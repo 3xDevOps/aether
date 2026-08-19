@@ -217,5 +217,9 @@ assets are exactly what the install script downloads, so the release workflow
 and the installer must stay in step: renaming an asset breaks every
 `curl | sh`.
 
+If a tag workflow fails after building, rerun the workflow for that tag. The
+publisher uploads missing assets to the existing release and replaces
+same-named assets without changing its release notes.
+
 The version the binaries report comes from `git describe`, so tags must be
 pushed to the repo the workflow checks out, and the checkout uses full history.
