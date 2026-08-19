@@ -1,0 +1,29 @@
+package scheduler
+
+import (
+	"context"
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/runtime"
+)
+
+// GitEngine is the scheduler's view of the git engine (*gitengine.Engine).
+type GitEngine interface {
+	CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, task string) (checkoutPath, branch string, err error)
+	WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceID, branch string) (bool, error)
+	CommitAll(ctx context.Context, run domain.RunID, message string) (commit string, err error)
+	PublishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error)
+	RemoveRunCheckout(ctx context.Context, run domain.RunID) error
+	StartDiffWatch(ctx context.Context, session domain.SessionID, run domain.RunID) error
+	StopDiffWatch(run domain.RunID)
+	LastFileChange(run domain.RunID) (time.Time, bool)
+}
+
+// PTYHost is the scheduler's view of the PTY host (*ptyhost.Host).
+type PTYHost interface {
+	StartSession(ctx context.Context, run domain.RunID, att runtime.Attachment) error
+	StopSession(ctx context.Context, run domain.RunID) error
+	LastOutput(run domain.RunID) (time.Time, bool)
+	Inject(ctx context.Context, run domain.RunID, actorName, actorColor, message string) error
+}

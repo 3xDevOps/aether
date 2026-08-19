@@ -1,0 +1,16 @@
+{
+  "harness": "claude",
+  "files": [
+    {
+      "path": "commands/review.md",
+      "mode": 420,
+      "content": "# review\n"
+    },
+    {
+      "path": "settings.json",
+      "mode": 420,
+      "content": "{\"model\":\"opus\"}\n"
+    }
+  ],
+  "digest": "efbe4d908b0e68f010583612b531f22fc027e81cbb9425c033cd0a16168844a9"
+}

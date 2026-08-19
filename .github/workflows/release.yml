@@ -1,0 +1,47 @@
+name: Release
+
+# Tagging is the release trigger: push a `vX.Y.Z` tag and this builds the
+# cross-compile matrix, checksums it, and publishes a GitHub release whose
+# assets are exactly what scripts/install.sh downloads.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so git describe stamps the tag
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+
+      # A tag push does not run the PR pipeline, so gate the release on the
+      # fast checks rather than publishing an untested binary.
+      - name: Vet
+        run: make vet
+      - name: Unit tests
+        run: make test
+
+      - name: Cross-compile the release matrix
+        run: make release
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum aether-* > checksums.txt
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/*

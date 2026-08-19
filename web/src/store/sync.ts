@@ -1,0 +1,251 @@
+// Hydration and live updates: one HTTP fetch fills the store, then the event
+// stream is the only thing that changes it.
+
+import { api, type Api } from '@/lib/api'
+import { backoff, connectEvents } from '@/lib/stream'
+import type {
+  Event,
+  OverlapPayload,
+  RunDiffPayload,
+  RunStatusPayload,
+} from '@/lib/types'
+import type { RootStore } from '@/store'
+import { pausedFromTimeline } from '@/store/board'
+
+/** Fills the store from the server. False means the server was unreachable. */
+export async function hydrate(store: RootStore, client: Api = api): Promise<boolean> {
+  const s = store.getState()
+  try {
+    const [info, sessions, members, runs, overlaps] = await Promise.all([
+      client.serverInfo(),
+      client.sessionList(),
+      client.memberList(),
+      client.runList(),
+      // The conflict radar is a warning system, not a data source the app
+      // needs: an unreachable one leaves the chips off, it does not fail the
+      // hydration.
+      client.runOverlaps().catch(() => []),
+    ])
+    s.setInfo(info)
+    s.setSessions(sessions)
+    s.setMembers(members)
+    s.setRuns(runs)
+    s.setOverlaps(overlaps)
+    s.setHydrated(true)
+    return true
+  } catch (err) {
+    // A failed re-hydration keeps the data we already have; only the error
+    // is new. Once the token is known dead, the recorded recovery hint is
+    // more useful than this raw failure, so it stays.
+    if (!store.getState().streamDead) {
+      s.setHydrated(s.hydrated, err instanceof Error ? err.message : String(err))
+    }
+    return false
+  }
+}
+
+/**
+ * Applies one event and reports whether it resolved. Await it, and await it in
+ * sequence order: an event about a run the store has never seen has to fetch
+ * that run first, and the cursor must never move past an event still waiting
+ * on a fetch. False means the event could not be resolved at all, and only a
+ * fresh snapshot repairs the store.
+ *
+ * Every state read happens after the awaits, never before them.
+ */
+export async function applyEvent(
+  store: RootStore,
+  ev: Event,
+  client: Api = api,
+): Promise<boolean> {
+  if (ev.seq > 0 && ev.seq <= store.getState().lastSeq) {
+    // Replay resumes strictly after the cursor, so an equal sequence is a
+    // duplicate. One below it means the server's event log restarted - a
+    // fresh or restored data dir numbers from scratch - and every event
+    // would be dropped forever: forget the cursor and take a fresh snapshot,
+    // exactly as a reconnect with no cursor does.
+    if (ev.seq === store.getState().lastSeq) return true
+    store.getState().resetSeq()
+    return false
+  }
+
+  // Sessions arrive only by fetch, so an event for one we do not know means a
+  // teammate created it after we hydrated. Without this its runs would be
+  // stored but rendered nowhere.
+  if (ev.session_id && !store.getState().sessions[ev.session_id]) {
+    await client.sessionList().then(store.getState().setSessions).catch(ignore)
+  }
+
+  // Members likewise: no member.* event exists, so an actor we have never
+  // seen is a teammate who joined after we hydrated. Without the re-read
+  // their name renders as a raw ID everywhere.
+  if (ev.actor_id && !store.getState().members[ev.actor_id]) {
+    await client.memberList().then(store.getState().setMembers).catch(ignore)
+  }
+
+  switch (ev.type) {
+    case 'run.status': {
+      const p = ev.payload as RunStatusPayload
+      if (!store.getState().runs[ev.run_id]) {
+        // A run launched by someone else after we hydrated. Fetching it here,
+        // before the event is applied and before the cursor moves, is what
+        // keeps two transitions of a brand new run in order.
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch {
+          return false
+        }
+      }
+      store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time)
+      break
+    }
+    case 'run.diff': {
+      // A snapshot carries per-file stats only. It is the timeline entry the
+      // Diff tab lists, and the signal that its patch text is behind.
+      const p = ev.payload as RunDiffPayload
+      store
+        .getState()
+        .noteDiffSnapshot(ev.run_id, { time: ev.time, files: p.files ?? [] })
+      break
+    }
+    case 'run.overlap': {
+      // The radar names the peer runs, not who owns them; the member comes
+      // from the run the client already holds.
+      const p = ev.payload as OverlapPayload
+      const s = store.getState()
+      s.applyOverlap(
+        ev.run_id,
+        (p.with ?? []).map((peer) => ({
+          ...peer,
+          member_id: s.runs[peer.run_id]?.member_id ?? '',
+        })),
+      )
+      break
+    }
+    case 'session.timeline': {
+      // A paused run still reads `running`, so the board's paused badge comes
+      // from the pause and resume steering entries.
+      const paused = pausedFromTimeline(ev.payload)
+      if (paused !== null && ev.run_id) store.getState().setPaused(ev.run_id, paused)
+      // A handoff publishes no run.status event, so the new owner arrives
+      // with nothing else to carry it: re-read the run.
+      const kind = (ev.payload as { kind?: string } | null)?.kind
+      if (kind === 'handoff' && ev.run_id) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch {
+          return false
+        }
+      }
+      break
+    }
+  }
+  store.getState().noteSeq(ev.seq)
+  return true
+}
+
+/**
+ * Subscribes, hydrates and follows the event stream for as long as the app is
+ * mounted. Returns a disposer.
+ *
+ * Three orderings matter.
+ *
+ * The subscription comes first: hydration starts only once the server has
+ * acknowledged it, so a change between the snapshot and the subscription
+ * cannot fall in the gap. Events that arrive while the snapshot is in flight
+ * wait in the queue and are applied after it, so an older snapshot never
+ * overwrites a newer event.
+ *
+ * Events are then applied one at a time, in sequence order, each one fully
+ * resolved before the next begins. That is what keeps the single global
+ * cursor honest: it can never move past an event still waiting on a fetch.
+ *
+ * And a reconnect with no cursor cannot replay, so the client re-fetches
+ * instead of subscribing live and missing the outage.
+ */
+export function connect(store: RootStore, client: Api = api): () => void {
+  let disposed = false
+  let hydrating = false
+  let attempts = 0
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  let subscribed = false
+  const queue: Event[] = []
+  let chain: Promise<void> = Promise.resolve()
+
+  const drain = async () => {
+    while (!disposed && !hydrating && queue.length > 0) {
+      const ev = queue.shift() as Event
+      if (await applyEvent(store, ev, client)) continue
+      // The event named something we could not fetch. A fresh snapshot is the
+      // repair; the rest of the queue waits for it.
+      void load()
+      return
+    }
+  }
+
+  const pump = () => {
+    chain = chain.then(drain).catch(ignore)
+  }
+
+  const load = async () => {
+    if (disposed || hydrating || store.getState().streamDead) return
+    hydrating = true
+    await chain // let an event that is mid-flight finish first
+    const ok = await hydrate(store, client)
+    hydrating = false
+    if (disposed) return
+    if (!ok) {
+      retryTimer = setTimeout(() => void load(), backoff(attempts++))
+      return
+    }
+    attempts = 0
+    pump()
+  }
+
+  const stopStream = connectEvents({
+    onEvent: (ev) => {
+      queue.push(ev)
+      pump()
+    },
+    onState: (state) => {
+      store.getState().setConnection(state)
+      if (
+        state === 'offline' &&
+        !store.getState().hydrated &&
+        !store.getState().hydrationError
+      ) {
+        // The stream cannot even be established and nothing has been fetched:
+        // say so, rather than animating skeletons forever. An error already
+        // recorded - a 401 hydration, a dead token - is more precise than
+        // this one, so it stays.
+        store.getState().setHydrated(false, 'the server is unreachable')
+      }
+      if (state !== 'live') return
+      // The subscription is installed. Hydrate behind it on the first connect,
+      // and again on a reconnect that has no cursor to replay from.
+      if (!subscribed || store.getState().lastSeq === 0) void load()
+      subscribed = true
+    },
+    onDead: (reason) => {
+      // The token died, not the server: the stream has stopped for good, and
+      // only a fresh token brings it back. The flag is what lets the panes
+      // say so instead of claiming a retry that will never come, and the
+      // pending hydrate retry is cancelled so a later 401 cannot overwrite
+      // the recovery hint.
+      if (retryTimer) clearTimeout(retryTimer)
+      store.getState().setStreamDead()
+      store.getState().setHydrated(false, `${reason}; mint one with \`aether dash\``)
+    },
+    afterSeq: () => store.getState().lastSeq,
+  })
+
+  return () => {
+    disposed = true
+    if (retryTimer) clearTimeout(retryTimer)
+    stopStream()
+  }
+}
+
+// A session list we could not refresh leaves the store as it was; the next
+// event for that session tries again.
+function ignore(): void {}

@@ -1,0 +1,42 @@
+[Unit]
+Description=Aether agent development server
+Documentation=https://github.com/3xDevOps/Aether/blob/main/docs/install.md
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+# Runs as root. Two reasons, both deliberate (docs/security.md):
+#   1. The unit needs the Docker socket, and Docker socket access is already
+#      root-equivalent on the host - a dedicated user in the docker group
+#      buys nothing.
+#   2. Workspace images whose configured user is non-root make the server
+#      chown run checkouts and credential homes to that UID, which needs
+#      CAP_CHOWN. A non-root server can only serve root images.
+# To run unprivileged anyway: add User=aether and SupplementaryGroups=docker,
+# keep every workspace image on a root user, and give the user read access to
+# the tailscaled socket (tailscale set --operator=aether) if you want tailnet
+# identity auth.
+ExecStart=/usr/local/bin/aether-server serve \
+    --data-dir /var/lib/aether \
+    --addr :2222 \
+    --dashboard-port 8080
+
+# Optional: ANTHROPIC_API_KEY / OPENAI_API_KEY for API-key harnesses, passed
+# through into run containers. Subscription logins do not belong here - they
+# live in the per-member server-side home that `aether setup` writes.
+EnvironmentFile=-/etc/aether/aether-server.env
+
+StateDirectory=aether
+StateDirectoryMode=0700
+
+Restart=on-failure
+RestartSec=5s
+# Shutdown stops the live containers before the process exits; give it room.
+KillSignal=SIGTERM
+TimeoutStopSec=90
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

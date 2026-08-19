@@ -1,0 +1,254 @@
+import {
+  ChevronDown,
+  ChevronRight,
+  LayoutGrid,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-react'
+import { useCallback } from 'react'
+import { StateDot } from '@/components/state-dot'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useDelayed } from '@/lib/hooks'
+import { cn } from '@/lib/utils'
+import { useStore } from '@/store'
+import { isUnseen } from '@/store/board'
+import { useAttentionCount, useSidebarGroups } from '@/store/hooks'
+import type { SidebarGroup, SidebarRun } from '@/store/selectors'
+
+export function Sidebar() {
+  const collapsed = useStore((s) => s.sidebarCollapsed)
+  const width = useStore((s) => s.sidebarWidth)
+  const toggleSidebar = useStore((s) => s.toggleSidebar)
+  const setSidebarWidth = useStore((s) => s.setSidebarWidth)
+
+  const startResize = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault()
+      const move = (ev: PointerEvent) => setSidebarWidth(ev.clientX)
+      const stop = () => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', stop)
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', stop)
+    },
+    [setSidebarWidth],
+  )
+
+  if (collapsed) {
+    return (
+      <aside className="flex w-10 shrink-0 flex-col items-center border-r py-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Expand sidebar"
+          onClick={toggleSidebar}
+        >
+          <PanelLeftOpen />
+        </Button>
+      </aside>
+    )
+  }
+
+  return (
+    <aside
+      className="relative flex shrink-0 flex-col border-r"
+      style={{ width }}
+      aria-label="Sessions"
+    >
+      <SidebarHeader onCollapse={toggleSidebar} />
+      <SessionTree />
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        onPointerDown={startResize}
+        className="absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-accent"
+      />
+    </aside>
+  )
+}
+
+function SidebarHeader({ onCollapse }: { onCollapse: () => void }) {
+  const groupBy = useStore((s) => s.groupBy)
+  const setGroupBy = useStore((s) => s.setGroupBy)
+  const navigate = useStore((s) => s.navigate)
+  return (
+    <div className="flex items-center gap-1 border-b px-2 py-1.5">
+      <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Sessions
+      </span>
+      <AttentionBadge />
+      <div className="ml-auto flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          title="Run board"
+          aria-label="Run board"
+          onClick={() => navigate('board')}
+        >
+          <LayoutGrid />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          title="Group sessions"
+          onClick={() => setGroupBy(groupBy === 'status' ? 'member' : 'status')}
+        >
+          {groupBy === 'status' ? 'Status' : 'Member'}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Collapse sidebar"
+          onClick={onCollapse}
+        >
+          <PanelLeftClose />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * How many runs are waiting on a human. The sessions below are already
+ * sorted worst-first, so this is not navigation - it is the count a member
+ * needs when the sidebar is scrolled, or when a stall lands while they are
+ * elsewhere in the app.
+ */
+function AttentionBadge() {
+  const count = useAttentionCount()
+  if (count === 0) return null
+  return (
+    <span
+      aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
+      title="Runs waiting on a human"
+      className="rounded-full bg-state-needs-attention/15 px-1.5 text-[11px] font-medium text-state-needs-attention"
+    >
+      {count}
+    </span>
+  )
+}
+
+function SessionTree() {
+  const groups = useSidebarGroups()
+  const hydrated = useStore((s) => s.hydrated)
+  const error = useStore((s) => s.hydrationError)
+  const dead = useStore((s) => s.streamDead)
+  const unreachable = error !== null
+  const loading = useDelayed(!hydrated && !unreachable && groups.length === 0)
+
+  if (groups.length === 0) {
+    return (
+      <div className="flex-1 space-y-2 overflow-y-auto p-2">
+        {unreachable ? (
+          <p className="px-1 py-2 text-xs text-muted-foreground">
+            {dead ? error : 'Cannot reach the server. Retrying.'}
+          </p>
+        ) : loading ? (
+          <>
+            <Skeleton className="h-6 w-full" />
+            <Skeleton className="h-6 w-4/5" />
+            <Skeleton className="h-6 w-3/5" />
+          </>
+        ) : (
+          hydrated && (
+            <p className="px-1 py-2 text-xs text-muted-foreground">
+              No sessions yet.
+            </p>
+          )
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto py-1">
+      {groups.map((group) => (
+        <Group key={group.key} group={group} />
+      ))}
+    </div>
+  )
+}
+
+function Group({ group }: { group: SidebarGroup }) {
+  const collapsedSessions = useStore((s) => s.collapsedSessions)
+  const toggleSession = useStore((s) => s.toggleSession)
+  const navigate = useStore((s) => s.navigate)
+  const route = useStore((s) => s.route)
+
+  return (
+    <section className="mb-1">
+      <h2 className="px-2 py-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        {group.label}
+      </h2>
+      {group.sessions.map(({ session, runs, state }) => {
+        const open = !collapsedSessions.includes(session.id)
+        const selected =
+          route.name === 'session' && route.params.sessionId === session.id
+        return (
+          <div key={session.id}>
+            <div
+              className={cn(
+                'flex w-full items-center gap-1 px-1 text-sm hover:bg-accent/60',
+                selected && 'bg-accent',
+              )}
+            >
+              <button
+                type="button"
+                aria-label={open ? 'Collapse session' : 'Expand session'}
+                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                onClick={() => toggleSession(session.id)}
+              >
+                {open ? (
+                  <ChevronDown className="size-3.5" />
+                ) : (
+                  <ChevronRight className="size-3.5" />
+                )}
+              </button>
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left"
+                onClick={() => navigate('session', { sessionId: session.id })}
+              >
+                <StateDot state={state} />
+                <span className="truncate">{session.name}</span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {runs.length}
+                </span>
+              </button>
+            </div>
+            {open && runs.map((run) => <RunRow key={run.run.id} entry={run} />)}
+          </div>
+        )
+      })}
+    </section>
+  )
+}
+
+function RunRow({ entry }: { entry: SidebarRun }) {
+  const navigate = useStore((s) => s.navigate)
+  const route = useStore((s) => s.route)
+  // Acks are app-wide, so a row mutes at the same moment its board card does.
+  const unseen = useStore((s) => isUnseen(s.acked, entry.run))
+  const selected = route.name === 'run' && route.params.runId === entry.run.id
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('run', { runId: entry.run.id })}
+      style={{ borderLeftColor: entry.owner?.color }}
+      className={cn(
+        'flex w-full items-center gap-2 border-l-2 py-1 pr-2 pl-6 text-left text-xs hover:bg-accent/60',
+        selected ? 'bg-accent' : 'border-l-transparent',
+        unseen ? 'font-medium' : 'text-muted-foreground',
+      )}
+    >
+      <StateDot state={entry.state} />
+      <span className="truncate">{entry.run.task}</span>
+      <span className="ml-auto shrink-0 text-muted-foreground">
+        {entry.run.harness}
+      </span>
+    </button>
+  )
+}

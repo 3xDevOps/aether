@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # `make build` builds the embedded dashboard SPA before Go compiles.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+      - name: Public boundary
+        run: sh scripts/public-audit.sh
+      - name: Check formatting
+        run: make fmt-check
+      - name: Vet
+        run: make vet
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.4.0
+      # Advisory only: the reachable Moby CVEs have no fixed release and
+      # govulncheck cannot suppress individual findings, so a hard gate would
+      # keep CI permanently red. Read the step output, do not ignore it.
+      - name: Vulnerability scan (advisory)
+        run: make vulncheck
+        continue-on-error: true
+      - name: Unit tests
+        run: make test
+      - name: Build binaries
+        run: make build
+
+  integration:
+    # Docker is preinstalled on ubuntu-latest runners.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Integration tests (real Docker, real git)
+        run: make test-integration
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+      - name: Typecheck
+        run: bun run typecheck
+        working-directory: web
+      - name: SPA tests
+        run: bun run test
+        working-directory: web
+
+  release-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so git describe can version the build
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+      - name: Cross-compile release matrix
+        run: make release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist/
+          retention-days: 7
