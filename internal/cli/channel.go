@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bufio"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,12 +16,18 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// sessionStream is one SSH session's stdio as a byte stream. Close ends
-// the session without tearing down the parent connection.
+// sessionStream is one SSH session channel's stdio as a byte stream.
+// Close ends the channel without tearing down the parent connection.
+//
+// x/crypto's Session.Wait cannot report a subsystem's exit status:
+// RequestSubsystem never marks the session started, so Wait fails with
+// "ssh: session not started" no matter what the server sent. The stream
+// therefore talks to the raw channel and collects the exit-status
+// request itself.
 type sessionStream struct {
 	io.Reader
 	stdin    io.WriteCloser
-	sess     *ssh.Session
+	closeCh  func() error
 	wait     func() error
 	waitOnce sync.Once
 	waitErr  error
@@ -45,35 +53,88 @@ func (s *sessionStream) Write(p []byte) (int, error) { return s.stdin.Write(p) }
 func (s *sessionStream) CloseWrite() error           { return s.stdin.Close() }
 func (s *sessionStream) Close() error {
 	_ = s.CloseWrite()
-	return s.sess.Close()
+	if s.closeCh == nil {
+		return nil
+	}
+	return s.closeCh()
 }
 
-func (c *Conn) openSubsystem(name string, pty func(*ssh.Session) error) (*sessionStream, error) {
-	sess, err := c.client.NewSession()
+// channelStdin adapts an SSH channel's write side to io.WriteCloser with
+// Close as half-close, so ending input leaves remote output readable.
+type channelStdin struct{ ch ssh.Channel }
+
+func (w channelStdin) Write(p []byte) (int, error) { return w.ch.Write(p) }
+func (w channelStdin) Close() error                { return w.ch.CloseWrite() }
+
+// ptyGeometry is the terminal size requested for a subsystem channel.
+type ptyGeometry struct{ cols, rows uint }
+
+func (c *Conn) openSubsystem(name string, pty *ptyGeometry) (*sessionStream, error) {
+	ch, reqs, err := c.client.OpenChannel("session", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cli: open session: %w", err)
 	}
+	exit := make(chan error, 1)
+	go func() { exit <- awaitExitStatus(reqs) }()
 	if pty != nil {
-		if err = pty(sess); err != nil {
-			_ = sess.Close()
-			return nil, err
+		if perr := requestPTY(ch, pty.cols, pty.rows); perr != nil {
+			_ = ch.Close()
+			return nil, perr
 		}
 	}
-	stdin, err := sess.StdinPipe()
-	if err != nil {
-		_ = sess.Close()
-		return nil, fmt.Errorf("cli: stdin pipe: %w", err)
+	ok, err := ch.SendRequest("subsystem", true, ssh.Marshal(struct{ Subsystem string }{name}))
+	if err == nil && !ok {
+		err = errors.New("request refused")
 	}
-	stdout, err := sess.StdoutPipe()
 	if err != nil {
-		_ = sess.Close()
-		return nil, fmt.Errorf("cli: stdout pipe: %w", err)
-	}
-	if err := sess.RequestSubsystem(name); err != nil {
-		_ = sess.Close()
+		_ = ch.Close()
 		return nil, fmt.Errorf("cli: subsystem %s: %w", name, err)
 	}
-	return &sessionStream{Reader: stdout, stdin: stdin, sess: sess, wait: sess.Wait}, nil
+	return &sessionStream{
+		Reader:  ch,
+		stdin:   channelStdin{ch: ch},
+		closeCh: ch.Close,
+		wait:    func() error { return <-exit },
+	}, nil
+}
+
+// awaitExitStatus consumes session requests until the channel closes.
+// Exit status 0, or a close without any status, is a clean end; a
+// nonzero status carries the remote failure.
+func awaitExitStatus(reqs <-chan *ssh.Request) error {
+	var res error
+	for req := range reqs {
+		if req.Type == "exit-status" && len(req.Payload) >= 4 {
+			if status := binary.BigEndian.Uint32(req.Payload); status != 0 {
+				res = fmt.Errorf("cli: remote exited with status %d", status)
+			}
+		}
+		if req.WantReply {
+			_ = req.Reply(false, nil)
+		}
+	}
+	return res
+}
+
+// requestPTY mirrors the wire format of x/crypto Session.RequestPty with
+// an empty mode list.
+func requestPTY(ch ssh.Channel, cols, rows uint) error {
+	req := struct {
+		Term          string
+		Cols, Rows    uint32
+		Width, Height uint32
+		Modes         string
+	}{
+		Term: "xterm-256color",
+		Cols: uint32(cols), Rows: uint32(rows),
+		Width: uint32(cols * 8), Height: uint32(rows * 8),
+		Modes: string([]byte{0}),
+	}
+	ok, err := ch.SendRequest("pty-req", true, ssh.Marshal(&req))
+	if err == nil && !ok {
+		err = errors.New("cli: pty-req refused")
+	}
+	return err
 }
 
 // Control opens the JSON-RPC control channel.
@@ -88,9 +149,7 @@ func (c *Conn) Control() (*protocol.Client, error) {
 // Attach opens the attach subsystem for runID with the given geometry and
 // returns the raw PTY stream after a successful ack.
 func (c *Conn) Attach(runID string, cols, rows uint) (io.ReadWriteCloser, error) {
-	stream, err := c.openSubsystem(protocol.SubsystemAttach, func(sess *ssh.Session) error {
-		return sess.RequestPty("xterm-256color", int(rows), int(cols), ssh.TerminalModes{})
-	})
+	stream, err := c.openSubsystem(protocol.SubsystemAttach, &ptyGeometry{cols: cols, rows: rows})
 	if err != nil {
 		return nil, err
 	}
@@ -178,9 +237,7 @@ func (c *Conn) Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error)
 // Setup opens the setup subsystem for harness (optional image) and
 // returns the raw login stream after a successful ack.
 func (c *Conn) Setup(harness, image string, cols, rows uint) (io.ReadWriteCloser, error) {
-	stream, err := c.openSubsystem(protocol.SubsystemSetup, func(sess *ssh.Session) error {
-		return sess.RequestPty("xterm-256color", int(rows), int(cols), ssh.TerminalModes{})
-	})
+	stream, err := c.openSubsystem(protocol.SubsystemSetup, &ptyGeometry{cols: cols, rows: rows})
 	if err != nil {
 		return nil, err
 	}

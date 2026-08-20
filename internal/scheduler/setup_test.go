@@ -63,6 +63,12 @@ func TestSetupLoginCleansContainer(t *testing.T) {
 	if c.spec.Env["HOME"] != "/root" {
 		t.Errorf("HOME = %q, want /root", c.spec.Env["HOME"])
 	}
+	if got, want := strings.Join(c.spec.Command, " "), "/bin/sh -i"; got != want {
+		t.Errorf("setup command = %q, want %q", got, want)
+	}
+	if got, want := c.spec.Env["PS1"], "aether-setup$ "; got != want {
+		t.Errorf("setup PS1 = %q, want %q", got, want)
+	}
 	if len(c.spec.Mounts) != 1 || c.spec.Mounts[0].ContainerPath != "/root/.claude" || c.spec.Mounts[0].ReadOnly {
 		t.Errorf("credential mounts = %+v, want writable /root/.claude target", c.spec.Mounts)
 	}
@@ -74,6 +80,58 @@ func TestSetupLoginCleansContainer(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("SetupLogin did not return")
+	}
+}
+
+// setupHalfCloseConn wraps one end of a net.Pipe and records whether
+// SetupLogin half-closed it when the container's output ended. Providing
+// CloseWrite mirrors the SSH-backed conn used in production; a full Close
+// would drop the exit status the subsystem handler still has to send.
+type setupHalfCloseConn struct {
+	net.Conn
+	mu         sync.Mutex
+	halfClosed bool
+}
+
+func (c *setupHalfCloseConn) CloseWrite() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.halfClosed = true
+	return nil
+}
+
+func (c *setupHalfCloseConn) wasHalfClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.halfClosed
+}
+
+func TestSetupLoginReturnsWhenContainerExits(t *testing.T) {
+	e := newTestEnv(t, nil)
+	a, b := net.Pipe()
+	defer func() {
+		_ = a.Close()
+		_ = b.Close()
+	}()
+	conn := &setupHalfCloseConn{Conn: a}
+	done := make(chan error, 1)
+	go func() {
+		done <- e.sched.SetupLogin(t.Context(), e.member.ID, "claude", "", 80, 24, conn, nil)
+	}()
+	waitFor(t, "setup container", func() bool {
+		return e.rt.byName("setup-"+string(e.member.ID)+"-claude") != nil
+	})
+	e.rt.byName("setup-" + string(e.member.ID) + "-claude").exitNow(0)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("SetupLogin: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SetupLogin did not return after the container exited")
+	}
+	if !conn.wasHalfClosed() {
+		t.Error("SetupLogin did not half-close the client conn after container exit")
 	}
 }
 

@@ -46,11 +46,11 @@ func (s *Scheduler) SetupLogin(ctx context.Context, member domain.MemberID, harn
 	id, err := s.cfg.Runtime.Create(ctx, runtime.Spec{
 		Name:        "setup-" + string(member) + "-" + harnessName,
 		Image:       image,
-		Command:     []string{"/bin/sh"},
+		Command:     []string{"/bin/sh", "-i"},
 		TTY:         true,
 		Mounts:      mounts,
 		User:        user,
-		Env:         map[string]string{"HOME": containerHome, "TERM": "xterm-256color"},
+		Env:         map[string]string{"HOME": containerHome, "TERM": "xterm-256color", "PS1": "aether-setup$ "},
 		CreationKey: fmt.Sprintf("setup-%s-%s-%d", member, harnessName, time.Now().UnixNano()),
 	})
 	if err != nil {
@@ -91,9 +91,38 @@ func (s *Scheduler) SetupLogin(ctx context.Context, member domain.MemberID, harn
 		}()
 	}
 
-	go func() { _, _ = io.Copy(conn, att.Stdout()) }()
-	_, _ = io.Copy(att.Stdin(), conn)
-	_ = att.Stdin().Close()
+	// halfCloseConn signals end-of-output to the client. An SSH-backed
+	// conn half-closes so the subsystem handler can still deliver the
+	// exit status; a plain conn is closed outright.
+	halfCloseConn := func() {
+		if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
+			return
+		}
+		if closer, ok := conn.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}
+	outputDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(conn, att.Stdout())
+		close(outputDone)
+	}()
+	inputDone := make(chan struct{})
+	stdin := att.Stdin()
+	go func() {
+		_, _ = io.Copy(stdin, conn)
+		_ = stdin.Close()
+		close(inputDone)
+	}()
+	select {
+	case <-outputDone:
+		halfCloseConn()
+	case <-inputDone:
+	case <-ctx.Done():
+		halfCloseConn()
+		return ctx.Err()
+	}
 	return nil
 }
 

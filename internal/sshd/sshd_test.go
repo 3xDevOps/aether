@@ -166,9 +166,10 @@ func (p *fakePTY) setErr(err error) {
 
 // fakeRuns records RunController calls and returns the configured error.
 type fakeRuns struct {
-	mu    sync.Mutex
-	err   error
-	calls []string
+	mu        sync.Mutex
+	err       error
+	calls     []string
+	setupHook func(conn io.ReadWriter) error
 }
 
 func (f *fakeRuns) record(call string) error {
@@ -182,6 +183,12 @@ func (f *fakeRuns) setErr(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.err = err
+}
+
+func (f *fakeRuns) setSetupHook(hook func(conn io.ReadWriter) error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.setupHook = hook
 }
 
 func (f *fakeRuns) Calls() []string {
@@ -238,6 +245,12 @@ func (f *fakeRuns) SetupLogin(_ context.Context, member domain.MemberID, harness
 	}
 	if _, err := conn.Write([]byte("setup-ready\n")); err != nil {
 		return err
+	}
+	f.mu.Lock()
+	hook := f.setupHook
+	f.mu.Unlock()
+	if hook != nil {
+		return hook(conn)
 	}
 	_, _ = io.Copy(io.Discard, conn)
 	return nil
