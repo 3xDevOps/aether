@@ -260,7 +260,13 @@ func (g *gate) outgoing(line []byte, err error) {
 		}
 		return
 	}
-	g.finishResponse(line, err)
+	for _, raw := range bytes.Split(line, []byte{'\n'}) {
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 {
+			continue
+		}
+		g.finishResponse(raw, err)
+	}
 }
 
 func (g *gate) finishResponse(raw []byte, err error) {

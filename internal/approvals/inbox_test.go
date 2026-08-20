@@ -34,7 +34,7 @@ func TestReplayedPausesRaiseOneRequestEach(t *testing.T) {
 	if err = db.CreateMember(ctx, m); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
-	ws := &domain.Workspace{Name: "proj", Image: "img"}
+	ws := &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}

@@ -36,6 +36,11 @@ func (b *Bridge) server() *Server {
 // Call dispatches one control-channel method and returns the response the
 // SSH transport would have written.
 func (b *Bridge) Call(ctx context.Context, member domain.MemberID, method string, params json.RawMessage) protocol.Response {
+	switch method {
+	case protocol.MethodWorkspaceToolsList, protocol.MethodWorkspaceToolsVerify,
+		protocol.MethodWorkspaceToolsRollback, protocol.MethodWorkspaceToolsReset:
+		return protocol.Response{JSONRPC: "2.0", ID: json.RawMessage(`1`), Error: &protocol.Error{Code: protocol.CodeDenied, Message: "workspace tools are available only on the SSH control channel"}}
+	}
 	line, err := json.Marshal(protocol.Request{
 		JSONRPC: "2.0",
 		ID:      json.RawMessage(`1`),

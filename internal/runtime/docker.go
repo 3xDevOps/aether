@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"math"
 	"slices"
@@ -271,26 +272,31 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 }
 
 func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir string) error {
-	code, _, err := d.exec(ctx, id, []string{"/bin/sh", "-c", "test -e " + sentinel}, "")
+	code, output, err := d.exec(ctx, id, []string{"/bin/sh", "-c", "test -e " + sentinel}, "")
 	if err != nil {
+		slog.Error("runtime: setup gate probe failed", "container", id, "output", output, "error", err)
 		return fmt.Errorf("runtime: probe setup gate: %w", err)
 	}
 	if code == 0 {
 		return nil // setup already completed for this container
 	}
-	code, output, err := d.exec(ctx, id, []string{"/bin/sh", "-ec", script}, workDir)
+	code, output, err = d.exec(ctx, id, []string{"/bin/sh", "-ec", script}, workDir)
 	if err != nil {
+		slog.Error("runtime: setup script execution failed", "container", id, "working_dir", workDir, "script", script, "output", output, "error", err)
 		return fmt.Errorf("runtime: setup script: %w", err)
 	}
 	if code != 0 {
+		slog.Error("runtime: setup script exited nonzero", "container", id, "working_dir", workDir, "script", script, "output", output, "exit_code", code)
 		return fmt.Errorf("runtime: setup script exited %d: %s", code, strings.TrimSpace(output))
 	}
 	release := []string{"/bin/sh", "-c", "mkdir -p /tmp && : > " + sentinel}
 	code, output, err = d.exec(ctx, id, release, "")
 	if err != nil {
+		slog.Error("runtime: release setup gate failed", "container", id, "output", output, "error", err)
 		return fmt.Errorf("runtime: release setup gate: %w", err)
 	}
 	if code != 0 {
+		slog.Error("runtime: release setup gate exited nonzero", "container", id, "output", output, "exit_code", code)
 		return fmt.Errorf("runtime: release setup gate exited %d: %s", code, strings.TrimSpace(output))
 	}
 	return nil

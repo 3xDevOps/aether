@@ -234,23 +234,23 @@ func (c *Conn) Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error)
 	return out, nil
 }
 
-// Setup opens the setup subsystem for harness (optional image) and
-// returns the raw login stream after a successful ack.
-func (c *Conn) Setup(harness, image string, cols, rows uint) (io.ReadWriteCloser, error) {
-	stream, err := c.openSubsystem(protocol.SubsystemSetup, &ptyGeometry{cols: cols, rows: rows})
+// WorkspaceShell opens the unified workspace-shell subsystem for bootstrap
+// tools or harness login and returns the raw terminal stream after its ack.
+func (c *Conn) WorkspaceShell(req protocol.WorkspaceShellRequest) (io.ReadWriteCloser, error) {
+	stream, err := c.openSubsystem(protocol.SubsystemWorkspaceShell, &ptyGeometry{cols: req.Cols, rows: req.Rows})
 	if err != nil {
 		return nil, err
 	}
-	header, err := json.Marshal(protocol.SetupRequest{Harness: harness, Image: image, Cols: cols, Rows: rows})
+	header, err := json.Marshal(req)
 	if err != nil {
 		_ = stream.Close()
 		return nil, err
 	}
 	if _, err = stream.Write(append(header, '\n')); err != nil {
 		_ = stream.Close()
-		return nil, fmt.Errorf("cli: write setup header: %w", err)
+		return nil, fmt.Errorf("cli: write workspace shell header: %w", err)
 	}
-	var ack protocol.SetupResponse
+	var ack protocol.WorkspaceShellResponse
 	out, err := readAck(stream, &ack)
 	if err != nil {
 		_ = stream.Close()
@@ -258,9 +258,16 @@ func (c *Conn) Setup(harness, image string, cols, rows uint) (io.ReadWriteCloser
 	}
 	if !ack.OK {
 		_ = stream.Close()
-		return nil, fmt.Errorf("cli: setup: %s", ack.Error)
+		return nil, workspaceShellAckError(ack)
 	}
 	return out, nil
+}
+
+func workspaceShellAckError(ack protocol.WorkspaceShellResponse) error {
+	if ack.Code != 0 {
+		return fmt.Errorf("cli: workspace shell: %s (code %d)", ack.Error, ack.Code)
+	}
+	return fmt.Errorf("cli: workspace shell: %s", ack.Error)
 }
 
 // ListenLocalForward listens on 127.0.0.1:localPort (0 picks an ephemeral

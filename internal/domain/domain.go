@@ -7,7 +7,10 @@
 package domain
 
 import (
+	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -20,7 +23,107 @@ type (
 	RunID string
 	// MemberID identifies a Member.
 	MemberID string
+	// ToolSnapshotID identifies an immutable per-member workspace tool tree.
+	ToolSnapshotID string
 )
+
+// SetupPolicy controls the script run before a command starts in the
+// workspace environment.
+type SetupPolicy struct {
+	Script string `json:"script,omitempty"`
+}
+
+// WorkspaceEnvironment is the server-owned environment definition for a
+// workspace. Exactly one of CustomImage and NeutralImage selects the base
+// image. Variables and setup policy retain the run-level environment inputs.
+type WorkspaceEnvironment struct {
+	CustomImage  string            `json:"custom_image,omitempty"`
+	NeutralImage bool              `json:"neutral_image,omitempty"`
+	Variables    map[string]string `json:"variables,omitempty"`
+	SetupPolicy  SetupPolicy       `json:"setup_policy,omitempty"`
+}
+
+// Valid reports whether the environment has one unambiguous image selection
+// and valid environment variable names.
+func (e WorkspaceEnvironment) Valid() bool {
+	if (e.CustomImage == "") == !e.NeutralImage {
+		return false
+	}
+	for name := range e.Variables {
+		if name == "" || strings.ContainsAny(name, "=\x00") {
+			return false
+		}
+	}
+	return true
+}
+
+// EffectiveImage resolves the custom image or the configured neutral image.
+func (e WorkspaceEnvironment) EffectiveImage(neutralImage string) string {
+	if e.CustomImage != "" {
+		return e.CustomImage
+	}
+	if e.NeutralImage {
+		return neutralImage
+	}
+	return ""
+}
+
+// WorkspaceSelector addresses a workspace by exactly one of ID or Name.
+type WorkspaceSelector struct {
+	ID   WorkspaceID
+	Name string
+}
+
+// Valid reports whether exactly one selector form is present.
+func (s WorkspaceSelector) Valid() bool {
+	return (s.ID != "") != (strings.TrimSpace(s.Name) != "")
+}
+
+// WorkspaceShellMode identifies the purpose of a workspace shell.
+type WorkspaceShellMode string
+
+const (
+	WorkspaceShellBootstrapTools WorkspaceShellMode = "bootstrap-tools"
+	WorkspaceShellHarnessLogin   WorkspaceShellMode = "harness-login"
+)
+
+// Valid reports whether m is a supported workspace shell mode.
+func (m WorkspaceShellMode) Valid() bool {
+	return m == WorkspaceShellBootstrapTools || m == WorkspaceShellHarnessLogin
+}
+
+// WorkspaceShellRequest describes one agent-agnostic interactive workspace
+// shell request.
+type WorkspaceShellRequest struct {
+	Workspace              WorkspaceSelector
+	Mode                   WorkspaceShellMode
+	Harness                string
+	VerificationExecutable string
+	Resume                 bool
+	Reset                  bool
+	Cols                   uint
+	Rows                   uint
+}
+
+// Validate checks selector, mode, mode-specific harness, and intent fields.
+func (r WorkspaceShellRequest) Validate() error {
+	switch {
+	case !r.Workspace.Valid():
+		return errors.New("workspace selector must contain exactly one ID or name")
+	case !r.Mode.Valid():
+		return fmt.Errorf("invalid workspace shell mode %q", r.Mode)
+	case r.Resume && r.Reset:
+		return errors.New("resume and reset cannot both be set")
+	case r.Mode == WorkspaceShellHarnessLogin && strings.TrimSpace(r.Harness) == "":
+		return errors.New("harness is required for login mode")
+	case r.Mode == WorkspaceShellBootstrapTools && strings.TrimSpace(r.Harness) != "":
+		return errors.New("harness is not allowed for bootstrap mode")
+	}
+	if strings.ContainsAny(r.VerificationExecutable, "/\x00\r\n\t ") {
+		return errors.New("verification executable must be a name")
+	}
+	return nil
+}
 
 // RunStatus is the lifecycle state of a Run.
 //
@@ -95,18 +198,29 @@ func (r Role) Valid() bool {
 	return r == RoleViewer || r == RoleCollaborator || r == RoleAdmin
 }
 
-// Workspace is a repo checkout plus its environment: the container image,
-// env vars, and setup script that runs execute inside. It lives on the
-// server as a bare git repo plus this config.
+// ToolManifest records stable metadata discovered while creating a tool
+// snapshot. It contains no server filesystem paths.
+type ToolManifest struct {
+	Executable string            `json:"executable,omitempty"`
+	Version    string            `json:"version,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+}
+
+// ToolSnapshot is an immutable member/workspace tool tree.
+type ToolSnapshot struct {
+	ID          ToolSnapshotID
+	WorkspaceID WorkspaceID
+	MemberID    MemberID
+	Digest      string
+	Manifest    ToolManifest
+	CreatedAt   time.Time
+}
+
+// Workspace is a repo checkout plus its server-owned environment definition.
 type Workspace struct {
-	ID   WorkspaceID
-	Name string
-	// Image is the container image runs start from.
-	Image string
-	// Env is extra environment applied to run containers.
-	Env map[string]string
-	// SetupScript runs inside the container before the agent launches.
-	SetupScript string
+	ID          WorkspaceID
+	Name        string
+	Environment WorkspaceEnvironment
 	CreatedAt   time.Time
 }
 
@@ -188,4 +302,7 @@ type Run struct {
 	// ProfileSnapshotID is the immutable agent-profile snapshot pinned at
 	// provisioning. Zero (empty) means unpinned / no snapshot.
 	ProfileSnapshotID ProfileSnapshotID
+	// ToolSnapshotID is the immutable workspace tool snapshot pinned before
+	// container creation. Zero means no active tool snapshot.
+	ToolSnapshotID ToolSnapshotID
 }

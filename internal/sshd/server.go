@@ -24,6 +24,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/toolenv"
 )
 
 // memberIDExtension is the ssh.Permissions extension carrying the
@@ -69,6 +70,10 @@ type Config struct {
 	Git           GitTransport
 	PTY           PTYAttacher
 	Runs          RunController
+
+	// Toolenv provides server-owned snapshot lifecycle operations for SSH
+	// control methods. It is optional in narrow unit-test configurations.
+	Toolenv *toolenv.Manager
 
 	// WhoIs resolves connections to tailnet identities via tailscaled;
 	// nil disables tailnet auth entirely (key auth only). WhoIs runs

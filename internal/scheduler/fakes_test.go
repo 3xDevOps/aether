@@ -246,6 +246,16 @@ func (r *fakeRuntime) byName(name string) *fakeContainer {
 	return nil
 }
 
+func (r *fakeRuntime) allContainers() []*fakeContainer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*fakeContainer, 0, len(r.containers))
+	for _, c := range r.containers {
+		out = append(out, c)
+	}
+	return out
+}
+
 type fakeAttachment struct {
 	c  *fakeContainer
 	pr *io.PipeReader

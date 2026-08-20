@@ -73,7 +73,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 		Color:       "#4363d8",
 		Role:        domain.RoleAdmin,
 	}
-	ws := &domain.Workspace{Name: "prof", Image: image}
+	ws := &domain.Workspace{Name: "prof", Environment: domain.WorkspaceEnvironment{CustomImage: image}}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	// Harness login, once, natively: an interactive setup container with
 	// the member's login home mounted. Aether is only a terminal surface;
 	// the "login flow" here writes the credential file the harness would.
-	setup := openSetup(t, client, "claude")
+	setup := openSetup(t, client, string(ws.ID), "claude")
 	setup.write(t, "printf 'tok-1' > \"$HOME/.claude/.credentials.json\" && echo \"SETUP-\"OK\n")
 	setup.waitOutput(t, "SETUP-OK")
 	setup.detach(t)
@@ -265,9 +265,9 @@ func fetchRunFiles(t *testing.T, ctrl *protocol.Client, dir string, env []string
 	return out
 }
 
-// openSetup opens the aether-setup subsystem for a harness login session
-// and reads its ack; the returned attachConn is the interactive terminal.
-func openSetup(t *testing.T, client *ssh.Client, harnessName string) *attachConn {
+// openSetup opens the unified workspace-shell subsystem for a harness login
+// session and reads its ack; the returned attachConn is the interactive terminal.
+func openSetup(t *testing.T, client *ssh.Client, workspaceID, harnessName string) *attachConn {
 	t.Helper()
 	sess, err := client.NewSession()
 	if err != nil {
@@ -282,24 +282,30 @@ func openSetup(t *testing.T, client *ssh.Client, harnessName string) *attachConn
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.RequestSubsystem(protocol.SubsystemSetup); err != nil {
-		t.Fatalf("aether-setup subsystem: %v", err)
+	if err := sess.RequestSubsystem(protocol.SubsystemWorkspaceShell); err != nil {
+		t.Fatalf("workspace-shell subsystem: %v", err)
 	}
-	header, err := json.Marshal(protocol.SetupRequest{Harness: harnessName, Cols: 120, Rows: 30})
+	header, err := json.Marshal(protocol.WorkspaceShellRequest{
+		Workspace: protocol.WorkspaceSelector{ID: workspaceID},
+		Mode:      protocol.WorkspaceShellModeHarnessLogin,
+		Harness:   harnessName,
+		Cols:      120,
+		Rows:      30,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = stdin.Write(append(header, '\n')); err != nil {
-		t.Fatalf("write setup header: %v", err)
+		t.Fatalf("write workspace shell header: %v", err)
 	}
 	r := bufio.NewReader(stdout)
 	line, err := protocol.ReadLine(r)
 	if err != nil {
-		t.Fatalf("read setup ack: %v", err)
+		t.Fatalf("read workspace shell ack: %v", err)
 	}
-	var ack protocol.SetupResponse
+	var ack protocol.WorkspaceShellResponse
 	if err := json.Unmarshal(line, &ack); err != nil || !ack.OK {
-		t.Fatalf("setup ack = %s (err %v)", line, err)
+		t.Fatalf("workspace shell ack = %s (err %v)", line, err)
 	}
 	a := &attachConn{sess: sess, stdin: stdin}
 	go a.pump(r)

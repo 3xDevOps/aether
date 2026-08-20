@@ -111,9 +111,13 @@ func (s *Scheduler) profileMount(ctx context.Context, run *domain.Run, profile h
 	if err := s.cfg.Profiles.Materialize(ctx, run.ProfileSnapshotID, dest); err != nil {
 		return nil, fmt.Errorf("materialize profile: %w", err)
 	}
+	target := profile.LocalRoot
+	if !path.IsAbs(target) {
+		target = path.Join(containerHome, target)
+	}
 	return &runtime.Mount{
 		HostPath:      dest,
-		ContainerPath: path.Join(containerHome, profile.LocalRoot),
+		ContainerPath: path.Clean(target),
 	}, nil
 }
 

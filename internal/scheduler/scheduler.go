@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/toolenv"
 )
 
 // ErrInvalidTransition is returned when a steering call or lifecycle step
@@ -49,14 +51,16 @@ type Config struct {
 	Bus            events.Bus
 	Git            GitEngine
 	PTY            PTYHost
-	StateDir       string // <data>/scheduler
-	HomesDir       string // <data>/homes; empty disables credential-home mounts
-	ProfilesDir    string // <data>/profiles; default sibling of HomesDir
+	StateDir       string
+	HomesDir       string
+	ProfilesDir    string
 	Profiles       profileService
-	ReposDir       string        // <data>/repos; required only for non-root run users (ownership pass)
-	WorktreeMount  string        // default "/workspace"
-	StallThreshold time.Duration // default 10m
-	PollInterval   time.Duration // default 30s
+	ReposDir       string
+	WorktreeMount  string
+	NeutralImage   string
+	Toolenv        *toolenv.Manager
+	StallThreshold time.Duration
+	PollInterval   time.Duration
 	StopGrace      time.Duration // default 10s
 	CheckoutTTL    time.Duration // default 72h; negative disables GC
 	// MinFreeBytes is the free-space floor: a launch or relaunch that
@@ -79,10 +83,16 @@ type Config struct {
 	Harnesses map[string]HarnessSpec
 }
 
-// HarnessSpec is one agent harness's argv templates.
+// HarnessSpec is an administrator-supplied generic harness definition. A
+// zero-valued Executable keeps the legacy argv-only override behavior for
+// shipped profiles and the deterministic fake harness.
 type HarnessSpec struct {
-	TUIArgs      []string // argv template; "{task}" placeholder substituted
-	HeadlessArgs []string
+	TUIArgs         []string
+	HeadlessArgs    []string
+	Executable      string
+	ProfileRoot     string
+	CredentialPaths []string
+	DenyNames       []string
 }
 
 // fakeAgentEnv names the environment variable the "fake" harness reads its
@@ -197,11 +207,16 @@ func New(cfg Config) (*Scheduler, error) {
 	if cfg.CheckoutTTL == 0 {
 		cfg.CheckoutTTL = 72 * time.Hour
 	}
+	harnesses := defaultHarnesses()
+	for name, spec := range cfg.Harnesses {
+		if err := validateHarnessSpec(name, spec); err != nil {
+			return nil, err
+		}
+	}
+	maps.Copy(harnesses, cfg.Harnesses)
 	if cfg.MinFreeBytes == 0 {
 		cfg.MinFreeBytes = DefaultMinFreeBytes
 	}
-	harnesses := defaultHarnesses()
-	maps.Copy(harnesses, cfg.Harnesses)
 	if cfg.HomesDir != "" && cfg.ProfilesDir == "" {
 		cfg.ProfilesDir = filepath.Join(filepath.Dir(cfg.HomesDir), "profiles")
 	}
@@ -237,6 +252,18 @@ func New(cfg Config) (*Scheduler, error) {
 // checkout-GC loops until ctx is done or Close is called. Shutting down
 // never stops containers; supervision simply ends.
 func (s *Scheduler) Start(ctx context.Context) error {
+	if s.cfg.Toolenv != nil {
+		if removed, err := s.cfg.Toolenv.CleanupPending(ctx, 24*time.Hour, 128); err != nil {
+			slog.Warn("scheduler: pending bootstrap cleanup failed", "error", err)
+		} else if removed > 0 {
+			slog.Info("scheduler: stale bootstrap sessions cleaned", "count", removed)
+		}
+		if removed, err := s.cfg.Toolenv.CleanupAbandonedStaging(ctx, 24*time.Hour, 128); err != nil {
+			slog.Warn("scheduler: staging cleanup failed", "error", err)
+		} else if removed > 0 {
+			slog.Info("scheduler: stale staging cleaned", "count", removed)
+		}
+	}
 	if err := s.recoverRuns(ctx); err != nil {
 		return err
 	}
@@ -270,20 +297,60 @@ func (s *Scheduler) Close() error {
 	s.wg.Wait()
 	return nil
 }
+func validateHarnessSpec(name string, spec HarnessSpec) error {
+	registered, known := harness.Lookup(name)
+	if spec.Executable == "" {
+		// "fake" is a scheduler-owned deterministic harness. Its argv is
+		// resolved from AETHER_FAKE_AGENT at launch time, so an explicit
+		// empty fixture entry must not be treated as an administrator custom
+		// definition.
+		if !known && name != "fake" {
+			return fmt.Errorf("scheduler: custom harness %q requires an explicit definition", name)
+		}
+		for _, argv := range [][]string{spec.TUIArgs, spec.HeadlessArgs} {
+			if len(argv) > 0 && strings.ContainsAny(argv[0], `/\`) {
+				return fmt.Errorf("scheduler: harness %q executable %q is a host path", name, argv[0])
+			}
+		}
+		return nil
+	}
+	def := harness.Definition{
+		Name:            name,
+		TUIArgs:         spec.TUIArgs,
+		HeadlessArgs:    spec.HeadlessArgs,
+		Executable:      spec.Executable,
+		ProfileRoot:     spec.ProfileRoot,
+		CredentialPaths: spec.CredentialPaths,
+		DenyNames:       spec.DenyNames,
+	}
+	if err := def.Validate(); err != nil {
+		return fmt.Errorf("scheduler: harness %q: %w", name, err)
+	}
+	if known && name != "custom" && registered.Name != name {
+		return fmt.Errorf("scheduler: harness %q has invalid registry entry", name)
+	}
+	return nil
+}
 
-// command resolves the container argv and launch profile for a
-// harness/mode pair, with "{task}" substituted. Config.Harnesses argv
-// overrides win over the shipped registry templates; the registry profile
-// (credential paths, env passthrough, user mapping) applies either way.
 func (s *Scheduler) command(harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
 	profile, inRegistry := harness.Lookup(harnessName)
 	var tui, headless []string
 	switch spec, ok := s.harnesses[harnessName]; {
 	case ok:
 		tui, headless = spec.TUIArgs, spec.HeadlessArgs
-		// An explicit argv override is respected verbatim: the registry's
-		// MCP and resume flags are for the CLI it ships with, and nothing
-		// checks the override still is that CLI.
+		if spec.Executable != "" {
+			profile = (harness.Definition{
+				Name:            harnessName,
+				TUIArgs:         spec.TUIArgs,
+				HeadlessArgs:    spec.HeadlessArgs,
+				Executable:      spec.Executable,
+				ProfileRoot:     spec.ProfileRoot,
+				CredentialPaths: spec.CredentialPaths,
+				DenyNames:       spec.DenyNames,
+			}).Profile()
+		}
+		// An explicit argv override is respected verbatim. Registry MCP and
+		// resume flags belong to the shipped CLI, not an override.
 		profile.MCPConfigFlag = ""
 		profile.ResumeFlag = ""
 	case inRegistry:
@@ -309,24 +376,11 @@ func (s *Scheduler) command(harnessName string, mode domain.LaunchMode, task str
 	return harness.Argv(argv, task), profile, nil
 }
 
-// containerSpec builds the runtime spec for a provisioned run (§6.1 plus
-// the Wave 2 amendments: the container's main process is the agent, on a
-// TTY, in both modes; the agent commits under the owning member's git
-// identity; credential homes ride as additional mounts; the run ID is the
-// creation key recovery uses to find a container whose ID never reached
-// the sidecar).
-func (s *Scheduler) containerSpec(run *domain.Run, ws *domain.Workspace, member *domain.Member, argv []string, profile harness.Profile, mounts []runtime.Mount, user string) runtime.Spec {
-	env := make(map[string]string, len(ws.Env)+len(profile.EnvPassthrough)+7)
-	for _, k := range profile.EnvPassthrough {
-		if v, ok := os.LookupEnv(k); ok && v != "" {
-			env[k] = v
-		}
-	}
-	maps.Copy(env, ws.Env)
-	env["TERM"] = "xterm-256color"
-	// HOME follows the resolved run user so harnesses read and write
-	// their config and login state where the credential mounts land.
-	env["HOME"] = harness.HomeDir(user)
+// containerSpec converts one fully assembled environment plan into a runtime
+// spec. Callers must not assemble workspace mounts or environment fields here.
+func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan) runtime.Spec {
+	env := make(map[string]string, len(plan.Env)+7)
+	maps.Copy(env, plan.Env)
 	env["AETHER_RUN_ID"] = string(run.ID)
 	env["AETHER_SESSION_ID"] = string(run.SessionID)
 	env["GIT_AUTHOR_NAME"] = member.DisplayName
@@ -335,16 +389,16 @@ func (s *Scheduler) containerSpec(run *domain.Run, ws *domain.Workspace, member 
 	env["GIT_COMMITTER_EMAIL"] = string(member.ID) + "@aether.local"
 	return runtime.Spec{
 		Name:              string(run.ID),
-		Image:             ws.Image,
+		Image:             plan.Image,
 		Env:               env,
-		SetupScript:       ws.SetupScript,
+		SetupScript:       plan.SetupScript,
 		WorktreeHostPath:  run.Worktree,
 		WorktreeMountPath: s.cfg.WorktreeMount,
 		WorkingDir:        s.cfg.WorktreeMount,
 		Command:           argv,
 		TTY:               true,
-		Mounts:            mounts,
-		User:              user,
+		Mounts:            plan.Mounts,
+		User:              plan.User,
 		CreationKey:       string(run.ID),
 	}
 }

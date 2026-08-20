@@ -183,7 +183,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	// The working session is administered remotely, over the control
 	// channel: Ada registers the workspace and opens the session.
 	var addedWS protocol.WorkspaceAddResult
-	if err := adaCtrl.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "team", Image: image}, &addedWS); err != nil {
+	if err := adaCtrl.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "team", Environment: protocol.WorkspaceEnvironment{CustomImage: image}}, &addedWS); err != nil {
 		t.Fatalf("workspace.add: %v", err)
 	}
 	var newSess protocol.SessionNewResult

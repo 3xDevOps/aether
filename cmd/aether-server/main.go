@@ -4,12 +4,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -43,10 +45,10 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: aether-server <command>
 
 commands:
-  serve    run the server (flags: --data-dir, --addr, --dashboard-port,
-           --dashboard-addr, --tailnet-auto-join, --tailnet-require-key,
-           --conflict-coordination, --stall-threshold, --poll-interval,
-           --checkout-ttl, --min-free-disk)
+  serve    run the server (flags: --data-dir, --addr, --neutral-image,
+           --harness-definitions, --dashboard-port, --dashboard-addr,
+           --tailnet-auto-join, --tailnet-require-key, --conflict-coordination,
+           --stall-threshold, --poll-interval, --checkout-ttl, --min-free-disk)
   version  print the version`)
 }
 
@@ -54,7 +56,11 @@ func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	dataDir := fs.String("data-dir", server.DefaultDataDir, "server data directory")
 	addr := fs.String("addr", server.DefaultAddr, "SSH listen address")
+	neutralImage := fs.String("neutral-image", server.DefaultNeutralImage,
+		"server-owned neutral bootstrap image for workspaces without a custom image")
 	dashboardPort := fs.Int("dashboard-port", 0, "local dashboard port reachable via SSH forwards (0 = deny)")
+	harnessDefinitions := fs.String("harness-definitions", os.Getenv("AETHER_HARNESS_DEFINITIONS"),
+		`JSON object of administrator-owned generic harness definitions`)
 	tailnetAutoJoin := fs.Bool("tailnet-auto-join", false, "register unknown tailnet identities as approved members instead of pending")
 	tailnetRequireKey := fs.Bool("tailnet-require-key", false, "additionally require pubkey verification on tailnet connections")
 	dashboardAddr := fs.String("dashboard-addr", "", "expose the dashboard directly on this address (empty = loopback only)")
@@ -69,14 +75,20 @@ func serve(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
+	var harnesses map[string]scheduler.HarnessSpec
+	if *harnessDefinitions != "" {
+		if err := json.Unmarshal([]byte(*harnessDefinitions), &harnesses); err != nil {
+			return fmt.Errorf("invalid --harness-definitions JSON: %w", err)
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
 	srv, err := server.New(ctx, server.Config{
 		DataDir:           *dataDir,
 		Addr:              *addr,
+		NeutralImage:      *neutralImage,
 		DashboardPort:     *dashboardPort,
+		Harnesses:         harnesses,
 		TailnetAutoJoin:   *tailnetAutoJoin,
 		TailnetRequireKey: *tailnetRequireKey,
 		DashboardAddr:     *dashboardAddr,

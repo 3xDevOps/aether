@@ -77,7 +77,7 @@ func newEnv(t *testing.T) *env {
 		}
 	}
 	e.admin, e.viewer, e.collab = admin.ID, viewer.ID, collab.ID
-	ws := &domain.Workspace{Name: "app", Image: "img"}
+	ws := &domain.Workspace{Name: "app", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -426,6 +426,6 @@ func (f *fakeRuns) CloseRun(context.Context, domain.RunID, domain.MemberID, doma
 func (f *fakeRuns) Relaunch(context.Context, domain.RunID, domain.MemberID) (*domain.Run, error) {
 	return &domain.Run{}, nil
 }
-func (f *fakeRuns) SetupLogin(context.Context, domain.MemberID, string, string, uint, uint, io.ReadWriter, <-chan [2]uint) error {
+func (f *fakeRuns) WorkspaceShell(context.Context, domain.MemberID, domain.WorkspaceShellRequest, uint, uint, io.ReadWriter, <-chan [2]uint) error {
 	return nil
 }

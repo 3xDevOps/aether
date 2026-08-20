@@ -89,17 +89,25 @@ On first contact `aether` records the server's host key in `~/.ssh/known_hosts`
 and prints its fingerprint. Compare that against what the server printed if you
 care to.
 
-## 4. Add a workspace and push your repo
+## 4. Initialize a workspace and push your repo
 
-A **workspace** is a repo plus the container image its agents run in.
+A **workspace** is a repo plus a server-owned environment plan. With no image
+option, the server selects its neutral bootstrap image. Workspace creation is
+an administrator operation:
 
 ```sh
-aether workspace add myproject --image ghcr.io/you/agent-image:latest
+aether workspace init myproject
 ```
 
-The image is where the agent actually executes, so **it must contain the agent
-CLI you intend to run** (`claude`, `codex`, ...) plus whatever your build needs.
-See [harnesses.md](harnesses.md) for what each agent expects.
+Use a custom, administrator-approved image only when the project needs system
+packages that the neutral image does not provide:
+
+```sh
+aether workspace init myproject --image registry.example.invalid/team/base:version
+```
+
+The custom image is workspace configuration. A member cannot replace it from a
+bootstrap or login shell. See [install.md](install.md) for image policy.
 
 Now point your local clone at it and seed the repo:
 
@@ -114,30 +122,78 @@ Re-running `link` with `--repo` adds an `aether` git remote to that clone.
 the re-run it asked for.) The remote is a normal git remote over the same SSH
 port - no separate credentials.
 
-## 5. Log the agent in
+## 5. Bootstrap the workspace tools
 
-Subscription agents log in with the vendor's own flow. Aether gives you a
-terminal on the server and stays out of it:
+Bootstrap opens a shell **inside a server-created container**. It mounts a
+private, per-member and per-workspace staging directory at `~/.local` with
+read-write access. Install the agent executable using its vendor documentation,
+then leave the shell:
 
 ```sh
-aether setup claude
+aether workspace bootstrap myproject --command omp
 ```
 
-This starts a throwaway container from your workspace image with a persistent
-per-member home mounted, and hands you its shell. Run the agent's login command
-exactly as you would on a new laptop (`claude` and follow the prompts), then
-`exit`. The login state is saved on the server under your member ID and mounted
-into every run you launch from now on - once per person, per agent.
+The `--command` value is only an optional executable check. It does not select
+an installer or grant the shell access to the host. On a clean exit, Aether
+verifies the executable, creates an immutable tool snapshot, and activates it.
+User-local files under `~/.local` persist; system packages and other container
+filesystem changes do not. Use `aether workspace tools verify` later to report
+whether the active snapshot records the requested executable.
 
-Per-vendor detail, and the API-key alternative, is in
+If the SSH client disconnects before you exit, the pending staging directory is
+kept for this member and workspace. Resume it with:
+
+```sh
+aether workspace bootstrap myproject --resume --command omp
+```
+
+Discard that pending staging state instead:
+
+```sh
+aether workspace bootstrap myproject --reset
+```
+
+See [bootstrap.md](bootstrap.md) for snapshot inspection, rollback, reset,
+recovery, and the image escape hatch.
+
+Now run:
+
+```sh
+aether workspace tools list myproject
+aether workspace tools verify myproject --command omp
+```
+
+The list shows snapshot IDs, active state, executable, version, and creation
+time. It never prints host paths or tool contents.
+
+## 6. Log the agent in
+
+Login is separate from tool installation. Aether gives you a terminal in a
+container using the active tool snapshot mounted read-only:
+
+```sh
+aether setup omp --workspace myproject
+```
+
+Run the harness vendor's login flow in that shell, then `exit`. Login state is
+saved in a separate per-member credential home and mounted only according to
+the registered harness definition. Profile snapshots are separate again; they
+are not credentials and never become part of a tool snapshot. See
 [harnesses.md](harnesses.md).
 
-## 6. Launch a run
+## 7. Launch a run
+
+The `omp` name above is only an example. An administrator must register a
+generic harness definition for it before `aether run` can launch it:
 
 ```sh
 aether session new myproject --workspace myproject
-aether run "add a health check endpoint" --agent claude
+aether run "add a health check endpoint" --agent omp
 ```
+
+The run pins the complete environment plan, including the active tool
+snapshot. Later bootstrap or rollback operations affect later runs, not this
+one.
 
 ```
 run 01m04mhf114eap4k85n2mgcped running
@@ -147,7 +203,7 @@ A **session** is the shared context runs live in (members, feed, budgets); a
 **run** is one agent execution with its own container, its own git worktree,
 and its own branch. `aether runs` lists them.
 
-## 7. Watch it
+## 8. Watch it
 
 ```sh
 aether dash
@@ -176,7 +232,7 @@ aether inject <run-id> "also update the README"
 The message appears in the transcript as a banner in your member color, and
 everyone watching sees who said it.
 
-## 8. Pull the result
+## 9. Pull the result
 
 When the agent exits, its work is already committed to the run's branch and the
 run parks in `needs-attention`.
@@ -202,6 +258,7 @@ Then close the run out so it leaves the attention board:
 ```sh
 aether close <run-id> --outcome merged      # or --outcome abandoned
 ```
+
 
 To stop pulling by hand, run the local sync daemon - it fetches run branches as
 they update and pushes your base branch up so new runs start from current
@@ -243,9 +300,9 @@ echo "# demo" > README.md
 git add -A && git commit -m seed
 ```
 
-Then run steps 3, 4, 6, 7 and 8 above with `busybox` as the workspace image and
-`--agent fake` instead of `--agent claude`. Skip step 5 - there is nothing to
-log into.
+Then run steps 3, 4, 7, 8 and 9 above with `busybox` as the workspace image
+and `--agent fake` instead of `--agent omp`. Skip steps 5 and 6 because the
+fake harness has no agent login.
 
 ```sh
 aether link <server-host>:2222
@@ -271,16 +328,17 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `unable to authenticate, attempted methods [none]` | The CLI found no usable key: none at `~/.ssh/id_ed25519`, no ssh-agent, or a passphrase-protected key with no agent to unlock it. Run `ssh-add`, or generate an unencrypted key. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
-| `no workspace yet; skip git remote` | Run `aether workspace add` first, then re-run `aether link --repo`. |
-| `scheduler: setup requires an image` | `aether setup` borrows a workspace image. Add a workspace first. |
-| `executable file not found in $PATH` from `aether run` | The agent CLI is not installed in the workspace image. |
+| `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |
+| `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether setup`, or select one explicitly for bootstrap and tools commands. |
+| `workspace tools verify` reports failure | The active snapshot does not contain the requested executable, or it is not executable. Bootstrap again with `--command <executable>`. |
 | Run reaches `failed` immediately | The agent started and exited. `aether timeline --run <run-id>` shows the exit code; `aether attach` only works while a run is alive. |
 | `this server forwards no dashboard port` | The server was started without `--dashboard-port` or `--dashboard-addr`. |
 
 ## Next
 
 - [install.md](install.md) - systemd, upgrades, data layout
+- [bootstrap.md](bootstrap.md) - bootstrap shells, snapshots, recovery, and images
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
 - [teams.md](teams.md) - joining, roles, sessions
-- [harnesses.md](harnesses.md) - per-agent login and image requirements
+- [harnesses.md](harnesses.md) - login, profile sync, tool snapshots, and launch definitions
 - [security.md](security.md) - what the container boundary does and does not do

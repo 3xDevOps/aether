@@ -23,12 +23,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/toolenv"
 )
 
 // Defaults for the server configuration.
 const (
-	DefaultDataDir = "/var/lib/aether"
-	DefaultAddr    = ":2222"
+	DefaultDataDir      = "/var/lib/aether"
+	DefaultAddr         = ":2222"
+	DefaultNeutralImage = "ghcr.io/3xDevOps/aether-bootstrap:v0.1.0"
 )
 
 // Config configures a Server. The zero value serves from DefaultDataDir on
@@ -39,6 +41,10 @@ type Config struct {
 	DataDir string
 	// Addr is the SSH listen address; default ":2222".
 	Addr string
+	// NeutralImage is the server-owned image used for workspaces whose
+	// environment selects the neutral base. Empty uses DefaultNeutralImage.
+	// Workspace shell requests cannot override this value.
+	NeutralImage string
 	// DashboardPort is the only allowed direct-tcpip forward target on
 	// 127.0.0.1; 0 denies all forwards.
 	DashboardPort int
@@ -63,14 +69,14 @@ type Config struct {
 	// (the local tailscaled socket when present). The E2E suite stubs it
 	// so join and fallback scenarios need no real tailnet.
 	WhoIs sshd.WhoIsResolver
-	// Harnesses overrides or extends the scheduler's harness registry
-	// argv templates (scheduler.Config.Harnesses): deployment-supplied
-	// "custom" commands, and the E2E suite's scripted agents.
+	// Harnesses are server-owned, administrator-supplied launch definitions.
+	// They are validated before the scheduler starts; ordinary workspace
+	// members have no request field that can alter them.
 	Harnesses map[string]scheduler.HarnessSpec
 
 	// The failure-handling tuning knobs, all passed through to the
-	// scheduler and all documented in docs/failure-handling.md. Zero means the
-	// scheduler's shipped default.
+	// scheduler and all documented in docs/failure-handling.md. Zero means
+	// the scheduler's shipped default.
 	//
 	// StallThreshold is how long a run may go with no PTY output and no
 	// file changes before it parks at needs-attention; PollInterval is how
@@ -111,6 +117,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}
 	if cfg.Addr == "" {
 		cfg.Addr = DefaultAddr
+	}
+	if cfg.NeutralImage == "" {
+		cfg.NeutralImage = DefaultNeutralImage
 	}
 
 	s := &Server{}
@@ -159,18 +168,24 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if perr != nil {
 		return nil, perr
 	}
+	tools, terr := toolenv.NewManager(filepath.Join(cfg.DataDir, "toolenv"), s.db)
+	if terr != nil {
+		return nil, terr
+	}
 	if s.sched, err = scheduler.New(scheduler.Config{
-		Store:       s.db,
-		Runtime:     s.rt,
-		Bus:         s.bus,
-		Git:         lazyGit{s.git},
-		PTY:         s.pty,
-		StateDir:    filepath.Join(cfg.DataDir, "scheduler"),
-		HomesDir:    filepath.Join(cfg.DataDir, "homes"),
-		ReposDir:    filepath.Join(cfg.DataDir, "repos"),
-		ProfilesDir: profDir,
-		Profiles:    prof,
-		Harnesses:   cfg.Harnesses,
+		Store:        s.db,
+		Runtime:      s.rt,
+		Bus:          s.bus,
+		Git:          lazyGit{s.git},
+		PTY:          s.pty,
+		StateDir:     filepath.Join(cfg.DataDir, "scheduler"),
+		HomesDir:     filepath.Join(cfg.DataDir, "homes"),
+		ReposDir:     filepath.Join(cfg.DataDir, "repos"),
+		ProfilesDir:  profDir,
+		Profiles:     prof,
+		Toolenv:      tools,
+		NeutralImage: cfg.NeutralImage,
+		Harnesses:    cfg.Harnesses,
 
 		StallThreshold: cfg.StallThreshold,
 		PollInterval:   cfg.PollInterval,
@@ -201,6 +216,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Git:               lazyGit{s.git},
 		PTY:               s.pty,
 		Runs:              s.sched,
+		Toolenv:           tools,
 		WhoIs:             whois,
 		TailnetAutoJoin:   cfg.TailnetAutoJoin,
 		TailnetRequireKey: cfg.TailnetRequireKey,

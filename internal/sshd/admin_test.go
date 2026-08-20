@@ -46,7 +46,7 @@ func TestAdminRPCDeniedForNonAdmin(t *testing.T) {
 	c := controlAs(t, e, bob)
 
 	var pe *protocol.Error
-	if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "x", Image: "img"}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+	if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "x", Environment: protocol.WorkspaceEnvironment{CustomImage: "img"}}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("collaborator workspace.add = %v, want CodeDenied", err)
 	}
 	if err := c.Call(protocol.MethodMemberInvite, protocol.MemberInviteParams{}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
@@ -113,7 +113,7 @@ func TestPendingDeniedExceptServerInfo(t *testing.T) {
 	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("pending workspace.list = %v, want CodeDenied", err)
 	}
-	if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "x", Image: "img"}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+	if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "x", Environment: protocol.WorkspaceEnvironment{CustomImage: "img"}}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("pending workspace.add = %v, want CodeDenied", err)
 	}
 	if err := c.Call(protocol.MethodSessionNew, protocol.SessionNewParams{WorkspaceID: string(e.ws.ID), Name: "n"}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
@@ -127,7 +127,7 @@ func TestAdminWorkspaceAddAndInvite(t *testing.T) {
 	c := controlClient(t, e)
 
 	var ws protocol.WorkspaceAddResult
-	if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "other", Image: "alpine"}, &ws); err != nil {
+	if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "other", Environment: protocol.WorkspaceEnvironment{CustomImage: "alpine"}}, &ws); err != nil {
 		t.Fatalf("workspace.add: %v", err)
 	}
 	if ws.Workspace.Name != "other" || ws.Workspace.ID == "" {
