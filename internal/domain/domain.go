@@ -7,6 +7,8 @@
 package domain
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -41,6 +43,49 @@ type WorkspaceEnvironment struct {
 	NeutralImage bool              `json:"neutral_image,omitempty"`
 	Variables    map[string]string `json:"variables,omitempty"`
 	SetupPolicy  SetupPolicy       `json:"setup_policy,omitempty"`
+}
+
+// UnmarshalJSON accepts canonical JSON booleans and legacy SQLite numeric
+// 0/1 values for neutral_image. MarshalJSON remains the standard encoder,
+// so values are always written as canonical JSON booleans.
+func (e *WorkspaceEnvironment) UnmarshalJSON(data []byte) error {
+	type environmentAlias WorkspaceEnvironment
+	var raw struct {
+		*environmentAlias
+		NeutralImage json.RawMessage `json:"neutral_image"`
+	}
+	raw.environmentAlias = (*environmentAlias)(e)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw.NeutralImage) == 0 {
+		return nil
+	}
+
+	value := bytes.TrimSpace(raw.NeutralImage)
+	if len(value) == 0 {
+		return fmt.Errorf("domain: neutral_image must be a boolean or numeric 0/1")
+	}
+	switch value[0] {
+	case 't', 'f':
+		var neutral bool
+		if err := json.Unmarshal(value, &neutral); err != nil {
+			return err
+		}
+		e.NeutralImage = neutral
+		return nil
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-':
+		var legacy int
+		if err := json.Unmarshal(value, &legacy); err == nil {
+			if legacy == 0 || legacy == 1 {
+				e.NeutralImage = legacy == 1
+				return nil
+			}
+			return fmt.Errorf("domain: neutral_image numeric value must be 0 or 1, got %d", legacy)
+		}
+	}
+
+	return fmt.Errorf("domain: neutral_image must be a boolean or numeric 0/1")
 }
 
 // Valid reports whether the environment has one unambiguous image selection

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -243,6 +244,39 @@ func TestWorkspaceNilEnvRoundTrip(t *testing.T) {
 	}
 	if got.Environment.Variables != nil {
 		t.Fatalf("nil Variables round-tripped as %#v", got.Environment.Variables)
+	}
+}
+
+func TestWorkspaceEnvironmentAcceptsNumericNeutralImage(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	if _, err := db.db.ExecContext(ctx, `UPDATE workspaces SET environment = ? WHERE id = ?`,
+		`{"custom_image":"","neutral_image":1,"variables":{},"setup_policy":{"script":""}}`, w.ID); err != nil {
+		t.Fatalf("seed legacy environment: %v", err)
+	}
+
+	got, err := db.GetWorkspace(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if !got.Environment.NeutralImage {
+		t.Fatal("numeric neutral_image was not decoded as true")
+	}
+}
+
+func TestWorkspaceEnvironmentMarshalUsesCanonicalBoolean(t *testing.T) {
+	data, err := json.Marshal(domain.WorkspaceEnvironment{NeutralImage: true})
+	if err != nil {
+		t.Fatalf("marshal environment: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("decode marshaled environment: %v", err)
+	}
+	if got := string(fields["neutral_image"]); got != "true" {
+		t.Fatalf("neutral_image JSON = %s, want true", got)
 	}
 }
 
