@@ -45,16 +45,19 @@ const (
 var DefaultNeutralImage = neutralImageRepo + ":" + neutralImageTag(version.Version)
 
 var (
-	describeSuffixPattern = regexp.MustCompile(`-\d+-g[0-9a-f]+$`)
-	releaseTagPattern     = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$`)
+	describeSuffixPattern = regexp.MustCompile(`-\d+-g[0-9a-f]+(?:-dirty)?$`)
+	// releaseTagPattern matches the release workflow's accepted refs
+	// (push tags v*) that are also valid Docker tags; the prerelease part
+	// may contain hyphens (v1.2.3-rc-1).
+	releaseTagPattern = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
 )
 
 // neutralImageTag reduces a build version to a published image tag. The
 // release workflow tags the bootstrap image with the release ref name, so a
 // release version is its own image tag.
 func neutralImageTag(buildVersion string) string {
-	tag := strings.TrimSuffix(buildVersion, "-dirty")
-	tag = describeSuffixPattern.ReplaceAllString(tag, "")
+	tag := describeSuffixPattern.ReplaceAllString(buildVersion, "")
+	tag = strings.TrimSuffix(tag, "-dirty")
 	if releaseTagPattern.MatchString(tag) {
 		return tag
 	}

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +84,38 @@ func TestWorkspaceShellBootstrapUsesWritableStaging(t *testing.T) {
 	}
 	if _, err := e.db.GetToolHead(t.Context(), e.member.ID, e.ws.ID); err != nil {
 		t.Fatalf("bootstrap did not activate a snapshot: %v", err)
+	}
+}
+
+func TestWorkspaceShellNonzeroExitFailsAndSkipsPromotion(t *testing.T) {
+	e := newTestEnv(t, func(c *Config) {
+		mgr, err := toolenv.NewManager(filepath.Join(t.TempDir(), "tools"), c.Store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Toolenv = mgr
+	})
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+	drainPipe(client)
+	done := make(chan error, 1)
+	go func() {
+		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
+			Workspace: domain.WorkspaceSelector{ID: e.ws.ID},
+			Mode:      domain.WorkspaceShellBootstrapTools,
+		}, 80, 24, server, nil)
+	}()
+	waitFor(t, "bootstrap container", func() bool { return len(e.rt.allContainers()) == 1 })
+	e.rt.allContainers()[0].exitNow(7)
+	err := <-done
+	if err == nil {
+		t.Fatal("nonzero shell exit returned nil; sshd would report success")
+	}
+	if !strings.Contains(err.Error(), "status 7") {
+		t.Fatalf("error = %v, want it to carry exit status 7", err)
+	}
+	if _, headErr := e.db.GetToolHead(t.Context(), e.member.ID, e.ws.ID); headErr == nil {
+		t.Fatal("failed bootstrap promoted a snapshot")
 	}
 }
 func TestWorkspaceShellUsesPinnedSnapshotPathAfterHeadChange(t *testing.T) {

@@ -197,12 +197,22 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 	}()
 	cleanExit := false
 	var terminalErr error
+	// exitError converts an observed container exit into the shell result:
+	// transport errors and nonzero exits must both fail the session, or
+	// sshd would report success (exit-status 0) for a failed bootstrap.
+	exitError := func(status runtime.ExitStatus, waitErr error) error {
+		if waitErr != nil {
+			return waitErr
+		}
+		if status.Code != 0 {
+			return fmt.Errorf("scheduler: workspace shell exited with status %d", status.Code)
+		}
+		return nil
+	}
 	select {
 	case result := <-waitDone:
 		cleanExit = result.err == nil && result.status.Code == 0
-		if result.err != nil {
-			terminalErr = result.err
-		}
+		terminalErr = exitError(result.status, result.err)
 	case <-ctx.Done():
 		terminalErr = ctx.Err()
 	case revokedErr := <-revoked:
@@ -220,10 +230,13 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 		select {
 		case result := <-waitDone:
 			cleanExit = result.err == nil && result.status.Code == 0
-			if result.err != nil {
-				terminalErr = result.err
-			}
+			terminalErr = exitError(result.status, result.err)
 		case <-waitCtx.Done():
+			// Disconnect without an observed exit: an intentional detach.
+			// Bootstrap keeps its pending staging for --resume.
+			if req.Mode == domain.WorkspaceShellBootstrapTools {
+				_, _ = io.WriteString(conn, "\r\naether: bootstrap session detached; pending tools staging preserved (resume with --resume)\r\n")
+			}
 		}
 		cancel()
 	}

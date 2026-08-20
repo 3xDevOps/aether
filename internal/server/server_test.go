@@ -32,6 +32,8 @@ func TestNeutralImageTag(t *testing.T) {
 		{"v0.1.2-alpha.1-3-g35e2990", "v0.1.2-alpha.1"},
 		{"v0.1.2-alpha.1-3-g35e2990-dirty", "v0.1.2-alpha.1"},
 		{"v0.1.2-dirty", "v0.1.2"},
+		{"v1.2.3-rc-1", "v1.2.3-rc-1"},
+		{"v1.2.3-rc-1-5-gabcdef0", "v1.2.3-rc-1"},
 		{"dev", "latest"},
 		{"35e2990", "latest"},
 		{"", "latest"},
