@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"bufio"
+	"encoding/binary"
 	"errors"
 	"io"
 	"strings"
@@ -111,6 +112,69 @@ func TestSetupSubsystemReportsControllerFailure(t *testing.T) {
 	}
 	if err := pipe.sess.Wait(); err == nil {
 		t.Fatal("setup failure returned successful SSH exit status")
+	}
+}
+
+// When the setup container exits, the controller half-closes the client
+// conn. The client must observe EOF on output while the channel still
+// delivers the trailing zero exit status; a full close here would drop
+// the status entirely. Session.Wait cannot see subsystem exits, so the
+// test drives a raw session channel the same way internal/cli does.
+func TestSetupSubsystemDeliversExitStatusAfterHalfClose(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.runs.setSetupHook(func(conn io.ReadWriter) error {
+		cw, ok := conn.(interface{ CloseWrite() error })
+		if !ok {
+			return errors.New("setup conn does not support CloseWrite")
+		}
+		return cw.CloseWrite()
+	})
+	client := e.dial(t)
+	ch, reqs, err := client.OpenChannel("session", nil)
+	if err != nil {
+		t.Fatalf("open channel: %v", err)
+	}
+	t.Cleanup(func() { _ = ch.Close() })
+	status := make(chan int, 1)
+	go func() {
+		got := -1
+		for req := range reqs {
+			if req.Type == "exit-status" && len(req.Payload) >= 4 {
+				got = int(binary.BigEndian.Uint32(req.Payload))
+			}
+			if req.WantReply {
+				_ = req.Reply(false, nil)
+			}
+		}
+		status <- got
+	}()
+	ok, err := ch.SendRequest("subsystem", true, ssh.Marshal(struct{ Subsystem string }{protocol.SubsystemSetup}))
+	if err != nil || !ok {
+		t.Fatalf("subsystem request: ok=%v err=%v", ok, err)
+	}
+	if _, err := ch.Write([]byte(`{"harness":"claude"}` + "\n")); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	reader := bufio.NewReader(ch)
+	var ack protocol.SetupResponse
+	readJSONLine(t, reader, &ack)
+	if !ack.OK {
+		t.Fatalf("ack = %+v", ack)
+	}
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read to EOF after half-close: %v", err)
+	}
+	if !strings.Contains(string(body), "setup-ready") {
+		t.Fatalf("setup output = %q, want setup-ready", body)
+	}
+	select {
+	case got := <-status:
+		if got != 0 {
+			t.Fatalf("exit status after half-close = %d, want 0", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("exit status not delivered after half-close")
 	}
 }
 

@@ -73,6 +73,8 @@ func (s *Server) serveSetup(ctx context.Context, member domain.MemberID, st *ses
 
 // setupConn is the io.ReadWriter handed to RunController.SetupLogin. It
 // reads leftover header-buffer bytes from the channel, then raw input.
+// CloseWrite half-closes the channel so end-of-output reaches the client
+// while the exit-status request can still be delivered.
 type setupConn struct {
 	r *bufio.Reader
 	w ssh.Channel
@@ -80,3 +82,4 @@ type setupConn struct {
 
 func (c *setupConn) Read(p []byte) (int, error)  { return c.r.Read(p) }
 func (c *setupConn) Write(p []byte) (int, error) { return c.w.Write(p) }
+func (c *setupConn) CloseWrite() error           { return c.w.CloseWrite() }
