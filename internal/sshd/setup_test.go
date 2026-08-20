@@ -152,8 +152,8 @@ func TestSetupSubsystemDeliversExitStatusAfterHalfClose(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("subsystem request: ok=%v err=%v", ok, err)
 	}
-	if _, err := ch.Write([]byte(`{"harness":"claude"}` + "\n")); err != nil {
-		t.Fatalf("write header: %v", err)
+	if _, writeErr := ch.Write([]byte(`{"harness":"claude"}` + "\n")); writeErr != nil {
+		t.Fatalf("write header: %v", writeErr)
 	}
 	reader := bufio.NewReader(ch)
 	var ack protocol.SetupResponse
