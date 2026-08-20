@@ -242,7 +242,7 @@ ALTER TABLE workspaces ADD COLUMN environment TEXT NOT NULL DEFAULT '{}';
 UPDATE workspaces
 SET environment = json_object(
 	'custom_image', image,
-	'neutral_image', CASE WHEN image = '' THEN 1 ELSE 0 END,
+	'neutral_image', CASE WHEN image = '' THEN json('true') ELSE json('false') END,
 	'variables', CASE WHEN json_valid(env) THEN json(env) ELSE json('{}') END,
 	'setup_policy', json_object('script', setup_script)
 );
