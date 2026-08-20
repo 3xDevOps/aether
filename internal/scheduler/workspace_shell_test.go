@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"bytes"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +14,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/toolenv"
 )
+
+// drainPipe discards everything the shell writes to the client half of a
+// net.Pipe. A real SSH channel buffers writes; net.Pipe does not, so an
+// undrained pipe would deadlock the shell's provisioning notice.
+func drainPipe(c net.Conn) {
+	go func() { _, _ = io.Copy(io.Discard, c) }()
+}
 
 func TestWorkspaceShellRequiresWorkspaceSelector(t *testing.T) {
 	e := newTestEnv(t, func(c *Config) {
@@ -39,6 +47,7 @@ func TestWorkspaceShellBootstrapUsesWritableStaging(t *testing.T) {
 	})
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
@@ -59,6 +68,12 @@ func TestWorkspaceShellBootstrapUsesWritableStaging(t *testing.T) {
 	for _, c := range containers {
 		if len(c.spec.Mounts) == 0 || c.spec.Mounts[0].ReadOnly {
 			t.Fatal("bootstrap staging is not writable")
+		}
+		if !c.startedWithAttach {
+			t.Fatal("workspace shell started before attaching; the first prompt would be lost")
+		}
+		if c.spec.Env["PS1"] != "aether-bootstrap$ " {
+			t.Fatalf("PS1 = %q, want the bootstrap prompt", c.spec.Env["PS1"])
 		}
 		c.exitNow(0)
 	}
@@ -144,6 +159,7 @@ func TestWorkspaceShellResumeRequiresExplicitResumeAndCleansSelectedPendingRow(t
 		t.Fatal(createPendingErr)
 	}
 	client, server := net.Pipe()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
@@ -186,6 +202,7 @@ func TestWorkspaceShellResumeDeletesPendingRowAfterTeardownAndPromotion(t *testi
 		t.Fatal(createPendingErr)
 	}
 	client, server := net.Pipe()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
@@ -228,6 +245,7 @@ func TestWorkspaceShellLoginUsesConfiguredCustomHarnessCredentials(t *testing.T)
 		c.PollInterval = time.Millisecond
 	})
 	client, server := net.Pipe()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
@@ -250,6 +268,7 @@ func TestWorkspaceShellLoginUsesConfiguredCustomHarnessCredentials(t *testing.T)
 func TestWorkspaceShellStopsOnMemberRevocation(t *testing.T) {
 	e := newTestEnv(t, func(c *Config) { c.PollInterval = time.Millisecond })
 	client, server := net.Pipe()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{

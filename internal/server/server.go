@@ -10,6 +10,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,14 +26,40 @@ import (
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/toolenv"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // Defaults for the server configuration.
 const (
-	DefaultDataDir      = "/var/lib/aether"
-	DefaultAddr         = ":2222"
-	DefaultNeutralImage = "ghcr.io/3xDevOps/aether-bootstrap:v0.1.0"
+	DefaultDataDir = "/var/lib/aether"
+	DefaultAddr    = ":2222"
+	// neutralImageRepo is the published neutral bootstrap image repository.
+	// Docker requires repository names to be lowercase.
+	neutralImageRepo = "ghcr.io/3xdevops/aether-bootstrap"
 )
+
+// DefaultNeutralImage is the neutral bootstrap image matching this build.
+// Release builds pin the image published from the same tag, git-describe
+// builds pin the nearest release tag, and untagged builds track the latest
+// published image.
+var DefaultNeutralImage = neutralImageRepo + ":" + neutralImageTag(version.Version)
+
+var (
+	describeSuffixPattern = regexp.MustCompile(`-\d+-g[0-9a-f]+$`)
+	releaseTagPattern     = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$`)
+)
+
+// neutralImageTag reduces a build version to a published image tag. The
+// release workflow tags the bootstrap image with the release ref name, so a
+// release version is its own image tag.
+func neutralImageTag(buildVersion string) string {
+	tag := strings.TrimSuffix(buildVersion, "-dirty")
+	tag = describeSuffixPattern.ReplaceAllString(tag, "")
+	if releaseTagPattern.MatchString(tag) {
+		return tag
+	}
+	return "latest"
+}
 
 // Config configures a Server. The zero value serves from DefaultDataDir on
 // DefaultAddr with the Docker runtime and all port forwards denied.

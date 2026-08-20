@@ -54,10 +54,11 @@ jobs:
         id: bootstrap-meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/3xDevOps/aether-bootstrap
+          images: ghcr.io/3xdevops/aether-bootstrap
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=raw,value=${{ github.sha }}
+            type=raw,value=latest
             type=sha,prefix=sha-
       - name: Publish neutral bootstrap image
         uses: docker/build-push-action@v6

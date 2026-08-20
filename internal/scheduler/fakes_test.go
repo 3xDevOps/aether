@@ -45,6 +45,9 @@ type fakeContainer struct {
 	stdin bytes.Buffer
 	exit  *runtime.ExitStatus
 	done  chan struct{}
+	// startedWithAttach records whether an attachment existed when Start
+	// ran; interactive shells must attach first or lose the first prompt.
+	startedWithAttach bool
 }
 
 // output emits agent PTY bytes to every open attachment.
@@ -129,6 +132,7 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 		return fmt.Errorf("fake runtime: start from state %q", c.state)
 	}
 	c.state = "running"
+	c.startedWithAttach = len(c.atts) > 0
 	return nil
 }
 
