@@ -300,7 +300,11 @@ func (s *Scheduler) Close() error {
 func validateHarnessSpec(name string, spec HarnessSpec) error {
 	registered, known := harness.Lookup(name)
 	if spec.Executable == "" {
-		if !known {
+		// "fake" is a scheduler-owned deterministic harness. Its argv is
+		// resolved from AETHER_FAKE_AGENT at launch time, so an explicit
+		// empty fixture entry must not be treated as an administrator custom
+		// definition.
+		if !known && name != "fake" {
 			return fmt.Errorf("scheduler: custom harness %q requires an explicit definition", name)
 		}
 		for _, argv := range [][]string{spec.TUIArgs, spec.HeadlessArgs} {

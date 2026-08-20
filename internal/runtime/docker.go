@@ -12,7 +12,7 @@ import (
 	"maps"
 	"math"
 	"slices"
-
+	"strings"
 	"sync"
 	"time"
 
@@ -287,7 +287,7 @@ func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir 
 	}
 	if code != 0 {
 		slog.Error("runtime: setup script exited nonzero", "container", id, "working_dir", workDir, "script", script, "output", output, "exit_code", code)
-		return fmt.Errorf("runtime: setup script exited %d", code)
+		return fmt.Errorf("runtime: setup script exited %d: %s", code, strings.TrimSpace(output))
 	}
 	release := []string{"/bin/sh", "-c", "mkdir -p /tmp && : > " + sentinel}
 	code, output, err = d.exec(ctx, id, release, "")
@@ -297,7 +297,7 @@ func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir 
 	}
 	if code != 0 {
 		slog.Error("runtime: release setup gate exited nonzero", "container", id, "output", output, "exit_code", code)
-		return fmt.Errorf("runtime: release setup gate exited %d", code)
+		return fmt.Errorf("runtime: release setup gate exited %d: %s", code, strings.TrimSpace(output))
 	}
 	return nil
 }

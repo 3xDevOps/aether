@@ -811,5 +811,25 @@ func TestCustomHarnessRequiresDefinition(t *testing.T) {
 	e.cfg.Harnesses = map[string]HarnessSpec{"omp": {TUIArgs: []string{"omp", "{task}"}}}
 	if _, err := New(e.cfg); err == nil {
 		t.Fatal("custom harness without executable accepted")
+	} else if !strings.Contains(err.Error(), `custom harness "omp" requires an explicit definition`) {
+		t.Fatalf("custom harness error = %v", err)
+	}
+}
+func TestFakeHarnessDefinitionUsesEnvironment(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.cfg.Harnesses = map[string]HarnessSpec{"fake": {}}
+	s, err := New(e.cfg)
+	if err != nil {
+		t.Fatalf("New with built-in fake harness: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	t.Setenv(fakeAgentEnv, "fake-agent {task}")
+	argv, _, err := s.command("fake", domain.LaunchTUI, "integration task")
+	if err != nil {
+		t.Fatalf("fake command: %v", err)
+	}
+	if got, want := fmt.Sprint(argv), fmt.Sprint([]string{"fake-agent", "integration task"}); got != want {
+		t.Fatalf("argv = %s, want %s", got, want)
 	}
 }
