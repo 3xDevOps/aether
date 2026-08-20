@@ -123,13 +123,13 @@ func callWorkspaceTools(method string, params any, result any) error {
 
 func printToolSnapshots(result protocol.ToolSnapshotListResult) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tACTIVE\tEXECUTABLE\tVERSION\tCREATED_AT")
+	_, _ = fmt.Fprintln(w, "ID\tACTIVE\tEXECUTABLE\tVERSION\tCREATED_AT")
 	for _, snapshot := range result.Snapshots {
 		active := "no"
 		if snapshot.Active || (result.Active != nil && result.Active.ID == snapshot.ID) {
 			active = "yes"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", snapshot.ID, active, snapshot.Manifest.Executable, snapshot.Manifest.Version, snapshot.CreatedAt)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", snapshot.ID, active, snapshot.Manifest.Executable, snapshot.Manifest.Version, snapshot.CreatedAt)
 	}
 	_ = w.Flush()
 }

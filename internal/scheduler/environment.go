@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/store"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // EnvironmentPurpose identifies the consumer of an environment plan.
@@ -149,11 +150,11 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			}
 		}
 	}
-	if err := runtime.ValidateMounts(plan.Mounts, runtime.MountPolicy{
+	if validateErr := runtime.ValidateMounts(plan.Mounts, runtime.MountPolicy{
 		OwnedRoots: roots, WorktreeHostPath: worktreePath(run),
 		WorktreeMountPath: s.cfg.WorktreeMount, AllowedNestings: allowedNestings,
-	}); err != nil {
-		return nil, err
+	}); validateErr != nil {
+		return nil, validateErr
 	}
 	return plan, nil
 }

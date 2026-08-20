@@ -185,12 +185,6 @@ func (f *fakeRuns) setErr(err error) {
 	f.err = err
 }
 
-func (f *fakeRuns) setSetupHook(hook func(conn io.ReadWriter) error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.setupHook = hook
-}
-
 func (f *fakeRuns) Calls() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

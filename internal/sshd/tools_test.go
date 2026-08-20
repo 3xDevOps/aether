@@ -18,14 +18,14 @@ func TestWorkspaceToolsResetUsesToolManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	workspace := &domain.Workspace{Name: "workspace", Environment: domain.WorkspaceEnvironment{NeutralImage: true}}
-	if err := db.CreateWorkspace(ctx, workspace); err != nil {
-		t.Fatal(err)
+	if createWorkspaceErr := db.CreateWorkspace(ctx, workspace); createWorkspaceErr != nil {
+		t.Fatal(createWorkspaceErr)
 	}
 	member := &domain.Member{DisplayName: "member", TailnetLogin: "member@example.com", Role: domain.RoleCollaborator}
-	if err := db.CreateMember(ctx, member); err != nil {
-		t.Fatal(err)
+	if createMemberErr := db.CreateMember(ctx, member); createMemberErr != nil {
+		t.Fatal(createMemberErr)
 	}
 	manager, err := toolenv.NewManager(filepath.Join(t.TempDir(), "tools"), db)
 	if err != nil {
@@ -36,8 +36,8 @@ func TestWorkspaceToolsResetUsesToolManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := &store.PendingWorkspaceShell{WorkspaceID: workspace.ID, MemberID: member.ID, StagingID: filepath.Base(staging)}
-	if err := db.CreatePendingWorkspaceShell(ctx, pending); err != nil {
-		t.Fatal(err)
+	if createPendingErr := db.CreatePendingWorkspaceShell(ctx, pending); createPendingErr != nil {
+		t.Fatal(createPendingErr)
 	}
 	server := &Server{cfg: Config{Store: db, Toolenv: manager}}
 	raw, err := json.Marshal(protocol.ToolSnapshotResetParams{

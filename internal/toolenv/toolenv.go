@@ -96,16 +96,16 @@ func (m *Manager) CreateStaging(member, workspace string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(base, 0o700); err != nil {
-		return "", err
+	if mkdirErr := os.MkdirAll(base, 0o700); mkdirErr != nil {
+		return "", mkdirErr
 	}
 	id, err := randomID()
 	if err != nil {
 		return "", err
 	}
 	path := filepath.Join(base, id)
-	if err := os.Mkdir(path, 0o700); err != nil {
-		return "", err
+	if mkdirErr := os.Mkdir(path, 0o700); mkdirErr != nil {
+		return "", mkdirErr
 	}
 	return path, nil
 }
@@ -123,9 +123,9 @@ func (m *Manager) ensureStaging(path string) error {
 		return ErrTraversal
 	}
 	for p := clean; ; p = filepath.Dir(p) {
-		info, err := os.Lstat(p)
-		if err != nil {
-			return err
+		info, lstatErr := os.Lstat(p)
+		if lstatErr != nil {
+			return lstatErr
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return ErrSymlink
@@ -151,8 +151,8 @@ func (m *Manager) snapshotPath(member, workspace, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := checkIDs(id); err != nil {
-		return "", err
+	if idErr := checkIDs(id); idErr != nil {
+		return "", idErr
 	}
 	return filepath.Join(base, id), nil
 }
@@ -164,9 +164,9 @@ func (m *Manager) ensureSnapshot(path string) error {
 		return ErrTraversal
 	}
 	for p := clean; ; p = filepath.Dir(p) {
-		info, err := os.Lstat(p)
-		if err != nil {
-			return err
+		info, lstatErr := os.Lstat(p)
+		if lstatErr != nil {
+			return lstatErr
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return ErrSymlink
@@ -209,8 +209,8 @@ func (m *Manager) SnapshotPath(ctx context.Context, member domain.MemberID, work
 	if err != nil {
 		return "", err
 	}
-	if err := m.ensureSnapshot(path); err != nil {
-		return "", err
+	if ensureErr := m.ensureSnapshot(path); ensureErr != nil {
+		return "", ensureErr
 	}
 	return path, nil
 }
@@ -229,8 +229,9 @@ func (m *Manager) duplicateSnapshot(ctx context.Context, member, workspace, dige
 		if snapshot.Digest != digest {
 			continue
 		}
-		if _, err := m.SnapshotPath(ctx, snapshot.MemberID, snapshot.WorkspaceID, snapshot.ID); err != nil {
-			return nil, err
+		_, resolveErr := m.SnapshotPath(ctx, snapshot.MemberID, snapshot.WorkspaceID, snapshot.ID)
+		if resolveErr != nil {
+			return nil, resolveErr
 		}
 		return snapshot, nil
 	}
@@ -254,30 +255,31 @@ func (m *Manager) Promote(ctx context.Context, member, workspace, staging string
 		return nil, err
 	}
 	if manifest.Executable != "" {
-		if err := checkIDs(manifest.Executable); err != nil {
-			return nil, err
+		if executableIDErr := checkIDs(manifest.Executable); executableIDErr != nil {
+			return nil, executableIDErr
 		}
 		executable := filepath.Join(staging, "bin", manifest.Executable)
 		if verify != nil {
-			if err := verify(executable); err != nil {
-				return nil, err
+			if verifyErr := verify(executable); verifyErr != nil {
+				return nil, verifyErr
 			}
-		} else if info, err := os.Stat(executable); err != nil || info.Mode().Perm()&0o111 == 0 {
-			if err == nil {
-				err = fmt.Errorf("toolenv: executable is not executable")
+		} else if info, statErr := os.Stat(executable); statErr != nil || info.Mode().Perm()&0o111 == 0 {
+			if statErr == nil {
+				statErr = fmt.Errorf("toolenv: executable is not executable")
 			}
-			return nil, err
+			return nil, statErr
 		}
 	}
-	if existing, err := m.duplicateSnapshot(ctx, member, workspace, digest); err == nil {
-		if err := m.store.SetToolHead(ctx, existing.MemberID, existing.WorkspaceID, existing.ID); err != nil {
-			return nil, err
+	existing, duplicateErr := m.duplicateSnapshot(ctx, member, workspace, digest)
+	if duplicateErr == nil {
+		if headErr := m.store.SetToolHead(ctx, existing.MemberID, existing.WorkspaceID, existing.ID); headErr != nil {
+			return nil, headErr
 		}
 		// Keep the staged tree intact. The caller or bounded staging cleanup
 		// can retry removal without losing the duplicate's usable snapshot.
 		return existing, nil
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return nil, err
+	} else if !errors.Is(duplicateErr, store.ErrNotFound) {
+		return nil, duplicateErr
 	}
 	id, err := randomID()
 	if err != nil {
@@ -287,32 +289,32 @@ func (m *Manager) Promote(ctx context.Context, member, workspace, staging string
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-		return nil, err
+	if mkdirErr := os.MkdirAll(filepath.Dir(destination), 0o700); mkdirErr != nil {
+		return nil, mkdirErr
 	}
-	if err := os.Rename(staging, destination); err != nil {
-		return nil, fmt.Errorf("toolenv: promote staging: %w", err)
+	if renameErr := os.Rename(staging, destination); renameErr != nil {
+		return nil, fmt.Errorf("toolenv: promote staging: %w", renameErr)
 	}
 	snapshot := &domain.ToolSnapshot{ID: domain.ToolSnapshotID(id), WorkspaceID: domain.WorkspaceID(workspace), MemberID: domain.MemberID(member), Digest: digest, Manifest: manifest}
 	createErr := m.store.CreateToolSnapshot(ctx, snapshot)
 	if createErr != nil {
 		if errors.Is(createErr, store.ErrConflict) {
-			existing, lookupErr := m.duplicateSnapshot(ctx, member, workspace, digest)
+			conflictSnapshot, lookupErr := m.duplicateSnapshot(ctx, member, workspace, digest)
 			if lookupErr == nil {
-				if headErr := m.store.SetToolHead(ctx, existing.MemberID, existing.WorkspaceID, existing.ID); headErr != nil {
+				if headErr := m.store.SetToolHead(ctx, conflictSnapshot.MemberID, conflictSnapshot.WorkspaceID, conflictSnapshot.ID); headErr != nil {
 					return nil, headErr
 				}
 				// Leave the newly staged tree in place. It remains within the
 				// manager root and can be reclaimed by bounded cleanup.
-				return existing, nil
+				return conflictSnapshot, nil
 			}
 			return nil, createErr
 		}
 		_ = os.RemoveAll(destination)
 		return nil, createErr
 	}
-	if err := m.store.SetToolHead(ctx, snapshot.MemberID, snapshot.WorkspaceID, snapshot.ID); err != nil {
-		return snapshot, err
+	if headErr := m.store.SetToolHead(ctx, snapshot.MemberID, snapshot.WorkspaceID, snapshot.ID); headErr != nil {
+		return snapshot, headErr
 	}
 	return snapshot, nil
 }
@@ -384,8 +386,8 @@ func (m *Manager) Reset(ctx context.Context, member domain.MemberID, workspace d
 				return e
 			}
 		}
-		if err := m.store.DeletePendingWorkspaceShell(ctx, p.ID); err != nil {
-			return err
+		if deleteErr := m.store.DeletePendingWorkspaceShell(ctx, p.ID); deleteErr != nil {
+			return deleteErr
 		}
 	}
 	snapshots, err := m.store.ListToolSnapshots(ctx, member, workspace)
@@ -453,17 +455,17 @@ func (m *Manager) CleanupAbandonedStaging(ctx context.Context, age time.Duration
 			}
 			keep := make(map[string]struct{})
 			if m.store != nil {
-				pending, e := m.store.ListPendingWorkspaceShells(ctx, domain.MemberID(member.Name()), domain.WorkspaceID(workspace.Name()))
-				if e != nil {
-					return removed, e
+				pending, pendingErr := m.store.ListPendingWorkspaceShells(ctx, domain.MemberID(member.Name()), domain.WorkspaceID(workspace.Name()))
+				if pendingErr != nil {
+					return removed, pendingErr
 				}
 				for _, p := range pending {
 					keep[p.StagingID] = struct{}{}
 				}
 			}
-			candidates, e := os.ReadDir(filepath.Join(root, member.Name(), workspace.Name()))
-			if e != nil {
-				return removed, e
+			candidates, candidatesErr := os.ReadDir(filepath.Join(root, member.Name(), workspace.Name()))
+			if candidatesErr != nil {
+				return removed, candidatesErr
 			}
 			for _, candidate := range candidates {
 				if removed >= limit {
@@ -472,16 +474,16 @@ func (m *Manager) CleanupAbandonedStaging(ctx context.Context, age time.Duration
 				if _, ok := keep[candidate.Name()]; ok {
 					continue
 				}
-				info, e := candidate.Info()
-				if e != nil {
-					return removed, e
+				info, infoErr := candidate.Info()
+				if infoErr != nil {
+					return removed, infoErr
 				}
 				if info.ModTime().After(cutoff) {
 					continue
 				}
 				path := filepath.Join(root, member.Name(), workspace.Name(), candidate.Name())
-				if e = m.CleanupStaging(path); e != nil {
-					return removed, e
+				if cleanupErr := m.CleanupStaging(path); cleanupErr != nil {
+					return removed, cleanupErr
 				}
 				removed++
 			}
@@ -516,8 +518,8 @@ func (m *Manager) CleanupPending(ctx context.Context, age time.Duration, limit i
 				return removed, e
 			}
 		}
-		if err := m.store.DeletePendingWorkspaceShell(ctx, p.ID); err != nil {
-			return removed, err
+		if deleteErr := m.store.DeletePendingWorkspaceShell(ctx, p.ID); deleteErr != nil {
+			return removed, deleteErr
 		}
 		removed++
 	}
@@ -529,8 +531,8 @@ func (m *Manager) stagingPathForID(member domain.MemberID, workspace domain.Work
 	if err != nil {
 		return "", err
 	}
-	if err := checkIDs(id); err != nil {
-		return "", err
+	if idErr := checkIDs(id); idErr != nil {
+		return "", idErr
 	}
 	return filepath.Join(base, id), nil
 }
@@ -553,25 +555,25 @@ func (m *Manager) Recover(ctx context.Context) error {
 		if !memberEntry.IsDir() {
 			continue
 		}
-		members, err := os.ReadDir(filepath.Join(m.root, "staging", memberEntry.Name()))
-		if err != nil {
-			return err
+		members, membersErr := os.ReadDir(filepath.Join(m.root, "staging", memberEntry.Name()))
+		if membersErr != nil {
+			return membersErr
 		}
 		for _, workspaceEntry := range members {
 			if !workspaceEntry.IsDir() {
 				continue
 			}
-			pending, err := m.store.ListPendingWorkspaceShells(ctx, domain.MemberID(memberEntry.Name()), domain.WorkspaceID(workspaceEntry.Name()))
-			if err != nil {
-				return err
+			pending, pendingErr := m.store.ListPendingWorkspaceShells(ctx, domain.MemberID(memberEntry.Name()), domain.WorkspaceID(workspaceEntry.Name()))
+			if pendingErr != nil {
+				return pendingErr
 			}
 			keep := map[string]bool{}
 			for _, p := range pending {
 				keep[p.StagingID] = true
 			}
-			stagingEntries, err := os.ReadDir(filepath.Join(m.root, "staging", memberEntry.Name(), workspaceEntry.Name()))
-			if err != nil {
-				return err
+			stagingEntries, stagingErr := os.ReadDir(filepath.Join(m.root, "staging", memberEntry.Name(), workspaceEntry.Name()))
+			if stagingErr != nil {
+				return stagingErr
 			}
 			for _, candidate := range stagingEntries {
 				if !keep[candidate.Name()] {

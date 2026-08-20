@@ -48,8 +48,8 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 			return pendingErr
 		}
 		if req.Reset {
-			if err := s.cfg.Toolenv.Reset(ctx, member, ws.ID); err != nil {
-				return err
+			if resetErr := s.cfg.Toolenv.Reset(ctx, member, ws.ID); resetErr != nil {
+				return resetErr
 			}
 			pending = nil
 		}
@@ -71,12 +71,12 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 			if err != nil {
 				return err
 			}
-			pending := &store.PendingWorkspaceShell{WorkspaceID: ws.ID, MemberID: member, StagingID: filepath.Base(staging)}
-			if err := s.cfg.Store.CreatePendingWorkspaceShell(ctx, pending); err != nil {
+			pendingRow := &store.PendingWorkspaceShell{WorkspaceID: ws.ID, MemberID: member, StagingID: filepath.Base(staging)}
+			if createErr := s.cfg.Store.CreatePendingWorkspaceShell(ctx, pendingRow); createErr != nil {
 				_ = s.cfg.Toolenv.CleanupStaging(staging)
-				return err
+				return createErr
 			}
-			pendingID = pending.ID
+			pendingID = pendingRow.ID
 		}
 	}
 	plan, err := s.BuildEnvironmentPlan(ctx, nil, ws, &domain.Member{ID: member}, profile, purposeForShell(req.Mode), staging)
@@ -110,14 +110,14 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 		_ = s.cfg.Runtime.Destroy(cctx, id)
 	}
 	defer teardown()
-	if err := s.cfg.Runtime.Start(ctx, id); err != nil {
-		return err
+	if startErr := s.cfg.Runtime.Start(ctx, id); startErr != nil {
+		return startErr
 	}
 	att, err := s.cfg.Runtime.Attach(ctx, id)
 	if err != nil {
 		return err
 	}
-	defer att.Close()
+	defer func() { _ = att.Close() }()
 	if cols > 0 && rows > 0 {
 		_ = att.Resize(ctx, cols, rows)
 	}
@@ -150,8 +150,8 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 		for {
 			select {
 			case <-ticker.C:
-				if err := s.validateWorkspaceShellMember(ctx, member); err != nil {
-					revoked <- err
+				if monitorErr := s.validateWorkspaceShellMember(ctx, member); monitorErr != nil {
+					revoked <- monitorErr
 					return
 				}
 			case <-monitorDone:
@@ -189,8 +189,8 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 		}
 	case <-ctx.Done():
 		terminalErr = ctx.Err()
-	case err := <-revoked:
-		terminalErr = fmt.Errorf("scheduler: workspace shell access revoked: %w", err)
+	case revokedErr := <-revoked:
+		terminalErr = fmt.Errorf("scheduler: workspace shell access revoked: %w", revokedErr)
 	case <-inputDone:
 		if ctx.Err() != nil {
 			terminalErr = ctx.Err()
@@ -229,12 +229,12 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 			manifest.Executable = req.VerificationExecutable
 		}
 		slog.Info("workspace shell promoted", "mode", string(req.Mode))
-		if _, err := s.cfg.Toolenv.Promote(ctx, string(member), string(ws.ID), staging, manifest, nil); err != nil {
-			return err
+		if _, promoteErr := s.cfg.Toolenv.Promote(ctx, string(member), string(ws.ID), staging, manifest, nil); promoteErr != nil {
+			return promoteErr
 		}
 		if pendingID != "" {
-			if err := s.cfg.Store.DeletePendingWorkspaceShell(ctx, pendingID); err != nil {
-				return fmt.Errorf("scheduler: delete pending bootstrap session: %w", err)
+			if deleteErr := s.cfg.Store.DeletePendingWorkspaceShell(ctx, pendingID); deleteErr != nil {
+				return fmt.Errorf("scheduler: delete pending bootstrap session: %w", deleteErr)
 			}
 		}
 	}
@@ -248,8 +248,8 @@ func (s *Scheduler) validateWorkspaceShellMember(ctx context.Context, member dom
 	if m.Pending {
 		return errors.New("scheduler: workspace shell member approval was revoked")
 	}
-	if err := permissions.Check(permissions.Launch, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{}); err != nil {
-		return fmt.Errorf("scheduler: workspace shell permission revoked: %w", err)
+	if permissionErr := permissions.Check(permissions.Launch, permissions.Actor{ID: m.ID, Role: m.Role}, permissions.Target{}); permissionErr != nil {
+		return fmt.Errorf("scheduler: workspace shell permission revoked: %w", permissionErr)
 	}
 	return nil
 }

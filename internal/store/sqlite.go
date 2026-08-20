@@ -520,7 +520,7 @@ func (d *DB) ListPendingWorkspaceShellsBefore(ctx context.Context, before time.T
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return collect(rows, scanPendingWorkspaceShell)
 }
 func (d *DB) ListPendingWorkspaceShells(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) ([]*PendingWorkspaceShell, error) {

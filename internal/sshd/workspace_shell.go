@@ -27,21 +27,21 @@ func (s *Server) serveWorkspaceShell(ctx context.Context, member domain.MemberID
 	}
 	capped.left = -1
 	var req protocol.WorkspaceShellRequest
-	if err := json.Unmarshal(line, &req); err != nil {
-		_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: false, Code: protocol.CodeParse, Error: "parse error: " + err.Error()})
+	if unmarshalErr := json.Unmarshal(line, &req); unmarshalErr != nil {
+		_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: false, Code: protocol.CodeParse, Error: "parse error: " + unmarshalErr.Error()})
 		return
 	}
-	if err := req.Validate(); err != nil {
-		_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: false, Code: protocol.CodeInvalidParams, Error: err.Error()})
+	if validateErr := req.Validate(); validateErr != nil {
+		_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: false, Code: protocol.CodeInvalidParams, Error: validateErr.Error()})
 		return
 	}
-	if err := s.checkMember(ctx, member); err != nil {
-		e := rpcError(err)
+	if memberErr := s.checkMember(ctx, member); memberErr != nil {
+		e := rpcError(memberErr)
 		_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
-	if _, werr := s.resolveWorkspaceShellWorkspace(ctx, req.Workspace); werr != nil {
-		e := rpcError(werr)
+	if _, workspaceErr := s.resolveWorkspaceShellWorkspace(ctx, req.Workspace); workspaceErr != nil {
+		e := rpcError(workspaceErr)
 		_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
@@ -51,8 +51,8 @@ func (s *Server) serveWorkspaceShell(ctx context.Context, member domain.MemberID
 		_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
-	if err := permissions.Check(permissions.Launch, actor, permissions.Target{}); err != nil {
-		_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: false, Code: protocol.CodeDenied, Error: "workspace shell: " + err.Error()})
+	if permissionErr := permissions.Check(permissions.Launch, actor, permissions.Target{}); permissionErr != nil {
+		_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: false, Code: protocol.CodeDenied, Error: "workspace shell: " + permissionErr.Error()})
 		return
 	}
 	cols, rows, hasPTY := st.geometry()
@@ -64,12 +64,12 @@ func (s *Server) serveWorkspaceShell(ctx context.Context, member domain.MemberID
 	}
 	_ = writeJSONLine(ch, protocol.WorkspaceShellResponse{OK: true, Workspace: req.Workspace, Mode: req.Mode, Harness: req.Harness, VerificationExecutable: req.VerificationExecutable, Resume: req.Resume, Reset: req.Reset, Cols: cols, Rows: rows})
 	conn := &workspaceShellConn{r: r, w: ch}
-	if err := s.cfg.Runs.WorkspaceShell(ctx, member, domain.WorkspaceShellRequest{
+	if workspaceShellErr := s.cfg.Runs.WorkspaceShell(ctx, member, domain.WorkspaceShellRequest{
 		Workspace: domain.WorkspaceSelector{ID: domain.WorkspaceID(req.Workspace.ID), Name: req.Workspace.Name},
 		Mode:      req.Mode, Harness: req.Harness, VerificationExecutable: req.VerificationExecutable,
 		Resume: req.Resume, Reset: req.Reset, Cols: cols, Rows: rows,
-	}, cols, rows, conn, st.resize); err != nil {
-		_, _ = fmt.Fprintf(ch, "\r\naether workspace shell: %v\r\n", err)
+	}, cols, rows, conn, st.resize); workspaceShellErr != nil {
+		_, _ = fmt.Fprintf(ch, "\r\naether workspace shell: %v\r\n", workspaceShellErr)
 		sendExitStatus(ch, 1)
 		return
 	}

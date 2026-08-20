@@ -50,22 +50,24 @@ func DigestTree(root string) (string, Manifest, error) {
 		if d.Type()&os.ModeSymlink != 0 {
 			return ErrSymlink
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return infoErr
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil || rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return ErrTraversal
 		}
 		rel = filepath.ToSlash(rel)
 		mode := uint32(info.Mode().Perm())
 		entries = append(entries, FileEntry{Path: rel, Mode: mode, Size: info.Size()})
-		fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, mode, info.Size())
+		if _, formatErr := fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, mode, info.Size()); formatErr != nil {
+			return formatErr
+		}
 		if info.Mode().IsRegular() {
-			f, err := os.Open(path)
-			if err != nil {
-				return err
+			f, openErr := os.Open(path)
+			if openErr != nil {
+				return openErr
 			}
 			_, copyErr := io.Copy(h, f)
 			closeErr := f.Close()

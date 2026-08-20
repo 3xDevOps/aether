@@ -38,7 +38,7 @@ func TestWorkspaceShellBootstrapUsesWritableStaging(t *testing.T) {
 		c.Toolenv = mgr
 	})
 	client, server := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
@@ -83,8 +83,8 @@ func TestWorkspaceShellUsesPinnedSnapshotPathAfterHeadChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(stage1, "one"), []byte("one"), 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(filepath.Join(stage1, "one"), []byte("one"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	first, err := mgr.Promote(t.Context(), string(e.member.ID), string(e.ws.ID), stage1, domain.ToolManifest{}, nil)
 	if err != nil {
@@ -94,25 +94,25 @@ func TestWorkspaceShellUsesPinnedSnapshotPathAfterHeadChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(stage2, "two"), []byte("two"), 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(filepath.Join(stage2, "two"), []byte("two"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
-	if _, err := mgr.Promote(t.Context(), string(e.member.ID), string(e.ws.ID), stage2, domain.ToolManifest{}, nil); err != nil {
-		t.Fatal(err)
+	if _, promoteErr := mgr.Promote(t.Context(), string(e.member.ID), string(e.ws.ID), stage2, domain.ToolManifest{}, nil); promoteErr != nil {
+		t.Fatal(promoteErr)
 	}
 	run := &domain.Run{
 		ID: "pin-run", SessionID: e.sess.ID, MemberID: e.member.ID, Task: "pin tools",
 		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 	}
-	if err := e.db.CreateRun(t.Context(), run); err != nil {
-		t.Fatal(err)
+	if createRunErr := e.db.CreateRun(t.Context(), run); createRunErr != nil {
+		t.Fatal(createRunErr)
 	}
 	plan, err := e.sched.BuildEnvironmentPlan(t.Context(), run, e.ws, e.member, harness.Profile{}, EnvironmentPurposeRun, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.db.SetToolHead(t.Context(), e.member.ID, e.ws.ID, first.ID); err != nil {
-		t.Fatal(err)
+	if setHeadErr := e.db.SetToolHead(t.Context(), e.member.ID, e.ws.ID, first.ID); setHeadErr != nil {
+		t.Fatal(setHeadErr)
 	}
 	pinned, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil {
@@ -140,8 +140,8 @@ func TestWorkspaceShellResumeRequiresExplicitResumeAndCleansSelectedPendingRow(t
 		t.Fatal(err)
 	}
 	pending := &store.PendingWorkspaceShell{WorkspaceID: e.ws.ID, MemberID: e.member.ID, StagingID: filepath.Base(oldStaging)}
-	if err := e.db.CreatePendingWorkspaceShell(t.Context(), pending); err != nil {
-		t.Fatal(err)
+	if createPendingErr := e.db.CreatePendingWorkspaceShell(t.Context(), pending); createPendingErr != nil {
+		t.Fatal(createPendingErr)
 	}
 	client, server := net.Pipe()
 	done := make(chan error, 1)
@@ -157,8 +157,8 @@ func TestWorkspaceShellResumeRequiresExplicitResumeAndCleansSelectedPendingRow(t
 		t.Fatal("bootstrap reused pending staging without Resume=true")
 	}
 	_ = client.Close()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	if doneErr := <-done; doneErr != nil {
+		t.Fatal(doneErr)
 	}
 	remaining, err := e.db.ListPendingWorkspaceShells(t.Context(), e.member.ID, e.ws.ID)
 	if err != nil {
@@ -182,8 +182,8 @@ func TestWorkspaceShellResumeDeletesPendingRowAfterTeardownAndPromotion(t *testi
 		t.Fatal(err)
 	}
 	pending := &store.PendingWorkspaceShell{WorkspaceID: e.ws.ID, MemberID: e.member.ID, StagingID: filepath.Base(staging)}
-	if err := e.db.CreatePendingWorkspaceShell(t.Context(), pending); err != nil {
-		t.Fatal(err)
+	if createPendingErr := e.db.CreatePendingWorkspaceShell(t.Context(), pending); createPendingErr != nil {
+		t.Fatal(createPendingErr)
 	}
 	client, server := net.Pipe()
 	done := make(chan error, 1)
@@ -198,8 +198,8 @@ func TestWorkspaceShellResumeDeletesPendingRowAfterTeardownAndPromotion(t *testi
 	container := e.rt.allContainers()[0]
 	container.exitNow(0)
 	_ = client.Close()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	if doneErr := <-done; doneErr != nil {
+		t.Fatal(doneErr)
 	}
 	remaining, err := e.db.ListPendingWorkspaceShells(t.Context(), e.member.ID, e.ws.ID)
 	if err != nil {
