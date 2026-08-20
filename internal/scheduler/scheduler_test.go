@@ -16,7 +16,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -76,7 +75,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		pty: newFakePTY(),
 	}
 	ctx := t.Context()
-	e.ws = &domain.Workspace{Name: "ws", Image: "busybox:1.36", Env: map[string]string{"WS": "1"}}
+	e.ws = &domain.Workspace{Name: "ws", Environment: domain.WorkspaceEnvironment{CustomImage: "busybox:1.36", Variables: map[string]string{"WS": "1"}}}
 	if cerr := db.CreateWorkspace(ctx, e.ws); cerr != nil {
 		t.Fatalf("create workspace: %v", cerr)
 	}
@@ -499,9 +498,10 @@ func TestLaunchCredentialMounts(t *testing.T) {
 func TestContainerSpecNonRootHome(t *testing.T) {
 	e := newTestEnv(t, nil)
 	run := &domain.Run{ID: "run-x", SessionID: e.sess.ID, MemberID: e.member.ID}
-	spec := e.sched.containerSpec(run, e.ws, e.member, []string{"agent"}, harness.Profile{}, nil, "1000:1000")
+	plan := &EnvironmentPlan{Image: "busybox:1.36", Env: map[string]string{"HOME": "/home/aether"}, User: "1000:1000"}
+	spec := e.sched.containerSpec(run, e.member, []string{"agent"}, plan)
 	if spec.Env["HOME"] != "/home/aether" {
-		t.Errorf("HOME = %q, want /home/aether for a non-root run", spec.Env["HOME"])
+		t.Errorf("HOME = %q, want /home/aether", spec.Env["HOME"])
 	}
 	if spec.User != "1000:1000" {
 		t.Errorf("user = %q, want 1000:1000", spec.User)
@@ -780,5 +780,36 @@ func TestCombineProfileCredentialsNested(t *testing.T) {
 	}
 	if mounts[0].ContainerPath != "/root/.claude" {
 		t.Fatalf("parent not first: %v", mounts)
+	}
+}
+func TestCustomHarnessDefinition(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.Harnesses = map[string]HarnessSpec{
+			"omp": {
+				TUIArgs:         []string{"omp", "{task}"},
+				HeadlessArgs:    []string{"omp", "-p", "{task}"},
+				Executable:      "omp",
+				ProfileRoot:     "/home/aether/.omp",
+				CredentialPaths: []string{"/home/aether/.omp"},
+				DenyNames:       []string{"auth.json"},
+			},
+		}
+	})
+	argv, prof, err := e.sched.command("omp", domain.LaunchHeadless, "quoted; task")
+	if err != nil {
+		t.Fatalf("custom command: %v", err)
+	}
+	if got, want := fmt.Sprint(argv), fmt.Sprint([]string{"omp", "-p", "quoted; task"}); got != want {
+		t.Fatalf("argv = %s, want %s", got, want)
+	}
+	if prof.LocalRoot != "/home/aether/.omp" || len(prof.CredentialPaths) != 1 {
+		t.Fatalf("profile = %+v", prof)
+	}
+}
+func TestCustomHarnessRequiresDefinition(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.cfg.Harnesses = map[string]HarnessSpec{"omp": {TUIArgs: []string{"omp", "{task}"}}}
+	if _, err := New(e.cfg); err == nil {
+		t.Fatal("custom harness without executable accepted")
 	}
 }

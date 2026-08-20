@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestRunStatusTerminal(t *testing.T) {
 	terminal := []RunStatus{RunMerged, RunAbandoned, RunFailed, RunInterrupted}
@@ -63,5 +66,105 @@ func TestRoleValid(t *testing.T) {
 	}
 	if Role("bogus").Valid() {
 		t.Error(`Role("bogus").Valid() = true, want false`)
+	}
+}
+
+func TestWorkspaceEnvironmentRepresentsMigrationFields(t *testing.T) {
+	env := WorkspaceEnvironment{
+		CustomImage:  "registry.example/workspace:latest",
+		NeutralImage: true,
+		Variables:    map[string]string{"AETHER_MODE": "bootstrap"},
+		SetupPolicy: SetupPolicy{
+			Script: "echo setup",
+		},
+	}
+	w := Workspace{ID: "ws_1", Name: "project", Environment: env}
+	if w.Environment.CustomImage != env.CustomImage || !w.Environment.NeutralImage {
+		t.Fatalf("workspace environment was not retained: %+v", w.Environment)
+	}
+	if w.Environment.Variables["AETHER_MODE"] != "bootstrap" {
+		t.Fatalf("environment variables were not retained: %+v", w.Environment.Variables)
+	}
+	if w.Environment.SetupPolicy.Script != "echo setup" {
+		t.Fatalf("setup policy was not retained: %+v", w.Environment.SetupPolicy)
+	}
+}
+
+func TestWorkspaceEnvironmentValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		env  WorkspaceEnvironment
+		want bool
+	}{
+		{"neutral", WorkspaceEnvironment{NeutralImage: true}, true},
+		{"custom", WorkspaceEnvironment{CustomImage: "image"}, true},
+		{"neither image", WorkspaceEnvironment{}, false},
+		{"invalid variable", WorkspaceEnvironment{NeutralImage: true, Variables: map[string]string{"": "value"}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.env.Valid(); got != tt.want {
+				t.Fatalf("Valid() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkspaceShellModeValid(t *testing.T) {
+	if !WorkspaceShellBootstrapTools.Valid() || !WorkspaceShellHarnessLogin.Valid() {
+		t.Fatal("defined workspace shell modes must be valid")
+	}
+	if WorkspaceShellMode("invalid").Valid() {
+		t.Fatal("invalid workspace shell mode must be rejected")
+	}
+}
+
+func TestWorkspaceShellRequestValidatesWorkspaceSelector(t *testing.T) {
+	base := WorkspaceShellRequest{
+		Workspace: WorkspaceSelector{ID: "ws_1"},
+		Mode:      WorkspaceShellBootstrapTools,
+		Cols:      80,
+		Rows:      24,
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid request rejected: %v", err)
+	}
+	for name, req := range map[string]WorkspaceShellRequest{
+		"missing selector": {Mode: WorkspaceShellBootstrapTools},
+		"both selector forms": {
+			Workspace: WorkspaceSelector{ID: "ws_1", Name: "project"},
+			Mode:      WorkspaceShellBootstrapTools,
+		},
+		"invalid mode": {
+			Workspace: WorkspaceSelector{ID: "ws_1"},
+			Mode:      WorkspaceShellMode("invalid"),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := req.Validate(); err == nil {
+				t.Fatal("invalid request accepted")
+			}
+		})
+	}
+}
+
+func TestToolSnapshotMetadataIsStable(t *testing.T) {
+	created := time.Date(2026, 8, 19, 10, 11, 12, 0, time.UTC)
+	snapshot := ToolSnapshot{
+		ID:          "snapshot_1",
+		WorkspaceID: "ws_1",
+		MemberID:    "member_1",
+		Digest:      "sha256:abc",
+		Manifest: ToolManifest{
+			Executable: "omp",
+			Version:    "1.2.3",
+			Metadata:   map[string]string{"source": "bootstrap"},
+		},
+		CreatedAt: created,
+	}
+	if snapshot.ID == "" || snapshot.WorkspaceID == "" || snapshot.MemberID == "" ||
+		snapshot.Digest == "" || snapshot.Manifest.Executable != "omp" ||
+		snapshot.Manifest.Version != "1.2.3" || !snapshot.CreatedAt.Equal(created) {
+		t.Fatalf("snapshot metadata was not retained: %+v", snapshot)
 	}
 }

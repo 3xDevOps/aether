@@ -162,7 +162,7 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *harness {
 	}
 	t.Cleanup(func() { _ = bus.Close() })
 
-	ws := &domain.Workspace{Name: "proj", Image: "img"}
+	ws := &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
 	if werr := db.CreateWorkspace(ctx, ws); werr != nil {
 		t.Fatalf("create workspace: %v", werr)
 	}

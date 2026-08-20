@@ -266,7 +266,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, sess *domain
 	run.Status = domain.RunProvisioning
 	if err := s.provisionSteps(ctx, entry, run, sess, ws, member, argv, profile, reuseCheckout); err != nil {
 		s.failProvisioning(run, actor, err)
-		return err
+		return errors.New(publicRunStatusReason("provisioning: " + err.Error()))
 	}
 	return nil
 }
@@ -286,34 +286,22 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err := s.pinLatestProfile(ctx, run); err != nil {
 		return fmt.Errorf("pin profile: %w", err)
 	}
-	user, err := s.resolveContainerUser(ctx, ws.Image, profile)
+	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, member, profile, EnvironmentPurposeRun, "")
 	if err != nil {
-		return fmt.Errorf("resolve run user: %w", err)
+		return err
 	}
-	creds, err := s.credentialMounts(run, member.ID, profile, harness.HomeDir(user))
-	if err != nil {
-		return fmt.Errorf("credential mounts: %w", err)
-	}
-	mounts, err := s.withProfileMounts(ctx, run, profile, harness.HomeDir(user), creds)
-	if err != nil {
-		return fmt.Errorf("profile mounts: %w", err)
-	}
-	if reserveErr := s.reserveRunUser(entry, user, len(creds) > 0); reserveErr != nil {
+	if reserveErr := s.reserveRunUser(entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
 		return reserveErr
 	}
-	if ownErr := s.applyRunOwnership(ws, run, mounts, user); ownErr != nil {
+	if ownErr := s.applyRunOwnership(ws, run, plan.Mounts, plan.User); ownErr != nil {
 		return fmt.Errorf("apply run ownership: %w", ownErr)
 	}
-	// Coordination assets are Aether-owned container surfaces, never
-	// chowned and never validated as caller mounts, so they join the spec
-	// after the ownership pass and outside runtime.ValidateMounts. A harness
-	// that registers MCP also picks up the arguments pointing it at the
-	// bridge here, so a run only ever carries them alongside the assets they
-	// name - and a relaunch re-decides both from scratch.
+	// Coordination assets are Aether-owned container surfaces and are appended
+	// after the environment plan's validated workspace mounts.
 	coordMounts, mcpArgs := s.coordinationMounts(ctx, entry, run, profile)
-	mounts = append(mounts, coordMounts...)
+	plan.Mounts = append(plan.Mounts, coordMounts...)
 	argv = append(argv, mcpArgs...)
-	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, ws, member, argv, profile, mounts, user))
+	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, member, argv, plan))
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)
 	}
@@ -375,6 +363,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 // failed ("provisioning: <err>") otherwise — on a fresh context so a
 // cancelled launch still lands in a consistent state.
 func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cause error) {
+	slog.Error("scheduler: provisioning failed", "run", run.ID, "error", cause)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	s.mu.Lock()

@@ -28,6 +28,116 @@ import (
 // TaskPlaceholder is replaced by the run's task prompt in argv templates.
 const TaskPlaceholder = "{task}"
 
+// Definition is an administrator-supplied generic harness launch definition.
+// Paths are absolute container paths so the server never has to infer where
+// credentials live from an executable name.
+type Definition struct {
+	Name            string
+	TUIArgs         []string
+	HeadlessArgs    []string
+	Executable      string
+	ProfileRoot     string
+	CredentialPaths []string
+	DenyNames       []string
+}
+
+// Validate checks a generic definition before it can be used for a run.
+func (d Definition) Validate() error {
+	if d.Name == "" {
+		return fmt.Errorf("harness: definition name is required")
+	}
+	if err := validateExecutable(d.Executable); err != nil {
+		return err
+	}
+	if err := validateArgv(d.TUIArgs, d.Executable); err != nil {
+		return fmt.Errorf("harness: tui argv: %w", err)
+	}
+	if err := validateArgv(d.HeadlessArgs, d.Executable); err != nil {
+		return fmt.Errorf("harness: headless argv: %w", err)
+	}
+	if d.ProfileRoot != "" {
+		if err := validateContainerPath(d.ProfileRoot); err != nil {
+			return fmt.Errorf("harness: profile root: %w", err)
+		}
+	}
+	for _, credential := range d.CredentialPaths {
+		if err := validateContainerPath(credential); err != nil {
+			return fmt.Errorf("harness: credential path: %w", err)
+		}
+		if d.ProfileRoot != "" && !isPathWithin(credential, d.ProfileRoot) {
+			return fmt.Errorf("harness: credential path %q is outside profile root %q", credential, d.ProfileRoot)
+		}
+	}
+	for _, denied := range d.DenyNames {
+		if denied == "" || path.Base(denied) != denied || denied == "." || denied == ".." ||
+			strings.ContainsAny(denied, `/\`) {
+			return fmt.Errorf("harness: denied sync name %q is not a basename", denied)
+		}
+	}
+	return nil
+}
+
+func validateExecutable(executable string) error {
+	if executable == "" {
+		return fmt.Errorf("harness: executable is required")
+	}
+	if strings.ContainsAny(executable, `/\`) || executable == "." || executable == ".." {
+		return fmt.Errorf("harness: executable %q must be a name, not a host path", executable)
+	}
+	if strings.ContainsRune(executable, 0) {
+		return fmt.Errorf("harness: executable contains NUL")
+	}
+	return nil
+}
+
+func validateArgv(argv []string, executable string) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("argv is required")
+	}
+	if argv[0] != executable {
+		return fmt.Errorf("argv executable %q does not match %q", argv[0], executable)
+	}
+	for _, arg := range argv {
+		if arg == "" || strings.ContainsRune(arg, 0) {
+			return fmt.Errorf("argv contains an empty or NUL argument")
+		}
+	}
+	return nil
+}
+
+func validateContainerPath(raw string) error {
+	if !path.IsAbs(raw) || strings.Contains(raw, `\`) {
+		return fmt.Errorf("path %q must be an absolute container path", raw)
+	}
+	clean := path.Clean(raw)
+	if clean != raw || clean == "/" || strings.HasPrefix(clean, "/proc/") ||
+		strings.HasPrefix(clean, "/sys/") || strings.HasPrefix(clean, "/dev/") {
+		return fmt.Errorf("path %q is not an allowed container path", raw)
+	}
+	if !isPathWithin(clean, "/root") && !isPathWithin(clean, "/home/aether") {
+		return fmt.Errorf("path %q must be under /root or /home/aether", raw)
+	}
+	return nil
+}
+
+func isPathWithin(candidate, root string) bool {
+	candidate, root = path.Clean(candidate), path.Clean(root)
+	return candidate == root || strings.HasPrefix(candidate, root+"/")
+}
+
+// Profile converts a generic definition to the launch profile used by the
+// scheduler and mount code.
+func (d Definition) Profile() Profile {
+	return Profile{
+		Name:            d.Name,
+		TUIArgs:         append([]string(nil), d.TUIArgs...),
+		HeadlessArgs:    append([]string(nil), d.HeadlessArgs...),
+		CredentialPaths: append([]string(nil), d.CredentialPaths...),
+		LocalRoot:       d.ProfileRoot,
+		DenyNames:       append([]string(nil), d.DenyNames...),
+	}
+}
+
 // Profile is one agent harness's launch profile.
 type Profile struct {
 	// Name is the harness name runs reference (domain.Run.Harness).
@@ -213,17 +323,40 @@ func (p Profile) ContainerLocalRoot(user string) string {
 	if p.LocalRoot == "" {
 		return ""
 	}
+	if path.IsAbs(p.LocalRoot) {
+		return path.Clean(p.LocalRoot)
+	}
 	return path.Join(HomeDir(user), p.LocalRoot)
 }
 
-// CredentialMounts maps the profile's home-relative credential paths into
-// a member's harness home on the host (<data>/homes/<member>/<harness>)
-// and the run user's home in the container. The host path mirrors the
-// relative credential path beneath hostHome, so distinct credential paths
-// can never collide, and the same host home serves every run user - login
-// state persists across image-user changes. Mounts are read-write: the
-// whole point is that token refreshes made inside any run persist for the
-// next.
+func containerHomePath(containerHome, configured string) string {
+	if path.IsAbs(configured) {
+		return path.Clean(configured)
+	}
+	return path.Join(containerHome, configured)
+}
+
+func hostCredentialPath(hostHome, containerHome, configured string) string {
+	relative := configured
+	if path.IsAbs(configured) {
+		cleaned := path.Clean(configured)
+		home := path.Clean(containerHome)
+		relative = strings.TrimPrefix(cleaned, home+"/")
+		if relative == cleaned {
+			switch {
+			case isPathWithin(cleaned, "/root"):
+				relative = strings.TrimPrefix(cleaned, "/root/")
+			case isPathWithin(cleaned, "/home/aether"):
+				relative = strings.TrimPrefix(cleaned, "/home/aether/")
+			}
+		}
+	}
+	return filepath.Join(hostHome, filepath.FromSlash(relative))
+}
+
+// CredentialMounts maps the profile's home-relative or absolute credential
+// paths into a member's harness home on the host and the run user's home in
+// the container. Absolute paths are restricted by Definition.Validate.
 func (p Profile) CredentialMounts(hostHome, containerHome string) []runtime.Mount {
 	if hostHome == "" || len(p.CredentialPaths) == 0 {
 		return nil
@@ -231,8 +364,8 @@ func (p Profile) CredentialMounts(hostHome, containerHome string) []runtime.Moun
 	mounts := make([]runtime.Mount, 0, len(p.CredentialPaths))
 	for _, cp := range p.CredentialPaths {
 		mounts = append(mounts, runtime.Mount{
-			HostPath:      filepath.Join(hostHome, filepath.FromSlash(cp)),
-			ContainerPath: path.Join(containerHome, cp),
+			HostPath:      hostCredentialPath(hostHome, containerHome, cp),
+			ContainerPath: containerHomePath(containerHome, cp),
 		})
 	}
 	return mounts

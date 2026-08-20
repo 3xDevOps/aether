@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -40,6 +41,44 @@ func legalTransition(from, to domain.RunStatus) bool {
 	return false
 }
 
+// maxPublicRunStatusReason bounds user-visible status details. Setup output
+// is never part of the public reason, even when a non-Docker runtime includes
+// it in an error string.
+const maxPublicRunStatusReason = 256
+
+func publicRunStatusReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	lower := strings.ToLower(reason)
+	redactedSetup := false
+	for _, marker := range []string{"setup script exited ", "release setup gate exited ", "probe setup gate"} {
+		if i := strings.Index(lower, marker); i >= 0 {
+			if marker == "probe setup gate" {
+				reason = strings.TrimSpace(reason[:i+len(marker)]) + " failed"
+			} else {
+				end := i + len(marker)
+				for end < len(reason) && reason[end] >= '0' && reason[end] <= '9' {
+					end++
+				}
+				reason = strings.TrimSpace(reason[:end])
+			}
+			redactedSetup = true
+			break
+		}
+	}
+	if !redactedSetup {
+		for _, marker := range []string{"setup script", "release setup gate"} {
+			if i := strings.Index(lower, marker); i >= 0 {
+				reason = strings.TrimSpace(reason[:i+len(marker)]) + " failed"
+				break
+			}
+		}
+	}
+	if len([]rune(reason)) > maxPublicRunStatusReason {
+		reason = string([]rune(reason)[:maxPublicRunStatusReason])
+	}
+	return reason
+}
+
 // transitionLocked persists a legal status change via UpdateRunStatus and
 // publishes the run.status event. The caller must hold s.mu; from must be
 // the run's current status.
@@ -68,7 +107,7 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, sess
 		SessionID: session,
 		RunID:     run,
 		ActorID:   actor,
-		Payload:   events.RunStatusPayload{From: from, To: to, Reason: reason},
+		Payload:   events.RunStatusPayload{From: from, To: to, Reason: publicRunStatusReason(reason)},
 	})
 	return nil
 }

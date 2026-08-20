@@ -55,7 +55,7 @@ func TestIntegrationDashboard(t *testing.T) {
 		Color:       "#3cb44b",
 		Role:        domain.RoleAdmin,
 	}
-	ws := &domain.Workspace{Name: "dash", Image: image}
+	ws := &domain.Workspace{Name: "dash", Environment: domain.WorkspaceEnvironment{CustomImage: image}}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}

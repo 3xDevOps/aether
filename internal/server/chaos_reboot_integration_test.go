@@ -232,7 +232,7 @@ func (e *chaosEnv) seedStore(t *testing.T) {
 	if err := db.CreateMember(e.ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
-	e.ws = &domain.Workspace{Name: "chaos", Image: "busybox"}
+	e.ws = &domain.Workspace{Name: "chaos", Environment: domain.WorkspaceEnvironment{CustomImage: "busybox"}}
 	if err := db.CreateWorkspace(e.ctx, e.ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}

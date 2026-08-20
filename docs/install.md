@@ -75,13 +75,58 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rest of the toolchain.
 
 - **Linux.** Windows and macOS are client platforms.
 - **Docker**, running, with the server's user able to reach its socket. Every
-  run and every `aether setup` session is a container.
+  bootstrap shell, login shell, and run is a container.
 - **git** on the host. Bare repos, run checkouts, and diffs are real git.
-- **A container image** with the agent CLI you intend to run inside it. Aether
-  never installs an agent for you; see [harnesses.md](harnesses.md).
+- **A server-owned neutral image** is selected automatically when a workspace
+  has no custom image. An administrator may configure a custom image when
+  system dependencies are required. Agent installation can instead happen in
+  the workspace bootstrap shell; it is not a prerequisite for every image.
 - Optionally **Tailscale**, which is the recommended way to make the SSH port
   reachable and the recommended identity layer. See
   [networking.md](networking.md).
+
+## Images and containers
+
+An image is a read-only package used to create containers. A container is one
+runtime instance of that image and is discarded after a run or shell session.
+The server opens shells only inside containers, never on the host. Aether never
+mounts the Docker socket into a workspace container.
+
+When a workspace has no custom image, the server selects the neutral bootstrap
+image:
+
+```
+ghcr.io/3xDevOps/aether-bootstrap:v0.1.0
+```
+
+It contains a shell, certificates, curl, Git, and common file-search tools. It
+does not contain an agent vendor or execute a vendor installer. A member can
+install an executable into `~/.local` with
+`aether workspace bootstrap <name> --command <executable>`. Those files are
+captured in a per-member, per-workspace immutable tool snapshot.
+
+User-installed tools under `~/.local` persist across containers. System packages
+installed into `/usr` or `/etc`, edits elsewhere in the container filesystem,
+and container process state do not persist. Put required system dependencies in
+an administrator-approved custom image.
+
+Use `aether workspace init <name>` for the neutral default, or
+`aether workspace init <name> --image <image>` when the project needs system
+dependencies that the neutral image does not provide. Workspace image
+references are administrator-owned configuration, not input to a shell session.
+
+To prepare a normal Dockerfile and optional standard Dev Container metadata for
+review and later image publication:
+
+```
+aether image init
+aether image init --devcontainer
+```
+
+The command writes `Dockerfile`, `.dockerignore`, and, when requested,
+`.devcontainer/devcontainer.json` in the current directory. It does not run a
+build, log in to a registry, or install a vendor agent. Existing files are
+preserved unless `--force` is supplied.
 
 ## First boot
 
@@ -103,6 +148,7 @@ Serve flags:
 | --- | --- | --- |
 | `--data-dir` | `/var/lib/aether` | Everything the server owns. |
 | `--addr` | `:2222` | The SSH listener. This is the only port that must be reachable. |
+| `--neutral-image` | `ghcr.io/3xDevOps/aether-bootstrap:v0.1.0` | Server-owned image selected for workspaces without a custom image. Set this to a pinned deployment-approved image to override it. |
 | `--dashboard-port` | `0` (deny) | Loopback dashboard listener that `aether dash` forwards to. |
 | `--dashboard-addr` | empty | Additionally expose the dashboard directly on this address. Plain HTTP - see [security.md](security.md). |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
@@ -146,17 +192,15 @@ server chown run checkouts to that UID, which needs `CAP_CHOWN`. The header
 comment in the unit spells out how to run unprivileged instead, and what you
 give up.
 
-Edit `ExecStart` to change ports or the data directory. API keys for
-key-driven harnesses go in `/etc/aether/aether-server.env`, which the unit
-loads if it exists:
+Edit `ExecStart` to change ports or the data directory. Key-driven harnesses
+read the documented API-key environment variable names from
+`/etc/aether/aether-server.env`, which the unit loads if it exists. Provide
+those values through your deployment's secret manager; do not commit them or
+paste them into public configuration examples.
 
-```sh
-ANTHROPIC_API_KEY=<anthropic-api-key>
-OPENAI_API_KEY=<openai-api-key>
-```
-
-Subscription logins do **not** go there - they live in the per-member
-server-side home that `aether setup` writes. See [harnesses.md](harnesses.md).
+Subscription logins do **not** go there. They live in the per-member,
+per-harness server-side home that `aether setup` writes. See
+[harnesses.md](harnesses.md).
 
 ## The client-side sync daemon
 
@@ -178,21 +222,33 @@ half off.
 
 | Path | Contents |
 | --- | --- |
-| `aether.db` | SQLite: members, workspaces, sessions, runs, event log. |
+| `aether.db` | SQLite: members, workspaces, sessions, runs, event log, and snapshot metadata. |
 | `ssh/` | The server's SSH host key. |
 | `repos/` | One bare git repo per workspace. |
 | `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. |
 | `transcripts/` | Per-run PTY recordings (asciicast v2). |
-| `homes/<member>/<harness>/` | Per-member harness login state, mounted into that member's runs. |
+| `homes/<member>/<harness>/` | Per-member, per-harness login state. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
+| `toolenv/staging/` | Pending per-member, per-workspace bootstrap staging. |
+| `toolenv/snapshots/` | Immutable per-member, per-workspace tool snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run conflict-coordination sockets, recreated each run. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. |
 
+Tool snapshots and pending staging are server-owned state. Back up the database
+and `toolenv/` when recovery of installed workspace tools matters. Pending
+staging can be resumed after a client disconnect, while stale unreferenced
+staging is removed by the server's bounded cleanup policy. Active snapshots and
+snapshots pinned by running work remain available. See
+[bootstrap.md](bootstrap.md) for rollback, reset, and the read-only normal-run
+mount.
+
 Three consequences worth knowing:
 
-- **Back up `aether.db` and `repos/`.** The rest is reconstructible; those two
-  are the state and the code.
+- **Back up `aether.db`, `repos/`, `toolenv/`, and the homes you need to
+  recover.** The database and git repos are core state. Tool snapshots,
+  profile snapshots, and per-member login homes are also persistent workspace
+  state.
 - **Three of these grow without bound**: `checkouts/` (reclaimed by the TTL
   GC), `transcripts/`, and `aether.db` (the event log). The dashboard's disk
   gauge breaks the data directory down across exactly those three, and new

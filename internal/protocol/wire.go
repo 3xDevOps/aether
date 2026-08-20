@@ -23,6 +23,7 @@ type Run struct {
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
 	ProfileSnapshotID string  `json:"profile_snapshot_id,omitempty"`
+	ToolSnapshotID    string  `json:"tool_snapshot_id,omitempty"`
 }
 
 // Session is the wire form of a session.
@@ -92,6 +93,7 @@ func RunFromDomain(r *domain.Run) Run {
 		StartedAt:         rfc3339Ptr(r.StartedAt),
 		FinishedAt:        rfc3339Ptr(r.FinishedAt),
 		ProfileSnapshotID: string(r.ProfileSnapshotID),
+		ToolSnapshotID:    string(r.ToolSnapshotID),
 	}
 }
 
@@ -312,23 +314,64 @@ type AttachResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// SetupRequest is the single header line a client sends after opening the
-// setup subsystem. Geometry precedence is pty-req > header > 80x24.
-type SetupRequest struct {
-	Harness string `json:"harness"`
-	Image   string `json:"image,omitempty"`
-	Cols    uint   `json:"cols,omitempty"`
-	Rows    uint   `json:"rows,omitempty"`
+// WorkspaceSelector addresses a workspace by exactly one of ID or Name.
+type WorkspaceSelector struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
-// SetupResponse acknowledges a SetupRequest with the effective geometry;
-// on failure the server sends OK false with a code and closes.
-type SetupResponse struct {
-	OK    bool   `json:"ok"`
-	Cols  uint   `json:"cols,omitempty"`
-	Rows  uint   `json:"rows,omitempty"`
-	Code  int    `json:"code,omitempty"`
-	Error string `json:"error,omitempty"`
+// WorkspaceShellMode identifies the purpose of a workspace shell.
+type WorkspaceShellMode = domain.WorkspaceShellMode
+
+const (
+	WorkspaceShellBootstrapTools     = domain.WorkspaceShellBootstrapTools
+	WorkspaceShellHarnessLogin       = domain.WorkspaceShellHarnessLogin
+	WorkspaceShellModeBootstrapTools = domain.WorkspaceShellBootstrapTools
+	WorkspaceShellModeHarnessLogin   = domain.WorkspaceShellHarnessLogin
+)
+
+// WorkspaceShellRequest is the single header line a client sends after
+// opening the unified workspace-shell subsystem. Geometry precedence is
+// pty-req > header > 80x24.
+type WorkspaceShellRequest struct {
+	Workspace              WorkspaceSelector  `json:"workspace"`
+	Mode                   WorkspaceShellMode `json:"mode"`
+	Harness                string             `json:"harness,omitempty"`
+	VerificationExecutable string             `json:"verification_executable,omitempty"`
+	Resume                 bool               `json:"resume,omitempty"`
+	Reset                  bool               `json:"reset,omitempty"`
+	Cols                   uint               `json:"cols,omitempty"`
+	Rows                   uint               `json:"rows,omitempty"`
+}
+
+// Validate checks the server-facing request contract.
+func (r WorkspaceShellRequest) Validate() error {
+	return (domain.WorkspaceShellRequest{
+		Workspace:              domain.WorkspaceSelector{ID: domain.WorkspaceID(r.Workspace.ID), Name: r.Workspace.Name},
+		Mode:                   r.Mode,
+		Harness:                r.Harness,
+		VerificationExecutable: r.VerificationExecutable,
+		Resume:                 r.Resume,
+		Reset:                  r.Reset,
+		Cols:                   r.Cols,
+		Rows:                   r.Rows,
+	}).Validate()
+}
+
+// WorkspaceShellResponse acknowledges a WorkspaceShellRequest with the
+// effective geometry and echoed shell selection.
+type WorkspaceShellResponse struct {
+	OK                     bool               `json:"ok"`
+	Workspace              WorkspaceSelector  `json:"workspace,omitempty"`
+	Mode                   WorkspaceShellMode `json:"mode,omitempty"`
+	Harness                string             `json:"harness,omitempty"`
+	VerificationExecutable string             `json:"verification_executable,omitempty"`
+	Resume                 bool               `json:"resume,omitempty"`
+	Reset                  bool               `json:"reset,omitempty"`
+	Cols                   uint               `json:"cols,omitempty"`
+	Rows                   uint               `json:"rows,omitempty"`
+	Code                   int                `json:"code,omitempty"`
+	Error                  string             `json:"error,omitempty"`
 }
 
 // SyncRequest is the single header line a client sends after opening the

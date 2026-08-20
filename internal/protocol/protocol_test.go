@@ -56,8 +56,12 @@ func TestRunWireShape(t *testing.T) {
 
 func TestWorkspaceWireShapeOmitsServerConfig(t *testing.T) {
 	w := &domain.Workspace{
-		ID: "ws_1", Name: "proj", Image: "secret-image",
-		Env: map[string]string{"KEY": "value"}, SetupScript: "curl | sh",
+		ID: "ws_1", Name: "proj",
+		Environment: domain.WorkspaceEnvironment{
+			CustomImage: "secret-image",
+			Variables:   map[string]string{"KEY": "value"},
+			SetupPolicy: domain.SetupPolicy{Script: "curl | sh"},
+		},
 		CreatedAt: time.Now(),
 	}
 	raw, err := json.Marshal(WorkspaceFromDomain(w))

@@ -232,11 +232,11 @@ func (f *fakeRuns) Relaunch(_ context.Context, run domain.RunID, actor domain.Me
 	}, nil
 }
 
-func (f *fakeRuns) SetupLogin(_ context.Context, member domain.MemberID, harnessName, image string, cols, rows uint, conn io.ReadWriter, _ <-chan [2]uint) error {
-	if err := f.record(fmt.Sprintf("setup:%s:%s:%s:%d:%d", member, harnessName, image, cols, rows)); err != nil {
+func (f *fakeRuns) WorkspaceShell(_ context.Context, member domain.MemberID, req domain.WorkspaceShellRequest, cols, rows uint, conn io.ReadWriter, _ <-chan [2]uint) error {
+	if err := f.record(fmt.Sprintf("workspace-shell:%s:%s:%s:%d:%d", member, req.Mode, req.Harness, cols, rows)); err != nil {
 		return err
 	}
-	if _, err := conn.Write([]byte("setup-ready\n")); err != nil {
+	if _, err := conn.Write([]byte("workspace-shell-ready\n")); err != nil {
 		return err
 	}
 	_, _ = io.Copy(io.Discard, conn)
@@ -323,7 +323,7 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 		if cerr := db.CreateMember(ctx, e.member); cerr != nil {
 			t.Fatalf("create member: %v", cerr)
 		}
-		e.ws = &domain.Workspace{Name: "proj", Image: "img"}
+		e.ws = &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
 		if cerr := db.CreateWorkspace(ctx, e.ws); cerr != nil {
 			t.Fatalf("create workspace: %v", cerr)
 		}

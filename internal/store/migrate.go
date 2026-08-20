@@ -234,6 +234,50 @@ CREATE TABLE run_messages (
 );
 CREATE INDEX idx_run_messages_inbox ON run_messages(to_run, acked_at, id);
 `,
+	// v9: first-class workspace environments and immutable per-member tool
+	// snapshots. Legacy workspace columns remain for on-disk compatibility,
+	// while environment is the sole runtime representation.
+	`
+ALTER TABLE workspaces ADD COLUMN environment TEXT NOT NULL DEFAULT '{}';
+UPDATE workspaces
+SET environment = json_object(
+	'custom_image', image,
+	'neutral_image', CASE WHEN image = '' THEN 1 ELSE 0 END,
+	'variables', CASE WHEN json_valid(env) THEN json(env) ELSE json('{}') END,
+	'setup_policy', json_object('script', setup_script)
+);
+ALTER TABLE runs ADD COLUMN tool_snapshot_id TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE tool_snapshots (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	digest       TEXT NOT NULL,
+	manifest     TEXT NOT NULL,
+	created_at   INTEGER NOT NULL,
+	UNIQUE (workspace_id, member_id, digest)
+);
+CREATE INDEX idx_tool_snapshots_scope ON tool_snapshots(member_id, workspace_id, created_at);
+
+CREATE TABLE tool_heads (
+	member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	snapshot_id  TEXT NOT NULL REFERENCES tool_snapshots(id),
+	PRIMARY KEY (member_id, workspace_id)
+);
+
+CREATE TABLE pending_workspace_shells (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	snapshot_id  TEXT NOT NULL DEFAULT '',
+	staging_id   TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	updated_at   INTEGER NOT NULL
+);
+CREATE INDEX idx_pending_workspace_shells_scope
+	ON pending_workspace_shells(member_id, workspace_id);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

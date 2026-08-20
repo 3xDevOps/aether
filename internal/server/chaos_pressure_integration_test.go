@@ -283,7 +283,7 @@ func newPressureEnv(ctx context.Context, t *testing.T, cfg Config) *pressureEnv 
 	if err := e.srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
-	e.ws = &domain.Workspace{Name: "pressure", Image: image}
+	e.ws = &domain.Workspace{Name: "pressure", Environment: domain.WorkspaceEnvironment{CustomImage: image}}
 	if err := e.srv.Store().CreateWorkspace(ctx, e.ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}

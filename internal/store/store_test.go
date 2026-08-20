@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -55,10 +56,12 @@ func openTestDB(t *testing.T) *DB {
 func mustCreateWorkspace(t *testing.T, db *DB) *domain.Workspace {
 	t.Helper()
 	w := &domain.Workspace{
-		Name:        "aether",
-		Image:       "ghcr.io/3xdevops/aether-dev:latest",
-		Env:         map[string]string{"GOFLAGS": "-trimpath", "TZ": "UTC"},
-		SetupScript: "make deps\n",
+		Name: "aether",
+		Environment: domain.WorkspaceEnvironment{
+			CustomImage: "ghcr.io/3xdevops/aether-dev:latest",
+			Variables:   map[string]string{"GOFLAGS": "-trimpath", "TZ": "UTC"},
+			SetupPolicy: domain.SetupPolicy{Script: "make deps\n"},
+		},
 	}
 	if err := db.CreateWorkspace(context.Background(), w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
@@ -191,9 +194,11 @@ func TestWorkspaceCRUD(t *testing.T) {
 	assertWorkspaceEqual(t, w, got)
 
 	w.Name = "aether-v2"
-	w.Image = "alpine:3.20"
-	w.Env = map[string]string{"A": "1"}
-	w.SetupScript = "true"
+	w.Environment = domain.WorkspaceEnvironment{
+		CustomImage: "alpine:3.20",
+		Variables:   map[string]string{"A": "1"},
+		SetupPolicy: domain.SetupPolicy{Script: "true"},
+	}
 	if uerr := db.UpdateWorkspace(ctx, w); uerr != nil {
 		t.Fatalf("UpdateWorkspace: %v", uerr)
 	}
@@ -228,7 +233,7 @@ func TestWorkspaceCRUD(t *testing.T) {
 func TestWorkspaceNilEnvRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
-	w := &domain.Workspace{Name: "bare", Image: "alpine"}
+	w := &domain.Workspace{Name: "bare", Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"}}
 	if err := db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
@@ -236,8 +241,8 @@ func TestWorkspaceNilEnvRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWorkspace: %v", err)
 	}
-	if got.Env != nil {
-		t.Fatalf("nil Env round-tripped as %#v", got.Env)
+	if got.Environment.Variables != nil {
+		t.Fatalf("nil Variables round-tripped as %#v", got.Environment.Variables)
 	}
 }
 
@@ -599,6 +604,7 @@ func TestRunCRUDRoundTripsEveryField(t *testing.T) {
 	r.Task = "updated task"
 	r.Protected = true
 	r.Harness = "codex"
+	r.ToolSnapshotID = "tools-123"
 	r.StartedAt = &started
 	r.FinishedAt = &finished
 	if uerr := db.UpdateRun(ctx, r); uerr != nil {
@@ -880,7 +886,7 @@ func TestZeroTimeRejected(t *testing.T) {
 		t.Fatal("UpdateRunStatus accepted a zero StartedAt")
 	}
 	far := time.Date(2263, 1, 1, 0, 0, 0, 0, time.UTC)
-	ws := &domain.Workspace{Name: "far", Image: "alpine", CreatedAt: far}
+	ws := &domain.Workspace{Name: "far", Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"}, CreatedAt: far}
 	if err := db.CreateWorkspace(ctx, ws); err == nil {
 		t.Fatal("CreateWorkspace accepted a CreatedAt outside the storable range")
 	}
@@ -913,7 +919,7 @@ func TestCreatedAtPreservedWhenSet(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	want := time.Date(2020, 1, 2, 3, 4, 5, 678900000, time.UTC)
-	w := &domain.Workspace{Name: "old", Image: "alpine", CreatedAt: want}
+	w := &domain.Workspace{Name: "old", Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"}, CreatedAt: want}
 	if err := db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
@@ -928,16 +934,19 @@ func TestCreatedAtPreservedWhenSet(t *testing.T) {
 
 func assertWorkspaceEqual(t *testing.T, want, got *domain.Workspace) {
 	t.Helper()
-	if got.ID != want.ID || got.Name != want.Name || got.Image != want.Image ||
-		got.SetupScript != want.SetupScript || !got.CreatedAt.Equal(want.CreatedAt) {
+	if got.ID != want.ID || got.Name != want.Name ||
+		got.Environment.CustomImage != want.Environment.CustomImage ||
+		got.Environment.NeutralImage != want.Environment.NeutralImage ||
+		got.Environment.SetupPolicy != want.Environment.SetupPolicy ||
+		!got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("workspace round-trip: got %+v, want %+v", got, want)
 	}
-	if len(got.Env) != len(want.Env) {
-		t.Fatalf("env round-trip: got %v, want %v", got.Env, want.Env)
+	if len(got.Environment.Variables) != len(want.Environment.Variables) {
+		t.Fatalf("variables round-trip: got %v, want %v", got.Environment.Variables, want.Environment.Variables)
 	}
-	for k, v := range want.Env {
-		if got.Env[k] != v {
-			t.Fatalf("env[%q] = %q, want %q", k, got.Env[k], v)
+	for k, v := range want.Environment.Variables {
+		if got.Environment.Variables[k] != v {
+			t.Fatalf("variables[%q] = %q, want %q", k, got.Environment.Variables[k], v)
 		}
 	}
 }
@@ -947,7 +956,8 @@ func assertRunEqual(t *testing.T, want, got *domain.Run) {
 	if got.ID != want.ID || got.SessionID != want.SessionID || got.MemberID != want.MemberID ||
 		got.Task != want.Task || got.Harness != want.Harness || got.Mode != want.Mode ||
 		got.Status != want.Status || got.Branch != want.Branch || got.Worktree != want.Worktree ||
-		got.ProfileSnapshotID != want.ProfileSnapshotID || got.Protected != want.Protected ||
+		got.ProfileSnapshotID != want.ProfileSnapshotID || got.ToolSnapshotID != want.ToolSnapshotID ||
+		got.Protected != want.Protected ||
 		!got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("run round-trip: got %+v, want %+v", got, want)
 	}
@@ -964,4 +974,181 @@ func timePtrEqual(a, b *time.Time) bool {
 		return a == b
 	}
 	return a.Equal(*b)
+}
+
+func TestToolSnapshotCRUDAndDeletionProtection(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	s := &domain.ToolSnapshot{
+		WorkspaceID: w.ID,
+		MemberID:    m.ID,
+		Digest:      "sha256:first",
+		Manifest:    domain.ToolManifest{Executable: "tool", Version: "1"},
+	}
+	if err := db.CreateToolSnapshot(ctx, s); err != nil {
+		t.Fatalf("CreateToolSnapshot: %v", err)
+	}
+	if err := db.SetToolHead(ctx, m.ID, w.ID, s.ID); err != nil {
+		t.Fatalf("SetToolHead: %v", err)
+	}
+	if err := db.DeleteToolSnapshot(ctx, s.ID); !errors.Is(err, ErrInUse) {
+		t.Fatalf("delete active snapshot = %v, want ErrInUse", err)
+	}
+	if err := db.SetToolHead(ctx, m.ID, w.ID, ""); err != nil {
+		t.Fatalf("clear head: %v", err)
+	}
+	pending := &PendingWorkspaceShell{
+		WorkspaceID: w.ID, MemberID: m.ID, SnapshotID: s.ID, StagingID: "staging-1",
+	}
+	if err := db.CreatePendingWorkspaceShell(ctx, pending); err != nil {
+		t.Fatalf("CreatePendingWorkspaceShell: %v", err)
+	}
+	if err := db.DeleteToolSnapshot(ctx, s.ID); !errors.Is(err, ErrInUse) {
+		t.Fatalf("delete pending snapshot = %v, want ErrInUse", err)
+	}
+	if err := db.DeletePendingWorkspaceShell(ctx, pending.ID); err != nil {
+		t.Fatalf("DeletePendingWorkspaceShell: %v", err)
+	}
+	if err := db.DeleteToolSnapshot(ctx, s.ID); err != nil {
+		t.Fatalf("delete unreferenced snapshot: %v", err)
+	}
+}
+
+func TestWorkspaceEnvironmentUsesFirstClassRepresentation(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := &domain.Workspace{
+		Name: "neutral",
+		Environment: domain.WorkspaceEnvironment{
+			NeutralImage: true,
+			Variables:    map[string]string{"A": "1"},
+			SetupPolicy:  domain.SetupPolicy{Script: "echo setup"},
+		},
+	}
+	if err := db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	var raw string
+	if err := db.db.QueryRowContext(ctx, `SELECT environment FROM workspaces WHERE id = ?`, w.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw == "" || raw == "{}" {
+		t.Fatalf("first-class environment is empty: %q", raw)
+	}
+	got, err := db.GetWorkspace(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Environment.NeutralImage || got.Environment.Variables["A"] != "1" ||
+		got.Environment.SetupPolicy.Script != "echo setup" {
+		t.Fatalf("environment = %+v", got.Environment)
+	}
+}
+
+func TestDeleteToolSnapshotProtectsLiveRunReferences(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	s := mustCreateSession(t, db, w.ID)
+	m := mustCreateMember(t, db)
+
+	for i, status := range []domain.RunStatus{
+		domain.RunQueued,
+		domain.RunProvisioning,
+		domain.RunRunning,
+		domain.RunNeedsAttention,
+	} {
+		snapshot := &domain.ToolSnapshot{
+			WorkspaceID: w.ID,
+			MemberID:    m.ID,
+			Digest:      fmt.Sprintf("sha256:live-%d", i),
+			Manifest:    domain.ToolManifest{Executable: "tool"},
+		}
+		if err := db.CreateToolSnapshot(ctx, snapshot); err != nil {
+			t.Fatalf("CreateToolSnapshot(%s): %v", status, err)
+		}
+		run := &domain.Run{
+			SessionID:      s.ID,
+			MemberID:       m.ID,
+			Task:           "task",
+			Harness:        "claude",
+			Mode:           domain.LaunchTUI,
+			Status:         status,
+			ToolSnapshotID: snapshot.ID,
+		}
+		if err := db.CreateRun(ctx, run); err != nil {
+			t.Fatalf("CreateRun(%s): %v", status, err)
+		}
+		if err := db.DeleteToolSnapshot(ctx, snapshot.ID); !errors.Is(err, ErrInUse) {
+			t.Fatalf("delete %s snapshot = %v, want ErrInUse", status, err)
+		}
+		if err := db.UpdateRunStatus(ctx, run.ID, domain.RunMerged, nil, nil); err != nil {
+			t.Fatalf("finish %s run: %v", status, err)
+		}
+		if err := db.DeleteToolSnapshot(ctx, snapshot.ID); err != nil {
+			t.Fatalf("delete terminal %s snapshot: %v", status, err)
+		}
+	}
+}
+
+func TestSetRunToolSnapshotPreservesHandoffFields(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	s := mustCreateSession(t, db, w.ID)
+	owner := mustCreateMember(t, db)
+	handoff := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, s.ID, owner.ID, domain.RunQueued)
+	run.Branch = "handoff-branch"
+	if err := db.UpdateRun(ctx, run); err != nil {
+		t.Fatalf("set branch: %v", err)
+	}
+
+	ownerSnapshot := &domain.ToolSnapshot{
+		WorkspaceID: w.ID,
+		MemberID:    owner.ID,
+		Digest:      "sha256:owner",
+		Manifest:    domain.ToolManifest{Executable: "tool"},
+	}
+	handoffSnapshot := &domain.ToolSnapshot{
+		WorkspaceID: w.ID,
+		MemberID:    handoff.ID,
+		Digest:      "sha256:handoff",
+		Manifest:    domain.ToolManifest{Executable: "tool"},
+	}
+	otherWorkspace := mustCreateWorkspace(t, db)
+	wrongWorkspaceSnapshot := &domain.ToolSnapshot{
+		WorkspaceID: otherWorkspace.ID,
+		MemberID:    handoff.ID,
+		Digest:      "sha256:other-workspace",
+		Manifest:    domain.ToolManifest{Executable: "tool"},
+	}
+	for _, snapshot := range []*domain.ToolSnapshot{ownerSnapshot, handoffSnapshot, wrongWorkspaceSnapshot} {
+		if err := db.CreateToolSnapshot(ctx, snapshot); err != nil {
+			t.Fatalf("CreateToolSnapshot: %v", err)
+		}
+	}
+
+	if err := db.TransferRun(ctx, run.ID, handoff.ID); err != nil {
+		t.Fatalf("TransferRun: %v", err)
+	}
+	if err := db.SetRunToolSnapshot(ctx, run.ID, wrongWorkspaceSnapshot.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("pin snapshot from another workspace = %v, want ErrNotFound", err)
+	}
+	if err := db.SetRunToolSnapshot(ctx, run.ID, ownerSnapshot.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("pin snapshot from prior owner = %v, want ErrNotFound", err)
+	}
+	if err := db.SetRunToolSnapshot(ctx, run.ID, handoffSnapshot.ID); err != nil {
+		t.Fatalf("pin handoff snapshot: %v", err)
+	}
+	got, err := db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.MemberID != handoff.ID || got.Branch != "handoff-branch" ||
+		got.ToolSnapshotID != handoffSnapshot.ID {
+		t.Fatalf("run after pin = %+v, handoff/branch/tool fields were not preserved", got)
+	}
 }

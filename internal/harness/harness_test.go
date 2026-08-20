@@ -225,3 +225,35 @@ func TestResumeArgvAddsTheHarnessResumeFlag(t *testing.T) {
 		t.Fatalf("resume argv of an empty template = %v, want nil", got)
 	}
 }
+func TestDefinitionValidation(t *testing.T) {
+	valid := Definition{
+		Name:            "omp",
+		TUIArgs:         []string{"omp", "{task}"},
+		HeadlessArgs:    []string{"omp", "-p", "{task}"},
+		Executable:      "omp",
+		ProfileRoot:     "/home/aether/.omp",
+		CredentialPaths: []string{"/home/aether/.omp"},
+		DenyNames:       []string{"auth.json"},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid definition rejected: %v", err)
+	}
+	for name, def := range map[string]Definition{
+		"host executable":            validWith(valid, func(d *Definition) { d.Executable = "/usr/bin/omp" }),
+		"relative profile":           validWith(valid, func(d *Definition) { d.ProfileRoot = ".omp" }),
+		"credential escapes profile": validWith(valid, func(d *Definition) { d.CredentialPaths = []string{"/home/aether/.other"} }),
+		"denied path":                validWith(valid, func(d *Definition) { d.DenyNames = []string{"nested/auth.json"} }),
+		"argv mismatch":              validWith(valid, func(d *Definition) { d.HeadlessArgs = []string{"other", "{task}"} }),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := def.Validate(); err == nil {
+				t.Fatal("definition accepted")
+			}
+		})
+	}
+}
+
+func validWith(base Definition, mutate func(*Definition)) Definition {
+	mutate(&base)
+	return base
+}

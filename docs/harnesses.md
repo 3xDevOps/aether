@@ -8,9 +8,11 @@ plugin system.
 
 Two rules shape everything below:
 
-1. **Aether never installs an agent.** The agent CLI has to be in the workspace
-   image. If `claude` is not on `PATH` in that image, `aether run --agent
-   claude` fails at launch with `executable file not found in $PATH`.
+1. **Aether does not run vendor installer logic.** A member can install an agent
+   executable into the workspace's bootstrap staging directory with the
+   vendor's documented procedure. Aether snapshots it under `~/.local` and
+   makes it available to later runs. An administrator may instead choose a
+   custom image that already contains the executable.
 2. **Aether never handles your vendor credentials.** Logins happen through the
    vendor's own flow, in a terminal Aether hands you, exactly as on a new
    laptop. Tokens are never extracted, synced, or proxied.
@@ -67,31 +69,31 @@ the agent is in a container, and the container is the boundary
 | `opencode` | `opencode --prompt {task}` | `opencode run {task}` |
 
 These are the vendors' own flags, and vendors rename them. If a launch fails
-with an unknown-flag error, the installed CLI has drifted from the registry -
-pin the CLI version in your image, or update the registry.
+with an unknown-flag error, the installed CLI has drifted from the registry.
+Pin it in an administrator-approved custom image or update the registry. A
+CLI installed by bootstrap is selected by the active tool snapshot.
 
 ## Logging in
 
 Once per person, per harness:
 
 ```sh
-aether setup <harness>
+aether setup <harness> --workspace <workspace>
 ```
 
-That starts a throwaway container from a workspace image, mounts your
-persistent per-member home for that harness, and hands you its shell. Run the
-vendor's login flow, then `exit`. What you wrote under the harness's credential
-path is saved on the server at
-`<data-dir>/homes/<member-id>/<harness>/` and mounted **read-write** into every
-run you launch afterwards, so token refreshes made inside a run persist too.
+This opens the unified workspace shell in login mode. The active tool snapshot
+is mounted read-only at `~/.local`; the selected harness credential home is
+mounted separately and according to the administrator's definition. Run the
+vendor's login flow, then `exit`. Login state is saved per member and harness,
+and is available to that member's later runs.
 
 Three things to know:
 
-- **The image matters.** `aether setup` borrows a workspace image, so the agent
-  CLI must be installed in it. With no workspace at all it fails with
-  `scheduler: setup requires an image`.
+- **Bootstrap first.** If the harness executable is not in the active tool
+  snapshot or administrator-approved image, login cannot start it. Use
+  `aether workspace bootstrap <workspace> --command <executable>` first.
 - **There is no browser in the container.** Use the harness's headless or
-  device-code login option - the one that prints a URL and a code you complete
+  device-code login option, the one that prints a URL and a code you complete
   in your own browser.
 - **Logins are per member and shared across that member's runs**, the same way
   two terminals on one laptop share a login. Never across members.
@@ -152,11 +154,44 @@ the end-to-end tests drive.
 
 ### `custom`
 
-A registry placeholder for a deployment-supplied agent command. It declares no
-credentials, no key passthrough, and no argv of its own - the argv is expected
-to come from the scheduler's harness override map, which the shipped
-`aether-server serve` has no flag for. Until that is exposed, `fake` plus
-`AETHER_FAKE_AGENT` is the way to run a scripted or in-house agent.
+Custom launch definitions are server configuration, not workspace input. An
+administrator supplies them with `--harness-definitions` or the
+`AETHER_HARNESS_DEFINITIONS` environment variable. Members cannot submit an
+executable or argv template.
+
+The value is a JSON object keyed by harness name. Each definition must name
+the executable and provide both interactive and headless argv. `{task}` is
+replaced as one argv value, never passed through a shell. Profile and
+credential paths are explicit absolute container paths under `/root` or
+`/home/aether`; credentials must be inside the profile root when one is
+configured. Deny names are basenames only.
+
+For example, an administrator can register OMP without adding vendor logic to
+Aether. This definition is only launch configuration. Install OMP through
+bootstrap first, then use `aether setup omp --workspace <workspace>` for login:
+
+```json
+{
+  "omp": {
+    "Name": "omp",
+    "TUIArgs": ["omp", "{task}"],
+    "HeadlessArgs": ["omp", "-p", "{task}"],
+    "Executable": "omp",
+    "ProfileRoot": "/home/aether/.omp",
+    "CredentialPaths": ["/home/aether/.omp"],
+    "DenyNames": ["auth.json", "token.json"]
+  }
+}
+```
+
+The server validates that the executable is a name rather than a host path,
+that argv starts with that executable, and that profile, credential, and
+deny-name policies are safe. A missing or invalid custom definition rejects
+server startup or the run. Tool installation, login state, profile sync, and
+launch definitions remain separate: bootstrap installs the executable,
+`aether setup` performs login, profile push syncs only the declared profile,
+and the launch definition only resolves argv. Both shell modes use the
+`aether-workspace-shell` subsystem; there is no separate setup subsystem.
 
 ## Agent configuration (profile sync)
 

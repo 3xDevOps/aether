@@ -39,10 +39,15 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 	if perr != nil {
 		return nil, perr
 	}
-	if p.Name == "" || p.Image == "" {
-		return nil, invalidParams("name and image are required")
+	if p.Name == "" || !p.Environment.Valid() {
+		return nil, invalidParams("name and valid environment are required")
 	}
-	w := &domain.Workspace{Name: p.Name, Image: p.Image, Env: p.Env, SetupScript: p.SetupScript}
+	w := &domain.Workspace{Name: p.Name, Environment: domain.WorkspaceEnvironment{
+		CustomImage:  p.Environment.CustomImage,
+		NeutralImage: p.Environment.NeutralImage,
+		Variables:    p.Environment.Variables,
+		SetupPolicy:  domain.SetupPolicy{Script: p.Environment.SetupPolicy.Script},
+	}}
 	if err := s.cfg.Store.CreateWorkspace(ctx, w); err != nil {
 		return nil, rpcError(err)
 	}

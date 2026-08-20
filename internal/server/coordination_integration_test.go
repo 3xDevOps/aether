@@ -249,7 +249,7 @@ func newCoordEnv(ctx context.Context, t *testing.T, disabled bool) (*coordEnv, *
 	e.ada = coordMember{id: e.seedMember(ctx, t, srv, "Ada", "#e6194b", adaKey), key: adaKey}
 	e.bo = coordMember{id: e.seedMember(ctx, t, srv, "Bo", "#3cb44b", boKey), key: boKey}
 
-	e.ws = &domain.Workspace{Name: "coord", Image: "e2e/fake"}
+	e.ws = &domain.Workspace{Name: "coord", Environment: domain.WorkspaceEnvironment{CustomImage: "e2e/fake"}}
 	if err := srv.srv.Store().CreateWorkspace(ctx, e.ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}

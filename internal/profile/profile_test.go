@@ -144,7 +144,7 @@ func TestPinRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	w := &domain.Workspace{Name: "ws", Image: "alpine"}
+	w := &domain.Workspace{Name: "ws", Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"}}
 	if err = db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
