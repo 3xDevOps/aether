@@ -96,7 +96,7 @@ When a workspace has no custom image, the server selects the neutral bootstrap
 image:
 
 ```
-ghcr.io/3xDevOps/aether-bootstrap:v0.1.0
+ghcr.io/3xdevops/aether-bootstrap:<release-tag>
 ```
 
 It contains a shell, certificates, curl, Git, and common file-search tools. It
@@ -148,7 +148,7 @@ Serve flags:
 | --- | --- | --- |
 | `--data-dir` | `/var/lib/aether` | Everything the server owns. |
 | `--addr` | `:2222` | The SSH listener. This is the only port that must be reachable. |
-| `--neutral-image` | `ghcr.io/3xDevOps/aether-bootstrap:v0.1.0` | Server-owned image selected for workspaces without a custom image. Set this to a pinned deployment-approved image to override it. |
+| `--neutral-image` | `ghcr.io/3xdevops/aether-bootstrap:<build-version>` | Server-owned image selected for workspaces without a custom image. A release build defaults to the image published with that release; a dev build tracks `latest`. Set this to a pinned deployment-approved image to override it. |
 | `--dashboard-port` | `0` (deny) | Loopback dashboard listener that `aether dash` forwards to. |
 | `--dashboard-addr` | empty | Additionally expose the dashboard directly on this address. Plain HTTP - see [security.md](security.md). |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |

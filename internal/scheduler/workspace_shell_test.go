@@ -2,9 +2,11 @@ package scheduler
 
 import (
 	"bytes"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/toolenv"
 )
+
+// drainPipe discards everything the shell writes to the client half of a
+// net.Pipe. A real SSH channel buffers writes; net.Pipe does not, so an
+// undrained pipe would deadlock the shell's provisioning notice.
+func drainPipe(c net.Conn) {
+	go func() { _, _ = io.Copy(io.Discard, c) }()
+}
 
 func TestWorkspaceShellRequiresWorkspaceSelector(t *testing.T) {
 	e := newTestEnv(t, func(c *Config) {
@@ -39,6 +48,7 @@ func TestWorkspaceShellBootstrapUsesWritableStaging(t *testing.T) {
 	})
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
@@ -60,6 +70,12 @@ func TestWorkspaceShellBootstrapUsesWritableStaging(t *testing.T) {
 		if len(c.spec.Mounts) == 0 || c.spec.Mounts[0].ReadOnly {
 			t.Fatal("bootstrap staging is not writable")
 		}
+		if !c.startedWithAttach {
+			t.Fatal("workspace shell started before attaching; the first prompt would be lost")
+		}
+		if c.spec.Env["PS1"] != "aether-bootstrap$ " {
+			t.Fatalf("PS1 = %q, want the bootstrap prompt", c.spec.Env["PS1"])
+		}
 		c.exitNow(0)
 	}
 	_ = client.Close()
@@ -68,6 +84,38 @@ func TestWorkspaceShellBootstrapUsesWritableStaging(t *testing.T) {
 	}
 	if _, err := e.db.GetToolHead(t.Context(), e.member.ID, e.ws.ID); err != nil {
 		t.Fatalf("bootstrap did not activate a snapshot: %v", err)
+	}
+}
+
+func TestWorkspaceShellNonzeroExitFailsAndSkipsPromotion(t *testing.T) {
+	e := newTestEnv(t, func(c *Config) {
+		mgr, err := toolenv.NewManager(filepath.Join(t.TempDir(), "tools"), c.Store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Toolenv = mgr
+	})
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+	drainPipe(client)
+	done := make(chan error, 1)
+	go func() {
+		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
+			Workspace: domain.WorkspaceSelector{ID: e.ws.ID},
+			Mode:      domain.WorkspaceShellBootstrapTools,
+		}, 80, 24, server, nil)
+	}()
+	waitFor(t, "bootstrap container", func() bool { return len(e.rt.allContainers()) == 1 })
+	e.rt.allContainers()[0].exitNow(7)
+	err := <-done
+	if err == nil {
+		t.Fatal("nonzero shell exit returned nil; sshd would report success")
+	}
+	if !strings.Contains(err.Error(), "status 7") {
+		t.Fatalf("error = %v, want it to carry exit status 7", err)
+	}
+	if _, headErr := e.db.GetToolHead(t.Context(), e.member.ID, e.ws.ID); headErr == nil {
+		t.Fatal("failed bootstrap promoted a snapshot")
 	}
 }
 func TestWorkspaceShellUsesPinnedSnapshotPathAfterHeadChange(t *testing.T) {
@@ -144,6 +192,7 @@ func TestWorkspaceShellResumeRequiresExplicitResumeAndCleansSelectedPendingRow(t
 		t.Fatal(createPendingErr)
 	}
 	client, server := net.Pipe()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
@@ -186,6 +235,7 @@ func TestWorkspaceShellResumeDeletesPendingRowAfterTeardownAndPromotion(t *testi
 		t.Fatal(createPendingErr)
 	}
 	client, server := net.Pipe()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
@@ -228,6 +278,7 @@ func TestWorkspaceShellLoginUsesConfiguredCustomHarnessCredentials(t *testing.T)
 		c.PollInterval = time.Millisecond
 	})
 	client, server := net.Pipe()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{
@@ -250,6 +301,7 @@ func TestWorkspaceShellLoginUsesConfiguredCustomHarnessCredentials(t *testing.T)
 func TestWorkspaceShellStopsOnMemberRevocation(t *testing.T) {
 	e := newTestEnv(t, func(c *Config) { c.PollInterval = time.Millisecond })
 	client, server := net.Pipe()
+	drainPipe(client)
 	done := make(chan error, 1)
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, domain.WorkspaceShellRequest{

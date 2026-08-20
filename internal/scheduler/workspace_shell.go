@@ -83,15 +83,25 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 	if err != nil {
 		return err
 	}
+	if _, ok := plan.Env["PS1"]; !ok {
+		if req.Mode == domain.WorkspaceShellBootstrapTools {
+			plan.Env["PS1"] = "aether-bootstrap$ "
+		} else {
+			plan.Env["PS1"] = "aether-setup$ "
+		}
+	}
 	reservation, err := s.reserveCredentialUser(member, req.Harness, plan.User, len(profile.CredentialPaths) > 0 && req.Mode == domain.WorkspaceShellHarnessLogin, "workspace shell", nil)
 	if err != nil {
 		return err
 	}
 	defer s.releaseCredentialUser(reservation)
+	// Provisioning can include an image pull; tell the member the session
+	// is alive before the potentially slow container creation.
+	_, _ = io.WriteString(conn, "aether: provisioning workspace shell container...\r\n")
 	spec := runtime.Spec{
 		Name: "workspace-shell-" + string(member) + "-" + string(ws.ID), Image: plan.Image,
-		Command: []string{"/bin/sh"}, TTY: true, Mounts: plan.Mounts, User: plan.User,
-		Env: plan.Env, SetupScript: plan.SetupScript,
+		Command: []string{"/bin/sh", "-i"}, TTY: true, Mounts: plan.Mounts, User: plan.User,
+		Env: plan.Env, SetupScript: plan.SetupScript, WorkingDir: plan.Home,
 		CreationKey: fmt.Sprintf("workspace-shell-%s-%s-%d", member, ws.ID, time.Now().UnixNano()),
 	}
 	id, err := s.cfg.Runtime.Create(ctx, spec)
@@ -110,16 +120,22 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 		_ = s.cfg.Runtime.Destroy(cctx, id)
 	}
 	defer teardown()
-	if startErr := s.cfg.Runtime.Start(ctx, id); startErr != nil {
-		return startErr
-	}
+	// Attach before Start: Docker attach only streams output produced after
+	// the attach connects, so attaching late would drop the shell's first
+	// prompt and greet the member with a blank screen.
 	att, err := s.cfg.Runtime.Attach(ctx, id)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = att.Close() }()
+	if startErr := s.cfg.Runtime.Start(ctx, id); startErr != nil {
+		return startErr
+	}
 	if cols > 0 && rows > 0 {
 		_ = att.Resize(ctx, cols, rows)
+	}
+	if req.Mode == domain.WorkspaceShellBootstrapTools {
+		_, _ = io.WriteString(conn, "aether: bootstrap shell ready. Install tools into ~/.local/bin; exit cleanly to snapshot them.\r\n")
 	}
 	done := make(chan struct{})
 	defer close(done)
@@ -181,12 +197,22 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 	}()
 	cleanExit := false
 	var terminalErr error
+	// exitError converts an observed container exit into the shell result:
+	// transport errors and nonzero exits must both fail the session, or
+	// sshd would report success (exit-status 0) for a failed bootstrap.
+	exitError := func(status runtime.ExitStatus, waitErr error) error {
+		if waitErr != nil {
+			return waitErr
+		}
+		if status.Code != 0 {
+			return fmt.Errorf("scheduler: workspace shell exited with status %d", status.Code)
+		}
+		return nil
+	}
 	select {
 	case result := <-waitDone:
 		cleanExit = result.err == nil && result.status.Code == 0
-		if result.err != nil {
-			terminalErr = result.err
-		}
+		terminalErr = exitError(result.status, result.err)
 	case <-ctx.Done():
 		terminalErr = ctx.Err()
 	case revokedErr := <-revoked:
@@ -204,10 +230,13 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 		select {
 		case result := <-waitDone:
 			cleanExit = result.err == nil && result.status.Code == 0
-			if result.err != nil {
-				terminalErr = result.err
-			}
+			terminalErr = exitError(result.status, result.err)
 		case <-waitCtx.Done():
+			// Disconnect without an observed exit: an intentional detach.
+			// Bootstrap keeps its pending staging for --resume.
+			if req.Mode == domain.WorkspaceShellBootstrapTools {
+				_, _ = io.WriteString(conn, "\r\naether: bootstrap session detached; pending tools staging preserved (resume with --resume)\r\n")
+			}
 		}
 		cancel()
 	}
