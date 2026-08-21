@@ -61,7 +61,7 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 	if serr := s.cfg.Store.UpsertHarnessDefinition(ctx, row); serr != nil {
 		return nil, rpcError(serr)
 	}
-	return protocol.AgentRegisterResult{Definition: p.Definition}, nil
+	return protocol.AgentRegisterResult(p), nil
 }
 
 func (s *Server) agentList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {

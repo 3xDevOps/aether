@@ -116,8 +116,8 @@ func TestAgentSetupShellRegistersDefinition(t *testing.T) {
 		t.Fatalf("definition was not registered: %v", err)
 	}
 	var def harness.Definition
-	if err := json.Unmarshal(row.Definition, &def); err != nil {
-		t.Fatalf("stored definition: %v", err)
+	if unmarshalErr := json.Unmarshal(row.Definition, &def); unmarshalErr != nil {
+		t.Fatalf("stored definition: %v", unmarshalErr)
 	}
 	if len(def.CredentialPaths) != 1 || def.CredentialPaths[0] != "/root/.omp" {
 		t.Fatalf("credential paths = %v, want exactly /root/.omp", def.CredentialPaths)

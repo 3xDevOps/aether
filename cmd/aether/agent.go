@@ -100,9 +100,9 @@ func resolveAgentArgs(name, tuiFlag, headlessFlag string, shipped bool, promptIn
 		}
 		if lines != nil {
 			fmt.Fprintf(os.Stderr, "%s command [%s]: ", label, def)
-			line, err := lines.ReadString('\n')
-			if err != nil && err != io.EOF {
-				return nil, err
+			line, readErr := lines.ReadString('\n')
+			if readErr != nil && readErr != io.EOF {
+				return nil, readErr
 			}
 			if line = strings.TrimSpace(line); line != "" {
 				return strings.Fields(line), nil
@@ -125,10 +125,10 @@ func agentAdd(args []string) error {
 		return err
 	}
 	shipped := false
-	if err := withControl(func(c *protocol.Client) error {
+	if listErr := withControl(func(c *protocol.Client) error {
 		var list protocol.AgentListResult
-		if err := c.Call(protocol.MethodAgentList, struct{}{}, &list); err != nil {
-			return err
+		if callErr := c.Call(protocol.MethodAgentList, struct{}{}, &list); callErr != nil {
+			return callErr
 		}
 		for _, a := range list.Agents {
 			if a.Name == opts.name && a.Source == "shipped" {
@@ -136,8 +136,8 @@ func agentAdd(args []string) error {
 			}
 		}
 		return nil
-	}); err != nil {
-		return err
+	}); listErr != nil {
+		return listErr
 	}
 	var promptInput io.Reader
 	if term.IsTerminal(int(os.Stdin.Fd())) {
