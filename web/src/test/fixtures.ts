@@ -155,6 +155,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       transcript_bytes: 128 * 1024 * 1024,
       database_bytes: 64 * 1024 * 1024,
     })),
+    capabilities: vi.fn(async () => ({
+      gateway: 'remote',
+      methods: ['*'],
+      ws: ['events', 'attach'],
+    })),
     eventsSocket: vi.fn(() => 'ws://localhost/ws/events'),
     attachSocket: vi.fn((runID: string) => `ws://localhost/ws/attach/${runID}`),
     ...over,

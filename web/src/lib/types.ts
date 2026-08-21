@@ -25,6 +25,10 @@ export interface Run {
   started_at: string | null
   finished_at: string | null
   profile_snapshot_id?: string
+  /** Last run.status reason, sanitized like the event payload. */
+  reason?: string
+  /** Decorated by the gateway from the scheduler; absent on legacy servers. */
+  paused?: boolean
 }
 
 export interface Session {
@@ -71,6 +75,18 @@ export interface DiskUsage {
   worktree_bytes: number
   transcript_bytes: number
   database_bytes: number
+}
+
+/**
+ * GET /api/v1/capabilities - what this gateway can do. Legacy remote
+ * monitors do not serve it; a null result means "assume the remote
+ * allowlist" on the client.
+ */
+export interface GatewayCapabilities {
+  gateway: string
+  methods: string[]
+  ws: string[]
+  local?: string[]
 }
 
 export interface Event {

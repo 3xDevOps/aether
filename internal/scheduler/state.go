@@ -94,7 +94,8 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, sess
 	if to.Terminal() {
 		finishedAt = &now
 	}
-	if err := s.cfg.Store.UpdateRunStatus(ctx, run, to, startedAt, finishedAt); err != nil {
+	public := publicRunStatusReason(reason)
+	if err := s.cfg.Store.UpdateRunStatus(ctx, run, to, public, startedAt, finishedAt); err != nil {
 		return err
 	}
 	if e := s.runs[run]; e != nil {
@@ -107,7 +108,7 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, sess
 		SessionID: session,
 		RunID:     run,
 		ActorID:   actor,
-		Payload:   events.RunStatusPayload{From: from, To: to, Reason: publicRunStatusReason(reason)},
+		Payload:   events.RunStatusPayload{From: from, To: to, Reason: public},
 	})
 	return nil
 }

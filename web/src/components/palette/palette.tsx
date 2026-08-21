@@ -78,9 +78,11 @@ export function PaletteBody({
 
   const runID = focused?.run.id ?? ''
   const finished = focused?.state === 'done' || focused?.state === 'failed'
-  // Undefined means nobody has seen this run pause or resume, which after a
-  // reload is every run: offer neither verb rather than the one the server
-  // would refuse. See the paused-badge gap in docs/dashboard-frontend.md.
+  // Undefined means nobody knows this run's pause state: hydration seeds it
+  // from the run list's `paused` wire field, but a legacy gateway sends none,
+  // so there a reloaded tab knows no run's state until a pause or resume
+  // event arrives. Offer neither verb rather than the one the server would
+  // refuse. See the paused-badge gap in docs/dashboard-frontend.md.
   const paused = pausedRuns[runID]
 
   return (

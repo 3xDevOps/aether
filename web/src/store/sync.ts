@@ -16,21 +16,35 @@ import { pausedFromTimeline } from '@/store/board'
 export async function hydrate(store: RootStore, client: Api = api): Promise<boolean> {
   const s = store.getState()
   try {
-    const [info, sessions, members, runs, overlaps] = await Promise.all([
-      client.serverInfo(),
-      client.sessionList(),
-      client.memberList(),
-      client.runList(),
-      // The conflict radar is a warning system, not a data source the app
-      // needs: an unreachable one leaves the chips off, it does not fail the
-      // hydration.
-      client.runOverlaps().catch(() => []),
-    ])
+    const [info, sessions, members, runs, overlaps, capabilities] =
+      await Promise.all([
+        client.serverInfo(),
+        client.sessionList(),
+        client.memberList(),
+        client.runList(),
+        // The conflict radar is a warning system, not a data source the app
+        // needs: an unreachable one leaves the chips off, it does not fail the
+        // hydration.
+        client.runOverlaps().catch(() => []),
+        // A legacy remote monitor does not serve the endpoint; null keeps the
+        // client on its built-in assumptions.
+        client.capabilities().catch(() => null),
+      ])
     s.setInfo(info)
     s.setSessions(sessions)
     s.setMembers(members)
     s.setRuns(runs)
+    // The snapshot is authoritative for the paused badge; runs without the
+    // wire field (a legacy gateway) stay unknown.
+    s.seedPaused(
+      Object.fromEntries(
+        runs
+          .filter((r) => r.paused !== undefined)
+          .map((r) => [r.id, r.paused === true]),
+      ),
+    )
     s.setOverlaps(overlaps)
+    s.setCapabilities(capabilities)
     s.setHydrated(true)
     return true
   } catch (err) {

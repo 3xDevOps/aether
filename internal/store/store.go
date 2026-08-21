@@ -72,11 +72,12 @@ type Store interface {
 	ListRunsByMember(ctx context.Context, id domain.MemberID) ([]*domain.Run, error)
 	ListActiveRuns(ctx context.Context) ([]*domain.Run, error)
 	UpdateRun(ctx context.Context, r *domain.Run) error
-	// UpdateRunStatus sets only the run's status, plus started/finished
+	// UpdateRunStatus sets only the run's status and reason (the reason
+	// column is always overwritten, empty clears it), plus started/finished
 	// timestamps when non-nil, leaving every other field untouched. This
 	// is the mutator lifecycle transitions should use so they cannot
 	// clobber concurrent writes to other fields.
-	UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, startedAt, finishedAt *time.Time) error
+	UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
 	// TransferRun reassigns only the run's owning member (handoff),
 	// leaving every other field untouched.
 	TransferRun(ctx context.Context, id domain.RunID, to domain.MemberID) error

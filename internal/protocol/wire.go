@@ -8,7 +8,10 @@ import (
 )
 
 // Run is the wire form of a run. Times are RFC3339; server-side host paths
-// never appear on the wire.
+// never appear on the wire. Reason is the last run.status reason,
+// sanitized server-side. Paused reports a frozen container; it is
+// decorated by handlers from the scheduler, never derived from the
+// stored run.
 type Run struct {
 	ID                string  `json:"id"`
 	SessionID         string  `json:"session_id"`
@@ -17,6 +20,8 @@ type Run struct {
 	Harness           string  `json:"harness"`
 	Mode              string  `json:"mode"`
 	Status            string  `json:"status"`
+	Reason            string  `json:"reason,omitempty"`
+	Paused            bool    `json:"paused,omitempty"`
 	Branch            string  `json:"branch"`
 	Protected         bool    `json:"protected,omitempty"`
 	CreatedAt         string  `json:"created_at"`
@@ -87,6 +92,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Harness:           r.Harness,
 		Mode:              string(r.Mode),
 		Status:            string(r.Status),
+		Reason:            r.Reason,
 		Branch:            r.Branch,
 		Protected:         r.Protected,
 		CreatedAt:         rfc3339(r.CreatedAt),

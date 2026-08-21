@@ -160,6 +160,7 @@ func New(cfg Config) (*Gateway, error) {
 	mux.HandleFunc("POST /api/v1/{method}", g.handleAPI)
 	mux.HandleFunc("GET /api/v1/run/{run}/patch", g.handlePatch)
 	mux.HandleFunc("GET /api/v1/disk", g.handleDisk)
+	mux.HandleFunc("GET /api/v1/capabilities", g.handleCapabilities)
 	mux.HandleFunc("GET /ws/events", g.handleEvents)
 	mux.HandleFunc("GET /ws/attach/{run}", g.handleAttach)
 	static := staticHandler(cfg.Static)

@@ -181,7 +181,7 @@ func TestRecoveryDestroysProvisioningContainer(t *testing.T) {
 	if uerr := e.db.UpdateRun(ctx, r); uerr != nil {
 		t.Fatalf("UpdateRun: %v", uerr)
 	}
-	if uerr := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, nil, nil); uerr != nil {
+	if uerr := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", nil, nil); uerr != nil {
 		t.Fatalf("UpdateRunStatus: %v", uerr)
 	}
 	cid, err := e.rt.Create(ctx, runtime.Spec{
@@ -245,7 +245,7 @@ func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
 		t.Fatalf("UpdateRun: %v", uerr)
 	}
 	finished := time.Now().UTC().Add(-2 * time.Hour)
-	if uerr := e.db.UpdateRunStatus(ctx, old.ID, domain.RunInterrupted, nil, &finished); uerr != nil {
+	if uerr := e.db.UpdateRunStatus(ctx, old.ID, domain.RunInterrupted, "", nil, &finished); uerr != nil {
 		t.Fatalf("UpdateRunStatus: %v", uerr)
 	}
 	// A leftover active row still names the old checkout (the pre-fix
@@ -313,7 +313,7 @@ func TestRelaunchRejectsCheckoutInUse(t *testing.T) {
 		t.Fatalf("Relaunch with old checkout in use = %v, want ErrInvalidTransition", rerr)
 	}
 	finished := time.Now().UTC()
-	if uerr := e.db.UpdateRunStatus(ctx, blocker.ID, domain.RunAbandoned, nil, &finished); uerr != nil {
+	if uerr := e.db.UpdateRunStatus(ctx, blocker.ID, domain.RunAbandoned, "", nil, &finished); uerr != nil {
 		t.Fatalf("abandon blocker: %v", uerr)
 	}
 	third, err := s2.Relaunch(ctx, run.ID, e.member.ID)

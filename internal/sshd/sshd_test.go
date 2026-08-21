@@ -169,6 +169,7 @@ type fakeRuns struct {
 	mu        sync.Mutex
 	err       error
 	calls     []string
+	paused    map[domain.RunID]bool
 	setupHook func(conn io.ReadWriter) error
 }
 
@@ -212,6 +213,21 @@ func (f *fakeRuns) Pause(_ context.Context, run domain.RunID, actor domain.Membe
 
 func (f *fakeRuns) Resume(_ context.Context, run domain.RunID, actor domain.MemberID) error {
 	return f.record(fmt.Sprintf("resume:%s:%s", run, actor))
+}
+
+func (f *fakeRuns) Paused(run domain.RunID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.paused[run]
+}
+
+func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.paused == nil {
+		f.paused = map[domain.RunID]bool{}
+	}
+	f.paused[run] = paused
 }
 
 func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.MemberID, message string) error {

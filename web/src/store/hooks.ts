@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { pendingApprovalKey } from '@/lib/status'
+import type { GatewayCapabilities } from '@/lib/types'
 import { useStore } from '@/store'
 import {
   sidebarGroups,
@@ -59,4 +60,39 @@ export function useAttentionRuns(): SidebarRun[] {
     () => sortRuns(sidebarSessions(input).flatMap((entry) => entry.runs)),
     [input],
   )
+}
+
+/** What the connected gateway can do, queryable per method, verb and socket. */
+export interface Capability {
+  hasMethod: (method: string) => boolean
+  hasLocal: (verb: string) => boolean
+  hasWS: (name: string) => boolean
+}
+
+/**
+ * Answers from a capabilities result. Null means a legacy remote monitor
+ * that predates the endpoint: it speaks the remote allowlist, which covers
+ * every method the SPA calls today, and both gateway sockets; local verbs
+ * are a desktop-gateway feature it cannot have. A "*" methods entry means
+ * every method.
+ */
+export function capability(caps: GatewayCapabilities | null): Capability {
+  if (caps === null) {
+    return {
+      hasMethod: () => true,
+      hasLocal: () => false,
+      hasWS: (name) => name === 'events' || name === 'attach',
+    }
+  }
+  const every = caps.methods.includes('*')
+  return {
+    hasMethod: (method) => every || caps.methods.includes(method),
+    hasLocal: (verb) => (caps.local ?? []).includes(verb),
+    hasWS: (name) => caps.ws.includes(name),
+  }
+}
+
+export function useCapability(): Capability {
+  const caps = useStore((s) => s.capabilities)
+  return useMemo(() => capability(caps), [caps])
 }

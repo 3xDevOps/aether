@@ -1,5 +1,7 @@
 import type { Event, Run } from '@/lib/types'
+import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
+import { capability } from '@/store/hooks'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
   alice,
@@ -51,6 +53,98 @@ describe('hydrate', () => {
 
     expect(store.getState().hydrated).toBe(false)
     expect(store.getState().hydrationError).toContain('502')
+  })
+
+  it('seeds pausedRuns from the run list, so paused survives a reload', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        runList: vi.fn(async () => [
+          run({ id: 'run_1', paused: true }),
+          run({ id: 'run_2', paused: false }),
+          run({ id: 'run_3' }), // a legacy gateway sends no paused field
+        ]),
+      }),
+    )
+
+    // No timeline event has arrived, yet the snapshot already knows.
+    const s = store.getState()
+    expect(s.pausedRuns).toEqual({ run_1: true, run_2: false })
+    expect(s.pausedRuns.run_3).toBeUndefined()
+
+    // And the board card carries the badge straight from the snapshot.
+    const { columns } = board({
+      sessions: s.sessions,
+      runs: s.runs,
+      members: s.members,
+      acked: s.acked,
+      pausedRuns: s.pausedRuns,
+      pending: new Set<string>(),
+    })
+    const working = columns.find((c) => c.key === 'working')
+    expect(working?.cards.find((c) => c.run.id === 'run_1')?.paused).toBe(true)
+    expect(working?.cards.find((c) => c.run.id === 'run_2')?.paused).toBe(false)
+  })
+
+  it('replaces the paused map wholesale on re-hydration', async () => {
+    const store = createRootStore()
+    store.getState().setPaused('run_gone', true)
+    await hydrate(
+      store,
+      fakeApi({ runList: vi.fn(async () => [run({ id: 'run_1', paused: true })]) }),
+    )
+
+    expect(store.getState().pausedRuns).toEqual({ run_1: true })
+  })
+
+  it('keeps the wire reason across a refetch that changed the status', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    expect(store.getState().runs.run_1.reason).toBeUndefined()
+
+    await hydrate(
+      store,
+      fakeApi({
+        runList: vi.fn(async () => [
+          run({ status: 'needs-attention', reason: 'plan review' }),
+        ]),
+      }),
+    )
+
+    expect(store.getState().runs.run_1.status).toBe('needs-attention')
+    expect(store.getState().runs.run_1.reason).toBe('plan review')
+  })
+
+  it('stores the gateway capabilities', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    const caps = store.getState().capabilities
+    expect(caps?.gateway).toBe('remote')
+    const c = capability(caps)
+    expect(c.hasMethod('run.pause')).toBe(true) // "*" covers everything
+    expect(c.hasWS('events')).toBe(true)
+    expect(c.hasLocal('worktree.open')).toBe(false)
+  })
+
+  it('treats a missing capabilities endpoint as the legacy remote monitor', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        capabilities: vi.fn(async () => {
+          throw new Error('404 Not Found')
+        }),
+      }),
+    )
+
+    expect(store.getState().hydrated).toBe(true)
+    expect(store.getState().capabilities).toBeNull()
+    const c = capability(store.getState().capabilities)
+    expect(c.hasMethod('run.list')).toBe(true)
+    expect(c.hasWS('attach')).toBe(true)
+    expect(c.hasLocal('worktree.open')).toBe(false)
   })
 })
 

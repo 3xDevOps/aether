@@ -7,6 +7,7 @@ import type {
   Approval,
   BudgetReport,
   DiskUsage,
+  GatewayCapabilities,
   Member,
   Overlap,
   PresenceEntry,
@@ -157,6 +158,7 @@ export const api = {
   runPatch: (runID: string) =>
     get<RunPatch>(`/run/${encodeURIComponent(runID)}/patch`),
   disk: () => get<DiskUsage>('/disk'),
+  capabilities: () => get<GatewayCapabilities>('/capabilities'),
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),

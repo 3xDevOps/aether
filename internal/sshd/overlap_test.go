@@ -121,7 +121,7 @@ func TestConflictRadarFlagsBothRunsAndClears(t *testing.T) {
 	}
 
 	finished := time.Now().UTC()
-	if err = e.store.UpdateRunStatus(ctx, other.ID, domain.RunMerged, nil, &finished); err != nil {
+	if err = e.store.UpdateRunStatus(ctx, other.ID, domain.RunMerged, "", nil, &finished); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	if _, err = bus.Publish(ctx, events.Event{

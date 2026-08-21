@@ -24,6 +24,9 @@ type RunController interface {
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Pause(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Resume(ctx context.Context, run domain.RunID, actor domain.MemberID) error
+	// Paused reports whether the run's container is currently frozen;
+	// unknown or finished runs report false.
+	Paused(run domain.RunID) bool
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
