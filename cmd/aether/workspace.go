@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -11,20 +12,22 @@ import (
 func init() {
 	register(command{
 		name:  "workspace",
-		short: "manage workspaces: init, add, bootstrap, tools",
+		short: "manage workspaces: init, add, list, bootstrap, tools",
 		run:   runWorkspace,
 	})
 }
 
 func runWorkspace(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether workspace init <name> [--image <image>]")
+		return fmt.Errorf("usage: aether workspace <init|add|list|bootstrap|tools>")
 	}
 	switch args[0] {
 	case "init":
 		return workspaceInit(args[1:])
 	case "add":
 		return workspaceAdd(args[1:])
+	case "list":
+		return workspaceList(args[1:])
 	case "bootstrap":
 		return workspaceBootstrap(args[1:])
 	case "tools":
@@ -32,6 +35,34 @@ func runWorkspace(args []string) error {
 	default:
 		return fmt.Errorf("unknown workspace command %q", args[0])
 	}
+}
+
+func workspaceList(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("usage: aether workspace list")
+	}
+	return withControl(func(c *protocol.Client) error {
+		var list protocol.WorkspaceListResult
+		if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
+			return err
+		}
+		return printWorkspaces(os.Stdout, list.Workspaces)
+	})
+}
+
+// printWorkspaces emits one "workspace <id> <name>" line per workspace, the
+// same shape init and add print, so IDs are easy to copy into git remotes.
+func printWorkspaces(w io.Writer, workspaces []protocol.Workspace) error {
+	if len(workspaces) == 0 {
+		_, err := fmt.Fprintln(w, "no workspaces")
+		return err
+	}
+	for _, ws := range workspaces {
+		if _, err := fmt.Fprintf(w, "workspace %s %s\n", ws.ID, ws.Name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type workspaceBootstrapOptions struct {

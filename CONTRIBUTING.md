@@ -53,6 +53,25 @@ bun run typecheck
 bun run test
 ```
 
+## Development deploy
+
+`make deploy` is the fast loop for testing server changes on a real machine:
+it builds the dashboard and the server binary for the target's architecture,
+installs it to `/usr/local/bin`, and restarts the `aether-server` systemd
+service. The first deploy to a machine without the unit installs and enables
+`packaging/systemd/aether-server.service`.
+
+```sh
+make deploy                          # this machine
+DEPLOY_HOST=user@server make deploy  # remote over SSH
+```
+
+A remote deploy authenticates SSH once (connection multiplexing) and prompts
+for sudo at most once. It deliberately skips tests and CI; releases stay the
+quality gate for
+published binaries. Deployed dev builds report their `git describe` version
+and pin the neutral bootstrap image of the nearest release tag.
+
 ## Testing
 
 Prefer a test that follows the real user path. Integration tests are valuable
@@ -83,5 +102,6 @@ including live credentials.
 
 ## Releases
 
-Release tags are built by the repository workflow. Keep the installer, release
-asset names, checksums, and documentation synchronized when changing packaging.
+Release tags are built by the repository workflow. Keep the installer,
+`aether update` (`internal/selfupdate`), release asset names, checksums, and
+documentation synchronized when changing packaging.

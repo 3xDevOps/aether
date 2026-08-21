@@ -18,7 +18,7 @@ BUN  := bun
 SERVER_PLATFORMS := linux/amd64 linux/arm64
 CLI_PLATFORMS    := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: all build test test-integration vet lint vulncheck fmt-check public-audit dashboard release clean
+.PHONY: all build test test-integration vet lint vulncheck fmt-check public-audit dashboard release deploy clean
 
 all: build
 
@@ -59,6 +59,13 @@ dashboard:
 		exit 1; \
 	}
 	cd web && $(BUN) install --frozen-lockfile && $(BUN) run build
+
+# Dev loop only: build the server for the target machine, install it, and
+# restart the systemd service. Deliberately skips tests and CI - releases
+# remain the quality gate. DEPLOY_HOST=user@server deploys remotely; unset
+# deploys to this machine. See CONTRIBUTING.md.
+deploy: dashboard
+	sh scripts/deploy.sh
 
 release: dashboard
 	@mkdir -p $(DIST)

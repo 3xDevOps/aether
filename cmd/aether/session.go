@@ -58,7 +58,13 @@ func resolveWorkspace(c *protocol.Client, idOrName string) (string, error) {
 	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &wl); err != nil {
 		return "", err
 	}
-	for _, w := range wl.Workspaces {
+	return workspaceIDIn(wl.Workspaces, idOrName)
+}
+
+// workspaceIDIn maps a user-supplied workspace name or ID to the ID. Git
+// remote URLs and wire calls carry IDs only; names are user-facing sugar.
+func workspaceIDIn(list []protocol.Workspace, idOrName string) (string, error) {
+	for _, w := range list {
 		if w.ID == idOrName || w.Name == idOrName {
 			return w.ID, nil
 		}

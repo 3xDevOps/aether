@@ -25,8 +25,9 @@ curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/instal
 ```
 
 On Linux that installs `aether` and `aether-server`; on macOS just `aether`
-(the server is Linux-only). Details, pinning a version, and the systemd unit
-are in [install.md](install.md).
+(the server is Linux-only). Upgrading later is one command: `aether update`.
+Details, pinning a version, and the systemd unit are in
+[install.md](install.md).
 
 ## 2. Start the server
 
@@ -118,6 +119,8 @@ git push -u aether main
 ```
 
 Re-running `link` with `--repo` adds an `aether` git remote to that clone.
+With multiple workspaces, pass `--workspace <name-or-id>`;
+`aether workspace list` shows what exists.
 (Linking before any workspace existed skipped that step and said so; this is
 the re-run it asked for.) The remote is a normal git remote over the same SSH
 port - no separate credentials.
