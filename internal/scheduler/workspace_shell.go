@@ -32,14 +32,26 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 		return err
 	}
 	var profile harness.Profile
-	if req.Mode == domain.WorkspaceShellHarnessLogin {
-		_, profile, err = s.command(req.Harness, domain.LaunchTUI, "")
+	switch req.Mode {
+	case domain.WorkspaceShellHarnessLogin:
+		_, profile, err = s.command(ctx, member, req.Harness, domain.LaunchTUI, "")
 		if err != nil {
 			return err
 		}
+	case domain.WorkspaceShellAgentSetup:
+		profile, err = s.agentSetupProfile(req)
+		if err != nil {
+			return err
+		}
+		release, acquireErr := s.acquireAgentSetup(member, req.Harness)
+		if acquireErr != nil {
+			return acquireErr
+		}
+		defer release()
 	}
+	needsStaging := req.Mode == domain.WorkspaceShellBootstrapTools || req.Mode == domain.WorkspaceShellAgentSetup
 	var staging, pendingID string
-	if req.Mode == domain.WorkspaceShellBootstrapTools {
+	if needsStaging {
 		if s.cfg.Toolenv == nil {
 			return errors.New("scheduler: tool environment is not configured")
 		}
@@ -71,6 +83,13 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 			if err != nil {
 				return err
 			}
+			// Seed the fresh staging with the active snapshot so promotion
+			// accumulates tools: adding agent B must not evict agent A from
+			// the single active head this member+workspace has.
+			if seedErr := s.seedStagingFromActiveSnapshot(ctx, member, ws.ID, staging); seedErr != nil {
+				_ = s.cfg.Toolenv.CleanupStaging(staging)
+				return seedErr
+			}
 			pendingRow := &store.PendingWorkspaceShell{WorkspaceID: ws.ID, MemberID: member, StagingID: filepath.Base(staging)}
 			if createErr := s.cfg.Store.CreatePendingWorkspaceShell(ctx, pendingRow); createErr != nil {
 				_ = s.cfg.Toolenv.CleanupStaging(staging)
@@ -83,14 +102,28 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 	if err != nil {
 		return err
 	}
+	if req.Mode == domain.WorkspaceShellAgentSetup && len(plan.Mounts) < 2 {
+		return errors.New("scheduler: agent setup plan is missing its home and staging mounts")
+	}
+	// Writable shell mounts (staging, harness home) are server-created with
+	// server ownership; a non-root image user could not write them without
+	// the same ownership pass runs get.
+	if ownErr := s.applyRunOwnership(ws, &domain.Run{}, plan.Mounts, plan.User); ownErr != nil {
+		return fmt.Errorf("scheduler: workspace shell ownership: %w", ownErr)
+	}
 	if _, ok := plan.Env["PS1"]; !ok {
-		if req.Mode == domain.WorkspaceShellBootstrapTools {
+		switch req.Mode {
+		case domain.WorkspaceShellBootstrapTools:
 			plan.Env["PS1"] = "aether-bootstrap$ "
-		} else {
+		case domain.WorkspaceShellAgentSetup:
+			plan.Env["PS1"] = "aether-agent-setup$ "
+		default:
 			plan.Env["PS1"] = "aether-setup$ "
 		}
 	}
-	reservation, err := s.reserveCredentialUser(member, req.Harness, plan.User, len(profile.CredentialPaths) > 0 && req.Mode == domain.WorkspaceShellHarnessLogin, "workspace shell", nil)
+	sharedHome := req.Mode == domain.WorkspaceShellAgentSetup ||
+		(len(profile.CredentialPaths) > 0 && req.Mode == domain.WorkspaceShellHarnessLogin)
+	reservation, err := s.reserveCredentialUser(member, req.Harness, plan.User, sharedHome, "workspace shell", nil)
 	if err != nil {
 		return err
 	}
@@ -134,8 +167,13 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 	if cols > 0 && rows > 0 {
 		_ = att.Resize(ctx, cols, rows)
 	}
-	if req.Mode == domain.WorkspaceShellBootstrapTools {
+	switch req.Mode {
+	case domain.WorkspaceShellBootstrapTools:
 		_, _ = io.WriteString(conn, "aether: bootstrap shell ready. Install tools into ~/.local/bin; exit cleanly to snapshot them.\r\n")
+	case domain.WorkspaceShellAgentSetup:
+		_, _ = io.WriteString(conn, "aether: agent setup shell ready. Install "+req.Harness+" into ~/.local/bin and run its login flow; exit cleanly to save both.\r\n")
+	case domain.WorkspaceShellHarnessLogin:
+		_, _ = io.WriteString(conn, "aether: login shell ready. Run the agent's login flow; exit cleanly to save it.\r\n")
 	}
 	done := make(chan struct{})
 	defer close(done)
@@ -233,9 +271,13 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 			terminalErr = exitError(result.status, result.err)
 		case <-waitCtx.Done():
 			// Disconnect without an observed exit: an intentional detach.
-			// Bootstrap keeps its pending staging for --resume.
-			if req.Mode == domain.WorkspaceShellBootstrapTools {
-				_, _ = io.WriteString(conn, "\r\naether: bootstrap session detached; pending tools staging preserved (resume with --resume)\r\n")
+			// Bootstrap keeps its pending staging for --resume; agent setup
+			// must fail loudly, or sshd would report success for a session
+			// that registered nothing.
+			if req.Mode == domain.WorkspaceShellAgentSetup {
+				terminalErr = errors.New("scheduler: agent setup detached before a clean exit; nothing was registered - rerun aether agent add")
+			} else if needsStaging {
+				_, _ = io.WriteString(conn, "\r\naether: session detached; pending tools staging preserved (resume with --resume)\r\n")
 			}
 		}
 		cancel()
@@ -243,19 +285,28 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 	if terminalErr != nil || !cleanExit {
 		return terminalErr
 	}
-	if req.Mode == domain.WorkspaceShellBootstrapTools {
+	if needsStaging {
 		manifest := domain.ToolManifest{}
-		if req.VerificationExecutable != "" {
-			executable := filepath.Join(staging, "bin", req.VerificationExecutable)
+		verify := req.VerificationExecutable
+		if req.Mode == domain.WorkspaceShellAgentSetup {
+			// Verify what the profile actually launches: for an admin or
+			// shipped definition the executable can differ from the name.
+			verify = req.Harness
+			if len(profile.TUIArgs) > 0 && profile.TUIArgs[0] != "" {
+				verify = profile.TUIArgs[0]
+			}
+		}
+		if verify != "" {
+			executable := filepath.Join(staging, "bin", verify)
 			info, statErr := os.Stat(executable)
 			if statErr != nil || info.Mode().Perm()&0o111 == 0 {
 				if statErr == nil {
 					statErr = errors.New("executable is not executable")
 				}
 				slog.Warn("workspace shell verification failed", "mode", string(req.Mode))
-				return fmt.Errorf("scheduler: verify bootstrap executable: %w", statErr)
+				return fmt.Errorf("scheduler: verify bootstrap executable %q: %w", verify, statErr)
 			}
-			manifest.Executable = req.VerificationExecutable
+			manifest.Executable = verify
 		}
 		slog.Info("workspace shell promoted", "mode", string(req.Mode))
 		if _, promoteErr := s.cfg.Toolenv.Promote(ctx, string(member), string(ws.ID), staging, manifest, nil); promoteErr != nil {
@@ -265,6 +316,11 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 			if deleteErr := s.cfg.Store.DeletePendingWorkspaceShell(ctx, pendingID); deleteErr != nil {
 				return fmt.Errorf("scheduler: delete pending bootstrap session: %w", deleteErr)
 			}
+		}
+	}
+	if req.Mode == domain.WorkspaceShellAgentSetup {
+		if registerErr := s.registerAgentDefinition(ctx, member, req, plan, conn); registerErr != nil {
+			return registerErr
 		}
 	}
 	return nil
@@ -284,10 +340,14 @@ func (s *Scheduler) validateWorkspaceShellMember(ctx context.Context, member dom
 }
 
 func purposeForShell(mode domain.WorkspaceShellMode) EnvironmentPurpose {
-	if mode == domain.WorkspaceShellBootstrapTools {
+	switch mode {
+	case domain.WorkspaceShellBootstrapTools:
 		return EnvironmentPurposeBootstrap
+	case domain.WorkspaceShellAgentSetup:
+		return EnvironmentPurposeAgentSetup
+	default:
+		return EnvironmentPurposeLogin
 	}
-	return EnvironmentPurposeLogin
 }
 
 func (s *Scheduler) resolveWorkspace(ctx context.Context, selector domain.WorkspaceSelector) (*domain.Workspace, error) {

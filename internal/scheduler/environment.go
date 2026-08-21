@@ -19,9 +19,10 @@ import (
 type EnvironmentPurpose string
 
 const (
-	EnvironmentPurposeRun       EnvironmentPurpose = "run"
-	EnvironmentPurposeBootstrap EnvironmentPurpose = "bootstrap"
-	EnvironmentPurposeLogin     EnvironmentPurpose = "login"
+	EnvironmentPurposeRun        EnvironmentPurpose = "run"
+	EnvironmentPurposeBootstrap  EnvironmentPurpose = "bootstrap"
+	EnvironmentPurposeLogin      EnvironmentPurpose = "login"
+	EnvironmentPurposeAgentSetup EnvironmentPurpose = "agent-setup"
 )
 
 // EnvironmentPlan is the complete, server-assembled container environment.
@@ -45,7 +46,9 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if ws == nil || member == nil {
 		return nil, errors.New("scheduler: workspace and member are required")
 	}
-	if purpose != EnvironmentPurposeRun && purpose != EnvironmentPurposeBootstrap && purpose != EnvironmentPurposeLogin {
+	switch purpose {
+	case EnvironmentPurposeRun, EnvironmentPurposeBootstrap, EnvironmentPurposeLogin, EnvironmentPurposeAgentSetup:
+	default:
 		return nil, fmt.Errorf("scheduler: invalid environment purpose %q", purpose)
 	}
 	image := ws.Environment.EffectiveImage(s.cfg.NeutralImage)
@@ -83,15 +86,46 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		User:        user, Home: home, Path: env["PATH"],
 	}
 
-	if purpose == EnvironmentPurposeBootstrap {
+	if purpose == EnvironmentPurposeBootstrap || purpose == EnvironmentPurposeAgentSetup {
 		if stagingPath == "" {
 			return nil, errors.New("scheduler: bootstrap staging path is required")
 		}
 		if s.cfg.Toolenv == nil {
 			return nil, errors.New("scheduler: tool environment is not configured")
 		}
+		if purpose == EnvironmentPurposeAgentSetup {
+			// The member's whole harness home is mounted writable at $HOME
+			// so the vendor login flow persists wherever it writes; runs
+			// later mount only the discovered credential paths. The home
+			// mount precedes the staging mount so ~/.local nests over it.
+			if s.cfg.HomesDir == "" || profile.Name == "" {
+				return nil, errors.New("scheduler: agent setup requires a homes directory and a harness name")
+			}
+			hostHome := filepath.Join(s.cfg.HomesDir, string(member.ID), profile.Name)
+			if err := os.MkdirAll(hostHome, 0o700); err != nil {
+				return nil, fmt.Errorf("scheduler: create agent home: %w", err)
+			}
+			plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: hostHome, ContainerPath: home})
+		}
 		plan.ToolHostPath = stagingPath
 		plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: stagingPath, ContainerPath: filepath.Join(home, ".local")})
+		if purpose == EnvironmentPurposeAgentSetup {
+			// A shipped profile may keep credentials under ~/.local
+			// (opencode). The staging mount would swallow that login state
+			// into the immutable tool snapshot, so those paths are mounted
+			// from the credential home over the staging. Ordered after
+			// staging so the nesting loop below approves child-over-parent.
+			creds, credErr := s.credentialMounts(&domain.Run{}, member.ID, profile, home)
+			if credErr != nil {
+				return nil, credErr
+			}
+			toolMount := path.Clean(filepath.Join(home, ".local"))
+			for _, m := range creds {
+				if strings.HasPrefix(path.Clean(m.ContainerPath), toolMount+"/") {
+					plan.Mounts = append(plan.Mounts, m)
+				}
+			}
+		}
 	} else {
 		snapshot, snapErr := s.resolveToolSnapshot(ctx, run, member.ID, ws.ID, purpose == EnvironmentPurposeRun)
 		if snapErr != nil && !errors.Is(snapErr, store.ErrNotFound) {
@@ -110,7 +144,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: toolPath, ContainerPath: filepath.Join(home, ".local"), ReadOnly: true})
 		}
 	}
-	if purpose != EnvironmentPurposeBootstrap && profile.Name != "" {
+	if purpose != EnvironmentPurposeBootstrap && purpose != EnvironmentPurposeAgentSetup && profile.Name != "" {
 		mountRun := run
 		if mountRun == nil {
 			mountRun = &domain.Run{}
@@ -139,15 +173,33 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if s.cfg.Toolenv != nil {
 		roots = append(roots, s.cfg.Toolenv.Root())
 	}
+	// Nesting approval is not blanket: the sanctioned parents are the
+	// container home (agent-setup mounts staging and credentials inside
+	// $HOME), the tool mount (registry credentials under ~/.local, the
+	// opencode pattern), and the profile root (registry credential files
+	// under the synced profile, the claude pattern). A member definition
+	// must not be able to nest a writable mount under an arbitrary
+	// read-only parent.
+	sanctioned := map[string]bool{
+		path.Clean(home): true,
+		path.Clean(filepath.Join(home, ".local")): true,
+	}
+	if root := profile.ContainerLocalRoot(user); root != "" {
+		sanctioned[path.Clean(root)] = true
+	}
 	allowedNestings := make(map[string]string)
 	for i, childMount := range plan.Mounts {
 		child := path.Clean(childMount.ContainerPath)
 		for j := 0; j < i; j++ {
 			parent := path.Clean(plan.Mounts[j].ContainerPath)
-			if child != parent && strings.HasPrefix(child, parent+"/") {
-				allowedNestings[child] = parent
-				break
+			if child == parent || !strings.HasPrefix(child, parent+"/") {
+				continue
 			}
+			if !sanctioned[parent] {
+				continue
+			}
+			allowedNestings[child] = parent
+			break
 		}
 	}
 	if validateErr := runtime.ValidateMounts(plan.Mounts, runtime.MountPolicy{

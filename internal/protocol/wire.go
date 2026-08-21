@@ -328,6 +328,7 @@ const (
 	WorkspaceShellHarnessLogin       = domain.WorkspaceShellHarnessLogin
 	WorkspaceShellModeBootstrapTools = domain.WorkspaceShellBootstrapTools
 	WorkspaceShellModeHarnessLogin   = domain.WorkspaceShellHarnessLogin
+	WorkspaceShellModeAgentSetup     = domain.WorkspaceShellAgentSetup
 )
 
 // WorkspaceShellRequest is the single header line a client sends after
@@ -338,10 +339,13 @@ type WorkspaceShellRequest struct {
 	Mode                   WorkspaceShellMode `json:"mode"`
 	Harness                string             `json:"harness,omitempty"`
 	VerificationExecutable string             `json:"verification_executable,omitempty"`
-	Resume                 bool               `json:"resume,omitempty"`
-	Reset                  bool               `json:"reset,omitempty"`
-	Cols                   uint               `json:"cols,omitempty"`
-	Rows                   uint               `json:"rows,omitempty"`
+	// TUIArgs/HeadlessArgs are argv template proposals for agent-setup mode.
+	TUIArgs      []string `json:"tui_args,omitempty"`
+	HeadlessArgs []string `json:"headless_args,omitempty"`
+	Resume       bool     `json:"resume,omitempty"`
+	Reset        bool     `json:"reset,omitempty"`
+	Cols         uint     `json:"cols,omitempty"`
+	Rows         uint     `json:"rows,omitempty"`
 }
 
 // Validate checks the server-facing request contract.
@@ -351,6 +355,8 @@ func (r WorkspaceShellRequest) Validate() error {
 		Mode:                   r.Mode,
 		Harness:                r.Harness,
 		VerificationExecutable: r.VerificationExecutable,
+		TUIArgs:                r.TUIArgs,
+		HeadlessArgs:           r.HeadlessArgs,
 		Resume:                 r.Resume,
 		Reset:                  r.Reset,
 		Cols:                   r.Cols,
@@ -400,4 +406,39 @@ type SyncConflictParams struct {
 	RunID         string   `json:"run_id"`
 	SyncSessionID string   `json:"sync_session_id,omitempty"`
 	Files         []string `json:"files"`
+}
+
+// AgentDefinition is the wire form of a member-supplied custom harness
+// launch definition. Paths are absolute container paths; validation lives
+// in internal/harness.Definition.Validate.
+type AgentDefinition struct {
+	Name            string   `json:"name"`
+	Executable      string   `json:"executable"`
+	TUIArgs         []string `json:"tui_args"`
+	HeadlessArgs    []string `json:"headless_args"`
+	ProfileRoot     string   `json:"profile_root,omitempty"`
+	CredentialPaths []string `json:"credential_paths,omitempty"`
+	DenyNames       []string `json:"deny_names,omitempty"`
+}
+
+// AgentRegisterParams are the params of agent.register.
+type AgentRegisterParams struct {
+	Definition AgentDefinition `json:"definition"`
+}
+
+// AgentRegisterResult is the result of agent.register: the stored
+// definition echoed back.
+type AgentRegisterResult struct {
+	Definition AgentDefinition `json:"definition"`
+}
+
+// AgentListResult is the result of agent.list.
+type AgentListResult struct {
+	Agents []AgentInfo `json:"agents"`
+}
+
+// AgentInfo is one entry of agent.list; Source is "shipped" or "member".
+type AgentInfo struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
 }

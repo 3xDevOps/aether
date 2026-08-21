@@ -125,69 +125,40 @@ With multiple workspaces, pass `--workspace <name-or-id>`;
 the re-run it asked for.) The remote is a normal git remote over the same SSH
 port - no separate credentials.
 
-## 5. Bootstrap the workspace tools
+## 5. Set up your agent
 
-Bootstrap opens a shell **inside a server-created container**. It mounts a
-private, per-member and per-workspace staging directory at `~/.local` with
-read-write access. Install the agent executable using its vendor documentation,
-then leave the shell:
+One command installs the agent, logs it in, and registers it:
 
 ```sh
-aether workspace bootstrap myproject --command omp
+aether agent add omp --workspace myproject
 ```
 
-The `--command` value is only an optional executable check. It does not select
-an installer or grant the shell access to the host. On a clean exit, Aether
-verifies the executable, creates an immutable tool snapshot, and activates it.
-User-local files under `~/.local` persist; system packages and other container
-filesystem changes do not. Use `aether workspace tools verify` later to report
-whether the active snapshot records the requested executable.
+For a name Aether does not ship (anything but claude, codex, aider, or
+opencode) it first asks how to launch the agent, with defaults you accept by
+pressing Enter (`omp {task}` and `omp -p {task}`), or take from `--tui` /
+`--headless` flags. It then opens a shell **inside a server-created
+container**. Install the agent executable into `~/.local/bin` using its
+vendor documentation, run the vendor's login flow (use a device-code or
+headless option; the container has no browser), and `exit` cleanly.
 
-If the SSH client disconnects before you exit, the pending staging directory is
-kept for this member and workspace. Resume it with:
+On exit Aether verifies the executable, snapshots `~/.local` as an immutable
+tool snapshot, persists whatever the login wrote in your home as your
+credential home, and registers the agent under your membership. Shipped
+names skip the questions and the registration; their launch profiles are
+built in. `aether agent list` shows what is available.
 
-```sh
-aether workspace bootstrap myproject --resume --command omp
-```
+System packages and other container filesystem changes do not persist; only
+`~/.local` and the login state do. If the SSH client disconnects before you
+exit, resume with `aether workspace bootstrap myproject --resume` or discard
+with `--reset`.
 
-Discard that pending staging state instead:
+The pieces remain individually addressable when you need them: `aether
+workspace bootstrap` re-installs tools without touching login state,
+`aether setup <agent>` re-runs a login without reinstalling, and
+`aether workspace tools list/verify/rollback` manage snapshots. See
+[bootstrap.md](bootstrap.md) and [harnesses.md](harnesses.md).
 
-```sh
-aether workspace bootstrap myproject --reset
-```
-
-See [bootstrap.md](bootstrap.md) for snapshot inspection, rollback, reset,
-recovery, and the image escape hatch.
-
-Now run:
-
-```sh
-aether workspace tools list myproject
-aether workspace tools verify myproject --command omp
-```
-
-The list shows snapshot IDs, active state, executable, version, and creation
-time. It never prints host paths or tool contents.
-
-## 6. Log the agent in
-
-Login is separate from tool installation. Aether gives you a terminal in a
-container using the active tool snapshot mounted read-only:
-
-```sh
-aether setup omp --workspace myproject
-```
-
-Run the harness vendor's login flow in that shell, then `exit`. Login state is
-saved in a separate per-member credential home and mounted only according to
-the registered harness definition. Profile snapshots are separate again; they
-are not credentials and never become part of a tool snapshot. See
-[harnesses.md](harnesses.md).
-
-## 7. Launch a run
-
-The `omp` name above is only an example. An administrator must register a
-generic harness definition for it before `aether run` can launch it:
+## 6. Launch a run
 
 ```sh
 aether session new myproject --workspace myproject
@@ -206,7 +177,7 @@ A **session** is the shared context runs live in (members, feed, budgets); a
 **run** is one agent execution with its own container, its own git worktree,
 and its own branch. `aether runs` lists them.
 
-## 8. Watch it
+## 7. Watch it
 
 ```sh
 aether dash
@@ -235,7 +206,7 @@ aether inject <run-id> "also update the README"
 The message appears in the transcript as a banner in your member color, and
 everyone watching sees who said it.
 
-## 9. Pull the result
+## 8. Pull the result
 
 When the agent exits, its work is already committed to the run's branch and the
 run parks in `needs-attention`.

@@ -67,6 +67,7 @@ func (s *Server) serveWorkspaceShell(ctx context.Context, member domain.MemberID
 	if workspaceShellErr := s.cfg.Runs.WorkspaceShell(ctx, member, domain.WorkspaceShellRequest{
 		Workspace: domain.WorkspaceSelector{ID: domain.WorkspaceID(req.Workspace.ID), Name: req.Workspace.Name},
 		Mode:      req.Mode, Harness: req.Harness, VerificationExecutable: req.VerificationExecutable,
+		TUIArgs: req.TUIArgs, HeadlessArgs: req.HeadlessArgs,
 		Resume: req.Resume, Reset: req.Reset, Cols: cols, Rows: rows,
 	}, cols, rows, conn, st.resize); workspaceShellErr != nil {
 		_, _ = fmt.Fprintf(ch, "\r\naether workspace shell: %v\r\n", workspaceShellErr)

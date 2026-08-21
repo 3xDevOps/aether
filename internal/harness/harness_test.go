@@ -244,12 +244,56 @@ func TestDefinitionValidation(t *testing.T) {
 		"credential escapes profile": validWith(valid, func(d *Definition) { d.CredentialPaths = []string{"/home/aether/.other"} }),
 		"denied path":                validWith(valid, func(d *Definition) { d.DenyNames = []string{"nested/auth.json"} }),
 		"argv mismatch":              validWith(valid, func(d *Definition) { d.HeadlessArgs = []string{"other", "{task}"} }),
+		// The name becomes a host path segment under <homes>/<member>;
+		// a traversal name would address another member's credentials.
+		"traversal name": validWith(valid, func(d *Definition) { d.Name = "../victim/claude" }),
+		"path name":      validWith(valid, func(d *Definition) { d.Name = "a/b" }),
+		"spaced name":    validWith(valid, func(d *Definition) { d.Name = "a b" }),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := def.Validate(); err == nil {
 				t.Fatal("definition accepted")
 			}
 		})
+	}
+}
+
+// Member-supplied definitions additionally reject paths under the tool
+// mount: they would shadow or pierce the read-only snapshot at ~/.local.
+// Administrator definitions and registry profiles (opencode) keep the
+// capability.
+func TestValidateMemberDefinition(t *testing.T) {
+	valid := Definition{
+		Name:            "omp",
+		TUIArgs:         []string{"omp", "{task}"},
+		HeadlessArgs:    []string{"omp", "-p", "{task}"},
+		Executable:      "omp",
+		ProfileRoot:     "/home/aether/.omp",
+		CredentialPaths: []string{"/home/aether/.omp"},
+	}
+	if err := ValidateMemberDefinition(valid); err != nil {
+		t.Fatalf("valid member definition rejected: %v", err)
+	}
+	for name, def := range map[string]Definition{
+		"credential under tool mount": validWith(valid, func(d *Definition) {
+			d.ProfileRoot = ""
+			d.CredentialPaths = []string{"/home/aether/.local/bin"}
+		}),
+		"profile under tool mount": validWith(valid, func(d *Definition) {
+			d.ProfileRoot = "/root/.local/share/omp"
+			d.CredentialPaths = []string{"/root/.local/share/omp"}
+		}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateMemberDefinition(def); err == nil {
+				t.Fatal("member definition accepted")
+			}
+		})
+	}
+	// The opencode registry profile keeps its under-.local credentials.
+	opencode, _ := Lookup("opencode")
+	if opencode.LocalRoot != ".local/share/opencode" {
+		t.Fatalf("opencode profile root moved: %q", opencode.LocalRoot)
 	}
 }
 

@@ -61,11 +61,14 @@ aether workspace bootstrap <workspace> --command omp
 # Then exit the shell so Aether can verify and snapshot ~/.local.
 ```
 
-Installing an executable is separate from making it launchable. An
-administrator must register a validated generic harness definition for `omp`
-before a member can run `aether run ... --agent omp`. The definition supplies
-argv templates and explicit profile and credential paths. It does not install
-OMP or infer secret paths from its name. See [harnesses.md](harnesses.md).
+Installing an executable is separate from making it launchable. For a name
+outside the shipped registry, a launch definition must exist before
+`aether run ... --agent omp` works: `aether agent add omp` performs the
+install, the login, and the member-scoped registration in one session
+(recommended), or an administrator pins a server-wide definition. The
+definition supplies argv templates and explicit profile and credential
+paths. It does not install OMP or infer secret paths from its name. See
+[harnesses.md](harnesses.md).
 
 ## Verify, inspect, rollback, and reset
 

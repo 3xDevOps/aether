@@ -61,12 +61,21 @@ func (s *Scheduler) credentialMounts(run *domain.Run, member domain.MemberID, pr
 		return nil, nil
 	}
 	for _, m := range mounts {
+		// A credential path may be a regular file (auth.json at the top of
+		// home); precreate only what does not exist, as an empty directory.
+		// An existing file must not be MkdirAll'd into an error.
+		if _, statErr := os.Lstat(m.HostPath); statErr == nil {
+			continue
+		}
 		if err := os.MkdirAll(m.HostPath, 0o700); err != nil {
 			return nil, fmt.Errorf("create credential home: %w", err)
 		}
 	}
+	// Containment is the member's own harness home, not all of HomesDir:
+	// a symlink planted during setup must not alias another member's (or
+	// another harness's) files into this run.
 	if err := runtime.ValidateMounts(mounts, runtime.MountPolicy{
-		OwnedRoots:        []string{s.cfg.HomesDir},
+		OwnedRoots:        []string{home},
 		WorktreeHostPath:  run.Worktree,
 		WorktreeMountPath: s.cfg.WorktreeMount,
 	}); err != nil {
@@ -203,7 +212,7 @@ func (s *Scheduler) Launch(ctx context.Context, session domain.SessionID, member
 	if err := s.checkFreeSpace(); err != nil {
 		return nil, err
 	}
-	argv, profile, err := s.command(harness, mode, task)
+	argv, profile, err := s.command(ctx, member, harness, mode, task)
 	if err != nil {
 		return nil, err
 	}

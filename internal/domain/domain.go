@@ -130,11 +130,15 @@ type WorkspaceShellMode string
 const (
 	WorkspaceShellBootstrapTools WorkspaceShellMode = "bootstrap-tools"
 	WorkspaceShellHarnessLogin   WorkspaceShellMode = "harness-login"
+	// WorkspaceShellAgentSetup combines bootstrap and login in one session:
+	// install the agent, run its login flow, exit; the server snapshots
+	// tools, persists login state, and registers the member definition.
+	WorkspaceShellAgentSetup WorkspaceShellMode = "agent-setup"
 )
 
 // Valid reports whether m is a supported workspace shell mode.
 func (m WorkspaceShellMode) Valid() bool {
-	return m == WorkspaceShellBootstrapTools || m == WorkspaceShellHarnessLogin
+	return m == WorkspaceShellBootstrapTools || m == WorkspaceShellHarnessLogin || m == WorkspaceShellAgentSetup
 }
 
 // WorkspaceShellRequest describes one agent-agnostic interactive workspace
@@ -144,10 +148,14 @@ type WorkspaceShellRequest struct {
 	Mode                   WorkspaceShellMode
 	Harness                string
 	VerificationExecutable string
-	Resume                 bool
-	Reset                  bool
-	Cols                   uint
-	Rows                   uint
+	// TUIArgs/HeadlessArgs are the member's proposed argv templates for an
+	// agent-setup shell registering a custom agent. Empty for shipped names.
+	TUIArgs      []string
+	HeadlessArgs []string
+	Resume       bool
+	Reset        bool
+	Cols         uint
+	Rows         uint
 }
 
 // Validate checks selector, mode, mode-specific harness, and intent fields.
@@ -159,10 +167,12 @@ func (r WorkspaceShellRequest) Validate() error {
 		return fmt.Errorf("invalid workspace shell mode %q", r.Mode)
 	case r.Resume && r.Reset:
 		return errors.New("resume and reset cannot both be set")
-	case r.Mode == WorkspaceShellHarnessLogin && strings.TrimSpace(r.Harness) == "":
-		return errors.New("harness is required for login mode")
+	case (r.Mode == WorkspaceShellHarnessLogin || r.Mode == WorkspaceShellAgentSetup) && strings.TrimSpace(r.Harness) == "":
+		return errors.New("harness is required for login and agent-setup modes")
 	case r.Mode == WorkspaceShellBootstrapTools && strings.TrimSpace(r.Harness) != "":
 		return errors.New("harness is not allowed for bootstrap mode")
+	case r.Mode != WorkspaceShellAgentSetup && (len(r.TUIArgs) > 0 || len(r.HeadlessArgs) > 0):
+		return errors.New("argv proposals are only allowed for agent-setup mode")
 	}
 	if strings.ContainsAny(r.VerificationExecutable, "/\x00\r\n\t ") {
 		return errors.New("verification executable must be a name")

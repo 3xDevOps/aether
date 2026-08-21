@@ -69,6 +69,12 @@ const (
 	MethodWorkspaceToolsReset    = "workspace.tools.reset"
 )
 
+// Custom agent (harness) onboarding methods.
+const (
+	MethodAgentRegister = "agent.register"
+	MethodAgentList     = "agent.list"
+)
+
 // Wave 3 permission-model methods.
 const (
 	// MethodSessionSettings updates session settings (admin only).
