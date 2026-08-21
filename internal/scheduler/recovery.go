@@ -38,7 +38,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if _, statErr := os.Stat(old.Worktree); statErr != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidTransition, relaunchRequiresCheckout)
 	}
-	argv, profile, err := s.command(old.Harness, old.Mode, old.Task)
+	argv, profile, err := s.command(ctx, actor, old.Harness, old.Mode, old.Task)
 	if err != nil {
 		return nil, err
 	}

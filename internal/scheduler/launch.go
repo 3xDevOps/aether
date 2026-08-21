@@ -203,7 +203,7 @@ func (s *Scheduler) Launch(ctx context.Context, session domain.SessionID, member
 	if err := s.checkFreeSpace(); err != nil {
 		return nil, err
 	}
-	argv, profile, err := s.command(harness, mode, task)
+	argv, profile, err := s.command(ctx, member, harness, mode, task)
 	if err != nil {
 		return nil, err
 	}

@@ -212,7 +212,7 @@ func TestArgvOverrideDropsMCPRegistration(t *testing.T) {
 	s := &Scheduler{harnesses: map[string]HarnessSpec{
 		"claude": {TUIArgs: []string{"claude-shim", harness.TaskPlaceholder}},
 	}}
-	argv, profile, err := s.command("claude", domain.LaunchTUI, "add OAuth login")
+	argv, profile, err := s.command(t.Context(), "", "claude", domain.LaunchTUI, "add OAuth login")
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}

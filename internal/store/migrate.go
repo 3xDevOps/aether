@@ -278,6 +278,18 @@ CREATE TABLE pending_workspace_shells (
 CREATE INDEX idx_pending_workspace_shells_scope
 	ON pending_workspace_shells(member_id, workspace_id);
 `,
+	// v10: member-owned custom harness definitions, keyed by (member, name).
+	// The definition column is an opaque JSON blob validated by callers.
+	`
+CREATE TABLE harness_definitions (
+	member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	name       TEXT NOT NULL,
+	definition TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	PRIMARY KEY (member_id, name)
+);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

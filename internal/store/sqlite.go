@@ -538,6 +538,74 @@ func (d *DB) DeletePendingWorkspaceShell(ctx context.Context, id string) error {
 		`DELETE FROM pending_workspace_shells WHERE id = ?`, id)
 }
 
+// Harness definitions
+
+const harnessDefinitionCols = `member_id, name, definition, created_at, updated_at`
+
+func (d *DB) UpsertHarnessDefinition(ctx context.Context, def *HarnessDefinition) error {
+	now := time.Now().UTC()
+	created := def.CreatedAt
+	if created.IsZero() {
+		created = now
+	}
+	createdAt, err := encodeTime(created)
+	if err != nil {
+		return fmt.Errorf("store: upsert harness definition: %w", err)
+	}
+	updatedAt, err := encodeTime(now)
+	if err != nil {
+		return fmt.Errorf("store: upsert harness definition: %w", err)
+	}
+	var storedCreated int64
+	if err := d.db.QueryRowContext(ctx, `INSERT INTO harness_definitions
+		(member_id, name, definition, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(member_id, name) DO UPDATE SET
+			definition = excluded.definition,
+			updated_at = excluded.updated_at
+		RETURNING created_at`,
+		def.MemberID, def.Name, string(def.Definition), createdAt, updatedAt,
+	).Scan(&storedCreated); err != nil {
+		return fmt.Errorf("store: upsert harness definition: %w", mapConstraint(err, ErrNotFound))
+	}
+	def.CreatedAt, def.UpdatedAt = decodeTime(storedCreated), now
+	return nil
+}
+
+func scanHarnessDefinition(row interface{ Scan(...any) error }) (*HarnessDefinition, error) {
+	var def HarnessDefinition
+	var blob string
+	var createdAt, updatedAt int64
+	if err := row.Scan(&def.MemberID, &def.Name, &blob, &createdAt, &updatedAt); err != nil {
+		return nil, err
+	}
+	def.Definition = []byte(blob)
+	def.CreatedAt, def.UpdatedAt = decodeTime(createdAt), decodeTime(updatedAt)
+	return &def, nil
+}
+
+func (d *DB) GetHarnessDefinition(ctx context.Context, member domain.MemberID, name string) (*HarnessDefinition, error) {
+	def, err := scanHarnessDefinition(d.db.QueryRowContext(ctx,
+		`SELECT `+harnessDefinitionCols+` FROM harness_definitions
+		WHERE member_id = ? AND name = ?`, member, name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get harness definition: %w", err)
+	}
+	return def, nil
+}
+
+func (d *DB) ListHarnessDefinitions(ctx context.Context, member domain.MemberID) ([]*HarnessDefinition, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT `+harnessDefinitionCols+`
+		FROM harness_definitions WHERE member_id = ? ORDER BY name`, member)
+	if err != nil {
+		return nil, fmt.Errorf("store: list harness definitions: %w", err)
+	}
+	return collect(rows, scanHarnessDefinition)
+}
+
 func (d *DB) DeleteWorkspace(ctx context.Context, id domain.WorkspaceID) error {
 	return d.execDelete(ctx, "delete workspace", `DELETE FROM workspaces WHERE id = ?`, id)
 }

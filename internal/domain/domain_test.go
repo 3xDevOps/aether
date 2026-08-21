@@ -111,11 +111,41 @@ func TestWorkspaceEnvironmentValidation(t *testing.T) {
 }
 
 func TestWorkspaceShellModeValid(t *testing.T) {
-	if !WorkspaceShellBootstrapTools.Valid() || !WorkspaceShellHarnessLogin.Valid() {
+	if !WorkspaceShellBootstrapTools.Valid() || !WorkspaceShellHarnessLogin.Valid() || !WorkspaceShellAgentSetup.Valid() {
 		t.Fatal("defined workspace shell modes must be valid")
 	}
 	if WorkspaceShellMode("invalid").Valid() {
 		t.Fatal("invalid workspace shell mode must be rejected")
+	}
+}
+
+func TestWorkspaceShellRequestAgentSetup(t *testing.T) {
+	valid := WorkspaceShellRequest{
+		Workspace: WorkspaceSelector{ID: "ws_1"},
+		Mode:      WorkspaceShellAgentSetup,
+		Harness:   "omp",
+		TUIArgs:   []string{"omp", "{task}"},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid agent-setup request rejected: %v", err)
+	}
+	for name, req := range map[string]WorkspaceShellRequest{
+		"missing harness": {
+			Workspace: WorkspaceSelector{ID: "ws_1"},
+			Mode:      WorkspaceShellAgentSetup,
+		},
+		"argv proposal outside agent-setup": {
+			Workspace: WorkspaceSelector{ID: "ws_1"},
+			Mode:      WorkspaceShellHarnessLogin,
+			Harness:   "claude",
+			TUIArgs:   []string{"claude", "{task}"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := req.Validate(); err == nil {
+				t.Fatal("invalid request accepted")
+			}
+		})
 	}
 }
 

@@ -19,9 +19,10 @@ import (
 type EnvironmentPurpose string
 
 const (
-	EnvironmentPurposeRun       EnvironmentPurpose = "run"
-	EnvironmentPurposeBootstrap EnvironmentPurpose = "bootstrap"
-	EnvironmentPurposeLogin     EnvironmentPurpose = "login"
+	EnvironmentPurposeRun        EnvironmentPurpose = "run"
+	EnvironmentPurposeBootstrap  EnvironmentPurpose = "bootstrap"
+	EnvironmentPurposeLogin      EnvironmentPurpose = "login"
+	EnvironmentPurposeAgentSetup EnvironmentPurpose = "agent-setup"
 )
 
 // EnvironmentPlan is the complete, server-assembled container environment.
@@ -45,7 +46,9 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if ws == nil || member == nil {
 		return nil, errors.New("scheduler: workspace and member are required")
 	}
-	if purpose != EnvironmentPurposeRun && purpose != EnvironmentPurposeBootstrap && purpose != EnvironmentPurposeLogin {
+	switch purpose {
+	case EnvironmentPurposeRun, EnvironmentPurposeBootstrap, EnvironmentPurposeLogin, EnvironmentPurposeAgentSetup:
+	default:
 		return nil, fmt.Errorf("scheduler: invalid environment purpose %q", purpose)
 	}
 	image := ws.Environment.EffectiveImage(s.cfg.NeutralImage)
@@ -83,12 +86,26 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		User:        user, Home: home, Path: env["PATH"],
 	}
 
-	if purpose == EnvironmentPurposeBootstrap {
+	if purpose == EnvironmentPurposeBootstrap || purpose == EnvironmentPurposeAgentSetup {
 		if stagingPath == "" {
 			return nil, errors.New("scheduler: bootstrap staging path is required")
 		}
 		if s.cfg.Toolenv == nil {
 			return nil, errors.New("scheduler: tool environment is not configured")
+		}
+		if purpose == EnvironmentPurposeAgentSetup {
+			// The member's whole harness home is mounted writable at $HOME
+			// so the vendor login flow persists wherever it writes; runs
+			// later mount only the discovered credential paths. The home
+			// mount precedes the staging mount so ~/.local nests over it.
+			if s.cfg.HomesDir == "" || profile.Name == "" {
+				return nil, errors.New("scheduler: agent setup requires a homes directory and a harness name")
+			}
+			hostHome := filepath.Join(s.cfg.HomesDir, string(member.ID), profile.Name)
+			if err := os.MkdirAll(hostHome, 0o700); err != nil {
+				return nil, fmt.Errorf("scheduler: create agent home: %w", err)
+			}
+			plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: hostHome, ContainerPath: home})
 		}
 		plan.ToolHostPath = stagingPath
 		plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: stagingPath, ContainerPath: filepath.Join(home, ".local")})
@@ -110,7 +127,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: toolPath, ContainerPath: filepath.Join(home, ".local"), ReadOnly: true})
 		}
 	}
-	if purpose != EnvironmentPurposeBootstrap && profile.Name != "" {
+	if purpose != EnvironmentPurposeBootstrap && purpose != EnvironmentPurposeAgentSetup && profile.Name != "" {
 		mountRun := run
 		if mountRun == nil {
 			mountRun = &domain.Run{}

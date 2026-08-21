@@ -11,6 +11,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -332,10 +333,22 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 	return nil
 }
 
-func (s *Scheduler) command(harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
+// command resolves argv and profile for one launch. Resolution precedence:
+// the server-wide admin spec, then the member's own stored definition, then
+// the shipped registry. Member definitions only shape argv inside that
+// member's own container, so they never leak across members.
+func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
 	profile, inRegistry := harness.Lookup(harnessName)
 	var tui, headless []string
-	switch spec, ok := s.harnesses[harnessName]; {
+	spec, ok := s.harnesses[harnessName]
+	if !ok {
+		memberSpec, found, err := s.memberHarnessSpec(ctx, member, harnessName)
+		if err != nil {
+			return nil, harness.Profile{}, err
+		}
+		spec, ok = memberSpec, found
+	}
+	switch {
 	case ok:
 		tui, headless = spec.TUIArgs, spec.HeadlessArgs
 		if spec.Executable != "" {
@@ -356,7 +369,7 @@ func (s *Scheduler) command(harnessName string, mode domain.LaunchMode, task str
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:
-		return nil, harness.Profile{}, fmt.Errorf("scheduler: unknown harness %q", harnessName)
+		return nil, harness.Profile{}, fmt.Errorf("scheduler: unknown harness %q; register it with: aether agent add %s", harnessName, harnessName)
 	}
 	var argv []string
 	switch mode {
@@ -374,6 +387,37 @@ func (s *Scheduler) command(harnessName string, mode domain.LaunchMode, task str
 		return nil, harness.Profile{}, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
 	}
 	return harness.Argv(argv, task), profile, nil
+}
+
+// memberHarnessSpec loads and validates the member's stored definition for
+// name. A corrupt or invalid stored blob is an error, not a miss: silently
+// skipping it would launch a shipped profile the member did not ask for.
+func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberID, name string) (HarnessSpec, bool, error) {
+	if member == "" {
+		return HarnessSpec{}, false, nil
+	}
+	row, err := s.cfg.Store.GetHarnessDefinition(ctx, member, name)
+	if errors.Is(err, store.ErrNotFound) {
+		return HarnessSpec{}, false, nil
+	}
+	if err != nil {
+		return HarnessSpec{}, false, fmt.Errorf("scheduler: load member harness definition: %w", err)
+	}
+	var def harness.Definition
+	if err := json.Unmarshal(row.Definition, &def); err != nil {
+		return HarnessSpec{}, false, fmt.Errorf("scheduler: member harness definition %q: %w", name, err)
+	}
+	if err := def.Validate(); err != nil {
+		return HarnessSpec{}, false, fmt.Errorf("scheduler: member harness definition %q: %w", name, err)
+	}
+	return HarnessSpec{
+		TUIArgs:         def.TUIArgs,
+		HeadlessArgs:    def.HeadlessArgs,
+		Executable:      def.Executable,
+		ProfileRoot:     def.ProfileRoot,
+		CredentialPaths: def.CredentialPaths,
+		DenyNames:       def.DenyNames,
+	}, true, nil
 }
 
 // containerSpec converts one fully assembled environment plan into a runtime

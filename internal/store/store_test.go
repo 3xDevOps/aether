@@ -1186,3 +1186,112 @@ func TestSetRunToolSnapshotPreservesHandoffFields(t *testing.T) {
 		t.Fatalf("run after pin = %+v, handoff/branch/tool fields were not preserved", got)
 	}
 }
+
+func TestHarnessDefinitionRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	m := mustCreateMember(t, db)
+
+	blob := []byte(`{"Name":"mytool","Executable":"mytool","TUIArgs":["--tui"]}`)
+	def := &HarnessDefinition{MemberID: m.ID, Name: "mytool", Definition: blob}
+	if err := db.UpsertHarnessDefinition(ctx, def); err != nil {
+		t.Fatalf("UpsertHarnessDefinition: %v", err)
+	}
+	if def.CreatedAt.IsZero() || def.UpdatedAt.IsZero() {
+		t.Fatalf("timestamps not set: %+v", def)
+	}
+
+	got, err := db.GetHarnessDefinition(ctx, m.ID, "mytool")
+	if err != nil {
+		t.Fatalf("GetHarnessDefinition: %v", err)
+	}
+	if got.MemberID != m.ID || got.Name != "mytool" || string(got.Definition) != string(blob) {
+		t.Fatalf("round trip = %+v, want member/name/blob preserved", got)
+	}
+	if !got.CreatedAt.Equal(def.CreatedAt) || !got.UpdatedAt.Equal(def.UpdatedAt) {
+		t.Fatalf("timestamps = %v/%v, want %v/%v", got.CreatedAt, got.UpdatedAt, def.CreatedAt, def.UpdatedAt)
+	}
+}
+
+func TestHarnessDefinitionNotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	m := mustCreateMember(t, db)
+
+	if _, err := db.GetHarnessDefinition(ctx, m.ID, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("get missing = %v, want ErrNotFound", err)
+	}
+	def := &HarnessDefinition{MemberID: "nonexistent", Name: "x", Definition: []byte(`{}`)}
+	if err := db.UpsertHarnessDefinition(ctx, def); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("upsert for missing member = %v, want ErrNotFound", err)
+	}
+}
+
+func TestHarnessDefinitionUpsertOverwrites(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	m := mustCreateMember(t, db)
+
+	first := &HarnessDefinition{
+		MemberID:   m.ID,
+		Name:       "mytool",
+		Definition: []byte(`{"Executable":"v1"}`),
+		CreatedAt:  time.Unix(0, 1_000_000_000).UTC(),
+		UpdatedAt:  time.Unix(0, 1_000_000_000).UTC(),
+	}
+	if err := db.UpsertHarnessDefinition(ctx, first); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	second := &HarnessDefinition{MemberID: m.ID, Name: "mytool", Definition: []byte(`{"Executable":"v2"}`)}
+	if err := db.UpsertHarnessDefinition(ctx, second); err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	got, err := db.GetHarnessDefinition(ctx, m.ID, "mytool")
+	if err != nil {
+		t.Fatalf("GetHarnessDefinition: %v", err)
+	}
+	if string(got.Definition) != `{"Executable":"v2"}` {
+		t.Fatalf("definition = %s, want overwritten blob", got.Definition)
+	}
+	if !got.CreatedAt.Equal(first.CreatedAt) {
+		t.Fatalf("created_at = %v, want preserved %v", got.CreatedAt, first.CreatedAt)
+	}
+	if !got.UpdatedAt.After(first.UpdatedAt) {
+		t.Fatalf("updated_at = %v, want bumped past %v", got.UpdatedAt, first.UpdatedAt)
+	}
+}
+
+func TestListHarnessDefinitionsScopedAndSorted(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	a := mustCreateMember(t, db)
+	b := mustCreateMember(t, db)
+
+	for _, seed := range []struct {
+		member domain.MemberID
+		name   string
+	}{
+		{a.ID, "zeta"},
+		{a.ID, "alpha"},
+		{b.ID, "other"},
+	} {
+		d := &HarnessDefinition{MemberID: seed.member, Name: seed.name, Definition: []byte(`{}`)}
+		if err := db.UpsertHarnessDefinition(ctx, d); err != nil {
+			t.Fatalf("upsert %s/%s: %v", seed.member, seed.name, err)
+		}
+	}
+	got, err := db.ListHarnessDefinitions(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("ListHarnessDefinitions: %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "alpha" || got[1].Name != "zeta" {
+		t.Fatalf("list = %+v, want [alpha zeta] for member a only", got)
+	}
+	empty, err := db.ListHarnessDefinitions(ctx, "no-such-member")
+	if err != nil {
+		t.Fatalf("list unknown member: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("list unknown member = %+v, want empty", empty)
+	}
+}

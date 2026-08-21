@@ -116,6 +116,13 @@ type Store interface {
 	ListPendingWorkspaceShells(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) ([]*PendingWorkspaceShell, error)
 	DeletePendingWorkspaceShell(ctx context.Context, id string) error
 
+	// Harness definitions are member-owned custom agent profiles. The
+	// Definition blob is opaque JSON validated by callers; upsert keys on
+	// (member, name) and preserves CreatedAt on replace.
+	UpsertHarnessDefinition(ctx context.Context, d *HarnessDefinition) error
+	GetHarnessDefinition(ctx context.Context, member domain.MemberID, name string) (*HarnessDefinition, error)
+	ListHarnessDefinitions(ctx context.Context, member domain.MemberID) ([]*HarnessDefinition, error)
+
 	// Aliases used by shell lifecycle callers.
 	SetActiveToolSnapshot(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, id domain.ToolSnapshotID) error
 	GetActiveToolSnapshot(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) (*domain.ToolSnapshot, error)
@@ -141,6 +148,17 @@ type PendingWorkspaceShell struct {
 
 // WorkspaceShellSession is retained as a descriptive alias for callers.
 type WorkspaceShellSession = PendingWorkspaceShell
+
+// HarnessDefinition is one member-owned custom agent definition. The
+// Definition blob is a JSON-encoded internal/harness.Definition using Go
+// field names; the store treats it as opaque bytes and callers validate it.
+type HarnessDefinition struct {
+	MemberID   domain.MemberID
+	Name       string
+	Definition []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
 
 // ProfileFile is one path inside a stored profile snapshot.
 type ProfileFile struct {
