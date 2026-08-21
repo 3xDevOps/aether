@@ -61,7 +61,7 @@ func releaseServer(t *testing.T, asset string, body []byte, poison bool) *httpte
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "%s  %s\n", digest, asset)
+		_, _ = fmt.Fprintf(w, "%s  %s\n", digest, asset)
 	})
 	mux.HandleFunc("/"+asset, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
@@ -143,7 +143,7 @@ func TestApplyRejectsMissingAsset(t *testing.T) {
 	// checksums.txt lists the asset but the download 404s.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "%s  %s\n", strings.Repeat("0", 64), "aether-linux-amd64")
+		_, _ = fmt.Fprintf(w, "%s  %s\n", strings.Repeat("0", 64), "aether-linux-amd64")
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

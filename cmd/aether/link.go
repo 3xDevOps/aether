@@ -112,8 +112,8 @@ func runLink(args []string) error {
 		return nil
 	}
 	var wl protocol.WorkspaceListResult
-	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &wl); err != nil {
-		return err
+	if callErr := c.Call(protocol.MethodWorkspaceList, struct{}{}, &wl); callErr != nil {
+		return callErr
 	}
 	if len(wl.Workspaces) == 0 {
 		fmt.Println("no workspace yet; skip git remote (re-run link --repo after workspace add)")
