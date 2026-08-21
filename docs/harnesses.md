@@ -73,34 +73,50 @@ with an unknown-flag error, the installed CLI has drifted from the registry.
 Pin it in an administrator-approved custom image or update the registry. A
 CLI installed by bootstrap is selected by the active tool snapshot.
 
-## Logging in
+## Setting up an agent
 
-Once per person, per harness:
+Once per person, per agent:
 
 ```sh
-aether setup <harness> --workspace <workspace>
+aether agent add <name> --workspace <workspace>
 ```
 
-This opens the unified workspace shell in login mode. The active tool snapshot
-is mounted read-only at `~/.local`; the selected harness credential home is
-mounted separately and according to the administrator's definition. Run the
-vendor's login flow, then `exit`. Login state is saved per member and harness,
-and is available to that member's later runs.
+This opens the unified workspace shell in agent-setup mode: tool staging is
+mounted writable at `~/.local` and your per-harness credential home is
+mounted writable at `$HOME`. Install the executable into `~/.local/bin` with
+the vendor's documented procedure, run the vendor's login flow, then `exit`
+cleanly. Aether verifies the executable, snapshots the tools, persists the
+login state, and - for a name outside the shipped table - registers a
+launch definition under your membership. `aether agent list` shows shipped
+and member-registered agents.
+
+For an unshipped name the command asks for the interactive and headless
+launch templates first (`<name> {task}` and `<name> -p {task}` by default;
+Enter accepts, or pass `--tui` / `--headless`). `{task}` is replaced as one
+argv value, never through a shell. Aether discovers where the login flow
+wrote its state by comparing your credential home before and after the
+session, so the registered definition mounts exactly those paths into later
+runs.
+
+The individual steps remain available when you need only one of them:
+
+- `aether workspace bootstrap <workspace>` re-installs tools without
+  touching login state (`--resume` / `--reset` manage a disconnected
+  session's pending staging).
+- `aether setup <harness> --workspace <workspace>` re-runs a login without
+  reinstalling. The active tool snapshot is mounted read-only at `~/.local`;
+  the harness credential home is mounted per its definition.
 
 Three things to know:
 
-- **Bootstrap first.** If the harness executable is not in the active tool
-  snapshot or administrator-approved image, login cannot start it. Use
-  `aether workspace bootstrap <workspace> --command <executable>` first.
 - **There is no browser in the container.** Use the harness's headless or
   device-code login option, the one that prints a URL and a code you complete
   in your own browser.
 - **Logins are per member and shared across that member's runs**, the same way
   two terminals on one laptop share a login. Never across members.
-
-If you skip setup, the agent's own login prompt simply appears in the run's
-PTY. Attach with `aether attach <run>` and complete it there; it persists the
-same way.
+- If you skip the login part, the agent's own login prompt simply appears in
+  the run's PTY. Attach with `aether attach <run>` and complete it there; it
+  persists the same way.
 
 ### Claude Code
 
@@ -152,23 +168,29 @@ This is how the [quickstart](quickstart.md#prove-the-plumbing-without-an-agent-s
 proves the whole lifecycle without any vendor account, and it is the harness
 the end-to-end tests drive.
 
-### `custom`
+### Custom agents
 
-Custom launch definitions are server configuration, not workspace input. An
-administrator supplies them with `--harness-definitions` or the
-`AETHER_HARNESS_DEFINITIONS` environment variable. Members cannot submit an
-executable or argv template.
+Custom launch definitions come from two places, resolved in this order:
 
-The value is a JSON object keyed by harness name. Each definition must name
-the executable and provide both interactive and headless argv. `{task}` is
-replaced as one argv value, never passed through a shell. Profile and
+1. **Server configuration** (administrator): `--harness-definitions` or the
+   `AETHER_HARNESS_DEFINITIONS` environment variable. These pin a name for
+   every member and always win.
+2. **Member registration**: `aether agent add <name>` stores a definition
+   scoped to the registering member, over the normal control channel; no
+   server restart. A member's definition shapes argv only inside that
+   member's own containers and never affects anyone else. Shipped names and
+   the reserved names `custom` and `fake` cannot be registered.
+
+Both forms carry the same fields and pass the same validation. The
+administrator JSON is an object keyed by harness name. Each definition must
+name the executable and provide both interactive and headless argv. `{task}`
+is replaced as one argv value, never passed through a shell. Profile and
 credential paths are explicit absolute container paths under `/root` or
 `/home/aether`; credentials must be inside the profile root when one is
 configured. Deny names are basenames only.
 
-For example, an administrator can register OMP without adding vendor logic to
-Aether. This definition is only launch configuration. Install OMP through
-bootstrap first, then use `aether setup omp --workspace <workspace>` for login:
+For example, an administrator can pin OMP without adding vendor logic to
+Aether (a member would instead just run `aether agent add omp`):
 
 ```json
 {
@@ -186,12 +208,13 @@ bootstrap first, then use `aether setup omp --workspace <workspace>` for login:
 
 The server validates that the executable is a name rather than a host path,
 that argv starts with that executable, and that profile, credential, and
-deny-name policies are safe. A missing or invalid custom definition rejects
-server startup or the run. Tool installation, login state, profile sync, and
-launch definitions remain separate: bootstrap installs the executable,
-`aether setup` performs login, profile push syncs only the declared profile,
-and the launch definition only resolves argv. Both shell modes use the
-`aether-workspace-shell` subsystem; there is no separate setup subsystem.
+deny-name policies are safe. An invalid administrator definition rejects
+server startup; an invalid member registration is refused at the RPC. Tool
+installation, login state, profile sync, and launch definitions remain
+separate concerns even when `aether agent add` drives them in one session:
+bootstrap installs the executable, login writes credential state, profile
+push syncs only the declared profile, and the launch definition only
+resolves argv. All shell modes use the `aether-workspace-shell` subsystem.
 
 ## Agent configuration (profile sync)
 
