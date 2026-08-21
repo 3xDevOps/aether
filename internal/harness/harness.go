@@ -43,8 +43,11 @@ type Definition struct {
 
 // Validate checks a generic definition before it can be used for a run.
 func (d Definition) Validate() error {
-	if d.Name == "" {
-		return fmt.Errorf("harness: definition name is required")
+	// The name becomes a host path segment (<homes>/<member>/<name>) and a
+	// store key; it must be a plain single-segment identifier, never a
+	// relative path that could address another member's credential home.
+	if err := validateName(d.Name); err != nil {
+		return err
 	}
 	if err := validateExecutable(d.Executable); err != nil {
 		return err
@@ -72,6 +75,50 @@ func (d Definition) Validate() error {
 		if denied == "" || path.Base(denied) != denied || denied == "." || denied == ".." ||
 			strings.ContainsAny(denied, `/\`) {
 			return fmt.Errorf("harness: denied sync name %q is not a basename", denied)
+		}
+	}
+	return nil
+}
+
+func validateName(name string) error {
+	if name == "" {
+		return fmt.Errorf("harness: definition name is required")
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00") ||
+		strings.ContainsAny(name, " \t\r\n") {
+		return fmt.Errorf("harness: definition name %q must be a plain name", name)
+	}
+	return nil
+}
+
+// ValidateMemberDefinition applies Validate plus the restrictions that hold
+// only for member-supplied definitions: no path may live under the
+// tool-snapshot mount (~/.local). Runs mount the immutable snapshot
+// read-only there, so a member credential path beneath it would either be
+// shadowed or punch a writable hole through snapshot immutability. Trusted
+// administrator definitions keep the capability (the opencode pattern).
+func ValidateMemberDefinition(d Definition) error {
+	if err := d.Validate(); err != nil {
+		return err
+	}
+	if d.ProfileRoot != "" {
+		if err := rejectToolPath(d.ProfileRoot); err != nil {
+			return fmt.Errorf("harness: profile root: %w", err)
+		}
+	}
+	for _, credential := range d.CredentialPaths {
+		if err := rejectToolPath(credential); err != nil {
+			return fmt.Errorf("harness: credential path: %w", err)
+		}
+	}
+	return nil
+}
+
+func rejectToolPath(raw string) error {
+	clean := path.Clean(raw)
+	for _, root := range []string{"/root/.local", "/home/aether/.local"} {
+		if isPathWithin(clean, root) {
+			return fmt.Errorf("path %q is under the tool mount %s", raw, root)
 		}
 	}
 	return nil

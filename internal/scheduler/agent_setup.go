@@ -3,8 +3,10 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -44,6 +46,16 @@ func (s *Scheduler) agentSetupProfile(req domain.WorkspaceShellRequest) (harness
 	if name == "custom" || name == "fake" {
 		return harness.Profile{}, fmt.Errorf("scheduler: %q is a reserved harness name", name)
 	}
+	// An administrator definition pins the name for everyone; the setup
+	// shell must run under it, not under a member proposal that later
+	// launches would ignore.
+	if spec, ok := s.harnesses[name]; ok && spec.Executable != "" {
+		return (harness.Definition{
+			Name: name, TUIArgs: spec.TUIArgs, HeadlessArgs: spec.HeadlessArgs,
+			Executable: spec.Executable, ProfileRoot: spec.ProfileRoot,
+			CredentialPaths: spec.CredentialPaths, DenyNames: spec.DenyNames,
+		}).Profile(), nil
+	}
 	if shipped, ok := harness.Lookup(name); ok {
 		return shipped, nil
 	}
@@ -75,7 +87,7 @@ func agentSetupDefinition(req domain.WorkspaceShellRequest, credentialPaths []st
 		ProfileRoot:     profileRoot,
 		CredentialPaths: credentialPaths,
 	}
-	if err := def.Validate(); err != nil {
+	if err := harness.ValidateMemberDefinition(def); err != nil {
 		return harness.Definition{}, fmt.Errorf("scheduler: agent definition: %w", err)
 	}
 	return def, nil
@@ -86,6 +98,10 @@ func agentSetupDefinition(req domain.WorkspaceShellRequest, credentialPaths []st
 // surviving entries to container credential paths, and store the member
 // definition. Shipped names store nothing.
 func (s *Scheduler) registerAgentDefinition(ctx context.Context, member domain.MemberID, req domain.WorkspaceShellRequest, plan *EnvironmentPlan, conn io.Writer) error {
+	if spec, ok := s.harnesses[req.Harness]; ok && spec.Executable != "" {
+		_, _ = io.WriteString(conn, "aether: "+req.Harness+" is ready (administrator-defined agent; tools and login saved).\r\n")
+		return nil
+	}
 	if _, shipped := harness.Lookup(req.Harness); shipped {
 		_, _ = io.WriteString(conn, "aether: "+req.Harness+" is ready (shipped agent; tools and login saved).\r\n")
 		return nil
@@ -119,6 +135,46 @@ func (s *Scheduler) registerAgentDefinition(ctx context.Context, member domain.M
 	return nil
 }
 
+// seedStagingFromActiveSnapshot copies the member's active tool snapshot
+// into a fresh staging directory so a completed shell promotes the union
+// of old and new tools. Without the seed, installing agent B would evict
+// agent A: the member+workspace has a single active head. No active
+// snapshot seeds nothing.
+func (s *Scheduler) seedStagingFromActiveSnapshot(ctx context.Context, member domain.MemberID, ws domain.WorkspaceID, staging string) error {
+	active, err := s.cfg.Toolenv.ActivePath(ctx, member, ws)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: resolve active snapshot: %w", err)
+	}
+	if err := os.CopyFS(staging, os.DirFS(active)); err != nil {
+		return fmt.Errorf("scheduler: seed staging from active snapshot: %w", err)
+	}
+	return nil
+}
+
+// acquireAgentSetup claims the member+harness agent-setup slot. Concurrent
+// sessions would race the exit-time promotion and registration writes, so
+// the second session is refused up front rather than corrupted later.
+func (s *Scheduler) acquireAgentSetup(member domain.MemberID, name string) (func(), error) {
+	key := string(member) + "/" + name
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.agentSetups == nil {
+		s.agentSetups = make(map[string]struct{})
+	}
+	if _, busy := s.agentSetups[key]; busy {
+		return nil, fmt.Errorf("scheduler: an agent setup for %q is already in progress; finish or disconnect it first", name)
+	}
+	s.agentSetups[key] = struct{}{}
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.agentSetups, key)
+	}, nil
+}
+
 // discoverCredentialPaths lists the top-level entries the login flow left
 // in the member's host-side home, filters noise, and converts survivors to
 // absolute container paths. Entries that fail the harness path validator
@@ -138,13 +194,19 @@ func discoverCredentialPaths(hostHome, containerHome string) ([]string, error) {
 		if homeDiffNoise[name] {
 			continue
 		}
+		// A symlink here is member-authored and would be resolved on the
+		// host at mount time; it must never become a credential path, or
+		// it could alias another member's files under HomesDir.
+		if entry.Type()&fs.ModeSymlink != 0 {
+			return nil, fmt.Errorf("login state %q is a symlink; symlinked credential paths are not supported", name)
+		}
 		containerPath := path.Join(containerHome, name)
 		probe := harness.Definition{
 			Name: "probe", Executable: "probe",
 			TUIArgs: []string{"probe", harness.TaskPlaceholder}, HeadlessArgs: []string{"probe", harness.TaskPlaceholder},
 			CredentialPaths: []string{containerPath},
 		}
-		if err := probe.Validate(); err != nil {
+		if err := harness.ValidateMemberDefinition(probe); err != nil {
 			return nil, fmt.Errorf("login state %q cannot be mounted: %w", name, err)
 		}
 		paths = append(paths, containerPath)

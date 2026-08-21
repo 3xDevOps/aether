@@ -109,6 +109,23 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		}
 		plan.ToolHostPath = stagingPath
 		plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: stagingPath, ContainerPath: filepath.Join(home, ".local")})
+		if purpose == EnvironmentPurposeAgentSetup {
+			// A shipped profile may keep credentials under ~/.local
+			// (opencode). The staging mount would swallow that login state
+			// into the immutable tool snapshot, so those paths are mounted
+			// from the credential home over the staging. Ordered after
+			// staging so the nesting loop below approves child-over-parent.
+			creds, credErr := s.credentialMounts(&domain.Run{}, member.ID, profile, home)
+			if credErr != nil {
+				return nil, credErr
+			}
+			toolMount := path.Clean(filepath.Join(home, ".local"))
+			for _, m := range creds {
+				if strings.HasPrefix(path.Clean(m.ContainerPath), toolMount+"/") {
+					plan.Mounts = append(plan.Mounts, m)
+				}
+			}
+		}
 	} else {
 		snapshot, snapErr := s.resolveToolSnapshot(ctx, run, member.ID, ws.ID, purpose == EnvironmentPurposeRun)
 		if snapErr != nil && !errors.Is(snapErr, store.ErrNotFound) {
@@ -156,15 +173,33 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if s.cfg.Toolenv != nil {
 		roots = append(roots, s.cfg.Toolenv.Root())
 	}
+	// Nesting approval is not blanket: the sanctioned parents are the
+	// container home (agent-setup mounts staging and credentials inside
+	// $HOME), the tool mount (registry credentials under ~/.local, the
+	// opencode pattern), and the profile root (registry credential files
+	// under the synced profile, the claude pattern). A member definition
+	// must not be able to nest a writable mount under an arbitrary
+	// read-only parent.
+	sanctioned := map[string]bool{
+		path.Clean(home): true,
+		path.Clean(filepath.Join(home, ".local")): true,
+	}
+	if root := profile.ContainerLocalRoot(user); root != "" {
+		sanctioned[path.Clean(root)] = true
+	}
 	allowedNestings := make(map[string]string)
 	for i, childMount := range plan.Mounts {
 		child := path.Clean(childMount.ContainerPath)
 		for j := 0; j < i; j++ {
 			parent := path.Clean(plan.Mounts[j].ContainerPath)
-			if child != parent && strings.HasPrefix(child, parent+"/") {
-				allowedNestings[child] = parent
-				break
+			if child == parent || !strings.HasPrefix(child, parent+"/") {
+				continue
 			}
+			if !sanctioned[parent] {
+				continue
+			}
+			allowedNestings[child] = parent
+			break
 		}
 	}
 	if validateErr := runtime.ValidateMounts(plan.Mounts, runtime.MountPolicy{

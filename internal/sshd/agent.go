@@ -1,6 +1,7 @@
 package sshd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,9 +23,16 @@ func init() {
 var reservedAgentNames = map[string]bool{"custom": true, "fake": true}
 
 func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
-	p, err := decodeParams[protocol.AgentRegisterParams](raw)
-	if err != nil {
-		return nil, err
+	// Strict decoding: a misspelled field ("credential_path") in a
+	// definition must be an error, not a silently reduced registration
+	// that passes validation with the wrong paths.
+	var p protocol.AgentRegisterParams
+	if len(raw) > 0 {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&p); err != nil {
+			return nil, invalidParams("invalid params: " + err.Error())
+		}
 	}
 	name := p.Definition.Name
 	if reservedAgentNames[name] {
@@ -42,7 +50,7 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 		CredentialPaths: p.Definition.CredentialPaths,
 		DenyNames:       p.Definition.DenyNames,
 	}
-	if verr := def.Validate(); verr != nil {
+	if verr := harness.ValidateMemberDefinition(def); verr != nil {
 		return nil, invalidParams(verr.Error())
 	}
 	blob, merr := json.Marshal(def)
@@ -57,6 +65,8 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 }
 
 func (s *Server) agentList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	// "custom" (deployment escape hatch) and "fake" (deterministic test
+	// harness, registered scheduler-side) are deliberately not advertised.
 	var agents []protocol.AgentInfo
 	for _, p := range harness.Profiles() {
 		if p.Name == "custom" {

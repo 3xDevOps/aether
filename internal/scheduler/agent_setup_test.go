@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ func agentSetupEnv(t *testing.T) *testEnv {
 
 func runAgentSetupShell(t *testing.T, e *testEnv, req domain.WorkspaceShellRequest, beforeExit func(c *fakeContainer), exitCode int) error {
 	t.Helper()
+	before := len(e.rt.allContainers())
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
 	drainPipe(client)
@@ -37,8 +39,9 @@ func runAgentSetupShell(t *testing.T, e *testEnv, req domain.WorkspaceShellReque
 	go func() {
 		done <- e.sched.WorkspaceShell(t.Context(), e.member.ID, req, 80, 24, server, nil)
 	}()
-	waitFor(t, "agent setup container", func() bool { return len(e.rt.allContainers()) == 1 })
-	c := e.rt.allContainers()[0]
+	waitFor(t, "agent setup container", func() bool { return len(e.rt.allContainers()) > before })
+	containers := e.rt.allContainers()
+	c := containers[len(containers)-1]
 	if beforeExit != nil {
 		beforeExit(c)
 	}
@@ -159,6 +162,76 @@ func TestAgentSetupShellShippedNameStoresNothing(t *testing.T) {
 	}
 	if _, err := e.db.GetHarnessDefinition(t.Context(), e.member.ID, "claude"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("shipped name stored a member definition (err=%v)", err)
+	}
+}
+
+// A symlink planted in the home during setup must abort registration: at
+// run time it would be resolved on the host and could alias another
+// member's credentials.
+func TestAgentSetupShellRejectsSymlinkLoginState(t *testing.T) {
+	e := agentSetupEnv(t)
+	hostHome := filepath.Join(e.cfg.HomesDir, string(e.member.ID), "omp")
+	req := domain.WorkspaceShellRequest{
+		Workspace: domain.WorkspaceSelector{ID: e.ws.ID},
+		Mode:      domain.WorkspaceShellAgentSetup,
+		Harness:   "omp",
+	}
+	err := runAgentSetupShell(t, e, req, func(c *fakeContainer) {
+		staging := c.spec.Mounts[1]
+		if mkErr := os.MkdirAll(filepath.Join(staging.HostPath, "bin"), 0o755); mkErr != nil {
+			t.Fatal(mkErr)
+		}
+		if wrErr := os.WriteFile(filepath.Join(staging.HostPath, "bin", "omp"), []byte("#!/bin/sh\n"), 0o755); wrErr != nil {
+			t.Fatal(wrErr)
+		}
+		if lnErr := os.Symlink("../../evil", filepath.Join(hostHome, ".loot")); lnErr != nil {
+			t.Fatal(lnErr)
+		}
+	}, 0)
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("err = %v, want a symlink rejection", err)
+	}
+	if _, defErr := e.db.GetHarnessDefinition(t.Context(), e.member.ID, "omp"); !errors.Is(defErr, store.ErrNotFound) {
+		t.Fatalf("symlinked home registered a definition (err=%v)", defErr)
+	}
+}
+
+// Adding a second agent must not evict the first agent's tools: fresh
+// staging is seeded from the active snapshot before the session starts.
+func TestAgentSetupShellAccumulatesTools(t *testing.T) {
+	e := agentSetupEnv(t)
+	install := func(name string) func(c *fakeContainer) {
+		return func(c *fakeContainer) {
+			staging := c.spec.Mounts[1]
+			if mkErr := os.MkdirAll(filepath.Join(staging.HostPath, "bin"), 0o755); mkErr != nil {
+				t.Fatal(mkErr)
+			}
+			if wrErr := os.WriteFile(filepath.Join(staging.HostPath, "bin", name), []byte("#!/bin/sh\n"), 0o755); wrErr != nil {
+				t.Fatal(wrErr)
+			}
+		}
+	}
+	first := domain.WorkspaceShellRequest{
+		Workspace: domain.WorkspaceSelector{ID: e.ws.ID},
+		Mode:      domain.WorkspaceShellAgentSetup,
+		Harness:   "agenta",
+	}
+	if err := runAgentSetupShell(t, e, first, install("agenta"), 0); err != nil {
+		t.Fatalf("first agent setup: %v", err)
+	}
+	second := first
+	second.Harness = "agentb"
+	if err := runAgentSetupShell(t, e, second, install("agentb"), 0); err != nil {
+		t.Fatalf("second agent setup: %v", err)
+	}
+	active, err := e.cfg.Toolenv.ActivePath(t.Context(), e.member.ID, e.ws.ID)
+	if err != nil {
+		t.Fatalf("active snapshot: %v", err)
+	}
+	for _, name := range []string{"agenta", "agentb"} {
+		if _, statErr := os.Stat(filepath.Join(active, "bin", name)); statErr != nil {
+			t.Fatalf("active snapshot lost %s: %v", name, statErr)
+		}
 	}
 }
 

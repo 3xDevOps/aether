@@ -124,6 +124,10 @@ type Scheduler struct {
 	mu              sync.Mutex
 	runs            map[domain.RunID]*supervised
 	credentialUsers map[*credentialUserReservation]struct{}
+	// agentSetups serializes agent-setup shells per member+harness: the
+	// exit-time pair of writes (tool promotion, definition upsert) must
+	// not interleave between two sessions.
+	agentSetups map[string]struct{}
 	// coordination is the attached conflict-coordination service and the
 	// staged-bridge directory (UseCoordination); nil means new containers
 	// get no coordination assets.
@@ -392,8 +396,13 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 // memberHarnessSpec loads and validates the member's stored definition for
 // name. A corrupt or invalid stored blob is an error, not a miss: silently
 // skipping it would launch a shipped profile the member did not ask for.
+// A stored row shadowing a shipped name is rejected here independently of
+// the write path, so the invariant holds even against a corrupted store.
 func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberID, name string) (HarnessSpec, bool, error) {
 	if member == "" {
+		return HarnessSpec{}, false, nil
+	}
+	if _, shipped := harness.Lookup(name); shipped || name == "fake" {
 		return HarnessSpec{}, false, nil
 	}
 	row, err := s.cfg.Store.GetHarnessDefinition(ctx, member, name)
@@ -407,7 +416,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 	if err := json.Unmarshal(row.Definition, &def); err != nil {
 		return HarnessSpec{}, false, fmt.Errorf("scheduler: member harness definition %q: %w", name, err)
 	}
-	if err := def.Validate(); err != nil {
+	if err := harness.ValidateMemberDefinition(def); err != nil {
 		return HarnessSpec{}, false, fmt.Errorf("scheduler: member harness definition %q: %w", name, err)
 	}
 	return HarnessSpec{
