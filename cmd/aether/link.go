@@ -64,7 +64,7 @@ func runLink(args []string) error {
 	invite := fs.String("invite", "", "one-time invite code")
 	name := fs.String("name", "", "display name when joining via invite")
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
-	workspace := fs.String("workspace", "", "workspace id for the git remote")
+	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
 	addr, err := parseLeadingArg(fs, args)
 	if err != nil || addr == "" {
 		return fmt.Errorf("usage: aether link <addr> [--invite] [--name] [--repo] [--workspace]")
@@ -122,9 +122,16 @@ func runLink(args []string) error {
 	wsID := *workspace
 	if wsID == "" {
 		if len(wl.Workspaces) > 1 {
-			return fmt.Errorf("link --repo: multiple workspaces; pass --workspace <id>")
+			return fmt.Errorf("link --repo: multiple workspaces; pass --workspace <name-or-id>")
 		}
 		wsID = wl.Workspaces[0].ID
+	} else {
+		// The git remote URL must carry the workspace ID; sshd resolves
+		// the pack path by ID only, so a name here would 128 every push.
+		wsID, err = workspaceIDIn(wl.Workspaces, wsID)
+		if err != nil {
+			return err
+		}
 	}
 	url := cli.GitURL(cfg.User, cfg.Addr, wsID)
 	if err := gitRemote(cfg.Repo, url); err != nil {
