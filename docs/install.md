@@ -39,9 +39,15 @@ Passing flags through a pipe needs `sh -s --`:
 curl -fsSL .../install.sh | sh -s -- --client --bin-dir ~/.local/bin
 ```
 
-**Upgrading is re-running the installer.** Binaries are replaced in place; the
-data directory is untouched. Stop the server first if it is running under
-systemd, then `systemctl restart aether-server`.
+**Upgrading:** `aether update` replaces the running CLI with the latest
+release (or `--version <tag>`), verifying it against the release's
+`checksums.txt`. On a Linux host with `aether-server` installed next to the
+CLI it updates both and reminds you to
+`sudo systemctl restart aether-server`. `aether update --check` only reports
+whether a newer release exists. Binaries in `/usr/local/bin` need
+`sudo aether update`. Re-running the installer does the same job; the data
+directory is untouched either way. Windows has no self-update - download the
+release binary.
 
 ## Manual install
 
@@ -269,9 +275,10 @@ Pushing a `vX.Y.Z` tag runs
 [`.github/workflows/release.yml`](../.github/workflows/release.yml): it vets,
 runs the unit tests, cross-compiles the full matrix with `make release`, writes
 `checksums.txt`, and publishes a GitHub release with generated notes. Those
-assets are exactly what the install script downloads, so the release workflow
-and the installer must stay in step: renaming an asset breaks every
-`curl | sh`.
+assets are exactly what the install script and `aether update` download, so
+the release workflow, the installer, and `internal/selfupdate` must stay in
+step: renaming an asset breaks every `curl | sh` and every deployed binary's
+self-update.
 
 If a tag workflow fails after building, rerun the workflow for that tag. The
 publisher uploads missing assets to the existing release and replaces
