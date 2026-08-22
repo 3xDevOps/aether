@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -134,31 +134,9 @@ func runLink(args []string) error {
 		}
 	}
 	url := cli.GitURL(cfg.User, cfg.Addr, wsID)
-	if err := gitRemote(cfg.Repo, url); err != nil {
+	if err := localops.GitRemote(cfg.Repo, url, os.Stdout, os.Stderr); err != nil {
 		return err
 	}
 	fmt.Printf("git remote aether -> %s\n", url)
 	return nil
-}
-
-func gitRemote(repo, url string) error {
-	out, err := exec.Command("git", "-C", repo, "remote").Output()
-	if err != nil {
-		return fmt.Errorf("git remote: %w", err)
-	}
-	has := false
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "aether" {
-			has = true
-			break
-		}
-	}
-	args := []string{"-C", repo, "remote", "add", "aether", url}
-	if has {
-		args = []string{"-C", repo, "remote", "set-url", "aether", url}
-	}
-	cmd := exec.Command("git", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }

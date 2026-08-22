@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 
 	cliprofile "github.com/3xDevOps/Aether/internal/cli/profile"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/syncd"
 )
 
@@ -87,53 +87,10 @@ func daemonInstall(args []string) error {
 	if cfg.Server == "" {
 		return errors.New("daemon install: --server is required")
 	}
-	repo, err := filepath.Abs(cfg.RepoPath)
+	path, activate, err := localops.InstallDaemonUnit(*cfg, *noProfileSync)
 	if err != nil {
 		return err
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve aether binary path: %w", err)
-	}
-
-	runArgs := []string{"daemon", "run", "--server", cfg.Server, "--repo", repo}
-	if cfg.KeyPath != "" {
-		runArgs = append(runArgs, "--key", cfg.KeyPath)
-	}
-	if cfg.KnownHostsPath != "" {
-		runArgs = append(runArgs, "--known-hosts", cfg.KnownHostsPath)
-	}
-	if cfg.User != "aether" {
-		runArgs = append(runArgs, "--user", cfg.User)
-	}
-	if cfg.Remote != "aether" {
-		runArgs = append(runArgs, "--remote", cfg.Remote)
-	}
-	if cfg.BaseBranch != "main" {
-		runArgs = append(runArgs, "--base", cfg.BaseBranch)
-	}
-	if cfg.WorkspaceID != "" {
-		runArgs = append(runArgs, "--workspace", cfg.WorkspaceID)
-	}
-	if *noProfileSync {
-		runArgs = append(runArgs, "--no-profile-sync")
-	}
-
-	unit, err := syncd.ServiceUnit(runtime.GOOS, exe, runArgs)
-	if err != nil {
-		return err
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(home, filepath.FromSlash(unit.Path))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, []byte(unit.Content), 0o644); err != nil {
-		return err
-	}
-	fmt.Printf("wrote %s\nactivate it with:\n  %s\n", path, unit.Activate)
+	fmt.Printf("wrote %s\nactivate it with:\n  %s\n", path, activate)
 	return nil
 }

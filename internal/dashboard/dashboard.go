@@ -24,6 +24,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/sshd"
+	"github.com/3xDevOps/Aether/internal/webgate"
 	"github.com/3xDevOps/Aether/web"
 )
 
@@ -169,7 +170,7 @@ func New(cfg Config) (*Gateway, error) {
 		// pattern lands here; answering it with the SPA would turn a
 		// wrong-verb client bug into a silent 200.
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
-			writeError(w, http.StatusMethodNotAllowed, &protocol.Error{
+			webgate.WriteError(w, http.StatusMethodNotAllowed, &protocol.Error{
 				Code:    protocol.CodeInvalidRequest,
 				Message: "method not allowed",
 			})

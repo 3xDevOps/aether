@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
 // handleCapabilities serves GET /api/v1/capabilities: what this gateway
@@ -19,7 +20,7 @@ func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if perr := g.cfg.RPC.CheckMember(r.Context(), member); perr != nil {
-		writeError(w, statusFor(perr.Code), perr)
+		webgate.WriteError(w, webgate.StatusFor(perr.Code), perr)
 		return
 	}
 	methods := make([]string, 0, len(apiMethods))

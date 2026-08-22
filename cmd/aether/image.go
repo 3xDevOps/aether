@@ -4,38 +4,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/3xDevOps/Aether/internal/localops"
 )
-
-const neutralScaffoldDockerfile = `FROM ubuntu:24.04
-
-WORKDIR /workspace
-CMD ["/bin/bash"]
-`
-
-const neutralScaffoldDockerignore = `.git
-.gitignore
-Dockerfile*
-.dockerignore
-.devcontainer/
-`
-
-const neutralScaffoldDevcontainer = `{
-  "name": "Aether workspace",
-  "build": {
-    "dockerfile": "../Dockerfile",
-    "context": ".."
-  },
-  "workspaceFolder": "/workspace"
-}
-`
-
-type imageScaffoldOptions struct {
-	Force        bool
-	DevContainer bool
-}
 
 func init() {
 	register(command{
@@ -72,40 +44,6 @@ func imageInit(args []string) error {
 	if fs.NArg() > 1 {
 		return errors.New("image init accepts at most one directory")
 	}
-	return initImageScaffold(directory, imageScaffoldOptions{Force: *force, DevContainer: *devcontainer})
-}
-
-func initImageScaffold(directory string, options imageScaffoldOptions) error {
-	targets := []string{
-		filepath.Join(directory, "Dockerfile"),
-		filepath.Join(directory, ".dockerignore"),
-	}
-	contents := []string{neutralScaffoldDockerfile, neutralScaffoldDockerignore}
-	if options.DevContainer {
-		targets = append(targets, filepath.Join(directory, ".devcontainer", "devcontainer.json"))
-		contents = append(contents, neutralScaffoldDevcontainer)
-	}
-	if !options.Force {
-		for _, path := range targets {
-			if _, err := os.Stat(path); err == nil {
-				return fmt.Errorf("refusing to overwrite existing %s; use --force", path)
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("check %s: %w", path, err)
-			}
-		}
-	}
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return fmt.Errorf("create image scaffold directory: %w", err)
-	}
-	if options.DevContainer {
-		if err := os.MkdirAll(filepath.Join(directory, ".devcontainer"), 0o755); err != nil {
-			return fmt.Errorf("create devcontainer directory: %w", err)
-		}
-	}
-	for i, path := range targets {
-		if err := os.WriteFile(path, []byte(contents[i]), 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", path, err)
-		}
-	}
-	return nil
+	_, err := localops.ScaffoldFiles(directory, localops.ScaffoldOptions{Force: *force, DevContainer: *devcontainer})
+	return err
 }
