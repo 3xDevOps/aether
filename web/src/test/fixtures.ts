@@ -259,6 +259,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       remote: 'aether',
       url: 'ssh://alice@host:2222/wsp_1',
     })),
+    // Mirrors the gateway: link.switch always refuses with the restart
+    // instruction; the SSH identity is process-lifetime.
+    localLinkSwitch: vi.fn(async (name: string) => {
+      throw new Error(`restart aether gui --server ${name} to switch servers`)
+    }),
     localPull: vi.fn(async () => ({
       branch: 'aether/run-1-checkout',
       ref: 'refs/heads/aether/run-1-checkout',

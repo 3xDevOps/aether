@@ -52,6 +52,26 @@ func normalizeAddr(addr string) string {
 	return net.JoinHostPort(host, defaultSSHPort)
 }
 
+// linkConfig is the config `aether link` saves: the fresh link cfg
+// carrying forward previously saved profiles - Save overwrites the whole
+// file - plus, when name is non-empty, a snapshot of cfg upserted under
+// that name. Without a name the top-level fields change exactly as before
+// profiles existed.
+func linkConfig(cfg, prev cli.Config, name string) cli.Config {
+	cfg.Links = prev.Links
+	if name == "" {
+		return cfg
+	}
+	return cli.UpsertLink(cfg, cli.NamedLink{
+		Name:       name,
+		Addr:       cfg.Addr,
+		User:       cfg.User,
+		Key:        cfg.Key,
+		Repo:       cfg.Repo,
+		KnownHosts: cfg.KnownHosts,
+	})
+}
+
 func absoluteRepo(repo string) (string, error) {
 	if repo == "" {
 		return "", nil
@@ -62,7 +82,7 @@ func absoluteRepo(repo string) (string, error) {
 func runLink(args []string) error {
 	fs := flag.NewFlagSet("link", flag.ExitOnError)
 	invite := fs.String("invite", "", "one-time invite code")
-	name := fs.String("name", "", "display name when joining via invite")
+	name := fs.String("name", "", "profile label for this link (also the display name when joining via invite)")
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
 	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
 	addr, err := parseLeadingArg(fs, args)
@@ -99,7 +119,11 @@ func runLink(args []string) error {
 		return fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
 	}
 
-	if err = cli.Save(cfg); err != nil {
+	prev, loadErr := cli.Load()
+	if loadErr != nil {
+		prev = cli.Config{}
+	}
+	if err = cli.Save(linkConfig(cfg, prev, *name)); err != nil {
 		return err
 	}
 	who := info.Member.DisplayName

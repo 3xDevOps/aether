@@ -104,7 +104,13 @@ func TestLocalUnknownVerb(t *testing.T) {
 }
 
 func TestLocalLinkStatus(t *testing.T) {
-	linked := cli.Config{Addr: "host:2222", User: "alice", Repo: "/src/repo"}
+	linked := cli.Config{
+		Addr: "host:2222", User: "alice", Repo: "/src/repo", Active: "prod",
+		Links: []cli.NamedLink{
+			{Name: "prod", Addr: "host:2222", User: "alice"},
+			{Name: "staging", Addr: "staging:2222"},
+		},
+	}
 	g := newVerbGateway(t, &verbStubBackend{}, linked)
 	rec := do(g, http.MethodPost, "/local/v1/link.status", "{}", true)
 	if rec.Code != http.StatusOK {
@@ -115,6 +121,11 @@ func TestLocalLinkStatus(t *testing.T) {
 		Addr   string `json:"addr"`
 		User   string `json:"user"`
 		Repo   string `json:"repo"`
+		Links  []struct {
+			Name string `json:"name"`
+			Addr string `json:"addr"`
+		} `json:"links"`
+		Active string `json:"active"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -122,8 +133,16 @@ func TestLocalLinkStatus(t *testing.T) {
 	if !got.Linked || got.Addr != "host:2222" || got.User != "alice" || got.Repo != "/src/repo" {
 		t.Fatalf("link.status = %+v", got)
 	}
+	if got.Active != "prod" {
+		t.Errorf("active = %q, want prod", got.Active)
+	}
+	if len(got.Links) != 2 || got.Links[0].Name != "prod" || got.Links[0].Addr != "host:2222" ||
+		got.Links[1].Name != "staging" || got.Links[1].Addr != "staging:2222" {
+		t.Errorf("links = %+v", got.Links)
+	}
 
-	// An unlinked gateway reports linked:false rather than failing.
+	// An unlinked gateway reports linked:false rather than failing, and a
+	// profile-less config omits links and active entirely.
 	g = newVerbGateway(t, &verbStubBackend{}, cli.Config{})
 	rec = do(g, http.MethodPost, "/local/v1/link.status", "", true)
 	if rec.Code != http.StatusOK {
@@ -134,6 +153,44 @@ func TestLocalLinkStatus(t *testing.T) {
 	}
 	if got.Linked {
 		t.Fatalf("unlinked gateway reports linked: %+v", got)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &keys); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := keys["links"]; ok {
+		t.Errorf("profile-less link.status carries links: %s", rec.Body)
+	}
+	if _, ok := keys["active"]; ok {
+		t.Errorf("top-level link.status carries active: %s", rec.Body)
+	}
+}
+
+// link.switch never switches: the SSH identity is process-lifetime. It
+// answers the restart instruction so the SPA can show it verbatim.
+func TestLocalLinkSwitch(t *testing.T) {
+	cfg := cli.Config{Addr: "host:2222", Links: []cli.NamedLink{{Name: "prod", Addr: "host:2222"}}}
+	g := newVerbGateway(t, &verbStubBackend{}, cfg)
+
+	rec := do(g, http.MethodPost, "/local/v1/link.switch", `{"name":"prod"}`, true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState {
+		t.Errorf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	}
+	if perr.Message != "restart aether gui --server prod to switch servers" {
+		t.Errorf("message = %q", perr.Message)
+	}
+
+	// A missing name is a params error, not the instruction.
+	rec = do(g, http.MethodPost, "/local/v1/link.switch", "{}", true)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("no-name status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if perr := decodeError(t, rec.Body.Bytes()); perr.Code != protocol.CodeInvalidParams {
+		t.Errorf("no-name code = %d, want %d", perr.Code, protocol.CodeInvalidParams)
 	}
 }
 

@@ -73,4 +73,39 @@ describe('settings view', () => {
     // The prefill came from link.status, through the store mirror.
     expect(client.localDaemonInstall).toHaveBeenCalledWith('host:2222', '/src/repo')
   })
+
+  it('lists named servers, marks the active one, and shows the switch instruction', async () => {
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => ({
+        linked: true,
+        addr: 'host:2222',
+        user: 'alice',
+        repo: '/src/repo',
+        links: [
+          { name: 'prod', addr: 'host:2222' },
+          { name: 'staging', addr: 'staging:2222' },
+        ],
+        active: 'prod',
+      })),
+    })
+    seed()
+    render(<SettingsRoute params={{}} client={client} />)
+
+    // Both profiles render; the active one is marked, not switchable.
+    expect(await screen.findByText('prod')).toBeDefined()
+    expect(screen.getByText('staging')).toBeDefined()
+    expect(screen.getByText('active')).toBeDefined()
+    const switches = screen.getAllByRole('button', { name: 'Switch' })
+    expect(switches).toHaveLength(1)
+
+    // Switching calls link.switch and renders the server's refusal verbatim:
+    // the SSH identity is process-lifetime, so switching is a restart.
+    fireEvent.click(switches[0])
+    expect(
+      await screen.findByText(
+        'restart aether gui --server staging to switch servers',
+      ),
+    ).toBeDefined()
+    expect(client.localLinkSwitch).toHaveBeenCalledWith('staging')
+  })
 })

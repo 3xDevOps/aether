@@ -293,6 +293,9 @@ export const api = {
   localLinkStatus: () => local<LinkStatus>('link.status'),
   localLinkRepo: (repo: string, workspaceID?: string) =>
     local<LinkRepoResult>('link.repo', { repo, workspace_id: workspaceID }),
+  // link.switch never succeeds: the gateway's SSH identity is fixed at
+  // process start, so it answers the restart instruction as an error.
+  localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
   localPull: (runID: string) => local<PullResult>('pull', { run_id: runID }),
   localSyncStart: (runID: string, force?: boolean) =>
     local<SyncSessionState>('sync.start', { run_id: runID, force }),

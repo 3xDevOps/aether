@@ -6,6 +6,7 @@ import type { DiskUsage } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
+import type { UnreachableKind } from '@/store/server'
 
 const connectionLabel: Record<ConnectionState, string> = {
   connecting: 'Connecting',
@@ -20,6 +21,14 @@ const connectionDot: Record<ConnectionState, string> = {
   live: 'bg-state-done',
   reconnecting: 'bg-state-waiting',
   offline: 'bg-state-failed',
+}
+
+// Which hop is down decides what an operator does next: a dead gateway
+// origin needs its process restarted, a dead SSH hop needs the tunnel or
+// network looked at while the gateway keeps retrying on its own.
+const unreachableLabel: Record<UnreachableKind, string> = {
+  gateway: 'dashboard gateway is gone — restart aether gui (or aether dash)',
+  server: 'server unreachable over SSH — check the tunnel/network; retrying',
 }
 
 /**
@@ -72,6 +81,7 @@ function LocalStatus() {
 
 export function StatusBar() {
   const connection = useStore((s) => s.connection)
+  const unreachable = useStore((s) => s.unreachable)
   const info = useStore((s) => s.info)
   const disk = info?.disk
 
@@ -84,6 +94,14 @@ export function StatusBar() {
         />
         {connectionLabel[connection]}
       </span>
+      {unreachable !== null && (
+        <span
+          role="status"
+          className="rounded-full bg-state-needs-attention/15 px-2 py-0.5 text-[11px] font-medium text-state-needs-attention"
+        >
+          {unreachableLabel[unreachable]}
+        </span>
+      )}
       {info && (
         <span title={`protocol ${info.protocol_version}`}>
           aether {info.server_version}

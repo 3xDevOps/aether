@@ -25,6 +25,7 @@ var localVerbs = []string{
 	"image.scaffold",
 	"link.repo",
 	"link.status",
+	"link.switch",
 	"pull",
 	"sync.start",
 	"sync.status",
@@ -74,6 +75,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 		"daemon.status":  (*Gateway).localDaemonStatus,
 		"image.scaffold": (*Gateway).localImageScaffold,
 		"link.repo":      (*Gateway).localLinkRepo,
+		"link.switch":    (*Gateway).localLinkSwitch,
 		"link.status":    (*Gateway).localLinkStatus,
 		"pull":           (*Gateway).localPull,
 		"sync.start":     (*Gateway).localSyncStart,
@@ -108,14 +110,59 @@ func decodeParams(body []byte, v any) *protocol.Error {
 	return nil
 }
 
+// linkRef is one named server profile as link.status reports it: enough
+// for a switcher to list, nothing secret.
+type linkRef struct {
+	Name string `json:"name"`
+	Addr string `json:"addr"`
+}
+
+// namedLinks projects cfg.Links for link.status; nil when none are saved
+// so the JSON omits the key.
+func namedLinks(cfg cli.Config) []linkRef {
+	if len(cfg.Links) == 0 {
+		return nil
+	}
+	links := make([]linkRef, len(cfg.Links))
+	for i, l := range cfg.Links {
+		links[i] = linkRef{Name: l.Name, Addr: l.Addr}
+	}
+	return links
+}
+
 func (g *Gateway) localLinkStatus(*http.Request, []byte) (any, *protocol.Error) {
 	cfg := g.local.snapshot()
 	return struct {
-		Linked bool   `json:"linked"`
-		Addr   string `json:"addr"`
-		User   string `json:"user"`
-		Repo   string `json:"repo"`
-	}{Linked: cfg.Repo != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo}, nil
+		Linked bool      `json:"linked"`
+		Addr   string    `json:"addr"`
+		User   string    `json:"user"`
+		Repo   string    `json:"repo"`
+		Links  []linkRef `json:"links,omitempty"`
+		Active string    `json:"active,omitempty"`
+	}{Linked: cfg.Repo != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
+		Links: namedLinks(cfg), Active: cfg.Active}, nil
+}
+
+// localLinkSwitch always refuses: the gateway's SSH identity, host-key
+// verification, and every WebSocket bridge are bound to the backend built
+// at process start, so swapping servers in-place would leave live event
+// streams and attach sessions pointed at the old host. Switching is a
+// process restart. The verb exists so the SPA can probe it and render
+// the instruction verbatim.
+func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		Name string `json:"name"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	if params.Name == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "name is required"}
+	}
+	return nil, &protocol.Error{
+		Code:    protocol.CodeInvalidState,
+		Message: "restart aether gui --server " + params.Name + " to switch servers",
+	}
 }
 
 func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Error) {

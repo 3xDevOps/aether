@@ -337,6 +337,10 @@ export interface LinkStatus {
   addr: string
   user: string
   repo: string
+  /** Named server profiles from `aether link --name`; absent when none. */
+  links?: { name: string; addr: string }[]
+  /** The profile this gateway runs on; absent on the top-level link. */
+  active?: string
 }
 
 /** link.repo: the repo just linked and the git remote written into it. */

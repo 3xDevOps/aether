@@ -63,6 +63,14 @@ function LinkCard({ client }: { client: Api }) {
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const link = useStore((s) => s.linkStatus)
   const [error, setError] = useState<string | null>(null)
+  // The gateway's SSH identity is process-lifetime, so link.switch always
+  // answers an instruction to restart; show it verbatim.
+  const [switchNote, setSwitchNote] = useState<string | null>(null)
+
+  const switchTo = (name: string) => {
+    setSwitchNote(null)
+    client.localLinkSwitch(name).catch((err) => setSwitchNote(message(err)))
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -98,6 +106,36 @@ function LinkCard({ client }: { client: Api }) {
             <dd className="font-mono">{link.repo}</dd>
           </div>
         </dl>
+      )}
+      {(link?.links?.length ?? 0) > 0 && (
+        <div className="space-y-1 pt-1">
+          <h3 className="text-xs font-medium text-muted-foreground">Servers</h3>
+          <ul className="space-y-1 text-sm">
+            {link?.links?.map((l) => {
+              const active = l.name === (link?.active ?? '')
+              return (
+                <li key={l.name} className="flex items-center gap-2">
+                  <span className="font-mono">{l.name}</span>
+                  <span className="text-muted-foreground">{l.addr}</span>
+                  {active ? (
+                    <span className="text-xs text-muted-foreground">active</span>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => switchTo(l.name)}
+                    >
+                      Switch
+                    </Button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+          {switchNote && (
+            <p className="text-xs text-muted-foreground">{switchNote}</p>
+          )}
+        </div>
       )}
       {link && !link.linked && (
         <p className="text-sm text-muted-foreground">
