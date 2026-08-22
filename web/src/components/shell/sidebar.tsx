@@ -1,9 +1,15 @@
 import {
+  Bot,
   ChevronDown,
   ChevronRight,
+  Compass,
+  FileText,
+  FolderGit2,
   LayoutGrid,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings,
+  Users,
 } from 'lucide-react'
 import { useCallback } from 'react'
 import { StateDot } from '@/components/state-dot'
@@ -13,7 +19,7 @@ import { useDelayed } from '@/lib/hooks'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { isUnseen } from '@/store/board'
-import { useAttentionCount, useSidebarGroups } from '@/store/hooks'
+import { useAttentionCount, useCapability, useSidebarGroups } from '@/store/hooks'
 import type { SidebarGroup, SidebarRun } from '@/store/selectors'
 
 export function Sidebar() {
@@ -59,6 +65,7 @@ export function Sidebar() {
     >
       <SidebarHeader onCollapse={toggleSidebar} />
       <SessionTree />
+      <NavSection />
       <div
         role="separator"
         aria-orientation="vertical"
@@ -169,6 +176,50 @@ function SessionTree() {
         <Group key={group.key} group={group} />
       ))}
     </div>
+  )
+}
+
+/**
+ * Entry points for the admin and desktop surfaces. Every link is gated on
+ * the capability that powers its view, so a gateway that cannot serve a
+ * surface never shows the way in; on the remote allowlist nothing here
+ * renders at all.
+ */
+function NavSection() {
+  const cap = useCapability()
+  const navigate = useStore((s) => s.navigate)
+  const route = useStore((s) => s.route)
+  const links: { name: string; label: string; Icon: typeof Users }[] = []
+  if (cap.hasMethod('member.approve'))
+    links.push({ name: 'members', label: 'Members', Icon: Users })
+  if (cap.hasMethod('workspace.add'))
+    links.push({ name: 'workspaces', label: 'Workspaces', Icon: FolderGit2 })
+  if (cap.hasMethod('template.save'))
+    links.push({ name: 'templates', label: 'Templates', Icon: FileText })
+  if (cap.hasMethod('agent.list'))
+    links.push({ name: 'agents', label: 'Agents', Icon: Bot })
+  if (cap.hasLocal('link.status'))
+    links.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass })
+  if (cap.hasLocal('daemon.status'))
+    links.push({ name: 'settings', label: 'Settings', Icon: Settings })
+  if (links.length === 0) return null
+  return (
+    <nav aria-label="Surfaces" className="shrink-0 border-t py-1">
+      {links.map(({ name, label, Icon }) => (
+        <button
+          key={name}
+          type="button"
+          onClick={() => navigate(name)}
+          className={cn(
+            'flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-accent/60',
+            route.name === name && 'bg-accent',
+          )}
+        >
+          <Icon className="size-3.5 text-muted-foreground" />
+          {label}
+        </button>
+      ))}
+    </nav>
   )
 }
 

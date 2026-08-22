@@ -48,4 +48,18 @@ describe('token bootstrap', () => {
     // The sockets cannot send headers, so their URL carries it instead.
     expect(socketURL('/ws/events')).toContain('token=tok_stored')
   })
+
+  it('posts a local verb to /local/v1 with the same bearer', async () => {
+    window.sessionStorage.setItem('aether.token', 'tok_stored')
+    const fetchSpy = fakeFetch()
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await api.localSyncStart('run_1', true)
+
+    expect(fetchSpy.mock.calls[0][0]).toBe('/local/v1/sync.start')
+    expect(sentHeaders(fetchSpy).authorization).toBe('Bearer tok_stored')
+    expect(fetchSpy.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ run_id: 'run_1', force: true }),
+    )
+  })
 })

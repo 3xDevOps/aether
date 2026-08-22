@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { parsePatch } from '@/routes/diff/parse'
 import { FilePatch } from '@/routes/diff/patch-view'
+import { LandControls } from '@/routes/diff/land'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
@@ -68,6 +69,7 @@ function DiffView({ params }: RouteProps) {
           <RefreshCw className={cn('size-3', state.status === 'loading' && 'animate-spin')} />
           Refresh
         </Button>
+        <LandControls run={run} />
       </div>
 
       {state.status === 'error' && (

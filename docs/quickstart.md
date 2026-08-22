@@ -193,6 +193,12 @@ needs attention, a live terminal mirror per run, the diff timeline, the session
 feed. Read-only by default; typing into a run needs the steer capability, which
 as the owner you have.
 
+`aether gui` is the full-control alternative: it serves the same dashboard
+from your own machine over your SSH key, so every command works - no
+allowlist - plus local verbs like pulling a run branch into your clone.
+No tunnel, no minted token to expire. See
+[local-gateway.md](local-gateway.md).
+
 The terminal escape hatch is `aether attach <run-id>` - a raw byte-for-byte
 passthrough where every native keybind and theme of the agent's own TUI works.
 Detach without killing anything: the PTY lives on the server.

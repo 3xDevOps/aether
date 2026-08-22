@@ -1,9 +1,13 @@
 import {
   Archive,
+  Bot,
   CheckCheck,
+  Compass,
+  Download,
   Eye,
   EyeOff,
   FileText,
+  FolderGit2,
   GitMerge,
   Layers,
   LayoutGrid,
@@ -11,9 +15,14 @@ import {
   MessageSquarePlus,
   Pause,
   Play,
+  RefreshCw,
   Rocket,
+  Settings,
+  Shield,
+  ShieldOff,
   Square,
   UserPlus,
+  Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { StateDot } from '@/components/state-dot'
@@ -28,7 +37,7 @@ import {
 import { api } from '@/lib/api'
 import { stateLabel } from '@/lib/status'
 import { useStore } from '@/store'
-import { useAttentionRuns } from '@/store/hooks'
+import { useAttentionRuns, useCapability } from '@/store/hooks'
 
 /**
  * Everything the palette can do. Jumping is local; the steering verbs go
@@ -55,6 +64,7 @@ export function PaletteBody({
   const toggleIdle = useStore((s) => s.toggleIdle)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const pausedRuns = useStore((s) => s.pausedRuns)
+  const cap = useCapability()
 
   // Steering acts on the run the centre view is showing, whichever of the run
   // detail routes is showing it - the terminal tab is exactly where a human
@@ -132,6 +142,31 @@ export function PaletteBody({
                   </CommandItem>
                 </>
               )}
+              {cap.hasMethod('run.protect') && (
+                <CommandItem
+                  onSelect={() =>
+                    act(
+                      focused.run.protected ? 'Unprotected' : 'Protected',
+                      api.runProtect(runID, !focused.run.protected),
+                    )
+                  }
+                >
+                  {focused.run.protected ? <ShieldOff /> : <Shield />}
+                  {focused.run.protected ? 'Unprotect run' : 'Protect run'}
+                </CommandItem>
+              )}
+              {finished && cap.hasMethod('run.relaunch') && (
+                <CommandItem onSelect={() => act('Relaunched', api.runRelaunch(runID))}>
+                  <RefreshCw />
+                  Relaunch run
+                </CommandItem>
+              )}
+              {cap.hasLocal('pull') && (
+                <CommandItem onSelect={() => act('Pulled branch', api.localPull(runID))}>
+                  <Download />
+                  Pull branch
+                </CommandItem>
+              )}
               {Object.values(members)
                 .filter((m) => m.id !== focused.run.member_id && !m.pending)
                 .map((m) => (
@@ -177,6 +212,52 @@ export function PaletteBody({
             {showIdle ? 'Hide' : 'Show'} idle sessions
           </CommandItem>
         </CommandGroup>
+
+        {(cap.hasMethod('member.approve') ||
+          cap.hasMethod('workspace.add') ||
+          cap.hasMethod('template.save') ||
+          cap.hasMethod('agent.list') ||
+          cap.hasLocal('daemon.status') ||
+          cap.hasLocal('link.status')) && (
+          <CommandGroup heading="Go to">
+            {cap.hasMethod('member.approve') && (
+              <CommandItem onSelect={() => go('members')}>
+                <Users />
+                Members
+              </CommandItem>
+            )}
+            {cap.hasMethod('workspace.add') && (
+              <CommandItem onSelect={() => go('workspaces')}>
+                <FolderGit2 />
+                Workspaces
+              </CommandItem>
+            )}
+            {cap.hasMethod('template.save') && (
+              <CommandItem onSelect={() => go('templates')}>
+                <FileText />
+                Templates
+              </CommandItem>
+            )}
+            {cap.hasMethod('agent.list') && (
+              <CommandItem onSelect={() => go('agents')}>
+                <Bot />
+                Agents
+              </CommandItem>
+            )}
+            {cap.hasLocal('daemon.status') && (
+              <CommandItem onSelect={() => go('settings')}>
+                <Settings />
+                Settings
+              </CommandItem>
+            )}
+            {cap.hasLocal('link.status') && (
+              <CommandItem onSelect={() => go('onboarding')}>
+                <Compass />
+                Onboarding
+              </CommandItem>
+            )}
+          </CommandGroup>
+        )}
 
         <CommandGroup heading="Runs">
           {runs.map(({ run, state }) => (

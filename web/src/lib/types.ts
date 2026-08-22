@@ -246,3 +246,143 @@ export interface SubscribeRequest {
   replay?: boolean
   after_seq?: number
 }
+
+/** Wire form of a cron schedule (internal/protocol/template.go). */
+export interface Schedule {
+  id: string
+  session_id: string
+  template: string
+  cron: string
+  member_id: string
+  created_at: string
+  last_fire_at?: string | null
+  next_fire_at?: string | null
+}
+
+/** Addresses a workspace by exactly one of id or name. */
+export interface WorkspaceSelector {
+  id?: string
+  name?: string
+}
+
+/** Stable executable metadata; never a server filesystem path. */
+export interface ToolManifest {
+  executable?: string
+  version?: string
+  metadata?: Record<string, string>
+}
+
+/** Immutable member/workspace tool snapshot (internal/protocol/tools.go). */
+export interface ToolSnapshot {
+  id: string
+  workspace_id: string
+  member_id: string
+  digest: string
+  manifest: ToolManifest
+  created_at: string
+  /** Set on the snapshot currently active for the workspace. */
+  active?: boolean
+}
+
+/** One entry of agent.list; source is who supplied the harness. */
+export interface AgentInfo {
+  name: string
+  source: 'shipped' | 'member'
+}
+
+/** A member-supplied custom harness launch definition (agent.register). */
+export interface AgentDefinition {
+  name: string
+  executable?: string
+  tui_args?: string[]
+  headless_args?: string[]
+  profile_root?: string
+  credential_paths?: string[]
+  deny_names?: string[]
+}
+
+/** One immutable member+harness profile snapshot. */
+export interface ProfileSnapshot {
+  id: string
+  harness: string
+  digest: string
+  created_at: string
+}
+
+/** One path in a profile snapshot listing (no content). */
+export interface ProfileFileMeta {
+  path: string
+  digest: string
+  mode?: number
+}
+
+/**
+ * profile.status: the latest snapshot, its file list, and recent snapshots
+ * for a rollback UI (internal/protocol ProfileStatusResult). `snapshot` is
+ * absent when none exists.
+ */
+export interface ProfileStatus {
+  snapshot?: ProfileSnapshot
+  files?: ProfileFileMeta[]
+  snapshots: ProfileSnapshot[]
+}
+
+// The local gateway's client-machine verbs, POST /local/v1/<verb>
+// (internal/localgw/local.go). Only a gateway with the user's repository
+// and SSH key serves these; useCapability's hasLocal gates every caller.
+
+/** link.status: whether this gateway has a linked repository. */
+export interface LinkStatus {
+  linked: boolean
+  addr: string
+  user: string
+  repo: string
+}
+
+/** link.repo: the repo just linked and the git remote written into it. */
+export interface LinkRepoResult {
+  repo: string
+  remote: string
+  url: string
+}
+
+/** pull: the run branch fetched into the linked repository. */
+export interface PullResult {
+  branch: string
+  ref: string
+  output: string
+}
+
+/** sync.start / sync.stop: one run's overlay state after the verb. */
+export interface SyncSessionState {
+  run_id: string
+  state: string
+}
+
+/** One background sync session as sync.status reports it. */
+export interface SyncSessionStatus {
+  run_id: string
+  state: string
+  /** Describes a paused-on-conflict session; null otherwise. */
+  conflict: string | null
+}
+
+export interface SyncStatusResult {
+  sessions: SyncSessionStatus[]
+}
+
+/** daemon.install: where the sync-daemon unit landed and how to enable it. */
+export interface DaemonInstallResult {
+  unit_path: string
+  note: string
+}
+
+export interface DaemonStatusResult {
+  installed: boolean
+  unit_path: string
+}
+
+/** image.scaffold: the files written (existing files are never overwritten). */
+export interface ImageScaffoldResult {
+  written: string[]
+}

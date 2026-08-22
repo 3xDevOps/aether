@@ -10,6 +10,11 @@ The gateway runs only when the server was started with `--dashboard-port`
 (loopback listener) or `--dashboard-addr` (direct exposure); with neither
 flag the service is not built and no HTTP port exists.
 
+The same SPA and API shape are also served from the user's own machine by
+`aether gui`, which proxies onto the SSH control channel instead of running
+on the server - see [local-gateway.md](local-gateway.md). A client tells
+the two apart with `GET /api/v1/capabilities` below, not by sniffing URLs.
+
 ## Identity and tokens
 
 The SSH key stays the only identity system. HTTP has no login: every API
@@ -85,6 +90,7 @@ secret and needs to load before it can present one.
 | `POST` | `/api/v1/<rpc.method>` | one control-channel method call |
 | `GET` | `/api/v1/run/<run_id>/patch` | the run's diff as unified patch text |
 | `GET` | `/api/v1/disk` | data-directory disk usage |
+| `GET` | `/api/v1/capabilities` | what this gateway can do (transport probe) |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 
@@ -234,6 +240,54 @@ with `-32004` when the gateway was not told
 where the data directory is, or the platform has no `statfs` (the server
 ships for linux; the endpoint refuses rather than reporting zero anywhere
 else).
+
+### `GET /api/v1/capabilities`
+
+What this gateway can do, so a client probes instead of hard-coding which
+transport it is talking to. Any member holding a token may read it - the
+answer is the same for everyone, and the methods listed still pass their
+own capability checks when called.
+
+```json
+{"gateway":"remote","methods":["approval.decide","approval.list", "..."],"ws":["events","attach"]}
+```
+
+- `gateway` names the serving transport: `remote` here, `local` from
+  `aether gui`.
+- `methods` is the sorted method allowlist - exactly the table above.
+- `ws` lists the WebSocket surfaces this gateway serves: `events` and
+  `attach`.
+- A `local` array of client-machine verbs appears only in the local
+  gateway's answer ([local-gateway.md](local-gateway.md)); this gateway
+  omits it.
+
+### `run.patch` and `server.disk` on the control channel
+
+The two `GET` endpoints above also exist as SSH control-channel methods,
+because the local gateway proxies the whole API shape over SSH and needs
+both reads without an HTTP listener of its own. The `GET` routes remain -
+they are what the browser calls against this gateway.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `run.patch` | `RunIDParams` (`{"run_id":"..."}`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
+| `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+
+- The same 512 KiB diff ceiling applies to `run.patch`; `truncated`
+  reports that the patch ends at the last whole line that fit.
+- Both answer `-32004` (unavailable) when the read cannot be served:
+  `run.patch` when diff rendering is not enabled (no git engine wired) or
+  the run has no checkout left to diff, `server.disk` when the server was
+  not told where the data directory is or the filesystem holding it could
+  not be read. The underlying errors name server-side paths, so they are
+  not echoed to the client.
+
+Related wire change: `protocol.Run` carries `reason` - the last
+`run.status` reason, persisted with the run and sanitized server-side
+before persistence, so it survives a fetch instead of existing only on
+the event payload - and `paused`, which `run.get` and `run.list` decorate
+from the scheduler's live state (a frozen container), never derived from
+the stored run.
 
 ### `GET /ws/events`
 

@@ -5,6 +5,7 @@ import type { ConnectionState } from '@/lib/stream'
 import type { DiskUsage } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 
 const connectionLabel: Record<ConnectionState, string> = {
   connecting: 'Connecting',
@@ -36,6 +37,37 @@ function diskBreakdown(disk: DiskUsage): string {
     `Database ${formatBytes(disk.database_bytes)}`,
     `${formatBytes(disk.free_bytes)} free`,
   ].join(' · ')
+}
+
+/**
+ * The desktop gateway's always-visible entry point: whether this machine
+ * has a linked repository, jumping to onboarding until it does and to
+ * settings after. Gated on the link.status verb, so the remote gateway
+ * shows nothing.
+ */
+function LocalStatus() {
+  const cap = useCapability()
+  const link = useStore((s) => s.linkStatus)
+  const navigate = useStore((s) => s.navigate)
+  if (!cap.hasLocal('link.status')) return null
+  const linked = link?.linked === true
+  return (
+    <button
+      type="button"
+      onClick={() => navigate(linked ? 'settings' : 'onboarding')}
+      title={linked ? `Linked to ${link?.repo}` : 'Link a repository'}
+      className="flex items-center gap-1.5 rounded px-1 hover:text-foreground"
+    >
+      <span
+        className={cn(
+          'size-2 rounded-full',
+          linked ? 'bg-state-done' : 'bg-state-waiting',
+        )}
+        aria-hidden
+      />
+      {linked ? 'Linked' : 'Not linked'}
+    </button>
+  )
 }
 
 export function StatusBar() {
@@ -75,6 +107,7 @@ export function StatusBar() {
           {formatBytes(disk.used_bytes)} / {formatBytes(disk.total_bytes)}
         </span>
       )}
+      <LocalStatus />
       <span className="ml-auto flex items-center gap-3">
         <Slot name="statusbar" />
         <ThemeToggle />
