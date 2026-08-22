@@ -30,8 +30,10 @@ linux:
     - AppImage
     - deb
 
-# No publishing from this repo: builds are local artifacts. A deployment
-# that wants auto-update should point this at its own release feed, e.g.
+# No publishing from this repo: builds are local artifacts (`--publish never`
+# on the CLI; a bare string here would be parsed as a provider name). A
+# deployment that wants auto-update should point this at its own release
+# feed, e.g.
 #
 #   publish:
 #     provider: github
@@ -40,4 +42,4 @@ linux:
 #
 # (or a generic provider with a URL you control), and sign the binaries -
 # unsigned auto-update is refused on macOS and Windows.
-publish: never
+publish: null
