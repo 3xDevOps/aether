@@ -285,12 +285,15 @@ routes on the same `runId`.
 - **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
   glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038),
   garbling scrolled rows until a forced refresh; the DOM renderer never
-  desyncs. The terminal font stack ends in the shipped symbols-only Nerd Font
+  desyncs. The terminals render in the shipped JetBrainsMono Nerd Font Mono
   (`src/lib/term-font.ts`, declared in `src/index.css`), so agent TUIs get
-  their powerline and devicon glyphs; the terminal opens only once that font
-  is loaded, because xterm caches glyph metrics synchronously at `open` and
-  would otherwise bake fallback metrics in. The workspace-shell pane
-  (`routes/shell/pane.tsx`) uses the identical renderer and font setup.
+  their powerline and devicon glyphs at the same advance as text - a
+  symbols-only overlay font renders them full-em wide and xterm's per-cell
+  letter-spacing slices the overhang off. The terminal opens only once
+  regular and bold faces are loaded, because xterm caches glyph metrics
+  synchronously at `open` and would otherwise bake fallback metrics in.
+  The workspace-shell pane (`routes/shell/pane.tsx`) uses the identical
+  renderer and font setup.
 - **Injections need no client work.**  writes the attributed
   member-coloured banner into the PTY stream itself, so it arrives as ANSI and
   xterm renders it like any other output.
