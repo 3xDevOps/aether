@@ -25,13 +25,33 @@ describe('whenTerminalFontReady', () => {
     expect(opened).toBe(true)
   })
 
-  it('opens synchronously when the font is already loaded', () => {
+  it('opens synchronously when both faces are already loaded', () => {
     stubFonts({ check: () => true, load: () => Promise.resolve([]) })
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
     })
     expect(opened).toBe(true)
+  })
+
+  it('waits when only the regular face is loaded', async () => {
+    vi.useFakeTimers()
+    const loads: string[] = []
+    stubFonts({
+      check: (face: string) => !face.startsWith('bold'),
+      load: (face: string) => {
+        loads.push(face)
+        return Promise.resolve([])
+      },
+    })
+    let opened = false
+    whenTerminalFontReady(() => {
+      opened = true
+    })
+    expect(opened).toBe(false)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(opened).toBe(true)
+    expect(loads).toEqual(['12px "JetBrainsMono NFM"', 'bold 12px "JetBrainsMono NFM"'])
   })
 
   it('waits for the font load and then opens', async () => {
@@ -90,10 +110,9 @@ describe('whenTerminalFontReady', () => {
 })
 
 describe('terminalFontFamily', () => {
-  it('keeps the symbols font behind the text stack, before the generic fallback', () => {
+  it('leads with the shipped Nerd Font and falls back to generic monospace', () => {
     const families = terminalFontFamily.split(',').map((f) => f.trim())
-    expect(families[0]).toBe('ui-monospace')
-    expect(families[families.length - 2]).toBe('"Symbols Nerd Font Mono"')
+    expect(families[0]).toBe('"JetBrainsMono NFM"')
     expect(families[families.length - 1]).toBe('monospace')
   })
 })
