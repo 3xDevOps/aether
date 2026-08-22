@@ -1,10 +1,10 @@
 import { FitAddon } from '@xterm/addon-fit'
-import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
+import { terminalFontFamily, whenTerminalFontReady } from '@/lib/term-font'
 import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { type Attachment, connectAttach } from '@/routes/terminal/attach'
@@ -37,85 +37,91 @@ function TerminalView({ params }: RouteProps) {
     const host = hostRef.current
     if (!host) return
 
+    // The DOM renderer, deliberately: @xterm/addon-webgl 0.19.0 reuses stale
+    // glyph-atlas positions under heavy glyph churn, garbling scrolled rows
+    // until a forced refresh (xtermjs/xterm.js#6038; the fix is unreleased).
+    // The DOM renderer never desyncs and keeps up with agent TUI streams.
     const terminal = new Terminal({
       fontSize: 12,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontFamily: terminalFontFamily,
       scrollback: 10_000,
       cursorBlink: false,
     })
-    const fit = new FitAddon()
-    terminal.loadAddon(fit)
-    terminal.open(host)
-    // WebGL per instance: a machine without a GL context loses acceleration
-    // for this terminal only, and keeps the DOM renderer everywhere else.
-    try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => webgl.dispose())
-      terminal.loadAddon(webgl)
-    } catch {
-      // The DOM renderer stays loaded; nothing else to do.
-    }
 
-    // The renderers paint into a canvas, so they need resolved colours rather
-    // than the CSS variables. Reading them off the host keeps index.css the
-    // single source, and the dark class landing on <html> is the signal to
-    // re-read them.
-    const paint = () => {
-      const style = getComputedStyle(host)
-      if (!style.backgroundColor || !style.color) return
-      try {
-        terminal.options.theme = {
-          background: style.backgroundColor,
-          foreground: style.color,
-          cursor: style.color,
+    // xterm measures and caches glyph metrics synchronously at open, so the
+    // shipped symbols font must be usable first - opening earlier would bake
+    // fallback-font metrics in for every agent-TUI symbol (term-font.ts).
+    let teardown: (() => void) | null = null
+    const cancelFontWait = whenTerminalFontReady(() => {
+      const fit = new FitAddon()
+      terminal.loadAddon(fit)
+      terminal.open(host)
+
+      // The renderer needs resolved colours rather than the CSS variables.
+      // Reading them off the host keeps index.css the single source, and the
+      // dark class landing on <html> is the signal to re-read them.
+      const paint = () => {
+        const style = getComputedStyle(host)
+        if (!style.backgroundColor || !style.color) return
+        try {
+          terminal.options.theme = {
+            background: style.backgroundColor,
+            foreground: style.color,
+            cursor: style.color,
+          }
+        } catch {
+          // A colour xterm cannot parse is not worth losing the terminal over.
         }
-      } catch {
-        // A colour xterm cannot parse is not worth losing the terminal over.
       }
-    }
-    paint()
-    const themeWatch = new MutationObserver(paint)
-    themeWatch.observe(document.documentElement, { attributeFilter: ['class'] })
+      paint()
+      const themeWatch = new MutationObserver(paint)
+      themeWatch.observe(document.documentElement, { attributeFilter: ['class'] })
 
-    const resize = () => {
-      fit.fit()
-      attachRef.current?.resize(terminal.cols, terminal.rows)
-    }
-    resize()
+      const resize = () => {
+        fit.fit()
+        attachRef.current?.resize(terminal.cols, terminal.rows)
+      }
+      resize()
 
-    // A new attach answers for itself: the last one's refusal and steer denial
-    // must not decide what this one shows, or a run whose steer was granted in
-    // between stays greyed out until a reload.
-    setTerminal(runID, initialTerminal)
-    writeRef.current = initialTerminal.write
+      // A new attach answers for itself: the last one's refusal and steer denial
+      // must not decide what this one shows, or a run whose steer was granted in
+      // between stays greyed out until a reload.
+      setTerminal(runID, initialTerminal)
+      writeRef.current = initialTerminal.write
 
-    const attachment = connectAttach(runID, {
-      onData: (chunk) => terminal.write(chunk),
-      // Every attach starts with the server's transcript replay, so the pane
-      // is never blank - and clearing first keeps a reconnect from stacking a
-      // second copy of the scrollback under the first.
-      onAttached: () => {
-        terminal.reset()
-        setTerminal(runID, { message: null, refused: false })
-      },
-      onState: (connection) => setTerminal(runID, { connection }),
-      onRefused: (message) => setTerminal(runID, { message, refused: true }),
-      onWriteDenied: () => setTerminal(runID, { steerDenied: true, write: false }),
-      geometry: () => ({ cols: terminal.cols, rows: terminal.rows }),
-      wantsWrite: () => writeRef.current,
+      const attachment = connectAttach(runID, {
+        onData: (chunk) => terminal.write(chunk),
+        // Every attach starts with the server's transcript replay, so the pane
+        // is never blank - and clearing first keeps a reconnect from stacking a
+        // second copy of the scrollback under the first.
+        onAttached: () => {
+          terminal.reset()
+          setTerminal(runID, { message: null, refused: false })
+        },
+        onState: (connection) => setTerminal(runID, { connection }),
+        onRefused: (message) => setTerminal(runID, { message, refused: true }),
+        onWriteDenied: () => setTerminal(runID, { steerDenied: true, write: false }),
+        geometry: () => ({ cols: terminal.cols, rows: terminal.rows }),
+        wantsWrite: () => writeRef.current,
+      })
+      attachRef.current = attachment
+
+      const input = terminal.onData((data) => attachment.send(data))
+      const observer = new ResizeObserver(resize)
+      observer.observe(host)
+
+      teardown = () => {
+        observer.disconnect()
+        themeWatch.disconnect()
+        input.dispose()
+        attachment.close()
+        attachRef.current = null
+      }
     })
-    attachRef.current = attachment
-
-    const input = terminal.onData((data) => attachment.send(data))
-    const observer = new ResizeObserver(resize)
-    observer.observe(host)
 
     return () => {
-      observer.disconnect()
-      themeWatch.disconnect()
-      input.dispose()
-      attachment.close()
-      attachRef.current = null
+      cancelFontWait()
+      teardown?.()
       terminal.dispose()
     }
     // `known` is in the deps because the host element only exists once the run
