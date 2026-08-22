@@ -143,8 +143,16 @@ describe('hydrate', () => {
     expect(store.getState().hydrated).toBe(true)
     expect(store.getState().capabilities).toBeNull()
     const c = capability(store.getState().capabilities)
+    // The pre-capabilities allowlist: monitoring and steering verbs pass...
     expect(c.hasMethod('run.list')).toBe(true)
+    expect(c.hasMethod('template.launch')).toBe(true)
+    // ...but the admin methods a legacy gateway would 403 do not.
+    expect(c.hasMethod('member.approve')).toBe(false)
+    expect(c.hasMethod('workspace.add')).toBe(false)
+    expect(c.hasMethod('template.save')).toBe(false)
+    expect(c.hasMethod('agent.list')).toBe(false)
     expect(c.hasWS('attach')).toBe(true)
+    expect(c.hasWS('shell')).toBe(false)
     expect(c.hasLocal('worktree.open')).toBe(false)
   })
 

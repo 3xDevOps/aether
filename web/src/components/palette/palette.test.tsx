@@ -35,7 +35,8 @@ beforeEach(() => {
     paletteRunID: null,
     route: { name: 'board', params: {} },
     hydrated: true,
-    // Null is the legacy remote monitor: every method, no local verbs.
+    // Null is the legacy remote monitor: the pre-capabilities allowlist
+    // (steering, launch, templates), no admin methods, no local verbs.
     capabilities: null,
   })
   vi.clearAllMocks()
@@ -168,6 +169,19 @@ describe('command palette', () => {
     expect(screen.queryByText('Members')).toBeNull()
     expect(screen.queryByText('Workspaces')).toBeNull()
     expect(screen.queryByText('Onboarding')).toBeNull()
+  })
+
+  it('hides the admin surfaces on a legacy monitor without capabilities', async () => {
+    // capabilities stays null (the beforeEach default): the endpoint 404ed,
+    // so only the pre-capabilities allowlist may render - the admin methods
+    // behind these entries would all answer 403.
+    open()
+
+    await screen.findByText('rewrite the checkout flow')
+    expect(screen.queryByText('Members')).toBeNull()
+    expect(screen.queryByText('Workspaces')).toBeNull()
+    expect(screen.queryByText('Templates')).toBeNull()
+    expect(screen.queryByText('Agents')).toBeNull()
   })
 
   it('pulls the focused run branch through the local gateway', async () => {

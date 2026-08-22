@@ -23,9 +23,13 @@ const (
 	// readHeaderTimeout bounds how long a client may take to send its
 	// header frame after the socket opens.
 	readHeaderTimeout = 10 * time.Second
-	// statusBacklogDropped tells a client its subscription lost events;
-	// resubscribing with replay and its last seq recovers them.
-	statusBacklogDropped = 4000
+	// statusStreamEnded (1012, service restart) tells a client the SSH
+	// event stream ended for any reason: connection drop, server
+	// shutdown, or a backlog drop. The wire cannot distinguish them, so
+	// the SPA takes its jittered-backoff reconnect path rather than the
+	// immediate 4000 resubscribe; replay with after_seq still recovers a
+	// true backlog drop, just a beat slower.
+	statusStreamEnded = websocket.StatusServiceRestart
 	// statusDirtyExit tells a shell client the remote command ended with
 	// a nonzero exit status, distinct from a clean 1000 close.
 	statusDirtyExit = 4001
@@ -89,15 +93,17 @@ func (g *Gateway) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// The SSH server ends the events channel only when the subscriber's
-	// backlog dropped; any end of the stream after a successful ack is
-	// therefore reported as 4000 so the SPA resubscribes with its cursor.
-	// A genuinely dead server makes that reconnect fail on its own.
+	// The stream ends when the subscriber's backlog dropped, but also
+	// when the shared SSH connection dies or the server shuts down; the
+	// wire cannot tell these apart. Report all of them as 1012 so the
+	// SPA resubscribes with backoff instead of hot-looping - a true
+	// backlog drop also resumes via replay/after_seq, just a beat
+	// slower.
 	br := bufio.NewReader(stream)
 	for {
 		line, err := protocol.ReadLine(br)
 		if err != nil {
-			_ = conn.Close(statusBacklogDropped, "event backlog dropped; resubscribe with after_seq")
+			_ = conn.Close(statusStreamEnded, "event stream ended; resubscribe with after_seq")
 			return
 		}
 		if writeText(ctx, conn, line) != nil {

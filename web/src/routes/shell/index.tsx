@@ -3,7 +3,7 @@
 // pane. The request lives in the ShellSlice so any surface can open a shell
 // with a single openShell call and a navigate.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { registerRoute } from '@/routes/registry'
@@ -14,6 +14,13 @@ function ShellView() {
   const req = useStore((s) => s.shellRequest)
   const navigate = useStore((s) => s.navigate)
   const [exited, setExited] = useState(false)
+
+  // Resume/Reset replace the request with a fresh one: the pane remounts
+  // and reconnects, so the "where to go next" footer from the previous
+  // exit must not stay rendered over the live shell.
+  useEffect(() => {
+    setExited(false)
+  }, [req])
 
   if (!req) {
     return (

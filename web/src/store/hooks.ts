@@ -70,16 +70,50 @@ export interface Capability {
 }
 
 /**
+ * The pre-capabilities allowlist: the browser-transport methods a legacy
+ * remote gateway (internal/dashboard/api.go's apiMethods before the
+ * /capabilities endpoint existed) will serve. Everything else answers 403
+ * "available on the SSH control channel only", so gating against a null
+ * capabilities result must fall back to this list, never to "everything".
+ */
+const LEGACY_REMOTE_METHODS: Record<string, true> = {
+  'server.info': true,
+  'workspace.list': true,
+  'session.list': true,
+  'session.get': true,
+  'member.list': true,
+  'run.launch': true,
+  'run.list': true,
+  'run.get': true,
+  'run.kill': true,
+  'run.pause': true,
+  'run.resume': true,
+  'run.inject': true,
+  'run.close': true,
+  'run.handoff': true,
+  'approval.list': true,
+  'approval.decide': true,
+  'presence.roster': true,
+  'presence.heartbeat': true,
+  'session.timeline': true,
+  'cost.report': true,
+  'budget.get': true,
+  'run.overlaps': true,
+  'template.list': true,
+  'template.launch': true,
+}
+
+/**
  * Answers from a capabilities result. Null means a legacy remote monitor
- * that predates the endpoint: it speaks the remote allowlist, which covers
- * every method the SPA calls today, and both gateway sockets; local verbs
- * are a desktop-gateway feature it cannot have. A "*" methods entry means
- * every method.
+ * that predates the endpoint: it serves exactly the pre-capabilities
+ * allowlist and both gateway sockets; the admin methods behind the newer
+ * surfaces would 403, and local verbs are a desktop-gateway feature it
+ * cannot have. A "*" methods entry means every method.
  */
 export function capability(caps: GatewayCapabilities | null): Capability {
   if (caps === null) {
     return {
-      hasMethod: () => true,
+      hasMethod: (method) => LEGACY_REMOTE_METHODS[method] === true,
       hasLocal: () => false,
       hasWS: (name) => name === 'events' || name === 'attach',
     }

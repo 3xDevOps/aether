@@ -190,4 +190,54 @@ describe('onboarding wizard', () => {
       })
     })
   })
+
+  it('reuses the created session when the launch itself fails and is retried', async () => {
+    // sessionNew succeeds but the first runLaunch fails: the retry must not
+    // mint a second session with the same name.
+    const runLaunch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('temporarily out of capacity'))
+      .mockResolvedValue({ id: 'run_1' })
+    const client = fakeApi({ sessionList: vi.fn(async () => []), runLaunch })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toRepoStep()
+
+    fireEvent.change(await screen.findByLabelText('Repository path'), {
+      target: { value: '/home/alice/code/myproject' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+
+    fireEvent.change(await screen.findByLabelText('Session'), {
+      target: { value: '__new' },
+    })
+    fireEvent.change(await screen.findByLabelText('New session name'), {
+      target: { value: 'demo' },
+    })
+    fireEvent.change(screen.getByLabelText('Harness'), {
+      target: { value: 'claude' },
+    })
+    fireEvent.change(screen.getByLabelText('Task'), {
+      target: { value: 'write a result file' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+
+    // The refusal renders verbatim and the picker now holds the created
+    // session, so the name field is gone.
+    expect(await screen.findByText('temporarily out of capacity')).toBeDefined()
+    expect(screen.queryByLabelText('New session name')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+
+    await waitFor(() => {
+      expect(client.runLaunch).toHaveBeenCalledTimes(2)
+      expect(client.runLaunch).toHaveBeenLastCalledWith({
+        session_id: session.id,
+        task: 'write a result file',
+        harness: 'claude',
+      })
+    })
+    expect(client.sessionNew).toHaveBeenCalledTimes(1)
+  })
 })

@@ -46,9 +46,10 @@ function connect(wsURL) {
   socket = ws
 
   ws.onopen = () => {
-    attempt = 0
     // Live tail only: the SPA owns replay, we only care about transitions
-    // that happen while the app is open.
+    // that happen while the app is open. Note: attempt is NOT reset here -
+    // an open-then-immediate-close storm (e.g. a refused token) must keep
+    // backing off; the reset waits for the subscribe ack.
     ws.send(JSON.stringify({ replay: false }))
   }
 
@@ -57,6 +58,11 @@ function connect(wsURL) {
     try {
       ev = JSON.parse(msg.data)
     } catch {
+      return
+    }
+    if (ev.ok === true) {
+      // Subscribe ack: the gateway accepted us, so the backoff can reset.
+      attempt = 0
       return
     }
     if (ev.type !== 'run.status' || !ev.run_id) return
@@ -74,6 +80,13 @@ function connect(wsURL) {
 
   ws.onclose = () => {
     if (socket === ws) socket = null
+    // With replay:false the set only reflects what this socket observed; a
+    // gap makes it a lie, and the SPA is the source of truth for standing
+    // attention. Drop everything and start clean on the next connection.
+    if (needsAttention.size > 0) {
+      needsAttention.clear()
+      updateBadge()
+    }
     scheduleReconnect(wsURL)
   }
   ws.onerror = () => {
@@ -94,10 +107,11 @@ function scheduleReconnect(wsURL) {
 
 function show(runId, payload) {
   if (!Notification.isSupported()) return
-  const task = typeof payload.task === 'string' ? payload.task : ''
+  // run.status payloads carry {from, to, reason} - no task name; the run id
+  // (shortened) is the best stable identifier we have.
   const n = new Notification({
-    title: task ? task.slice(0, 60) : runId,
-    body: payload.reason || 'needs attention',
+    title: 'Run needs attention',
+    body: payload.reason || runId.slice(0, 12),
   })
   n.on('click', () => focusWindow())
   n.show()

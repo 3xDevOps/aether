@@ -1,5 +1,5 @@
 import { Archive, Copy, GitMerge, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/components/palette/palette'
 import { Button } from '@/components/ui/button'
@@ -138,11 +138,35 @@ export function LandControls({ run }: { run: RunRecord }) {
   )
 }
 
-/** One copyable review command: the text, and a button that clipboards it. */
+/**
+ * One copyable review command: the text, and a button that clipboards it.
+ * jsdom, plain-http origins and older engines have no navigator.clipboard;
+ * the fallback selects the command text for a manual copy (same pattern as
+ * the members InviteDialog).
+ */
 function ReviewCommand({ command }: { command: string }) {
+  const codeRef = useRef<HTMLElement>(null)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command)
+      toast.success('Copied')
+    } catch {
+      const node = codeRef.current
+      if (!node) return
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    }
+  }
+
   return (
     <div className="flex items-center gap-1">
-      <code className="min-w-0 truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px]">
+      <code
+        ref={codeRef}
+        className="min-w-0 truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px]"
+      >
         {command}
       </code>
       <Button
@@ -150,12 +174,7 @@ function ReviewCommand({ command }: { command: string }) {
         size="icon"
         className="size-5"
         aria-label={`Copy ${command}`}
-        onClick={() => {
-          void navigator.clipboard.writeText(command).then(
-            () => toast.success('Copied'),
-            (err: unknown) => toast.error(message(err)),
-          )
-        }}
+        onClick={() => void copy()}
       >
         <Copy className="size-3" aria-hidden />
       </Button>

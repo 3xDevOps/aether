@@ -364,12 +364,15 @@ export function FirstRunStep({
       let sid = sessionID
       if (sid === '__new') {
         if (!workspace) throw new Error('no workspace selected; go back a step')
-        sid = (
-          await client.sessionNew({
-            workspace_id: workspace.id,
-            name: newName.trim(),
-          })
-        ).id
+        const created = await client.sessionNew({
+          workspace_id: workspace.id,
+          name: newName.trim(),
+        })
+        sid = created.id
+        // Keep the created session: if the launch below fails, a retry
+        // must reuse it rather than create a duplicate.
+        setSessions((prev) => [...(prev ?? []), created])
+        setSessionID(created.id)
       }
       const run = await client.runLaunch({
         session_id: sid,

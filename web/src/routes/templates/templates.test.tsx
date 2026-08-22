@@ -26,7 +26,9 @@ function seed(extra: Partial<RootState> = {}) {
     sessions: { [session.id]: session, [otherSession.id]: otherSession },
     members: { [alice.id]: alice },
     info: serverInfo,
-    capabilities: null,
+    // template.save/delete and the budget/settings buttons are gated; an
+    // upgraded gateway advertising every method renders them all.
+    capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
     hydrated: true,
     hydrationError: null,
     route: { name: 'templates', params: {} },

@@ -111,3 +111,32 @@ test('the review commands name the fetched branch and the base', () => {
     screen.getByText(`git diff abcdef12...aether/${active.branch}`),
   ).toBeTruthy()
 })
+
+test('copy writes the command to the clipboard when the API exists', async () => {
+  const writeText = vi.fn(async () => {})
+  vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+  renderControls(seed())
+
+  const command = `git log --oneline aether/${active.branch}`
+  fireEvent.click(screen.getByRole('button', { name: `Copy ${command}` }))
+
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(command))
+  expect(toast.success).toHaveBeenCalledWith('Copied')
+  vi.unstubAllGlobals()
+})
+
+test('copy falls back to selecting the text where the clipboard is missing', async () => {
+  // jsdom ships no navigator.clipboard - exactly the environment (plain-http
+  // origins, older engines) the fallback exists for. The click must not
+  // throw; it selects the command text instead.
+  renderControls(seed())
+
+  const command = `git log --oneline aether/${active.branch}`
+  fireEvent.click(screen.getByRole('button', { name: `Copy ${command}` }))
+
+  await waitFor(() => {
+    const selection = window.getSelection()
+    expect(selection?.rangeCount).toBe(1)
+    expect(selection?.getRangeAt(0).toString()).toBe(command)
+  })
+})

@@ -94,6 +94,30 @@ describe('sync panel', () => {
 
     expect(container.innerHTML).toBe('')
   })
+
+  it('drops a status response that resolves after unmount', async () => {
+    // clearInterval stops future ticks but not an in-flight fetch: a late
+    // response must not overwrite the store a later mount just filled.
+    let resolveStatus!: (v: { sessions: SyncSessionStatus[] }) => void
+    const statusPromise = new Promise<{ sessions: SyncSessionStatus[] }>((res) => {
+      resolveStatus = res
+    })
+    const client = fakeApi({
+      localSyncStatus: vi.fn(() => statusPromise),
+    })
+    seed()
+    const view = render(<SyncPanel runID="run_1" client={client} />)
+    view.unmount()
+
+    resolveStatus({
+      sessions: [{ run_id: 'run_1', state: 'running', conflict: null }],
+    })
+    // Let the resolved fetch's continuation run before asserting.
+    await statusPromise
+    await Promise.resolve()
+
+    expect(useStore.getState().syncSessions).toEqual({})
+  })
 })
 
 describe('sync badge', () => {

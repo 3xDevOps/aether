@@ -4,7 +4,7 @@
 // the board badge and this view agree on what is running.
 
 import { RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { message } from '@/components/palette/palette'
 import type { CardSlotProps } from '@/components/slots'
 import { Button } from '@/components/ui/button'
@@ -52,9 +52,23 @@ export function SyncPanel({
   )
   const [busy, setBusy] = useState(false)
 
+  // The interval tick and the verbs' own refreshes all resolve async: after
+  // unmount none of them may write the store, or a stale snapshot could
+  // overwrite what a freshly-mounted panel just fetched. Same cancelled
+  // convention as the LinkCard/DaemonCard/members effects, held in a ref
+  // because the verbs share it with the polling effect.
+  const cancelled = useRef(false)
+  useEffect(() => {
+    cancelled.current = false
+    return () => {
+      cancelled.current = true
+    }
+  }, [])
+
   const refresh = useCallback(async () => {
     try {
-      setSyncSessions((await client.localSyncStatus()).sessions)
+      const { sessions } = await client.localSyncStatus()
+      if (!cancelled.current) setSyncSessions(sessions)
     } catch {
       // A failed poll is transient; the verbs surface their own refusals.
     }

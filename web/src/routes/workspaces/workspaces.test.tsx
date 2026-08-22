@@ -33,7 +33,9 @@ function seed(extra: Partial<RootState> = {}) {
     sessions: { [session.id]: session },
     members: { [alice.id]: alice },
     info: serverInfo,
-    capabilities: null,
+    // workspace.add and the tools verbs are capability-gated; an upgraded
+    // gateway advertising every method renders the admin forms.
+    capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
     hydrated: true,
     hydrationError: null,
     route: { name: 'workspaces', params: {} },
@@ -41,8 +43,9 @@ function seed(extra: Partial<RootState> = {}) {
   })
 }
 
-// The remote-legacy null capability set claims every method, so the admin
-// forms render; a desktop gateway narrows this via /capabilities.
+// A legacy null capability set covers only the pre-capabilities allowlist,
+// so these tests advertise every method; a desktop gateway narrows this
+// via /capabilities.
 describe('workspaces view', () => {
   it('submits the add form with a custom image environment', async () => {
     const client = fakeApi({

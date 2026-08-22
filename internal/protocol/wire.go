@@ -13,15 +13,17 @@ import (
 // decorated by handlers from the scheduler, never derived from the
 // stored run.
 type Run struct {
-	ID                string  `json:"id"`
-	SessionID         string  `json:"session_id"`
-	MemberID          string  `json:"member_id"`
-	Task              string  `json:"task"`
-	Harness           string  `json:"harness"`
-	Mode              string  `json:"mode"`
-	Status            string  `json:"status"`
-	Reason            string  `json:"reason,omitempty"`
-	Paused            bool    `json:"paused,omitempty"`
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	MemberID  string `json:"member_id"`
+	Task      string `json:"task"`
+	Harness   string `json:"harness"`
+	Mode      string `json:"mode"`
+	Status    string `json:"status"`
+	Reason    string `json:"reason,omitempty"`
+	// Paused has no omitempty: absence must keep meaning "gateway too old
+	// to know", never "not paused", or clients cannot seed pause state.
+	Paused            bool    `json:"paused"`
 	Branch            string  `json:"branch"`
 	Protected         bool    `json:"protected,omitempty"`
 	CreatedAt         string  `json:"created_at"`

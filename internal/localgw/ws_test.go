@@ -214,10 +214,10 @@ func expectClose(t *testing.T, conn *websocket.Conn, want websocket.StatusCode) 
 	}
 }
 
-// TestEventsStreamsThenSignalsBacklogDrop covers the happy path: header,
-// ok ack, event lines as text frames, and stream end reported as 4000 so
-// the SPA resubscribes with its cursor.
-func TestEventsStreamsThenSignalsBacklogDrop(t *testing.T) {
+// TestEventsStreamsThenSignalsStreamEnd covers the happy path: header,
+// ok ack, event lines as text frames, and stream end reported as 1012 so
+// the SPA resubscribes with backoff from its cursor.
+func TestEventsStreamsThenSignalsStreamEnd(t *testing.T) {
 	b := &wsStubBackend{eventsStream: newWSStubStream("{\"seq\":1}\n{\"seq\":2}\n")}
 	g, base := newWSGateway(t, b)
 	conn := wsDial(t, base, "/ws/events", g.Token())
@@ -237,7 +237,7 @@ func TestEventsStreamsThenSignalsBacklogDrop(t *testing.T) {
 			t.Fatalf("event seq = %d, want %d", ev.Seq, want)
 		}
 	}
-	reason := expectClose(t, conn, websocket.StatusCode(statusBacklogDropped))
+	reason := expectClose(t, conn, statusStreamEnded)
 	if !strings.Contains(reason, "after_seq") {
 		t.Fatalf("close reason = %q, want resubscribe hint", reason)
 	}

@@ -96,7 +96,7 @@ authority.
 | Verb | Request | Response |
 | --- | --- | --- |
 | `link.status` | `{}` | `{"linked":bool,"addr":"...","user":"...","repo":"..."}` |
-| `link.repo` | `{"repo":"/path/to/clone"}` | `{"repo":"...","remote":"aether","url":"..."}` |
+| `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
 | `sync.stop` | `{"run_id":"..."}` | `{"run_id":"...","state":"stopped"}` |
@@ -105,15 +105,18 @@ authority.
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
 | `image.scaffold` | `{"repo":"...","kind":"dockerfile"\|"devcontainer"}` (`repo` defaults to the linked one) | `{"written":["..."]}` |
 
-- `link.repo` resolves the workspace exactly like `aether link --repo`: a
-  single workspace resolves implicitly; none or several answers `-32002`
+- `link.repo` honors a `workspace_id` naming the workspace the remote URL
+  must carry (the onboarding wizard sends the one just picked). Without
+  it the workspace resolves exactly like `aether link --repo`: a single
+  workspace resolves implicitly; none or several answers `-32002`
   (invalid state) and is resolved server-side or with the CLI's
   `--workspace` flag first.
 - `pull`, `sync.start`, and `sync.stop` refuse with `-32002` when no repo
-  is linked. A sync session's states are `running`, `stopped`, `conflict`
-  (with the conflict text in `conflict`), and `error`. A conflict is also
-  reported to the server as a `sync.conflict` call so both affected
-  members see the event.
+  is linked. A sync session's states are `starting` (the overlay is
+  dialing the run worktree), `running`, `stopped`, `conflict` (with the
+  conflict text in `conflict`), and `error`. A conflict is also reported
+  to the server as a `sync.conflict` call so both affected members see
+  the event; `sync.stop` dismisses a standing conflict.
 - `image.scaffold` refuses with `-32002` when the files already exist,
   rather than overwriting them.
 

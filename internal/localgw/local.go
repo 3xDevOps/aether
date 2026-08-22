@@ -167,7 +167,8 @@ func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.
 
 func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
-		Repo string `json:"repo"`
+		Repo        string `json:"repo"`
+		WorkspaceID string `json:"workspace_id"`
 	}
 	if perr := decodeParams(body, &params); perr != nil {
 		return nil, perr
@@ -175,9 +176,14 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 	if params.Repo == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "repo is required"}
 	}
-	wsID, perr := g.resolveWorkspace(r)
-	if perr != nil {
-		return nil, perr
+	// The onboarding wizard names the workspace it just picked; only an
+	// unqualified request falls back to the CLI's sole-workspace rule.
+	wsID := params.WorkspaceID
+	if wsID == "" {
+		var perr *protocol.Error
+		if wsID, perr = g.resolveWorkspace(r); perr != nil {
+			return nil, perr
+		}
 	}
 	g.local.mu.Lock()
 	defer g.local.mu.Unlock()

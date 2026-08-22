@@ -144,4 +144,25 @@ describe('shell route', () => {
     expect(useStore.getState().route.name).toBe('agents')
     view.unmount()
   })
+
+  it('clears the ended footer when a dirty exit is resumed', () => {
+    const View = lookupRoute('shell')
+    if (!View) throw new Error('shell route not registered')
+    useStore.setState({ shellRequest: req })
+    const view = render(<View params={{}} />)
+    attached()
+
+    act(() =>
+      StubSocket.last().onclose?.({ code: 4001, reason: 'shell exited with status 1' }),
+    )
+    expect(screen.getByText('Back to workspaces')).toBeDefined()
+
+    // Resume replaces the request: the pane reconnects and the footer's
+    // claim that the session ended must go with the old shell.
+    fireEvent.click(screen.getByText('Resume'))
+    attached()
+
+    expect(screen.queryByText('Back to workspaces')).toBeNull()
+    view.unmount()
+  })
 })

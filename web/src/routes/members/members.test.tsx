@@ -19,7 +19,9 @@ function seed(extra: Partial<RootState> = {}) {
     members: { [alice.id]: alice, [bob.id]: bob },
     presence: [],
     info: serverInfo,
-    capabilities: null,
+    // The admin verbs (approve/invite/remove) are capability-gated; an
+    // upgraded gateway advertising every method renders them all.
+    capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
     hydrated: true,
     hydrationError: null,
     route: { name: 'members', params: {} },

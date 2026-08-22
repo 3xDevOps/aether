@@ -119,16 +119,33 @@ function main() {
     // The sidecar prints exactly one JSON line on stdout, then serves.
     const rl = readline.createInterface({ input: child.stdout })
     let parsed = false
+
+    // Bounded handshake wait: a gateway hung on startup (SSH prompt on
+    // stderr, stdout silent) would otherwise leave a dock icon and no
+    // window - the exit-driven respawn/fatal path never fires for a child
+    // that neither talks nor dies. Kill it so that path takes over.
+    const spawned = child
+    let handshakeTimer = setTimeout(() => {
+      handshakeTimer = null
+      if (parsed || spawned !== child) return
+      console.error('aether gui produced no handshake within 15s; killing it')
+      spawned.kill('SIGKILL')
+    }, 15000)
     rl.on('line', (line) => {
       if (parsed) return
-      parsed = true
       let msg
       try {
         msg = JSON.parse(line)
       } catch (err) {
+        // Not the handshake line (a stray warning, say): keep waiting for it.
         console.error('aether gui printed an unparseable line:', line, err)
         return
       }
+      if (handshakeTimer) {
+        clearTimeout(handshakeTimer)
+        handshakeTimer = null
+      }
+      parsed = true
       gatewayURL = msg.url
       gatewayOrigin = new URL(msg.url).origin
       respawns = 0 // a healthy start resets the backoff budget
@@ -137,6 +154,10 @@ function main() {
     })
 
     child.on('exit', (code, signal) => {
+      if (handshakeTimer) {
+        clearTimeout(handshakeTimer)
+        handshakeTimer = null
+      }
       child = null
       notify.stop()
       if (quitting) return
@@ -229,7 +250,9 @@ function main() {
     // aether://run/<id> parses as host "run", pathname "/<id>".
     if (parsed.hostname !== 'run') return
     const id = parsed.pathname.replace(/^\//, '')
-    if (!id) return
+    // Run IDs are lowercase ULIDs; refuse anything else rather than
+    // concatenating attacker-shaped text into the gateway URL.
+    if (!/^[0-9a-z]{10,32}$/.test(id)) return
     if (!gatewayURL) {
       pendingRunId = id
       return

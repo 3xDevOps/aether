@@ -125,4 +125,13 @@ describe('Sidebar', () => {
 
     expect(screen.queryByLabelText('Surfaces')).toBeNull()
   })
+
+  it('shows no surface links on a legacy monitor without capabilities', () => {
+    // The capabilities endpoint 404ed: only the pre-capabilities allowlist
+    // may be assumed, and no admin method is on it.
+    useStore.setState({ capabilities: null })
+    render(<Sidebar />)
+
+    expect(screen.queryByLabelText('Surfaces')).toBeNull()
+  })
 })
