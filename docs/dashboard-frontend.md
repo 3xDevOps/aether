@@ -282,18 +282,24 @@ routes on the same `runId`.
   attach, so a reconnected pane is never blank; the client clears the buffer
   first, which is what keeps a reconnect from stacking a second copy of the
   scrollback under the first.
-- **WebGL is per instance.** The renderer is loaded in a `try`; a machine with
-  no GL context loses acceleration for that one terminal and keeps the DOM
-  renderer, rather than the app turning WebGL off everywhere.
+- **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
+  glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038),
+  garbling scrolled rows until a forced refresh; the DOM renderer never
+  desyncs. The terminal font stack ends in the shipped symbols-only Nerd Font
+  (`src/lib/term-font.ts`, declared in `src/index.css`), so agent TUIs get
+  their powerline and devicon glyphs; the terminal opens only once that font
+  is loaded, because xterm caches glyph metrics synchronously at `open` and
+  would otherwise bake fallback metrics in. The workspace-shell pane
+  (`routes/shell/pane.tsx`) uses the identical renderer and font setup.
 - **Injections need no client work.**  writes the attributed
   member-coloured banner into the PTY stream itself, so it arrives as ANSI and
   xterm renders it like any other output.
 - Board cards get no live terminal previews in v1 (spec cut-line).
 
 The terminal's colours are the one place the tokens cannot be used directly:
-the renderers paint into a canvas and need resolved values, so the view reads
-the computed background and foreground off its own host element and re-reads
-them when the dark class on `<html>` changes.
+xterm needs resolved theme values rather than the CSS variables, so the view
+reads the computed background and foreground off its own host element and
+re-reads them when the dark class on `<html>` changes.
 
 ## Run events tab
 
@@ -461,8 +467,7 @@ dropped socket, the 4000 close, hydration waiting on the subscription
 acknowledgement, the mid-hydration event, the cursor held behind an unresolved
 fetch, the cursorless reconnect, and the hydration retry. The terminal is driven through the same
 stub: the attach client's own tests cover the header, the reconnect and the
-refusals, and the view is rendered with a real xterm instance (jsdom has no
-canvas, so the WebGL load fails there and exercises the DOM fallback) to prove
+refusals, and the view is rendered with a real xterm instance to prove
 the toggle and the steer refusal reach the UI. The board and the palette are
 rendered against a seeded store: bucket membership and ordering, the ack
 muting a card and a later state change bringing the emphasis back, the paused
