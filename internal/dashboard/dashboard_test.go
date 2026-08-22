@@ -417,6 +417,7 @@ func (f *fakeRuns) Launch(context.Context, domain.SessionID, domain.MemberID, st
 }
 func (f *fakeRuns) Pause(context.Context, domain.RunID, domain.MemberID) error  { return nil }
 func (f *fakeRuns) Resume(context.Context, domain.RunID, domain.MemberID) error { return nil }
+func (f *fakeRuns) Paused(domain.RunID) bool                                    { return false }
 func (f *fakeRuns) Inject(context.Context, domain.RunID, domain.MemberID, string) error {
 	return nil
 }

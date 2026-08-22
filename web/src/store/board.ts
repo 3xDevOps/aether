@@ -19,8 +19,9 @@ export interface BoardSlice {
   /**
    * Run ID to paused. The domain status enum has no paused state - a paused
    * run still reads `running` - so this comes from the pause and resume
-   * timeline events. A run missing from the map is *unknown*, not running:
-   * nothing seeds it at hydration, so a run paused before the tab loaded
+   * timeline events, seeded at hydration from the run list's `paused` wire
+   * field. A run missing from the map is *unknown*, not running: a legacy
+   * server sends no `paused` field, so a run paused before the tab loaded
    * looks the same as one that was never paused.
    */
   pausedRuns: Record<string, boolean>
@@ -29,6 +30,8 @@ export interface BoardSlice {
   ackRun: (runID: string) => void
   ackAll: () => void
   setPaused: (runID: string, paused: boolean) => void
+  /** Replaces the map wholesale; the hydration snapshot is authoritative. */
+  seedPaused: (entries: Record<string, boolean>) => void
   toggleIdle: () => void
 }
 
@@ -52,6 +55,7 @@ export const createBoardSlice: SliceCreator<BoardSlice> = (set) => ({
     })),
   setPaused: (runID, paused) =>
     set((s) => ({ pausedRuns: { ...s.pausedRuns, [runID]: paused } })),
+  seedPaused: (pausedRuns) => set({ pausedRuns }),
   toggleIdle: () => set((s) => ({ showIdle: !s.showIdle })),
 })
 

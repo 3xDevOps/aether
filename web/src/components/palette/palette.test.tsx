@@ -35,6 +35,9 @@ beforeEach(() => {
     paletteRunID: null,
     route: { name: 'board', params: {} },
     hydrated: true,
+    // Null is the legacy remote monitor: the pre-capabilities allowlist
+    // (steering, launch, templates), no admin methods, no local verbs.
+    capabilities: null,
   })
   vi.clearAllMocks()
 })
@@ -132,5 +135,87 @@ describe('command palette', () => {
         params: { runId: 'run_tpl' },
       }),
     )
+  })
+
+  it('offers the admin surfaces when the gateway serves their methods', async () => {
+    useStore.setState({
+      capabilities: {
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events', 'attach', 'shell'],
+        local: ['link.status', 'daemon.status', 'pull'],
+      },
+    })
+    open()
+
+    fireEvent.click(await screen.findByText('Members'))
+
+    expect(useStore.getState().route).toEqual({ name: 'members', params: {} })
+  })
+
+  it('hides the admin surfaces behind the remote allowlist', async () => {
+    // A remote gateway advertises its allowlist; member.approve and the
+    // other admin methods are not on it, so their verbs never render.
+    useStore.setState({
+      capabilities: {
+        gateway: 'remote',
+        methods: ['run.list', 'run.get', 'member.list'],
+        ws: ['events', 'attach'],
+      },
+    })
+    open()
+
+    await screen.findByText('rewrite the checkout flow')
+    expect(screen.queryByText('Members')).toBeNull()
+    expect(screen.queryByText('Workspaces')).toBeNull()
+    expect(screen.queryByText('Onboarding')).toBeNull()
+  })
+
+  it('hides the admin surfaces on a legacy monitor without capabilities', async () => {
+    // capabilities stays null (the beforeEach default): the endpoint 404ed,
+    // so only the pre-capabilities allowlist may render - the admin methods
+    // behind these entries would all answer 403.
+    open()
+
+    await screen.findByText('rewrite the checkout flow')
+    expect(screen.queryByText('Members')).toBeNull()
+    expect(screen.queryByText('Workspaces')).toBeNull()
+    expect(screen.queryByText('Templates')).toBeNull()
+    expect(screen.queryByText('Agents')).toBeNull()
+  })
+
+  it('pulls the focused run branch through the local gateway', async () => {
+    useStore.setState({
+      route: { name: 'run', params: { runId: 'run_1' } },
+      capabilities: {
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events', 'attach', 'shell'],
+        local: ['pull'],
+      },
+    })
+    open()
+
+    fireEvent.click(await screen.findByText('Pull branch'))
+
+    await waitFor(() => expect(api.localPull).toHaveBeenCalledWith('run_1'))
+  })
+
+  it('offers relaunch only on a terminal run', async () => {
+    useStore.setState({
+      runs: { [active.id]: toRecord(run({ status: 'failed' })) },
+      route: { name: 'run', params: { runId: 'run_1' } },
+      capabilities: {
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events', 'attach', 'shell'],
+        local: [],
+      },
+    })
+    open()
+
+    fireEvent.click(await screen.findByText('Relaunch run'))
+
+    await waitFor(() => expect(api.runRelaunch).toHaveBeenCalledWith('run_1'))
   })
 })

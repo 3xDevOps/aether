@@ -93,12 +93,24 @@ func TestControlListsAndGets(t *testing.T) {
 		t.Errorf("member.list = %+v, want Ada", ml.Members)
 	}
 
+	// run.get carries the stored reason and the scheduler-decorated
+	// paused flag.
+	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunNeedsAttention, "stalled: no output", nil, nil); err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+	e.runs.setPaused(e.run.ID, true)
 	var rg protocol.RunResult
 	if err := c.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: string(e.run.ID)}, &rg); err != nil {
 		t.Fatalf("run.get: %v", err)
 	}
-	if rg.Run.Status != "running" || rg.Run.Branch != e.run.Branch {
+	if rg.Run.Status != "needs-attention" || rg.Run.Branch != e.run.Branch {
 		t.Errorf("run.get = %+v", rg.Run)
+	}
+	if rg.Run.Reason != "stalled: no output" {
+		t.Errorf("run.get reason = %q, want %q", rg.Run.Reason, "stalled: no output")
+	}
+	if !rg.Run.Paused {
+		t.Error("run.get did not carry paused")
 	}
 	if rg.Run.StartedAt != nil {
 		t.Errorf("started_at = %v, want null", *rg.Run.StartedAt)

@@ -76,6 +76,12 @@ func TestPauseResumeAndStallExemption(t *testing.T) {
 	if err != nil || !sc.Paused {
 		t.Fatalf("sidecar paused flag: %+v, %v", sc, err)
 	}
+	if !e.sched.Paused(run.ID) {
+		t.Fatal("Paused(run) = false after Pause")
+	}
+	if e.sched.Paused("run_unknown") {
+		t.Fatal("Paused(unknown run) = true")
+	}
 	if perr := e.sched.Pause(ctx, run.ID, e.member.ID); perr == nil {
 		t.Fatal("double pause accepted")
 	}
@@ -101,6 +107,9 @@ func TestPauseResumeAndStallExemption(t *testing.T) {
 	sc, err = e.sched.readSidecar(run.ID)
 	if err != nil || sc.Paused {
 		t.Fatalf("sidecar paused flag after resume: %+v, %v", sc, err)
+	}
+	if e.sched.Paused(run.ID) {
+		t.Fatal("Paused(run) = true after Resume")
 	}
 
 	// Unpaused and idle: now the stall fires.

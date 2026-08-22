@@ -1,5 +1,8 @@
+import { ApiError } from '@/lib/api'
 import type { Event, Run } from '@/lib/types'
+import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
+import { capability } from '@/store/hooks'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
   alice,
@@ -51,6 +54,171 @@ describe('hydrate', () => {
 
     expect(store.getState().hydrated).toBe(false)
     expect(store.getState().hydrationError).toContain('502')
+  })
+
+  it('seeds pausedRuns from the run list, so paused survives a reload', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        runList: vi.fn(async () => [
+          run({ id: 'run_1', paused: true }),
+          run({ id: 'run_2', paused: false }),
+          run({ id: 'run_3' }), // a legacy gateway sends no paused field
+        ]),
+      }),
+    )
+
+    // No timeline event has arrived, yet the snapshot already knows.
+    const s = store.getState()
+    expect(s.pausedRuns).toEqual({ run_1: true, run_2: false })
+    expect(s.pausedRuns.run_3).toBeUndefined()
+
+    // And the board card carries the badge straight from the snapshot.
+    const { columns } = board({
+      sessions: s.sessions,
+      runs: s.runs,
+      members: s.members,
+      acked: s.acked,
+      pausedRuns: s.pausedRuns,
+      pending: new Set<string>(),
+    })
+    const working = columns.find((c) => c.key === 'working')
+    expect(working?.cards.find((c) => c.run.id === 'run_1')?.paused).toBe(true)
+    expect(working?.cards.find((c) => c.run.id === 'run_2')?.paused).toBe(false)
+  })
+
+  it('replaces the paused map wholesale on re-hydration', async () => {
+    const store = createRootStore()
+    store.getState().setPaused('run_gone', true)
+    await hydrate(
+      store,
+      fakeApi({ runList: vi.fn(async () => [run({ id: 'run_1', paused: true })]) }),
+    )
+
+    expect(store.getState().pausedRuns).toEqual({ run_1: true })
+  })
+
+  it('keeps the wire reason across a refetch that changed the status', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    expect(store.getState().runs.run_1.reason).toBeUndefined()
+
+    await hydrate(
+      store,
+      fakeApi({
+        runList: vi.fn(async () => [
+          run({ status: 'needs-attention', reason: 'plan review' }),
+        ]),
+      }),
+    )
+
+    expect(store.getState().runs.run_1.status).toBe('needs-attention')
+    expect(store.getState().runs.run_1.reason).toBe('plan review')
+  })
+
+  it('stores the gateway capabilities', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    const caps = store.getState().capabilities
+    expect(caps?.gateway).toBe('remote')
+    const c = capability(caps)
+    expect(c.hasMethod('run.pause')).toBe(true) // "*" covers everything
+    expect(c.hasWS('events')).toBe(true)
+    expect(c.hasLocal('worktree.open')).toBe(false)
+  })
+
+  it('treats a missing capabilities endpoint as the legacy remote monitor', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        capabilities: vi.fn(async () => {
+          throw new Error('404 Not Found')
+        }),
+      }),
+    )
+
+    expect(store.getState().hydrated).toBe(true)
+    expect(store.getState().capabilities).toBeNull()
+    const c = capability(store.getState().capabilities)
+    // The pre-capabilities allowlist: monitoring and steering verbs pass...
+    expect(c.hasMethod('run.list')).toBe(true)
+    expect(c.hasMethod('template.launch')).toBe(true)
+    // ...but the admin methods a legacy gateway would 403 do not.
+    expect(c.hasMethod('member.approve')).toBe(false)
+    expect(c.hasMethod('workspace.add')).toBe(false)
+    expect(c.hasMethod('template.save')).toBe(false)
+    expect(c.hasMethod('agent.list')).toBe(false)
+    expect(c.hasWS('attach')).toBe(true)
+    expect(c.hasWS('shell')).toBe(false)
+    expect(c.hasLocal('worktree.open')).toBe(false)
+  })
+
+  it('classifies a fetch that never got an answer as a dead gateway', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        serverInfo: vi.fn(async () => {
+          // What fetch throws when the origin itself is gone.
+          throw new TypeError('Failed to fetch')
+        }),
+      }),
+    )
+
+    expect(store.getState().unreachable).toBe('gateway')
+    expect(store.getState().hydrationError).toContain('Failed to fetch')
+  })
+
+  it('classifies the gateway naming its SSH backend as a dead server', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        serverInfo: vi.fn(async () => {
+          throw new ApiError(
+            503,
+            'server.info: server unreachable: dial tcp 10.0.0.5:22: connect: connection refused',
+          )
+        }),
+      }),
+    )
+
+    expect(store.getState().unreachable).toBe('server')
+  })
+
+  it('clears unreachable when a re-hydration succeeds', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        serverInfo: vi.fn(async () => {
+          throw new TypeError('Failed to fetch')
+        }),
+      }),
+    )
+    expect(store.getState().unreachable).toBe('gateway')
+
+    await hydrate(store, fakeApi())
+
+    expect(store.getState().unreachable).toBeNull()
+    expect(store.getState().hydrated).toBe(true)
+  })
+
+  it('leaves unreachable null on a failure that is neither hop', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        serverInfo: vi.fn(async () => {
+          throw new ApiError(500, 'server.info: internal error')
+        }),
+      }),
+    )
+
+    expect(store.getState().unreachable).toBeNull()
   })
 })
 
@@ -363,6 +531,28 @@ describe('connect', () => {
       timeout: 3000,
     })
     expect(store.getState().hydrationError).toBeNull()
+    stop()
+  })
+
+  it('marks the server hop dead on a -32004 subscribe refusal', async () => {
+    const client = fakeApi()
+    const store = createRootStore()
+    const stop = connect(store, client)
+
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(1))
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    // The local gateway refuses the subscribe when its SSH backend cannot
+    // reach aether-server, naming the hop in the frame before it closes.
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: false,
+        code: -32004,
+        error: 'server unreachable: dial tcp 10.0.0.5:22: connect: connection refused',
+      }),
+    })
+
+    expect(store.getState().unreachable).toBe('server')
     stop()
   })
 })

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { pendingApprovalKey } from '@/lib/status'
+import type { GatewayCapabilities } from '@/lib/types'
 import { useStore } from '@/store'
 import {
   sidebarGroups,
@@ -59,4 +60,73 @@ export function useAttentionRuns(): SidebarRun[] {
     () => sortRuns(sidebarSessions(input).flatMap((entry) => entry.runs)),
     [input],
   )
+}
+
+/** What the connected gateway can do, queryable per method, verb and socket. */
+export interface Capability {
+  hasMethod: (method: string) => boolean
+  hasLocal: (verb: string) => boolean
+  hasWS: (name: string) => boolean
+}
+
+/**
+ * The pre-capabilities allowlist: the browser-transport methods a legacy
+ * remote gateway (internal/dashboard/api.go's apiMethods before the
+ * /capabilities endpoint existed) will serve. Everything else answers 403
+ * "available on the SSH control channel only", so gating against a null
+ * capabilities result must fall back to this list, never to "everything".
+ */
+const LEGACY_REMOTE_METHODS: Record<string, true> = {
+  'server.info': true,
+  'workspace.list': true,
+  'session.list': true,
+  'session.get': true,
+  'member.list': true,
+  'run.launch': true,
+  'run.list': true,
+  'run.get': true,
+  'run.kill': true,
+  'run.pause': true,
+  'run.resume': true,
+  'run.inject': true,
+  'run.close': true,
+  'run.handoff': true,
+  'approval.list': true,
+  'approval.decide': true,
+  'presence.roster': true,
+  'presence.heartbeat': true,
+  'session.timeline': true,
+  'cost.report': true,
+  'budget.get': true,
+  'run.overlaps': true,
+  'template.list': true,
+  'template.launch': true,
+}
+
+/**
+ * Answers from a capabilities result. Null means a legacy remote monitor
+ * that predates the endpoint: it serves exactly the pre-capabilities
+ * allowlist and both gateway sockets; the admin methods behind the newer
+ * surfaces would 403, and local verbs are a desktop-gateway feature it
+ * cannot have. A "*" methods entry means every method.
+ */
+export function capability(caps: GatewayCapabilities | null): Capability {
+  if (caps === null) {
+    return {
+      hasMethod: (method) => LEGACY_REMOTE_METHODS[method] === true,
+      hasLocal: () => false,
+      hasWS: (name) => name === 'events' || name === 'attach',
+    }
+  }
+  const every = caps.methods.includes('*')
+  return {
+    hasMethod: (method) => every || caps.methods.includes(method),
+    hasLocal: (verb) => (caps.local ?? []).includes(verb),
+    hasWS: (name) => caps.ws.includes(name),
+  }
+}
+
+export function useCapability(): Capability {
+  const caps = useStore((s) => s.capabilities)
+  return useMemo(() => capability(caps), [caps])
 }

@@ -26,7 +26,10 @@ import (
 // request itself.
 type sessionStream struct {
 	io.Reader
-	stdin    io.WriteCloser
+	stdin io.WriteCloser
+	// ch is the raw session channel, kept for out-of-band channel
+	// requests (window-change); nil in tests that fake the stream.
+	ch       ssh.Channel
 	closeCh  func() error
 	wait     func() error
 	waitOnce sync.Once
@@ -92,6 +95,7 @@ func (c *Conn) openSubsystem(name string, pty *ptyGeometry) (*sessionStream, err
 	}
 	return &sessionStream{
 		Reader:  ch,
+		ch:      ch,
 		stdin:   channelStdin{ch: ch},
 		closeCh: ch.Close,
 		wait:    func() error { return <-exit },
@@ -137,6 +141,32 @@ func requestPTY(ch ssh.Channel, cols, rows uint) error {
 	return err
 }
 
+// Terminal is an interactive remote terminal: a byte stream whose window
+// can be resized while it is open.
+type Terminal interface {
+	io.ReadWriteCloser
+	Resize(cols, rows uint) error
+}
+
+// TerminalStream is a PTY-backed subsystem stream; Resize sends the RFC
+// 4254 window-change request on the underlying session channel.
+type TerminalStream struct {
+	*bufferedStream
+}
+
+var _ Terminal = (*TerminalStream)(nil)
+
+// Resize adjusts the remote PTY to cols by rows.
+func (t *TerminalStream) Resize(cols, rows uint) error {
+	payload := ssh.Marshal(struct {
+		Cols, Rows, WidthPx, HeightPx uint32
+	}{Cols: uint32(cols), Rows: uint32(rows)})
+	if _, err := t.ch.SendRequest("window-change", false, payload); err != nil {
+		return fmt.Errorf("cli: window-change: %w", err)
+	}
+	return nil
+}
+
 // Control opens the JSON-RPC control channel.
 func (c *Conn) Control() (*protocol.Client, error) {
 	stream, err := c.openSubsystem(protocol.SubsystemControl, nil)
@@ -146,61 +176,60 @@ func (c *Conn) Control() (*protocol.Client, error) {
 	return protocol.NewClient(stream), nil
 }
 
+// AttachStream opens the attach subsystem for req and returns the
+// resizable terminal stream alongside the server's ack. A refused ack is
+// returned with the error so callers can forward its code.
+func (c *Conn) AttachStream(req protocol.AttachRequest) (*TerminalStream, protocol.AttachResponse, error) {
+	var ack protocol.AttachResponse
+	out, err := c.openStream(protocol.SubsystemAttach, &ptyGeometry{cols: req.Cols, rows: req.Rows}, req, "attach", &ack)
+	if err != nil {
+		return nil, ack, err
+	}
+	if !ack.OK {
+		_ = out.Close()
+		return nil, ack, fmt.Errorf("cli: attach: %s", ack.Error)
+	}
+	return &TerminalStream{bufferedStream: out}, ack, nil
+}
+
 // Attach opens the attach subsystem for runID with the given geometry and
 // returns the raw PTY stream after a successful ack.
 func (c *Conn) Attach(runID string, cols, rows uint) (io.ReadWriteCloser, error) {
-	stream, err := c.openSubsystem(protocol.SubsystemAttach, &ptyGeometry{cols: cols, rows: rows})
+	stream, _, err := c.AttachStream(protocol.AttachRequest{RunID: runID, Cols: cols, Rows: rows})
 	if err != nil {
 		return nil, err
 	}
-	header, err := json.Marshal(protocol.AttachRequest{RunID: runID, Cols: cols, Rows: rows})
-	if err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-	if _, err = stream.Write(append(header, '\n')); err != nil {
-		_ = stream.Close()
-		return nil, fmt.Errorf("cli: write attach header: %w", err)
-	}
-	var ack protocol.AttachResponse
-	out, err := readAck(stream, &ack)
-	if err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-	if !ack.OK {
-		_ = stream.Close()
-		return nil, fmt.Errorf("cli: attach: %s", ack.Error)
-	}
-	return out, nil
+	return stream, nil
 }
 
 // Sync opens the sync subsystem for runID and returns the raw mutagen
 // endpoint stream after a successful ack. force overrides the server's
 // mid-write refusal for runs that are currently running.
 func (c *Conn) Sync(runID string, force bool) (io.ReadWriteCloser, error) {
-	stream, err := c.openSubsystem(protocol.SubsystemSync, nil)
-	if err != nil {
-		return nil, err
-	}
-	header, err := json.Marshal(protocol.SyncRequest{RunID: runID, Force: force})
-	if err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-	if _, err = stream.Write(append(header, '\n')); err != nil {
-		_ = stream.Close()
-		return nil, fmt.Errorf("cli: write sync header: %w", err)
-	}
 	var ack protocol.SyncResponse
-	out, err := readAck(stream, &ack)
+	out, err := c.openStream(protocol.SubsystemSync, nil, protocol.SyncRequest{RunID: runID, Force: force}, "sync", &ack)
 	if err != nil {
-		_ = stream.Close()
 		return nil, err
 	}
 	if !ack.OK {
-		_ = stream.Close()
+		_ = out.Close()
 		return nil, fmt.Errorf("cli: sync: %s", ack.Error)
+	}
+	return out, nil
+}
+
+// EventsStream opens the events subsystem with the given subscription and
+// returns the raw NDJSON event stream after a successful ack. A refused
+// subscription comes back as *protocol.Error with the server's code.
+func (c *Conn) EventsStream(req protocol.SubscribeRequest) (io.ReadWriteCloser, error) {
+	var ack protocol.SubscribeResponse
+	out, err := c.openStream(protocol.SubsystemEvents, nil, req, "subscribe", &ack)
+	if err != nil {
+		return nil, err
+	}
+	if !ack.OK {
+		_ = out.Close()
+		return nil, &protocol.Error{Code: ack.Code, Message: ack.Error}
 	}
 	return out, nil
 }
@@ -208,59 +237,38 @@ func (c *Conn) Sync(runID string, force bool) (io.ReadWriteCloser, error) {
 // Events opens the events subsystem with the given subscription and
 // returns the raw NDJSON event stream after a successful ack.
 func (c *Conn) Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error) {
-	stream, err := c.openSubsystem(protocol.SubsystemEvents, nil)
-	if err != nil {
-		return nil, err
+	out, err := c.EventsStream(req)
+	var perr *protocol.Error
+	if errors.As(err, &perr) {
+		return nil, fmt.Errorf("cli: subscribe: %s", perr.Message)
 	}
-	header, err := json.Marshal(req)
+	return out, err
+}
+
+// WorkspaceShellStream opens the unified workspace-shell subsystem for req
+// and returns the resizable terminal stream alongside the server's ack. A
+// refused ack is returned with the error so callers can forward its code.
+func (c *Conn) WorkspaceShellStream(req protocol.WorkspaceShellRequest) (*TerminalStream, protocol.WorkspaceShellResponse, error) {
+	var ack protocol.WorkspaceShellResponse
+	out, err := c.openStream(protocol.SubsystemWorkspaceShell, &ptyGeometry{cols: req.Cols, rows: req.Rows}, req, "workspace shell", &ack)
 	if err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-	if _, err = stream.Write(append(header, '\n')); err != nil {
-		_ = stream.Close()
-		return nil, fmt.Errorf("cli: write subscribe: %w", err)
-	}
-	var ack protocol.SubscribeResponse
-	out, err := readAck(stream, &ack)
-	if err != nil {
-		_ = stream.Close()
-		return nil, err
+		return nil, ack, err
 	}
 	if !ack.OK {
-		_ = stream.Close()
-		return nil, fmt.Errorf("cli: subscribe: %s", ack.Error)
+		_ = out.Close()
+		return nil, ack, workspaceShellAckError(ack)
 	}
-	return out, nil
+	return &TerminalStream{bufferedStream: out}, ack, nil
 }
 
 // WorkspaceShell opens the unified workspace-shell subsystem for bootstrap
 // tools or harness login and returns the raw terminal stream after its ack.
 func (c *Conn) WorkspaceShell(req protocol.WorkspaceShellRequest) (io.ReadWriteCloser, error) {
-	stream, err := c.openSubsystem(protocol.SubsystemWorkspaceShell, &ptyGeometry{cols: req.Cols, rows: req.Rows})
+	stream, _, err := c.WorkspaceShellStream(req)
 	if err != nil {
 		return nil, err
 	}
-	header, err := json.Marshal(req)
-	if err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-	if _, err = stream.Write(append(header, '\n')); err != nil {
-		_ = stream.Close()
-		return nil, fmt.Errorf("cli: write workspace shell header: %w", err)
-	}
-	var ack protocol.WorkspaceShellResponse
-	out, err := readAck(stream, &ack)
-	if err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-	if !ack.OK {
-		_ = stream.Close()
-		return nil, workspaceShellAckError(ack)
-	}
-	return out, nil
+	return stream, nil
 }
 
 func workspaceShellAckError(ack protocol.WorkspaceShellResponse) error {
@@ -327,6 +335,31 @@ func readAck(stream *sessionStream, v any) (*bufferedStream, error) {
 		return nil, fmt.Errorf("cli: decode ack: %w", err)
 	}
 	return &bufferedStream{r: br, sessionStream: stream}, nil
+}
+
+// openStream opens a subsystem, writes its one-line JSON header, and reads
+// the ack line into ack; the returned stream carries any bytes past the
+// ack. Refusal is the caller's to detect: the ack is decoded either way.
+func (c *Conn) openStream(name string, pty *ptyGeometry, header any, what string, ack any) (*bufferedStream, error) {
+	stream, err := c.openSubsystem(name, pty)
+	if err != nil {
+		return nil, err
+	}
+	line, err := json.Marshal(header)
+	if err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	if _, err = stream.Write(append(line, '\n')); err != nil {
+		_ = stream.Close()
+		return nil, fmt.Errorf("cli: write %s header: %w", what, err)
+	}
+	out, err := readAck(stream, ack)
+	if err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	return out, nil
 }
 
 // GitURL is the ssh:// remote matching sshd's git-upload-pack / receive-pack

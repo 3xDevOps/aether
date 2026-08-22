@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -29,22 +29,20 @@ func runPull(args []string) error {
 		return fmt.Errorf("no linked repo; re-run aether link <addr> --repo <path>")
 	}
 	var coords protocol.RunPullResult
-	if err := withControl(func(c *protocol.Client) error {
+	if err = withControl(func(c *protocol.Client) error {
 		return c.Call(protocol.MethodRunPull, protocol.RunIDParams{RunID: args[0]}, &coords)
 	}); err != nil {
 		return err
 	}
-	if coords.Branch == "" {
-		return fmt.Errorf("run has no branch")
+	branch, cmd, err := localops.PullCommand(cfg.Repo, cfg.User, cfg.Addr, coords)
+	if err != nil {
+		return err
 	}
-	url := cli.GitURL(cfg.User, cfg.Addr, coords.WorkspaceID)
-	refspec := "+refs/heads/" + coords.Branch + ":refs/remotes/aether/" + coords.Branch
-	cmd := exec.Command("git", "-C", cfg.Repo, "fetch", "--no-tags", url, refspec)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return err
 	}
-	fmt.Printf("fetched %s into refs/remotes/aether/%s (not merged)\n", coords.Branch, coords.Branch)
+	fmt.Printf("fetched %s into refs/remotes/aether/%s (not merged)\n", branch, branch)
 	return nil
 }

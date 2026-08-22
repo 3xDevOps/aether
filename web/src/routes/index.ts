@@ -1,12 +1,21 @@
 // Import every route file once, for its registerRoute side effect. New views
 // (run board, terminal, diffs, team surfaces) add one line here.
+import '@/components/shortcuts'
+import '@/routes/agents'
 import '@/routes/board'
 import '@/routes/diff'
+import '@/routes/members'
+import '@/routes/onboarding'
 import '@/routes/overview'
 import '@/routes/run'
+import '@/routes/run-sync'
 import '@/routes/session'
+import '@/routes/settings'
+import '@/routes/shell'
 import '@/routes/team'
+import '@/routes/templates'
 import '@/routes/terminal'
 import '@/routes/terminal/events'
+import '@/routes/workspaces'
 
 export { lookupRoute, registerRoute, type RouteProps } from '@/routes/registry'

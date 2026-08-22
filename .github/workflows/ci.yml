@@ -69,6 +69,22 @@ jobs:
         run: bun run test
         working-directory: web
 
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No lockfile is committed (the repo toolchain is Bun, which cannot
+      # write an npm lockfile), so this is `npm install`, not `npm ci`.
+      - name: Install dependencies
+        run: npm install
+        working-directory: desktop
+      - name: Package (unpacked, no publish)
+        run: npx electron-builder --dir --publish never
+        working-directory: desktop
+
   release-build:
     runs-on: ubuntu-latest
     steps:

@@ -189,7 +189,7 @@ func TestRestartRecovery(t *testing.T) {
 				t.Fatalf("Provision(%s): %v", r, err)
 			}
 		}
-		if err := h.db.UpdateRunStatus(ctx, finished, domain.RunAbandoned, nil, nil); err != nil {
+		if err := h.db.UpdateRunStatus(ctx, finished, domain.RunAbandoned, "", nil, nil); err != nil {
 			t.Fatalf("finish run: %v", err)
 		}
 		socket := filepath.Join(h.dir, "coord", string(alive), SocketName)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -52,6 +52,26 @@ func normalizeAddr(addr string) string {
 	return net.JoinHostPort(host, defaultSSHPort)
 }
 
+// linkConfig is the config `aether link` saves: the fresh link cfg
+// carrying forward previously saved profiles - Save overwrites the whole
+// file - plus, when name is non-empty, a snapshot of cfg upserted under
+// that name. Without a name the top-level fields change exactly as before
+// profiles existed.
+func linkConfig(cfg, prev cli.Config, name string) cli.Config {
+	cfg.Links = prev.Links
+	if name == "" {
+		return cfg
+	}
+	return cli.UpsertLink(cfg, cli.NamedLink{
+		Name:       name,
+		Addr:       cfg.Addr,
+		User:       cfg.User,
+		Key:        cfg.Key,
+		Repo:       cfg.Repo,
+		KnownHosts: cfg.KnownHosts,
+	})
+}
+
 func absoluteRepo(repo string) (string, error) {
 	if repo == "" {
 		return "", nil
@@ -62,7 +82,7 @@ func absoluteRepo(repo string) (string, error) {
 func runLink(args []string) error {
 	fs := flag.NewFlagSet("link", flag.ExitOnError)
 	invite := fs.String("invite", "", "one-time invite code")
-	name := fs.String("name", "", "display name when joining via invite")
+	name := fs.String("name", "", "profile label for this link (also the display name when joining via invite)")
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
 	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
 	addr, err := parseLeadingArg(fs, args)
@@ -99,7 +119,11 @@ func runLink(args []string) error {
 		return fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
 	}
 
-	if err = cli.Save(cfg); err != nil {
+	prev, loadErr := cli.Load()
+	if loadErr != nil {
+		prev = cli.Config{}
+	}
+	if err = cli.Save(linkConfig(cfg, prev, *name)); err != nil {
 		return err
 	}
 	who := info.Member.DisplayName
@@ -134,31 +158,9 @@ func runLink(args []string) error {
 		}
 	}
 	url := cli.GitURL(cfg.User, cfg.Addr, wsID)
-	if err := gitRemote(cfg.Repo, url); err != nil {
+	if err := localops.GitRemote(cfg.Repo, url, os.Stdout, os.Stderr); err != nil {
 		return err
 	}
 	fmt.Printf("git remote aether -> %s\n", url)
 	return nil
-}
-
-func gitRemote(repo, url string) error {
-	out, err := exec.Command("git", "-C", repo, "remote").Output()
-	if err != nil {
-		return fmt.Errorf("git remote: %w", err)
-	}
-	has := false
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "aether" {
-			has = true
-			break
-		}
-	}
-	args := []string{"-C", repo, "remote", "add", "aether", url}
-	if has {
-		args = []string{"-C", repo, "remote", "set-url", "aether", url}
-	}
-	cmd := exec.Command("git", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }

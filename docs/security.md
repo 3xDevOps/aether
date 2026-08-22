@@ -79,6 +79,34 @@ surface.
   has to load before it can present one; everything behind `/api/` and `/ws/`
   is gated.
 
+### The local gateway
+
+`aether gui` serves the same SPA from the user's own machine, proxying the
+API shape over that machine's SSH connection (`internal/localgw`,
+[local-gateway.md](local-gateway.md)). Its stances differ from the remote
+gateway's in exactly the ways the trust model differs:
+
+- **It binds 127.0.0.1 and nothing else.** There is no exposure flag; the
+  listener is loopback or it does not exist.
+- **Every request still needs a token, loopback included** - the same
+  rationale as above: any local process can reach a loopback port. The
+  token is minted per process (32 random bytes) and dies with it; there is
+  nothing to revoke and nothing survives a restart.
+- **The full method map is reachable, not an allowlist.** The remote
+  allowlist exists because a dashboard token travels in a URL and must not
+  be a route to a durable credential. Here that rationale does not apply:
+  the identity is the member's own SSH key, held by the same process that
+  serves the page, and the bearer token never crosses a network or lands
+  anywhere shareable - it lives in one process and one local browser tab.
+  A method call carries exactly the authority the SSH key already has from
+  a terminal on the same machine.
+- **`/local/v1` executes with the user's own filesystem and git
+  authority** - link config, `git fetch`/`push` on the linked clone,
+  systemd user units, scaffold files. That is the point of the surface: it
+  does what the CLI does, for the person already at the keyboard.
+- **The remote gateway's allowlist is unchanged.** Nothing about the local
+  gateway widens what a server-side dashboard token can reach.
+
 ## Conflict coordination
 
 When two runs edit the same file, each container gets a unix socket it can

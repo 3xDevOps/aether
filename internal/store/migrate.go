@@ -290,6 +290,12 @@ CREATE TABLE harness_definitions (
 	PRIMARY KEY (member_id, name)
 );
 `,
+	// v11: runs gain reason, the last run.status reason (already sanitized
+	// by the scheduler before persistence). Empty when the last transition
+	// carried no reason.
+	`
+ALTER TABLE runs ADD COLUMN reason TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

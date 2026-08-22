@@ -830,7 +830,7 @@ func TestUpdateRunStatus(t *testing.T) {
 	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunQueued)
 
 	started := time.Date(2026, 8, 9, 10, 30, 0, 0, time.UTC)
-	if err := db.UpdateRunStatus(ctx, r.ID, domain.RunRunning, &started, nil); err != nil {
+	if err := db.UpdateRunStatus(ctx, r.ID, domain.RunRunning, "container started", &started, nil); err != nil {
 		t.Fatalf("UpdateRunStatus to running: %v", err)
 	}
 	got, err := db.GetRun(ctx, r.ID)
@@ -840,12 +840,15 @@ func TestUpdateRunStatus(t *testing.T) {
 	if got.Status != domain.RunRunning || !timePtrEqual(got.StartedAt, &started) || got.FinishedAt != nil {
 		t.Fatalf("after running transition: %+v", got)
 	}
+	if got.Reason != "container started" {
+		t.Fatalf("reason = %q, want %q", got.Reason, "container started")
+	}
 	if got.Task != r.Task || got.MemberID != r.MemberID {
 		t.Fatalf("UpdateRunStatus touched unrelated fields: %+v", got)
 	}
 
 	finished := started.Add(time.Hour)
-	if uerr := db.UpdateRunStatus(ctx, r.ID, domain.RunMerged, nil, &finished); uerr != nil {
+	if uerr := db.UpdateRunStatus(ctx, r.ID, domain.RunMerged, "", nil, &finished); uerr != nil {
 		t.Fatalf("UpdateRunStatus to merged: %v", uerr)
 	}
 	got, err = db.GetRun(ctx, r.ID)
@@ -855,11 +858,14 @@ func TestUpdateRunStatus(t *testing.T) {
 	if got.Status != domain.RunMerged || !timePtrEqual(got.StartedAt, &started) || !timePtrEqual(got.FinishedAt, &finished) {
 		t.Fatalf("after merged transition: %+v", got)
 	}
+	if got.Reason != "" {
+		t.Fatalf("second transition kept stale reason %q, want empty", got.Reason)
+	}
 
-	if err := db.UpdateRunStatus(ctx, r.ID, "warp-drive", nil, nil); err == nil {
+	if err := db.UpdateRunStatus(ctx, r.ID, "warp-drive", "", nil, nil); err == nil {
 		t.Fatal("UpdateRunStatus accepted invalid status")
 	}
-	if err := db.UpdateRunStatus(ctx, "no-such-run", domain.RunRunning, nil, nil); !errors.Is(err, ErrNotFound) {
+	if err := db.UpdateRunStatus(ctx, "no-such-run", domain.RunRunning, "", nil, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("UpdateRunStatus on missing run: %v, want ErrNotFound", err)
 	}
 }
@@ -916,7 +922,7 @@ func TestZeroTimeRejected(t *testing.T) {
 	if err := db.UpdateRun(ctx, ok); err == nil {
 		t.Fatal("UpdateRun accepted a zero FinishedAt")
 	}
-	if err := db.UpdateRunStatus(ctx, ok.ID, domain.RunRunning, &zero, nil); err == nil {
+	if err := db.UpdateRunStatus(ctx, ok.ID, domain.RunRunning, "", &zero, nil); err == nil {
 		t.Fatal("UpdateRunStatus accepted a zero StartedAt")
 	}
 	far := time.Date(2263, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -1118,7 +1124,7 @@ func TestDeleteToolSnapshotProtectsLiveRunReferences(t *testing.T) {
 		if err := db.DeleteToolSnapshot(ctx, snapshot.ID); !errors.Is(err, ErrInUse) {
 			t.Fatalf("delete %s snapshot = %v, want ErrInUse", status, err)
 		}
-		if err := db.UpdateRunStatus(ctx, run.ID, domain.RunMerged, nil, nil); err != nil {
+		if err := db.UpdateRunStatus(ctx, run.ID, domain.RunMerged, "", nil, nil); err != nil {
 			t.Fatalf("finish %s run: %v", status, err)
 		}
 		if err := db.DeleteToolSnapshot(ctx, snapshot.ID); err != nil {

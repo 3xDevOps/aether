@@ -77,6 +77,37 @@ make build      # dashboard SPA, then both binaries into dist/
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rest of the toolchain.
 
+## Desktop app
+
+Optional, in `desktop/`: an Electron shell that launches `aether gui` for you
+and shows the dashboard in its own window, with desktop notifications and a
+badge when a run parks needs-attention, plus `aether://run/<id>` deep links.
+It is the same SPA with the same full SSH authority - just without a browser
+tab to lose.
+
+It requires the `aether` CLI installed and linked first. The app does not
+bundle the binary; it looks for `aether` in `AETHER_BIN`, then on your
+`PATH`, then in the installer's default locations (`/usr/local/bin`,
+`~/.local/bin`). If launching fails with "aether CLI not found", set
+`AETHER_BIN` to the binary's full path.
+
+Build from source (needs Node 22+):
+
+```sh
+cd desktop
+npm ci        # or npm install when there is no lockfile
+npm run dist  # installers into desktop/dist/
+```
+
+`npm run start` runs it unpackaged during development.
+
+Security posture: the sidecar `aether gui` process owns the SSH identity and
+every credential; the window is just a browser locked to the tokened loopback
+gateway it prints. Context isolation is on, the renderer is sandboxed, and no
+Node API is exposed to the page - a compromised dashboard page gets exactly
+what a browser tab would get, nothing more. Links to anything other than the
+gateway open in your real browser.
+
 ## Server prerequisites
 
 - **Linux.** Windows and macOS are client platforms.

@@ -16,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
 const (
@@ -155,7 +156,7 @@ func (g *Gateway) authenticate(w http.ResponseWriter, r *http.Request, allowQuer
 	member, ok := g.tokens.resolve(token)
 	if !ok {
 		w.Header().Set("WWW-Authenticate", "Bearer")
-		writeError(w, http.StatusUnauthorized, &protocol.Error{
+		webgate.WriteError(w, http.StatusUnauthorized, &protocol.Error{
 			Code:    protocol.CodeDenied,
 			Message: "a valid dashboard token is required; mint one with `aether dash`",
 		})

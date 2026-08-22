@@ -93,8 +93,11 @@ badges () belong in these slots, not in `run-card.tsx`.
 
 `connect()` in `src/store/sync.ts` owns the whole lifecycle. One round of HTTP
 fetches hydrates the store (`server.info`, `session.list`, `member.list`,
-`run.list`, `run.overlaps`), then `/ws/events` is the only thing that changes
-it.
+`run.list`, `run.overlaps`, and `GET /api/v1/capabilities`), then `/ws/events`
+is the only thing that changes it. The capabilities fetch may fail without
+failing hydration - a legacy gateway has no such endpoint - and the store
+then holds `null`. The snapshot also seeds the board's paused map from each
+run's wire `paused` field, skipping runs that do not carry it.
 
 - **The subscription is established first.** Hydration starts only once the
   server acknowledges it (`{"ok":true}`), which is also when the client calls
@@ -135,6 +138,16 @@ it.
   `session.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
 
+**The capabilities descriptor is the transport seam.** The store holds the
+`GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, `local`), and
+`useCapability()` in `src/store/hooks.ts` wraps it as three predicates -
+`hasMethod`, `hasLocal`, `hasWS` - with `methods: ["*"]` meaning everything.
+When the descriptor is `null` (a legacy gateway), the fallback assumes the
+remote surface: every method, `events` and `attach` sockets, no local verbs.
+Views gate on these predicates rather than sniffing the URL, which is what
+lets the same SPA serve the remote dashboard and the local gateway's
+capability-gated surfaces (`docs/local-gateway.md`).
+
 Every request goes through `src/lib/api.ts` - the only module that knows route
 shapes, the bearer token, and error decoding. It carries exactly the methods
 the views call; the team-feature methods arrive with the tickets that use them.
@@ -174,9 +187,12 @@ Three things the buckets do not come from the run status alone:
   run status maps to idle. It is hidden until the header toggle asks for it,
   and the preference is persisted.
 - **Paused** is a badge, not a bucket. A paused run still reads `running` in
-  the domain enum, so the board derives it from the `pause` and `resume`
-  entries on the `session.timeline` event stream. If the enum ever gains a
-  paused status, `pausedFromTimeline` in `src/store/board.ts` is what goes.
+  the domain enum, so the wire `Run` carries a `paused` field the gateway
+  decorates from the scheduler on `run.get` and `run.list`, never derived
+  from the stored run. The hydration snapshot seeds the board's map from it
+  (`seedPaused`, skipping runs without the field - a legacy gateway), and
+  live `pause`/`resume` entries on the `session.timeline` event stream keep
+  it current (`pausedFromTimeline` in `src/store/board.ts`).
 - **Unseen** marks a run whose state changed since someone acknowledged it.
   An ack records the status *and* the change time, because `stateChangedAt` is
   recomputed from the run's timestamps on every fetch and can move backwards -
@@ -189,32 +205,25 @@ Three things the buckets do not come from the run status alone:
   purpose - nothing is acknowledged when the page loads, so a fresh tab shows
   what is waiting rather than remembering that yesterday's you looked at it.
 
-### Two gaps, both waiting on the wire
+### Reason and paused on the wire
 
-**The Needs You reason renders only for runs whose transition this tab saw
-live.** The reason string exists on the `run.status` event payload and nowhere
-else: it is not on `domain.Run`, not in the store schema, and not on
-`protocol.Run`, so it cannot survive a fetch. A run that was already in
-needs-attention when the tab loaded therefore shows no reason line, and its
-card cannot tell a stall from a clean exit waiting on `run.close` - the one
-distinction the Needs You bucket exists to make. An approval pause is the
-exception: the pending request survives in `approval.list`, so a card with an
-empty reason falls back to its oldest pending request's action as the
-summary. Closing the rest needs the reason
-persisted on the run and carried on the wire, which is a domain field, a store
-migration and a change to a type shared with the CLI. Tracked as the related issue
-rather than fixed here.
+**The Needs You reason survives a fetch.** `protocol.Run` carries `reason` -
+the last `run.status` reason, persisted with the run and sanitized
+server-side - so a run that was already in needs-attention when the tab
+loaded shows its reason line, and the card tells a stall from a clean exit
+waiting on `run.close`. `toRecord` in `src/store/runs.ts` prefers the wire
+reason and falls back to the previously stored one only when the fetch
+omits it and the status has not changed (a legacy gateway); a live
+`run.status` event still overwrites it with the event payload's reason. An
+approval pause keeps its fallback: a card with an empty reason uses its
+oldest pending request's action as the summary.
 
-**The paused badge has no hydration source**, for the same shape of reason:
-`paused` lives in the scheduler's sidecar and appears on no wire type, so
-`pausedRuns` is written only by live `session.timeline` events. Seeding it at
-load would mean paging every session's whole history on every page load -
-`session.timeline` reads forward from a cursor, oldest first, with no way to
-read the tail - which is not worth it for a badge. So after a reload a run
-paused earlier shows no badge, and because the palette cannot tell paused from
-running it offers **neither** pause nor resume until it has seen one of those
-events, rather than offering the verb the server would refuse. Both clear as
-soon as anyone pauses or resumes. The hydration half is the too.
+**The paused badge hydrates from the same snapshot.** With `paused` on the
+wire (above), a reload shows the badge for a run paused earlier, and the
+palette offers the right one of pause/resume. Against a legacy gateway
+whose runs carry no `paused` field the state stays unknown until a live
+`session.timeline` pause or resume arrives, and the palette offers
+neither verb rather than the one the server would refuse.
 
 ## Command palette
 

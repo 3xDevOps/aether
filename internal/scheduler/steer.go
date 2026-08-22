@@ -148,6 +148,15 @@ func (s *Scheduler) setPaused(entry *supervised, paused bool) {
 	}
 }
 
+// Paused reports whether a supervised run's container is currently
+// frozen. Unknown or finished runs report false.
+func (s *Scheduler) Paused(run domain.RunID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.runs[run]
+	return entry != nil && entry.paused
+}
+
 // Inject writes a steering message into a live agent's PTY, attributed
 // to the actor, and stamps the act into the session timeline. A live
 // supervised run in running or needs-attention is accepted; a clean-exited

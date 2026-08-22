@@ -24,6 +24,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/sshd"
+	"github.com/3xDevOps/Aether/internal/webgate"
 	"github.com/3xDevOps/Aether/web"
 )
 
@@ -160,6 +161,7 @@ func New(cfg Config) (*Gateway, error) {
 	mux.HandleFunc("POST /api/v1/{method}", g.handleAPI)
 	mux.HandleFunc("GET /api/v1/run/{run}/patch", g.handlePatch)
 	mux.HandleFunc("GET /api/v1/disk", g.handleDisk)
+	mux.HandleFunc("GET /api/v1/capabilities", g.handleCapabilities)
 	mux.HandleFunc("GET /ws/events", g.handleEvents)
 	mux.HandleFunc("GET /ws/attach/{run}", g.handleAttach)
 	static := staticHandler(cfg.Static)
@@ -168,7 +170,7 @@ func New(cfg Config) (*Gateway, error) {
 		// pattern lands here; answering it with the SPA would turn a
 		// wrong-verb client bug into a silent 200.
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
-			writeError(w, http.StatusMethodNotAllowed, &protocol.Error{
+			webgate.WriteError(w, http.StatusMethodNotAllowed, &protocol.Error{
 				Code:    protocol.CodeInvalidRequest,
 				Message: "method not allowed",
 			})

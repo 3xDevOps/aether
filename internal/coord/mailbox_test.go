@@ -180,7 +180,7 @@ func TestSendRejectsFinishedAndSelfTargets(t *testing.T) {
 	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(a), Body: "hi"}); err == nil || err.Code != protocol.CodeInvalidParams {
 		t.Fatalf("self-send = %v, want CodeInvalidParams", err)
 	}
-	if err := h.db.UpdateRunStatus(ctx, b, domain.RunMerged, nil, nil); err != nil {
+	if err := h.db.UpdateRunStatus(ctx, b, domain.RunMerged, "", nil, nil); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	_, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "hi"})

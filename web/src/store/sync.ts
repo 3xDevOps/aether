@@ -1,7 +1,7 @@
 // Hydration and live updates: one HTTP fetch fills the store, then the event
 // stream is the only thing that changes it.
 
-import { api, type Api } from '@/lib/api'
+import { api, ApiError, type Api } from '@/lib/api'
 import { backoff, connectEvents } from '@/lib/stream'
 import type {
   Event,
@@ -11,33 +11,69 @@ import type {
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import { pausedFromTimeline } from '@/store/board'
+import type { UnreachableKind } from '@/store/server'
+
+/**
+ * Names the hop that failed. The local gateway's SSH backend reports a dead
+ * transport as 503 "server unreachable: ..." (protocol.CodeUnavailable) -
+ * the gateway answered, the server behind it did not. A fetch that never got
+ * an answer at all (a TypeError from fetch) means the gateway origin itself
+ * is gone. Anything else - a 401, a 500 the server produced - is neither.
+ */
+function classifyUnreachable(err: unknown): UnreachableKind | null {
+  if (
+    err instanceof ApiError &&
+    err.status === 503 &&
+    err.message.includes('server unreachable')
+  ) {
+    return 'server'
+  }
+  if (err instanceof TypeError) return 'gateway'
+  return null
+}
 
 /** Fills the store from the server. False means the server was unreachable. */
 export async function hydrate(store: RootStore, client: Api = api): Promise<boolean> {
   const s = store.getState()
   try {
-    const [info, sessions, members, runs, overlaps] = await Promise.all([
-      client.serverInfo(),
-      client.sessionList(),
-      client.memberList(),
-      client.runList(),
-      // The conflict radar is a warning system, not a data source the app
-      // needs: an unreachable one leaves the chips off, it does not fail the
-      // hydration.
-      client.runOverlaps().catch(() => []),
-    ])
+    const [info, sessions, members, runs, overlaps, capabilities] =
+      await Promise.all([
+        client.serverInfo(),
+        client.sessionList(),
+        client.memberList(),
+        client.runList(),
+        // The conflict radar is a warning system, not a data source the app
+        // needs: an unreachable one leaves the chips off, it does not fail the
+        // hydration.
+        client.runOverlaps().catch(() => []),
+        // A legacy remote monitor does not serve the endpoint; null keeps the
+        // client on its built-in assumptions.
+        client.capabilities().catch(() => null),
+      ])
     s.setInfo(info)
     s.setSessions(sessions)
     s.setMembers(members)
     s.setRuns(runs)
+    // The snapshot is authoritative for the paused badge; runs without the
+    // wire field (a legacy gateway) stay unknown.
+    s.seedPaused(
+      Object.fromEntries(
+        runs
+          .filter((r) => r.paused !== undefined)
+          .map((r) => [r.id, r.paused === true]),
+      ),
+    )
     s.setOverlaps(overlaps)
+    s.setCapabilities(capabilities)
     s.setHydrated(true)
+    s.setUnreachable(null)
     return true
   } catch (err) {
     // A failed re-hydration keeps the data we already have; only the error
     // is new. Once the token is known dead, the recorded recovery hint is
     // more useful than this raw failure, so it stays.
     if (!store.getState().streamDead) {
+      s.setUnreachable(classifyUnreachable(err))
       s.setHydrated(s.hydrated, err instanceof Error ? err.message : String(err))
     }
     return false
@@ -92,7 +128,8 @@ export async function applyEvent(
         // keeps two transitions of a brand new run in order.
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
-        } catch {
+        } catch (err) {
+          store.getState().setUnreachable(classifyUnreachable(err))
           return false
         }
       }
@@ -133,7 +170,8 @@ export async function applyEvent(
       if (kind === 'handoff' && ev.run_id) {
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
-        } catch {
+        } catch (err) {
+          store.getState().setUnreachable(classifyUnreachable(err))
           return false
         }
       }
@@ -225,6 +263,11 @@ export function connect(store: RootStore, client: Api = api): () => void {
       // and again on a reconnect that has no cursor to replay from.
       if (!subscribed || store.getState().lastSeq === 0) void load()
       subscribed = true
+    },
+    onServerUnreachable: () => {
+      // The gateway answered and named its SSH backend as the failure:
+      // the tunnel to aether-server is down, not the gateway itself.
+      store.getState().setUnreachable('server')
     },
     onDead: (reason) => {
       // The token died, not the server: the stream has stopped for good, and

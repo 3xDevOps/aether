@@ -1,0 +1,17 @@
+{
+  "name": "aether-desktop",
+  "version": "0.1.0",
+  "description": "Desktop shell for the Aether dashboard: spawns `aether gui` and renders its tokened loopback gateway.",
+  "private": true,
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

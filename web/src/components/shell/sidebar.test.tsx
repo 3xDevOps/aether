@@ -92,4 +92,46 @@ describe('Sidebar', () => {
     // The session groups under Needs you, so the attention sort surfaces it.
     expect(screen.getByRole('heading', { name: 'Needs you' })).toBeDefined()
   })
+
+  it('shows the admin and desktop surfaces the gateway can serve', () => {
+    useStore.setState({
+      capabilities: {
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events', 'attach', 'shell'],
+        local: ['link.status', 'daemon.status', 'pull'],
+      },
+    })
+    render(<Sidebar />)
+
+    fireEvent.click(screen.getByText('Members'))
+
+    expect(useStore.getState().route).toEqual({ name: 'members', params: {} })
+    expect(screen.getByText('Onboarding')).toBeDefined()
+    expect(screen.getByText('Settings')).toBeDefined()
+  })
+
+  it('shows no surface links behind the remote allowlist', () => {
+    // The remote gateway advertises its allowlist: no admin methods, no
+    // local verbs, so no new entry points appear.
+    useStore.setState({
+      capabilities: {
+        gateway: 'remote',
+        methods: ['run.list', 'run.get', 'member.list'],
+        ws: ['events', 'attach'],
+      },
+    })
+    render(<Sidebar />)
+
+    expect(screen.queryByLabelText('Surfaces')).toBeNull()
+  })
+
+  it('shows no surface links on a legacy monitor without capabilities', () => {
+    // The capabilities endpoint 404ed: only the pre-capabilities allowlist
+    // may be assumed, and no admin method is on it.
+    useStore.setState({ capabilities: null })
+    render(<Sidebar />)
+
+    expect(screen.queryByLabelText('Surfaces')).toBeNull()
+  })
 })

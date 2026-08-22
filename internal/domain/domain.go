@@ -341,6 +341,9 @@ type Run struct {
 	Harness string
 	Mode    LaunchMode
 	Status  RunStatus
+	// Reason is the last run.status reason, sanitized like the event
+	// payload; empty when the last transition carried no reason.
+	Reason string
 	// Branch is the run's git branch, aether/run-<id>-<slug>.
 	Branch string
 	// Worktree is the server-side path of the run's git worktree.

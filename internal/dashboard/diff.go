@@ -8,6 +8,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
 // maxPatchBytes bounds one rendered diff. The dashboard reads diffs, it
@@ -42,7 +43,7 @@ func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if g.cfg.Git == nil {
-		writeError(w, http.StatusServiceUnavailable, &protocol.Error{
+		webgate.WriteError(w, http.StatusServiceUnavailable, &protocol.Error{
 			Code:    protocol.CodeUnavailable,
 			Message: "run.patch: diff rendering is not enabled",
 		})
@@ -51,11 +52,11 @@ func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 	run := r.PathValue("run")
 	params, err := json.Marshal(protocol.RunIDParams{RunID: run})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()})
+		webgate.WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()})
 		return
 	}
 	if resp := g.cfg.RPC.Call(r.Context(), member, protocol.MethodRunGet, params); resp.Error != nil {
-		writeError(w, statusFor(resp.Error.Code), resp.Error)
+		webgate.WriteError(w, webgate.StatusFor(resp.Error.Code), resp.Error)
 		return
 	}
 	patch, err := g.cfg.Git.RunPatch(r.Context(), domain.RunID(run), maxPatchBytes)
@@ -63,7 +64,7 @@ func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 		// The failure is always the same one in practice - the run's
 		// checkout is gone, because the run finished and was cleaned up -
 		// and the wrapped error names server paths, so it is not echoed.
-		writeError(w, http.StatusServiceUnavailable, &protocol.Error{
+		webgate.WriteError(w, http.StatusServiceUnavailable, &protocol.Error{
 			Code:    protocol.CodeUnavailable,
 			Message: "run.patch: this run has no checkout to diff",
 		})

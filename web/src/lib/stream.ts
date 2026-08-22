@@ -14,6 +14,10 @@ export interface StreamHandlers {
   /** The gateway's token watch closed the socket: the bearer token is dead,
    * and every reconnect would carry it. The stream has stopped for good. */
   onDead?: (reason: string) => void
+  /** The local gateway's subscribe refusal named its SSH backend as the
+   * failure (-32004 "server unreachable: ..."): the gateway itself is fine,
+   * the hop behind it is not. Fired before the retry is scheduled. */
+  onServerUnreachable?: () => void
   /** Last sequence applied to the store; replay resumes after it. */
   afterSeq: () => number
 }
@@ -25,6 +29,9 @@ const policyClose = 1008
  * also closes 1008 for refused subscribes and transient membership check
  * failures, which a reconnect can outlive - only a dead token is terminal. */
 const deadTokenReason = 'dashboard token revoked or expired'
+
+/** The local gateway's code for a dead SSH hop (protocol.CodeUnavailable). */
+const codeUnavailable = -32004
 
 const baseDelayMs = 500
 const maxDelayMs = 30_000
@@ -64,15 +71,27 @@ export function connectEvents(h: StreamHandlers): () => void {
     ws.onmessage = (msg) => {
       if (typeof msg.data !== 'string') return
       try {
-        const parsed = JSON.parse(msg.data) as Event & { ok?: boolean }
+        const parsed = JSON.parse(msg.data) as Event & {
+          ok?: boolean
+          code?: number
+          error?: string
+        }
         if (parsed.type === undefined) {
           // The subscribe acknowledgement, not an event. Only now has the
           // server installed the subscription, so only now is nothing able to
           // slip past us: that is what `live` means to callers. A refusal
-          // closes the socket on the server side and lands in onclose.
+          // closes the socket on the server side and lands in onclose - but
+          // the local gateway's refusal frame already names which hop died,
+          // and the close reason does not survive every proxy.
           if (parsed.ok) {
             attempt = 0
             h.onState('live')
+          } else if (
+            parsed.ok === false &&
+            parsed.code === codeUnavailable &&
+            parsed.error?.includes('server unreachable')
+          ) {
+            h.onServerUnreachable?.()
           }
           return
         }

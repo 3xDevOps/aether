@@ -15,7 +15,7 @@ export function toRecord(run: Run, previous?: RunRecord): RunRecord {
   const carry = previous && previous.status === run.status
   return {
     ...run,
-    reason: carry ? previous.reason : undefined,
+    reason: run.reason ?? (carry ? previous.reason : undefined),
     stateChangedAt: carry
       ? previous.stateChangedAt
       : (run.finished_at ?? run.started_at ?? run.created_at),

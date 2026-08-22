@@ -177,7 +177,11 @@ func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.Raw
 		if p.ActiveOnly && r.Status.Terminal() {
 			continue
 		}
-		out = append(out, protocol.RunFromDomain(r))
+		wr := protocol.RunFromDomain(r)
+		if s.cfg.Runs != nil {
+			wr.Paused = s.cfg.Runs.Paused(r.ID)
+		}
+		out = append(out, wr)
 	}
 	return protocol.RunListResult{Runs: out}, nil
 }
@@ -191,7 +195,11 @@ func (s *Server) runGet(ctx context.Context, _ domain.MemberID, params json.RawM
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
+	wr := protocol.RunFromDomain(run)
+	if s.cfg.Runs != nil {
+		wr.Paused = s.cfg.Runs.Paused(run.ID)
+	}
+	return protocol.RunResult{Run: wr}, nil
 }
 
 func runIDParams(params json.RawMessage) (domain.RunID, *protocol.Error) {

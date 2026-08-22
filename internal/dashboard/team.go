@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
 // diskResponse is the body of GET /api/v1/disk: the headroom on the
@@ -38,11 +39,11 @@ func (g *Gateway) handleDisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if perr := g.cfg.RPC.CheckMember(r.Context(), member); perr != nil {
-		writeError(w, statusFor(perr.Code), perr)
+		webgate.WriteError(w, webgate.StatusFor(perr.Code), perr)
 		return
 	}
 	if g.disk == nil {
-		writeError(w, http.StatusServiceUnavailable, &protocol.Error{
+		webgate.WriteError(w, http.StatusServiceUnavailable, &protocol.Error{
 			Code:    protocol.CodeUnavailable,
 			Message: "the gateway was not told where the data directory is",
 		})
@@ -52,7 +53,7 @@ func (g *Gateway) handleDisk(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The wrapped error names the data-directory path, so it is not
 		// echoed - the same rule the patch endpoint applies.
-		writeError(w, http.StatusServiceUnavailable, &protocol.Error{
+		webgate.WriteError(w, http.StatusServiceUnavailable, &protocol.Error{
 			Code:    protocol.CodeUnavailable,
 			Message: "disk usage: the data directory's filesystem could not be read",
 		})

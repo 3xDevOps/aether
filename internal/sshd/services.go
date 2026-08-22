@@ -18,4 +18,8 @@ type Services struct {
 	Templates TemplateService
 	// Dashboard mints the web gateway's bearer tokens ().
 	Dashboard DashboardTokens
+	// Patch renders a run checkout's diff against its fork point ().
+	Patch RunPatcher
+	// Disk reads the data directory's disk usage ().
+	Disk DiskReader
 }

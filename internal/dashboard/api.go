@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
 // maxRequestBody bounds one API request body. The dashboard makes control
@@ -67,19 +68,19 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBody))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeParse, Message: "read body: " + err.Error()})
+		webgate.WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeParse, Message: "read body: " + err.Error()})
 		return
 	}
 	params := json.RawMessage(bytes.TrimSpace(body))
 	if len(params) == 0 {
 		params = nil
 	} else if !json.Valid(params) {
-		writeError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeParse, Message: "request body is not valid JSON"})
+		webgate.WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeParse, Message: "request body is not valid JSON"})
 		return
 	}
 	method := r.PathValue("method")
 	if _, ok := apiMethods[method]; !ok {
-		writeError(w, http.StatusForbidden, &protocol.Error{
+		webgate.WriteError(w, http.StatusForbidden, &protocol.Error{
 			Code:    protocol.CodeDenied,
 			Message: method + " is available on the SSH control channel only",
 		})
@@ -87,41 +88,13 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := g.cfg.RPC.Call(r.Context(), member, method, params)
 	if resp.Error != nil {
-		writeError(w, statusFor(resp.Error.Code), resp.Error)
+		webgate.WriteError(w, webgate.StatusFor(resp.Error.Code), resp.Error)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(resp.Result)
 }
 
-// errorBody is the failure envelope every endpoint answers with, carrying
-// the JSON-RPC error object unchanged so a client can branch on the code
-// rather than the HTTP status.
-type errorBody struct {
-	Error *protocol.Error `json:"error"`
-}
-
-func writeError(w http.ResponseWriter, status int, e *protocol.Error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errorBody{Error: e})
-}
-
-// statusFor maps a wire error code onto the closest HTTP status. The code
-// stays the authority; the status is what browsers and proxies read.
-func statusFor(code int) int {
-	switch code {
-	case protocol.CodeParse, protocol.CodeInvalidRequest, protocol.CodeInvalidParams:
-		return http.StatusBadRequest
-	case protocol.CodeDenied:
-		return http.StatusForbidden
-	case protocol.CodeMethodNotFound, protocol.CodeNotFound:
-		return http.StatusNotFound
-	case protocol.CodeInvalidState, protocol.CodeConflict:
-		return http.StatusConflict
-	case protocol.CodeUnavailable:
-		return http.StatusServiceUnavailable
-	default:
-		return http.StatusInternalServerError
-	}
-}
+// errorBody is the failure envelope every endpoint answers with, shared
+// with the local gateway through webgate.
+type errorBody = webgate.ErrorBody

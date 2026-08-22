@@ -1,0 +1,45 @@
+# electron-builder configuration for the Aether desktop shell.
+#
+# The aether CLI binary is NOT bundled. The shell discovers it at launch:
+# AETHER_BIN first, then PATH, then the install script's default locations
+# (/usr/local/bin, ~/.local/bin). Install the CLI and link it before
+# launching the app - see docs/install.md.
+appId: io.aether.desktop
+productName: Aether
+
+directories:
+  output: dist
+
+files:
+  - main.js
+  - notify.js
+  - preload.js
+  - package.json
+
+mac:
+  target:
+    - dmg
+    - zip
+
+win:
+  target:
+    - nsis
+
+linux:
+  target:
+    - AppImage
+    - deb
+
+# No publishing from this repo: builds are local artifacts (`--publish never`
+# on the CLI; a bare string here would be parsed as a provider name). A
+# deployment that wants auto-update should point this at its own release
+# feed, e.g.
+#
+#   publish:
+#     provider: github
+#     owner: <your-org>
+#     repo: <your-fork>
+#
+# (or a generic provider with a URL you control), and sign the binaries -
+# unsigned auto-update is refused on macOS and Windows.
+publish: null

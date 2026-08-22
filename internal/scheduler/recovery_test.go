@@ -147,7 +147,7 @@ func TestRecoveryFindsContainerByCreationKey(t *testing.T) {
 	if err := e.db.CreateRun(ctx, r); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, nil, nil); err != nil {
+	if err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	// The container was created (creation key = run ID) but the crash hit
@@ -296,7 +296,7 @@ func TestCheckoutGC(t *testing.T) {
 		if err := e.db.UpdateRun(ctx, r); err != nil {
 			t.Fatalf("UpdateRun: %v", err)
 		}
-		if err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunAbandoned, nil, &finished); err != nil {
+		if err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunAbandoned, "", nil, &finished); err != nil {
 			t.Fatalf("UpdateRunStatus: %v", err)
 		}
 		return r
@@ -469,7 +469,7 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 	if err = os.WriteFile(e.sched.sidecarPath(run.ID), data, 0o644); err != nil {
 		t.Fatalf("write sidecar: %v", err)
 	}
-	if err = e.db.UpdateRunStatus(ctx, run.ID, domain.RunNeedsAttention, nil, nil); err != nil {
+	if err = e.db.UpdateRunStatus(ctx, run.ID, domain.RunNeedsAttention, "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	c.exitNow(0)
