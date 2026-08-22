@@ -29,7 +29,7 @@ func runPull(args []string) error {
 		return fmt.Errorf("no linked repo; re-run aether link <addr> --repo <path>")
 	}
 	var coords protocol.RunPullResult
-	if err := withControl(func(c *protocol.Client) error {
+	if err = withControl(func(c *protocol.Client) error {
 		return c.Call(protocol.MethodRunPull, protocol.RunIDParams{RunID: args[0]}, &coords)
 	}); err != nil {
 		return err

@@ -83,15 +83,15 @@ func pipeDial(count *int) func(string, bool) (io.ReadWriteCloser, error) {
 	}
 }
 
-// statusOf finds one run's session in a status snapshot.
-func statusOf(t *testing.T, m *SyncManager, runID string) SyncSession {
+// run1Status finds run_1's session in a status snapshot.
+func run1Status(t *testing.T, m *SyncManager) SyncSession {
 	t.Helper()
 	for _, s := range m.Status() {
-		if s.RunID == runID {
+		if s.RunID == "run_1" {
 			return s
 		}
 	}
-	t.Fatalf("run %s not in status %v", runID, m.Status())
+	t.Fatalf("run_1 not in status %v", m.Status())
 	return SyncSession{}
 }
 
@@ -110,7 +110,7 @@ func TestSyncManagerLifecycle(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("session never started")
 	}
-	if got := statusOf(t, m, "run_1"); got.State != SyncRunning || got.Conflict != nil {
+	if got := run1Status(t, m); got.State != SyncRunning || got.Conflict != nil {
 		t.Fatalf("running status = %+v", got)
 	}
 
@@ -138,7 +138,7 @@ func TestSyncManagerLifecycle(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("session never closed")
 	}
-	if got := statusOf(t, m, "run_1"); got.State != SyncStopped || got.Conflict != nil {
+	if got := run1Status(t, m); got.State != SyncStopped || got.Conflict != nil {
 		t.Fatalf("stopped status = %+v", got)
 	}
 
@@ -177,7 +177,7 @@ func TestSyncManagerReportsConflict(t *testing.T) {
 		t.Fatal("conflict never reported")
 	}
 
-	got := statusOf(t, m, "run_1")
+	got := run1Status(t, m)
 	if got.State != SyncConflict || got.Conflict == nil {
 		t.Fatalf("conflict status = %+v", got)
 	}
@@ -218,7 +218,7 @@ func TestSyncManagerRecordsRunError(t *testing.T) {
 
 	deadline := time.After(time.Second)
 	for {
-		if got := statusOf(t, m, "run_1"); got.State == SyncError {
+		if got := run1Status(t, m); got.State == SyncError {
 			if got.Conflict == nil || *got.Conflict != "session disappeared" {
 				t.Fatalf("error status = %+v", got)
 			}
@@ -226,7 +226,7 @@ func TestSyncManagerRecordsRunError(t *testing.T) {
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("state never became error: %+v", statusOf(t, m, "run_1"))
+			t.Fatalf("state never became error: %+v", run1Status(t, m))
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -293,7 +293,7 @@ func TestSyncManagerStatusReportsStarting(t *testing.T) {
 	if err := <-startErr; err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if got := statusOf(t, m, "run_1"); got.State != SyncRunning {
+	if got := run1Status(t, m); got.State != SyncRunning {
 		t.Fatalf("status after gate = %+v", got)
 	}
 	if err := m.Stop("run_1"); err != nil {
@@ -360,7 +360,7 @@ func TestSyncManagerSweepsStaleTerminalEntries(t *testing.T) {
 	if err := m.Start(t.TempDir(), "run_new", false, pipeDial(dials), nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer m.Stop("run_new")
+	defer m.Stop("run_new") //nolint:errcheck // test cleanup
 
 	got := map[string]string{}
 	for _, s := range m.Status() {
@@ -405,7 +405,7 @@ func TestSyncManagerEvictsOldestTerminalEntries(t *testing.T) {
 	if err := m.Start(t.TempDir(), "run_new", false, pipeDial(dials), nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer m.Stop("run_new")
+	defer m.Stop("run_new") //nolint:errcheck // test cleanup
 
 	got := map[string]string{}
 	for _, s := range m.Status() {

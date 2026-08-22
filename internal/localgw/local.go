@@ -245,7 +245,7 @@ func (g *Gateway) localPull(r *http.Request, body []byte) (any, *protocol.Error)
 		return nil, perr
 	}
 	var coords protocol.RunPullResult
-	if err := json.Unmarshal(result, &coords); err != nil {
+	if err = json.Unmarshal(result, &coords); err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "decode pull coordinates: " + err.Error()}
 	}
 	branch, ref, output, err := localops.Pull(cfg.Repo, cfg.User, cfg.Addr, coords)
@@ -259,7 +259,7 @@ func (g *Gateway) localPull(r *http.Request, body []byte) (any, *protocol.Error)
 	}{Branch: branch, Ref: ref, Output: output}, nil
 }
 
-func (g *Gateway) localSyncStart(r *http.Request, body []byte) (any, *protocol.Error) {
+func (g *Gateway) localSyncStart(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		RunID string `json:"run_id"`
 		Force bool   `json:"force"`

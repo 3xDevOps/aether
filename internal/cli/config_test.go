@@ -16,7 +16,7 @@ func TestLoadOldFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	old := `{
@@ -27,7 +27,7 @@ func TestLoadOldFormat(t *testing.T) {
   "known_hosts": "/home/alice/.ssh/known_hosts"
 }
 `
-	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+	if err = os.WriteFile(path, []byte(old), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,7 +48,7 @@ func TestLoadOldFormat(t *testing.T) {
 	}
 
 	// Re-saving must not invent a links key for a link-less config.
-	if err := Save(cfg); err != nil {
+	if err = Save(cfg); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	body, err := os.ReadFile(path)
