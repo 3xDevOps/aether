@@ -4,11 +4,11 @@
 // resume/reset when a previous shell was abandoned.
 
 import { FitAddon } from '@xterm/addon-fit'
-import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { terminalFontFamily, whenTerminalFontReady } from '@/lib/term-font'
 import { cn } from '@/lib/utils'
 import { connectShell, type ShellSession } from '@/routes/shell/client'
 import { useStore } from '@/store'
@@ -47,81 +47,87 @@ export function ShellPane({
     const host = hostRef.current
     if (!host) return
 
+    // The DOM renderer, deliberately: @xterm/addon-webgl 0.19.0 reuses stale
+    // glyph-atlas positions under heavy glyph churn, garbling scrolled rows
+    // until a forced refresh (xtermjs/xterm.js#6038; the fix is unreleased).
+    // Same setup as routes/terminal/index.tsx.
     const terminal = new Terminal({
       fontSize: 12,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontFamily: terminalFontFamily,
       scrollback: 10_000,
       cursorBlink: true,
     })
-    const fit = new FitAddon()
-    terminal.loadAddon(fit)
-    terminal.open(host)
-    // WebGL per instance: a machine without a GL context loses acceleration
-    // for this pane only, and keeps the DOM renderer everywhere else.
-    try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => webgl.dispose())
-      terminal.loadAddon(webgl)
-    } catch {
-      // The DOM renderer stays loaded; nothing else to do.
-    }
 
-    // The renderers paint into a canvas, so they need resolved colours rather
-    // than the CSS variables; reading them off the host keeps index.css the
-    // single source (same dance as routes/terminal/index.tsx).
-    const paint = () => {
-      const style = getComputedStyle(host)
-      if (!style.backgroundColor || !style.color) return
-      try {
-        terminal.options.theme = {
-          background: style.backgroundColor,
-          foreground: style.color,
-          cursor: style.color,
+    // xterm measures and caches glyph metrics synchronously at open, so the
+    // shipped symbols font must be usable first (see src/lib/term-font.ts).
+    let teardown: (() => void) | null = null
+    const cancelFontWait = whenTerminalFontReady(() => {
+      const fit = new FitAddon()
+      terminal.loadAddon(fit)
+      terminal.open(host)
+
+      // The renderer needs resolved colours rather than the CSS variables;
+      // reading them off the host keeps index.css the single source (same
+      // dance as routes/terminal/index.tsx).
+      const paint = () => {
+        const style = getComputedStyle(host)
+        if (!style.backgroundColor || !style.color) return
+        try {
+          terminal.options.theme = {
+            background: style.backgroundColor,
+            foreground: style.color,
+            cursor: style.color,
+          }
+        } catch {
+          // A colour xterm cannot parse is not worth losing the shell over.
         }
-      } catch {
-        // A colour xterm cannot parse is not worth losing the shell over.
       }
-    }
-    paint()
-    const themeWatch = new MutationObserver(paint)
-    themeWatch.observe(document.documentElement, { attributeFilter: ['class'] })
+      paint()
+      const themeWatch = new MutationObserver(paint)
+      themeWatch.observe(document.documentElement, { attributeFilter: ['class'] })
 
-    const resize = () => {
-      fit.fit()
-      shellRef.current?.resize(terminal.cols, terminal.rows)
-    }
-    resize()
+      const resize = () => {
+        fit.fit()
+        shellRef.current?.resize(terminal.cols, terminal.rows)
+      }
+      resize()
 
-    setOutcome({ kind: 'running' })
-    const session = connectShell(req, {
-      onData: (chunk) => terminal.write(chunk),
-      onAttached: () => {},
-      onRefused: (message) => {
-        setOutcome({ kind: 'refused', message })
-        onExitRef.current(false)
-      },
-      onExit: (clean, reason) => {
-        setOutcome(
-          clean
-            ? { kind: 'clean' }
-            : { kind: 'dirty', reason: reason ?? 'shell exited without registering' },
-        )
-        onExitRef.current(clean)
-      },
-      geometry: () => ({ cols: terminal.cols, rows: terminal.rows }),
+      setOutcome({ kind: 'running' })
+      const session = connectShell(req, {
+        onData: (chunk) => terminal.write(chunk),
+        onAttached: () => {},
+        onRefused: (message) => {
+          setOutcome({ kind: 'refused', message })
+          onExitRef.current(false)
+        },
+        onExit: (clean, reason) => {
+          setOutcome(
+            clean
+              ? { kind: 'clean' }
+              : { kind: 'dirty', reason: reason ?? 'shell exited without registering' },
+          )
+          onExitRef.current(clean)
+        },
+        geometry: () => ({ cols: terminal.cols, rows: terminal.rows }),
+      })
+      shellRef.current = session
+
+      const input = terminal.onData((data) => session.send(data))
+      const observer = new ResizeObserver(resize)
+      observer.observe(host)
+
+      teardown = () => {
+        observer.disconnect()
+        themeWatch.disconnect()
+        input.dispose()
+        session.close()
+        shellRef.current = null
+      }
     })
-    shellRef.current = session
-
-    const input = terminal.onData((data) => session.send(data))
-    const observer = new ResizeObserver(resize)
-    observer.observe(host)
 
     return () => {
-      observer.disconnect()
-      themeWatch.disconnect()
-      input.dispose()
-      session.close()
-      shellRef.current = null
+      cancelFontWait()
+      teardown?.()
       terminal.dispose()
     }
   }, [req])

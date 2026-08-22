@@ -289,16 +289,17 @@ routes on the same `runId`.
   (`src/lib/term-font.ts`, declared in `src/index.css`), so agent TUIs get
   their powerline and devicon glyphs; the terminal opens only once that font
   is loaded, because xterm caches glyph metrics synchronously at `open` and
-  would otherwise bake fallback metrics in.
+  would otherwise bake fallback metrics in. The workspace-shell pane
+  (`routes/shell/pane.tsx`) uses the identical renderer and font setup.
 - **Injections need no client work.**  writes the attributed
   member-coloured banner into the PTY stream itself, so it arrives as ANSI and
   xterm renders it like any other output.
 - Board cards get no live terminal previews in v1 (spec cut-line).
 
 The terminal's colours are the one place the tokens cannot be used directly:
-the renderers paint into a canvas and need resolved values, so the view reads
-the computed background and foreground off its own host element and re-reads
-them when the dark class on `<html>` changes.
+xterm needs resolved theme values rather than the CSS variables, so the view
+reads the computed background and foreground off its own host element and
+re-reads them when the dark class on `<html>` changes.
 
 ## Run events tab
 
