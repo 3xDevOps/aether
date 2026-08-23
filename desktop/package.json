@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "description": "Desktop shell for the Aether dashboard: spawns `aether gui` and renders its tokened loopback gateway.",
   "private": true,
+  "homepage": "https://github.com/3xDevOps/Aether",
+  "license": "GPL-3.0",
+  "author": {
+    "name": "3xDevOps",
+    "email": "aether@users.noreply.github.com"
+  },
   "type": "commonjs",
   "main": "main.js",
   "scripts": {

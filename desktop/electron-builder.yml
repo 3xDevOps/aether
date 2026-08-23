@@ -26,6 +26,10 @@ win:
     - nsis
 
 linux:
+  # The deb target refuses to build without an explicit maintainer; the
+  # package.json author alone is only a fallback for the other targets.
+  maintainer: 3xDevOps <aether@users.noreply.github.com>
+  category: Development
   target:
     - AppImage
     - deb

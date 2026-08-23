@@ -89,6 +89,24 @@ render its own links and buttons; everything else on the card is one target
 that reveals the run. Conflict chips () and watcher avatars and approval
 badges () belong in these slots, not in `run-card.tsx`.
 
+## Title bar
+
+`src/components/shell/title-bar.tsx` is the desktop shell's window chrome.
+The Electron window is frameless, so the SPA draws the bar itself: 36px tall,
+the Aether mark and the `aether` wordmark in VT323 (the landing page's display
+face, loaded in `index.css` as `--font-pixel` and used nowhere else), and -
+on Windows and Linux, where the shell draws no native buttons - minimize,
+maximize/restore and close wired to `window.aetherDesktop.controls`. The bar
+is `-webkit-app-region: drag` and every button `no-drag`; on macOS the native
+traffic lights are kept and the bar reserves 78px for them instead of drawing
+buttons.
+
+`App.tsx` mounts it above the whole app, the `ConnectionError` page included:
+that page replaces the shell, and a frameless window without a title bar would
+leave an offline user unable to move or close the app. In a browser
+`window.aetherDesktop` is absent, the component renders nothing, and the tab
+keeps the browser's own chrome.
+
 ## Data flow
 
 `connect()` in `src/store/sync.ts` owns the whole lifecycle. One round of HTTP
@@ -121,6 +139,17 @@ run's wire `paused` field, skipping runs that do not carry it.
 - **A failed hydration retries** on the same backoff, and the affected panes
   say the server is unreachable rather than animating skeletons forever. That
   generic copy never overwrites a more precise error already recorded.
+- **A total failure replaces the shell with one error page.** When nothing has
+  hydrated and an error is recorded, `ConnectionError` takes the window
+  instead of an empty sidebar and an empty board behind a toast. Which hop
+  failed picks the copy, because each one has a different fix: `network` says
+  this computer is offline (reconnect wifi or the VPN), `server` says the
+  server did not answer over SSH, `gateway` says the local `aether gui`
+  process stopped answering, and a dead token says to mint a new link. The
+  gateway's own message is kept behind a collapsed "Technical details", and
+  the page suppresses the toast that would otherwise repeat it. Its Retry
+  button clears the connection state and remounts the subscribe-and-hydrate
+  cycle, rather than reloading the page and dropping the in-memory token.
 - **A `1008` close naming the dead token stops the stream for good.** The
   gateway's close reason distinguishes the token watch from a refused
   subscribe or a transient membership check, which the next reconnect can

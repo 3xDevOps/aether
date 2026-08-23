@@ -189,6 +189,25 @@ describe('hydrate', () => {
     expect(store.getState().unreachable).toBe('server')
   })
 
+  it('classifies a dead local network as neither the gateway nor the server', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        serverInfo: vi.fn(async () => {
+          // The gateway dialed and the machine's own network stack refused
+          // to try: no route, or DNS is dead. The server is not implicated.
+          throw new ApiError(
+            503,
+            'server.info: network unreachable: dial tcp: lookup aether.example: no such host',
+          )
+        }),
+      }),
+    )
+
+    expect(store.getState().unreachable).toBe('network')
+  })
+
   it('clears unreachable when a re-hydration succeeds', async () => {
     const store = createRootStore()
     await hydrate(
@@ -553,6 +572,51 @@ describe('connect', () => {
     })
 
     expect(store.getState().unreachable).toBe('server')
+    stop()
+  })
+
+  it('marks the local network dead on a network-unreachable subscribe refusal', async () => {
+    const client = fakeApi()
+    const store = createRootStore()
+    const stop = connect(store, client)
+
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(1))
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    // Same refusal frame, different hop: the gateway never got off this
+    // machine, so the fix is the user's own connection.
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: false,
+        code: -32004,
+        error: 'network unreachable: dial tcp: lookup aether.example: no such host',
+      }),
+    })
+
+    expect(store.getState().unreachable).toBe('network')
+    stop()
+  })
+
+  it('records the refusal detail, which is the only account of what failed', async () => {
+    const client = fakeApi()
+    const store = createRootStore()
+    const stop = connect(store, client)
+
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(1))
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    // The stream never goes live, so hydration never runs: this frame is
+    // the only description of the failure the client will ever get.
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: false,
+        code: -32004,
+        error: 'server unreachable: cli: dial 10.0.0.5:22: connect: connection refused',
+      }),
+    })
+
+    expect(store.getState().hydrationError).toContain('connection refused')
+    expect(store.getState().hydrated).toBe(false)
     stop()
   })
 })
