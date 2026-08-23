@@ -85,6 +85,11 @@ badge when a run parks needs-attention, plus `aether://run/<id>` deep links.
 It is the same SPA with the same full SSH authority - just without a browser
 tab to lose.
 
+The window is frameless: there is no OS title bar and no File/Edit/View menu,
+because the dashboard draws its own title bar with the window buttons in it.
+macOS is the exception and keeps its native traffic lights and system menu
+bar.
+
 It requires the `aether` CLI installed and linked first. The app does not
 bundle the binary; it looks for `aether` in `AETHER_BIN`, then on your
 `PATH`, then in the installer's default locations (`/usr/local/bin`,

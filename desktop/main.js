@@ -9,7 +9,7 @@
 
 'use strict'
 
-const { app, BrowserWindow, dialog, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron')
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -187,6 +187,45 @@ function main() {
     doomed.once('exit', () => clearTimeout(hardKill))
   }
 
+  // --- window chrome ---------------------------------------------------------
+
+  // The SPA draws its own title bar, so the shell's generic File/Edit/View
+  // menu is dead weight - on win32/linux it is drawn *inside* the frameless
+  // window and would sit on top of that bar. darwin is different: its menu
+  // lives in the system menu bar, not the window, and nulling it strips the
+  // renderer of Cmd+C/V/A and Cmd+Q. So darwin keeps a roles-only menu.
+  function installMenu() {
+    if (process.platform !== 'darwin') {
+      Menu.setApplicationMenu(null)
+      return
+    }
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]),
+    )
+  }
+
+  // Window controls for the SPA's title bar. The window is resolved from the
+  // sender, never from the `win` closure variable: a stale reference must not
+  // be able to drive a different window than the one that asked.
+  function senderWindow(event) {
+    const target = BrowserWindow.fromWebContents(event.sender)
+    return target && !target.isDestroyed() ? target : null
+  }
+
+  ipcMain.on('window:minimize', (event) => {
+    senderWindow(event)?.minimize()
+  })
+  ipcMain.on('window:toggle-maximize', (event) => {
+    const target = senderWindow(event)
+    if (!target) return
+    if (target.isMaximized()) target.unmaximize()
+    else target.maximize()
+  })
+  ipcMain.on('window:close', (event) => {
+    senderWindow(event)?.close()
+  })
+  ipcMain.handle('window:is-maximized', (event) => senderWindow(event)?.isMaximized() ?? false)
+
   // --- window ---------------------------------------------------------------
 
   function openWindow() {
@@ -200,6 +239,16 @@ function main() {
     win = new BrowserWindow({
       width: 1280,
       height: 840,
+      // Frameless: the SPA draws a 36px title bar itself. On darwin the frame
+      // stays (frame:false there would delete the traffic lights too); hiding
+      // just the title bar keeps them, and y:11 centers the 12px lights in
+      // that 36px bar.
+      ...(process.platform === 'darwin'
+        ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 11 } }
+        : { frame: false }),
+      // Matches the dashboard's --background token, so a frameless window
+      // does not flash white before the SPA paints.
+      backgroundColor: '#0a0a0a',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -207,6 +256,18 @@ function main() {
         preload: path.join(__dirname, 'preload.js'),
       },
     })
+
+    // The SPA's maximize/restore button needs to track state changes it did
+    // not cause (double-click on the bar, window manager shortcuts). Bound to
+    // this window, not the `win` closure, so a later window cannot be driven
+    // by an older window's events.
+    const created = win
+    const sendMaximized = (maximized) => () => {
+      if (created.isDestroyed()) return
+      created.webContents.send('window:maximized-change', maximized)
+    }
+    created.on('maximize', sendMaximized(true))
+    created.on('unmaximize', sendMaximized(false))
 
     // The window is a browser locked to the gateway origin: anything else
     // opens in the user's real browser, never in this privileged shell.
@@ -283,7 +344,10 @@ function main() {
 
   // --- app lifecycle -------------------------------------------------------
 
-  app.whenReady().then(startSidecar)
+  app.whenReady().then(() => {
+    installMenu()
+    startSidecar()
+  })
 
   app.on('activate', () => {
     if (!win && gatewayURL) openWindow()

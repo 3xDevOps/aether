@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
@@ -29,7 +31,9 @@ func NewSSHBackend(cfg cli.Config) Backend {
 	return &sshBackend{cfg: cfg}
 }
 
-// live returns the shared connection, dialing when there is none yet.
+// live returns the shared connection, dialing when there is none yet. A
+// dial failure comes back already classified so every surface that dials
+// (Call, Events, Attach, Shell, Sync) reports it identically.
 func (b *sshBackend) live() (*cli.Conn, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -38,7 +42,7 @@ func (b *sshBackend) live() (*cli.Conn, error) {
 	}
 	conn, err := cli.Dial(b.cfg)
 	if err != nil {
-		return nil, err
+		return nil, unreachableError(err)
 	}
 	b.conn = conn
 	return conn, nil
@@ -55,6 +59,27 @@ func (b *sshBackend) invalidate(conn *cli.Conn) {
 		_ = conn.Close()
 		b.conn = nil
 	}
+}
+
+// unreachableError classifies a transport failure for the SPA, which
+// routes on the message prefix: "network unreachable" tells the user to
+// fix their own connection, "server unreachable" tells them to check the
+// server. Only unambiguous local failures (DNS, no route, interface down)
+// earn the first. A refused connection or a timeout cannot distinguish a
+// down server from a firewall or a dropped link, and a wrong guess sends
+// the user to fix the wrong thing, so ambiguity stays "server
+// unreachable". Both keep CodeUnavailable, which the API maps to 503.
+func unreachableError(err error) *protocol.Error {
+	prefix := "server unreachable: "
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) ||
+		errors.Is(err, syscall.ENETUNREACH) ||
+		errors.Is(err, syscall.ENETDOWN) ||
+		errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.EHOSTDOWN) {
+		prefix = "network unreachable: "
+	}
+	return &protocol.Error{Code: protocol.CodeUnavailable, Message: prefix + err.Error()}
 }
 
 // callTimeout bounds one control round-trip end to end. A black-holed TCP
@@ -127,8 +152,9 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 	b.invalidate(conn)
 	if errors.Is(err, errWedged) {
 		// Coded so Call does not retry: a second 60s wait on a wedged
-		// path would double the worst case for nothing.
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "server unreachable: " + err.Error()}
+		// path would double the worst case for nothing. A wedge is
+		// ambiguous, so it classifies as "server unreachable".
+		return nil, unreachableError(err)
 	}
 	return nil, err
 }
@@ -155,7 +181,7 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 	if errors.As(err, &perr) {
 		return nil, perr
 	}
-	return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "server unreachable: " + err.Error()}
+	return nil, unreachableError(err)
 }
 
 // alive probes the SSH connection with a keepalive request. It separates

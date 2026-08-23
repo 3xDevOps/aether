@@ -14,19 +14,18 @@ import { pausedFromTimeline } from '@/store/board'
 import type { UnreachableKind } from '@/store/server'
 
 /**
- * Names the hop that failed. The local gateway's SSH backend reports a dead
- * transport as 503 "server unreachable: ..." (protocol.CodeUnavailable) -
- * the gateway answered, the server behind it did not. A fetch that never got
- * an answer at all (a TypeError from fetch) means the gateway origin itself
- * is gone. Anything else - a 401, a 500 the server produced - is neither.
+ * Names the hop that failed. The local gateway reports a dead transport as
+ * 503 (protocol.CodeUnavailable) with the failing hop in the message:
+ * "network unreachable: ..." when this machine never got off its own
+ * network stack (DNS dead, no route), "server unreachable: ..." when it did
+ * and aether-server did not answer. A fetch that never got an answer at all
+ * (a TypeError from fetch) means the gateway origin itself is gone.
+ * Anything else - a 401, a 500 the server produced - is neither.
  */
 function classifyUnreachable(err: unknown): UnreachableKind | null {
-  if (
-    err instanceof ApiError &&
-    err.status === 503 &&
-    err.message.includes('server unreachable')
-  ) {
-    return 'server'
+  if (err instanceof ApiError && err.status === 503) {
+    if (err.message.includes('network unreachable')) return 'network'
+    if (err.message.includes('server unreachable')) return 'server'
   }
   if (err instanceof TypeError) return 'gateway'
   return null
@@ -264,10 +263,16 @@ export function connect(store: RootStore, client: Api = api): () => void {
       if (!subscribed || store.getState().lastSeq === 0) void load()
       subscribed = true
     },
-    onServerUnreachable: () => {
-      // The gateway answered and named its SSH backend as the failure:
-      // the tunnel to aether-server is down, not the gateway itself.
-      store.getState().setUnreachable('server')
+    onUnreachable: (kind, detail) => {
+      // The gateway answered and named the failing hop: either this
+      // machine's own network, or the SSH tunnel to aether-server. Either
+      // way the gateway itself is fine.
+      const s = store.getState()
+      s.setUnreachable(kind)
+      // A refused subscribe never goes live, so hydration never runs and
+      // nothing else will ever record what happened. Keep an error already
+      // recorded: a dead token is more precise than a dead hop.
+      if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
     },
     onDead: (reason) => {
       // The token died, not the server: the stream has stopped for good, and

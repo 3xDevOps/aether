@@ -37,6 +37,11 @@ web/node_modules/
 web/dist/*
 !web/dist/.gitkeep
 
+# Desktop shell. Dependencies and installers stay out of git; the Electron
+# build is reproducible from desktop/package.json.
+desktop/node_modules/
+desktop/dist/
+
 # Editor/IDE
 # .idea/
 # .vscode/

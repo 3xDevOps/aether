@@ -21,6 +21,16 @@
   font-display: block;
 }
 
+/* VT323: the landing page's display face, kept here for the `aether` wordmark
+   in the title bar only, so the dashboard's UI type is untouched. Latin
+   subset; OFL, see public/fonts/LICENSE-vt323.txt. */
+@font-face {
+  font-family: 'VT323';
+  src: url('/fonts/vt323-latin.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+
 /* The DOM renderer measures wide glyphs in one context and renders them in
    another; Chromium's default CJK punctuation compression (text-spacing-trim)
    makes the two disagree, drifting CJK-heavy rows off the cell grid
@@ -37,6 +47,7 @@
    base so the status vocabulary stays one edit wide. */
 :root {
   --radius: 0.5rem;
+  --font-pixel: 'VT323', monospace;
 
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -99,6 +110,8 @@
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
+
+  --font-pixel: var(--font-pixel);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);

@@ -3,11 +3,13 @@ import type { GatewayCapabilities, ServerInfo } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /** Which hop is down when the app cannot reach its data.
+ * `network`: this machine has no usable network at all - DNS is dead, or
+ * there is no route to the host. Nothing on the server side is implicated.
  * `gateway`: the HTTP origin itself is gone - the `aether gui` process or
  * `aether dash` tunnel died - so nothing answers at all.
  * `server`: the gateway answers but its SSH backend cannot reach
  * aether-server (it reports 503 "server unreachable: ..."). */
-export type UnreachableKind = 'gateway' | 'server'
+export type UnreachableKind = 'network' | 'gateway' | 'server'
 
 export interface ServerSlice {
   info: ServerInfo | null
@@ -32,6 +34,7 @@ export interface ServerSlice {
   setHydrated: (hydrated: boolean, error?: string | null) => void
   setStreamDead: () => void
   setUnreachable: (kind: UnreachableKind | null) => void
+  resetConnection: () => void
 }
 
 export const createServerSlice: SliceCreator<ServerSlice> = (set) => ({
@@ -53,4 +56,13 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => ({
     set({ hydrated, hydrationError: error }),
   setStreamDead: () => set({ streamDead: true }),
   setUnreachable: (unreachable) => set({ unreachable }),
+  resetConnection: () =>
+    set({
+      connection: 'connecting',
+      lastSeq: 0,
+      hydrated: false,
+      hydrationError: null,
+      streamDead: false,
+      unreachable: null,
+    }),
 })

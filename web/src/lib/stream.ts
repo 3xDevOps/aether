@@ -14,10 +14,14 @@ export interface StreamHandlers {
   /** The gateway's token watch closed the socket: the bearer token is dead,
    * and every reconnect would carry it. The stream has stopped for good. */
   onDead?: (reason: string) => void
-  /** The local gateway's subscribe refusal named its SSH backend as the
-   * failure (-32004 "server unreachable: ..."): the gateway itself is fine,
-   * the hop behind it is not. Fired before the retry is scheduled. */
-  onServerUnreachable?: () => void
+  /** The gateway's subscribe refusal named the failing hop (-32004
+   * "network unreachable: ..." or "server unreachable: ..."): the gateway
+   * itself is fine, something past it is not. `network` means this machine
+   * never got off its own network stack; `server` means it did and
+   * aether-server did not answer. `detail` is the refusal message, which on
+   * a stream that never goes live is the only account of the failure the
+   * client ever gets. Fired before the retry is scheduled. */
+  onUnreachable?: (kind: 'network' | 'server', detail: string) => void
   /** Last sequence applied to the store; replay resumes after it. */
   afterSeq: () => number
 }
@@ -86,12 +90,13 @@ export function connectEvents(h: StreamHandlers): () => void {
           if (parsed.ok) {
             attempt = 0
             h.onState('live')
-          } else if (
-            parsed.ok === false &&
-            parsed.code === codeUnavailable &&
-            parsed.error?.includes('server unreachable')
-          ) {
-            h.onServerUnreachable?.()
+          } else if (parsed.ok === false && parsed.code === codeUnavailable) {
+            const detail = parsed.error ?? ''
+            if (detail.startsWith('network unreachable')) {
+              h.onUnreachable?.('network', detail)
+            } else if (detail.startsWith('server unreachable')) {
+              h.onUnreachable?.('server', detail)
+            }
           }
           return
         }

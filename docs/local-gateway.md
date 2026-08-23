@@ -54,6 +54,19 @@ that fails to open triggers a redial only when a keepalive shows the
 connection is actually gone, because tearing down a healthy connection
 would kill every live stream riding on it.
 
+Every `-32004` carries a message prefix that says who has to fix it, and
+both map to HTTP 503 as before. `network unreachable: ` means this
+machine could not even attempt the connection (DNS resolution failed, or
+the kernel reported no route or an interface down), so the user fixes
+their own connectivity. `server unreachable: ` is everything else and is
+the default: a refused connection, a dial timeout, a failed SSH
+handshake, or a wedged call, where the server is the thing to check. The
+split stops at unambiguous cases on purpose, since a refusal or a timeout
+cannot tell a stopped server from a firewall, and a wrong guess sends the
+user to fix the wrong thing. Dial failures are classified inside the
+shared dial path, so the `/ws/events` refusal frame carries the same code
+and prefix as a `POST /api/v1` error.
+
 ## Routes
 
 | Method | Path | Purpose |
