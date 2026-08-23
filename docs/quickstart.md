@@ -6,7 +6,8 @@ run against a real server; nothing is aspirational.
 Two machines are involved, though they can be the same one:
 
 - **the server box** - a Linux machine with Docker. This is where agents run.
-- **your machine** - laptop or desktop, any OS. This is where you type.
+- **your machine** - laptop or desktop, Linux, macOS, or Windows. This is
+  where you type.
 
 You need on the server box: Linux, Docker (running, and your user able to talk
 to it), and git. On your machine: git, and an SSH key unless both machines are
@@ -14,11 +15,25 @@ on a tailnet (see [step 3](#3-link-from-your-machine)). Aether reads
 `~/.ssh/id_ed25519` and your ssh-agent; a **passphrase-protected key only works
 through the agent**, so `ssh-add` it first.
 
+On Windows the equivalents are `%USERPROFILE%\.ssh\id_ed25519` and the Windows
+OpenSSH agent, which the client finds through its named pipe. That agent is a
+service and does not run by default, so check it before you need it:
+
+```powershell
+Get-Service ssh-agent                       # Status should be Running
+Start-Service ssh-agent                     # needs an elevated prompt
+Set-Service ssh-agent -StartupType Automatic
+ssh-add $env:USERPROFILE\.ssh\id_ed25519
+```
+
 ---
 
 ## 1. Install
 
-On both machines:
+The server box is Linux, so it always uses the script. Your machine uses the
+script too unless it runs Windows.
+
+**Linux and macOS:**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
@@ -26,12 +41,23 @@ curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/instal
 
 On Linux that installs `aether` and `aether-server`; on macOS just `aether`
 (the server is Linux-only). Upgrading later is one command: `aether update`.
-Details, pinning a version, and the systemd unit are in
-[install.md](install.md).
+
+**Windows** (client only): the install script is POSIX shell and there is no
+Windows installer, so this is a manual download. Grab
+`aether-windows-amd64.exe` (or `-arm64`) from the
+[latest release](https://github.com/3xDevOps/Aether/releases/latest), check
+its hash against `checksums.txt`, rename it `aether.exe`, and put it on your
+`PATH`. The three PowerShell commands are in
+[install.md](install.md#manual-install). Upgrading means repeating that with
+the newer release; `aether update` does not run on Windows.
+
+Details, pinning a version, the systemd unit, and everything Windows-specific
+are in [install.md](install.md).
 
 ## 2. Start the server
 
-On the server box:
+On the server box. Both commands are Linux-side; `aether init` refuses to run
+on Windows and tells you to run it here.
 
 ```sh
 sudo aether init --data-dir /var/lib/aether
@@ -72,7 +98,8 @@ linked to <server-host>:2222 as admin (admin)
 
 **The first identity to link a fresh server becomes the admin.** That is the
 whole account setup - there is no signup, no password, no config file to edit.
-The link is saved to `~/.config/aether/config.json`. (Joining over a tailnet,
+The link is saved to `~/.config/aether/config.json`, or
+`%AppData%\aether\config.json` on Windows. (Joining over a tailnet,
 the display name comes from your tailnet login instead of the literal
 `admin`; the role is the same. Change any display color with
 `aether member color <#rrggbb>`.)
@@ -84,11 +111,13 @@ How you were identified depends on the network:
   [networking.md](networking.md).
 - **Anywhere else:** your SSH public key (`~/.ssh/id_ed25519`, or any key in
   your ssh-agent) is registered as the admin's key. Generate one first with
-  `ssh-keygen -t ed25519` if you do not have one.
+  `ssh-keygen -t ed25519` if you do not have one. On Windows that is
+  `%USERPROFILE%\.ssh\id_ed25519` and the OpenSSH agent service; `ssh-keygen`
+  ships with Windows OpenSSH.
 
 On first contact `aether` records the server's host key in `~/.ssh/known_hosts`
-and prints its fingerprint. Compare that against what the server printed if you
-care to.
+(`%USERPROFILE%\.ssh\known_hosts` on Windows) and prints its fingerprint.
+Compare that against what the server printed if you care to.
 
 ## 4. Initialize a workspace and push your repo
 
@@ -249,6 +278,10 @@ aether daemon install --server <server-host>:2222 --repo ~/code/myproject
 systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 ```
 
+That second line is the Linux one. `daemon install` prints the activation
+command for whatever platform you are on: `launchctl load` on macOS,
+`schtasks /Create` on Windows.
+
 ---
 
 ## Prove the plumbing without an agent subscription
@@ -303,9 +336,9 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 
 | Symptom | Cause |
 | --- | --- |
-| `not linked; run aether link <addr>` | No `~/.config/aether/config.json` on this machine yet. |
+| `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`%AppData%\aether\config.json` on Windows) on this machine yet. |
 | `no Aether member for this key` | The server already has an admin, so you are not bootstrapping. Get an invite: [teams.md](teams.md). |
-| `unable to authenticate, attempted methods [none]` | The CLI found no usable key: none at `~/.ssh/id_ed25519`, no ssh-agent, or a passphrase-protected key with no agent to unlock it. Run `ssh-add`, or generate an unencrypted key. |
+| `unable to authenticate, attempted methods [none]` | The CLI found no usable key: none at `~/.ssh/id_ed25519`, no ssh-agent, or a passphrase-protected key with no agent to unlock it. Run `ssh-add`, or generate an unencrypted key. On Windows, check `Get-Service ssh-agent` and look for the key at `%USERPROFILE%\.ssh\id_ed25519`. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
 | `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |
@@ -313,6 +346,8 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `workspace tools verify` reports failure | The active snapshot does not contain the requested executable, or it is not executable. Bootstrap again with `--command <executable>`. |
 | Run reaches `failed` immediately | The agent started and exited. `aether timeline --run <run-id>` shows the exit code; `aether attach` only works while a run is alive. |
 | `this server forwards no dashboard port` | The server was started without `--dashboard-port` or `--dashboard-addr`. |
+| `aether init prepares a Linux server data directory` | You ran `aether init` on Windows. It belongs on the server box; the Windows binary is the client. |
+| `self-update is not supported on Windows` | Expected. Re-download the release binary: [install.md](install.md#manual-install). |
 
 ## Next
 

@@ -430,10 +430,25 @@ func TestLocalSyncStartRequiresLinkedRepo(t *testing.T) {
 }
 
 func TestLocalImageScaffold(t *testing.T) {
+	// The repo path goes through json.Marshal rather than string
+	// concatenation: a Windows path's backslashes are escape characters
+	// inside a JSON string literal.
+	scaffoldBody := func(repo, kind string) string {
+		t.Helper()
+		raw, err := json.Marshal(struct {
+			Repo string `json:"repo"`
+			Kind string `json:"kind"`
+		}{Repo: repo, Kind: kind})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+
 	repo := t.TempDir()
 	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{Addr: "host:2222"})
 	rec := do(g, http.MethodPost, "/local/v1/image.scaffold",
-		`{"repo":"`+repo+`","kind":"devcontainer"}`, true)
+		scaffoldBody(repo, "devcontainer"), true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("image.scaffold = %d: %s", rec.Code, rec.Body)
 	}
@@ -452,7 +467,7 @@ func TestLocalImageScaffold(t *testing.T) {
 
 	// Overwrite refusal is an invalid-state, not an internal error.
 	rec = do(g, http.MethodPost, "/local/v1/image.scaffold",
-		`{"repo":"`+repo+`","kind":"dockerfile"}`, true)
+		scaffoldBody(repo, "dockerfile"), true)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("second scaffold = %d: %s", rec.Code, rec.Body)
 	}
@@ -461,7 +476,7 @@ func TestLocalImageScaffold(t *testing.T) {
 	}
 
 	rec = do(g, http.MethodPost, "/local/v1/image.scaffold",
-		`{"repo":"`+t.TempDir()+`","kind":"vm"}`, true)
+		scaffoldBody(t.TempDir(), "vm"), true)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad kind = %d", rec.Code)
 	}

@@ -2,16 +2,17 @@ package localops
 
 import (
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestDaemonInstallAndStatus(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("HOME override does not steer os.UserHomeDir on windows")
-	}
-	t.Setenv("HOME", t.TempDir())
+	// os.UserHomeDir reads HOME on unix and USERPROFILE on windows, so
+	// both have to point at the scratch home for this to stay hermetic
+	// and to exercise the Scheduled Task rendering on windows.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	installed, unitPath, err := DaemonStatus()
 	if err != nil {
@@ -38,8 +39,9 @@ func TestDaemonInstallAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// systemd joins argv with spaces, launchd wraps each arg in XML;
-	// the server address appears verbatim in both.
+	// systemd joins argv with spaces, launchd wraps each arg in XML, and
+	// the Scheduled Task puts them in <Arguments>; the server address
+	// appears verbatim in all three.
 	if !strings.Contains(string(body), "host:2222") {
 		t.Fatalf("unit content lacks the server address: %q", body)
 	}

@@ -3,6 +3,7 @@ package profile
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -89,6 +90,9 @@ func TestDiscoverNegationCannotReincludeDenied(t *testing.T) {
 }
 
 func TestDiscoverSymlinkEscapeRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink needs SeCreateSymbolicLinkPrivilege: Developer Mode or an elevated shell")
+	}
 	root := setupClaudeRoot(t)
 	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
 	outside := filepath.Join(t.TempDir(), "outside.txt")

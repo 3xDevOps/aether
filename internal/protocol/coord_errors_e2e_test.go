@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,9 @@ import (
 // requests.ndjson and success.ndjson stay pinned by TestCoordWireV1Golden,
 // which marshals the same structs both endpoints serialize.
 func TestCoordWireV1ErrorsGolden(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("coord.Provision binds an AF_UNIX listener and chmods the run directory to 0700 and the socket to 0666")
+	}
 	ctx := context.Background()
 	runs := &wireRuns{runs: make(map[domain.RunID]*domain.Run)}
 	runs.set(domain.Run{ID: "run_01", SessionID: "ses_01", MemberID: "mem_01", Status: domain.RunRunning})

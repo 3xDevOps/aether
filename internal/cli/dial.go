@@ -18,6 +18,11 @@ const (
 	sshAgentTimeout = 500 * time.Millisecond
 )
 
+// dialAgent connects to the local SSH agent. Platform files supply the
+// transport: a unix socket on POSIX, a named pipe on Windows. It is a var so
+// tests can stand in for the host's agent.
+var dialAgent = platformDialAgent
+
 // Conn is a live SSH connection to an aether-server.
 type Conn struct {
 	client *ssh.Client
@@ -91,7 +96,10 @@ func (c *Conn) Close() error { return c.client.Close() }
 func (c *Conn) SSH() *ssh.Client { return c.client }
 
 func optionalAuthMethods(cfg Config) ([]ssh.AuthMethod, func()) {
-	methods, closeAuth, _ := loadAuthMethods(cfg)
+	methods, closeAuth, err := loadAuthMethods(cfg)
+	if len(methods) == 0 && err != nil {
+		fmt.Fprintf(os.Stderr, "aether: %v\n", err)
+	}
 	return methods, closeAuth
 }
 
@@ -108,31 +116,9 @@ func requiredAuthMethods(cfg Config) ([]ssh.AuthMethod, func(), error) {
 
 func loadAuthMethods(cfg Config) ([]ssh.AuthMethod, func(), error) {
 	var methods []ssh.AuthMethod
-	var closeAuth func()
-	var authErr error
-	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
-		conn, err := (&net.Dialer{Timeout: sshAgentTimeout}).Dial("unix", sock)
-		if err != nil {
-			authErr = fmt.Errorf("cli: connect ssh agent: %w", err)
-		} else if err := conn.SetDeadline(time.Now().Add(sshAgentTimeout)); err != nil {
-			_ = conn.Close()
-			authErr = fmt.Errorf("cli: set ssh agent deadline: %w", err)
-		} else {
-			signers, err := agent.NewClient(conn).Signers()
-			if err != nil {
-				_ = conn.Close()
-				authErr = fmt.Errorf("cli: load ssh agent keys: %w", err)
-			} else if len(signers) == 0 {
-				_ = conn.Close()
-				authErr = errors.New("cli: SSH agent has no signing keys")
-			} else if err := conn.SetDeadline(time.Time{}); err != nil {
-				_ = conn.Close()
-				authErr = fmt.Errorf("cli: clear ssh agent deadline: %w", err)
-			} else {
-				methods = append(methods, ssh.PublicKeys(signers...))
-				closeAuth = func() { _ = conn.Close() }
-			}
-		}
+	method, closeAuth, authErr := agentAuthMethod()
+	if method != nil {
+		methods = append(methods, method)
 	}
 	keyPath := cfg.keyPath()
 	if keyPath == "" {
@@ -151,6 +137,39 @@ func loadAuthMethods(cfg Config) ([]ssh.AuthMethod, func(), error) {
 	}
 	methods = append(methods, ssh.PublicKeys(signer))
 	return methods, closeAuth, authErr
+}
+
+// agentAuthMethod dials the local SSH agent and collects its signers. A nil
+// method with a nil error means no agent is configured, which is not a
+// failure: key-file auth may still succeed.
+func agentAuthMethod() (ssh.AuthMethod, func(), error) {
+	conn, err := dialAgent(sshAgentTimeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cli: connect ssh agent: %w", err)
+	}
+	if conn == nil {
+		return nil, nil, nil
+	}
+	// The deadline guards every exchange with an agent that accepts the
+	// connection and then never answers.
+	if err := conn.SetDeadline(time.Now().Add(sshAgentTimeout)); err != nil {
+		_ = conn.Close()
+		return nil, nil, fmt.Errorf("cli: set ssh agent deadline: %w", err)
+	}
+	signers, err := agent.NewClient(conn).Signers()
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, fmt.Errorf("cli: load ssh agent keys: %w", err)
+	}
+	if len(signers) == 0 {
+		_ = conn.Close()
+		return nil, nil, errors.New("cli: SSH agent has no signing keys")
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = conn.Close()
+		return nil, nil, fmt.Errorf("cli: clear ssh agent deadline: %w", err)
+	}
+	return ssh.PublicKeys(signers...), func() { _ = conn.Close() }, nil
 }
 
 func hostKeyCallback(path string) (ssh.HostKeyCallback, error) {

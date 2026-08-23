@@ -14,9 +14,19 @@ func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// useTempConfigDir points cli.Save/cli.Load at a scratch config
+// directory. Both variables are needed: os.UserConfigDir reads
+// XDG_CONFIG_HOME on unix and %AppData% on windows.
+func useTempConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
+}
+
 func TestLinkRepoSetsRemoteAndSavesConfig(t *testing.T) {
 	requireGit(t)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	useTempConfigDir(t)
 	repo := t.TempDir()
 	git(t, repo, "init")
 
@@ -57,7 +67,7 @@ func TestLinkRepoSetsRemoteAndSavesConfig(t *testing.T) {
 
 func TestLinkRepoRejectsNonRepo(t *testing.T) {
 	requireGit(t)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	useTempConfigDir(t)
 	if _, _, err := LinkRepo(cli.Config{Addr: "host:2222"}, t.TempDir(), "ws_1"); err == nil {
 		t.Fatal("LinkRepo accepted a non-git directory")
 	}

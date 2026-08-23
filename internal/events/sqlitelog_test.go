@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -159,6 +160,9 @@ func TestSQLiteLogPersistsAcrossReopen(t *testing.T) {
 // containing '?', '#', and '%': without escaping, '?' silently truncates
 // the path (creating the database at the wrong file) and '%' fails to open.
 func TestSQLiteLogPathWithURISpecialChars(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture directory name embeds '?', which NTFS forbids in a filename")
+	}
 	dir := filepath.Join(t.TempDir(), "cache?v=2#a", "%41dir")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)

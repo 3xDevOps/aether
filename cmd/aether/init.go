@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -26,6 +28,11 @@ func runInit(args []string) error {
 	dataDir := fs.String("data-dir", "/var/lib/aether", "server data directory")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if runtime.GOOS == "windows" {
+		// The server is Linux-only, so there is nothing to prepare here
+		// and the default data directory would land on the current drive.
+		return errors.New("aether init prepares a Linux server data directory; run it on the server box")
 	}
 	if err := os.MkdirAll(*dataDir, 0o700); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
