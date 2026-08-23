@@ -152,7 +152,7 @@ func agentAuthMethod() (ssh.AuthMethod, func(), error) {
 	}
 	// The deadline guards every exchange with an agent that accepts the
 	// connection and then never answers.
-	if err := conn.SetDeadline(time.Now().Add(sshAgentTimeout)); err != nil {
+	if err = conn.SetDeadline(time.Now().Add(sshAgentTimeout)); err != nil {
 		_ = conn.Close()
 		return nil, nil, fmt.Errorf("cli: set ssh agent deadline: %w", err)
 	}
@@ -165,7 +165,7 @@ func agentAuthMethod() (ssh.AuthMethod, func(), error) {
 		_ = conn.Close()
 		return nil, nil, errors.New("cli: SSH agent has no signing keys")
 	}
-	if err := conn.SetDeadline(time.Time{}); err != nil {
+	if err = conn.SetDeadline(time.Time{}); err != nil {
 		_ = conn.Close()
 		return nil, nil, fmt.Errorf("cli: clear ssh agent deadline: %w", err)
 	}
