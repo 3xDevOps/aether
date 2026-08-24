@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -777,6 +778,9 @@ func TestForeignKeyEnforcement(t *testing.T) {
 // The database holds credential-home blobs, so neither it nor the WAL
 // sidecars SQLite derives from it may be readable by other local accounts.
 func TestOpenKeepsDatabaseFilesPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("asserts unix permission bits; NTFS ACLs surface as 0666 through os.FileMode")
+	}
 	path := filepath.Join(t.TempDir(), "aether.db")
 	db, err := Open(path)
 	if err != nil {

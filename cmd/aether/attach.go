@@ -41,15 +41,28 @@ func runAttach(args []string) error {
 	return copyRaw(stream)
 }
 
+// termSizeOf is a seam so the handle probe order can be tested; under `go test`
+// neither standard handle is a console.
+var termSizeOf = term.GetSize
+
+// termSize prefers stdout because Windows resolves the size with
+// GetConsoleScreenBufferInfo, which rejects an input handle. Stdin is the
+// fallback for a redirected stdout, and 80x24 covers neither being a console.
 func termSize() (cols, rows uint) {
-	cols, rows = 80, 24
-	if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
-		cols, rows = uint(w), uint(h)
+	for _, f := range []*os.File{os.Stdout, os.Stdin} {
+		if w, h, err := termSizeOf(int(f.Fd())); err == nil {
+			return uint(w), uint(h)
+		}
 	}
-	return
+	return 80, 24
 }
 
 func copyRaw(stream io.ReadWriteCloser) error {
+	// Unconditional: stdout can be a console even when stdin is redirected,
+	// and the raw-mode branch below keys off stdin. The Windows
+	// implementation no-ops when stdout is not a console.
+	defer enableVirtualTerminal(os.Stdout)()
+
 	fd := int(os.Stdin.Fd())
 	input := io.Reader(os.Stdin)
 	if term.IsTerminal(fd) {

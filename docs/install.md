@@ -19,6 +19,10 @@ installs them into `/usr/local/bin` (via `sudo` if needed, falling back to
 `~/.local/bin` when there is no sudo). On Linux it installs both binaries; on
 macOS only `aether`, because the server is Linux-only.
 
+The script is POSIX-only: it covers Linux and macOS. There is no Windows
+installer and no PowerShell equivalent. Windows clients install by hand, which
+is three steps: see [Manual install](#manual-install).
+
 A checksum mismatch aborts the install. The script needs `curl` or `wget`, and
 `sha256sum` or `shasum`.
 
@@ -46,8 +50,9 @@ CLI it updates both and reminds you to
 `sudo systemctl restart aether-server`. `aether update --check` only reports
 whether a newer release exists. Binaries in `/usr/local/bin` need
 `sudo aether update`. Re-running the installer does the same job; the data
-directory is untouched either way. Windows has no self-update - download the
-release binary.
+directory is untouched either way. `aether update` is not a Windows command;
+it refuses to run there. Upgrading a Windows client means downloading the new
+release binary over the old one, exactly as below.
 
 ## Manual install
 
@@ -60,9 +65,81 @@ aether-darwin-amd64         aether-darwin-arm64
 aether-windows-amd64.exe    aether-windows-arm64.exe
 ```
 
-Download the one you want, check it against `checksums.txt`, `chmod +x`, and
-drop it on your `PATH` under the name `aether` or `aether-server`. Windows is a
-client platform only.
+`aether-server` is Linux-only. The Windows and macOS assets are the client.
+
+**Linux and macOS.** Download the one you want, check it against
+`checksums.txt`, `chmod +x`, and drop it on your `PATH` under the name
+`aether` or `aether-server`.
+
+**Windows.** In PowerShell, from the directory you downloaded into:
+
+```powershell
+# 1. Verify. Compare this against the matching line in checksums.txt.
+Get-FileHash -Algorithm SHA256 .\aether-windows-amd64.exe
+
+# 2. Put it somewhere on PATH under the name aether.exe.
+$dir = "$env:LOCALAPPDATA\Programs\Aether"
+New-Item -ItemType Directory -Force -Path $dir
+Move-Item .\aether-windows-amd64.exe "$dir\aether.exe"
+
+# 3. Add that directory to your user PATH (once), then open a new terminal.
+[Environment]::SetEnvironmentVariable(
+  "Path", "$([Environment]::GetEnvironmentVariable('Path','User'));$dir", "User")
+```
+
+Use `aether-windows-arm64.exe` on an Arm device. Confirm it works with
+`aether version` in a fresh terminal. Windows Defender SmartScreen may warn on
+first run: the binaries are not code-signed, which is why verifying the hash
+matters. To upgrade later, repeat this with the newer release; there is no
+self-update on Windows.
+
+## The Windows client
+
+Windows runs the client only. There is no `aether-server` for Windows and
+there will not be one: every run is a Linux container on a Linux host.
+
+Where the client keeps its state:
+
+| What | Path |
+| --- | --- |
+| Linked-server config | `%AppData%\aether\config.json` |
+| Host-key trust store | `%USERPROFILE%\.ssh\known_hosts` |
+| Default private key | `%USERPROFILE%\.ssh\id_ed25519` |
+
+**SSH agent.** The client talks to the Windows OpenSSH agent over its named
+pipe, `\\.\pipe\openssh-ssh-agent`, so a passphrase-protected key works the
+same way it does on Linux. The agent is a Windows service that is not running
+by default:
+
+```powershell
+Get-Service ssh-agent                       # is it running?
+Start-Service ssh-agent                     # start it now (needs admin)
+Set-Service ssh-agent -StartupType Automatic
+ssh-add $env:USERPROFILE\.ssh\id_ed25519
+```
+
+`SSH_AUTH_SOCK` takes precedence when it is set: the client dials it as a unix
+socket rather than using the pipe. Leave it unset unless you deliberately run
+a different agent. When neither is reachable the client falls back to the key
+file rather than failing; only with no usable key either does `aether link`
+report `attempted methods [none]`.
+
+**Console.** `aether attach` mirrors an agent's TUI byte for byte, so the
+console needs ANSI escape processing. The client enables it on the console it
+writes to and restores the previous mode on exit. Windows Terminal and current
+conhost handle it; a console that refuses is a cosmetic degradation, not a
+failed attach.
+
+**Not available on Windows**, by design rather than oversight:
+
+- `aether init` refuses to run. It prepares a Linux server's data directory,
+  so run it on the server box.
+- `aether update` refuses to run. Re-download the release binary instead.
+- `scripts/install.sh` is a POSIX shell script. Install by hand, above.
+- `aether-server` itself. Point the client at a Linux server.
+
+Everything else is the same client: `link`, `run`, `attach`, `dash`, `gui`,
+`pull`, `daemon`, and the rest.
 
 ## Building from source
 
@@ -90,11 +167,15 @@ because the dashboard draws its own title bar with the window buttons in it.
 macOS is the exception and keeps its native traffic lights and system menu
 bar.
 
+No release publishes it: there is no installer to download for any platform,
+Windows included. Build it yourself, below.
+
 It requires the `aether` CLI installed and linked first. The app does not
-bundle the binary; it looks for `aether` in `AETHER_BIN`, then on your
-`PATH`, then in the installer's default locations (`/usr/local/bin`,
-`~/.local/bin`). If launching fails with "aether CLI not found", set
-`AETHER_BIN` to the binary's full path.
+bundle the binary; it looks for `aether` (`aether.exe` on Windows) in
+`AETHER_BIN`, then on your `PATH`, then in the installer's default locations
+(`/usr/local/bin`, `~/.local/bin`), which do not exist on Windows. If
+launching fails with "aether CLI not found", set `AETHER_BIN` to the binary's
+full path.
 
 Build from source (needs Node 22+):
 
@@ -250,15 +331,20 @@ Optional, on your machine, once per repo. It fetches run branches as agents
 commit and pushes your base branch up so new runs start from current reality.
 
 ```sh
+# Linux; the second line is whatever `daemon install` printed on your platform.
 aether daemon install --server <server-host>:2222 --repo ~/code/myproject
 systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 ```
 
-`daemon install` writes `~/.config/systemd/user/aether-daemon.service` and
-prints the activation command. `aether daemon run --server ... --repo ...`
-does the same thing in the foreground. The daemon also watches your local
-agent-profile directories and pushes changes up; `--no-profile-sync` turns that
-half off.
+`daemon install` writes a user-level service definition for your platform and
+prints the command that activates it: a systemd user unit
+(`~/.config/systemd/user/aether-daemon.service`) on Linux, a launchd agent
+(`~/Library/LaunchAgents/com.aether.daemon.plist`) on macOS, and a Scheduled
+Task XML (`%USERPROFILE%\aether-daemon.xml`, registered with
+`schtasks /Create`) on Windows. `aether daemon run --server ... --repo ...`
+does the same work in the foreground on any of them. The daemon also watches
+your local agent-profile directories and pushes changes up; `--no-profile-sync`
+turns that half off.
 
 ## What lives in the data directory
 

@@ -11,7 +11,7 @@ import (
 // still parses to exactly the same Config and re-saves without gaining
 // a links key.
 func TestLoadOldFormat(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	useTempConfigDir(t)
 	path, err := Path()
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestLoadOldFormat(t *testing.T) {
 
 // TestLinksRoundTrip proves named links survive Save/Load.
 func TestLinksRoundTrip(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	useTempConfigDir(t)
 	cfg := Config{
 		Addr: "host:2222",
 		User: "alice",
@@ -145,4 +145,15 @@ func TestUpsertLink(t *testing.T) {
 	if len(base.Links) != 1 || base.Links[0].Addr != "old:2222" {
 		t.Fatalf("UpsertLink mutated its input: %+v", base.Links)
 	}
+}
+
+// useTempConfigDir points os.UserConfigDir at a scratch directory. It has
+// to set both variables: os.UserConfigDir reads XDG_CONFIG_HOME on unix
+// and %AppData% on windows, so setting only the former would leave a
+// windows run writing into the real user profile.
+func useTempConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
 }

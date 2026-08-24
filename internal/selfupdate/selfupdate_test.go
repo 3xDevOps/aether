@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -91,12 +92,16 @@ func TestApplyReplacesBinary(t *testing.T) {
 	if string(got) != string(body) {
 		t.Fatalf("dst = %q, want %q", got, body)
 	}
-	info, err := os.Stat(dst)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o755 {
-		t.Fatalf("mode = %v, want 0755", info.Mode().Perm())
+	// Windows has no execute bit: os.Chmod there only toggles the
+	// read-only attribute, so a writable file always reports 0666.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(dst)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o755 {
+			t.Fatalf("mode = %v, want 0755", info.Mode().Perm())
+		}
 	}
 }
 

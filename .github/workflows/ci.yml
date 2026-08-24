@@ -85,6 +85,30 @@ jobs:
         run: npx electron-builder --dir --publish never
         working-directory: desktop
 
+  # The client ships for Windows, so it gets a real Windows runner. Only the
+  # client's package closure is built and tested: the server is Linux-only by
+  # design and internal/gitengine does not compile for Windows.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # windows-latest defaults to PowerShell, where command substitution and
+      # grep are unavailable. Git Bash is preinstalled.
+      - name: Client packages build and vet
+        shell: bash
+        run: |
+          pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
+          go build ./cmd/aether
+          go vet ./cmd/aether $pkgs
+      - name: Client unit tests
+        shell: bash
+        run: |
+          pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
+          go test ./cmd/aether $pkgs
+
   release-build:
     runs-on: ubuntu-latest
     steps:

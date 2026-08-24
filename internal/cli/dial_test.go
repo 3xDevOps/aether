@@ -46,7 +46,7 @@ func TestDialAllowsKeylessNoneAuthenticationWithInvalidKey(t *testing.T) {
 		serverDone <- handshakeErr
 	}()
 
-	t.Setenv("SSH_AUTH_SOCK", "")
+	disableAgent(t)
 	dir := t.TempDir()
 	keyPath := filepath.Join(dir, "invalid-key")
 	if writeErr := os.WriteFile(keyPath, []byte("not an SSH private key"), 0o600); writeErr != nil {
@@ -140,7 +140,7 @@ func TestDialContinuesWithoutUnresponsiveAgent(t *testing.T) {
 }
 
 func TestDialInviteRejectsInvalidKeyBeforeDialing(t *testing.T) {
-	t.Setenv("SSH_AUTH_SOCK", "")
+	disableAgent(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestDialInviteRejectsInvalidKeyBeforeDialing(t *testing.T) {
 // one an attacker in the path would supply: the user must at least be told
 // which fingerprint was trusted.
 func TestDialAnnouncesNewlyPinnedHostKey(t *testing.T) {
-	t.Setenv("SSH_AUTH_SOCK", "")
+	disableAgent(t)
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -226,6 +226,76 @@ func TestDialAnnouncesNewlyPinnedHostKey(t *testing.T) {
 	}
 }
 
+func TestRequiredAuthMethodsWithoutAgentOrKey(t *testing.T) {
+	setDialAgent(t, func(time.Duration) (net.Conn, error) { return nil, nil })
+	cfg := Config{Key: filepath.Join(t.TempDir(), "missing-key")}
+
+	if _, _, err := requiredAuthMethods(cfg); err == nil ||
+		!strings.Contains(err.Error(), "no SSH key or agent available") {
+		t.Fatalf("requiredAuthMethods error = %v, want no SSH key or agent available", err)
+	}
+
+	stderr := captureStderr(t)
+	methods, closeAuth := optionalAuthMethods(cfg)
+	if closeAuth != nil {
+		closeAuth()
+	}
+	if len(methods) != 0 {
+		t.Errorf("optionalAuthMethods returned %d methods, want 0", len(methods))
+	}
+	if got := stderr(); got != "" {
+		t.Errorf("stderr = %q, want nothing when no agent is configured", got)
+	}
+}
+
+// A broken agent must not fail silently: optionalAuthMethods swallows the
+// error so the only trace the user gets is the diagnostic on stderr.
+func TestBrokenAgentIsReported(t *testing.T) {
+	dir := t.TempDir()
+	notASocket := filepath.Join(dir, "agent.sock")
+	if err := os.WriteFile(notASocket, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_AUTH_SOCK", notASocket)
+	cfg := Config{Key: filepath.Join(dir, "missing-key")}
+
+	_, _, err := requiredAuthMethods(cfg)
+	if err == nil || !strings.Contains(err.Error(), "connect ssh agent") {
+		t.Fatalf("requiredAuthMethods error = %v, want connect ssh agent", err)
+	}
+
+	stderr := captureStderr(t)
+	methods, closeAuth := optionalAuthMethods(cfg)
+	if closeAuth != nil {
+		closeAuth()
+	}
+	if len(methods) != 0 {
+		t.Errorf("optionalAuthMethods returned %d methods, want 0", len(methods))
+	}
+	if got := stderr(); !strings.Contains(got, "connect ssh agent") {
+		t.Errorf("stderr = %q, want it to mention connect ssh agent", got)
+	}
+}
+
+// setDialAgent installs a stub agent transport for the duration of the test
+// so the outcome does not depend on whether the host runs an SSH agent.
+func setDialAgent(t *testing.T, fn func(time.Duration) (net.Conn, error)) {
+	t.Helper()
+	saved := dialAgent
+	dialAgent = fn
+	t.Cleanup(func() { dialAgent = saved })
+}
+
+// disableAgent pins "no agent configured" for the duration of the test.
+// Clearing SSH_AUTH_SOCK alone is not enough: on Windows the agent
+// transport falls back to the OpenSSH named pipe, so a runner with
+// ssh-agent running would inject signers these tests do not expect.
+func disableAgent(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSH_AUTH_SOCK", "")
+	setDialAgent(t, func(time.Duration) (net.Conn, error) { return nil, nil })
+}
+
 // captureStderr redirects os.Stderr until the returned function reads back
 // everything written to it.
 func captureStderr(t *testing.T) func() string {
@@ -255,7 +325,15 @@ func captureStderr(t *testing.T) func() string {
 func startStallingAgent(t *testing.T) (string, func()) {
 	t.Helper()
 
-	socket := filepath.Join(t.TempDir(), "agent.sock")
+	// Not t.TempDir(): its directory name embeds the test name, and the
+	// resulting socket path can exceed the 108-byte sun_path limit that
+	// Windows AF_UNIX shares with POSIX.
+	dir, err := os.MkdirTemp("", "ag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "agent.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

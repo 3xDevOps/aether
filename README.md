@@ -8,6 +8,9 @@ aether link my-server
 aether run "fix the flaky auth test" --agent claude
 ```
 
+The install script covers Linux and macOS; Windows clients download the
+release binary ([install.md](docs/install.md#manual-install)).
+
 **Status:** pre-alpha, under active development.
 [10-minute quickstart →](docs/quickstart.md)
 
@@ -102,8 +105,12 @@ make test-integration # integration tests; needs real Docker and git
 make release          # cross-compile the full release matrix
 ```
 
-The server targets Linux (amd64/arm64). The CLI additionally builds for macOS
-and Windows clients. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
+The server targets Linux (amd64/arm64) and only Linux. The CLI is a supported
+client on Linux, macOS, and Windows (amd64/arm64 each), and CI builds, vets,
+and unit-tests the Windows client on a real Windows runner. Two commands are
+deliberately not part of the Windows client: `aether init`, which prepares a
+Linux server's data directory, and `aether update`, since Windows cannot
+replace a running executable. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 
 ## License
 
