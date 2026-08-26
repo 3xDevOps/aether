@@ -182,16 +182,15 @@ function SessionTree() {
 /**
  * Entry points for the admin and desktop surfaces. Every link is gated on
  * the capability that powers its view, so a gateway that cannot serve a
- * surface never shows the way in. Members is the exception that reads:
- * member.list is on the remote allowlist, the roster is worth seeing, and
- * the admin verbs inside it are gated one by one on role as well.
+ * surface never shows the way in; on the remote allowlist nothing here
+ * renders at all.
  */
 function NavSection() {
   const cap = useCapability()
   const navigate = useStore((s) => s.navigate)
   const route = useStore((s) => s.route)
   const links: { name: string; label: string; Icon: typeof Users }[] = []
-  if (cap.hasMethod('member.list'))
+  if (cap.hasMethod('member.approve'))
     links.push({ name: 'members', label: 'Members', Icon: Users })
   if (cap.hasMethod('workspace.add'))
     links.push({ name: 'workspaces', label: 'Workspaces', Icon: FolderGit2 })

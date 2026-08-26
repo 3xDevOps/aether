@@ -27,13 +27,6 @@ export const bob: Member = {
   role: 'collaborator',
 }
 
-export const vera: Member = {
-  id: 'mem_vera',
-  display_name: 'Vera',
-  color: '#f58231',
-  role: 'viewer',
-}
-
 export const session: Session = {
   id: 'ses_1',
   workspace_id: 'wsp_1',
@@ -217,7 +210,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     memberApprove: vi.fn(async () => bob),
     memberRemove: vi.fn(async () => ({})),
     memberColor: vi.fn(async () => alice),
-    memberRole: vi.fn(async () => bob),
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace]),
     sessionNew: vi.fn(async () => session),

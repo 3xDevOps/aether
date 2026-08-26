@@ -46,7 +46,6 @@ const (
 	MethodMemberInvite  = "member.invite"
 	MethodMemberRemove  = "member.remove"
 	MethodMemberColor   = "member.color"
-	MethodMemberRole    = "member.role"
 	MethodWorkspaceAdd  = "workspace.add"
 	MethodSessionNew    = "session.new"
 	MethodRunLaunch     = "run.launch"

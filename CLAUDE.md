@@ -23,7 +23,6 @@ The repository does not contain private planning, tracker, or deployment data.
 ```sh
 make fmt-check
 make vet
-make lint
 make test
 make public-audit
 ```

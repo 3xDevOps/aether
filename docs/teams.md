@@ -73,37 +73,15 @@ approve, pause), **kill** - plus session administration, bundled into roles:
 | collaborator (default) | everything | view, steer, kill | launch runs, create sessions, use templates |
 | admin | everything | everything | members, workspaces, budgets, templates, settings |
 
-The viewer row is a real choice, not a placeholder: `aether member role <id>
-viewer` assigns it. It is for the person who should watch the work and read the
-feed without being able to start, steer, or kill anything.
-
 **Everyone is a collaborator by default, on purpose.** Teammates can steer each
 other's agents with zero setup; every privileged act is attributed in the
 session timeline instead of being prevented.
 
-The bootstrap identity is the admin and everyone who joins afterwards is a
-collaborator, but an admin can change that:
-
-```sh
-aether member role 01m04mqes1z7wsdk4s90tx0pgg viewer
-```
-
-```
-set 01m04mqes1z7wsdk4s90tx0pgg dana to viewer
-```
-
-`member list`, `member approve`, `member color`, `member role` and `member
-remove` are the member surface. Two rules hold no matter what you type. **The
-last admin can neither be removed nor demoted** - `refusing to delete the last
-admin` and `refusing to demote the last admin` - because a server with no admin
-has no way back. **A role change lands on connections that are already open**,
-not at next login: the role is re-read from the store on every request, so a
-demotion takes effect mid-session and a live write attach closes the moment
-steer goes away.
-
-Setting someone to the role they already hold is a harmless no-op, and a
-pending member's role can be changed before they are approved - approval and
-role are separate questions.
+What v1 actually ships: the bootstrap identity is the admin, everyone who joins
+afterwards is a collaborator. There is no command to promote, demote, or assign
+the viewer role yet - `member list`, `member approve`, `member remove` and
+`member color` are the member surface. Removal refuses to delete the last
+admin.
 
 Admin-only commands answer with a clear error otherwise:
 
@@ -141,7 +119,7 @@ the artifact. Every other branch behaves like a normal git remote.
 | `aether attach <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer. |
 | `aether inject <run> "..."` | Push an instruction into a running agent. Renders as a banner in your member color. |
 | `aether pause` / `resume` / `kill <run>` | Suspend, thaw, terminate. Worktree and transcript survive a kill. |
-| `aether handoff <run> <member>` | Transfer ownership, notification routing, and cost attribution. Overnight relay work. Refused for a viewer or a pending member, since neither can own a run. |
+| `aether handoff <run> <member>` | Transfer ownership, notification routing, and cost attribution. Overnight relay work. |
 | `aether close <run> --outcome merged\|abandoned` | Clear a finished run off the attention board. |
 | `aether inbox` | The shared approval queue; any steer-holder can decide. |
 | `aether timeline` | The session's whole history; `--jsonl` exports it. |

@@ -6,15 +6,7 @@ Layers, per the design spec's testing strategy:
   (race detector on). Permission matrices, budget math, profile push
   rules, tailnet auth edge cases, scheduler transitions, and the
   dashboard gateway's own behaviours are proven there, once, and the E2E
-  suite does not restate them. Role changes belong to the same layer:
-  `internal/sshd/role_test.go` and `internal/sshd/permissions_test.go`
-  own promotion, demotion, the last-admin guard and what each role may
-  do, and the SPA's half of it (admin affordances gated on role, the
-  read-only roster) is in `web/src/routes/members/members.test.tsx`,
-  `web/src/components/shell/sidebar.test.tsx` and
-  `web/src/components/palette/palette.test.tsx`. The multi-member E2E row
-  below joins members and administers them; it does not re-prove the
-  matrix.
+  suite does not restate them.
 - **Integration/E2E tests** are behind the `integration` build tag and
   run with `make test-integration` (real Docker, real git). CI runs them
   on every PR in the `integration` job of `.github/workflows/ci.yml`;

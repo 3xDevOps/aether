@@ -3,7 +3,7 @@ import { CommandPalette } from '@/components/palette'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
-import { alice, bob, run, session, vera } from '@/test/fixtures'
+import { alice, run, session } from '@/test/fixtures'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -153,10 +153,9 @@ describe('command palette', () => {
     expect(useStore.getState().route).toEqual({ name: 'members', params: {} })
   })
 
-  it('keeps the roster reachable behind the remote allowlist', async () => {
-    // A remote gateway advertises its allowlist; the admin verbs are not on
-    // it, but member.list is, and the roster is worth reading, so the one
-    // Go-to entry that survives is Members.
+  it('hides the admin surfaces behind the remote allowlist', async () => {
+    // A remote gateway advertises its allowlist; member.approve and the
+    // other admin methods are not on it, so their verbs never render.
     useStore.setState({
       capabilities: {
         gateway: 'remote',
@@ -167,19 +166,19 @@ describe('command palette', () => {
     open()
 
     await screen.findByText('rewrite the checkout flow')
-    expect(screen.getByText('Members')).toBeDefined()
+    expect(screen.queryByText('Members')).toBeNull()
     expect(screen.queryByText('Workspaces')).toBeNull()
     expect(screen.queryByText('Onboarding')).toBeNull()
   })
 
   it('hides the admin surfaces on a legacy monitor without capabilities', async () => {
     // capabilities stays null (the beforeEach default): the endpoint 404ed,
-    // so only the pre-capabilities allowlist may render. member.list is on
-    // it; the methods behind the other entries would all answer 403.
+    // so only the pre-capabilities allowlist may render - the admin methods
+    // behind these entries would all answer 403.
     open()
 
     await screen.findByText('rewrite the checkout flow')
-    expect(screen.getByText('Members')).toBeDefined()
+    expect(screen.queryByText('Members')).toBeNull()
     expect(screen.queryByText('Workspaces')).toBeNull()
     expect(screen.queryByText('Templates')).toBeNull()
     expect(screen.queryByText('Agents')).toBeNull()
@@ -200,23 +199,6 @@ describe('command palette', () => {
     fireEvent.click(await screen.findByText('Pull branch'))
 
     await waitFor(() => expect(api.localPull).toHaveBeenCalledWith('run_1'))
-  })
-
-  it('offers handoff targets who can own a run, never a viewer', async () => {
-    // The run belongs to alice; bob may take it, vera may not, because the
-    // server refuses to hand a run to someone who cannot own one.
-    useStore.setState({
-      members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera },
-      route: { name: 'run', params: { runId: 'run_1' } },
-    })
-    open()
-
-    expect(await screen.findByText('Hand off to Bob')).toBeDefined()
-    expect(screen.queryByText('Hand off to Vera')).toBeNull()
-
-    fireEvent.click(screen.getByText('Hand off to Bob'))
-
-    await waitFor(() => expect(api.runHandoff).toHaveBeenCalledWith('run_1', bob.id))
   })
 
   it('offers relaunch only on a terminal run', async () => {

@@ -69,14 +69,3 @@ type MemberInviteResult struct {
 type MemberRemoveParams struct {
 	MemberID string `json:"member_id"`
 }
-
-// MemberRoleParams are the params of member.role (admin only).
-type MemberRoleParams struct {
-	MemberID string `json:"member_id"`
-	Role     string `json:"role"`
-}
-
-// MemberRoleResult is the result of member.role.
-type MemberRoleResult struct {
-	Member Member `json:"member"`
-}

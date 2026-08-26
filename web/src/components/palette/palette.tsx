@@ -167,15 +167,8 @@ export function PaletteBody({
                   Pull branch
                 </CommandItem>
               )}
-              {/* Viewers cannot own a run, so the server refuses a handoff
-                  to one; do not offer what will be refused. */}
               {Object.values(members)
-                .filter(
-                  (m) =>
-                    m.id !== focused.run.member_id &&
-                    !m.pending &&
-                    m.role !== 'viewer',
-                )
+                .filter((m) => m.id !== focused.run.member_id && !m.pending)
                 .map((m) => (
                   <CommandItem
                     key={m.id}
@@ -220,14 +213,14 @@ export function PaletteBody({
           </CommandItem>
         </CommandGroup>
 
-        {(cap.hasMethod('member.list') ||
+        {(cap.hasMethod('member.approve') ||
           cap.hasMethod('workspace.add') ||
           cap.hasMethod('template.save') ||
           cap.hasMethod('agent.list') ||
           cap.hasLocal('daemon.status') ||
           cap.hasLocal('link.status')) && (
           <CommandGroup heading="Go to">
-            {cap.hasMethod('member.list') && (
+            {cap.hasMethod('member.approve') && (
               <CommandItem onSelect={() => go('members')}>
                 <Users />
                 Members

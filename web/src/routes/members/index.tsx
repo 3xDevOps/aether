@@ -22,7 +22,7 @@ import { timeAgo } from '@/lib/format'
 import type { Member } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin } from '@/store/hooks'
+import { useCapability } from '@/store/hooks'
 import { onlineMembers } from '@/store/presence'
 
 // The attribution palette. These are colours, passed to member.color as
@@ -36,25 +36,14 @@ const presetColors = [
   '#4363d8',
 ]
 
-// The house field style, duplicated per file rather than shared; see the
-// admin dialogs for the other copies.
-const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
-
-const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
-
 export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   const members = useStore((s) => s.members)
   const setMembers = useStore((s) => s.setMembers)
   const presence = useStore((s) => s.presence)
   const self = useStore((s) => s.info?.member)
   const caps = useCapability()
-  const isAdmin = useIsAdmin()
   const [inviting, setInviting] = useState(false)
   const [removing, setRemoving] = useState<Member | null>(null)
-  // The role the caller picked for themselves, held until they confirm the
-  // self-lockout; null when no such change is pending.
-  const [demoting, setDemoting] = useState<Member['role'] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // The roster the store holds came from hydration; this view is the one
@@ -95,44 +84,19 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
     }
   }
 
-  const setRole = async (member: Member, role: Member['role']) => {
-    setError(null)
-    try {
-      await client.memberRole(member.id, role)
-      await refetch()
-      toast.success(`${member.display_name} is now ${role}`)
-    } catch (err) {
-      setError(message(err))
-    }
-  }
-
-  const changeRole = (member: Member, role: Member['role']) => {
-    // Losing your own admin role locks you out of this surface at once, so
-    // it is the one change worth confirming. Everything else, including the
-    // last-admin guard, is the server's refusal to make and ours to show.
-    if (member.id === self?.id && role !== 'admin') {
-      setDemoting(role)
-      return
-    }
-    void setRole(member, role)
-  }
-
   const online = new Set(onlineMembers(presence))
   const all = Object.values(members)
   const roster = all.filter((m) => !m.pending)
   const pending = all.filter((m) => m.pending)
 
-  const count = roster.length === 1 ? '1 member' : `${roster.length} members`
   return (
     <div className="flex h-full flex-col">
       <ViewHeader
         title="Members"
-        // A non-admin can read the roster but change nothing in it. Saying so
-        // once here beats leaving them to infer it from absent buttons.
-        subtitle={isAdmin ? count : `${count} - read only`}
+        subtitle={roster.length === 1 ? '1 member' : `${roster.length} members`}
       />
       <div className="flex-1 space-y-6 overflow-y-auto p-4">
-        {caps.hasMethod('member.invite') && isAdmin && (
+        {caps.hasMethod('member.invite') && (
           <div>
             <Button size="sm" onClick={() => setInviting(true)}>
               <UserPlus />
@@ -153,7 +117,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                   className="flex items-center gap-2 rounded-md border bg-card p-2 text-sm"
                 >
                   <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
-                  {caps.hasMethod('member.approve') && isAdmin && (
+                  {caps.hasMethod('member.approve') && (
                     <Button size="sm" onClick={() => void approve(member)}>
                       Approve
                     </Button>
@@ -190,44 +154,20 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                       )}
                     </span>
                   </td>
-                  <td className="py-1.5 pr-2 text-muted-foreground">
-                    {caps.hasMethod('member.role') && isAdmin ? (
-                      // No client-side prediction of who may be demoted: the
-                      // server refuses to demote the last admin and says so,
-                      // and that invariant is not recomputed here.
-                      <select
-                        className={field}
-                        aria-label={`Role for ${member.display_name}`}
-                        value={member.role}
-                        onChange={(e) =>
-                          changeRole(member, e.target.value as Member['role'])
-                        }
-                      >
-                        {roles.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      member.role
-                    )}
-                  </td>
+                  <td className="py-1.5 pr-2 text-muted-foreground">{member.role}</td>
                   <td className="py-1.5 pr-2 text-muted-foreground">
                     {online.has(member.id) ? 'online' : 'offline'}
                   </td>
                   <td className="py-1.5 text-right">
-                    {caps.hasMethod('member.remove') &&
-                      isAdmin &&
-                      member.id !== self?.id && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setRemoving(member)}
-                        >
-                          Remove
-                        </Button>
-                      )}
+                    {caps.hasMethod('member.remove') && member.id !== self?.id && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setRemoving(member)}
+                      >
+                        Remove
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -264,15 +204,6 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
           client={client}
           onClose={() => setRemoving(null)}
           onRemoved={() => void refetch()}
-        />
-      )}
-      {demoting && self && (
-        <DemoteSelfDialog
-          member={self}
-          role={demoting}
-          client={client}
-          onClose={() => setDemoting(null)}
-          onChanged={() => void refetch()}
         />
       )}
     </div>
@@ -408,65 +339,6 @@ function RemoveDialog({
           </Button>
           <Button variant="destructive" disabled={busy} onClick={() => void remove()}>
             Remove
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/**
- * Giving up your own admin role is the one member change worth confirming:
- * it takes effect at once and no other affordance here can undo it. Any
- * other refusal, the last-admin guard included, arrives from the server.
- */
-function DemoteSelfDialog({
-  member,
-  role,
-  client,
-  onClose,
-  onChanged,
-}: {
-  member: Member
-  role: Member['role']
-  client: Api
-  onClose: () => void
-  onChanged: () => void
-}) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const demote = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await client.memberRole(member.id, role)
-      onChanged()
-      onClose()
-      toast.success(`You are now ${role}`)
-    } catch (err) {
-      setBusy(false)
-      setError(message(err))
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Give up your admin role?</DialogTitle>
-          <DialogDescription>
-            You will become {role}. You will lose admin access immediately, and
-            another admin has to hand it back.
-          </DialogDescription>
-        </DialogHeader>
-        {error && <p className="text-xs text-state-failed">{error}</p>}
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="destructive" disabled={busy} onClick={() => void demote()}>
-            Become {role}
           </Button>
         </DialogFooter>
       </DialogContent>

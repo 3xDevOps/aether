@@ -36,7 +36,6 @@ Run the fast checks before opening a change:
 ```sh
 make fmt-check
 make vet
-make lint
 make test
 make public-audit
 ```

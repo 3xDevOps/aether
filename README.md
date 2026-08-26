@@ -56,9 +56,8 @@ HTTP port is exposed to your network at all.
 Inside: a sidebar of sessions and their runs, member-colored and groupable; a
 run board bucketed by what needs attention; a live terminal mirror of any run,
 read-only unless you hold the steer capability; a per-run diff timeline; the
-session event feed; the shared approval inbox; presence and watcher
-indicators; the member roster, read-only unless you are an admin; a disk gauge.
-Launch, inject, pause, kill, close, relaunch and handoff all call
+session event feed; the shared approval inbox; presence and watcher indicators;
+a disk gauge. Launch, inject, pause, kill, close, relaunch and handoff all call
 the same methods the CLI does, with the same permission checks and the same
 timeline attribution.
 

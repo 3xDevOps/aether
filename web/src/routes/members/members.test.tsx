@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { Member } from '@/lib/types'
 import { MembersRoute } from '@/routes/members'
 import { useStore, type RootState } from '@/store'
-import { alice, bob, fakeApi, serverInfo, session, vera } from '@/test/fixtures'
+import { alice, bob, fakeApi, serverInfo, session } from '@/test/fixtures'
 
 const pendingCara: Member = {
   id: 'mem_cara',
@@ -19,9 +19,8 @@ function seed(extra: Partial<RootState> = {}) {
     members: { [alice.id]: alice, [bob.id]: bob },
     presence: [],
     info: serverInfo,
-    // The admin verbs need both halves: a gateway advertising every method,
-    // and an admin caller. serverInfo.member is alice, who is an admin, so
-    // the default identity here sees them all.
+    // The admin verbs (approve/invite/remove) are capability-gated; an
+    // upgraded gateway advertising every method renders them all.
     capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
     hydrated: true,
     hydrationError: null,
@@ -113,99 +112,5 @@ describe('members view', () => {
     const code = await screen.findByLabelText<HTMLInputElement>('Invite code')
     expect(code.value).toBe('join-me-once')
     expect(client.memberInvite).toHaveBeenCalled()
-  })
-
-  it('lets an admin change another member role and refetches the roster', async () => {
-    const bobAdmin: Member = { ...bob, role: 'admin' }
-    const memberList = vi
-      .fn()
-      .mockResolvedValueOnce([alice, bob])
-      .mockResolvedValue([alice, bobAdmin])
-    const client = fakeApi({
-      memberList,
-      memberRole: vi.fn(async () => bobAdmin),
-    })
-    seed()
-    render(<MembersRoute params={{}} client={client} />)
-
-    const roster = within(await screen.findByRole('region', { name: 'Roster' }))
-    const select = await roster.findByRole<HTMLSelectElement>('combobox', {
-      name: 'Role for Bob',
-    })
-    expect(select.value).toBe('collaborator')
-
-    fireEvent.change(select, { target: { value: 'admin' } })
-
-    await waitFor(() =>
-      expect(client.memberRole).toHaveBeenCalledWith(bob.id, 'admin'),
-    )
-    await waitFor(() => expect(memberList.mock.calls.length).toBeGreaterThanOrEqual(2))
-  })
-
-  it('gives a non-admin the roster as text, with no admin verbs', async () => {
-    const client = fakeApi({
-      memberList: vi.fn(async () => [alice, bob, vera, pendingCara]),
-    })
-    // The local gateway forwards every method, so only the caller's role
-    // keeps the admin verbs off this view.
-    seed({ info: { ...serverInfo, member: bob } })
-    render(<MembersRoute params={{}} client={client} />)
-
-    const roster = within(await screen.findByRole('region', { name: 'Roster' }))
-    expect(await roster.findByText('Vera')).toBeDefined()
-    const veraRow = roster.getByText('Vera').closest('tr')!
-    expect(within(veraRow).getByText('viewer')).toBeDefined()
-    expect(roster.queryByRole('combobox')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Invite' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
-    // Colour is self-service, so it survives the role gate.
-    expect(screen.getByLabelText('Set color #e6194b')).toBeDefined()
-    // The header says why the view is inert, rather than leaving the
-    // absent buttons to imply it.
-    expect(screen.getByText('3 members - read only')).toBeDefined()
-  })
-
-  it('renders the server refusal verbatim when a role change is denied', async () => {
-    const client = fakeApi({
-      memberRole: vi.fn(async () => {
-        throw new ApiError(409, 'refusing to demote the last admin')
-      }),
-    })
-    seed()
-    render(<MembersRoute params={{}} client={client} />)
-
-    const roster = within(await screen.findByRole('region', { name: 'Roster' }))
-    fireEvent.change(
-      await roster.findByRole('combobox', { name: 'Role for Bob' }),
-      { target: { value: 'viewer' } },
-    )
-
-    expect(await screen.findByText('refusing to demote the last admin')).toBeDefined()
-  })
-
-  it('confirms before an admin gives up their own admin role', async () => {
-    const aliceDemoted: Member = { ...alice, role: 'collaborator' }
-    const client = fakeApi({
-      memberRole: vi.fn(async () => aliceDemoted),
-    })
-    seed()
-    render(<MembersRoute params={{}} client={client} />)
-
-    const roster = within(await screen.findByRole('region', { name: 'Roster' }))
-    fireEvent.change(
-      await roster.findByRole('combobox', { name: 'Role for Alice' }),
-      { target: { value: 'collaborator' } },
-    )
-
-    // Nothing happens until the self-lockout is confirmed.
-    expect(client.memberRole).not.toHaveBeenCalled()
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Become collaborator' }),
-    )
-
-    await waitFor(() =>
-      expect(client.memberRole).toHaveBeenCalledWith(alice.id, 'collaborator'),
-    )
   })
 })

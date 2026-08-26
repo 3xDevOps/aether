@@ -18,12 +18,10 @@ Type=simple
 # keep every workspace image on a root user, and give the user read access to
 # the tailscaled socket (tailscale set --operator=aether) if you want tailnet
 # identity auth.
-#
-# Options (listen address, dashboard port, data dir, tailnet policy) live in
-# the config file below, which is operator-owned and survives binary updates
-# and unit reinstalls. Set them with "aether-server config set <key> <value>"
-# or "aether-server setup" - do not edit this ExecStart.
-ExecStart=/usr/local/bin/aether-server serve --config /etc/aether/server.conf
+ExecStart=/usr/local/bin/aether-server serve \
+    --data-dir /var/lib/aether \
+    --addr :2222 \
+    --dashboard-port 8080
 
 # Optional: ANTHROPIC_API_KEY / OPENAI_API_KEY for API-key harnesses, passed
 # through into run containers. Subscription logins do not belong here - they

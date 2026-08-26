@@ -263,49 +263,6 @@ func TestHandoffOwnerOrAdminOnly(t *testing.T) {
 	}, nil), "viewer handoff")
 }
 
-// A run must land on someone who can act on it: handing one to a viewer
-// or to a member awaiting approval would orphan it, so both are refused
-// before ownership moves.
-func TestHandoffRecipientMustBeAbleToOwnRun(t *testing.T) {
-	e := newTestEnv(t, nil)
-	ctx := context.Background()
-	_, viewer := addMember(t, e, "Vera", domain.RoleViewer, false)
-	_, pending := addMember(t, e, "Pat", domain.RoleCollaborator, true)
-	admin := controlClient(t, e)
-
-	wantInvalid := func(err error, what string) {
-		t.Helper()
-		var pe *protocol.Error
-		if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
-			t.Fatalf("%s = %v, want CodeInvalidParams", what, err)
-		}
-	}
-	wantInvalid(admin.Call(protocol.MethodRunHandoff, protocol.RunHandoffParams{
-		RunID: string(e.run.ID), ToMemberID: string(viewer.ID),
-	}, nil), "handoff to viewer")
-	wantInvalid(admin.Call(protocol.MethodRunHandoff, protocol.RunHandoffParams{
-		RunID: string(e.run.ID), ToMemberID: string(pending.ID),
-	}, nil), "handoff to pending member")
-
-	// An unknown recipient is a not-found, not a silent transfer.
-	var pe *protocol.Error
-	err := admin.Call(protocol.MethodRunHandoff, protocol.RunHandoffParams{
-		RunID: string(e.run.ID), ToMemberID: "nobody",
-	}, nil)
-	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
-		t.Fatalf("handoff to unknown member = %v, want CodeNotFound", err)
-	}
-
-	// Nothing moved.
-	run, gerr := e.store.GetRun(ctx, e.run.ID)
-	if gerr != nil {
-		t.Fatalf("get run: %v", gerr)
-	}
-	if run.MemberID != e.member.ID {
-		t.Errorf("run owner = %q, want the original owner %q", run.MemberID, e.member.ID)
-	}
-}
-
 // The run.protect timeline note is attributed to the acting member.
 func TestRunProtectPublishesAttributedNote(t *testing.T) {
 	e := newTestEnv(t, nil)
