@@ -70,16 +70,16 @@ func TestIntegrationEndToEnd(t *testing.T) {
 		Color:       "#e6194b",
 		Role:        domain.RoleAdmin,
 	}
-	ws := &domain.Workspace{Name: "e2e", Environment: domain.WorkspaceEnvironment{CustomImage: image}}
+	ws := &domain.Workspace{
+		Name:        "e2e",
+		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
 	if err = srv.Store().CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
-	}
-	sess := &domain.Session{WorkspaceID: ws.ID, Name: "wave-1", BaseBranch: "main"}
-	if err = srv.Store().CreateSession(ctx, sess); err != nil {
-		t.Fatalf("seed session: %v", err)
 	}
 
 	sub, err := srv.Bus().Subscribe(ctx, events.SubscribeOptions{Buffer: 4096})
@@ -117,7 +117,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	ctrl := openControl(t, client)
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(sess.ID), Task: "integration e2e", Harness: "fake",
+		WorkspaceID: string(ws.ID), Task: "integration e2e", Harness: "fake",
 	}, &launched); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
@@ -264,7 +264,7 @@ func assertLifecycle(t *testing.T, seen []events.Event, run domain.RunID, actor 
 		t.Errorf("presence states = %v, want watching then online", presences)
 	}
 	if !steer {
-		t.Error("no session.timeline steer entry observed")
+		t.Error("no workspace.timeline steer entry observed")
 	}
 	if !banner {
 		t.Error("no git.branch event observed")

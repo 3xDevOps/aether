@@ -48,11 +48,11 @@ function describe(event: Event): string {
       return join([p.kind, p.tool, p.detail])
     case 'run.diff':
       return diffLine(p.files)
-    case 'session.timeline':
+    case 'workspace.timeline':
       return join([p.kind, p.message])
-    case 'session.approval':
+    case 'workspace.approval':
       return join([p.action, p.decision])
-    case 'session.presence':
+    case 'workspace.presence':
       return join([p.state])
     case 'run.cost':
       return `${p.input_tokens} in, ${p.output_tokens} out`

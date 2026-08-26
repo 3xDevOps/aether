@@ -5,9 +5,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/sshd"
 )
 
-// Cost attribution and session budgets (): a bus consumer that
+// Cost attribution and workspace budgets (): a bus consumer that
 // records what each run spent - or records that nobody measured it - and
-// gates new-run admission on the session's cap.
+// gates new-run admission on the workspace's cap.
 func init() {
 	registerService("cost", func(d Deps) (Service, error) {
 		svc, err := cost.New(cost.Config{Store: d.Store, Bus: d.Bus})

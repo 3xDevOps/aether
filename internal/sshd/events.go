@@ -49,7 +49,7 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch ssh
 	// ctx is canceled when the session channel closes (see handleSession),
 	// when the connection dies, and on server shutdown: that is what ends
 	// the subscription. A stdin half-close (EOF below) deliberately does
-	// not — per the contract only closing the channel unsubscribes, so
+	// not - per the contract only closing the channel unsubscribes, so
 	// piped clients (`echo ... | ssh -s aether-events`) keep streaming.
 	stop := context.AfterFunc(ctx, func() { _ = sub.Close() })
 	defer stop()
@@ -58,7 +58,7 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch ssh
 	}
 
 	// Drain (and discard) anything else the client writes; only a real
-	// read error — not EOF — tears the subscription down early.
+	// read error - not EOF - tears the subscription down early.
 	s.spawn(func() {
 		buf := make([]byte, 64)
 		for {

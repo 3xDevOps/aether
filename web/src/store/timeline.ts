@@ -3,14 +3,14 @@ import type { SliceCreator } from '@/store/slice'
 
 /** What the feed is narrowed to. Empty strings mean no filter. */
 export interface FeedFilters {
-  sessionID: string
+  workspaceID: string
   runID: string
   memberID: string
   type: string
 }
 
 export const emptyFilters: FeedFilters = {
-  sessionID: '',
+  workspaceID: '',
   runID: '',
   memberID: '',
   type: '',

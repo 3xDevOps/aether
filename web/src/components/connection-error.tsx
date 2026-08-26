@@ -42,7 +42,7 @@ function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
       description: (
         <>
           The dashboard token is no longer valid. Open a new link with{' '}
-          <Cmd>aether dash</Cmd> and try again.
+          <Cmd>aether gui</Cmd> and try again.
         </>
       ),
       action: null,

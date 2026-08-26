@@ -195,16 +195,12 @@ func TestTailnetSecondIdentityPendingThenApproved(t *testing.T) {
 	}
 	// Steering resolves the target run for the permission check, so give
 	// bob a real run to inject into.
-	ws := &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+	ws := &domain.Workspace{Name: "proj", BaseBranch: "main", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
 	if cerr := e.store.CreateWorkspace(context.Background(), ws); cerr != nil {
 		t.Fatalf("create workspace: %v", cerr)
 	}
-	sess := &domain.Session{WorkspaceID: ws.ID, Name: "effort", BaseBranch: "main"}
-	if cerr := e.store.CreateSession(context.Background(), sess); cerr != nil {
-		t.Fatalf("create session: %v", cerr)
-	}
 	run := &domain.Run{
-		SessionID: sess.ID, MemberID: domain.MemberID(bobInfo.ID), Task: "t",
+		WorkspaceID: ws.ID, MemberID: domain.MemberID(bobInfo.ID), Task: "t",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 	}
 	if cerr := e.store.CreateRun(context.Background(), run); cerr != nil {

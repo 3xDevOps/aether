@@ -69,7 +69,7 @@ func (s *stubWhoIs) WhoIs(context.Context, string) (sshd.WhoIsIdentity, error) {
 // tailnet identity, Bo joins pending and is approved, Cam joins with an
 // invite code and a key while WhoIs is down - which also proves the auth
 // fallback (key members connect, tailnet-only members are refused with the
-// banner). The session is administered over the control channel, then the
+// banner). The workspace is administered over the control channel, then the
 // members collaborate through the fake agent: Cam steers Bo's run, Bo
 // hands it off to Cam, the approval inbox round-trips a pause, the budget
 // cap refuses a launch until Ada overrides it, and a crashing agent lands
@@ -133,7 +133,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	}
 	var pe *protocol.Error
 	if err := boCtrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: "ses_nope", Task: "collab", Harness: "fake",
+		WorkspaceID: "ws_nope", Task: "collab", Harness: "fake",
 	}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("pending run.launch = %v, want CodeDenied", err)
 	}
@@ -180,19 +180,16 @@ func TestIntegrationMultiMember(t *testing.T) {
 		t.Fatalf("fallback banner = %q, want the whois-failure explanation", banner.String())
 	}
 
-	// The working session is administered remotely, over the control
-	// channel: Ada registers the workspace and opens the session.
+	// The working workspace is administered remotely, over the control
+	// channel: Ada registers it, base branch and all.
 	var addedWS protocol.WorkspaceAddResult
-	if err := adaCtrl.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "team", Environment: protocol.WorkspaceEnvironment{CustomImage: image}}, &addedWS); err != nil {
+	if err := adaCtrl.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{
+		Name:        "team",
+		Environment: protocol.WorkspaceEnvironment{CustomImage: image},
+	}, &addedWS); err != nil {
 		t.Fatalf("workspace.add: %v", err)
 	}
-	var newSess protocol.SessionNewResult
-	if err := adaCtrl.Call(protocol.MethodSessionNew, protocol.SessionNewParams{
-		WorkspaceID: addedWS.Workspace.ID, Name: "team effort",
-	}, &newSess); err != nil {
-		t.Fatalf("session.new: %v", err)
-	}
-	sessID := newSess.Session.ID
+	wsID := addedWS.Workspace.ID
 
 	// Cam seeds the base branch over the SSH git transport with their key.
 	seedDir := t.TempDir()
@@ -213,13 +210,13 @@ func TestIntegrationMultiMember(t *testing.T) {
 	// and steers Bo's run - collaborators steer each other by default.
 	var launched protocol.RunResult
 	if err := boCtrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: sessID, Task: "collab", Harness: "fake",
+		WorkspaceID: wsID, Task: "collab", Harness: "fake",
 	}, &launched); err != nil {
 		t.Fatalf("bo run.launch: %v", err)
 	}
 	collab := launched.Run
 	var board protocol.RunListResult
-	if err := camCtrl.Call(protocol.MethodRunList, protocol.RunListParams{SessionID: sessID}, &board); err != nil {
+	if err := camCtrl.Call(protocol.MethodRunList, protocol.RunListParams{WorkspaceID: wsID}, &board); err != nil {
 		t.Fatalf("cam run.list: %v", err)
 	}
 	if len(board.Runs) != 1 || board.Runs[0].ID != collab.ID {
@@ -244,10 +241,10 @@ func TestIntegrationMultiMember(t *testing.T) {
 
 	// Presence: Bo heartbeats, Cam holds the attach; the roster reports
 	// Bo online and Cam watching the run.
-	if err := boCtrl.Call(protocol.MethodPresenceHeartbeat, protocol.PresenceHeartbeatParams{SessionID: sessID}, nil); err != nil {
+	if err := boCtrl.Call(protocol.MethodPresenceHeartbeat, protocol.PresenceHeartbeatParams{WorkspaceID: wsID}, nil); err != nil {
 		t.Fatalf("presence.heartbeat: %v", err)
 	}
-	waitRoster(t, adaCtrl, sessID, func(entries []protocol.PresenceEntry) bool {
+	waitRoster(t, adaCtrl, wsID, func(entries []protocol.PresenceEntry) bool {
 		var boOnline, camWatching bool
 		for _, e := range entries {
 			boOnline = boOnline || e.MemberID == bo.ID
@@ -280,15 +277,15 @@ func TestIntegrationMultiMember(t *testing.T) {
 	// published on the same bus seam adapters use) reaches every client's
 	// inbox, and a steer-holder's decision is attributed.
 	if _, err := srv.Bus().Publish(ctx, events.Event{
-		SessionID: domain.SessionID(sessID),
-		RunID:     domain.RunID(collab.ID),
+		WorkspaceID: domain.WorkspaceID(wsID),
+		RunID:       domain.RunID(collab.ID),
 		Payload: events.AgentEventPayload{
 			Kind: events.AgentPause, Tool: "Bash", ToolUseID: "tu-e2e-1", Detail: "rm -rf build/",
 		},
 	}); err != nil {
 		t.Fatalf("publish agent pause: %v", err)
 	}
-	requestID := waitApproval(t, boCtrl, sessID)
+	requestID := waitApproval(t, boCtrl, wsID)
 	var decided protocol.ApprovalDecideResult
 	if err := boCtrl.Call(protocol.MethodApprovalDecide, protocol.ApprovalDecideParams{
 		RunID: collab.ID, RequestID: requestID, Approve: true,
@@ -299,31 +296,31 @@ func TestIntegrationMultiMember(t *testing.T) {
 		t.Fatalf("decision = %+v, want approved by Bo", decided.Approval)
 	}
 
-	// Budget cap: Ada caps the session, the adapter meters the running run
+	// Budget cap: Ada caps the workspace, the adapter meters the running run
 	// past it, and the next launch is refused before the scheduler is
 	// asked - while the running run is untouched. Ada's override admits
 	// the next launch.
 	if err := adaCtrl.Call(protocol.MethodBudgetSet, protocol.BudgetSetParams{
-		SessionID: sessID, LimitUSD: 1,
+		WorkspaceID: wsID, LimitUSD: 1,
 	}, nil); err != nil {
 		t.Fatalf("budget.set: %v", err)
 	}
 	if _, err := srv.Bus().Publish(ctx, events.Event{
-		SessionID: domain.SessionID(sessID),
-		RunID:     domain.RunID(collab.ID),
-		Payload:   events.RunCostPayload{InputTokens: 40000, OutputTokens: 2000, CostUSD: 1.25, Metered: true},
+		WorkspaceID: domain.WorkspaceID(wsID),
+		RunID:       domain.RunID(collab.ID),
+		Payload:     events.RunCostPayload{InputTokens: 40000, OutputTokens: 2000, CostUSD: 1.25, Metered: true},
 	}); err != nil {
 		t.Fatalf("publish run cost: %v", err)
 	}
-	waitBudgetState(t, adaCtrl, sessID, string(events.BudgetExceeded))
+	waitBudgetState(t, adaCtrl, wsID, string(events.BudgetExceeded))
 	launchErr := boCtrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: sessID, Task: "blocked", Harness: "fake",
+		WorkspaceID: wsID, Task: "blocked", Harness: "fake",
 	}, nil)
-	if launchErr == nil || !strings.Contains(launchErr.Error(), "session budget exceeded") {
+	if launchErr == nil || !strings.Contains(launchErr.Error(), "workspace budget exceeded") {
 		t.Fatalf("launch past the cap = %v, want the budget refusal", launchErr)
 	}
 	if err := adaCtrl.Call(protocol.MethodBudgetSet, protocol.BudgetSetParams{
-		SessionID: sessID, LimitUSD: 1, Override: true,
+		WorkspaceID: wsID, LimitUSD: 1, Override: true,
 	}, nil); err != nil {
 		t.Fatalf("budget.set override: %v", err)
 	}
@@ -333,7 +330,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	// table's agent-crash row).
 	var crashed protocol.RunResult
 	if err := boCtrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: sessID, Task: "crash", Harness: "fake",
+		WorkspaceID: wsID, Task: "crash", Harness: "fake",
 	}, &crashed); err != nil {
 		t.Fatalf("run.launch under override: %v", err)
 	}
@@ -429,13 +426,13 @@ func memberInfo(t *testing.T, ctrl *protocol.Client) protocol.Member {
 
 // waitRoster polls presence.roster until ok accepts the entries; the
 // roster is fed asynchronously from the bus.
-func waitRoster(t *testing.T, ctrl *protocol.Client, session string, ok func([]protocol.PresenceEntry) bool) {
+func waitRoster(t *testing.T, ctrl *protocol.Client, workspace string, ok func([]protocol.PresenceEntry) bool) {
 	t.Helper()
 	deadline := time.Now().Add(time.Minute)
 	var last protocol.PresenceRosterResult
 	for time.Now().Before(deadline) {
 		last = protocol.PresenceRosterResult{}
-		if err := ctrl.Call(protocol.MethodPresenceRoster, protocol.PresenceRosterParams{SessionID: session}, &last); err != nil {
+		if err := ctrl.Call(protocol.MethodPresenceRoster, protocol.PresenceRosterParams{WorkspaceID: workspace}, &last); err != nil {
 			t.Fatalf("presence.roster: %v", err)
 		}
 		if ok(last.Members) {
@@ -448,12 +445,12 @@ func waitRoster(t *testing.T, ctrl *protocol.Client, session string, ok func([]p
 
 // waitApproval polls the approval inbox until the raised request appears,
 // returning its ID.
-func waitApproval(t *testing.T, ctrl *protocol.Client, session string) string {
+func waitApproval(t *testing.T, ctrl *protocol.Client, workspace string) string {
 	t.Helper()
 	deadline := time.Now().Add(time.Minute)
 	for time.Now().Before(deadline) {
 		var inbox protocol.ApprovalListResult
-		if err := ctrl.Call(protocol.MethodApprovalList, protocol.ApprovalListParams{SessionID: session}, &inbox); err != nil {
+		if err := ctrl.Call(protocol.MethodApprovalList, protocol.ApprovalListParams{WorkspaceID: workspace}, &inbox); err != nil {
 			t.Fatalf("approval.list: %v", err)
 		}
 		if len(inbox.Approvals) == 1 && inbox.Approvals[0].Decision == "requested" {
@@ -465,15 +462,15 @@ func waitApproval(t *testing.T, ctrl *protocol.Client, session string) string {
 	return ""
 }
 
-// waitBudgetState polls budget.get until the session reaches state; spend
-// is folded in asynchronously from the bus.
-func waitBudgetState(t *testing.T, ctrl *protocol.Client, session, state string) {
+// waitBudgetState polls budget.get until the workspace reaches state;
+// spend is folded in asynchronously from the bus.
+func waitBudgetState(t *testing.T, ctrl *protocol.Client, workspace, state string) {
 	t.Helper()
 	deadline := time.Now().Add(time.Minute)
 	var last protocol.BudgetResult
 	for time.Now().Before(deadline) {
 		last = protocol.BudgetResult{}
-		if err := ctrl.Call(protocol.MethodBudgetGet, protocol.BudgetGetParams{SessionID: session}, &last); err != nil {
+		if err := ctrl.Call(protocol.MethodBudgetGet, protocol.BudgetGetParams{WorkspaceID: workspace}, &last); err != nil {
 			t.Fatalf("budget.get: %v", err)
 		}
 		if last.State == state {

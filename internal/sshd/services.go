@@ -10,14 +10,12 @@ type Services struct {
 	Approvals ApprovalService
 	// Overlaps is the cross-run file overlap index ().
 	Overlaps OverlapIndex
-	// Timeline reads persisted session history ().
+	// Timeline reads persisted workspace history ().
 	Timeline TimelineReader
-	// Costs is token metering, rollups, and session budgets ().
+	// Costs is token metering, rollups, and workspace budgets ().
 	Costs CostService
 	// Templates is task templates and their cron schedules ().
 	Templates TemplateService
-	// Dashboard mints the web gateway's bearer tokens ().
-	Dashboard DashboardTokens
 	// Patch renders a run checkout's diff against its fork point ().
 	Patch RunPatcher
 	// Disk reads the data directory's disk usage ().

@@ -29,7 +29,7 @@ const connectionDot: Record<ConnectionState, string> = {
 // while the gateway keeps retrying on its own.
 const unreachableLabel: Record<UnreachableKind, string> = {
   network: 'this computer is offline - reconnect to wifi or your VPN',
-  gateway: 'dashboard gateway is gone - restart aether gui (or aether dash)',
+  gateway: 'dashboard gateway is gone - restart aether gui',
   server: 'server unreachable over SSH - check the server and network; retrying',
 }
 

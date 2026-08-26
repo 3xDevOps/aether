@@ -10,8 +10,8 @@ import (
 
 // Push uploads discovered files via profile.push using a content-addressed
 // delta against the server's current head. The client never calls PinRun.
-func Push(c *protocol.Client, harness string, files []LocalFile, allowSecret []string, sessionID string) (protocol.ProfileSnapshot, error) {
-	params, err := BuildPushParams(c, harness, files, allowSecret, sessionID)
+func Push(c *protocol.Client, harness string, files []LocalFile, allowSecret []string, workspaceID string) (protocol.ProfileSnapshot, error) {
+	params, err := BuildPushParams(c, harness, files, allowSecret, workspaceID)
 	if err != nil {
 		return protocol.ProfileSnapshot{}, err
 	}
@@ -24,7 +24,7 @@ func Push(c *protocol.Client, harness string, files []LocalFile, allowSecret []s
 
 // BuildPushParams constructs a content-addressed delta push. Status is
 // consulted so only blobs the server does not already have are sent.
-func BuildPushParams(c *protocol.Client, harness string, files []LocalFile, allowSecret []string, sessionID string) (protocol.ProfilePushParams, error) {
+func BuildPushParams(c *protocol.Client, harness string, files []LocalFile, allowSecret []string, workspaceID string) (protocol.ProfilePushParams, error) {
 	known := map[string]struct{}{}
 	if c != nil {
 		var st protocol.ProfileStatusResult
@@ -38,7 +38,7 @@ func BuildPushParams(c *protocol.Client, harness string, files []LocalFile, allo
 	}
 	params := protocol.ProfilePushParams{
 		Harness:     harness,
-		SessionID:   sessionID,
+		WorkspaceID: workspaceID,
 		AllowSecret: allowSecret,
 		Paths:       make([]protocol.ProfileFile, 0, len(files)),
 	}

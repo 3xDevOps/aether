@@ -15,16 +15,16 @@ import (
 
 const eventsSchema = `
 CREATE TABLE IF NOT EXISTS events (
-	seq        INTEGER PRIMARY KEY,
-	id         TEXT NOT NULL,
-	ts         INTEGER NOT NULL,
-	session_id TEXT NOT NULL,
-	run_id     TEXT NOT NULL DEFAULT '',
-	actor_id   TEXT NOT NULL DEFAULT '',
-	type       TEXT NOT NULL,
-	payload    TEXT NOT NULL
+	seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+	id           TEXT NOT NULL UNIQUE,
+	ts           INTEGER NOT NULL,
+	workspace_id TEXT NOT NULL,
+	run_id       TEXT NOT NULL,
+	actor_id     TEXT NOT NULL,
+	type         TEXT NOT NULL,
+	payload      TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events (session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_events_workspace_seq ON events (workspace_id, seq);
 `
 
 // SQLiteLog is the EventLog backed by a SQLite events table
@@ -35,7 +35,7 @@ type SQLiteLog struct {
 }
 
 // sqliteURIPath percent-encodes the characters that would otherwise be
-// misparsed in the path component of a SQLite file: URI — '?' starts the
+// misparsed in the path component of a SQLite file: URI - '?' starts the
 // query string (silently truncating the path), '#' the fragment, and '%'
 // an escape sequence. SQLite percent-decodes the path when opening.
 var sqliteURIPath = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
@@ -68,9 +68,9 @@ func (l *SQLiteLog) Append(ctx context.Context, e Event) error {
 		return fmt.Errorf("events: encode payload: %w", err)
 	}
 	_, err = l.db.ExecContext(ctx,
-		`INSERT INTO events (seq, id, ts, session_id, run_id, actor_id, type, payload)
+		`INSERT INTO events (seq, id, ts, workspace_id, run_id, actor_id, type, payload)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.Seq, e.ID, e.Time.UnixNano(), string(e.SessionID), string(e.RunID),
+		e.Seq, e.ID, e.Time.UnixNano(), string(e.WorkspaceID), string(e.RunID),
 		string(e.ActorID), string(e.Type), string(body))
 	if err != nil {
 		return fmt.Errorf("events: append event %d: %w", e.Seq, err)
@@ -81,16 +81,16 @@ func (l *SQLiteLog) Append(ctx context.Context, e Event) error {
 // Read implements EventLog.
 func (l *SQLiteLog) Read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64, limit int) ([]Event, error) {
 	var sb strings.Builder
-	sb.WriteString(`SELECT seq, id, ts, session_id, run_id, actor_id, type, payload
+	sb.WriteString(`SELECT seq, id, ts, workspace_id, run_id, actor_id, type, payload
 		FROM events WHERE seq > ?`)
 	args := []any{afterSeq}
 	if uptoSeq > 0 {
 		sb.WriteString(" AND seq <= ?")
 		args = append(args, uptoSeq)
 	}
-	if f.Session != "" {
-		sb.WriteString(" AND session_id = ?")
-		args = append(args, string(f.Session))
+	if f.Workspace != "" {
+		sb.WriteString(" AND workspace_id = ?")
+		args = append(args, string(f.Workspace))
 	}
 	if f.Run != "" {
 		sb.WriteString(" AND run_id = ?")
@@ -116,17 +116,17 @@ func (l *SQLiteLog) Read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 		var (
 			e       Event
 			ts      int64
-			sess    string
+			ws      string
 			run     string
 			actor   string
 			typ     string
 			payload []byte
 		)
-		if err := rows.Scan(&e.Seq, &e.ID, &ts, &sess, &run, &actor, &typ, &payload); err != nil {
+		if err := rows.Scan(&e.Seq, &e.ID, &ts, &ws, &run, &actor, &typ, &payload); err != nil {
 			return nil, fmt.Errorf("events: scan log row: %w", err)
 		}
 		e.Time = time.Unix(0, ts).UTC()
-		e.SessionID = domain.SessionID(sess)
+		e.WorkspaceID = domain.WorkspaceID(ws)
 		e.RunID = domain.RunID(run)
 		e.ActorID = domain.MemberID(actor)
 		e.Type = Type(typ)

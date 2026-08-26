@@ -10,7 +10,7 @@ import (
 func init() {
 	register(command{
 		name:  "budget",
-		short: "show or set a session's spend cap",
+		short: "show or set a workspace's spend cap",
 		run:   runBudget,
 	})
 }
@@ -20,17 +20,17 @@ func runBudget(args []string) error {
 		return budgetSet(args[1:])
 	}
 	fs := flag.NewFlagSet("budget", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		var res protocol.BudgetResult
-		if err := c.Call(protocol.MethodBudgetGet, protocol.BudgetGetParams{SessionID: sessID}, &res); err != nil {
+		if err := c.Call(protocol.MethodBudgetGet, protocol.BudgetGetParams{WorkspaceID: wsID}, &res); err != nil {
 			return err
 		}
 		printBudget(res)
@@ -40,7 +40,7 @@ func runBudget(args []string) error {
 
 func budgetSet(args []string) error {
 	fs := flag.NewFlagSet("budget set", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	limit := fs.Float64("limit", 0, "hard cap in USD; new runs are refused at it (0 clears the budget, omitted keeps the current cap)")
 	warn := fs.Float64("warn", 0, "soft warning threshold in USD (0 for none, omitted keeps the current one)")
 	override := fs.Bool("override", false, "admit new runs past the cap until this is turned off again with -override=false")
@@ -50,15 +50,15 @@ func budgetSet(args []string) error {
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		change := protocol.BudgetSetParams{
-			SessionID: sessID,
-			LimitUSD:  *limit,
-			WarnUSD:   *warn,
-			Override:  *override,
+			WorkspaceID: wsID,
+			LimitUSD:    *limit,
+			WarnUSD:     *warn,
+			Override:    *override,
 		}
 		if err := carryBudget(c, &change, given); err != nil {
 			return err
@@ -81,12 +81,12 @@ func carryBudget(c *protocol.Client, change *protocol.BudgetSetParams, given map
 		return nil
 	}
 	var cur protocol.BudgetResult
-	if err := c.Call(protocol.MethodBudgetGet, protocol.BudgetGetParams{SessionID: change.SessionID}, &cur); err != nil {
+	if err := c.Call(protocol.MethodBudgetGet, protocol.BudgetGetParams{WorkspaceID: change.WorkspaceID}, &cur); err != nil {
 		return err
 	}
 	if cur.Budget == nil {
 		if !given["limit"] {
-			return fmt.Errorf("this session has no budget to edit: pass -limit to set one")
+			return fmt.Errorf("this workspace has no budget to edit: pass -limit to set one")
 		}
 		return nil
 	}

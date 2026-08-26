@@ -2,7 +2,7 @@ package server
 
 import "github.com/3xDevOps/Aether/internal/timeline"
 
-// Session history () is a pure reader over the persisted event log:
+// Workspace history () is a pure reader over the persisted event log:
 // there is no background loop to run, so the builder only attaches the
 // handler seam.
 func init() {

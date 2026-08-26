@@ -1,4 +1,4 @@
-// Package cost is token metering, cost rollups, and session budgets.
+// Package cost is token metering, cost rollups, and workspace budgets.
 //
 // Metering is honest before it is complete. A run whose harness has an
 // adapter reports real token counts once, at the adapter's final result
@@ -9,7 +9,7 @@
 // total over any unmetered run is a floor and every surface that shows it
 // must say so.
 //
-// Budgets follow from the same honesty. A session's cap is checked
+// Budgets follow from the same honesty. A workspace's cap is checked
 // against metered spend only, it refuses new runs and never stops a
 // running one, and an admin can override it.
 package cost
@@ -52,26 +52,26 @@ func (r *Rollup) Add(c *store.RunCost) {
 // measurement.
 func (r Rollup) Advisory() bool { return r.Unmetered > 0 }
 
-// MemberRollup is one member's share of a session's usage.
+// MemberRollup is one member's share of a workspace's usage.
 type MemberRollup struct {
 	Member domain.MemberID `json:"member"`
 	Rollup Rollup          `json:"rollup"`
 }
 
-// Report is a session's cost attribution: the session total, the
+// Report is a workspace's cost attribution: the workspace total, the
 // per-member split, and the per-run records behind both.
 type Report struct {
-	Session domain.SessionID
-	Total   Rollup
-	Members []MemberRollup
-	Runs    []*store.RunCost
+	Workspace domain.WorkspaceID
+	Total     Rollup
+	Members   []MemberRollup
+	Runs      []*store.RunCost
 }
 
-// Roll aggregates a session's run records into a report. Members are
+// Roll aggregates a workspace's run records into a report. Members are
 // ordered by ID so the output is stable; records are returned in the
 // order given (the store lists them oldest first).
-func Roll(session domain.SessionID, records []*store.RunCost) Report {
-	rep := Report{Session: session, Runs: records}
+func Roll(workspace domain.WorkspaceID, records []*store.RunCost) Report {
+	rep := Report{Workspace: workspace, Runs: records}
 	byMember := map[domain.MemberID]*Rollup{}
 	for _, c := range records {
 		rep.Total.Add(c)

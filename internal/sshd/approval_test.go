@@ -61,8 +61,8 @@ func TestApprovalInboxAndWatcherIndicatorAcrossClients(t *testing.T) {
 	// Ada's run pauses for a plan review: the adapter publishes the pause,
 	// the inbox turns it into a request.
 	if _, err := e.bus.Publish(ctx, events.Event{
-		SessionID: e.sess.ID,
-		RunID:     e.run.ID,
+		WorkspaceID: e.ws.ID,
+		RunID:       e.run.ID,
 		Payload: events.AgentEventPayload{
 			Kind: events.AgentPause, Tool: "ExitPlanMode",
 			Detail: "1. fix the backoff\n2. run the tests",
@@ -76,7 +76,7 @@ func TestApprovalInboxAndWatcherIndicatorAcrossClients(t *testing.T) {
 	eventually(t, "the pause to reach Bob's inbox", func() bool {
 		inbox = protocol.ApprovalListResult{}
 		if err := bobControl.Call(protocol.MethodApprovalList, protocol.ApprovalListParams{
-			SessionID: string(e.sess.ID),
+			WorkspaceID: string(e.ws.ID),
 		}, &inbox); err != nil {
 			t.Fatalf("approval.list: %v", err)
 		}
@@ -96,7 +96,7 @@ func TestApprovalInboxAndWatcherIndicatorAcrossClients(t *testing.T) {
 
 	// Naming another run must not launder the capability check.
 	other := &domain.Run{
-		SessionID: e.sess.ID, MemberID: bob.ID, Task: "other",
+		WorkspaceID: e.ws.ID, MemberID: bob.ID, Task: "other",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 	}
 	if err := e.store.CreateRun(ctx, other); err != nil {
@@ -146,10 +146,10 @@ func TestApprovalInboxAndWatcherIndicatorAcrossClients(t *testing.T) {
 		}
 	}
 
-	// Ada sees the decided request in the session's history.
+	// Ada sees the decided request in the workspace's history.
 	var history protocol.ApprovalListResult
 	if err := controlClient(t, e).Call(protocol.MethodApprovalList, protocol.ApprovalListParams{
-		SessionID: string(e.sess.ID), All: true,
+		WorkspaceID: string(e.ws.ID), All: true,
 	}, &history); err != nil {
 		t.Fatalf("approval.list --all: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestApprovalInboxAndWatcherIndicatorAcrossClients(t *testing.T) {
 	}
 	var ttl protocol.PresenceHeartbeatResult
 	if err := bobControl.Call(protocol.MethodPresenceHeartbeat, protocol.PresenceHeartbeatParams{
-		SessionID: string(e.sess.ID),
+		WorkspaceID: string(e.ws.ID),
 	}, &ttl); err != nil {
 		t.Fatalf("presence.heartbeat: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestApprovalInboxAndWatcherIndicatorAcrossClients(t *testing.T) {
 	eventually(t, "Bob's watcher indicator on Ada's run", func() bool {
 		watchers = protocol.PresenceRosterResult{}
 		if err := ada.Call(protocol.MethodPresenceRoster, protocol.PresenceRosterParams{
-			SessionID: string(e.sess.ID), RunID: string(e.run.ID),
+			WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID),
 		}, &watchers); err != nil {
 			t.Fatalf("presence.roster: %v", err)
 		}
@@ -199,8 +199,8 @@ func TestApprovalMethodsUnavailableWithoutService(t *testing.T) {
 		method string
 		params any
 	}{
-		{protocol.MethodApprovalList, protocol.ApprovalListParams{SessionID: string(e.sess.ID)}},
-		{protocol.MethodPresenceHeartbeat, protocol.PresenceHeartbeatParams{SessionID: string(e.sess.ID)}},
+		{protocol.MethodApprovalList, protocol.ApprovalListParams{WorkspaceID: string(e.ws.ID)}},
+		{protocol.MethodPresenceHeartbeat, protocol.PresenceHeartbeatParams{WorkspaceID: string(e.ws.ID)}},
 		{protocol.MethodPresenceRoster, protocol.PresenceRosterParams{}},
 	} {
 		err := c.Call(call.method, call.params, nil)

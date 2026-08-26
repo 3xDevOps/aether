@@ -3,7 +3,7 @@ import { CommandPalette } from '@/components/palette'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
-import { alice, bob, run, session, vera } from '@/test/fixtures'
+import { alice, bob, otherWorkspace, run, vera, workspace } from '@/test/fixtures'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -25,7 +25,8 @@ const active = run({ id: 'run_1', task: 'rewrite the checkout flow' })
 
 beforeEach(() => {
   useStore.setState({
-    sessions: { [session.id]: session },
+    workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
+    activeWorkspace: workspace.id,
     members: { [alice.id]: alice },
     runs: { [active.id]: toRecord(active) },
     acked: {},
@@ -66,6 +67,20 @@ describe('command palette', () => {
     })
   })
 
+  it('switches the active workspace and opens it', async () => {
+    open()
+
+    fireEvent.click(await screen.findByText(otherWorkspace.name))
+
+    // Scope and view move together: everything else in the app follows the
+    // active id, not the route.
+    expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
+    expect(useStore.getState().route).toEqual({
+      name: 'workspace',
+      params: { workspaceId: otherWorkspace.id },
+    })
+  })
+
   it('steers the run the centre view is showing, on any of its tabs', async () => {
     // The terminal tab is a route of its own; it carries the same runId.
     useStore.setState({
@@ -96,38 +111,43 @@ describe('command palette', () => {
     expect(screen.queryByText('Pause run')).toBeNull()
   })
 
-  it('launches a run from the dialog', async () => {
+  it('launches a run into the active workspace', async () => {
     open()
 
     fireEvent.click(await screen.findByText('Launch a run...'))
-    const task = await screen.findByPlaceholderText('What should the agent do?')
+    // Where it lands is stated, not asked: there is no workspace picker.
+    const target = await screen.findByLabelText('Target workspace')
+    expect(target.textContent).toContain(workspace.name)
+    expect(target.textContent).toContain(workspace.base_branch)
+
+    const task = screen.getByPlaceholderText('What should the agent do?')
     fireEvent.change(task, { target: { value: 'fix the flaky test' } })
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
       expect(api.runLaunch).toHaveBeenCalledWith({
-        session_id: session.id,
+        workspace_id: workspace.id,
         task: 'fix the flaky test',
         harness: 'claude',
         mode: 'tui',
       }),
     )
     // A launch reveals what it launched.
-    await waitFor(() =>
-      expect(useStore.getState().route.name).toBe('run'),
-    )
+    await waitFor(() => expect(useStore.getState().route.name).toBe('run'))
   })
 
-  it('launches a templated run from the dialog', async () => {
+  it('launches a templated run into the active workspace', async () => {
     open()
 
     fireEvent.click(await screen.findByText('Launch from a template...'))
-    // The session's templates arrive from template.list.
+    // The workspace's templates arrive from template.list.
     await screen.findByRole('option', { name: 'nightly triage' })
+    expect(api.templateList).toHaveBeenCalledWith(workspace.id)
+
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
-      expect(api.templateLaunch).toHaveBeenCalledWith(session.id, 'nightly triage'),
+      expect(api.templateLaunch).toHaveBeenCalledWith(workspace.id, 'nightly triage'),
     )
     await waitFor(() =>
       expect(useStore.getState().route).toEqual({
@@ -168,7 +188,7 @@ describe('command palette', () => {
 
     await screen.findByText('rewrite the checkout flow')
     expect(screen.getByText('Members')).toBeDefined()
-    expect(screen.queryByText('Workspaces')).toBeNull()
+    expect(screen.queryByText('Manage workspaces')).toBeNull()
     expect(screen.queryByText('Onboarding')).toBeNull()
   })
 
@@ -180,7 +200,7 @@ describe('command palette', () => {
 
     await screen.findByText('rewrite the checkout flow')
     expect(screen.getByText('Members')).toBeDefined()
-    expect(screen.queryByText('Workspaces')).toBeNull()
+    expect(screen.queryByText('Manage workspaces')).toBeNull()
     expect(screen.queryByText('Templates')).toBeNull()
     expect(screen.queryByText('Agents')).toBeNull()
   })

@@ -5,7 +5,7 @@ import { LandControls } from '@/routes/diff/land'
 import { useStore } from '@/store'
 import { initialDiff } from '@/store/diff'
 import { toRecord, type RunRecord } from '@/store/runs'
-import { alice, run, session } from '@/test/fixtures'
+import { alice, run, workspace } from '@/test/fixtures'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -21,7 +21,8 @@ const active = run({ id: 'run_1' })
 function seed(over: { local?: string[]; status?: 'running' | 'needs-attention' } = {}) {
   const record = toRecord(run({ id: active.id, status: over.status ?? 'running' }))
   useStore.setState({
-    sessions: { [session.id]: session },
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
     members: { [alice.id]: alice },
     runs: { [active.id]: record },
     diffs: { [active.id]: { ...initialDiff, base: 'abcdef1234567890' } },

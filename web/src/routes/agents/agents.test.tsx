@@ -4,6 +4,7 @@ import { lookupRoute } from '@/routes/registry'
 import '@/routes/agents'
 import { splitArgv } from '@/routes/agents/wizard'
 import { useStore } from '@/store'
+import { workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
 // vi.mock factories are hoisted above static imports, so the fixture module
@@ -35,6 +36,10 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', NoResizeObserver)
   useStore.setState({
     shellRequest: null,
+    // The wizard reads the workspace set from the store, so the scope is
+    // whatever the shell already hydrated.
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
     capabilities: { gateway: 'local', methods: ['*'], ws: ['events', 'attach', 'shell'] },
   })
 })
@@ -78,7 +83,7 @@ describe('agents view', () => {
     await flush()
 
     fireEvent.click(screen.getByText('Add agent'))
-    await flush() // the wizard's workspace fetch picks wsp_1
+    await flush()
     fireEvent.change(screen.getByPlaceholderText('claude'), {
       target: { value: 'mycli' },
     })

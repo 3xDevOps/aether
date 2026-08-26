@@ -192,12 +192,12 @@ func (f *fakeRuns) Calls() []string {
 	return append([]string(nil), f.calls...)
 }
 
-func (f *fakeRuns) Launch(_ context.Context, session domain.SessionID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
-	if err := f.record(fmt.Sprintf("launch:%s:%s:%s:%s:%s", session, member, task, harness, mode)); err != nil {
+func (f *fakeRuns) Launch(_ context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+	if err := f.record(fmt.Sprintf("launch:%s:%s:%s:%s:%s", workspace, member, task, harness, mode)); err != nil {
 		return nil, err
 	}
 	return &domain.Run{
-		ID: "run_new", SessionID: session, MemberID: member, Task: task,
+		ID: "run_new", WorkspaceID: workspace, MemberID: member, Task: task,
 		Harness: harness, Mode: mode, Status: domain.RunQueued,
 		CreatedAt: time.Now().UTC(),
 	}, nil
@@ -243,7 +243,7 @@ func (f *fakeRuns) Relaunch(_ context.Context, run domain.RunID, actor domain.Me
 		return nil, err
 	}
 	return &domain.Run{
-		ID: "run_relaunched", SessionID: "sess", MemberID: actor,
+		ID: "run_relaunched", WorkspaceID: "ws", MemberID: actor,
 		Task: "t", Harness: "claude", Mode: domain.LaunchTUI,
 		Status: domain.RunQueued, CreatedAt: time.Now().UTC(),
 	}, nil
@@ -277,7 +277,6 @@ type testEnv struct {
 	member      *domain.Member
 	signer      ssh.Signer
 	ws          *domain.Workspace
-	sess        *domain.Session
 	run         *domain.Run
 	serveCancel context.CancelFunc
 }
@@ -301,7 +300,7 @@ func newTestEnv(t *testing.T, mod func(*Config)) *testEnv {
 }
 
 // newFreshTestEnv builds an env against a fresh, unseeded store: no
-// member, workspace, session, or run rows (bootstrap tests).
+// member, workspace, or run rows (bootstrap tests).
 func newFreshTestEnv(t *testing.T, mod func(*Config)) *testEnv {
 	t.Helper()
 	return buildTestEnv(t, mod, newSigner(t), false)
@@ -346,16 +345,12 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 		if cerr := db.CreateMember(ctx, e.member); cerr != nil {
 			t.Fatalf("create member: %v", cerr)
 		}
-		e.ws = &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+		e.ws = &domain.Workspace{Name: "proj", BaseBranch: "main", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
 		if cerr := db.CreateWorkspace(ctx, e.ws); cerr != nil {
 			t.Fatalf("create workspace: %v", cerr)
 		}
-		e.sess = &domain.Session{WorkspaceID: e.ws.ID, Name: "effort", BaseBranch: "main"}
-		if cerr := db.CreateSession(ctx, e.sess); cerr != nil {
-			t.Fatalf("create session: %v", cerr)
-		}
 		e.run = &domain.Run{
-			SessionID: e.sess.ID, MemberID: e.member.ID, Task: "do things",
+			WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "do things",
 			Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 			Branch: "aether/run-x-do-things",
 		}

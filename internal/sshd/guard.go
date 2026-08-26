@@ -11,11 +11,11 @@ import (
 
 // targetResolver derives the permission target a request acts on from its
 // raw params, before the handler runs. nil means the capability targets no
-// run (launch, session administration) and the zero Target is checked.
+// run (launch, workspace administration) and the zero Target is checked.
 type targetResolver func(s *Server, ctx context.Context, params json.RawMessage) (permissions.Target, *protocol.Error)
 
 // runTarget resolves the standard "run_id" param to its run's ownership,
-// protection, and session steer-others policy. It is the resolver for
+// protection, and workspace steer-others policy. It is the resolver for
 // every method addressing one run.
 func runTarget(s *Server, ctx context.Context, params json.RawMessage) (permissions.Target, *protocol.Error) {
 	var p protocol.RunIDParams

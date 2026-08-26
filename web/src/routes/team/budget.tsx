@@ -25,15 +25,15 @@ const stateLabel: Record<BudgetState, string> = {
   exceeded: 'past the cap',
 }
 
-/** Session spend and budget state, in the status bar. */
+/** Workspace spend and budget state, in the status bar. */
 export function BudgetStatus() {
   const budgets = useStore((s) => s.budgets)
-  const sessions = useStore((s) => s.sessions)
+  const workspaces = useStore((s) => s.workspaces)
   const totals = costTotals(budgets)
   if (Object.keys(budgets).length === 0) return null
 
   const lines = totals.budgeted.map((report) => {
-    const name = sessions[report.session_id]?.name ?? report.session_id
+    const name = workspaces[report.workspace_id]?.name ?? report.workspace_id
     return `${name}: ${money.format(report.spend.cost_usd)} of ${money.format(
       report.budget?.limit_usd ?? 0,
     )} - ${stateLabel[report.state]}`

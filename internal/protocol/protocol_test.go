@@ -15,7 +15,7 @@ import (
 func TestRunWireShape(t *testing.T) {
 	created := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	r := &domain.Run{
-		ID: "run_1", SessionID: "sess_1", MemberID: "m_1", Task: "fix it",
+		ID: "run_1", WorkspaceID: "ws_1", MemberID: "m_1", Task: "fix it",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 		Branch: "aether/run-1-fix-it", Worktree: "/var/lib/aether/checkouts/run_1",
 		CreatedAt: created,
@@ -28,7 +28,7 @@ func TestRunWireShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"id", "session_id", "member_id", "task", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused"} {
+	for _, k := range []string{"id", "workspace_id", "member_id", "task", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("run wire form missing key %q", k)
 		}
@@ -151,7 +151,7 @@ func TestClientCall(t *testing.T) {
 func TestEventWirePayloadIsRaw(t *testing.T) {
 	ev := Event{
 		ID: "evt_1", Seq: 42, Time: "2026-08-09T12:00:00Z",
-		SessionID: "sess_1", RunID: "run_1", ActorID: "m_1",
+		WorkspaceID: "ws_1", RunID: "run_1", ActorID: "m_1",
 		Type: "run.status", Payload: json.RawMessage(`{"to":"running"}`),
 	}
 	raw, err := json.Marshal(ev)

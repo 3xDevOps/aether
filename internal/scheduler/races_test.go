@@ -30,7 +30,7 @@ func TestKillDuringProvisioning(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := e.sched.Launch(ctx, e.sess.ID, e.member.ID, "slow image pull", "fake", domain.LaunchTUI)
+		_, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "slow image pull", "fake", domain.LaunchTUI)
 		done <- err
 	}()
 	<-provisioning
@@ -167,7 +167,7 @@ func TestRecoveryDestroysProvisioningContainer(t *testing.T) {
 	ctx := t.Context()
 
 	r := &domain.Run{
-		SessionID: e.sess.ID, MemberID: e.member.ID, Task: "halfway there",
+		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "halfway there",
 		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunQueued,
 	}
 	if err := e.db.CreateRun(ctx, r); err != nil {
@@ -196,7 +196,7 @@ func TestRecoveryDestroysProvisioningContainer(t *testing.T) {
 	}
 	data, err := json.Marshal(sidecar{
 		RunID: string(r.ID), ContainerID: string(cid),
-		SessionID: string(e.sess.ID), WorkspaceID: string(e.ws.ID),
+		WorkspaceID: string(e.ws.ID),
 	})
 	if err != nil {
 		t.Fatalf("marshal sidecar: %v", err)
@@ -230,7 +230,7 @@ func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
 	ctx := t.Context()
 
 	old := &domain.Run{
-		SessionID: e.sess.ID, MemberID: e.member.ID, Task: "interrupted",
+		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "interrupted",
 		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunQueued,
 	}
 	if err := e.db.CreateRun(ctx, old); err != nil {
@@ -251,7 +251,7 @@ func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
 	// A leftover active row still names the old checkout (the pre-fix
 	// shared-tree case). GC must not reclaim it.
 	relaunched := &domain.Run{
-		SessionID: e.sess.ID, MemberID: e.member.ID, Task: old.Task,
+		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: old.Task,
 		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 		Branch: branch, Worktree: path,
 	}
@@ -302,7 +302,7 @@ func TestRelaunchRejectsCheckoutInUse(t *testing.T) {
 	// A leftover active row still naming the old checkout must block
 	// another relaunch of that source.
 	blocker := &domain.Run{
-		SessionID: e.sess.ID, MemberID: e.member.ID, Task: "blocker",
+		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "blocker",
 		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 		Branch: "aether/run-blocker", Worktree: old.Worktree,
 	}

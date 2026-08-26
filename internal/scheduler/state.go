@@ -82,7 +82,7 @@ func publicRunStatusReason(reason string) string {
 // transitionLocked persists a legal status change via UpdateRunStatus and
 // publishes the run.status event. The caller must hold s.mu; from must be
 // the run's current status.
-func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, session domain.SessionID, from, to domain.RunStatus, reason string, actor domain.MemberID) error {
+func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, from, to domain.RunStatus, reason string, actor domain.MemberID) error {
 	if !legalTransition(from, to) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, from, to)
 	}
@@ -105,15 +105,15 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, sess
 		}
 	}
 	s.publish(ctx, events.Event{
-		SessionID: session,
-		RunID:     run,
-		ActorID:   actor,
-		Payload:   events.RunStatusPayload{From: from, To: to, Reason: public},
+		WorkspaceID: workspace,
+		RunID:       run,
+		ActorID:     actor,
+		Payload:     events.RunStatusPayload{From: from, To: to, Reason: public},
 	})
 	return nil
 }
 
-// publish sends an event on the bus; failures are logged, never fatal —
+// publish sends an event on the bus; failures are logged, never fatal -
 // the store, not the bus, is the source of truth.
 func (s *Scheduler) publish(ctx context.Context, e events.Event) {
 	if _, err := s.cfg.Bus.Publish(ctx, e); err != nil {
@@ -122,21 +122,23 @@ func (s *Scheduler) publish(ctx context.Context, e events.Event) {
 	}
 }
 
-func (s *Scheduler) publishTimeline(ctx context.Context, session domain.SessionID, run domain.RunID, actor domain.MemberID, kind events.TimelineKind, message string) {
+func (s *Scheduler) publishTimeline(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, actor domain.MemberID, kind events.TimelineKind, message string) {
 	s.publish(ctx, events.Event{
-		SessionID: session,
-		RunID:     run,
-		ActorID:   actor,
-		Payload:   events.TimelinePayload{Kind: kind, Message: message},
+		WorkspaceID: workspace,
+		RunID:       run,
+		ActorID:     actor,
+		Payload:     events.TimelinePayload{Kind: kind, Message: message},
 	})
 }
 
 // sidecar is the durable per-run supervision state at
-// <StateDir>/<run-id>.json (Wave 1 contract §6.6).
+// <StateDir>/<run-id>.json (Wave 1 contract §6.6). A file written by an
+// older build still carries a session_id key; encoding/json ignores
+// unknown fields, so it decodes here unchanged, and the run's workspace
+// is read off the run row (entryFromSidecar) rather than this file.
 type sidecar struct {
 	RunID         string `json:"run_id"`
 	ContainerID   string `json:"container_id"`
-	SessionID     string `json:"session_id"`
 	WorkspaceID   string `json:"workspace_id"`
 	Paused        bool   `json:"paused"`
 	KillRequested bool   `json:"kill_requested"`
@@ -165,7 +167,6 @@ func (e *supervised) sidecar() sidecar {
 	return sidecar{
 		RunID:         string(e.runID),
 		ContainerID:   string(e.containerID),
-		SessionID:     string(e.sessionID),
 		WorkspaceID:   string(e.workspaceID),
 		Paused:        e.paused,
 		KillRequested: e.killRequested,

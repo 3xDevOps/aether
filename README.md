@@ -49,16 +49,18 @@ while you sleep.**
 
 ## Dashboard
 
-`aether dash` opens an SSH port-forward and a browser tab carrying a token
-minted over that SSH connection. There is no separate login, and by default no
-HTTP port is exposed to your network at all.
+`aether gui` serves the dashboard from your own machine: a loopback listener,
+a browser tab carrying a per-process token, and your own SSH key as the
+identity, so every command the CLI can run works from the page. The desktop
+app is the same thing with the window supplied. Nothing is exposed to your
+network, and there is no separate login.
 
-Inside: a sidebar of sessions and their runs, member-colored and groupable; a
-run board bucketed by what needs attention; a live terminal mirror of any run,
-read-only unless you hold the steer capability; a per-run diff timeline; the
-session event feed; the shared approval inbox; presence and watcher
-indicators; the member roster, read-only unless you are an admin; a disk gauge.
-Launch, inject, pause, kill, close, relaunch and handoff all call
+Inside: a workspace switcher over that workspace's runs, member-colored and
+groupable; a run board bucketed by what needs attention; a live terminal mirror
+of any run, read-only unless you hold the steer capability; a per-run diff
+timeline; the workspace event feed; the shared approval inbox; presence and
+watcher indicators; the member roster, read-only unless you are an admin; a
+disk gauge. Launch, inject, pause, kill, close, relaunch and handoff all call
 the same methods the CLI does, with the same permission checks and the same
 timeline attribution.
 
@@ -82,11 +84,11 @@ container image. See [docs/harnesses.md](docs/harnesses.md).
 | [Quickstart](docs/quickstart.md) | Zero to a finished run in ten minutes. |
 | [Install](docs/install.md) | The install script, systemd, upgrades, data layout. |
 | [Networking](docs/networking.md) | Tailscale-first keyless setup, plus LAN and VPN. |
-| [Teams](docs/teams.md) | Joining, roles, sessions, budgets, attribution. |
+| [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
 | [Harnesses](docs/harnesses.md) | Per-agent login and image requirements. |
 | [Adapters](docs/adapters.md) | Adding a harness profile or an output adapter. |
 | [Security](docs/security.md) | What the container boundary does and does not do. |
-| [Dashboard API](docs/dashboard-api.md) | The HTTP/WS surface and its token model. |
+| [Local gateway](docs/local-gateway.md) | The HTTP/WS surface `aether gui` serves. |
 | [Dashboard SPA](docs/dashboard-frontend.md) | The web client's structure. |
 | [Coordination](docs/coordination.md) | How overlapping runs warn and message each other. |
 | [MCP bridge](docs/mcp-bridge.md) | The in-container half of coordination. |

@@ -150,7 +150,7 @@ func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, r
 		return mounts, mcpArgs
 	}
 	slog.Warn("scheduler: coordination assets unavailable", "run", run.ID, "error", err)
-	s.publishTimeline(ctx, run.SessionID, run.ID, run.MemberID, events.TimelineNote,
+	s.publishTimeline(ctx, run.WorkspaceID, run.ID, run.MemberID, events.TimelineNote,
 		"coordination unavailable for this run: "+err.Error())
 	return nil, nil
 }

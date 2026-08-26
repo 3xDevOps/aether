@@ -5,15 +5,15 @@ import { useStore, type RootState } from '@/store'
 import {
   alice,
   fakeApi,
-  otherSession,
+  otherWorkspace,
   serverInfo,
-  session,
   template,
+  workspace,
 } from '@/test/fixtures'
 
 const schedule: Schedule = {
   id: 'sch_1',
-  session_id: session.id,
+  workspace_id: workspace.id,
   template: template.name,
   cron: '0 3 * * *',
   member_id: alice.id,
@@ -23,11 +23,15 @@ const schedule: Schedule = {
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
-    sessions: { [session.id]: session, [otherSession.id]: otherSession },
+    workspaces: {
+      [workspace.id]: workspace,
+      [otherWorkspace.id]: otherWorkspace,
+    },
+    activeWorkspace: workspace.id,
     members: { [alice.id]: alice },
     info: serverInfo,
-    // template.save/delete and the budget/settings buttons are gated; an
-    // upgraded gateway advertising every method renders them all.
+    // template.save/delete are gated; an upgraded gateway advertising every
+    // method renders them all.
     capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
     hydrated: true,
     hydrationError: null,
@@ -57,7 +61,7 @@ describe('templates view', () => {
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(client.templateSave).toHaveBeenCalledWith({
-      session_id: session.id,
+      workspace_id: workspace.id,
       name: 'weekly sweep',
       task: 'sweep the flaky tests',
       harness: 'claude',
@@ -84,7 +88,7 @@ describe('templates view', () => {
     // The preview is the server's next_fire_at, verbatim.
     expect(await screen.findByText(/2026-08-23T03:00:00Z/)).toBeDefined()
     expect(client.scheduleSave).toHaveBeenCalledWith({
-      session_id: session.id,
+      workspace_id: workspace.id,
       template: template.name,
       cron: '0 3 * * *',
     })
@@ -97,7 +101,7 @@ describe('templates view', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Launch' }))
 
-    expect(client.templateLaunch).toHaveBeenCalledWith(session.id, template.name)
+    expect(client.templateLaunch).toHaveBeenCalledWith(workspace.id, template.name)
     expect(await screen.findByText('nightly triage')).toBeDefined()
     // fakeApi's templateLaunch returns run_tpl; navigation lands on it.
     await waitFor(() => {
@@ -108,65 +112,21 @@ describe('templates view', () => {
     })
   })
 
-  it('opens the budget dialog from the session header and sets a cap', async () => {
-    const client = fakeApi({
-      scheduleList: vi.fn(async () => []),
-      budgetSet: vi.fn(async () => ({
-        session_id: session.id,
-        state: 'ok' as const,
-        spend: {
-          runs: 0,
-          metered_runs: 0,
-          unmetered_runs: 0,
-          input_tokens: 0,
-          output_tokens: 0,
-          cost_usd: 0,
-        },
-      })),
-    })
-    seed()
+  // The route follows the sidebar switcher rather than carrying a picker of
+  // its own, so changing the active workspace re-reads against the new one.
+  it('reads the active workspace, not a picker of its own', async () => {
+    const client = fakeApi({ scheduleList: vi.fn(async () => []) })
+    seed({ activeWorkspace: otherWorkspace.id })
     render(<TemplatesRoute params={{}} client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Budget' }))
-    const dialog = within(await screen.findByRole('dialog'))
-    fireEvent.change(dialog.getByLabelText(/Limit/), { target: { value: '2' } })
-    fireEvent.change(dialog.getByLabelText(/Warn/), { target: { value: '1' } })
-    fireEvent.click(dialog.getByRole('button', { name: 'Set' }))
-
-    expect(client.budgetSet).toHaveBeenCalledWith({
-      session_id: session.id,
-      limit_usd: 2,
-      warn_usd: 1,
-    })
-  })
-
-  it('saves session settings with the wire steer_others value', async () => {
-    const client = fakeApi({
-      scheduleList: vi.fn(async () => []),
-      sessionSettings: vi.fn(async () => ({
-        ...session,
-        steer_others: 'admins_only',
-      })),
-    })
-    seed()
-    render(<TemplatesRoute params={{}} client={client} />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Session settings' }))
-    const dialog = within(await screen.findByRole('dialog'))
-    fireEvent.change(dialog.getByLabelText(/Who may steer/), {
-      target: { value: 'admins_only' },
-    })
-    fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
-
-    expect(client.sessionSettings).toHaveBeenCalledWith({
-      session_id: session.id,
-      steer_others: 'admins_only',
-    })
-    // The updated session lands back in the store.
     await waitFor(() => {
-      expect(useStore.getState().sessions[session.id].steer_others).toBe(
-        'admins_only',
-      )
+      expect(client.templateList).toHaveBeenCalledWith(otherWorkspace.id)
     })
+    expect(screen.queryByLabelText('Workspace')).toBeNull()
+    // The budget and settings verbs moved to the workspace route.
+    expect(screen.queryByRole('button', { name: 'Budget' })).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Workspace settings' }),
+    ).toBeNull()
   })
 })

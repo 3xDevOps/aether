@@ -1,4 +1,0 @@
-{"jsonrpc":"2.0","id":1,"result":{"wire_version":"v1","run_id":"run_01","session_id":"ses_01","member_id":"mem_01","task":"add OAuth login","peers":[{"run_id":"run_02","member_id":"mem_02","task":"rename the auth helpers","files":["src/auth.go"],"state":"active"},{"run_id":"run_03","member_id":"mem_03","task":"split the login form","state":"grace","expires_at":"2026-08-10T12:10:00Z"}],"unread":1}}
-{"jsonrpc":"2.0","id":2,"result":{"message_id":"msg_01"}}
-{"jsonrpc":"2.0","id":3,"result":{"messages":[{"id":"msg_02","from_run_id":"run_02","body":"only adding an import - going ahead","created_at":"2026-08-10T12:00:05Z"}],"ack_token":"01k1h7m4z9q0r8s5t2v6w3x7y1"}}
-{"jsonrpc":"2.0","id":4,"result":{"messages":[]}}

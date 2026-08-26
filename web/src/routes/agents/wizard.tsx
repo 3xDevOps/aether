@@ -2,10 +2,9 @@
 // shell embedded right here (registration happens when that shell exits
 // cleanly, so the wizard never navigates away from it), then the result.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { api } from '@/lib/api'
-import type { AgentInfo, Workspace } from '@/lib/types'
+import type { AgentInfo } from '@/lib/types'
 import { ShellPane } from '@/routes/shell/pane'
 import { useStore } from '@/store'
 
@@ -34,51 +33,22 @@ export function AgentWizard({
   onRegistered: () => void
   onCancel: () => void
 }) {
-  const sessions = useStore((s) => s.sessions)
+  const workspaces = useStore((s) => s.workspaces)
+  const activeWorkspace = useStore((s) => s.activeWorkspace)
   const openShell = useStore((s) => s.openShell)
   const shellRequest = useStore((s) => s.shellRequest)
 
   const [step, setStep] = useState<Step>('form')
   const [name, setName] = useState('')
-  const [workspaceID, setWorkspaceID] = useState('')
-  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
+  // Empty until the member picks one, so the sidebar's choice keeps
+  // following them until they mean to set up an agent somewhere else.
+  const [picked, setPicked] = useState('')
   // Argv templates follow the name until the user edits them.
   const [tui, setTui] = useState<string | null>(null)
   const [headless, setHeadless] = useState<string | null>(null)
 
-  useEffect(() => {
-    let live = true
-    api
-      .workspaceListFull()
-      .then((list) => {
-        if (!live) return
-        setWorkspaces(list)
-        setWorkspaceID((id) => id || (list[0]?.id ?? ''))
-      })
-      .catch(() => {
-        // A gateway without workspace.list still has sessions, and every
-        // session names its workspace; the ids are a usable fallback.
-        if (!live) return
-        setWorkspaces([])
-      })
-    return () => {
-      live = false
-    }
-  }, [])
-
-  const workspaceChoices = useMemo(() => {
-    if (workspaces?.length) {
-      return workspaces.map((w) => ({ id: w.id, label: w.name }))
-    }
-    const ids = [...new Set(Object.values(sessions).map((s) => s.workspace_id))]
-    return ids.map((id) => ({ id, label: id }))
-  }, [workspaces, sessions])
-
-  useEffect(() => {
-    if (!workspaceID && workspaceChoices.length) {
-      setWorkspaceID(workspaceChoices[0].id)
-    }
-  }, [workspaceID, workspaceChoices])
+  const choices = Object.values(workspaces)
+  const workspaceID = picked || activeWorkspace || choices[0]?.id || ''
 
   const trimmed = name.trim()
   const shipped = agents.some((a) => a.name === trimmed && a.source === 'shipped')
@@ -169,11 +139,11 @@ export function AgentWizard({
         <select
           className={field}
           value={workspaceID}
-          onChange={(e) => setWorkspaceID(e.target.value)}
+          onChange={(e) => setPicked(e.target.value)}
         >
-          {workspaceChoices.map((w) => (
+          {choices.map((w) => (
             <option key={w.id} value={w.id}>
-              {w.label}
+              {w.name}
             </option>
           ))}
         </select>

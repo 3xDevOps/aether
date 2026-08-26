@@ -138,7 +138,7 @@ failed attach.
 - `scripts/install.sh` is a POSIX shell script. Install by hand, above.
 - `aether-server` itself. Point the client at a Linux server.
 
-Everything else is the same client: `link`, `run`, `attach`, `dash`, `gui`,
+Everything else is the same client: `link`, `run`, `attach`, `gui`,
 `pull`, `daemon`, and the rest.
 
 ## Building from source
@@ -328,7 +328,7 @@ and what the tailnet hostname is, and prints the serve and link commands. It
 starts nothing and writes no configuration - there is no config file.
 
 ```sh
-aether-server serve --data-dir /var/lib/aether --addr :2222 --dashboard-port 8080
+aether-server serve --data-dir /var/lib/aether --addr :2222
 ```
 
 Serve flags:
@@ -338,8 +338,6 @@ Serve flags:
 | `--data-dir` | `/var/lib/aether` | Everything the server owns. |
 | `--addr` | `:2222` | The SSH listener. This is the only port that must be reachable. |
 | `--neutral-image` | `ghcr.io/3xdevops/aether-bootstrap:<build-version>` | Server-owned image selected for workspaces without a custom image. A release build defaults to the image published with that release; a dev build tracks `latest`. Set this to a pinned deployment-approved image to override it. |
-| `--dashboard-port` | `0` (deny) | Loopback dashboard listener that `aether dash` forwards to. |
-| `--dashboard-addr` | empty | Additionally expose the dashboard directly on this address. Plain HTTP - see [security.md](security.md). |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
@@ -416,7 +414,7 @@ turns that half off.
 
 | Path | Contents |
 | --- | --- |
-| `aether.db` | SQLite: members, workspaces, sessions, runs, event log, and snapshot metadata. |
+| `aether.db` | SQLite: members, workspaces, runs, event log, and snapshot metadata. |
 | `ssh/` | The server's SSH host key. |
 | `repos/` | One bare git repo per workspace. |
 | `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. |
@@ -449,7 +447,7 @@ Three consequences worth knowing:
   runs are refused below `--min-free-disk`. See
   [failure-handling.md](failure-handling.md).
 - **Keep the path short.** Per-run coordination sockets live under
-  `coord/<run-id>/coord.sock`, and unix socket paths have a hard length limit
+  `coord/<run-id>/coord2.sock`, and unix socket paths have a hard length limit
   (about 100 characters). A very deep data directory makes the server log
   `coordination unavailable for this run` and fall back to the overlap notice.
   `/var/lib/aether` is nowhere near the limit.

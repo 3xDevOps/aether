@@ -36,13 +36,13 @@ func (s *Server) approvalList(ctx context.Context, _ domain.MemberID, params jso
 	if perr != nil {
 		return nil, perr
 	}
-	if p.SessionID == "" {
-		return nil, invalidParams("session_id is required")
+	if p.WorkspaceID == "" {
+		return nil, invalidParams("workspace_id is required")
 	}
-	if _, err := s.cfg.Store.GetSession(ctx, domain.SessionID(p.SessionID)); err != nil {
+	if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID)); err != nil {
 		return nil, rpcError(err)
 	}
-	list, err := svc.List(ctx, domain.SessionID(p.SessionID), p.All)
+	list, err := svc.List(ctx, domain.WorkspaceID(p.WorkspaceID), p.All)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -84,13 +84,13 @@ func (s *Server) presenceHeartbeat(ctx context.Context, member domain.MemberID, 
 	if perr != nil {
 		return nil, perr
 	}
-	if p.SessionID == "" {
-		return nil, invalidParams("session_id is required")
+	if p.WorkspaceID == "" {
+		return nil, invalidParams("workspace_id is required")
 	}
-	if _, err := s.cfg.Store.GetSession(ctx, domain.SessionID(p.SessionID)); err != nil {
+	if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID)); err != nil {
 		return nil, rpcError(err)
 	}
-	if err := svc.Heartbeat(ctx, member, domain.SessionID(p.SessionID)); err != nil {
+	if err := svc.Heartbeat(ctx, member, domain.WorkspaceID(p.WorkspaceID)); err != nil {
 		return nil, rpcError(err)
 	}
 	return protocol.PresenceHeartbeatResult{TTLSeconds: int(svc.TTL() / time.Second)}, nil
@@ -105,7 +105,7 @@ func (s *Server) presenceRoster(_ context.Context, _ domain.MemberID, params jso
 	if perr != nil {
 		return nil, perr
 	}
-	present := svc.Roster(domain.SessionID(p.SessionID), domain.RunID(p.RunID))
+	present := svc.Roster(domain.WorkspaceID(p.WorkspaceID), domain.RunID(p.RunID))
 	out := protocol.PresenceRosterResult{Members: make([]protocol.PresenceEntry, 0, len(present))}
 	for _, m := range present {
 		e := protocol.PresenceEntry{
@@ -123,14 +123,14 @@ func (s *Server) presenceRoster(_ context.Context, _ domain.MemberID, params jso
 
 func approvalWire(a *store.Approval) protocol.Approval {
 	w := protocol.Approval{
-		ID:        a.ID,
-		SessionID: string(a.SessionID),
-		RunID:     string(a.RunID),
-		Action:    a.Action,
-		Detail:    a.Detail,
-		Decision:  a.Decision,
-		DecidedBy: string(a.DecidedBy),
-		CreatedAt: a.CreatedAt.UTC().Format(time.RFC3339),
+		ID:          a.ID,
+		WorkspaceID: string(a.WorkspaceID),
+		RunID:       string(a.RunID),
+		Action:      a.Action,
+		Detail:      a.Detail,
+		Decision:    a.Decision,
+		DecidedBy:   string(a.DecidedBy),
+		CreatedAt:   a.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	if a.DecidedAt != nil {
 		t := a.DecidedAt.UTC().Format(time.RFC3339)

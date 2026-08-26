@@ -1,35 +1,10 @@
 package protocol
 
-// Dashboard gateway methods. The HTTP/WS transport has no login of its
-// own: bearer tokens are minted and revoked over the authenticated SSH
-// control channel, so the SSH key stays the only identity system.
-const (
-	MethodDashTokenMint   = "dash.token.mint"
-	MethodDashTokenRevoke = "dash.token.revoke"
-)
-
-// DashTokenMintParams are the params of dash.token.mint. TTLSeconds is
-// capped at the gateway's maximum and has no floor; zero means the
-// gateway default.
-type DashTokenMintParams struct {
-	TTLSeconds int `json:"ttl_seconds,omitempty"`
-}
-
-// DashTokenMintResult is the result of dash.token.mint. URL is set only
-// when the server exposes the dashboard directly (--dashboard-addr);
-// clients reaching the gateway through an SSH forward build their own
-// loopback URL from the forwarded port.
-type DashTokenMintResult struct {
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expires_at"`
-	URL       string `json:"url,omitempty"`
-}
-
-// DashTokenRevokeParams are the params of dash.token.revoke; a member may
-// revoke only tokens minted for itself.
-type DashTokenRevokeParams struct {
-	Token string `json:"token"`
-}
+// Attach transport types for the local gateway (internal/localgw). The
+// gateway's HTTP/WS surface has no login of its own: it is spawned by
+// `aether gui`, which holds the SSH identity and hands the browser a
+// single-process bearer token, so the SSH key stays the only identity
+// system.
 
 // DashAttachRequest is the header frame of /ws/attach/{run}; the run
 // comes from the path. Write access is opt-in - the zero value is the

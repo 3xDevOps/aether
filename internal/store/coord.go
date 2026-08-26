@@ -26,7 +26,7 @@ var ErrInboxFull = errors.New("store: run inbox is full")
 // unacknowledged, so the next read returns it again.
 type RunMessage struct {
 	ID            string
-	SessionID     domain.SessionID
+	WorkspaceID   domain.WorkspaceID
 	FromRun       domain.RunID
 	ToRun         domain.RunID
 	Body          string
@@ -63,11 +63,11 @@ type MessageStore interface {
 
 var _ MessageStore = (*DB)(nil)
 
-const runMessageCols = `id, session_id, from_run, to_run, body, delivery_token, created_at, delivered_at, acked_at`
+const runMessageCols = `id, workspace_id, from_run, to_run, body, delivery_token, created_at, delivered_at, acked_at`
 
 func (d *DB) AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int) error {
-	if m.SessionID == "" || m.FromRun == "" || m.ToRun == "" {
-		return errors.New("store: append run message: session_id, from_run, and to_run are required")
+	if m.WorkspaceID == "" || m.FromRun == "" || m.ToRun == "" {
+		return errors.New("store: append run message: workspace_id, from_run, and to_run are required")
 	}
 	if maxUnacked <= 0 {
 		return errors.New("store: append run message: maxUnacked must be positive")
@@ -84,7 +84,7 @@ func (d *DB) AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int
 		`INSERT INTO run_messages (`+runMessageCols+`)
 		 SELECT ?, ?, ?, ?, ?, '', ?, NULL, NULL
 		 WHERE (SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND acked_at IS NULL) < ?`,
-		id, m.SessionID, m.FromRun, m.ToRun, m.Body, createdAt, m.ToRun, maxUnacked,
+		id, m.WorkspaceID, m.FromRun, m.ToRun, m.Body, createdAt, m.ToRun, maxUnacked,
 	)
 	if err != nil {
 		return fmt.Errorf("store: append run message: %w", mapConstraint(err, ErrNotFound))
@@ -245,7 +245,7 @@ func scanRunMessage(row interface{ Scan(...any) error }) (*RunMessage, error) {
 		deliveredAt *int64
 		ackedAt     *int64
 	)
-	if err := row.Scan(&m.ID, &m.SessionID, &m.FromRun, &m.ToRun, &m.Body,
+	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.FromRun, &m.ToRun, &m.Body,
 		&m.DeliveryToken, &createdAt, &deliveredAt, &ackedAt); err != nil {
 		return nil, err
 	}

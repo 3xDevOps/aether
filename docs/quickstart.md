@@ -68,7 +68,7 @@ and what the server's tailnet hostname is, and prints the two commands that
 come next. It does not start anything.
 
 ```sh
-sudo aether-server serve --data-dir /var/lib/aether --addr :2222 --dashboard-port 8080
+sudo aether-server serve --data-dir /var/lib/aether --addr :2222
 ```
 
 (`sudo` because `/var/lib` is root-owned and the server needs the Docker
@@ -80,9 +80,7 @@ time. To make it permanent, install the systemd unit from
 [install.md](install.md#run-it-under-systemd).
 
 The SSH host key is generated into `<data-dir>/ssh/` on first start; there is
-nothing to configure. `--dashboard-port 8080` gives the dashboard a loopback
-listener that `aether dash` can forward to. Nothing is exposed to the network
-except the SSH port.
+nothing to configure. Nothing is exposed to the network except the SSH port.
 
 ## 3. Link from your machine
 
@@ -139,6 +137,9 @@ aether workspace init myproject --image registry.example.invalid/team/base:versi
 The custom image is workspace configuration. A member cannot replace it from a
 bootstrap or login shell. See [install.md](install.md) for image policy.
 
+Every run's worktree is cut from the workspace's base branch, `main` unless
+`--base <branch>` names another one at creation time.
+
 Now point your local clone at it and seed the repo:
 
 ```sh
@@ -190,7 +191,6 @@ workspace bootstrap` re-installs tools without touching login state,
 ## 6. Launch a run
 
 ```sh
-aether session new myproject --workspace myproject
 aether run "add a health check endpoint" --agent omp
 ```
 
@@ -202,31 +202,30 @@ one.
 run 01m04mhf114eap4k85n2mgcped running
 ```
 
-A **session** is the shared context runs live in (members, feed, budgets); a
-**run** is one agent execution with its own container, its own git worktree,
-and its own branch. `aether runs` lists them.
+A **workspace** is the shared context runs live in: its repository, its
+members, its feed, its budget, its templates, and the base branch new runs
+fork from. A **run** is one agent execution with its own container, its own
+git worktree, and its own branch. `aether runs` lists them. Scoped commands
+take `--workspace`, and default to it when there is exactly one, which is why
+nothing above had to name it.
 
 ## 7. Watch it
 
 ```sh
-aether dash
+aether gui
 ```
 
-This opens an SSH port-forward to the dashboard and a browser tab already
-carrying a token minted over that SSH connection. Leave it running - it holds
-the tunnel open, and Ctrl-C both closes the tunnel and revokes the token.
-`aether dash --url` prints the URL instead of opening a browser.
+This serves the dashboard from your own machine and opens a browser tab
+already carrying a per-process token. It rides your SSH key, so everything
+the CLI can do works from the page, plus local verbs like pulling a run
+branch into your clone. Leave it running; Ctrl-C stops the gateway and the
+token dies with it. `aether gui --url` prints the URL instead of opening a
+browser. See [local-gateway.md](local-gateway.md).
 
-In the dashboard: a sidebar of sessions and runs, a board bucketed by what
-needs attention, a live terminal mirror per run, the diff timeline, the session
-feed. Read-only by default; typing into a run needs the steer capability, which
-as the owner you have.
-
-`aether gui` is the full-control alternative: it serves the same dashboard
-from your own machine over your SSH key, so every command works - no
-allowlist - plus local verbs like pulling a run branch into your clone.
-No tunnel, no minted token to expire. See
-[local-gateway.md](local-gateway.md).
+In the dashboard: a workspace switcher over the runs in scope, a board
+bucketed by what needs attention, a live terminal mirror per run, the diff
+timeline, the workspace feed. Read-only by default; typing into a run needs
+the steer capability, which as the owner you have.
 
 The terminal escape hatch is `aether attach <run-id>` - a raw byte-for-byte
 passthrough where every native keybind and theme of the agent's own TUI works.
@@ -251,15 +250,17 @@ aether pull <run-id>
 ```
 
 ```
-fetched aether/run-01m04...-add-a-health-check into refs/remotes/aether/aether/run-01m04...-add-a-health-check (not merged)
+fetched aether/run-add-a-health-check-endpoint-mgcped into refs/remotes/aether/aether/run-add-a-health-check-endpoint-mgcped (not merged)
 ```
 
-The branch is now in your local clone as a remote-tracking ref. Review it, diff
-it, merge it - by hand. **Aether never merges anything for you.**
+A run branch is named `aether/run-<slug>-<short-id>`: the task slugified,
+then the last six characters of the run ID. The branch is now in your local
+clone as a remote-tracking ref. Review it, diff it, merge it - by hand.
+**Aether never merges anything for you.**
 
 ```sh
-git log --oneline aether/aether/run-<id>-<slug>
-git diff main...aether/aether/run-<id>-<slug>
+git log --oneline aether/aether/run-add-a-health-check-endpoint-mgcped
+git diff main...aether/aether/run-add-a-health-check-endpoint-mgcped
 ```
 
 Then close the run out so it leaves the attention board:
@@ -294,7 +295,7 @@ Start the server with the fake agent's command in its environment:
 
 ```sh
 AETHER_FAKE_AGENT="sh /workspace/agent.sh" \
-  aether-server serve --data-dir /var/lib/aether --addr :2222 --dashboard-port 8080
+  aether-server serve --data-dir /var/lib/aether --addr :2222
 ```
 
 `/workspace` is where the run's checkout is mounted, so `agent.sh` is just a
@@ -313,16 +314,15 @@ echo "# demo" > README.md
 git add -A && git commit -m seed
 ```
 
-Then run steps 3, 4, 7, 8 and 9 above with `busybox` as the workspace image
-and `--agent fake` instead of `--agent omp`. Skip steps 5 and 6 because the
-fake harness has no agent login.
+Then run steps 3, 4, 6, 7 and 8 above with `busybox` as the workspace image
+and `--agent fake` instead of `--agent omp`. Skip step 5: the fake harness has
+no agent login.
 
 ```sh
 aether link <server-host>:2222
 aether workspace add demo --image busybox
 aether link <server-host>:2222 --repo "$PWD"
 git push -u aether main
-aether session new demo --workspace demo
 aether run "write a result file" --agent fake
 aether runs
 aether pull <run-id>
@@ -345,7 +345,6 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether setup`, or select one explicitly for bootstrap and tools commands. |
 | `workspace tools verify` reports failure | The active snapshot does not contain the requested executable, or it is not executable. Bootstrap again with `--command <executable>`. |
 | Run reaches `failed` immediately | The agent started and exited. `aether timeline --run <run-id>` shows the exit code; `aether attach` only works while a run is alive. |
-| `this server forwards no dashboard port` | The server was started without `--dashboard-port` or `--dashboard-addr`. |
 | `aether init prepares a Linux server data directory` | You ran `aether init` on Windows. It belongs on the server box; the Windows binary is the client. |
 | `self-update is not supported on Windows` | Expected. Re-download the release binary: [install.md](install.md#manual-install). |
 
@@ -354,6 +353,6 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 - [install.md](install.md) - systemd, upgrades, data layout
 - [bootstrap.md](bootstrap.md) - bootstrap shells, snapshots, recovery, and images
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
-- [teams.md](teams.md) - joining, roles, sessions
+- [teams.md](teams.md) - joining, roles, workspaces
 - [harnesses.md](harnesses.md) - login, profile sync, tool snapshots, and launch definitions
 - [security.md](security.md) - what the container boundary does and does not do

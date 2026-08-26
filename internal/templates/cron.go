@@ -14,10 +14,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// Schedules returns a session's schedules with the next instant each is
+// Schedules returns a workspace's schedules with the next instant each is
 // due.
-func (s *Service) Schedules(ctx context.Context, session domain.SessionID) ([]ScheduleInfo, error) {
-	schedules, err := s.store.ListSchedules(ctx, session)
+func (s *Service) Schedules(ctx context.Context, workspace domain.WorkspaceID) ([]ScheduleInfo, error) {
+	schedules, err := s.store.ListSchedules(ctx, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func (s *Service) Schedules(ctx context.Context, session domain.SessionID) ([]Sc
 // is recorded as the schedule's owner: fires are attributed to them and
 // re-checked against their role, so this is not a way to launch runs as
 // somebody else.
-func (s *Service) SaveSchedule(ctx context.Context, session domain.SessionID, template, spec string, member domain.MemberID) (*ScheduleInfo, error) {
+func (s *Service) SaveSchedule(ctx context.Context, workspace domain.WorkspaceID, template, spec string, member domain.MemberID) (*ScheduleInfo, error) {
 	rule, err := cron.ParseStandard(spec)
 	if err != nil {
 		return nil, fmt.Errorf("%w: cron %q: %s", ErrInvalidDefinition, spec, err)
@@ -43,7 +43,7 @@ func (s *Service) SaveSchedule(ctx context.Context, session domain.SessionID, te
 	if rule.Next(s.now()).IsZero() {
 		return nil, fmt.Errorf("%w: cron %q never occurs", ErrInvalidDefinition, spec)
 	}
-	t, err := s.store.GetTemplate(ctx, session, template)
+	t, err := s.store.GetTemplate(ctx, workspace, template)
 	if err != nil {
 		return nil, fmt.Errorf("templates: schedule %s: %w", template, err)
 	}
@@ -56,13 +56,13 @@ func (s *Service) SaveSchedule(ctx context.Context, session domain.SessionID, te
 	if err := s.store.SaveSchedule(ctx, sc); err != nil {
 		return nil, fmt.Errorf("templates: schedule %s: %w", template, err)
 	}
-	sc.SessionID, sc.Template = t.SessionID, t.Name
+	sc.WorkspaceID, sc.Template = t.WorkspaceID, t.Name
 	return &ScheduleInfo{Schedule: sc, Next: s.seed(sc.ID, spec, rule)}, nil
 }
 
 // DeleteSchedule removes a template's cron rule, leaving the template.
-func (s *Service) DeleteSchedule(ctx context.Context, session domain.SessionID, template string) error {
-	t, err := s.store.GetTemplate(ctx, session, template)
+func (s *Service) DeleteSchedule(ctx context.Context, workspace domain.WorkspaceID, template string) error {
+	t, err := s.store.GetTemplate(ctx, workspace, template)
 	if err != nil {
 		return fmt.Errorf("templates: unschedule %s: %w", template, err)
 	}
@@ -149,25 +149,25 @@ func (s *Service) fire(ctx context.Context, sc *store.Schedule, at time.Time) {
 	if err := s.store.MarkScheduleFired(ctx, sc.ID, at); err != nil {
 		slog.Warn("templates: record schedule fire", "schedule", sc.ID, "error", err)
 	}
-	t, err := s.store.GetTemplate(ctx, sc.SessionID, sc.Template)
+	t, err := s.store.GetTemplate(ctx, sc.WorkspaceID, sc.Template)
 	if err != nil {
 		slog.Warn("templates: schedule template unavailable", "schedule", sc.ID, "error", err)
 		return
 	}
 	if err = s.allowed(ctx, sc.MemberID); err != nil {
 		slog.Warn("templates: schedule skipped", "schedule", sc.ID, "template", t.Name, "error", err)
-		s.publish(ctx, t.SessionID, "", sc.MemberID,
+		s.publish(ctx, t.WorkspaceID, "", sc.MemberID,
 			fmt.Sprintf("schedule for template %q skipped: %s", t.Name, err))
 		return
 	}
 	launched, err := s.launch(ctx, t, sc.MemberID, nil)
 	if err != nil {
 		slog.Warn("templates: schedule fire failed", "schedule", sc.ID, "template", t.Name, "error", err)
-		s.publish(ctx, t.SessionID, "", sc.MemberID,
+		s.publish(ctx, t.WorkspaceID, "", sc.MemberID,
 			fmt.Sprintf("schedule for template %q failed: %s", t.Name, err))
 		return
 	}
-	s.publish(ctx, t.SessionID, launched.Run.ID, sc.MemberID,
+	s.publish(ctx, t.WorkspaceID, launched.Run.ID, sc.MemberID,
 		fmt.Sprintf("scheduled run from template %q (cron %q); %s", t.Name, sc.Cron, launched.Base))
 }
 

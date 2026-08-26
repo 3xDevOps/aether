@@ -5,7 +5,7 @@ Layers, per the design spec's testing strategy:
 - **Unit tests** live beside their packages and run with `make test`
   (race detector on). Permission matrices, budget math, profile push
   rules, tailnet auth edge cases, scheduler transitions, and the
-  dashboard gateway's own behaviours are proven there, once, and the E2E
+  local gateway's own behaviours are proven there, once, and the E2E
   suite does not restate them. Role changes belong to the same layer:
   `internal/sshd/role_test.go` and `internal/sshd/permissions_test.go`
   own promotion, demotion, the last-admin guard and what each role may
@@ -35,7 +35,7 @@ container surfaces from the test process. Scenarios:
 | `TestIntegrationEndToEnd` (`integration_test.go`) | Solo lifecycle, the acceptance gate: seed over git push -> launch -> attach -> detach -> reattach -> steer -> finish -> pull, with the bus traffic checked against the Wave 1 contract |
 | `TestIntegrationDashboard` (`dashboard_integration_test.go`) | Dashboard lifecycle on the  gateway's own HTTP/WS wire: token mint over SSH, launch, board hydrate, live terminal over `/ws/attach`, steer from the card, kill from the card, diff patch, disk gauge |
 | `TestIntegrationMultiMember` (`multimember_integration_test.go`) | Three clients: tailnet bootstrap/pending/approve and invite-code key joins, WhoIs-down fallback with banner, remote administration, steering another member's run, presence roster, handoff, approval inbox, budget cap and override, agent crash -> `failed` + `wip:` commit |
-| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Profile sync and harness logins: setup-session login persists into two runs, push -> next run sees it, mid-run push never touches a running agent, denylisted credential names refused from pushes (Docker only - it needs a real shell) |
+| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Profile sync and harness logins: a login in the setup shell persists into two runs, push -> next run sees it, mid-run push never touches a running agent, denylisted credential names refused from pushes (Docker only - it needs a real shell) |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
 | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootLostContainer` (`chaos_reboot_integration_test.go`) | The server SIGKILLed mid-run: supervision reattaches to a surviving container (steer and finalize both still work) or, when the container went with it, commits `wip:`, publishes the branch, marks the run interrupted and relaunches it. SQLite and git are read back after the kill |
 | `TestIntegrationChaosDiskPressure`, `TestIntegrationChaosStallUX` (`chaos_pressure_integration_test.go`) | Worktree TTL GC under load with the branches surviving, the gauge's three-way breakdown following the reclaim, new runs refused below the free-space floor, and a silent agent parking at needs-attention and coming back |

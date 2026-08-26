@@ -14,7 +14,7 @@ framing anywhere.
 ```
 /opt/aether/aether-server   read-only  the staged bridge binary
 /run/aether/                read-only  the run's coordination directory
-/run/aether/coord.sock                 the socket the bridge dials (wire v1)
+/run/aether/coord2.sock                the socket the bridge dials (wire v2)
 ```
 
 Both are Aether-owned container paths. `runtime.ValidateMounts` refuses any
@@ -62,7 +62,7 @@ back out in the handler.
 
 A single slot keeps inbox calls to one socket round trip at a time. The
 handler claims it, not the transport's reader: the reader is the SDK's one
-decoder goroutine, and waiting there would stall the whole session -
+decoder goroutine, and waiting there would stall the whole MCP session -
 including the cancellation that would end the wait.
 
 Anything short of a completed write leaves the token unpromoted: a failed
@@ -90,7 +90,8 @@ table) pass through the same way with their own code.
 The code deliberately does not go in the MCP envelope's own error field:
 the JSON-RPC layer under MCP reserves that range for transport states
 (-32004 there means "the server is closing"), so an Aether code put there
-would tear the session down instead of telling the agent what happened.
+would tear the MCP session down instead of telling the agent what
+happened.
 
 ### Connections
 
@@ -144,7 +145,7 @@ The coordination E2E (`internal/server`, `integration` tag) runs against
 the in-process runtime, so it proves the host half: the launch wiring, the
 config document, the argument, all three kill-switch positions, and a real
 MCP client driving the real bridge over a real coordination socket into the
-real mailbox and session timeline.
+real mailbox and workspace timeline.
 
 It does not prove the container half. The two mounts are only asserted as
 fields on the container spec, never as realized bind mounts; the staged

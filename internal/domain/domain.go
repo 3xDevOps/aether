@@ -1,7 +1,7 @@
-// Package domain defines the four core Aether objects - Workspace, Session,
-// Run, Member - and their shared enums. This is the type contract agreed in
-// Wave 0: the SQLite store, the event bus, and the runtime all build against
-// these definitions and add no fields of their own.
+// Package domain defines the three core Aether objects - Workspace, Run,
+// Member - and their shared enums. This is the type contract the SQLite
+// store, the event bus, and the runtime all build against; they add no
+// fields of their own.
 //
 // IDs are opaque strings; the store assigns them at creation time.
 package domain
@@ -19,8 +19,6 @@ import (
 type (
 	// WorkspaceID identifies a Workspace.
 	WorkspaceID string
-	// SessionID identifies a Session.
-	SessionID string
 	// RunID identifies a Run.
 	RunID string
 	// MemberID identifies a Member.
@@ -271,37 +269,34 @@ type ToolSnapshot struct {
 	CreatedAt   time.Time
 }
 
-// Workspace is a repo checkout plus its server-owned environment definition.
+// Workspace is a repo checkout, its server-owned environment definition,
+// and the shared context every run against it inherits: runs, costs,
+// approvals, templates, and the event feed are all workspace-scoped.
 type Workspace struct {
 	ID          WorkspaceID
 	Name        string
 	Environment WorkspaceEnvironment
+	// BaseBranch is the branch new run worktrees are created from.
+	BaseBranch string
+	// SteerOthers is the workspace's steering policy for runs owned by
+	// someone else: "" (default) lets any collaborator steer or kill any
+	// run; SteerOthersAdminsOnly restricts steering and killing another
+	// member's run to its owner and admins.
+	SteerOthers string
 	CreatedAt   time.Time
 }
 
-// SteerOthersAdminsOnly is the restrictive Session.SteerOthers value.
+// DefaultBaseBranch is the branch a workspace falls back to when none was
+// given at creation.
+const DefaultBaseBranch = "main"
+
+// SteerOthersAdminsOnly is the restrictive Workspace.SteerOthers value.
 // The empty string is the permissive default.
 const SteerOthersAdminsOnly = "admins_only"
 
 // ValidSteerOthers reports whether v is a defined SteerOthers value.
 func ValidSteerOthers(v string) bool {
 	return v == "" || v == SteerOthersAdminsOnly
-}
-
-// Session is the shared context for one effort: it groups runs, members,
-// and the event feed against one workspace and base branch.
-type Session struct {
-	ID          SessionID
-	WorkspaceID WorkspaceID
-	Name        string
-	// BaseBranch is the branch new run worktrees are created from.
-	BaseBranch string
-	// SteerOthers is the session's steering policy for runs owned by
-	// someone else: "" (default) lets any collaborator steer or kill any
-	// run; SteerOthersAdminsOnly restricts steering and killing another
-	// member's run to its owner and admins.
-	SteerOthers string
-	CreatedAt   time.Time
 }
 
 // Member is a person. Identity is the SSH public key, the tailnet login
@@ -329,10 +324,11 @@ type Member struct {
 }
 
 // Run is one agent execution: a task, an isolated worktree and branch, a
-// container, and a PTY transcript, owned by one member within one session.
+// container, and a PTY transcript, owned by one member within one
+// workspace.
 type Run struct {
-	ID        RunID
-	SessionID SessionID
+	ID          RunID
+	WorkspaceID WorkspaceID
 	// MemberID is the owning member (transferable via handoff).
 	MemberID MemberID
 	// Task is the prompt the agent was launched with.
@@ -344,12 +340,14 @@ type Run struct {
 	// Reason is the last run.status reason, sanitized like the event
 	// payload; empty when the last transition carried no reason.
 	Reason string
-	// Branch is the run's git branch, aether/run-<id>-<slug>.
+	// Branch is the run's git branch, aether/run-<slug>-<id>: the task
+	// leads so the branch reads as what it is, the run ID trails as the
+	// disambiguator.
 	Branch string
 	// Worktree is the server-side path of the run's git worktree.
 	Worktree string
 	// Protected restricts steering and killing this run to its owner and
-	// admins, regardless of the session's SteerOthers setting.
+	// admins, regardless of the workspace's SteerOthers setting.
 	Protected bool
 	CreatedAt time.Time
 	// StartedAt is when the run entered running; nil while queued or

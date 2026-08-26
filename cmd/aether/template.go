@@ -15,7 +15,7 @@ import (
 func init() {
 	register(command{
 		name:  "template",
-		short: "list, save, or delete a session's task templates",
+		short: "list, save, or delete a workspace's task templates",
 		run:   runTemplate,
 	})
 }
@@ -46,17 +46,17 @@ func runTemplate(args []string) error {
 		}
 	}
 	fs := flag.NewFlagSet("template list", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		var res protocol.TemplateListResult
-		if err := c.Call(protocol.MethodTemplateList, protocol.TemplateListParams{SessionID: sessID}, &res); err != nil {
+		if err := c.Call(protocol.MethodTemplateList, protocol.TemplateListParams{WorkspaceID: wsID}, &res); err != nil {
 			return err
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -79,27 +79,27 @@ func templateSave(args []string) error {
 	task := fs.String("task", "", "task prompt; {{name}} marks a parameter")
 	mode := fs.String("mode", "headless", "tui or headless")
 	budget := fs.Float64("budget", 0, "advisory cost hint in USD per run")
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	params := kvFlag{}
 	fs.Var(params, "param", "default for a task parameter, name=value (repeatable)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" || *task == "" || *agent == "" {
-		return fmt.Errorf("usage: aether template save <name> --agent <name> --task \"...\" [--mode] [--param k=v] [--budget] [--session]")
+		return fmt.Errorf("usage: aether template save <name> --agent <name> --task \"...\" [--mode] [--param k=v] [--budget] [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		var res protocol.TemplateSaveResult
 		if err := c.Call(protocol.MethodTemplateSave, protocol.TemplateSaveParams{
-			SessionID: sessID,
-			Name:      name,
-			Task:      *task,
-			Harness:   *agent,
-			Mode:      *mode,
-			Params:    params,
-			BudgetUSD: *budget,
+			WorkspaceID: wsID,
+			Name:        name,
+			Task:        *task,
+			Harness:     *agent,
+			Mode:        *mode,
+			Params:      params,
+			BudgetUSD:   *budget,
 		}, &res); err != nil {
 			return err
 		}
@@ -110,18 +110,18 @@ func templateSave(args []string) error {
 
 func templateDelete(args []string) error {
 	fs := flag.NewFlagSet("template delete", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" {
-		return fmt.Errorf("usage: aether template delete <name> [--session]")
+		return fmt.Errorf("usage: aether template delete <name> [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		if err := c.Call(protocol.MethodTemplateDelete, protocol.TemplateDeleteParams{
-			SessionID: sessID, Name: name,
+			WorkspaceID: wsID, Name: name,
 		}, nil); err != nil {
 			return err
 		}
@@ -133,15 +133,15 @@ func templateDelete(args []string) error {
 // launchTemplate backs `aether run --template`. It reports the base
 // branch's age with the run: a template launch is often unattended work
 // on a base the server has not heard about since somebody last pushed.
-func launchTemplate(session, name string, params kvFlag) error {
+func launchTemplate(workspace, name string, params kvFlag) error {
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, session)
+		wsID, err := resolveWorkspace(c, workspace)
 		if err != nil {
 			return err
 		}
 		var res protocol.TemplateLaunchResult
 		if err := c.Call(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{
-			SessionID: sessID, Name: name, Params: params,
+			WorkspaceID: wsID, Name: name, Params: params,
 		}, &res); err != nil {
 			return err
 		}

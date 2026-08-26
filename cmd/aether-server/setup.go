@@ -66,16 +66,7 @@ func askServerOptions(w io.Writer, in io.Reader, configPath string) (map[string]
 
 	values := map[string]string{}
 	values["addr"] = p.ask("addr", "SSH listen address", def("addr"))
-	values["dashboard-port"] = p.ask("dashboard-port",
-		"Dashboard port reachable over SSH forwards (0 denies it)", def("dashboard-port"))
 	values["data-dir"] = p.ask("data-dir", "Data directory", def("data-dir"))
-
-	_, _ = fmt.Fprintln(w, "\nThe dashboard listens on loopback and members reach it through an SSH")
-	_, _ = fmt.Fprintln(w, "forward. Leave this empty unless you want it bound to a tailnet or LAN")
-	_, _ = fmt.Fprintln(w, "address directly.")
-	if addr := p.ask("dashboard-addr", "Dashboard address (empty = loopback only)", def("dashboard-addr")); addr != "" {
-		values["dashboard-addr"] = addr
-	}
 
 	_, _ = fmt.Fprintln(w, "\nWith tailnet auto-join on, anyone already on your tailnet becomes an")
 	_, _ = fmt.Fprintln(w, "approved member on first connect, with no admin approving them.")

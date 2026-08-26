@@ -1,7 +1,5 @@
 import {
   Bot,
-  ChevronDown,
-  ChevronRight,
   Compass,
   FileText,
   FolderGit2,
@@ -61,10 +59,11 @@ export function Sidebar() {
     <aside
       className="relative flex shrink-0 flex-col border-r"
       style={{ width }}
-      aria-label="Sessions"
+      aria-label="Runs"
     >
-      <SidebarHeader onCollapse={toggleSidebar} />
-      <SessionTree />
+      <WorkspaceSwitcher onCollapse={toggleSidebar} />
+      <SidebarHeader />
+      <RunTree />
       <NavSection />
       <div
         role="separator"
@@ -77,14 +76,66 @@ export function Sidebar() {
   )
 }
 
-function SidebarHeader({ onCollapse }: { onCollapse: () => void }) {
+/**
+ * The scoping control, above everything it scopes. A single workspace needs
+ * no picker, so it renders as a plain label: the affordance appears only
+ * when there is a choice to make.
+ */
+function WorkspaceSwitcher({ onCollapse }: { onCollapse: () => void }) {
+  const workspaces = useStore((s) => s.workspaces)
+  const active = useStore((s) => s.activeWorkspace)
+  const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
+  const list = Object.values(workspaces)
+  const current = workspaces[active]
+
+  return (
+    <div className="flex items-center gap-2 border-b px-2 py-1.5">
+      <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
+      {list.length > 1 ? (
+        <select
+          aria-label="Workspace"
+          className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm"
+          value={active}
+          onChange={(e) => setActiveWorkspace(e.target.value)}
+        >
+          {list.map((workspace) => (
+            <option key={workspace.id} value={workspace.id}>
+              {workspace.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
+          <span className="truncate text-sm font-medium">
+            {current?.name ?? 'No workspace'}
+          </span>
+          {current && (
+            <span className="truncate text-[11px] text-muted-foreground">
+              {current.base_branch}
+            </span>
+          )}
+        </span>
+      )}
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Collapse sidebar"
+        onClick={onCollapse}
+      >
+        <PanelLeftClose />
+      </Button>
+    </div>
+  )
+}
+
+function SidebarHeader() {
   const groupBy = useStore((s) => s.groupBy)
   const setGroupBy = useStore((s) => s.setGroupBy)
   const navigate = useStore((s) => s.navigate)
   return (
     <div className="flex items-center gap-1 border-b px-2 py-1.5">
       <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Sessions
+        Runs
       </span>
       <AttentionBadge />
       <div className="ml-auto flex items-center gap-1">
@@ -100,18 +151,10 @@ function SidebarHeader({ onCollapse }: { onCollapse: () => void }) {
         <Button
           variant="ghost"
           size="sm"
-          title="Group sessions"
+          title="Group runs"
           onClick={() => setGroupBy(groupBy === 'status' ? 'member' : 'status')}
         >
           {groupBy === 'status' ? 'Status' : 'Member'}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Collapse sidebar"
-          onClick={onCollapse}
-        >
-          <PanelLeftClose />
         </Button>
       </div>
     </div>
@@ -119,9 +162,9 @@ function SidebarHeader({ onCollapse }: { onCollapse: () => void }) {
 }
 
 /**
- * How many runs are waiting on a human. The sessions below are already
- * sorted worst-first, so this is not navigation - it is the count a member
- * needs when the sidebar is scrolled, or when a stall lands while they are
+ * How many runs are waiting on a human. The runs below are already sorted
+ * worst-first, so this is not navigation - it is the count a member needs
+ * when the sidebar is scrolled, or when a stall lands while they are
  * elsewhere in the app.
  */
 function AttentionBadge() {
@@ -138,7 +181,7 @@ function AttentionBadge() {
   )
 }
 
-function SessionTree() {
+function RunTree() {
   const groups = useSidebarGroups()
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
@@ -162,7 +205,7 @@ function SessionTree() {
         ) : (
           hydrated && (
             <p className="px-1 py-2 text-xs text-muted-foreground">
-              No sessions yet.
+              No runs yet.
             </p>
           )
         )}
@@ -194,7 +237,7 @@ function NavSection() {
   if (cap.hasMethod('member.list'))
     links.push({ name: 'members', label: 'Members', Icon: Users })
   if (cap.hasMethod('workspace.add'))
-    links.push({ name: 'workspaces', label: 'Workspaces', Icon: FolderGit2 })
+    links.push({ name: 'workspaces', label: 'Manage workspaces', Icon: FolderGit2 })
   if (cap.hasMethod('template.save'))
     links.push({ name: 'templates', label: 'Templates', Icon: FileText })
   if (cap.hasMethod('agent.list'))
@@ -225,56 +268,14 @@ function NavSection() {
 }
 
 function Group({ group }: { group: SidebarGroup }) {
-  const collapsedSessions = useStore((s) => s.collapsedSessions)
-  const toggleSession = useStore((s) => s.toggleSession)
-  const navigate = useStore((s) => s.navigate)
-  const route = useStore((s) => s.route)
-
   return (
     <section className="mb-1">
       <h2 className="px-2 py-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
         {group.label}
       </h2>
-      {group.sessions.map(({ session, runs, state }) => {
-        const open = !collapsedSessions.includes(session.id)
-        const selected =
-          route.name === 'session' && route.params.sessionId === session.id
-        return (
-          <div key={session.id}>
-            <div
-              className={cn(
-                'flex w-full items-center gap-1 px-1 text-sm hover:bg-accent/60',
-                selected && 'bg-accent',
-              )}
-            >
-              <button
-                type="button"
-                aria-label={open ? 'Collapse session' : 'Expand session'}
-                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-                onClick={() => toggleSession(session.id)}
-              >
-                {open ? (
-                  <ChevronDown className="size-3.5" />
-                ) : (
-                  <ChevronRight className="size-3.5" />
-                )}
-              </button>
-              <button
-                type="button"
-                className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left"
-                onClick={() => navigate('session', { sessionId: session.id })}
-              >
-                <StateDot state={state} />
-                <span className="truncate">{session.name}</span>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {runs.length}
-                </span>
-              </button>
-            </div>
-            {open && runs.map((run) => <RunRow key={run.run.id} entry={run} />)}
-          </div>
-        )
-      })}
+      {group.runs.map((run) => (
+        <RunRow key={run.run.id} entry={run} />
+      ))}
     </section>
   )
 }
@@ -291,7 +292,7 @@ function RunRow({ entry }: { entry: SidebarRun }) {
       onClick={() => navigate('run', { runId: entry.run.id })}
       style={{ borderLeftColor: entry.owner?.color }}
       className={cn(
-        'flex w-full items-center gap-2 border-l-2 py-1 pr-2 pl-6 text-left text-xs hover:bg-accent/60',
+        'flex w-full items-center gap-2 border-l-2 py-1 pr-2 pl-4 text-left text-xs hover:bg-accent/60',
         selected ? 'bg-accent' : 'border-l-transparent',
         unseen ? 'font-medium' : 'text-muted-foreground',
       )}

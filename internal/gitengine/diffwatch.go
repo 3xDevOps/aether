@@ -34,7 +34,6 @@ const snapshotTimeout = 30 * time.Second
 type diffWatch struct {
 	e        *Engine
 	run      domain.RunID
-	session  domain.SessionID
 	checkout string
 	base     string
 	watcher  *fsnotify.Watcher
@@ -54,11 +53,11 @@ type diffWatch struct {
 }
 
 // StartDiffWatch begins diff-snapshot watching for a run's checkout,
-// scoping published events to session. It also registers the run in the
-// watch registry (run -> session/workspace/branch), which outlives
-// StopDiffWatch and is what allows git.branch events to carry a session
-// scope. Idempotent while a watch is already active.
-func (e *Engine) StartDiffWatch(ctx context.Context, session domain.SessionID, run domain.RunID) error {
+// scoping published events to workspace. It also registers the run in the
+// watch registry (run -> workspace/branch), which outlives StopDiffWatch
+// and is what allows git.branch events to carry a workspace scope.
+// Idempotent while a watch is already active.
+func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return err
@@ -74,7 +73,7 @@ func (e *Engine) StartDiffWatch(ctx context.Context, session domain.SessionID, r
 		e.mu.Unlock()
 		return fmt.Errorf("gitengine: engine closed")
 	}
-	e.registry[run] = runInfo{session: session, workspace: meta.Workspace, branch: meta.Branch}
+	e.registry[run] = runInfo{workspace: workspace, branch: meta.Branch}
 	if _, active := e.watches[run]; active {
 		e.mu.Unlock()
 		return nil
@@ -88,7 +87,6 @@ func (e *Engine) StartDiffWatch(ctx context.Context, session domain.SessionID, r
 	w := &diffWatch{
 		e:        e,
 		run:      run,
-		session:  session,
 		checkout: checkout,
 		base:     meta.Base,
 		watcher:  watcher,
@@ -118,7 +116,7 @@ func (e *Engine) StartDiffWatch(ctx context.Context, session domain.SessionID, r
 }
 
 // StopDiffWatch stops the run's diff watcher. The registry entry survives
-// so later branch publications keep their session scope. Idempotent.
+// so later branch publications keep their workspace scope. Idempotent.
 func (e *Engine) StopDiffWatch(run domain.RunID) {
 	e.mu.Lock()
 	w := e.watches[run]
@@ -295,10 +293,15 @@ func (w *diffWatch) snapshot() {
 	if !slices.Equal(files, w.lastFiles) {
 		w.lastFiles = files
 		if w.e.cfg.Bus != nil {
+			// The registry entry outlives the watch, so the workspace scope
+			// is read from it rather than duplicated onto the watch.
+			w.e.mu.Lock()
+			workspace := w.e.registry[w.run].workspace
+			w.e.mu.Unlock()
 			_, _ = w.e.cfg.Bus.Publish(ctx, events.Event{
-				SessionID: w.session,
-				RunID:     w.run,
-				Payload:   events.RunDiffPayload{Files: files},
+				WorkspaceID: workspace,
+				RunID:       w.run,
+				Payload:     events.RunDiffPayload{Files: files},
 			})
 		}
 	}
@@ -359,7 +362,7 @@ const countBytesCap = 8 << 20
 
 // countLines counts the lines in an untracked path (a trailing partial line
 // counts). A symlink counts as one line (git's view of its content) and is
-// never followed — the target may be a FIFO or device that would block the
+// never followed - the target may be a FIFO or device that would block the
 // watch loop forever. Only regular files are read, capped at countBytesCap.
 func countLines(ctx context.Context, path string) (int, error) {
 	fi, err := os.Lstat(path)

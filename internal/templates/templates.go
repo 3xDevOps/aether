@@ -1,6 +1,7 @@
 // Package templates is task templates and their cron schedules.
 //
-// A template is a named, parameterized run definition stored on a session:
+// A template is a named, parameterized run definition stored on a
+// workspace:
 // agent, task prompt with {{placeholders}}, launch mode, and an advisory
 // budget hint. Any collaborator may launch one; only an admin may create,
 // change, or delete one. Launching a template is not a second launch path
@@ -63,9 +64,9 @@ var ErrInvalidDefinition = errors.New("templates: invalid definition")
 // Launcher is the scheduler seam: the one entry point every run comes
 // through, hand-launched or fired by cron. The server supplies the same
 // guarded controller its RPC handlers use, so a template launch and a
-// cron fire are admitted against the session budget like any other run.
+// cron fire are admitted against the workspace budget like any other run.
 type Launcher interface {
-	Launch(ctx context.Context, session domain.SessionID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
+	Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
 }
 
 // BaseResolver reports when a workspace branch was last committed as the
@@ -198,9 +199,9 @@ func (s *Service) Close() error {
 	return nil
 }
 
-// List returns a session's templates by name.
-func (s *Service) List(ctx context.Context, session domain.SessionID) ([]*store.Template, error) {
-	return s.store.ListTemplates(ctx, session)
+// List returns a workspace's templates by name.
+func (s *Service) List(ctx context.Context, workspace domain.WorkspaceID) ([]*store.Template, error) {
+	return s.store.ListTemplates(ctx, workspace)
 }
 
 // Save creates or replaces a template after validating its prompt,
@@ -223,7 +224,7 @@ func (s *Service) Save(ctx context.Context, t *store.Template) error {
 		return err
 	}
 	if _, err := Render(t.Task, t.Params, nil); err != nil {
-		scheduled, serr := s.scheduled(ctx, t.SessionID, t.Name)
+		scheduled, serr := s.scheduled(ctx, t.WorkspaceID, t.Name)
 		if serr != nil {
 			return fmt.Errorf("templates: save %s: %w", t.Name, serr)
 		}
@@ -232,7 +233,7 @@ func (s *Service) Save(ctx context.Context, t *store.Template) error {
 				ErrInvalidDefinition, t.Name, err)
 		}
 	}
-	if _, err := s.store.GetSession(ctx, t.SessionID); err != nil {
+	if _, err := s.store.GetWorkspace(ctx, t.WorkspaceID); err != nil {
 		return fmt.Errorf("templates: save %s: %w", t.Name, err)
 	}
 	if err := s.store.SaveTemplate(ctx, t); err != nil {
@@ -242,8 +243,8 @@ func (s *Service) Save(ctx context.Context, t *store.Template) error {
 }
 
 // scheduled reports whether a template name already has a cron rule.
-func (s *Service) scheduled(ctx context.Context, session domain.SessionID, name string) (bool, error) {
-	list, err := s.store.ListSchedules(ctx, session)
+func (s *Service) scheduled(ctx context.Context, workspace domain.WorkspaceID, name string) (bool, error) {
+	list, err := s.store.ListSchedules(ctx, workspace)
 	if err != nil {
 		return false, fmt.Errorf("list schedules: %w", err)
 	}
@@ -256,8 +257,8 @@ func (s *Service) scheduled(ctx context.Context, session domain.SessionID, name 
 }
 
 // Delete removes a template and, with it, its schedule.
-func (s *Service) Delete(ctx context.Context, session domain.SessionID, name string) error {
-	if err := s.store.DeleteTemplate(ctx, session, name); err != nil {
+func (s *Service) Delete(ctx context.Context, workspace domain.WorkspaceID, name string) error {
+	if err := s.store.DeleteTemplate(ctx, workspace, name); err != nil {
 		return fmt.Errorf("templates: delete %s: %w", name, err)
 	}
 	return nil
@@ -266,8 +267,8 @@ func (s *Service) Delete(ctx context.Context, session domain.SessionID, name str
 // Launch renders a template and launches it as member. Permission is the
 // caller's business: this is the manually invoked path, guarded at the RPC
 // boundary like any other launch.
-func (s *Service) Launch(ctx context.Context, session domain.SessionID, name string, member domain.MemberID, params map[string]string) (*Launched, error) {
-	t, err := s.store.GetTemplate(ctx, session, name)
+func (s *Service) Launch(ctx context.Context, workspace domain.WorkspaceID, name string, member domain.MemberID, params map[string]string) (*Launched, error) {
+	t, err := s.store.GetTemplate(ctx, workspace, name)
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", name, err)
 	}
@@ -279,28 +280,28 @@ func (s *Service) launch(ctx context.Context, t *store.Template, member domain.M
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}
-	base := s.baseInfo(ctx, t.SessionID)
-	run, err := s.runs.Launch(ctx, t.SessionID, member, task, t.Harness, t.Mode)
+	base := s.baseInfo(ctx, t.WorkspaceID)
+	run, err := s.runs.Launch(ctx, t.WorkspaceID, member, task, t.Harness, t.Mode)
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}
 	return &Launched{Run: run, Base: base}, nil
 }
 
-// baseInfo reports the age of the session's base branch as the server
+// baseInfo reports the age of the workspace's base branch as the server
 // currently sees it. A lookup failure is reported as unknown age, never as
 // a failed launch: the run is still correct, only its freshness is
 // uncertain.
-func (s *Service) baseInfo(ctx context.Context, session domain.SessionID) BaseInfo {
-	sess, err := s.store.GetSession(ctx, session)
+func (s *Service) baseInfo(ctx context.Context, workspace domain.WorkspaceID) BaseInfo {
+	ws, err := s.store.GetWorkspace(ctx, workspace)
 	if err != nil {
 		return BaseInfo{}
 	}
-	info := BaseInfo{Branch: sess.BaseBranch}
-	committed, err := s.base.BaseCommitTime(ctx, sess.WorkspaceID, sess.BaseBranch)
+	info := BaseInfo{Branch: ws.BaseBranch}
+	committed, err := s.base.BaseCommitTime(ctx, ws.ID, ws.BaseBranch)
 	if err != nil {
 		slog.Debug("templates: base branch age unavailable",
-			"session", session, "branch", sess.BaseBranch, "error", err)
+			"workspace", workspace, "branch", ws.BaseBranch, "error", err)
 		return info
 	}
 	info.Age = s.now().Sub(committed)
@@ -311,14 +312,14 @@ func (s *Service) baseInfo(ctx context.Context, session domain.SessionID) BaseIn
 	return info
 }
 
-func (s *Service) publish(ctx context.Context, session domain.SessionID, run domain.RunID, actor domain.MemberID, message string) {
+func (s *Service) publish(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, actor domain.MemberID, message string) {
 	if _, err := s.bus.Publish(ctx, events.Event{
-		SessionID: session,
-		RunID:     run,
-		ActorID:   actor,
-		Payload:   events.TimelinePayload{Kind: events.TimelineNote, Message: message},
+		WorkspaceID: workspace,
+		RunID:       run,
+		ActorID:     actor,
+		Payload:     events.TimelinePayload{Kind: events.TimelineNote, Message: message},
 	}); err != nil {
-		slog.Warn("templates: publish timeline entry", "session", session, "error", err)
+		slog.Warn("templates: publish timeline entry", "workspace", workspace, "error", err)
 	}
 }
 

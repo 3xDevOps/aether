@@ -17,21 +17,21 @@ import { useStore } from '@/store'
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
-/** Launches a saved task template into a chosen session. */
+/** Launches a saved task template into the active workspace. */
 export function TemplateDialog({ onClose }: { onClose: () => void }) {
-  const sessions = useStore((s) => s.sessions)
+  const workspaceID = useStore((s) => s.activeWorkspace)
+  const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const navigate = useStore((s) => s.navigate)
-  const [sessionID, setSessionID] = useState(Object.keys(sessions)[0] ?? '')
   const [templates, setTemplates] = useState<Template[] | null>(null)
   const [name, setName] = useState('')
   const [launching, setLaunching] = useState(false)
 
   useEffect(() => {
-    if (!sessionID) return
+    if (!workspaceID) return
     let stale = false
     setTemplates(null)
     setName('')
-    api.templateList(sessionID).then(
+    api.templateList(workspaceID).then(
       (list) => {
         if (stale) return
         setTemplates(list)
@@ -46,14 +46,14 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
     return () => {
       stale = true
     }
-  }, [sessionID])
+  }, [workspaceID])
 
   const selected = templates?.find((t) => t.name === name)
 
   const launch = async () => {
     setLaunching(true)
     try {
-      const { run } = await api.templateLaunch(sessionID, name)
+      const { run } = await api.templateLaunch(workspaceID, name)
       onClose()
       navigate('run', { runId: run.id })
       toast.success('Run launched')
@@ -69,7 +69,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
         <DialogHeader>
           <DialogTitle>Launch from a template</DialogTitle>
           <DialogDescription>
-            The template's saved task starts as a new run in the session.
+            The template's saved task starts as a new run in the workspace.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -80,20 +80,20 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
             void launch()
           }}
         >
-          <label className="block space-y-1 text-sm">
-            Session
-            <select
-              className={field}
-              value={sessionID}
-              onChange={(e) => setSessionID(e.target.value)}
-            >
-              {Object.values(sessions).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {/* Where the run lands, stated rather than asked: the sidebar's
+              switcher is the one place scope changes. */}
+          <p className="text-sm" aria-label="Target workspace">
+            {workspace ? (
+              <>
+                Launching into <span className="font-medium">{workspace.name}</span>{' '}
+                <span className="text-muted-foreground">({workspace.base_branch})</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">
+                Pick a workspace in the sidebar first.
+              </span>
+            )}
+          </p>
           <label className="block space-y-1 text-sm">
             Template
             <select
@@ -111,7 +111,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
           </label>
           {templates?.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              This session has no saved templates.
+              This workspace has no saved templates.
             </p>
           )}
           {selected && (
@@ -127,7 +127,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
           <Button
             type="submit"
             form="launch-template"
-            disabled={launching || !name || !sessionID}
+            disabled={launching || !name || !workspaceID}
           >
             Launch
           </Button>

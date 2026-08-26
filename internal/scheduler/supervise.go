@@ -97,7 +97,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if entry.killRequested {
 		to, reason, actor = domain.RunAbandoned, "killed", entry.killActor
 	}
-	err := s.transitionLocked(ctx, entry.runID, entry.sessionID, entry.status, to, reason, actor)
+	err := s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor)
 	delete(s.runs, entry.runID)
 	s.mu.Unlock()
 	// ErrInvalidTransition means the run already reached a terminal state
@@ -146,10 +146,10 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
-				err = s.transitionLocked(ctx, e.runID, e.sessionID, e.status, domain.RunNeedsAttention,
+				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
 					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
 			case e.status == domain.RunNeedsAttention && idle <= s.cfg.StallThreshold:
-				err = s.transitionLocked(ctx, e.runID, e.sessionID, e.status, domain.RunRunning,
+				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunRunning,
 					"activity resumed", "")
 			}
 			if err != nil {
@@ -161,12 +161,12 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 }
 
 // sweepCheckouts applies the checkout TTL (§6.8): terminal runs whose
-// checkout outlived CheckoutTTL lose the checkout directory — the branch
+// checkout outlived CheckoutTTL lose the checkout directory - the branch
 // and transcript are the artifacts and are never GC'd.
 func (s *Scheduler) sweepCheckouts(ctx context.Context) {
-	sessions, err := s.cfg.Store.ListSessions(ctx)
+	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
-		slog.Warn("scheduler: checkout gc: list sessions", "error", err)
+		slog.Warn("scheduler: checkout gc: list workspaces", "error", err)
 		return
 	}
 	// Checkouts are per-run-ID (relaunch clones a new tree from the old
@@ -184,10 +184,10 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 		}
 	}
 	cutoff := time.Now().UTC().Add(-s.cfg.CheckoutTTL)
-	for _, sess := range sessions {
-		runs, err := s.cfg.Store.ListRunsBySession(ctx, sess.ID)
+	for _, ws := range workspaces {
+		runs, err := s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
 		if err != nil {
-			slog.Warn("scheduler: checkout gc: list runs", "session", sess.ID, "error", err)
+			slog.Warn("scheduler: checkout gc: list runs", "workspace", ws.ID, "error", err)
 			continue
 		}
 		for _, r := range runs {

@@ -65,12 +65,13 @@ code was the approval. Nobody needs shell access to the server box to join.
 ## Roles
 
 Three capabilities on runs - **view**, **steer** (attach-write, inject,
-approve, pause), **kill** - plus session administration, bundled into roles:
+approve, pause), **kill** - plus **push** to the workspace repo and
+`workspace_admin`, bundled into roles:
 
-| Role | Own runs | Others' runs | Session |
+| Role | Own runs | Others' runs | Workspace |
 | --- | --- | --- | --- |
 | viewer | - | view | read the feed |
-| collaborator (default) | everything | view, steer, kill | launch runs, create sessions, use templates |
+| collaborator (default) | everything | view, steer, kill | launch runs, push, use templates |
 | admin | everything | everything | members, workspaces, budgets, templates, settings |
 
 The viewer row is a real choice, not a placeholder: `aether member role <id>
@@ -79,7 +80,7 @@ feed without being able to start, steer, or kill anything.
 
 **Everyone is a collaborator by default, on purpose.** Teammates can steer each
 other's agents with zero setup; every privileged act is attributed in the
-session timeline instead of being prevented.
+workspace timeline instead of being prevented.
 
 The bootstrap identity is the admin and everyone who joins afterwards is a
 collaborator, but an admin can change that:
@@ -111,16 +112,43 @@ Admin-only commands answer with a clear error otherwise:
 aether: rpc error -32001: workspace.add requires the admin role
 ```
 
-## Workspaces and sessions
+## Workspaces
 
-- **Workspaces are admin-owned.** `aether workspace add <name> --image <image>`
-  defines a repo and the container image its agents run in. One per project.
-- **Sessions are collaborator-owned.** `aether session new <name> --workspace
-  <name-or-id>` creates the shared context runs live in: members, event feed,
-  templates, budget. A session pins a base branch (`--base`, default `main`).
+A workspace is the whole shared scope. It is a repo plus the container image
+its agents run in, and everything the team shares hangs off it: runs, the
+event feed, the approval inbox, presence, templates, schedules, costs and the
+budget. One per project.
 
-Most commands take `--session`; with exactly one session they default to it.
-That is why the solo path never mentions sessions.
+Creating one is an admin operation. `init` takes the server's neutral
+image; `add` requires an administrator-approved one:
+
+```sh
+aether workspace init myproject [--image <image>] [--base <branch>]
+aether workspace add myproject --image <image> [--base <branch>]
+```
+
+Two settings belong to the workspace rather than to any run in it:
+
+- **The base branch** is what every new run's worktree is cut from. `--base`
+  sets it at creation; it defaults to `main`.
+- **The steering policy** decides whether collaborators may steer and kill
+  each other's runs. It is permissive by default; an admin restricts it to
+  owners and admins over the `workspace.settings` method, or in the dashboard's
+  Workspace settings dialog. A member refused by it reads
+  `workspace restricts steer of others' runs to their owner and admins`.
+  Marking a single run protected does the same for that run alone.
+
+Scoped commands - `run`, `budget`, `cost`, `inbox`, `who`, `timeline`,
+`template`, `schedule` - take `--workspace <name-or-id>` and default to the
+only workspace when there is exactly one. That is why the solo path never
+types it. With more than one they insist:
+`--workspace is required when more than one workspace exists`.
+
+Two commands sit outside that rule. `aether runs` takes no `--workspace` at
+all: it lists every run you can see, so a teammate's work in another workspace
+is never hidden from you. And `aether profile push --allow-secret` requires
+`--workspace` outright, with no default, because the override is only worth
+recording against a named timeline.
 
 Every member links their own clone to the server:
 
@@ -136,7 +164,7 @@ the artifact. Every other branch behaves like a normal git remote.
 
 | Command | What it does |
 | --- | --- |
-| `aether runs` | Every run in the session, colored by owner, with conflict warnings. Prints a notice when any run is waiting on a human; `--attention` lists only those. |
+| `aether runs` | Every run you can see, colored by owner, with conflict warnings. Prints a notice when any run is waiting on a human; `--attention` lists only those. |
 | `aether who` | Who is online and which runs they are watching. |
 | `aether attach <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer. |
 | `aether inject <run> "..."` | Push an instruction into a running agent. Renders as a banner in your member color. |
@@ -144,9 +172,9 @@ the artifact. Every other branch behaves like a normal git remote.
 | `aether handoff <run> <member>` | Transfer ownership, notification routing, and cost attribution. Overnight relay work. Refused for a viewer or a pending member, since neither can own a run. |
 | `aether close <run> --outcome merged\|abandoned` | Clear a finished run off the attention board. |
 | `aether inbox` | The shared approval queue; any steer-holder can decide. |
-| `aether timeline` | The session's whole history; `--jsonl` exports it. |
+| `aether timeline` | The workspace's whole history; `--jsonl` exports it. |
 | `aether cost --runs` | Token spend per member and per run. |
-| `aether budget` | The session's spend cap and what has been used. |
+| `aether budget` | The workspace's spend cap and what has been used. |
 
 ### Attribution
 
@@ -157,8 +185,8 @@ timeline dots, overlapping diff hunks, dashboard cards. "Whose agent is doing
 what" is meant to be answerable at a glance from any screen.
 
 Every privileged act - steer, kill, approve, handoff, settings change - is
-stamped into the session timeline with the actor. Permissive by default, always
-attributed.
+stamped into the workspace timeline with the actor. Permissive by default,
+always attributed.
 
 ### Conflict radar
 

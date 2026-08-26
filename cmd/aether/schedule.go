@@ -29,17 +29,17 @@ func runSchedule(args []string) error {
 		}
 	}
 	fs := flag.NewFlagSet("schedule list", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		var res protocol.ScheduleListResult
-		if err := c.Call(protocol.MethodScheduleList, protocol.ScheduleListParams{SessionID: sessID}, &res); err != nil {
+		if err := c.Call(protocol.MethodScheduleList, protocol.ScheduleListParams{WorkspaceID: wsID}, &res); err != nil {
 			return err
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -59,20 +59,20 @@ func runSchedule(args []string) error {
 
 func scheduleSet(args []string) error {
 	fs := flag.NewFlagSet("schedule set", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	rest, err := parseTwoArgs(fs, args)
 	if err != nil {
-		return fmt.Errorf("usage: aether schedule set <template> \"<cron>\" [--session]\ncron is standard five-field syntax or an @descriptor, in UTC")
+		return fmt.Errorf("usage: aether schedule set <template> \"<cron>\" [--workspace]\ncron is standard five-field syntax or an @descriptor, in UTC")
 	}
 	template, spec := rest[0], rest[1]
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		var res protocol.ScheduleSaveResult
 		if err := c.Call(protocol.MethodScheduleSave, protocol.ScheduleSaveParams{
-			SessionID: sessID, Template: template, Cron: spec,
+			WorkspaceID: wsID, Template: template, Cron: spec,
 		}, &res); err != nil {
 			return err
 		}
@@ -84,18 +84,18 @@ func scheduleSet(args []string) error {
 
 func scheduleDelete(args []string) error {
 	fs := flag.NewFlagSet("schedule delete", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	template, err := parseLeadingArg(fs, args)
 	if err != nil || template == "" {
-		return fmt.Errorf("usage: aether schedule delete <template> [--session]")
+		return fmt.Errorf("usage: aether schedule delete <template> [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		if err := c.Call(protocol.MethodScheduleDelete, protocol.ScheduleDeleteParams{
-			SessionID: sessID, Template: template,
+			WorkspaceID: wsID, Template: template,
 		}, nil); err != nil {
 			return err
 		}

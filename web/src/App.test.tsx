@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { App } from '@/App'
 import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
@@ -27,12 +27,23 @@ async function mount() {
   })
 }
 
+/** The sidebar landmark; the board repeats every run task the tree shows. */
+function sidebar() {
+  return within(screen.getByRole('complementary', { name: 'Runs' }))
+}
+
 describe('App', () => {
   it('renders the shell and fills it from the server', async () => {
     await mount()
 
-    // Sidebar, from session.list + run.list.
-    expect(await screen.findByText('checkout rewrite')).toBeDefined()
+    // Sidebar, from workspace.list + run.list: the scope on top, its runs
+    // below.
+    await vi.waitFor(() =>
+      expect(sidebar().getByText('rewrite the checkout flow')).toBeDefined(),
+    )
+    expect(
+      (screen.getByLabelText('Workspace') as HTMLSelectElement).value,
+    ).toBe('wsp_1')
     // Center view, from the default route in the registry.
     expect(screen.getByText('Run board')).toBeDefined()
     // Status bar, from server.info.
@@ -45,7 +56,9 @@ describe('App', () => {
 
   it('shows the run a sidebar row points at', async () => {
     await mount()
-    await screen.findByText('checkout rewrite')
+    await vi.waitFor(() =>
+      expect(sidebar().getByText('rewrite the checkout flow')).toBeDefined(),
+    )
 
     useStore.getState().navigate('run', { runId: 'run_1' })
 

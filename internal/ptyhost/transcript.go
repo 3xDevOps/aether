@@ -24,7 +24,7 @@ type castHeader struct {
 }
 
 // castWriter appends asciinema cast v2 events (output, resize, marker) to
-// the run's transcript file. Output only — PTY input is never recorded.
+// the run's transcript file. Output only - PTY input is never recorded.
 // Output chunks that end mid-rune hold the incomplete UTF-8 tail back until
 // the next chunk so runes are recorded whole; bytes that are not valid
 // UTF-8 are escaped losslessly (see appendCastString), so replay through

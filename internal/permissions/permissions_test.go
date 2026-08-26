@@ -17,7 +17,7 @@ func want(cap Capability, role domain.Role, owner, protected bool, steerOthers s
 	switch cap {
 	case View:
 		return true
-	case SessionAdmin:
+	case WorkspaceAdmin:
 		return false
 	case Launch, Push:
 		return role == domain.RoleCollaborator
@@ -39,7 +39,7 @@ func want(cap Capability, role domain.Role, owner, protected bool, steerOthers s
 // protected x steer-others.
 func TestCheckFullMatrix(t *testing.T) {
 	roles := []domain.Role{domain.RoleViewer, domain.RoleCollaborator, domain.RoleAdmin}
-	caps := []Capability{View, Steer, Kill, Launch, Push, Handoff, Protect, SessionAdmin}
+	caps := []Capability{View, Steer, Kill, Launch, Push, Handoff, Protect, WorkspaceAdmin}
 	settings := []string{"", domain.SteerOthersAdminsOnly}
 	actor := domain.MemberID("m_actor")
 	other := domain.MemberID("m_other")
@@ -118,7 +118,7 @@ func TestCheckSpotRules(t *testing.T) {
 			Actor{actor, domain.RoleCollaborator}, Target{Owner: actor}, true},
 		{"protect by owner allowed", Protect,
 			Actor{actor, domain.RoleCollaborator}, Target{Owner: actor}, true},
-		{"session admin requires admin", SessionAdmin,
+		{"workspace admin requires admin", WorkspaceAdmin,
 			Actor{actor, domain.RoleCollaborator}, Target{}, false},
 	}
 	for _, tc := range cases {

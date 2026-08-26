@@ -28,9 +28,9 @@ func SubscribeWire(ctx context.Context, bus Bus, req protocol.SubscribeRequest) 
 	}
 	sub, err := bus.Subscribe(ctx, SubscribeOptions{
 		Filter: Filter{
-			Session: domain.SessionID(req.SessionID),
-			Run:     domain.RunID(req.RunID),
-			Types:   types,
+			Workspace: domain.WorkspaceID(req.WorkspaceID),
+			Run:       domain.RunID(req.RunID),
+			Types:     types,
 		},
 		Replay:   req.Replay,
 		AfterSeq: req.AfterSeq,
@@ -76,13 +76,13 @@ func wireEvent(ev Event) (protocol.Event, error) {
 		return protocol.Event{}, fmt.Errorf("events: encode %s payload of event %s: %w", ev.Type, ev.ID, err)
 	}
 	return protocol.Event{
-		ID:        ev.ID,
-		Seq:       ev.Seq,
-		Time:      ev.Time.UTC().Format(time.RFC3339Nano),
-		SessionID: string(ev.SessionID),
-		RunID:     string(ev.RunID),
-		ActorID:   string(ev.ActorID),
-		Type:      string(ev.Type),
-		Payload:   payload,
+		ID:          ev.ID,
+		Seq:         ev.Seq,
+		Time:        ev.Time.UTC().Format(time.RFC3339Nano),
+		WorkspaceID: string(ev.WorkspaceID),
+		RunID:       string(ev.RunID),
+		ActorID:     string(ev.ActorID),
+		Type:        string(ev.Type),
+		Payload:     payload,
 	}, nil
 }

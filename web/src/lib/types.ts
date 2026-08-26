@@ -13,7 +13,7 @@ export type RunStatus =
 
 export interface Run {
   id: string
-  session_id: string
+  workspace_id: string
   member_id: string
   task: string
   harness: string
@@ -31,18 +31,11 @@ export interface Run {
   paused?: boolean
 }
 
-export interface Session {
-  id: string
-  workspace_id: string
-  name: string
-  base_branch: string
-  steer_others?: string
-  created_at: string
-}
-
 export interface Workspace {
   id: string
   name: string
+  base_branch: string
+  steer_others?: string
   created_at: string
 }
 
@@ -58,7 +51,6 @@ export interface ServerInfo {
   server_version: string
   protocol_version: string
   time: string
-  dashboard_port: number
   member: Member
   tailnet_hostname?: string
   tailnet_identity_auth?: boolean
@@ -93,7 +85,7 @@ export interface Event {
   id: string
   seq: number
   time: string
-  session_id: string
+  workspace_id: string
   run_id: string
   actor_id: string
   type: string
@@ -107,14 +99,14 @@ export interface RunStatusPayload {
 }
 
 // Team surfaces: the approval inbox, the presence roster, cost and budgets,
-// and the session timeline (internal/protocol approval.go, cost.go,
+// and the workspace timeline (internal/protocol approval.go, cost.go,
 // timeline.go).
 
 export type ApprovalDecision = 'requested' | 'approved' | 'denied'
 
 export interface Approval {
   id: string
-  session_id: string
+  workspace_id: string
   run_id: string
   action: string
   detail?: string
@@ -146,7 +138,7 @@ export interface CostRollup {
 }
 
 export interface Budget {
-  session_id: string
+  workspace_id: string
   limit_usd: number
   warn_usd?: number
   override?: boolean
@@ -156,16 +148,16 @@ export interface Budget {
 
 export type BudgetState = 'ok' | 'warn' | 'exceeded'
 
-/** A session's budget with its state and the spend behind it. */
+/** A workspace's budget with its state and the spend behind it. */
 export interface BudgetReport {
-  session_id: string
+  workspace_id: string
   budget?: Budget
   state: BudgetState
   spend: CostRollup
   advisory?: boolean
 }
 
-/** One page of session history, oldest first. */
+/** One page of workspace history, oldest first. */
 export interface TimelinePage {
   events: Event[]
   next_seq: number
@@ -173,7 +165,7 @@ export interface TimelinePage {
 }
 
 export interface TimelineQuery {
-  session_id: string
+  workspace_id: string
   run_id?: string
   member_id?: string
   types?: string[]
@@ -222,7 +214,7 @@ export interface RunPatch {
 /** Wire form of a task template (internal/protocol/template.go). */
 export interface Template {
   id: string
-  session_id: string
+  workspace_id: string
   name: string
   task: string
   harness: string
@@ -240,7 +232,7 @@ export interface TemplateLaunch {
 
 /** The first line a client sends on /ws/events. */
 export interface SubscribeRequest {
-  session_id?: string
+  workspace_id?: string
   run_id?: string
   types?: string[]
   replay?: boolean
@@ -250,7 +242,7 @@ export interface SubscribeRequest {
 /** Wire form of a cron schedule (internal/protocol/template.go). */
 export interface Schedule {
   id: string
-  session_id: string
+  workspace_id: string
   template: string
   cron: string
   member_id: string

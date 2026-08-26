@@ -6,16 +6,11 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 func init() {
 	registerMethod(protocol.MethodWorkspaceAdd, (*Server).workspaceAdd)
-	// Creating a session is a collaborator action, not an admin one: the
-	// role table gives collaborators "launch runs", and a run needs a
-	// session to live in. Viewers are still refused.
-	registerGuarded(protocol.MethodSessionNew, permissions.Launch, nil, (*Server).sessionNew)
 	registerMethod(protocol.MethodMemberInvite, (*Server).memberInvite)
 	registerMethod(protocol.MethodMemberRemove, (*Server).memberRemove)
 }
@@ -42,7 +37,11 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 	if p.Name == "" || !p.Environment.Valid() {
 		return nil, invalidParams("name and valid environment are required")
 	}
-	w := &domain.Workspace{Name: p.Name, Environment: domain.WorkspaceEnvironment{
+	base := p.BaseBranch
+	if base == "" {
+		base = domain.DefaultBaseBranch
+	}
+	w := &domain.Workspace{Name: p.Name, BaseBranch: base, Environment: domain.WorkspaceEnvironment{
 		CustomImage:  p.Environment.CustomImage,
 		NeutralImage: p.Environment.NeutralImage,
 		Variables:    p.Environment.Variables,
@@ -52,28 +51,6 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 		return nil, rpcError(err)
 	}
 	return protocol.WorkspaceAddResult{Workspace: protocol.WorkspaceFromDomain(w)}, nil
-}
-
-func (s *Server) sessionNew(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	p, perr := decodeParams[protocol.SessionNewParams](params)
-	if perr != nil {
-		return nil, perr
-	}
-	if p.WorkspaceID == "" || p.Name == "" {
-		return nil, invalidParams("workspace_id and name are required")
-	}
-	if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID)); err != nil {
-		return nil, rpcError(err)
-	}
-	base := p.BaseBranch
-	if base == "" {
-		base = "main"
-	}
-	sess := &domain.Session{WorkspaceID: domain.WorkspaceID(p.WorkspaceID), Name: p.Name, BaseBranch: base}
-	if err := s.cfg.Store.CreateSession(ctx, sess); err != nil {
-		return nil, rpcError(err)
-	}
-	return protocol.SessionNewResult{Session: protocol.SessionFromDomain(sess)}, nil
 }
 
 func (s *Server) memberInvite(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

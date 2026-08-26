@@ -52,7 +52,7 @@ export function pendingApprovalKey(inbox: Record<string, Approval[]>): string {
   return [...pendingApprovalRuns(inbox)].sort().join('\n')
 }
 
-// Worst-first. A session row shows the worst state of its runs.
+// Worst-first. A run group shows the worst state of its runs.
 const severity: PresentationState[] = [
   'needs-attention',
   'failed',

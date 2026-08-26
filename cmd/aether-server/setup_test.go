@@ -17,14 +17,13 @@ func answers(lines ...string) *strings.Reader {
 
 func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 	var out bytes.Buffer
-	in := answers("", "", "", "", "", "", "yes")
+	in := answers("", "", "", "", "yes")
 	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
 		"addr":                ":2222",
-		"dashboard-port":      "8080",
 		"data-dir":            "/var/lib/aether",
 		"tailnet-auto-join":   "false",
 		"tailnet-require-key": "false",
@@ -34,9 +33,6 @@ func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 			t.Errorf("%s = %q, want the default %q", k, values[k], v)
 		}
 	}
-	if _, ok := values["dashboard-addr"]; ok {
-		t.Error("an empty dashboard address must stay out of the file, not be written as empty")
-	}
 	if !strings.Contains(out.String(), "anyone already on your tailnet") {
 		t.Errorf("auto-join prompt does not explain the security tradeoff:\n%s", out.String())
 	}
@@ -44,16 +40,14 @@ func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 
 func TestAskServerOptionsUsesTypedAnswers(t *testing.T) {
 	var out bytes.Buffer
-	in := answers(":2300", "9090", "/srv/aether", "100.64.0.1:8080", "true", "true", "yes")
+	in := answers(":2300", "/srv/aether", "true", "true", "yes")
 	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
 		"addr":                ":2300",
-		"dashboard-port":      "9090",
 		"data-dir":            "/srv/aether",
-		"dashboard-addr":      "100.64.0.1:8080",
 		"tailnet-auto-join":   "true",
 		"tailnet-require-key": "true",
 	}
@@ -70,7 +64,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "", "", "yes"), path)
+	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,13 +75,13 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 
 func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 	var out bytes.Buffer
-	in := answers("", "not-a-port", "9090", "", "", "", "", "yes")
+	in := answers("", "", "not-a-bool", "true", "", "yes")
 	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values["dashboard-port"] != "9090" {
-		t.Errorf("dashboard-port = %q, want the retyped 9090", values["dashboard-port"])
+	if values["tailnet-auto-join"] != "true" {
+		t.Errorf("tailnet-auto-join = %q, want the retyped true", values["tailnet-auto-join"])
 	}
 	if !strings.Contains(out.String(), "try again") {
 		t.Errorf("a rejected answer must be re-asked:\n%s", out.String())
@@ -96,7 +90,7 @@ func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 
 func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "", "", "no"), filepath.Join(t.TempDir(), "absent.conf"))
+	values, err := askServerOptions(&out, answers("", "", "", "", "no"), filepath.Join(t.TempDir(), "absent.conf"))
 	if err != nil {
 		t.Fatal(err)
 	}

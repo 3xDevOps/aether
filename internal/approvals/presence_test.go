@@ -19,7 +19,7 @@ func (nopStore) GetApproval(context.Context, string) (*store.Approval, error) {
 	return nil, store.ErrNotFound
 }
 
-func (nopStore) ListApprovals(context.Context, domain.SessionID, string) ([]*store.Approval, error) {
+func (nopStore) ListApprovals(context.Context, domain.WorkspaceID, string) ([]*store.Approval, error) {
 	return nil, nil
 }
 
@@ -55,12 +55,12 @@ func TestStaleHeartbeatGoesOfflineWatcherStays(t *testing.T) {
 	}
 	defer func() { _ = presence.Close() }()
 
-	const session = domain.SessionID("sess")
-	if err := svc.Heartbeat(ctx, "ada", session); err != nil {
+	const workspace = domain.WorkspaceID("ws")
+	if err := svc.Heartbeat(ctx, "ada", workspace); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
 	if _, err := bus.Publish(ctx, events.Event{
-		SessionID: session, RunID: "run", ActorID: "bob",
+		WorkspaceID: workspace, RunID: "run", ActorID: "bob",
 		Payload: events.PresencePayload{State: events.PresenceWatching},
 	}); err != nil {
 		t.Fatalf("publish watching: %v", err)
@@ -86,16 +86,16 @@ func TestStaleHeartbeatGoesOfflineWatcherStays(t *testing.T) {
 		t.Fatalf("ada's presence = %v, want online then offline", got)
 	}
 
-	roster := svc.Roster(session, "run")
+	roster := svc.Roster(workspace, "run")
 	if len(roster) != 1 || roster[0].Member != "bob" || roster[0].State != events.PresenceWatching {
 		t.Fatalf("roster = %+v, want bob still watching", roster)
 	}
 }
 
-// Presence is per session and per attach: a member attached twice to one
-// run keeps watching it until the second attach ends, and their presence
-// in one session survives activity in another.
-func TestWatchingSurvivesSecondAttachAndOtherSession(t *testing.T) {
+// Presence is per workspace and per attach: a member attached twice to
+// one run keeps watching it until the second attach ends, and their
+// presence in one workspace survives activity in another.
+func TestWatchingSurvivesSecondAttachAndOtherWorkspace(t *testing.T) {
 	ctx := context.Background()
 	bus, err := events.NewInProc(ctx, nil)
 	if err != nil {
@@ -112,11 +112,11 @@ func TestWatchingSurvivesSecondAttachAndOtherSession(t *testing.T) {
 	}
 	defer func() { _ = svc.Close() }()
 
-	const sessA, sessB = domain.SessionID("sess-a"), domain.SessionID("sess-b")
+	const wsA, wsB = domain.WorkspaceID("ws-a"), domain.WorkspaceID("ws-b")
 	presence := func(member domain.MemberID, run domain.RunID, state events.PresenceState) {
 		t.Helper()
 		if _, perr := bus.Publish(ctx, events.Event{
-			SessionID: sessA, RunID: run, ActorID: member,
+			WorkspaceID: wsA, RunID: run, ActorID: member,
 			Payload: events.PresencePayload{State: state},
 		}); perr != nil {
 			t.Fatalf("publish %s: %v", state, perr)
@@ -129,23 +129,23 @@ func TestWatchingSurvivesSecondAttachAndOtherSession(t *testing.T) {
 	// bob's are handled.
 	presence("ada", "r2", events.PresenceWatching)
 
-	// Bob also touches another session, which must not move his presence.
-	if err := svc.Heartbeat(ctx, "bob", sessB); err != nil {
+	// Bob also touches another workspace, which must not move his presence.
+	if err := svc.Heartbeat(ctx, "bob", wsB); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
 
 	deadline := time.After(5 * time.Second)
-	for len(svc.Roster(sessA, "r2")) == 0 {
+	for len(svc.Roster(wsA, "r2")) == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for the presence events to be handled")
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
-	if got := svc.Roster(sessA, "r1"); len(got) != 1 || got[0].Member != "bob" || got[0].State != events.PresenceWatching {
-		t.Fatalf("roster(sess-a, r1) = %+v, want bob still watching his second attach", got)
+	if got := svc.Roster(wsA, "r1"); len(got) != 1 || got[0].Member != "bob" || got[0].State != events.PresenceWatching {
+		t.Fatalf("roster(ws-a, r1) = %+v, want bob still watching his second attach", got)
 	}
-	if got := svc.Roster(sessB, "r1"); len(got) != 0 {
-		t.Fatalf("roster(sess-b, r1) = %+v, want empty: r1 is not that session's run", got)
+	if got := svc.Roster(wsB, "r1"); len(got) != 0 {
+		t.Fatalf("roster(ws-b, r1) = %+v, want empty: r1 is not that workspace's run", got)
 	}
 }

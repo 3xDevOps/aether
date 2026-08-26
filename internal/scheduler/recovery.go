@@ -20,7 +20,7 @@ const (
 	exitProbeTimeout = 2 * time.Second
 )
 
-// Relaunch creates a new run from a terminal source: same session, task,
+// Relaunch creates a new run from a terminal source: same workspace, task,
 // harness, and mode, owned by the actor. The new checkout is cloned from
 // refs/heads/<old.Branch> via Git.CreateRunCheckout and is named for the
 // new run ID. The old row and its checkout are left untouched.
@@ -42,10 +42,10 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, err
 	}
-	// A run the reboot interrupted still has the agent's own session behind
-	// it, so the relaunch continues it where the harness can (failure
-	// table, "Server reboot"). A run that finished on its own has nothing
-	// to resume and starts fresh.
+	// A run the reboot interrupted still has the agent's own harness
+	// session behind it, so the relaunch continues it where the harness
+	// can (failure table, "Server reboot"). A run that finished on its own
+	// has nothing to resume and starts fresh.
 	if old.Status == domain.RunInterrupted {
 		argv = harness.ResumeArgv(argv, profile.ResumeFlag)
 	}
@@ -53,11 +53,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, err
 	}
-	sess, err := s.cfg.Store.GetSession(ctx, old.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	ws, err := s.cfg.Store.GetWorkspace(ctx, sess.WorkspaceID)
+	ws, err := s.cfg.Store.GetWorkspace(ctx, old.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,12 +65,12 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, fmt.Errorf("%w: %s", ErrInvalidTransition, relaunchRequiresCheckout)
 	}
 	next := &domain.Run{
-		SessionID: old.SessionID,
-		MemberID:  actor,
-		Task:      old.Task,
-		Harness:   old.Harness,
-		Mode:      old.Mode,
-		Status:    domain.RunQueued,
+		WorkspaceID: old.WorkspaceID,
+		MemberID:    actor,
+		Task:        old.Task,
+		Harness:     old.Harness,
+		Mode:        old.Mode,
+		Status:      domain.RunQueued,
 	}
 	// Checking for an active run in the same checkout and creating the new
 	// row under one critical section serializes concurrent relaunches of
@@ -108,7 +104,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.failRelaunch(next, actor, fmt.Errorf("record checkout: %w", err))
 		return nil, err
 	}
-	if err := s.provision(ctx, next, sess, ws, m, argv, profile, true); err != nil {
+	if err := s.provision(ctx, next, ws, m, argv, profile, true); err != nil {
 		return nil, err
 	}
 	return s.freshen(ctx, next), nil
@@ -121,9 +117,9 @@ func (s *Scheduler) failRelaunch(run *domain.Run, actor domain.MemberID, cause e
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	s.mu.Lock()
-	err := s.transitionLocked(ctx, run.ID, run.SessionID, domain.RunQueued, domain.RunProvisioning, "", actor)
+	err := s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunQueued, domain.RunProvisioning, "", actor)
 	if err == nil {
-		err = s.transitionLocked(ctx, run.ID, run.SessionID, domain.RunProvisioning, domain.RunFailed,
+		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunFailed,
 			"provisioning: "+cause.Error(), actor)
 	}
 	s.mu.Unlock()
@@ -206,7 +202,7 @@ func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {
 			s.mu.Unlock()
 			return
 		}
-		err = s.transitionLocked(ctx, r.ID, r.SessionID, fresh.Status, domain.RunInterrupted, "server restarted", "")
+		err = s.transitionLocked(ctx, r.ID, r.WorkspaceID, fresh.Status, domain.RunInterrupted, "server restarted", "")
 	}
 	s.mu.Unlock()
 	if err != nil {
@@ -308,7 +304,7 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 		}
 	}
 	if err == nil {
-		if werr := s.cfg.Git.StartDiffWatch(ctx, r.SessionID, r.ID); werr != nil {
+		if werr := s.cfg.Git.StartDiffWatch(ctx, r.WorkspaceID, r.ID); werr != nil {
 			slog.Warn("scheduler: restart diff watch", "run", r.ID, "error", werr)
 		}
 		entry := s.entryFromSidecar(r, sc)
@@ -334,9 +330,11 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		started = *r.StartedAt
 	}
 	return &supervised{
-		runID:         r.ID,
-		sessionID:     r.SessionID,
-		workspaceID:   domain.WorkspaceID(sc.WorkspaceID),
+		runID: r.ID,
+		// The workspace comes off the run row, not the sidecar: a sidecar
+		// written by an older build has no workspace scope at all, and the
+		// row is the source of truth either way.
+		workspaceID:   r.WorkspaceID,
 		containerID:   runtime.ID(sc.ContainerID),
 		task:          r.Task,
 		memberID:      r.MemberID,

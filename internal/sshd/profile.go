@@ -43,11 +43,11 @@ func (s *Server) profilePush(ctx context.Context, member domain.MemberID, params
 	if p.Harness == "" {
 		return nil, invalidParams("harness is required")
 	}
-	if len(p.AllowSecret) > 0 && p.SessionID == "" {
-		return nil, invalidParams("--allow-secret requires session_id")
+	if len(p.AllowSecret) > 0 && p.WorkspaceID == "" {
+		return nil, invalidParams("--allow-secret requires workspace_id")
 	}
-	if p.SessionID != "" {
-		if _, err := s.cfg.Store.GetSession(ctx, domain.SessionID(p.SessionID)); err != nil {
+	if p.WorkspaceID != "" {
+		if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID)); err != nil {
 			return nil, profileError(err)
 		}
 	}
@@ -69,11 +69,11 @@ func (s *Server) profilePush(ctx context.Context, member domain.MemberID, params
 	if err != nil {
 		return nil, profileError(err)
 	}
-	if p.SessionID != "" && len(p.AllowSecret) > 0 {
+	if p.WorkspaceID != "" && len(p.AllowSecret) > 0 {
 		msg := "profile.push --allow-secret: " + strings.Join(p.AllowSecret, ", ")
 		if _, pubErr := s.cfg.Bus.Publish(ctx, events.Event{
-			SessionID: domain.SessionID(p.SessionID),
-			ActorID:   member,
+			WorkspaceID: domain.WorkspaceID(p.WorkspaceID),
+			ActorID:     member,
 			Payload: events.TimelinePayload{
 				Kind:    events.TimelineNote,
 				Message: msg,

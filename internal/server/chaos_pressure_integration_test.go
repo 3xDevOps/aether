@@ -57,7 +57,7 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 	for i := range runs {
 		var launched protocol.RunResult
 		if err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-			SessionID: string(env.sess.ID), Task: fmt.Sprintf("gc load %d", i), Harness: "fake",
+			WorkspaceID: string(env.ws.ID), Task: fmt.Sprintf("gc load %d", i), Harness: "fake",
 		}, &launched); err != nil {
 			t.Fatalf("run.launch %d: %v", i, err)
 		}
@@ -108,7 +108,12 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 	// A boot with the TTL turned down is the operator's GC: the checkouts
 	// go, the branches stay, and the gauge drops to match.
 	env.restart(t, Config{CheckoutTTL: time.Nanosecond})
-	env.waitCheckoutsReclaimed(t, done[0].id)
+	// Every checkout, not just the first. The sweep walks runs in ID order
+	// and removes them one at a time, so waiting on done[0] alone proves
+	// nothing about the rest and races the ones still queued behind it.
+	for _, f := range done {
+		env.waitCheckoutsReclaimed(t, f.id)
+	}
 	for _, f := range done {
 		if _, err := os.Stat(filepath.Join(env.dataDir, "checkouts", f.id)); !os.IsNotExist(err) {
 			t.Errorf("checkout for run %s survived the TTL sweep (stat err %v)", f.id, err)
@@ -129,7 +134,7 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 	env.restart(t, Config{MinFreeDiskBytes: math.MaxInt64})
 	var refused protocol.RunResult
 	err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(env.sess.ID), Task: "over the floor", Harness: "fake",
+		WorkspaceID: string(env.ws.ID), Task: "over the floor", Harness: "fake",
 	}, &refused)
 	if err == nil {
 		t.Fatalf("run.launch (run %s) succeeded below the free-space floor; new runs must be refused",
@@ -177,7 +182,7 @@ func TestIntegrationChaosStallUX(t *testing.T) {
 	sub := env.subscribe(t)
 	var launched protocol.RunResult
 	if err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(env.sess.ID), Task: stallTask, Harness: "fake",
+		WorkspaceID: string(env.ws.ID), Task: stallTask, Harness: "fake",
 	}, &launched); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
@@ -247,12 +252,9 @@ type pressureEnv struct {
 	keyPath string
 	signer  ssh.Signer
 	ws      *domain.Workspace
-	sess    *domain.Session
 
 	srv    *Server
 	addr   string
-	base   string
-	tok    string
 	ctrl   *protocol.Client
 	client *ssh.Client
 	stop   func()
@@ -283,13 +285,13 @@ func newPressureEnv(ctx context.Context, t *testing.T, cfg Config) *pressureEnv 
 	if err := e.srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
-	e.ws = &domain.Workspace{Name: "pressure", Environment: domain.WorkspaceEnvironment{CustomImage: image}}
+	e.ws = &domain.Workspace{
+		Name:        "pressure",
+		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err := e.srv.Store().CreateWorkspace(ctx, e.ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
-	}
-	e.sess = &domain.Session{WorkspaceID: e.ws.ID, Name: "pressure", BaseBranch: "main"}
-	if err := e.srv.Store().CreateSession(ctx, e.sess); err != nil {
-		t.Fatalf("seed session: %v", err)
 	}
 	e.seedRepo(t)
 	e.connect(t)
@@ -302,7 +304,6 @@ func (e *pressureEnv) boot(t *testing.T, cfg Config) {
 	t.Helper()
 	cfg.DataDir = e.dataDir
 	cfg.Addr = "127.0.0.1:0"
-	cfg.DashboardAddr = "127.0.0.1:0"
 	cfg.Runtime = e.rt
 	srv, err := New(e.ctx, cfg)
 	if err != nil {
@@ -313,7 +314,6 @@ func (e *pressureEnv) boot(t *testing.T, cfg Config) {
 	go func() { done <- srv.Run(runCtx) }()
 	e.srv = srv
 	e.addr = waitSSHAddr(t, srv)
-	e.base = "http://" + waitDashboardAddr(t, srv)
 	e.stop = sync.OnceFunc(func() {
 		cancel()
 		select {
@@ -357,17 +357,12 @@ func (e *pressureEnv) restart(t *testing.T, cfg Config) {
 	e.connect(t)
 }
 
-// connect redials the control channel and mints a fresh dashboard token;
-// both are per-server, so every restart needs new ones.
+// connect redials the control channel; it is per-server, so every restart
+// needs a new one.
 func (e *pressureEnv) connect(t *testing.T) {
 	t.Helper()
 	e.client = dialSSH(t, e.addr, e.signer)
 	e.ctrl = openControl(t, e.client)
-	var minted protocol.DashTokenMintResult
-	if err := e.ctrl.Call(protocol.MethodDashTokenMint, protocol.DashTokenMintParams{}, &minted); err != nil {
-		t.Fatalf("dash.token.mint: %v", err)
-	}
-	e.tok = minted.Token
 }
 
 func (e *pressureEnv) subscribe(t *testing.T) events.Subscription {
@@ -417,24 +412,15 @@ func (e *pressureEnv) branchHeadMessage(t *testing.T, branch string) string {
 	return strings.TrimSpace(runGit(t, dir, env, "log", "-1", "--format=%s", "FETCH_HEAD"))
 }
 
-// disk reads the dashboard's gauge over its own HTTP wire, which is the
-// only place it is served.
-func (e *pressureEnv) disk(t *testing.T) diskGauge {
+// disk reads the server's gauge over the SSH control channel, which is
+// the only place it is served.
+func (e *pressureEnv) disk(t *testing.T) protocol.ServerDiskResult {
 	t.Helper()
-	var got diskGauge
-	dashGET(t, e.base+"/api/v1/disk", e.tok, &got)
+	var got protocol.ServerDiskResult
+	if err := e.ctrl.Call(protocol.MethodServerDisk, nil, &got); err != nil {
+		t.Fatalf("server.disk: %v", err)
+	}
 	return got
-}
-
-// diskGauge mirrors the gateway's GET /api/v1/disk body: the filesystem
-// headroom plus the three Aether directories that grow without bound.
-type diskGauge struct {
-	UsedBytes       uint64 `json:"used_bytes"`
-	TotalBytes      uint64 `json:"total_bytes"`
-	FreeBytes       uint64 `json:"free_bytes"`
-	WorktreeBytes   uint64 `json:"worktree_bytes"`
-	TranscriptBytes uint64 `json:"transcript_bytes"`
-	DatabaseBytes   uint64 `json:"database_bytes"`
 }
 
 func (e *pressureEnv) waitStatus(t *testing.T, runID string, want domain.RunStatus) {

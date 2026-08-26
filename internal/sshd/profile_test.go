@@ -94,7 +94,7 @@ func TestProfilePushStatusDeltaAndErrors(t *testing.T) {
 func TestProfileAllowSecretCreatesTimelineAudit(t *testing.T) {
 	e := newTestEnv(t, withProfiles(t))
 	sub, err := e.bus.Subscribe(context.Background(), events.SubscribeOptions{
-		Filter: events.Filter{Session: e.sess.ID, Types: []events.Type{events.TypeTimeline}},
+		Filter: events.Filter{Workspace: e.ws.ID, Types: []events.Type{events.TypeTimeline}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestProfileAllowSecretCreatesTimelineAudit(t *testing.T) {
 	c := controlClient(t, e)
 	if err := c.Call(protocol.MethodProfilePush, protocol.ProfilePushParams{
 		Harness:     "claude",
-		SessionID:   string(e.sess.ID),
+		WorkspaceID: string(e.ws.ID),
 		AllowSecret: []string{"settings.json"},
 		Files:       []protocol.ProfileFile{{Path: "settings.json", Mode: 0o644, Content: []byte(`{"ok":true}`)}},
 	}, nil); err != nil {
@@ -188,7 +188,7 @@ func TestProfileErrorMapping(t *testing.T) {
 	}
 }
 
-func TestProfilePushSecretRequiresAllowAndSession(t *testing.T) {
+func TestProfilePushSecretRequiresAllowAndWorkspace(t *testing.T) {
 	e := newTestEnv(t, withProfiles(t))
 	c := controlClient(t, e)
 	secret := []byte("This settings file embeds token=QmFzZTY0c2VjcmV0LWFldGhlci10ZXN0LTQy")
@@ -208,15 +208,15 @@ func TestProfilePushSecretRequiresAllowAndSession(t *testing.T) {
 		Files:       []protocol.ProfileFile{{Path: "settings.json", Mode: 0o644, Content: secret}},
 	}, nil)
 	if !errors.As(err, &rpc) || rpc.Code != protocol.CodeInvalidParams {
-		t.Fatalf("allow without session: err=%v", err)
+		t.Fatalf("allow without workspace: err=%v", err)
 	}
 
 	if err := c.Call(protocol.MethodProfilePush, protocol.ProfilePushParams{
 		Harness:     "claude",
-		SessionID:   string(e.sess.ID),
+		WorkspaceID: string(e.ws.ID),
 		AllowSecret: []string{"settings.json"},
 		Files:       []protocol.ProfileFile{{Path: "settings.json", Mode: 0o644, Content: secret}},
 	}, nil); err != nil {
-		t.Fatalf("allow+session: %v", err)
+		t.Fatalf("allow+workspace: %v", err)
 	}
 }

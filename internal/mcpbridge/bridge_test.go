@@ -73,11 +73,11 @@ func decodeStructured(t *testing.T, res *mcp.CallToolResult, out any) {
 	}
 }
 
-// TestBridgeSpeaksGoldenWireV1 drives a real MCP client through all three
+// TestBridgeSpeaksGoldenWireV2 drives a real MCP client through all three
 // tools against a coordination socket that answers with nothing but
-// the pinned wire-v1 bytes: the round trip a bridge staged against v1
+// the pinned wire-v2 bytes: the round trip a bridge staged against v2
 // makes when the server it dials has moved on.
-func TestBridgeSpeaksGoldenWireV1(t *testing.T) {
+func TestBridgeSpeaksGoldenWireV2(t *testing.T) {
 	success, errorResponses := golden(t, "success.ndjson"), golden(t, "errors.ndjson")
 	requests := goldenRequests(t)
 
@@ -168,23 +168,15 @@ func TestBridgeSpeaksGoldenWireV1(t *testing.T) {
 		t.Fatalf("inbox result carried the acknowledgement token to the agent: %s", raw)
 	}
 
-	// Reading again acknowledges the batch just delivered; the empty result
-	// that follows leaves the bridge holding no token at all.
-	callTool(t, cs, toolInbox, nil, &inbox)
-	if len(inbox.Messages) != 0 {
-		t.Fatalf("second inbox = %+v, want empty", inbox)
-	}
-	callTool(t, cs, toolInbox, nil, &inbox)
-
-	seen := coord.seen()
-	var inboxes []protocol.Request
-	for _, req := range seen {
-		if req.Method == protocol.MethodCoordInbox {
-			inboxes = append(inboxes, req)
-		}
-	}
-	if len(inboxes) != 3 {
-		t.Fatalf("coordination saw %d inbox calls, want 3", len(inboxes))
+	// Reading again acknowledges the batch just delivered. The token is
+	// promoted on the bridge's write path, after this client already has
+	// its result, so a read can race ahead of the promotion and be handed
+	// the same batch again. That redelivery is by design, so retry until
+	// the acknowledgement is on the wire rather than pinning a call count.
+	const ack = "01k1h7m4z9q0r8s5t2v6w3x7y1"
+	inboxes := coord.readUntilAcked(t, cs, ack, &inbox)
+	if len(inboxes) < 2 {
+		t.Fatalf("coordination saw %d inbox calls, want at least 2", len(inboxes))
 	}
 	// requests.ndjson pins both shapes: a read that acknowledges nothing
 	// sends no params at all, and one that acknowledges sends exactly the
@@ -192,12 +184,23 @@ func TestBridgeSpeaksGoldenWireV1(t *testing.T) {
 	if string(inboxes[0].Params) != string(requests[2].Params) {
 		t.Fatalf("first inbox params = %q, want %q", inboxes[0].Params, requests[2].Params)
 	}
-	if string(inboxes[1].Params) != string(requests[3].Params) {
-		t.Fatalf("second inbox params = %q, want %q", inboxes[1].Params, requests[3].Params)
+	acking := inboxes[len(inboxes)-1]
+	if string(acking.Params) != string(requests[3].Params) {
+		t.Fatalf("acknowledging inbox params = %q, want %q", acking.Params, requests[3].Params)
 	}
-	if string(inboxes[2].Params) != string(requests[2].Params) {
-		t.Fatalf("third inbox params = %q, want %q (an empty inbox retains no token)", inboxes[2].Params, requests[2].Params)
+	// Every read before the acknowledging one is a redelivery, which must
+	// carry no token at all.
+	for i, req := range inboxes[:len(inboxes)-1] {
+		if string(req.Params) != string(requests[2].Params) {
+			t.Fatalf("inbox call %d params = %q, want the no-token shape %q", i, req.Params, requests[2].Params)
+		}
 	}
+	// Once the batch is retired the next read acknowledges nothing again.
+	callTool(t, cs, toolInbox, nil, &inbox)
+	if len(inbox.Messages) != 0 {
+		t.Fatalf("inbox after the acknowledgement = %+v, want empty", inbox)
+	}
+	seen := coord.seen()
 	if string(seen[0].Params) != string(requests[0].Params) || seen[0].Method != requests[0].Method {
 		t.Fatalf("status request = %+v, want the golden shape %+v", seen[0], requests[0])
 	}

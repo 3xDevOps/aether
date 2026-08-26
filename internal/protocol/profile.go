@@ -27,11 +27,11 @@ type ProfileBlob struct {
 
 // ProfilePushParams are the params of profile.push. Send either Files
 // (path/mode/content) or a content-addressed delta (Paths + only the Blobs
-// the server does not already have). SessionID is optional: when set with
-// AllowSecret, the server stamps a session timeline audit entry.
+// the server does not already have). WorkspaceID is optional: when set with
+// AllowSecret, the server stamps a workspace timeline audit entry.
 type ProfilePushParams struct {
 	Harness     string        `json:"harness"`
-	SessionID   string        `json:"session_id,omitempty"`
+	WorkspaceID string        `json:"workspace_id,omitempty"`
 	AllowSecret []string      `json:"allow_secret,omitempty"`
 	Files       []ProfileFile `json:"files,omitempty"`
 	Paths       []ProfileFile `json:"paths,omitempty"`

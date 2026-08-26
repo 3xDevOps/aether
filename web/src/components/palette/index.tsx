@@ -47,7 +47,7 @@ export function CommandPalette() {
         open={open}
         onOpenChange={(next: boolean) => toggle(next)}
         title="Command palette"
-        description="Jump to a run or session, steer a run, launch a new one."
+        description="Jump to a run or workspace, steer a run, launch a new one."
       >
         <PaletteBody
           onDone={() => toggle(false)}

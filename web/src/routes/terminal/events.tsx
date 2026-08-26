@@ -1,4 +1,4 @@
-// The run detail's Events tab: the shared session feed pinned to one run.
+// The run detail's Events tab: the shared workspace feed pinned to one run.
 // It drives the same store feed slice and readers the team activity view
 // uses, so the window, live tail and page budget behave identically. The
 // pin is borrowed, not kept: unmounting hands the filters back, so the
@@ -26,8 +26,8 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
   const truncated = useStore((s) => s.feedTruncated)
   const lastSeq = useStore((s) => s.lastSeq)
 
-  const sessionID = run?.session_id ?? ''
-  const pinned = filters.sessionID === sessionID && filters.runID === runID
+  const workspaceID = run?.workspace_id ?? ''
+  const pinned = filters.workspaceID === workspaceID && filters.runID === runID
 
   // Runs before the pin below, so it captures the filters the activity view
   // chose and restores them when this tab lets go of the shared feed.
@@ -37,10 +37,10 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
   }, [])
 
   useEffect(() => {
-    if (sessionID && !pinned) {
-      setFilters({ sessionID, runID, memberID: '', type: '' })
+    if (workspaceID && !pinned) {
+      setFilters({ workspaceID, runID, memberID: '', type: '' })
     }
-  }, [sessionID, runID, pinned, setFilters])
+  }, [workspaceID, runID, pinned, setFilters])
 
   useEffect(() => {
     if (pinned) void openFeed(useStore, client)

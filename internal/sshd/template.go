@@ -13,14 +13,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/templates"
 )
 
-// Templates are session configuration, so creating, changing, and
-// deleting one is session administration. Using one is launching a run,
+// Templates are workspace configuration, so creating, changing, and
+// deleting one is workspace administration. Using one is launching a run,
 // and so is scheduling one: a cron rule is a standing order for future
 // runs, checked again against its creator's role at every fire.
 func init() {
 	registerMethod(protocol.MethodTemplateList, (*Server).templateList)
-	registerGuarded(protocol.MethodTemplateSave, permissions.SessionAdmin, nil, (*Server).templateSave)
-	registerGuarded(protocol.MethodTemplateDelete, permissions.SessionAdmin, nil, (*Server).templateDelete)
+	registerGuarded(protocol.MethodTemplateSave, permissions.WorkspaceAdmin, nil, (*Server).templateSave)
+	registerGuarded(protocol.MethodTemplateDelete, permissions.WorkspaceAdmin, nil, (*Server).templateDelete)
 	registerGuarded(protocol.MethodTemplateLaunch, permissions.Launch, nil, (*Server).templateLaunch)
 	registerMethod(protocol.MethodScheduleList, (*Server).scheduleList)
 	registerGuarded(protocol.MethodScheduleSave, permissions.Launch, nil, (*Server).scheduleSave)
@@ -34,16 +34,16 @@ func (s *Server) templates() (TemplateService, *protocol.Error) {
 	return s.cfg.Services.Templates, nil
 }
 
-// templateSession resolves and validates the session every template
+// templateWorkspace resolves and validates the workspace every template
 // method addresses.
-func (s *Server) templateSession(ctx context.Context, id string) (domain.SessionID, *protocol.Error) {
+func (s *Server) templateWorkspace(ctx context.Context, id string) (domain.WorkspaceID, *protocol.Error) {
 	if id == "" {
-		return "", invalidParams("session_id is required")
+		return "", invalidParams("workspace_id is required")
 	}
-	if _, err := s.cfg.Store.GetSession(ctx, domain.SessionID(id)); err != nil {
+	if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(id)); err != nil {
 		return "", rpcError(err)
 	}
-	return domain.SessionID(id), nil
+	return domain.WorkspaceID(id), nil
 }
 
 func (s *Server) templateList(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -55,11 +55,11 @@ func (s *Server) templateList(ctx context.Context, _ domain.MemberID, params jso
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.templateSession(ctx, p.SessionID)
+	workspace, perr := s.templateWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
-	list, err := svc.List(ctx, session)
+	list, err := svc.List(ctx, workspace)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -79,18 +79,18 @@ func (s *Server) templateSave(ctx context.Context, _ domain.MemberID, params jso
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.templateSession(ctx, p.SessionID)
+	workspace, perr := s.templateWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
 	t := &store.Template{
-		SessionID: session,
-		Name:      p.Name,
-		Task:      p.Task,
-		Harness:   p.Harness,
-		Mode:      domain.LaunchMode(p.Mode),
-		Params:    p.Params,
-		BudgetUSD: p.BudgetUSD,
+		WorkspaceID: workspace,
+		Name:        p.Name,
+		Task:        p.Task,
+		Harness:     p.Harness,
+		Mode:        domain.LaunchMode(p.Mode),
+		Params:      p.Params,
+		BudgetUSD:   p.BudgetUSD,
 	}
 	if err := svc.Save(ctx, t); err != nil {
 		return nil, templateError(err)
@@ -107,14 +107,14 @@ func (s *Server) templateDelete(ctx context.Context, _ domain.MemberID, params j
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.templateSession(ctx, p.SessionID)
+	workspace, perr := s.templateWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
 	if p.Name == "" {
 		return nil, invalidParams("name is required")
 	}
-	if err := svc.Delete(ctx, session, p.Name); err != nil {
+	if err := svc.Delete(ctx, workspace, p.Name); err != nil {
 		return nil, rpcError(err)
 	}
 	return struct{}{}, nil
@@ -129,14 +129,14 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.templateSession(ctx, p.SessionID)
+	workspace, perr := s.templateWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
 	if p.Name == "" {
 		return nil, invalidParams("name is required")
 	}
-	launched, err := svc.Launch(ctx, session, p.Name, member, p.Params)
+	launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params)
 	if err != nil {
 		return nil, templateError(err)
 	}
@@ -159,11 +159,11 @@ func (s *Server) scheduleList(ctx context.Context, _ domain.MemberID, params jso
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.templateSession(ctx, p.SessionID)
+	workspace, perr := s.templateWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
-	list, err := svc.Schedules(ctx, session)
+	list, err := svc.Schedules(ctx, workspace)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -183,14 +183,14 @@ func (s *Server) scheduleSave(ctx context.Context, member domain.MemberID, param
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.templateSession(ctx, p.SessionID)
+	workspace, perr := s.templateWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
 	if p.Template == "" || p.Cron == "" {
 		return nil, invalidParams("template and cron are required")
 	}
-	info, err := svc.SaveSchedule(ctx, session, p.Template, p.Cron, member)
+	info, err := svc.SaveSchedule(ctx, workspace, p.Template, p.Cron, member)
 	if err != nil {
 		return nil, templateError(err)
 	}
@@ -206,14 +206,14 @@ func (s *Server) scheduleDelete(ctx context.Context, _ domain.MemberID, params j
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.templateSession(ctx, p.SessionID)
+	workspace, perr := s.templateWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
 	if p.Template == "" {
 		return nil, invalidParams("template is required")
 	}
-	if err := svc.DeleteSchedule(ctx, session, p.Template); err != nil {
+	if err := svc.DeleteSchedule(ctx, workspace, p.Template); err != nil {
 		return nil, rpcError(err)
 	}
 	return struct{}{}, nil
@@ -232,27 +232,27 @@ func templateError(err error) *protocol.Error {
 
 func templateWire(t *store.Template) protocol.Template {
 	return protocol.Template{
-		ID:        t.ID,
-		SessionID: string(t.SessionID),
-		Name:      t.Name,
-		Task:      t.Task,
-		Harness:   t.Harness,
-		Mode:      string(t.Mode),
-		Params:    t.Params,
-		BudgetUSD: t.BudgetUSD,
-		CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
+		ID:          t.ID,
+		WorkspaceID: string(t.WorkspaceID),
+		Name:        t.Name,
+		Task:        t.Task,
+		Harness:     t.Harness,
+		Mode:        string(t.Mode),
+		Params:      t.Params,
+		BudgetUSD:   t.BudgetUSD,
+		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
 func scheduleWire(info templates.ScheduleInfo) protocol.Schedule {
 	sc := info.Schedule
 	w := protocol.Schedule{
-		ID:        sc.ID,
-		SessionID: string(sc.SessionID),
-		Template:  sc.Template,
-		Cron:      sc.Cron,
-		MemberID:  string(sc.MemberID),
-		CreatedAt: sc.CreatedAt.UTC().Format(time.RFC3339),
+		ID:          sc.ID,
+		WorkspaceID: string(sc.WorkspaceID),
+		Template:    sc.Template,
+		Cron:        sc.Cron,
+		MemberID:    string(sc.MemberID),
+		CreatedAt:   sc.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	if sc.LastFiredAt != nil {
 		w.LastFireAt = sc.LastFiredAt.UTC().Format(time.RFC3339)

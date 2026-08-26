@@ -205,7 +205,7 @@ func (s *Scheduler) checkFreeSpace() error {
 // branch via the git seam, container via the runtime, agent PTY via the
 // PTY seam. It returns the run in running state, or an error with the run
 // marked failed ("provisioning: <err>") once the row exists.
-func (s *Scheduler) Launch(ctx context.Context, session domain.SessionID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	if mode == "" {
 		mode = domain.LaunchTUI
 	}
@@ -220,26 +220,22 @@ func (s *Scheduler) Launch(ctx context.Context, session domain.SessionID, member
 	if err != nil {
 		return nil, err
 	}
-	sess, err := s.cfg.Store.GetSession(ctx, session)
-	if err != nil {
-		return nil, err
-	}
-	ws, err := s.cfg.Store.GetWorkspace(ctx, sess.WorkspaceID)
+	ws, err := s.cfg.Store.GetWorkspace(ctx, workspace)
 	if err != nil {
 		return nil, err
 	}
 	run := &domain.Run{
-		SessionID: session,
-		MemberID:  member,
-		Task:      task,
-		Harness:   harness,
-		Mode:      mode,
-		Status:    domain.RunQueued,
+		WorkspaceID: workspace,
+		MemberID:    member,
+		Task:        task,
+		Harness:     harness,
+		Mode:        mode,
+		Status:      domain.RunQueued,
 	}
 	if err := s.cfg.Store.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
-	if err := s.provision(ctx, run, sess, ws, m, argv, profile, false); err != nil {
+	if err := s.provision(ctx, run, ws, m, argv, profile, false); err != nil {
 		return nil, err
 	}
 	return s.freshen(ctx, run), nil
@@ -251,12 +247,11 @@ func (s *Scheduler) Launch(ctx context.Context, session domain.SessionID, member
 // the row underneath the in-flight launch. Any error after the row exists
 // marks the run failed ("provisioning: <err>"), or abandoned ("killed")
 // when a kill was accepted meanwhile.
-func (s *Scheduler) provision(ctx context.Context, run *domain.Run, sess *domain.Session, ws *domain.Workspace, member *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
+func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, member *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
 	actor := member.ID
 	entry := &supervised{
 		runID:       run.ID,
-		sessionID:   run.SessionID,
-		workspaceID: ws.ID,
+		workspaceID: run.WorkspaceID,
 		task:        run.Task,
 		memberID:    run.MemberID,
 		harness:     run.Harness,
@@ -264,7 +259,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, sess *domain
 		startedAt:   time.Now().UTC(),
 	}
 	s.mu.Lock()
-	err := s.transitionLocked(ctx, run.ID, run.SessionID, domain.RunQueued, domain.RunProvisioning, "", actor)
+	err := s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunQueued, domain.RunProvisioning, "", actor)
 	if err == nil {
 		s.runs[run.ID] = entry
 	}
@@ -273,17 +268,17 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, sess *domain
 		return err
 	}
 	run.Status = domain.RunProvisioning
-	if err := s.provisionSteps(ctx, entry, run, sess, ws, member, argv, profile, reuseCheckout); err != nil {
+	if err := s.provisionSteps(ctx, entry, run, ws, member, argv, profile, reuseCheckout); err != nil {
 		s.failProvisioning(run, actor, err)
 		return errors.New(publicRunStatusReason("provisioning: " + err.Error()))
 	}
 	return nil
 }
 
-func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, sess *domain.Session, ws *domain.Workspace, member *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
+func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, member *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
 	actor := member.ID
 	if !reuseCheckout {
-		checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, run.ID, sess.BaseBranch, run.Task)
+		checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, run.ID, ws.BaseBranch, run.Task)
 		if err != nil {
 			return fmt.Errorf("create checkout: %w", err)
 		}
@@ -345,7 +340,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 		_ = att.Close()
 		return fail("start pty session", perr)
 	}
-	if derr := s.cfg.Git.StartDiffWatch(ctx, run.SessionID, run.ID); derr != nil {
+	if derr := s.cfg.Git.StartDiffWatch(ctx, run.WorkspaceID, run.ID); derr != nil {
 		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), run.ID)
 		return fail("start diff watch", derr)
 	}
@@ -353,7 +348,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if entry.killRequested {
 		err = errKillRequested
 	} else {
-		err = s.transitionLocked(ctx, run.ID, run.SessionID, domain.RunProvisioning, domain.RunRunning, "", actor)
+		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, "", actor)
 	}
 	s.mu.Unlock()
 	if err != nil {
@@ -367,9 +362,9 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	return nil
 }
 
-// failProvisioning records the terminal state after a provisioning error —
+// failProvisioning records the terminal state after a provisioning error -
 // abandoned ("killed") when a kill was accepted during provisioning,
-// failed ("provisioning: <err>") otherwise — on a fresh context so a
+// failed ("provisioning: <err>") otherwise - on a fresh context so a
 // cancelled launch still lands in a consistent state.
 func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cause error) {
 	slog.Error("scheduler: provisioning failed", "run", run.ID, "error", cause)
@@ -394,9 +389,9 @@ func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cau
 	s.mu.Lock()
 	var err error
 	if killed {
-		err = s.transitionLocked(ctx, run.ID, run.SessionID, domain.RunProvisioning, domain.RunAbandoned, "killed", killActor)
+		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunAbandoned, "killed", killActor)
 	} else {
-		err = s.transitionLocked(ctx, run.ID, run.SessionID, domain.RunProvisioning, domain.RunFailed,
+		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunFailed,
 			"provisioning: "+cause.Error(), actor)
 	}
 	delete(s.runs, run.ID)
