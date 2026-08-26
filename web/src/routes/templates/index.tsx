@@ -24,7 +24,7 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { soleWorkspace } from '@/store/workspaces'
 
-const harnesses = ['claude', 'codex', 'aider', 'opencode', 'custom']
+const harnesses = ['claude', 'codex', 'opencode', 'custom']
 
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'

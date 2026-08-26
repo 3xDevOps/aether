@@ -43,11 +43,13 @@ func runRun(args []string) error {
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
-	if task == "" || *agent == "" || fs.NArg() > 1 {
-		return fmt.Errorf("usage: aether run \"task\" --agent <name> [--mode tui|headless] [--workspace]\n   or: aether run --template <name> [--param k=v] [--workspace]")
-	}
 	if *mode != "tui" && *mode != "headless" {
 		return fmt.Errorf("invalid mode %q (want tui or headless)", *mode)
+	}
+	// A taskless launch drops you into the agent's interactive TUI. Headless
+	// has no interactive surface, so it still needs a prompt.
+	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
+		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode tui|headless] [--workspace]\n   (a task is required with --mode headless)\n   or: aether run --template <name> [--param k=v] [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, *workspace)

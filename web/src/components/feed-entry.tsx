@@ -4,6 +4,7 @@
 // button; the Events tab is already pinned to one run and leaves it off.
 
 import { timeAgo } from '@/lib/format'
+import { runLabel } from '@/lib/status'
 import type { Event } from '@/lib/types'
 import { useStore } from '@/store'
 
@@ -31,7 +32,7 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
           onClick={() => navigate('run', { runId: run.id })}
           className="max-w-40 shrink-0 truncate text-muted-foreground hover:text-foreground hover:underline"
         >
-          {run.task}
+          {runLabel(run)}
         </button>
       )}
     </li>

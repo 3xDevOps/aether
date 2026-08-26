@@ -177,10 +177,13 @@ type MemberColorResult struct {
 	Member Member `json:"member"`
 }
 
-// RunLaunchParams are the params of run.launch.
+// RunLaunchParams are the params of run.launch. Task is optional in the
+// default tui mode - an empty task drops the member into the agent's
+// interactive TUI with no seeded prompt - but required in headless mode,
+// which has no interactive surface.
 type RunLaunchParams struct {
 	WorkspaceID string `json:"workspace_id"`
-	Task        string `json:"task"`
+	Task        string `json:"task,omitempty"`
 	Harness     string `json:"harness"`
 	Mode        string `json:"mode,omitempty"`
 }

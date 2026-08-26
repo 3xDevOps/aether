@@ -175,6 +175,32 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 	}
 }
 
+// A taskless launch is accepted in the default tui mode (the member lands in
+// the agent's interactive TUI) and refused in headless mode, which has no
+// interactive surface to type into.
+func TestControlLaunchTaskOptionalOnlyInTUI(t *testing.T) {
+	e := newTestEnv(t, nil)
+	c := controlClient(t, e)
+
+	var lr protocol.RunResult
+	if err := c.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+		WorkspaceID: string(e.ws.ID), Harness: "claude",
+	}, &lr); err != nil {
+		t.Fatalf("taskless tui launch: %v", err)
+	}
+	if lr.Run.Mode != "tui" {
+		t.Errorf("taskless launch mode = %q, want tui", lr.Run.Mode)
+	}
+
+	var pe *protocol.Error
+	err := c.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+		WorkspaceID: string(e.ws.ID), Harness: "claude", Mode: "headless",
+	}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
+		t.Fatalf("taskless headless launch = %v, want CodeInvalidParams", err)
+	}
+}
+
 func TestControlHandoffAndPull(t *testing.T) {
 	e := newTestEnv(t, nil)
 	other := &domain.Member{DisplayName: "Grace", PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: "#3cb44b", Role: domain.RoleCollaborator}

@@ -163,7 +163,7 @@ One command installs the agent, logs it in, and registers it:
 aether agent add omp --workspace myproject
 ```
 
-For a name Aether does not ship (anything but claude, codex, aider, or
+For a name Aether does not ship (anything but claude, codex, or
 opencode) it first asks how to launch the agent, with defaults you accept by
 pressing Enter (`omp {task}` and `omp -p {task}`), or take from `--tui` /
 `--headless` flags. It then opens a shell **inside a server-created

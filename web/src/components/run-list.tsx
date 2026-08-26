@@ -2,6 +2,7 @@ import { StateDot } from '@/components/state-dot'
 import { Skeleton } from '@/components/ui/skeleton'
 import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
+import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { SidebarRun } from '@/store/selectors'
@@ -53,7 +54,7 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
           >
             <StateDot state={state} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm">{run.task}</span>
+              <span className="block truncate text-sm">{runLabel(run)}</span>
               <span className="block truncate text-xs text-muted-foreground">
                 {run.harness} · {run.branch}
                 {run.reason ? ` · ${run.reason}` : ''}
