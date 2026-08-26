@@ -56,10 +56,10 @@ func TestMemberRolePromoteAndDemote(t *testing.T) {
 
 	// Bob is an admin now, so demoting him leaves one admin behind and is
 	// allowed.
-	if err := adminC.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+	if cerr := adminC.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
 		MemberID: string(bob.ID), Role: string(domain.RoleViewer),
-	}, &res); err != nil {
-		t.Fatalf("demote: %v", err)
+	}, &res); cerr != nil {
+		t.Fatalf("demote: %v", cerr)
 	}
 	if res.Member.Role != string(domain.RoleViewer) {
 		t.Errorf("demote result role = %q, want viewer", res.Member.Role)

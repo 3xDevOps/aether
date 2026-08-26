@@ -50,14 +50,14 @@ func writeAndReport(w io.Writer, unitPath, configPath string, values map[string]
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "wrote %s\n", res.UnitPath)
+	_, _ = fmt.Fprintf(w, "wrote %s\n", res.UnitPath)
 	if res.ConfigSkipped {
-		fmt.Fprintf(w, "kept %s (already exists; pass --force to overwrite)\n", res.ConfigPath)
+		_, _ = fmt.Fprintf(w, "kept %s (already exists; pass --force to overwrite)\n", res.ConfigPath)
 	} else {
-		fmt.Fprintf(w, "wrote %s\n", res.ConfigPath)
+		_, _ = fmt.Fprintf(w, "wrote %s\n", res.ConfigPath)
 	}
-	fmt.Fprintf(w, "\nactivate it with:\n  %s\n", serversetup.ActivateCommand)
-	fmt.Fprintf(w, "\nchange options later with:\n  aether-server config set <key> <value>\n")
+	_, _ = fmt.Fprintf(w, "\nactivate it with:\n  %s\n", serversetup.ActivateCommand)
+	_, _ = fmt.Fprintf(w, "\nchange options later with:\n  aether-server config set <key> <value>\n")
 	return nil
 }
 

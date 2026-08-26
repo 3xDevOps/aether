@@ -34,7 +34,7 @@ func setup(args []string) error {
 		return err
 	}
 	if values == nil {
-		fmt.Fprintln(os.Stdout, "nothing written")
+		_, _ = fmt.Fprintln(os.Stdout, "nothing written")
 		return nil
 	}
 	return writeAndReport(os.Stdout, *unitPath, *configPath, values, *force)
@@ -70,27 +70,27 @@ func askServerOptions(w io.Writer, in io.Reader, configPath string) (map[string]
 		"Dashboard port reachable over SSH forwards (0 denies it)", def("dashboard-port"))
 	values["data-dir"] = p.ask("data-dir", "Data directory", def("data-dir"))
 
-	fmt.Fprintln(w, "\nThe dashboard listens on loopback and members reach it through an SSH")
-	fmt.Fprintln(w, "forward. Leave this empty unless you want it bound to a tailnet or LAN")
-	fmt.Fprintln(w, "address directly.")
+	_, _ = fmt.Fprintln(w, "\nThe dashboard listens on loopback and members reach it through an SSH")
+	_, _ = fmt.Fprintln(w, "forward. Leave this empty unless you want it bound to a tailnet or LAN")
+	_, _ = fmt.Fprintln(w, "address directly.")
 	if addr := p.ask("dashboard-addr", "Dashboard address (empty = loopback only)", def("dashboard-addr")); addr != "" {
 		values["dashboard-addr"] = addr
 	}
 
-	fmt.Fprintln(w, "\nWith tailnet auto-join on, anyone already on your tailnet becomes an")
-	fmt.Fprintln(w, "approved member on first connect, with no admin approving them.")
+	_, _ = fmt.Fprintln(w, "\nWith tailnet auto-join on, anyone already on your tailnet becomes an")
+	_, _ = fmt.Fprintln(w, "approved member on first connect, with no admin approving them.")
 	values["tailnet-auto-join"] = p.ask("tailnet-auto-join",
 		"Auto-approve tailnet identities (true/false)", def("tailnet-auto-join"))
 
-	fmt.Fprintln(w, "\nRequiring a pubkey on top of tailnet identity means a member must have")
-	fmt.Fprintln(w, "linked a key before their tailnet identity is trusted.")
+	_, _ = fmt.Fprintln(w, "\nRequiring a pubkey on top of tailnet identity means a member must have")
+	_, _ = fmt.Fprintln(w, "linked a key before their tailnet identity is trusted.")
 	values["tailnet-require-key"] = p.ask("tailnet-require-key",
 		"Also require pubkey verification on tailnet connections (true/false)", def("tailnet-require-key"))
 
 	if p.err != nil {
 		return nil, p.err
 	}
-	fmt.Fprintf(w, "\n%s will hold:\n\n%s\n", configPath, serversetup.Render(values))
+	_, _ = fmt.Fprintf(w, "\n%s will hold:\n\n%s\n", configPath, serversetup.Render(values))
 	if !p.confirm("Write it", true) || p.err != nil {
 		return nil, p.err
 	}
@@ -119,7 +119,7 @@ func (p *prompter) ask(option, label, def string) string {
 			return answer
 		}
 		if err := p.options.Set(option, answer); err != nil {
-			fmt.Fprintf(p.w, "  %v; try again\n", err)
+			_, _ = fmt.Fprintf(p.w, "  %v; try again\n", err)
 			continue
 		}
 		return answer
@@ -148,7 +148,7 @@ func (p *prompter) readLine(label, def string) string {
 	if p.err != nil || p.eof {
 		return def
 	}
-	fmt.Fprintf(p.w, "%s [%s]: ", label, def)
+	_, _ = fmt.Fprintf(p.w, "%s [%s]: ", label, def)
 	line, err := p.lines.ReadString('\n')
 	switch {
 	case err == io.EOF:

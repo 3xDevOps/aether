@@ -49,7 +49,7 @@ func TestRenderIsDeterministicallyOrdered(t *testing.T) {
 	addr := strings.Index(body, "addr = ")
 	dashboard := strings.Index(body, "dashboard-port = ")
 	dataDir := strings.Index(body, "data-dir = ")
-	if !(addr < dashboard && dashboard < dataDir) {
+	if addr >= dashboard || dashboard >= dataDir {
 		t.Errorf("keys are not sorted:\n%s", body)
 	}
 	if !strings.Contains(body, "operator-owned") {

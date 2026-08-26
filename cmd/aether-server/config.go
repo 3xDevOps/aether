@@ -58,9 +58,9 @@ func configShow(w io.Writer, path string) error {
 		return err
 	}
 	if len(values) == 0 {
-		fmt.Fprintf(w, "%s (no config file; every option is at its default)\n\n", path)
+		_, _ = fmt.Fprintf(w, "%s (no config file; every option is at its default)\n\n", path)
 	} else {
-		fmt.Fprintf(w, "%s\n\n", path)
+		_, _ = fmt.Fprintf(w, "%s\n\n", path)
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "OPTION\tVALUE\tSOURCE")
@@ -93,8 +93,8 @@ func configSet(w io.Writer, path, key, value string) error {
 	if err := serversetup.WriteConfig(path, values); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "%s: %s = %s\n", path, key, value)
-	fmt.Fprintf(w, "apply it with:\n  %s\n", serversetup.RestartCommand)
+	_, _ = fmt.Fprintf(w, "%s: %s = %s\n", path, key, value)
+	_, _ = fmt.Fprintf(w, "apply it with:\n  %s\n", serversetup.RestartCommand)
 	return nil
 }
 
@@ -131,7 +131,7 @@ func configEdit(w io.Writer, path string) error {
 	if err := serversetup.Apply(serveFlagSet(), values); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "apply it with:\n  %s\n", serversetup.RestartCommand)
+	_, _ = fmt.Fprintf(w, "apply it with:\n  %s\n", serversetup.RestartCommand)
 	return nil
 }
 

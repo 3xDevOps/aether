@@ -38,7 +38,7 @@ func main() {
 	case "config":
 		exitOn(configCmd(args))
 	default:
-		fmt.Fprintf(os.Stderr, "aether-server: unknown command %q\n", os.Args[1])
+		_, _ = fmt.Fprintf(os.Stderr, "aether-server: unknown command %q\n", os.Args[1])
 		usage()
 		os.Exit(2)
 	}
@@ -48,12 +48,12 @@ func exitOn(err error) {
 	if err == nil {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "aether-server:", err)
+	_, _ = fmt.Fprintln(os.Stderr, "aether-server:", err)
 	os.Exit(1)
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `usage: aether-server <command>
+	_, _ = fmt.Fprintf(os.Stderr, `usage: aether-server <command>
 
 commands:
   serve    run the server
@@ -155,7 +155,7 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s (data dir %s)%s\n",
+	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s (data dir %s)%s\n",
 		version.String(), *o.addr, *o.dataDir, from)
 	return srv.Run(ctx)
 }
