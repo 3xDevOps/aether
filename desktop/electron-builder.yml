@@ -7,6 +7,10 @@
 appId: io.aether.desktop
 productName: Aether
 
+# `build/` is electron-builder's default buildResources directory: it holds
+# packaging inputs only and is never bundled into the app. icon.png there is
+# picked up for every platform - macOS and Windows convert it to .icns/.ico,
+# Linux rasterizes the icon set the AppImage and deb install.
 directories:
   output: dist
 
