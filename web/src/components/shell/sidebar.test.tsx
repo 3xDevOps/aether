@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { Sidebar } from '@/components/shell/sidebar'
 import { useStore } from '@/store'
 import { hydrate } from '@/store/sync'
@@ -111,9 +111,10 @@ describe('Sidebar', () => {
     expect(screen.getByText('Settings')).toBeDefined()
   })
 
-  it('shows no surface links behind the remote allowlist', () => {
-    // The remote gateway advertises its allowlist: no admin methods, no
-    // local verbs, so no new entry points appear.
+  it('keeps Members reachable behind the narrow remote allowlist', () => {
+    // The remote gateway advertises its allowlist: no admin methods and no
+    // local verbs, but member.list is on it, and the roster is readable by
+    // everyone, so Members is the one entry point that stays.
     useStore.setState({
       capabilities: {
         gateway: 'remote',
@@ -123,15 +124,22 @@ describe('Sidebar', () => {
     })
     render(<Sidebar />)
 
-    expect(screen.queryByLabelText('Surfaces')).toBeNull()
+    const surfaces = within(screen.getByLabelText('Surfaces'))
+    expect(surfaces.getByText('Members')).toBeDefined()
+    expect(surfaces.queryByText('Workspaces')).toBeNull()
+    expect(surfaces.queryByText('Onboarding')).toBeNull()
+    expect(surfaces.queryByText('Settings')).toBeNull()
   })
 
-  it('shows no surface links on a legacy monitor without capabilities', () => {
+  it('shows only Members on a legacy monitor without capabilities', () => {
     // The capabilities endpoint 404ed: only the pre-capabilities allowlist
-    // may be assumed, and no admin method is on it.
+    // may be assumed. member.list is on it; no admin method is.
     useStore.setState({ capabilities: null })
     render(<Sidebar />)
 
-    expect(screen.queryByLabelText('Surfaces')).toBeNull()
+    const surfaces = within(screen.getByLabelText('Surfaces'))
+    expect(surfaces.getByText('Members')).toBeDefined()
+    expect(surfaces.queryByText('Templates')).toBeNull()
+    expect(surfaces.queryByText('Agents')).toBeNull()
   })
 })

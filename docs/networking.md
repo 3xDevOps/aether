@@ -83,7 +83,9 @@ and borrows only the identity mechanism.
 - **Everyone after that joins pending.** They are registered as collaborators
   with `Pending` set, and can authenticate but not act until an admin runs
   `aether member approve <member-id>`. Until then commands fail with
-  `membership pending admin approval`.
+  `membership pending admin approval`. That is the role they *join* with; an
+  admin can change it afterwards with `aether member role` (see
+  [teams.md](teams.md)).
 - **`--tailnet-auto-join`** removes the approval step, for teams whose tailnet
   boundary already is the team boundary.
 - **Revocation follows the tailnet.** Remove someone from the tailnet, or deny

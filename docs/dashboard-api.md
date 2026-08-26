@@ -129,8 +129,8 @@ the SSH control channel:
 Everything else stays SSH-only, because a bearer token travels in a URL
 and is far easier to capture than an SSH key: methods that issue or widen
 a credential (`member.invite`, `member.approve`, `member.remove`,
-`dash.token.*`), that replace what is mounted into run containers
-(`profile.*`), or that administer the deployment (`workspace.add`,
+`member.role`, `dash.token.*`), that replace what is mounted into run
+containers (`profile.*`), or that administer the deployment (`workspace.add`,
 `session.new`, `session.settings`, `budget.set`, `template.save`,
 `template.delete`, `schedule.*`) must not be reachable with a stolen
 dashboard token, which the allowlist guarantees even though the token

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { pendingApprovalKey } from '@/lib/status'
-import type { GatewayCapabilities } from '@/lib/types'
+import type { GatewayCapabilities, Member } from '@/lib/types'
 import { useStore } from '@/store'
 import {
   sidebarGroups,
@@ -129,4 +129,19 @@ export function capability(caps: GatewayCapabilities | null): Capability {
 export function useCapability(): Capability {
   const caps = useStore((s) => s.capabilities)
   return useMemo(() => capability(caps), [caps])
+}
+
+/**
+ * The caller's own role, or null before hydration. The gateway capability
+ * descriptor answers what the transport can carry; this answers what this
+ * member may do. An admin affordance needs both, because the local gateway
+ * advertises every method regardless of who is behind it.
+ */
+export function useSelfRole(): Member['role'] | null {
+  return useStore((s) => s.info?.member.role ?? null)
+}
+
+/** Whether the caller holds the admin role. False until hydrated. */
+export function useIsAdmin(): boolean {
+  return useStore((s) => s.info?.member.role === 'admin')
 }

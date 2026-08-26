@@ -3,10 +3,12 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -297,7 +299,23 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if err := s.cfg.Store.TransferRun(ctx, run.ID, domain.MemberID(p.ToMemberID)); err != nil {
+	// A run must land on someone who can act on it. Handing one to a
+	// viewer (or a member awaiting approval) orphans it: nobody but an
+	// admin could then steer or kill it. Launch is the capability that
+	// separates the roles that may own a run from the ones that may not.
+	to := domain.MemberID(p.ToMemberID)
+	recipient, err := s.cfg.Store.GetMember(ctx, to)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if recipient.Pending {
+		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: membership is pending admin approval", recipient.DisplayName))
+	}
+	actor := permissions.Actor{ID: recipient.ID, Role: recipient.Role}
+	if derr := permissions.Check(permissions.Launch, actor, permissions.Target{}); derr != nil {
+		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own runs", recipient.DisplayName))
+	}
+	if err := s.cfg.Store.TransferRun(ctx, run.ID, to); err != nil {
 		return nil, rpcError(err)
 	}
 	_, _ = s.cfg.Bus.Publish(ctx, events.Event{

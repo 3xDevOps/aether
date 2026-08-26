@@ -55,23 +55,24 @@ surface.
   `template.launch`. Everything else answers `403`. The excluded ones are
   excluded because they issue or widen a credential (`member.invite`,
   whose one-time code becomes a persisted collaborator holding the
-  bearer's own SSH key, plus `member.approve`, `member.remove` and
-  `dash.token.*`), replace the agent credential profile mounted into run
-  containers (`profile.*`), or administer the deployment (`workspace.add`,
-  `session.new`, `session.settings`, `budget.set`, `template.save`,
-  `template.delete`, `schedule.*`). Those need the SSH key, which is the
-  point: a stolen dashboard token expires and can be revoked, an SSH
-  membership it minted could not be.
+  bearer's own SSH key, plus `member.approve`, `member.remove`,
+  `member.role` - which hands out the admin role itself, the widest
+  grant of the lot - and `dash.token.*`), replace the agent credential
+  profile mounted into run containers (`profile.*`), or administer the
+  deployment (`workspace.add`, `session.new`, `session.settings`,
+  `budget.set`, `template.save`, `template.delete`, `schedule.*`). Those
+  need the SSH key, which is the point: a stolen dashboard token expires
+  and can be revoked, an SSH membership it minted could not be.
 - **Live sockets are re-authorized, not just re-tokened.** Event and
   attach WebSockets re-run the handshake's gates every few seconds and
   close with a policy-violation status the moment one stops holding: the
   token revoked or expired, the member removed or un-approved, and for a
   write attach the steer capability withdrawn by a `protect`, a
-  `steer_others` change, or a handoff. Otherwise a socket would keep the
-  authority it was opened with - a removed member still on the event feed,
-  or someone still typing into an agent an admin has since walled off. A
-  downgrade from write to read is a close, not a silent demotion; the
-  browser reconnects read-only.
+  `steer_others` change, a handoff, or a demotion to viewer. Otherwise a
+  socket would keep the authority it was opened with - a removed member
+  still on the event feed, or someone still typing into an agent an admin
+  has since walled off. A downgrade from write to read is a close, not a
+  silent demotion; the browser reconnects read-only.
 - **`--dashboard-addr` serves plain HTTP.** Aether ships no certificate
   handling: terminate TLS in front of the gateway, or keep the address on a
   tailnet. Without the flag no direct listener exists at all.

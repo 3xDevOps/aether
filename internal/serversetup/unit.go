@@ -1,4 +1,38 @@
-[Unit]
+package serversetup
+
+// ServiceName is the system service identifier.
+const ServiceName = "aether-server"
+
+// UnitPath is where the system unit belongs.
+const UnitPath = "/etc/systemd/system/" + ServiceName + ".service"
+
+// ActivateCommand enables and starts a freshly installed unit.
+const ActivateCommand = "systemctl daemon-reload && systemctl enable --now " + ServiceName
+
+// RestartCommand applies a changed config file to a running service.
+const RestartCommand = "systemctl restart " + ServiceName
+
+// ServiceDefaults are the options the packaged unit used to hardcode in its
+// ExecStart before they moved into the config file. They are the posture of
+// a machine running aether-server as a service, which is not the same as the
+// posture of the bare `serve` command: notably the service publishes the
+// dashboard on 8080, while `serve` denies it unless asked. Install seeds a
+// new config file with these so moving the options out of the unit does not
+// quietly change what a fresh install does.
+func ServiceDefaults() map[string]string {
+	return map[string]string{
+		"data-dir":       "/var/lib/aether",
+		"addr":           ":2222",
+		"dashboard-port": "8080",
+	}
+}
+
+// DefaultUnit returns the systemd unit for the server. It is pinned
+// byte-for-byte to packaging/systemd/aether-server.service by a test, so the
+// shipped file and everything installed by this binary can never drift.
+func DefaultUnit() string { return defaultUnit }
+
+const defaultUnit = `[Unit]
 Description=Aether agent development server
 Documentation=https://github.com/3xDevOps/Aether/blob/main/docs/install.md
 Wants=network-online.target
@@ -23,11 +57,11 @@ Type=simple
 # the config file below, which is operator-owned and survives binary updates
 # and unit reinstalls. Set them with "aether-server config set <key> <value>"
 # or "aether-server setup" - do not edit this ExecStart.
-ExecStart=/usr/local/bin/aether-server serve --config /etc/aether/server.conf
+ExecStart=/usr/local/bin/aether-server serve --config ` + DefaultConfigPath + `
 
 # Optional: ANTHROPIC_API_KEY / OPENAI_API_KEY for API-key harnesses, passed
 # through into run containers. Subscription logins do not belong here - they
-# live in the per-member server-side home that `aether setup` writes.
+# live in the per-member server-side home that ` + "`aether setup`" + ` writes.
 EnvironmentFile=-/etc/aether/aether-server.env
 
 StateDirectory=aether
@@ -42,3 +76,4 @@ LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
+`
