@@ -45,14 +45,14 @@ func NewInProc(ctx context.Context, log EventLog) (*InProc, error) {
 // a persistence failure fails the publish so replay can never miss an
 // event that live subscribers saw. Sequence assignment, the log write, and
 // fan-out happen under one lock, so concurrent publishes (and Subscribe)
-// serialize on the disk write — a deliberate trade for a gapless, ordered
+// serialize on the disk write - a deliberate trade for a gapless, ordered
 // cursor.
 func (b *InProc) Publish(ctx context.Context, e Event) (Event, error) {
 	if e.Payload == nil {
 		return Event{}, ErrNoPayload
 	}
-	if e.SessionID == "" {
-		return Event{}, ErrNoSession
+	if e.WorkspaceID == "" {
+		return Event{}, ErrNoWorkspace
 	}
 	if e.Type == "" {
 		e.Type = e.Payload.EventType()
@@ -286,7 +286,7 @@ func (s *inprocSub) deliver(ctx context.Context, opts SubscribeOptions, joinSeq 
 }
 
 // errSubClosed signals that replay stopped because the subscription was
-// closed — a clean termination, not surfaced via Err.
+// closed - a clean termination, not surfaced via Err.
 var errSubClosed = errors.New("events: subscription closed")
 
 // replay streams persisted events with afterSeq < Seq <= joinSeq to the

@@ -72,6 +72,51 @@ func TestRebootRecoveryResumesSupervision(t *testing.T) {
 	}
 }
 
+// TestRecoveryOfLegacySidecarKeepsWorkspaceScope pins the upgrade path:
+// a sidecar written before runs hung off workspaces carries session_id and
+// no workspace_id. It must still decode, and the resumed supervision must
+// publish under the run row's workspace - the subscription here is
+// workspace-filtered, so receiving the exit event is the proof.
+func TestRecoveryOfLegacySidecarKeepsWorkspaceScope(t *testing.T) {
+	e := newTestEnv(t, nil)
+	sub := e.subscribe(t)
+
+	run, c := e.launchFake(t, "written by an older build")
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	raw, err := os.ReadFile(e.sched.sidecarPath(run.ID))
+	if err != nil {
+		t.Fatalf("read sidecar: %v", err)
+	}
+	var fields map[string]any
+	if decErr := json.Unmarshal(raw, &fields); decErr != nil {
+		t.Fatalf("decode sidecar: %v", decErr)
+	}
+	delete(fields, "workspace_id")
+	fields["session_id"] = "sess_legacy"
+	legacy, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal legacy sidecar: %v", err)
+	}
+	if err := os.WriteFile(e.sched.sidecarPath(run.ID), legacy, 0o644); err != nil {
+		t.Fatalf("write legacy sidecar: %v", err)
+	}
+
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	startScheduler(t, s2)
+	waitFor(t, "supervision resumed", func() bool {
+		_, watching := e.git.watchingFor(run.ID)
+		return watching
+	})
+
+	c.exitNow(0)
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	if ev.WorkspaceID != e.ws.ID {
+		t.Fatalf("recovered event workspace = %q, want %q", ev.WorkspaceID, e.ws.ID)
+	}
+}
+
 func TestRebootRecoveryContainerGone(t *testing.T) {
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
@@ -113,14 +158,14 @@ func TestRebootRecoveryQueuedAndMissingSidecar(t *testing.T) {
 	ctx := t.Context()
 
 	queued := &domain.Run{
-		SessionID: e.sess.ID, MemberID: e.member.ID, Task: "never started",
+		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "never started",
 		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunQueued,
 	}
 	if err := e.db.CreateRun(ctx, queued); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	orphan := &domain.Run{
-		SessionID: e.sess.ID, MemberID: e.member.ID, Task: "no sidecar",
+		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "no sidecar",
 		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 	}
 	if err := e.db.CreateRun(ctx, orphan); err != nil {
@@ -141,7 +186,7 @@ func TestRecoveryFindsContainerByCreationKey(t *testing.T) {
 	ctx := t.Context()
 
 	r := &domain.Run{
-		SessionID: e.sess.ID, MemberID: e.member.ID, Task: "narrow window",
+		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "narrow window",
 		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunQueued,
 	}
 	if err := e.db.CreateRun(ctx, r); err != nil {
@@ -249,9 +294,9 @@ func TestRelaunchRejectsUnpublishedBranch(t *testing.T) {
 	}
 	e.git.unpublishBranch(e.ws.ID, old.Branch)
 
-	before, err := e.db.ListRunsBySession(t.Context(), old.SessionID)
+	before, err := e.db.ListRunsByWorkspace(t.Context(), old.WorkspaceID)
 	if err != nil {
-		t.Fatalf("ListRunsBySession before relaunch: %v", err)
+		t.Fatalf("ListRunsByWorkspace before relaunch: %v", err)
 	}
 	next, err := s2.Relaunch(t.Context(), old.ID, e.member.ID)
 	if next != nil {
@@ -264,9 +309,9 @@ func TestRelaunchRejectsUnpublishedBranch(t *testing.T) {
 	if err.Error() != wantErr {
 		t.Fatalf("Relaunch error = %q, want %q", err, wantErr)
 	}
-	after, listErr := e.db.ListRunsBySession(t.Context(), old.SessionID)
+	after, listErr := e.db.ListRunsByWorkspace(t.Context(), old.WorkspaceID)
 	if listErr != nil {
-		t.Fatalf("ListRunsBySession after relaunch: %v", listErr)
+		t.Fatalf("ListRunsByWorkspace after relaunch: %v", listErr)
 	}
 	if len(after) != len(before) {
 		t.Fatalf("run count = %d after rejected relaunch, want %d", len(after), len(before))
@@ -282,7 +327,7 @@ func TestCheckoutGC(t *testing.T) {
 	// An expired terminal run and a fresh one.
 	mk := func(task string, finished time.Time) *domain.Run {
 		r := &domain.Run{
-			SessionID: e.sess.ID, MemberID: e.member.ID, Task: task,
+			WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: task,
 			Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunQueued,
 		}
 		if err := e.db.CreateRun(ctx, r); err != nil {
@@ -508,7 +553,7 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	e := newTestEnv(t, nil)
 
-	run, err := e.sched.Launch(t.Context(), e.sess.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}

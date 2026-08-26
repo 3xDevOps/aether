@@ -23,11 +23,11 @@ func TestRestartDoesNotRepublishHistory(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = log.Close() })
 
-	const session = domain.SessionID("s1")
+	const workspace = domain.WorkspaceID("w1")
 	diff := func(bus events.Bus, run domain.RunID, path string) {
 		t.Helper()
 		if _, err := bus.Publish(ctx, events.Event{
-			SessionID: session, RunID: run,
+			WorkspaceID: workspace, RunID: run,
 			Payload: events.RunDiffPayload{Files: []events.FileDiffStat{{Path: path}}},
 		}); err != nil {
 			t.Fatalf("publish diff: %v", err)
@@ -56,18 +56,18 @@ func TestRestartDoesNotRepublishHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bus: %v", err)
 	}
-	idx := NewIndex(bus, oneSession, log)
+	idx := NewIndex(bus, oneWorkspace, log)
 	if err = idx.Start(ctx); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	diff(bus, "r1", "main.go")
 	diff(bus, "r2", "main.go")
 	if n := waitOverlaps(2); n != 2 {
-		t.Fatalf("live session: overlap events = %d, want 2", n)
+		t.Fatalf("live index: overlap events = %d, want 2", n)
 	}
 	for _, run := range []domain.RunID{"r1", "r2"} {
 		if _, err = bus.Publish(ctx, events.Event{
-			SessionID: session, RunID: run,
+			WorkspaceID: workspace, RunID: run,
 			Payload: events.RunStatusPayload{From: domain.RunRunning, To: domain.RunMerged},
 		}); err != nil {
 			t.Fatalf("publish status: %v", err)
@@ -76,7 +76,7 @@ func TestRestartDoesNotRepublishHistory(t *testing.T) {
 	// The first terminal status clears the overlap for both runs.
 	live := waitOverlaps(4)
 	if live != 4 {
-		t.Fatalf("live session: overlap events = %d, want 4", live)
+		t.Fatalf("live index: overlap events = %d, want 4", live)
 	}
 	_ = idx.Close()
 	_ = bus.Close()
@@ -86,7 +86,7 @@ func TestRestartDoesNotRepublishHistory(t *testing.T) {
 		t.Fatalf("bus after restart: %v", err)
 	}
 	t.Cleanup(func() { _ = restarted.Close() })
-	rebuilt := NewIndex(restarted, oneSession, log)
+	rebuilt := NewIndex(restarted, oneWorkspace, log)
 	if err = rebuilt.Start(ctx); err != nil {
 		t.Fatalf("start after restart: %v", err)
 	}

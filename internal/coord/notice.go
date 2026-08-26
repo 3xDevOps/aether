@@ -58,7 +58,7 @@ func (s *Service) notify(ctx context.Context, run domain.RunID, with []events.Ov
 	}
 }
 
-// stampNotice records a delivered notice on the notified run's session
+// stampNotice records a delivered notice on the notified run's workspace
 // timeline, attributed to that run's owner - the same audit trail
 // coordination messages leave. It runs only after the banner actually
 // reached the terminal, so the feed says an agent was told rather than
@@ -70,9 +70,9 @@ func (s *Service) stampNotice(ctx context.Context, run domain.RunID, peer events
 		return
 	}
 	_, err = s.cfg.Bus.Publish(ctx, events.Event{
-		SessionID: r.SessionID,
-		RunID:     r.ID,
-		ActorID:   r.MemberID,
+		WorkspaceID: r.WorkspaceID,
+		RunID:       r.ID,
+		ActorID:     r.MemberID,
 		Payload: events.TimelinePayload{
 			Kind: events.TimelineNote,
 			Message: fmt.Sprintf("coordination notice: run %s is also editing %s",

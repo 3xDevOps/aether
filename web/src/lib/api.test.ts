@@ -1,4 +1,4 @@
-// The token bootstrap: `aether dash` opens a tokened URL, and the client's
+// The token bootstrap: `aether gui` opens a tokened URL, and the client's
 // job is to move the credential into sessionStorage and out of the address
 // bar - the one place it would otherwise sit in history and screenshots.
 

@@ -1,6 +1,6 @@
 package protocol
 
-// Coordination wire v1.
+// Coordination wire v2.
 //
 // This is the whole surface an agent reaches on its run's coordination
 // socket: three methods, no control verbs, no git, no other run's
@@ -8,7 +8,7 @@ package protocol
 // the bridge lives inside a container that outlives a server restart, and
 // carries its version in every coord.status result so a bridge can tell
 // what it is talking to.
-const CoordWireVersion = "v1"
+const CoordWireVersion = "v2"
 
 // The coordination method set. Nothing else is reachable on the socket.
 const (
@@ -54,7 +54,7 @@ type CoordPeer struct {
 type CoordStatusResult struct {
 	WireVersion string      `json:"wire_version"`
 	RunID       string      `json:"run_id"`
-	SessionID   string      `json:"session_id"`
+	WorkspaceID string      `json:"workspace_id"`
 	MemberID    string      `json:"member_id"`
 	Task        string      `json:"task,omitempty"`
 	Peers       []CoordPeer `json:"peers"`

@@ -20,7 +20,7 @@ type PTYAttacher interface {
 
 // RunController is the SSH server's view of the scheduler (*scheduler.Scheduler).
 type RunController interface {
-	Launch(ctx context.Context, session domain.SessionID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
+	Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Pause(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Resume(ctx context.Context, run domain.RunID, actor domain.MemberID) error

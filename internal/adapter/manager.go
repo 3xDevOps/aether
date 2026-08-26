@@ -27,7 +27,7 @@ type OutputTap interface {
 // run-status events on the bus; when a headless run whose harness has an
 // adapter enters running, it taps the run's PTY output and pumps it
 // through a LineNormalizer into the adapter, publishing the resulting
-// typed payloads on the bus under the run's session and run IDs. Runs
+// typed payloads on the bus under the run's workspace and run IDs. Runs
 // without an adapter (or non-headless runs) are left alone: layer-1
 // observability (PTY + diffs) is always sufficient.
 type Manager struct {
@@ -77,7 +77,7 @@ func (m *Manager) scan(ctx context.Context) {
 	}
 	for _, r := range runs {
 		if r.Status == domain.RunRunning {
-			m.attach(r.SessionID, r.ID)
+			m.attach(r.WorkspaceID, r.ID)
 		}
 	}
 }
@@ -120,14 +120,14 @@ func (m *Manager) loop() {
 		if !ok || p.To != domain.RunRunning {
 			continue
 		}
-		m.attach(e.SessionID, e.RunID)
+		m.attach(e.WorkspaceID, e.RunID)
 	}
 }
 
 // attach taps a run entering running, once: a run cycling through
 // needs-attention and back keeps its original tap (the PTY session, and
 // with it the tap, lives across that transition).
-func (m *Manager) attach(session domain.SessionID, run domain.RunID) {
+func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID) {
 	m.mu.Lock()
 	if m.closed || m.active[run] != nil {
 		m.mu.Unlock()
@@ -164,12 +164,12 @@ func (m *Manager) attach(session domain.SessionID, run domain.RunID) {
 	m.mu.Unlock()
 
 	m.wg.Add(1)
-	go m.pump(session, run, a, tap)
+	go m.pump(workspace, run, a, tap)
 }
 
 // pump reads the tap to EOF (the PTY session ending), normalizing chunks
 // into lines and publishing what the adapter makes of them.
-func (m *Manager) pump(session domain.SessionID, run domain.RunID, a Adapter, tap io.ReadCloser) {
+func (m *Manager) pump(workspace domain.WorkspaceID, run domain.RunID, a Adapter, tap io.ReadCloser) {
 	defer m.wg.Done()
 	defer func() {
 		m.mu.Lock()
@@ -183,22 +183,22 @@ func (m *Manager) pump(session domain.SessionID, run domain.RunID, a Adapter, ta
 		n, err := tap.Read(buf)
 		if n > 0 {
 			for _, line := range norm.Feed(buf[:n]) {
-				m.publish(session, run, a.ConsumeLine(line))
+				m.publish(workspace, run, a.ConsumeLine(line))
 			}
 		}
 		if err != nil {
 			// The final line of a run may lack a terminator.
 			if line, ok := norm.Flush(); ok {
-				m.publish(session, run, a.ConsumeLine(line))
+				m.publish(workspace, run, a.ConsumeLine(line))
 			}
 			return
 		}
 	}
 }
 
-func (m *Manager) publish(session domain.SessionID, run domain.RunID, payloads []events.Payload) {
+func (m *Manager) publish(workspace domain.WorkspaceID, run domain.RunID, payloads []events.Payload) {
 	for _, p := range payloads {
-		e := events.Event{SessionID: session, RunID: run, Payload: p}
+		e := events.Event{WorkspaceID: workspace, RunID: run, Payload: p}
 		if _, err := m.bus.Publish(context.Background(), e); err != nil {
 			slog.Warn("adapter: publish event failed",
 				"type", p.EventType(), "run", run, "error", err)

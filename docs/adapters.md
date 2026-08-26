@@ -70,8 +70,8 @@ type Adapter interface {
 Register a constructor in the `adapters` map keyed by harness name, and the
 `Manager` does the rest: it watches the bus for headless runs entering
 `running`, taps the run's PTY output, normalizes it into lines, feeds them to
-your adapter, and publishes whatever payloads come back under the run's session
-and run IDs.
+your adapter, and publishes whatever payloads come back under the run's
+workspace and run IDs.
 
 ### The four rules
 
@@ -103,13 +103,14 @@ Most adapter output is `events.AgentEventPayload`:
 | `AgentSession` | The harness's own session ID, surfaced on the timeline | `HarnessSessionID` |
 
 Token usage is **not** an agent event: report it as `events.RunCostPayload` so
-it reaches the cost rollups and session budgets. A harness that reports no
+it reaches the cost rollups and workspace budgets. A harness that reports no
 usage leaves its runs marked unmetered, which `aether cost` and `aether budget`
 both say out loud.
 
-`AgentSession` is a timeline record, not the resume mechanism. Relaunching an
-interrupted run uses the profile's `ResumeFlag`, which names no session - see
-[failure-handling.md](failure-handling.md). Nothing reads `HarnessSessionID`
+`AgentSession` carries the harness's own conversation ID, which is unrelated
+to any Aether scope. It is a timeline record, not the resume mechanism:
+relaunching an interrupted run uses the profile's `ResumeFlag`, which names no
+conversation - see [failure-handling.md](failure-handling.md). Nothing reads `HarnessSessionID`
 back today; emit it because it is what an operator needs to find the
 conversation in the harness's own tooling.
 

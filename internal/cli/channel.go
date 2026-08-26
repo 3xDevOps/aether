@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"strconv"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -276,44 +274,6 @@ func workspaceShellAckError(ack protocol.WorkspaceShellResponse) error {
 		return fmt.Errorf("cli: workspace shell: %s (code %d)", ack.Error, ack.Code)
 	}
 	return fmt.Errorf("cli: workspace shell: %s", ack.Error)
-}
-
-// ListenLocalForward listens on 127.0.0.1:localPort (0 picks an ephemeral
-// port) and forwards accepted connections to 127.0.0.1:destPort through
-// the SSH connection. The returned listener's Addr is the bound local address.
-func (c *Conn) ListenLocalForward(localPort, destPort int) (net.Listener, error) {
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)))
-	if err != nil {
-		return nil, fmt.Errorf("cli: local listen: %w", err)
-	}
-	go func() {
-		dst := net.JoinHostPort("127.0.0.1", strconv.Itoa(destPort))
-		for {
-			local, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func() {
-				defer func() { _ = local.Close() }()
-				remote, err := c.client.Dial("tcp", dst)
-				if err != nil {
-					return
-				}
-				defer func() { _ = remote.Close() }()
-				done := make(chan struct{}, 2)
-				go func() {
-					_, _ = io.Copy(remote, local)
-					done <- struct{}{}
-				}()
-				go func() {
-					_, _ = io.Copy(local, remote)
-					done <- struct{}{}
-				}()
-				<-done
-			}()
-		}
-	}()
-	return ln, nil
 }
 
 // bufferedStream keeps leftover bytes from the ack-line bufio.Reader so

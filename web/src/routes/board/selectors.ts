@@ -1,9 +1,9 @@
-// Board shape: run cards dealt into Orca's four buckets. Pure over a narrow
+// Board shape: run cards dealt into Orca's three buckets. Pure over a narrow
 // input so the component can memoize on exactly what it reads.
 
 import { useMemo } from 'react'
 import { runState, type PresentationState } from '@/lib/status'
-import type { Member, Session } from '@/lib/types'
+import type { Member, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { isUnseen, type Ack } from '@/store/board'
 import { usePendingApprovalRuns } from '@/store/hooks'
@@ -15,7 +15,7 @@ export interface BoardCard {
   run: RunRecord
   state: PresentationState
   owner?: Member
-  session?: Session
+  workspace?: Workspace
   unseen: boolean
   paused: boolean
 }
@@ -26,15 +26,13 @@ export interface BoardColumn {
   cards: BoardCard[]
 }
 
-/** A session with nothing running: the Idle column, hidden by default. */
-export interface IdleSession {
-  session: Session
-  runs: number
-  changedAt: string
-}
-
+/**
+ * An empty workspace shows every run: that is what the board falls back to
+ * before hydration has named one.
+ */
 export interface BoardInput {
-  sessions: Record<string, Session>
+  workspace: string
+  workspaces: Record<string, Workspace>
   runs: Record<string, RunRecord>
   members: Record<string, Member>
   acked: Record<string, Ack>
@@ -43,11 +41,10 @@ export interface BoardInput {
   pending: Set<string>
 }
 
-export const bucketLabel: Record<Bucket | 'idle', string> = {
+export const bucketLabel: Record<Bucket, string> = {
   'needs-you': 'Needs You',
   working: 'Working',
   done: 'Done',
-  idle: 'Idle',
 }
 
 /**
@@ -68,7 +65,6 @@ export function bucketOf(state: PresentationState): Bucket {
 
 export interface BoardData {
   columns: BoardColumn[]
-  idle: IdleSession[]
 }
 
 const at = (iso: string) => Date.parse(iso)
@@ -79,40 +75,22 @@ export function board(s: BoardInput): BoardData {
     working: [],
     done: [],
   }
-  const activeSessions = new Set<string>()
-  const runCounts = new Map<string, number>()
-  const sessionChanged = new Map<string, string>()
 
   for (const run of Object.values(s.runs)) {
+    if (s.workspace && run.workspace_id !== s.workspace) continue
     const state = runState(run.status, s.pending.has(run.id))
-    const bucket = bucketOf(state)
-    columns[bucket].push({
+    columns[bucketOf(state)].push({
       run,
       state,
       owner: s.members[run.member_id],
-      session: s.sessions[run.session_id],
+      workspace: s.workspaces[run.workspace_id],
       unseen: isUnseen(s.acked, run),
       paused: state === 'working' && s.pausedRuns[run.id] === true,
     })
-    if (bucket !== 'done') activeSessions.add(run.session_id)
-    runCounts.set(run.session_id, (runCounts.get(run.session_id) ?? 0) + 1)
-    const seen = sessionChanged.get(run.session_id)
-    if (!seen || at(run.stateChangedAt) > at(seen)) {
-      sessionChanged.set(run.session_id, run.stateChangedAt)
-    }
   }
 
   const newestFirst = (a: BoardCard, b: BoardCard) =>
     at(b.run.stateChangedAt) - at(a.run.stateChangedAt)
-
-  const idle = Object.values(s.sessions)
-    .filter((session) => !activeSessions.has(session.id))
-    .map((session) => ({
-      session,
-      runs: runCounts.get(session.id) ?? 0,
-      changedAt: sessionChanged.get(session.id) ?? session.created_at,
-    }))
-    .sort((a, b) => at(b.changedAt) - at(a.changedAt))
 
   return {
     columns: (Object.keys(columns) as Bucket[]).map((key) => ({
@@ -120,19 +98,20 @@ export function board(s: BoardInput): BoardData {
       label: bucketLabel[key],
       cards: columns[key].sort(newestFirst),
     })),
-    idle,
   }
 }
 
 export function useBoard(): BoardData {
-  const sessions = useStore((s) => s.sessions)
+  const workspace = useStore((s) => s.activeWorkspace)
+  const workspaces = useStore((s) => s.workspaces)
   const runs = useStore((s) => s.runs)
   const members = useStore((s) => s.members)
   const acked = useStore((s) => s.acked)
   const pausedRuns = useStore((s) => s.pausedRuns)
   const pending = usePendingApprovalRuns()
   return useMemo(
-    () => board({ sessions, runs, members, acked, pausedRuns, pending }),
-    [sessions, runs, members, acked, pausedRuns, pending],
+    () =>
+      board({ workspace, workspaces, runs, members, acked, pausedRuns, pending }),
+    [workspace, workspaces, runs, members, acked, pausedRuns, pending],
   )
 }

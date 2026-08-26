@@ -34,16 +34,16 @@ func TestReplayedPausesRaiseOneRequestEach(t *testing.T) {
 	if err = db.CreateMember(ctx, m); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
-	ws := &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+	ws := &domain.Workspace{
+		Name:        "proj",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	sess := &domain.Session{WorkspaceID: ws.ID, Name: "effort", BaseBranch: "main"}
-	if err = db.CreateSession(ctx, sess); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
 	run := &domain.Run{
-		SessionID: sess.ID, MemberID: m.ID, Task: "plan the thing",
+		WorkspaceID: ws.ID, MemberID: m.ID, Task: "plan the thing",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 	}
 	if err = db.CreateRun(ctx, run); err != nil {
@@ -75,7 +75,7 @@ func TestReplayedPausesRaiseOneRequestEach(t *testing.T) {
 		t.Helper()
 		for _, p := range pauses {
 			if _, perr := bus.Publish(ctx, events.Event{
-				SessionID: sess.ID, RunID: run.ID, ActorID: m.ID, Payload: p,
+				WorkspaceID: ws.ID, RunID: run.ID, ActorID: m.ID, Payload: p,
 			}); perr != nil {
 				t.Fatalf("publish pause: %v", perr)
 			}
@@ -102,7 +102,7 @@ func TestReplayedPausesRaiseOneRequestEach(t *testing.T) {
 	// Delivery is ordered, so both replayed pauses are handled by the time
 	// this one is: it is the marker that the replay is fully drained.
 	if _, err = bus.Publish(ctx, events.Event{
-		SessionID: sess.ID, RunID: run.ID, ActorID: m.ID,
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: m.ID,
 		Payload: events.AgentEventPayload{
 			Kind: events.AgentPause, Tool: "ExitPlanMode", ToolUseID: "toolu_3", Detail: "1. and one more",
 		},
@@ -118,7 +118,7 @@ func TestReplayedPausesRaiseOneRequestEach(t *testing.T) {
 		}
 	}
 
-	list, err := svc.List(ctx, sess.ID, true)
+	list, err := svc.List(ctx, ws.ID, true)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

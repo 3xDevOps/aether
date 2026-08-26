@@ -15,10 +15,10 @@ import {
   bob,
   budget,
   fakeApi,
-  otherSession,
+  otherWorkspace,
   run,
   serverInfo,
-  session,
+  workspace,
 } from '@/test/fixtures'
 
 const watching: PresenceEntry = {
@@ -30,7 +30,8 @@ const watching: PresenceEntry = {
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
-    sessions: { [session.id]: session },
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: { run_1: toRecord(run()) },
     inbox: {},
@@ -39,7 +40,6 @@ function seed(extra: Partial<RootState> = {}) {
     showDecided: false,
     acked: {},
     pausedRuns: {},
-    showIdle: false,
     hydrated: true,
     hydrationError: null,
     lastSeq: 0,
@@ -56,7 +56,7 @@ describe('team status bar', () => {
       budgetGet: vi.fn(async (id: string) =>
         budget(id, {
           state: 'warn',
-          budget: { session_id: id, limit_usd: 1, warn_usd: 0.4 },
+          budget: { workspace_id: id, limit_usd: 1, warn_usd: 0.4 },
         }),
       ),
     })
@@ -69,80 +69,76 @@ describe('team status bar', () => {
     // so nothing here may say that it did.
     expect(screen.getByText('nearing the cap')).toBeDefined()
     expect(screen.getByLabelText('Bob')).toBeDefined()
-    expect(client.presenceHeartbeat).toHaveBeenCalledWith(session.id)
+    expect(client.presenceHeartbeat).toHaveBeenCalledWith(workspace.id)
   })
 
-  // session.list returns every session that ever existed, and all three of
-  // these reads are per session on the wire, so the recurring refresh - the
-  // one that runs on every burst of events - has to bound what it asks
-  // about, or the cost of having the dashboard open grows with the age of
-  // the deployment rather than with what is happening on it.
-  it('bounds the recurring refresh to live sessions', async () => {
+  // Workspaces are few and long-lived, and both of these readouts claim a
+  // whole-deployment fact - the worst budget state anywhere, and the size of
+  // the shared queue - so the refresh covers every workspace, including the
+  // ones with nothing running in them.
+  it('refreshes every workspace, not just the ones with live runs', async () => {
     const client = fakeApi()
-    const stale = { ...otherSession, id: 'ses_3', name: 'older still' }
     seed({
-      sessions: {
-        [session.id]: session,
-        [otherSession.id]: otherSession,
-        [stale.id]: stale,
+      workspaces: {
+        [workspace.id]: workspace,
+        [otherWorkspace.id]: otherWorkspace,
       },
       runs: {
         run_1: toRecord(run()),
         run_done: toRecord(
-          run({ id: 'run_done', session_id: otherSession.id, status: 'merged' }),
+          run({
+            id: 'run_done',
+            workspace_id: otherWorkspace.id,
+            status: 'merged',
+          }),
         ),
       },
     })
 
     await refreshTeam(useStore, client)
 
-    expect(client.approvalList).toHaveBeenCalledTimes(1)
-    expect(client.approvalList).toHaveBeenCalledWith(session.id, false)
-    expect(client.budgetGet).toHaveBeenCalledTimes(1)
-    expect(client.budgetGet).toHaveBeenCalledWith(session.id)
+    expect(client.approvalList).toHaveBeenCalledWith(workspace.id, false)
+    expect(client.approvalList).toHaveBeenCalledWith(otherWorkspace.id, false)
+    expect(client.budgetGet).toHaveBeenCalledWith(workspace.id)
+    expect(client.budgetGet).toHaveBeenCalledWith(otherWorkspace.id)
+  })
 
-    // Nothing is revealed, so we are in no session and say so by beating
-    // none of them.
+  // Presence is keyed on (member, workspace): beating every workspace would
+  // report the user online in workspaces they have never opened.
+  it('beats only the workspace the view is pointed at', async () => {
+    const client = fakeApi()
+    seed({
+      workspaces: {
+        [workspace.id]: workspace,
+        [otherWorkspace.id]: otherWorkspace,
+      },
+      activeWorkspace: '',
+      route: { name: 'workspace', params: { workspaceId: otherWorkspace.id } },
+    })
+
     await heartbeat(useStore, client)
+
+    expect(client.presenceHeartbeat).toHaveBeenCalledTimes(1)
+    expect(client.presenceHeartbeat).toHaveBeenCalledWith(otherWorkspace.id)
+  })
+
+  it('says nothing when no workspace is chosen at all', async () => {
+    const client = fakeApi()
+    seed({ activeWorkspace: '', route: { name: 'board', params: {} } })
+
+    await heartbeat(useStore, client)
+
     expect(client.presenceHeartbeat).not.toHaveBeenCalled()
   })
 
-  // An approval outlives its run: nothing decides it when the run fails, and
-  // the decision can be made anywhere - over SSH, by a teammate. The session
-  // stays in the refresh set until the request is decided, or the queue
-  // count would keep claiming it for as long as the tab lives.
-  it('keeps refreshing a session whose inbox still holds a pending request', async () => {
-    const client = fakeApi()
-    seed({
-      sessions: { [session.id]: session, [otherSession.id]: otherSession },
-      runs: {
-        run_done: toRecord(
-          run({ id: 'run_done', session_id: otherSession.id, status: 'failed' }),
-        ),
-      },
-      inbox: {
-        [otherSession.id]: [
-          approval({ session_id: otherSession.id, run_id: 'run_done' }),
-        ],
-      },
-    })
-
-    await refreshTeam(useStore, client)
-
-    expect(client.approvalList).toHaveBeenCalledWith(otherSession.id, false)
-  })
-
-  // The bounded refresh cannot answer a whole-deployment question, and the
-  // budget readout asks one: a session does not stop being over its cap
-  // when its last run finishes. The wide read on the session list is what
-  // keeps it visible.
-  it('keeps an over-cap session in the readout after its last run finishes', async () => {
+  // A workspace does not stop being over its cap when its last run finishes.
+  it('keeps an over-cap workspace in the readout after its last run finishes', async () => {
     const client = fakeApi({
       budgetGet: vi.fn(async (id: string) =>
-        id === otherSession.id
+        id === otherWorkspace.id
           ? budget(id, {
               state: 'exceeded',
-              budget: { session_id: id, limit_usd: 1 },
+              budget: { workspace_id: id, limit_usd: 1 },
               spend: {
                 runs: 1,
                 metered_runs: 1,
@@ -156,31 +152,41 @@ describe('team status bar', () => {
       ),
     })
     seed({
-      sessions: { [session.id]: session, [otherSession.id]: otherSession },
+      workspaces: {
+        [workspace.id]: workspace,
+        [otherWorkspace.id]: otherWorkspace,
+      },
       runs: {
         run_1: toRecord(run()),
         run_done: toRecord(
-          run({ id: 'run_done', session_id: otherSession.id, status: 'merged' }),
+          run({
+            id: 'run_done',
+            workspace_id: otherWorkspace.id,
+            status: 'merged',
+          }),
         ),
       },
     })
     render(<TeamStatus client={client} />)
 
     expect(await screen.findByText('past the cap')).toBeDefined()
-    // $0.50 from the live session and $14 from the finished one.
+    // $0.50 from the live workspace and $14 from the finished one.
     expect(screen.getByText('$14.50')).toBeDefined()
   })
 
-  it('rolls spend up across sessions, worst state and unmetered floor first', () => {
+  it('rolls spend up across workspaces, worst state and unmetered floor first', () => {
     seed({
-      sessions: { [session.id]: session, [otherSession.id]: otherSession },
+      workspaces: {
+        [workspace.id]: workspace,
+        [otherWorkspace.id]: otherWorkspace,
+      },
       budgets: {
-        [session.id]: budget(session.id, {
-          budget: { session_id: session.id, limit_usd: 10 },
+        [workspace.id]: budget(workspace.id, {
+          budget: { workspace_id: workspace.id, limit_usd: 10 },
         }),
-        [otherSession.id]: budget(otherSession.id, {
+        [otherWorkspace.id]: budget(otherWorkspace.id, {
           state: 'exceeded',
-          budget: { session_id: otherSession.id, limit_usd: 1 },
+          budget: { workspace_id: otherWorkspace.id, limit_usd: 1 },
           spend: {
             runs: 2,
             metered_runs: 1,
@@ -235,7 +241,7 @@ describe('team status bar', () => {
 
 describe('run card contributions', () => {
   it('carries the approval badge and the watcher avatars', () => {
-    seed({ inbox: { [session.id]: [approval()] }, presence: [watching] })
+    seed({ inbox: { [workspace.id]: [approval()] }, presence: [watching] })
     render(<Board />)
 
     const card = screen.getByRole('article')
@@ -256,13 +262,23 @@ describe('approval inbox', () => {
         }),
       ),
     })
-    seed({ inbox: { [session.id]: [approval()] } })
+    seed({ inbox: { [workspace.id]: [approval()] } })
     render(<ApprovalInbox params={{}} client={client} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
 
     expect(await screen.findByText(/Approved by Alice/, { selector: 'p' })).toBeDefined()
     expect(client.approvalDecide).toHaveBeenCalledWith('run_1', 'apr_1', true)
+  })
+
+  // The row names the scope the request belongs to, so a shared queue says
+  // which workspace each decision is about.
+  it('names the workspace each request came from', async () => {
+    const client = fakeApi({ approvalList: vi.fn(async () => [approval()]) })
+    seed({ inbox: { [workspace.id]: [approval()] } })
+    render(<ApprovalInbox params={{}} client={client} />)
+
+    expect(await screen.findByText(workspace.name)).toBeDefined()
   })
 
   it('surfaces the server refusal instead of guessing at the capability', async () => {
@@ -272,7 +288,7 @@ describe('approval inbox', () => {
         throw new ApiError(403, 'approval.decide: permission denied')
       }),
     })
-    seed({ inbox: { [session.id]: [approval()] } })
+    seed({ inbox: { [workspace.id]: [approval()] } })
     render(<ApprovalInbox params={{}} client={client} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }))

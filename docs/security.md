@@ -31,82 +31,43 @@ mount and have it survive on the host. See the security note on
 
 ## The dashboard gateway
 
-The web dashboard is loopback-bound by default and reached through the SSH
-port-forward `aether dash` opens, so SSH stays the only required network
-surface.
-
-- **Every request needs a bearer token, loopback included.** HTTP cannot
-  identify a member on its own and any local process can reach a loopback
-  port, so identity always comes from a token minted on the authenticated SSH
-  control channel (`dash.token.mint`). A token carries exactly its member's
-  authority and passes the same capability checks. Tokens are stored hashed, in
-  memory only, expire (12h default, 24h maximum), and can be revoked by their
-  member. A server restart invalidates all of them.
-- **The HTTP transport reaches an allowlist of methods, not the whole SSH
-  method map.** A token travels in a URL - browser history, `xdg-open`
-  argv, a shared screen - so it is far easier to capture than an SSH key,
-  and it must not be a route to a durable one. The allowlist is what the
-  dashboard renders and steers: `server.info`, `workspace.list`,
-  `session.list`, `session.get`, `member.list`, the nine `run.*` methods
-  the GUI spec names (`launch`, `list`, `get`, `kill`, `pause`, `resume`,
-  `inject`, `close`, `handoff`), `approval.list`, `approval.decide`,
-  `presence.roster`, `presence.heartbeat`, `session.timeline`,
-  `cost.report`, `budget.get`, `run.overlaps`, `template.list`, and
-  `template.launch`. Everything else answers `403`. The excluded ones are
-  excluded because they issue or widen a credential (`member.invite`,
-  whose one-time code becomes a persisted collaborator holding the
-  bearer's own SSH key, plus `member.approve`, `member.remove`,
-  `member.role` - which hands out the admin role itself, the widest
-  grant of the lot - and `dash.token.*`), replace the agent credential
-  profile mounted into run containers (`profile.*`), or administer the
-  deployment (`workspace.add`, `session.new`, `session.settings`,
-  `budget.set`, `template.save`, `template.delete`, `schedule.*`). Those
-  need the SSH key, which is the point: a stolen dashboard token expires
-  and can be revoked, an SSH membership it minted could not be.
-- **Live sockets are re-authorized, not just re-tokened.** Event and
-  attach WebSockets re-run the handshake's gates every few seconds and
-  close with a policy-violation status the moment one stops holding: the
-  token revoked or expired, the member removed or un-approved, and for a
-  write attach the steer capability withdrawn by a `protect`, a
-  `steer_others` change, a handoff, or a demotion to viewer. Otherwise a
-  socket would keep the authority it was opened with - a removed member
-  still on the event feed, or someone still typing into an agent an admin
-  has since walled off. A downgrade from write to read is a close, not a
-  silent demotion; the browser reconnects read-only.
-- **`--dashboard-addr` serves plain HTTP.** Aether ships no certificate
-  handling: terminate TLS in front of the gateway, or keep the address on a
-  tailnet. Without the flag no direct listener exists at all.
-- **The SPA files are served without a token.** The bundle is not secret and
-  has to load before it can present one; everything behind `/api/` and `/ws/`
-  is gated.
-
-### The local gateway
-
-`aether gui` serves the same SPA from the user's own machine, proxying the
-API shape over that machine's SSH connection (`internal/localgw`,
-[local-gateway.md](local-gateway.md)). Its stances differ from the remote
-gateway's in exactly the ways the trust model differs:
+There is no server-side HTTP listener. The dashboard is served from the
+user's own machine by `aether gui`, which proxies the API shape over that
+machine's SSH connection to the linked server (`internal/localgw`,
+[local-gateway.md](local-gateway.md)). SSH stays the only network surface
+the server exposes, and the browser surface inherits its boundary.
 
 - **It binds 127.0.0.1 and nothing else.** There is no exposure flag; the
-  listener is loopback or it does not exist.
-- **Every request still needs a token, loopback included** - the same
-  rationale as above: any local process can reach a loopback port. The
-  token is minted per process (32 random bytes) and dies with it; there is
-  nothing to revoke and nothing survives a restart.
-- **The full method map is reachable, not an allowlist.** The remote
-  allowlist exists because a dashboard token travels in a URL and must not
-  be a route to a durable credential. Here that rationale does not apply:
-  the identity is the member's own SSH key, held by the same process that
-  serves the page, and the bearer token never crosses a network or lands
-  anywhere shareable - it lives in one process and one local browser tab.
-  A method call carries exactly the authority the SSH key already has from
-  a terminal on the same machine.
+  listener is loopback or it does not exist. Nothing about the dashboard
+  widens what the server listens on.
+- **Every request needs a token, loopback included.** HTTP cannot identify
+  a member on its own and any local process can reach a loopback port, so
+  the gateway mints a bearer token per process (32 random bytes) that every
+  API and WebSocket request must carry - as `Authorization: Bearer`, or
+  `?token=` on WebSocket handshakes and the initial browser tab. The token
+  dies with the process: there is nothing to revoke, and nothing survives a
+  restart.
+- **The full method map is reachable, not an allowlist.** The identity is
+  the member's own SSH key, held by the same process that serves the page,
+  and the bearer token never crosses a network or lands anywhere shareable -
+  it lives in one process and one local browser tab. A method call carries
+  exactly the authority that SSH key already has from a terminal on the same
+  machine, and every call still passes the same capability checks the CLI's
+  calls do. There is no path by which the browser surface can exceed the
+  person sitting at it.
 - **`/local/v1` executes with the user's own filesystem and git
   authority** - link config, `git fetch`/`push` on the linked clone,
   systemd user units, scaffold files. That is the point of the surface: it
   does what the CLI does, for the person already at the keyboard.
-- **The remote gateway's allowlist is unchanged.** Nothing about the local
-  gateway widens what a server-side dashboard token can reach.
+- **The SPA files are served without a token.** The bundle is not secret and
+  has to load before it can present one; everything behind `/api/`, `/ws/`
+  and `/local/` is gated.
+- **Live sockets carry no separate re-authorization clock.** The server
+  re-runs its own capability checks on every proxied call and on each
+  subsystem channel, and the token cannot be revoked out from under a
+  socket because it lives and dies with the process serving it. A write
+  attach that loses the steer capability is refused by the server the same
+  way a CLI attach would be.
 
 ## Conflict coordination
 
@@ -116,7 +77,7 @@ and wire) and `docs/mcp-bridge.md` (the in-container half); the operator-facing
 stances are these.
 
 - **The mount is the authentication, so no token enters a container.** Each run
-  gets its own socket at `/run/aether/coord.sock`; whoever connects on it *is*
+  gets its own socket at `/run/aether/coord2.sock`; whoever connects on it *is*
   that run. There is nothing inside the container to steal, and nothing to
   rotate. The host-side modes (`0700` on the coordination root, `0755` on the
   per-run directory, `0666` on the socket, `0444` on the config, `0555` on the
@@ -127,7 +88,7 @@ stances are these.
 - **The socket exposes three methods and no control verbs.** `coord.status`,
   `coord.send`, `coord.inbox`, and nothing else - no `run.kill`, no git, no
   other run's transcript. Messages are capped at 4 KiB, rate-limited per run,
-  bounded at 100 unread per inbox, and every one is recorded on the session
+  bounded at 100 unread per inbox, and every one is recorded on the workspace
   timeline.
 - **A run can widen its own peer set, and the cap is what bounds it.** The
   overlap that authorizes a message is computed from the two runs' own diff

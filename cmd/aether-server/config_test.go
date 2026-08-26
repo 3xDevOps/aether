@@ -14,7 +14,7 @@ import (
 
 func TestApplyConfigFilePrecedence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.conf")
-	if err := serversetup.WriteConfig(path, map[string]string{"addr": ":2300", "dashboard-port": "9090"}); err != nil {
+	if err := serversetup.WriteConfig(path, map[string]string{"addr": ":2300", "min-free-disk": "9090"}); err != nil {
 		t.Fatal(err)
 	}
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
@@ -29,8 +29,8 @@ func TestApplyConfigFilePrecedence(t *testing.T) {
 	if *o.addr != ":2400" {
 		t.Errorf("addr = %q, want the explicit flag to win", *o.addr)
 	}
-	if *o.dashboardPort != 9090 {
-		t.Errorf("dashboard-port = %d, want the config file value 9090", *o.dashboardPort)
+	if *o.minFreeDisk != 9090 {
+		t.Errorf("min-free-disk = %d, want the config file value 9090", *o.minFreeDisk)
 	}
 	if !strings.Contains(from, path) {
 		t.Errorf("startup suffix = %q, want it to name %s", from, path)
@@ -73,14 +73,14 @@ func TestApplyConfigFileMissingRequiredPathFails(t *testing.T) {
 func TestConfigSetValidatesKeyAgainstServeFlags(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.conf")
 	var out bytes.Buffer
-	err := configSet(&out, path, "dashbord-port", "9090")
+	err := configSet(&out, path, "min-free-disc", "9090")
 	if err == nil {
 		t.Fatal("want an error for an option that does not exist")
 	}
-	if !strings.Contains(err.Error(), "dashbord-port") || !strings.Contains(err.Error(), "dashboard-port") {
+	if !strings.Contains(err.Error(), "min-free-disc") || !strings.Contains(err.Error(), "min-free-disk") {
 		t.Errorf("error = %v, want it to name the typo and list the real options", err)
 	}
-	if err := configSet(&out, path, "dashboard-port", "not-a-number"); err == nil {
+	if err := configSet(&out, path, "min-free-disk", "not-a-number"); err == nil {
 		t.Fatal("want an error for a value the flag rejects")
 	}
 }
@@ -91,14 +91,14 @@ func TestConfigSetPreservesOtherKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := configSet(&out, path, "dashboard-port", "9090"); err != nil {
+	if err := configSet(&out, path, "min-free-disk", "9090"); err != nil {
 		t.Fatal(err)
 	}
 	values, err := serversetup.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"addr": ":2300", "data-dir": "/srv/aether", "dashboard-port": "9090"}
+	want := map[string]string{"addr": ":2300", "data-dir": "/srv/aether", "min-free-disk": "9090"}
 	for k, v := range want {
 		if values[k] != v {
 			t.Errorf("%s = %q, want %q", k, values[k], v)
@@ -240,9 +240,6 @@ func TestServiceDefaultsApplyToRealServeFlags(t *testing.T) {
 	if err := serversetup.Apply(fs, serversetup.ServiceDefaults()); err != nil {
 		t.Fatalf("ServiceDefaults is not accepted by serve: %v", err)
 	}
-	if *o.dashboardPort != 8080 {
-		t.Errorf("dashboard-port = %d, want the 8080 the packaged unit published", *o.dashboardPort)
-	}
 	if *o.addr != ":2222" || *o.dataDir != "/var/lib/aether" {
 		t.Errorf("addr=%q data-dir=%q, want the packaged unit's values", *o.addr, *o.dataDir)
 	}
@@ -292,10 +289,10 @@ func TestConfigEditReportsAFailingEditor(t *testing.T) {
 // The post-edit reparse is what stops a typo reaching the next restart.
 func TestConfigEditRejectsAnEditThatBreaksTheFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.conf")
-	t.Setenv("EDITOR", fakeEditor(t, "'dashbord-port = 9'"))
+	t.Setenv("EDITOR", fakeEditor(t, "'min-free-disc = 9'"))
 	var out bytes.Buffer
 	err := configEdit(&out, path)
-	if err == nil || !strings.Contains(err.Error(), "dashbord-port") {
+	if err == nil || !strings.Contains(err.Error(), "min-free-disc") {
 		t.Fatalf("err = %v, want it to name the unknown key", err)
 	}
 }

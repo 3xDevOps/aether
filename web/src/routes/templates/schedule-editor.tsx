@@ -12,13 +12,13 @@ const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 export function ScheduleEditor({
-  sessionID,
+  workspaceID,
   template,
   schedule,
   client = api,
   onChanged,
 }: {
-  sessionID: string
+  workspaceID: string
   template: string
   /** The rule as the last schedule.list fetch saw it, if any. */
   schedule?: Schedule
@@ -37,7 +37,7 @@ export function ScheduleEditor({
     try {
       setSaved(
         await client.scheduleSave({
-          session_id: sessionID,
+          workspace_id: workspaceID,
           template,
           cron: cron.trim(),
         }),
@@ -54,7 +54,7 @@ export function ScheduleEditor({
     setBusy(true)
     setError(null)
     try {
-      await client.scheduleDelete(sessionID, template)
+      await client.scheduleDelete(workspaceID, template)
       setSaved(null)
       setCron('')
       onChanged()

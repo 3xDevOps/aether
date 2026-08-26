@@ -6,7 +6,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/timeline"
 )
 
-// TimelineReader is the seam for reading persisted session history.
+// TimelineReader is the seam for reading persisted workspace history.
 // Satisfied by *timeline.Reader.
 type TimelineReader interface {
 	// Page returns the next page of history matching f after afterSeq,

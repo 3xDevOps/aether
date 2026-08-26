@@ -44,8 +44,8 @@ func TestManagerWithRealPTYTap(t *testing.T) {
 		t.Fatalf("read fixture: %v", err)
 	}
 	const (
-		session = domain.SessionID("sess_1")
-		run     = domain.RunID("run_1")
+		workspace = domain.WorkspaceID("ws_1")
+		run       = domain.RunID("run_1")
 	)
 	host, err := ptyhost.New(ptyhost.Config{TranscriptDir: t.TempDir()})
 	if err != nil {
@@ -59,7 +59,7 @@ func TestManagerWithRealPTYTap(t *testing.T) {
 
 	bus := newTestBus(t)
 	runs := &fakeRuns{runs: map[domain.RunID]*domain.Run{
-		run: {ID: run, SessionID: session, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
+		run: {ID: run, WorkspaceID: workspace, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
 	}}
 	sub, err := bus.Subscribe(t.Context(), events.SubscribeOptions{
 		Filter: events.Filter{Types: []events.Type{events.TypeAgentEvent, events.TypeRunCost}},
@@ -105,8 +105,8 @@ func TestManagerWithRealPTYTap(t *testing.T) {
 	var payloads []events.Payload
 	for _, e := range got {
 		payloads = append(payloads, e.Payload)
-		if e.SessionID != session || e.RunID != run {
-			t.Errorf("event scoped to %s/%s, want %s/%s", e.SessionID, e.RunID, session, run)
+		if e.WorkspaceID != workspace || e.RunID != run {
+			t.Errorf("event scoped to %s/%s, want %s/%s", e.WorkspaceID, e.RunID, workspace, run)
 		}
 	}
 	assertPayloads(t, payloads, want)

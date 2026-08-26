@@ -1,4 +1,4 @@
-// Budget administration for one session, over budget.set. The server owns
+// Budget administration for one workspace, over budget.set. The server owns
 // the arithmetic and the refusal; this form only carries the numbers.
 
 import { useState } from 'react'
@@ -19,11 +19,11 @@ const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 export function BudgetDialog({
-  sessionID,
+  workspaceID,
   client = api,
   onClose,
 }: {
-  sessionID: string
+  workspaceID: string
   client?: Api
   onClose: () => void
 }) {
@@ -37,10 +37,10 @@ export function BudgetDialog({
     setError(null)
     try {
       if (clear) {
-        await client.budgetSet({ session_id: sessionID, clear: true })
+        await client.budgetSet({ workspace_id: workspaceID, clear: true })
       } else {
         await client.budgetSet({
-          session_id: sessionID,
+          workspace_id: workspaceID,
           limit_usd: Number(limit),
           warn_usd: warn.trim() ? Number(warn) : undefined,
         })
@@ -59,7 +59,7 @@ export function BudgetDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Session budget</DialogTitle>
+          <DialogTitle>Workspace budget</DialogTitle>
           <DialogDescription>
             A budget warns and reports; it never stops a run.
           </DialogDescription>

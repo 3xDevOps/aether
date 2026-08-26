@@ -13,14 +13,14 @@ is that the work happens somewhere else and comes back as a branch.
 
 1. **Launch** (~5s) - `aether run "add a health check endpoint" --agent claude`
    in a terminal. The run ID prints.
-2. **Watch** (~15s) - `aether dash`, then the dashboard: the run card moving
+2. **Watch** (~15s) - `aether gui`, then the dashboard: the run card moving
    through the board, the live terminal mirror with the agent actually working,
    the diff timeline picking up changed files.
 3. **Steer** (~5s) - optional but the best moment if it fits: `aether inject`
    from the terminal and the colored banner appearing in the dashboard's
    terminal view a second later.
 4. **Pull** (~8s) - back in the terminal, `aether pull <run>` and then
-   `git diff main...aether/aether/run-...` showing real code.
+   `git diff main...aether/aether/run-<slug>-<id>` showing real code.
 
 Cut it before anything hangs. If the agent takes a long pause, record again -
 do not speed up the middle, because a sped-up terminal reads as fake.
@@ -36,7 +36,7 @@ do not speed up the middle, because a sped-up terminal reads as fake.
   timing with it first.
 - Clear the board of unrelated runs, and use a display name that is not
   `admin`.
-- No tokens on screen. `aether dash` puts one in the URL bar: hide the address
+- No tokens on screen. `aether gui` puts one in the URL bar: hide the address
   bar, or crop it out.
 
 ## Recording

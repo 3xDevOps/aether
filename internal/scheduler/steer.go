@@ -23,7 +23,7 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	}
 	entry.killRequested = true
 	entry.killActor = actor
-	session, cid := entry.sessionID, entry.containerID
+	workspace, cid := entry.workspaceID, entry.containerID
 	// Written under s.mu so a finalize that concurrently removes the entry
 	// (and its sidecar) cannot interleave and leave an orphaned file.
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
@@ -37,7 +37,7 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 			return err
 		}
 	}
-	s.publishTimeline(ctx, session, run, actor, events.TimelineKill, "")
+	s.publishTimeline(ctx, workspace, run, actor, events.TimelineKill, "")
 	return nil
 }
 
@@ -79,13 +79,13 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		s.mu.Unlock()
 		return fmt.Errorf("%w: run is already %s", ErrInvalidTransition, r.Status)
 	}
-	err = s.transitionLocked(ctx, id, r.SessionID, r.Status, domain.RunAbandoned, "killed", actor)
+	err = s.transitionLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor)
 	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	s.removeSidecar(id)
-	s.publishTimeline(ctx, r.SessionID, id, actor, events.TimelineKill, "")
+	s.publishTimeline(ctx, r.WorkspaceID, id, actor, events.TimelineKill, "")
 	return nil
 }
 
@@ -103,13 +103,13 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 		s.mu.Unlock()
 		return fmt.Errorf("%w: run is already paused", ErrInvalidTransition)
 	}
-	session, cid := entry.sessionID, entry.containerID
+	workspace, cid := entry.workspaceID, entry.containerID
 	s.mu.Unlock()
 	if err := s.cfg.Runtime.Pause(ctx, cid); err != nil {
 		return err
 	}
 	s.setPaused(entry, true)
-	s.publishTimeline(ctx, session, run, actor, events.TimelinePause, "")
+	s.publishTimeline(ctx, workspace, run, actor, events.TimelinePause, "")
 	return nil
 }
 
@@ -125,13 +125,13 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 		s.mu.Unlock()
 		return fmt.Errorf("%w: run is not paused", ErrInvalidTransition)
 	}
-	session, cid := entry.sessionID, entry.containerID
+	workspace, cid := entry.workspaceID, entry.containerID
 	s.mu.Unlock()
 	if err := s.cfg.Runtime.Resume(ctx, cid); err != nil {
 		return err
 	}
 	s.setPaused(entry, false)
-	s.publishTimeline(ctx, session, run, actor, events.TimelineResume, "")
+	s.publishTimeline(ctx, workspace, run, actor, events.TimelineResume, "")
 	return nil
 }
 
@@ -158,16 +158,16 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 }
 
 // Inject writes a steering message into a live agent's PTY, attributed
-// to the actor, and stamps the act into the session timeline. A live
+// to the actor, and stamps the act into the workspace timeline. A live
 // supervised run in running or needs-attention is accepted; a clean-exited
 // needs-attention run has no PTY and returns ptyhost.ErrNoSession.
 func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error {
 	s.mu.Lock()
 	entry := s.runs[run]
 	if entry != nil && (entry.status == domain.RunRunning || entry.status == domain.RunNeedsAttention) {
-		session := entry.sessionID
+		workspace := entry.workspaceID
 		s.mu.Unlock()
-		return s.injectLive(ctx, run, session, actor, message)
+		return s.injectLive(ctx, run, workspace, actor, message)
 	}
 	s.mu.Unlock()
 
@@ -181,7 +181,7 @@ func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.M
 	return fmt.Errorf("%w: inject requires a running or needs-attention run", ErrInvalidTransition)
 }
 
-func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, session domain.SessionID, actor domain.MemberID, message string) error {
+func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, actor domain.MemberID, message string) error {
 	m, err := s.cfg.Store.GetMember(ctx, actor)
 	if err != nil {
 		return err
@@ -189,7 +189,7 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, session do
 	if err := s.cfg.PTY.Inject(ctx, run, m.DisplayName, m.Color, message); err != nil {
 		return err
 	}
-	s.publishTimeline(ctx, session, run, actor, events.TimelineSteer, message)
+	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, message)
 	return nil
 }
 
@@ -206,7 +206,7 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			s.mu.Unlock()
 			return fmt.Errorf("%w: close requires needs-attention, run is %s", ErrInvalidTransition, entry.status)
 		}
-		err := s.transitionLocked(ctx, run, entry.sessionID, domain.RunNeedsAttention, outcome, "closed", actor)
+		err := s.transitionLocked(ctx, run, entry.workspaceID, domain.RunNeedsAttention, outcome, "closed", actor)
 		cid := entry.containerID
 		s.mu.Unlock()
 		if err != nil {
@@ -231,7 +231,7 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		s.mu.Unlock()
 		return fmt.Errorf("%w: close requires needs-attention, run is %s", ErrInvalidTransition, r.Status)
 	}
-	err = s.transitionLocked(ctx, run, r.SessionID, r.Status, outcome, "closed", actor)
+	err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
 	s.mu.Unlock()
 	return err
 }

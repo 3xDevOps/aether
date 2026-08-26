@@ -17,11 +17,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
-// RunLookup resolves the currently active runs and the workspace a
-// session belongs to; satisfied by store.Store.
+// RunLookup resolves the currently active runs; satisfied by store.Store.
 type RunLookup interface {
 	ListActiveRuns(ctx context.Context) ([]*domain.Run, error)
-	GetSession(ctx context.Context, id domain.SessionID) (*domain.Session, error)
 }
 
 // SeqSource reports the newest persisted event sequence; satisfied by
@@ -46,15 +44,14 @@ type Entry struct {
 	With  []Peer
 }
 
-// runState is what the index knows about one run: the session to publish
-// its overlap changes under, the workspace whose repository its files
-// belong to, and the files its last diff snapshot reported. live goes
-// false when the run reaches a terminal status; the entry survives until
-// its overlap has been announced as cleared. An empty workspace means it
-// could not be resolved, and the run is left out of the overlap view
-// rather than matched against unrelated repositories.
+// runState is what the index knows about one run: the workspace whose
+// repository its files belong to and that its overlap changes are
+// published under, and the files its last diff snapshot reported. live
+// goes false when the run reaches a terminal status; the entry survives
+// until its overlap has been announced as cleared. An empty workspace
+// means the diff event carried no scope, and the run is left out of the
+// overlap view rather than matched against unrelated repositories.
 type runState struct {
-	session   domain.SessionID
 	workspace domain.WorkspaceID
 	files     map[string]struct{}
 	live      bool
@@ -72,12 +69,11 @@ type Index struct {
 	// replayed history; only run() reads it, after Start wrote it.
 	rebuildUpto uint64
 
-	mu         sync.Mutex
-	state      map[domain.RunID]*runState
-	workspaces map[domain.SessionID]domain.WorkspaceID
-	announced  map[domain.RunID][]events.OverlapPeer
-	sub        events.Subscription
-	closed     bool
+	mu        sync.Mutex
+	state     map[domain.RunID]*runState
+	announced map[domain.RunID][]events.OverlapPeer
+	sub       events.Subscription
+	closed    bool
 
 	wg sync.WaitGroup
 }
@@ -87,12 +83,11 @@ type Index struct {
 // the bus has none.
 func NewIndex(bus events.Bus, runs RunLookup, log SeqSource) *Index {
 	return &Index{
-		bus:        bus,
-		runs:       runs,
-		log:        log,
-		state:      make(map[domain.RunID]*runState),
-		workspaces: make(map[domain.SessionID]domain.WorkspaceID),
-		announced:  make(map[domain.RunID][]events.OverlapPeer),
+		bus:       bus,
+		runs:      runs,
+		log:       log,
+		state:     make(map[domain.RunID]*runState),
+		announced: make(map[domain.RunID][]events.OverlapPeer),
 	}
 }
 
@@ -176,7 +171,7 @@ func (i *Index) run() {
 				break
 			}
 			cursor = e.Seq
-			if i.apply(ctx, e) {
+			if i.apply(e) {
 				// Replayed history rebuilds today's overlap set; its
 				// intermediate transitions already happened and must not
 				// be announced a second time on every restart.
@@ -205,32 +200,9 @@ func (i *Index) run() {
 	}
 }
 
-// workspaceOf resolves the workspace a session belongs to. A session's
-// workspace never changes, so successful answers are cached; a failure is
-// left uncached and retried on the run's next diff snapshot.
-func (i *Index) workspaceOf(ctx context.Context, id domain.SessionID) (domain.WorkspaceID, error) {
-	if id == "" {
-		return "", nil
-	}
-	i.mu.Lock()
-	ws, ok := i.workspaces[id]
-	i.mu.Unlock()
-	if ok {
-		return ws, nil
-	}
-	s, err := i.runs.GetSession(ctx, id)
-	if err != nil {
-		return "", fmt.Errorf("overlap: resolve workspace of session %s: %w", id, err)
-	}
-	i.mu.Lock()
-	i.workspaces[id] = s.WorkspaceID
-	i.mu.Unlock()
-	return s.WorkspaceID, nil
-}
-
 // apply folds one event into the index, reporting whether it changed the
 // state the overlap view is derived from.
-func (i *Index) apply(ctx context.Context, e events.Event) bool {
+func (i *Index) apply(e events.Event) bool {
 	if e.RunID == "" {
 		return false
 	}
@@ -240,17 +212,13 @@ func (i *Index) apply(ctx context.Context, e events.Event) bool {
 		for _, f := range p.Files {
 			files[f.Path] = struct{}{}
 		}
-		ws, err := i.workspaceOf(ctx, e.SessionID)
-		if err != nil {
-			slog.Warn("overlap: run left out of the overlap view", "run", e.RunID, "error", err)
-		}
 		i.mu.Lock()
 		st := i.state[e.RunID]
 		if st == nil {
 			st = &runState{}
 			i.state[e.RunID] = st
 		}
-		st.session, st.workspace, st.files, st.live = e.SessionID, ws, files, true
+		st.workspace, st.files, st.live = e.WorkspaceID, files, true
 		i.mu.Unlock()
 		return true
 	case events.RunStatusPayload:
@@ -306,9 +274,9 @@ func (i *Index) Overlaps(ctx context.Context) ([]Entry, error) {
 // change, so a later live change still publishes the real delta.
 func (i *Index) refresh(ctx context.Context, announce bool) map[domain.RunID][]events.OverlapPeer {
 	type change struct {
-		run     domain.RunID
-		session domain.SessionID
-		peers   []events.OverlapPeer
+		run       domain.RunID
+		workspace domain.WorkspaceID
+		peers     []events.OverlapPeer
 	}
 	i.mu.Lock()
 	view := i.view()
@@ -323,7 +291,7 @@ func (i *Index) refresh(ctx context.Context, announce bool) map[domain.RunID][]e
 		} else {
 			i.announced[id] = peers
 		}
-		changed = append(changed, change{run: id, session: st.session, peers: peers})
+		changed = append(changed, change{run: id, workspace: st.workspace, peers: peers})
 	}
 	for id, st := range i.state {
 		if !st.live && len(i.announced[id]) == 0 {
@@ -336,13 +304,13 @@ func (i *Index) refresh(ctx context.Context, announce bool) map[domain.RunID][]e
 		return view
 	}
 	for _, c := range changed {
-		if c.session == "" {
+		if c.workspace == "" {
 			continue
 		}
 		if _, err := i.bus.Publish(ctx, events.Event{
-			SessionID: c.session,
-			RunID:     c.run,
-			Payload:   events.OverlapPayload{With: c.peers},
+			WorkspaceID: c.workspace,
+			RunID:       c.run,
+			Payload:     events.OverlapPayload{With: c.peers},
 		}); err != nil {
 			slog.Warn("overlap: publish overlap change failed", "run", c.run, "error", err)
 		}

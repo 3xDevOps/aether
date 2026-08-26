@@ -5,8 +5,8 @@ import type { SliceCreator } from '@/store/slice'
 /** Which hop is down when the app cannot reach its data.
  * `network`: this machine has no usable network at all - DNS is dead, or
  * there is no route to the host. Nothing on the server side is implicated.
- * `gateway`: the HTTP origin itself is gone - the `aether gui` process or
- * `aether dash` tunnel died - so nothing answers at all.
+ * `gateway`: the HTTP origin itself is gone - the `aether gui` process that
+ * serves the page died - so nothing answers at all.
  * `server`: the gateway answers but its SSH backend cannot reach
  * aether-server (it reports 503 "server unreachable: ..."). */
 export type UnreachableKind = 'network' | 'gateway' | 'server'

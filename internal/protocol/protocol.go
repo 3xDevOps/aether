@@ -1,8 +1,8 @@
 // Package protocol is the shared client/server wire surface: the JSON-RPC
 // 2.0 envelope, method names, param/result types, error codes, subsystem
 // names, and wire DTOs, framed as NDJSON (one JSON object per newline-
-// terminated line). It is pure data plus framing — the CLI imports it
-// unchanged — so it depends only on the standard library and
+// terminated line). It is pure data plus framing - the CLI imports it
+// unchanged - so it depends only on the standard library and
 // internal/domain.
 package protocol
 
@@ -39,8 +39,7 @@ const MaxLineBytes = 32 << 20
 const (
 	MethodServerInfo    = "server.info"
 	MethodWorkspaceList = "workspace.list"
-	MethodSessionList   = "session.list"
-	MethodSessionGet    = "session.get"
+	MethodWorkspaceGet  = "workspace.get"
 	MethodMemberList    = "member.list"
 	MethodMemberApprove = "member.approve"
 	MethodMemberInvite  = "member.invite"
@@ -48,7 +47,6 @@ const (
 	MethodMemberColor   = "member.color"
 	MethodMemberRole    = "member.role"
 	MethodWorkspaceAdd  = "workspace.add"
-	MethodSessionNew    = "session.new"
 	MethodRunLaunch     = "run.launch"
 	MethodRunList       = "run.list"
 	MethodRunGet        = "run.get"
@@ -78,8 +76,8 @@ const (
 
 // Wave 3 permission-model methods.
 const (
-	// MethodSessionSettings updates session settings (admin only).
-	MethodSessionSettings = "session.settings"
+	// MethodWorkspaceSettings updates workspace settings (admin only).
+	MethodWorkspaceSettings = "workspace.settings"
 	// MethodRunProtect toggles a run's protected flag (owner or admin).
 	MethodRunProtect = "run.protect"
 	// MethodSyncConflict reports a live-overlay sync conflict so both
@@ -96,7 +94,7 @@ const (
 	CodeInvalidParams  = -32602
 	CodeInternal       = -32603
 
-	CodeNotFound     = -32000 // unknown run/session/workspace/member
+	CodeNotFound     = -32000 // unknown run/workspace/member
 	CodeDenied       = -32001 // write-gate / permission denial
 	CodeInvalidState = -32002 // invalid lifecycle transition, conflict-free misuse
 	CodeConflict     = -32003 // store conflict / in-use

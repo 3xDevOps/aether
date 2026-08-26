@@ -1,13 +1,12 @@
 // The team surfaces are read models the gateway already serves: the approval
-// inbox, the presence roster, budgets, and session history. None of them has
+// inbox, the presence roster, budgets, and workspace history. None of them has
 // a push channel of its own, so they refresh when the event cursor moves -
 // every event the store applies advances `lastSeq`, and that is the signal
 // that something a teammate did may have changed one of these reads.
 
 import { useEffect, useRef } from 'react'
 import { api, type Api } from '@/lib/api'
-import { runState } from '@/lib/status'
-import type { DiskUsage, RunStatus, TimelineQuery } from '@/lib/types'
+import type { DiskUsage, TimelineQuery } from '@/lib/types'
 import { useStore, type RootState, type RootStore } from '@/store'
 import type { FeedFilters } from '@/store/timeline'
 
@@ -29,75 +28,47 @@ const maxPages = 5
 export const pageBudget = maxPages * feedPage
 
 /**
- * The sessions a background refresh covers. Every read here is per session
- * on the wire and `session.list` returns every session that ever existed -
- * there is no closed state to thin it - so the set has to be bounded by
- * what is live: the sessions with a run still going, one still waiting on
- * an approval - a request outlives its run, and the decision may land
- * anywhere - plus whatever the centre view is showing. The inbox view asks
- * about the rest on demand.
+ * The workspace the centre view is showing, falling back to the active one.
+ * Presence is keyed on (member, workspace), so this is the only workspace a
+ * heartbeat may claim: beating every workspace would report the user online
+ * in workspaces they have never opened, to teammates who are working in
+ * them. An attach lives inside this view, so it needs no separate account.
  */
-export function refreshSessions(state: RootState): string[] {
-  const ids = new Set<string>()
-  for (const run of Object.values(state.runs)) {
-    if (isLive(run.status)) ids.add(run.session_id)
-  }
-  for (const [id, list] of Object.entries(state.inbox)) {
-    if (list.some((a) => a.decision === 'requested')) ids.add(id)
-  }
-  const focused = focusedSession(state)
-  if (focused) ids.add(focused)
-  return [...ids]
-}
-
-function isLive(status: RunStatus): boolean {
-  const state = runState(status)
-  return state !== 'done' && state !== 'failed'
+export function focusedWorkspace(state: RootState): string {
+  const { params } = state.route
+  if (params.workspaceId) return params.workspaceId
+  if (params.runId) return state.runs[params.runId]?.workspace_id ?? ''
+  return state.activeWorkspace
 }
 
 /**
- * The session the centre view is showing, if any. Presence is keyed on
- * (member, session), so this is the only session a heartbeat may claim:
- * beating every session would report the user online in sessions they have
- * never opened, to teammates who are working in them. An attach lives
- * inside this view, so it needs no separate account.
+ * Re-reads every team surface, for every workspace. A workspace is a repo
+ * plus its environment plan, so a deployment has a handful and they outlive
+ * every run in them; both readouts fed from here ask a whole-deployment
+ * question - the status bar claims the worst budget state anywhere, and the
+ * queue count claims the whole queue - which no subset can answer. Failures
+ * leave the last good data in place.
  */
-export function focusedSession(state: RootState): string {
-  const { params } = state.route
-  if (params.sessionId) return params.sessionId
-  if (params.runId) return state.runs[params.runId]?.session_id ?? ''
-  return ''
-}
-
-/** Re-reads every team surface. Failures leave the last good data in place. */
 export async function refreshTeam(store: RootStore, client: Api = api): Promise<void> {
-  const s = store.getState()
-  const sessions = refreshSessions(s)
   await Promise.all([
     client.presenceRoster().then(store.getState().setPresence).catch(ignore),
     client.disk().then(rememberDisk).catch(ignore),
-    ...sessions.map((id) =>
-      client
-        .approvalList(id, s.showDecided)
-        .then((list) => store.getState().setInbox(id, list))
-        .catch(ignore),
-    ),
-    ...sessions.map((id) =>
+    refreshInbox(store, client),
+    ...Object.keys(store.getState().workspaces).map((id) =>
       client.budgetGet(id).then(store.getState().setBudget).catch(ignore),
     ),
   ])
 }
 
 /**
- * Every session's inbox. The queue is shared and a request against a run
- * that has since finished still needs deciding, so the view that shows the
- * whole queue reads wider than the background refresh does - once, when it
- * opens, rather than every time the cursor moves.
+ * Every workspace's inbox. The queue is shared and a request against a run
+ * that has since finished still needs deciding, so this reads every
+ * workspace rather than only the ones with something running.
  */
 export async function refreshInbox(store: RootStore, client: Api = api): Promise<void> {
   const s = store.getState()
   await Promise.all(
-    Object.keys(s.sessions).map((id) =>
+    Object.keys(s.workspaces).map((id) =>
       client
         .approvalList(id, s.showDecided)
         .then((list) => store.getState().setInbox(id, list))
@@ -106,33 +77,11 @@ export async function refreshInbox(store: RootStore, client: Api = api): Promise
   )
 }
 
-/**
- * The wide read: every session, not just the live ones. Two of these
- * surfaces answer a whole-deployment question - the status bar claims the
- * worst budget state any session is in, and the queue count claims the
- * whole queue - and a session does not stop being over its cap or holding
- * a pending request when its last run finishes. The bounded set cannot
- * answer that, so this runs when the session list changes and never on the
- * recurring path, where a per-session fan-out is what has to stay out.
- */
-export async function refreshAllSessions(
-  store: RootStore,
-  client: Api = api,
-): Promise<void> {
-  const sessions = Object.keys(store.getState().sessions)
-  await Promise.all([
-    refreshInbox(store, client),
-    ...sessions.map((id) =>
-      client.budgetGet(id).then(store.getState().setBudget).catch(ignore),
-    ),
-  ])
-}
-
-/** Tells the server we are here, in the session we are actually in. */
+/** Tells the server we are here, in the workspace we are actually in. */
 export async function heartbeat(store: RootStore, client: Api = api): Promise<void> {
-  const session = focusedSession(store.getState())
-  if (!session) return
-  await client.presenceHeartbeat(session).catch(ignore)
+  const workspaceID = focusedWorkspace(store.getState())
+  if (!workspaceID) return
+  await client.presenceHeartbeat(workspaceID).catch(ignore)
 }
 
 /**
@@ -155,23 +104,15 @@ function rememberDisk(disk: DiskUsage): void {
 
 /**
  * Keeps the team reads current for as long as the status bar is mounted:
- * one refresh per burst of events, a heartbeat on its own interval, and
- * the wide read whenever the set of sessions changes - which is when the
- * shell first hydrates, and thereafter only when somebody creates or
- * removes a session. Events never trigger it.
+ * one refresh per burst of events, and a heartbeat on its own interval.
  */
 export function useTeamRefresh(client: Api = api): void {
   const runs = useStore((s) => s.runs)
   const route = useStore((s) => s.route)
   const lastSeq = useStore((s) => s.lastSeq)
   const showDecided = useStore((s) => s.showDecided)
-  const sessionIDs = useStore((s) => Object.keys(s.sessions).sort().join(','))
+  const workspaceIDs = useStore((s) => Object.keys(s.workspaces).sort().join(','))
   const lastRun = useRef(0)
-
-  useEffect(() => {
-    if (!sessionIDs) return
-    void refreshAllSessions(useStore, client)
-  }, [sessionIDs, showDecided, client])
 
   useEffect(() => {
     const wait = Math.max(0, minGapMs - (Date.now() - lastRun.current))
@@ -180,7 +121,7 @@ export function useTeamRefresh(client: Api = api): void {
       void refreshTeam(useStore, client)
     }, wait)
     return () => clearTimeout(timer)
-  }, [runs, route, lastSeq, showDecided, client])
+  }, [runs, route, lastSeq, showDecided, workspaceIDs, client])
 
   useEffect(() => {
     void heartbeat(useStore, client)
@@ -197,12 +138,12 @@ export function useTeamRefresh(client: Api = api): void {
  */
 export async function openFeed(store: RootStore, client: Api = api): Promise<void> {
   const { feedFilters, beginFeed } = store.getState()
-  if (!feedFilters.sessionID) return
+  if (!feedFilters.workspaceID) return
   beginFeed()
   const id = store.getState().feedRequest
   let head = 0
   try {
-    const probe = await client.sessionTimeline(
+    const probe = await client.workspaceTimeline(
       query(feedFilters, Number.MAX_SAFE_INTEGER, 1),
     )
     head = probe.next_seq
@@ -242,7 +183,7 @@ export async function olderFeed(store: RootStore, client: Api = api): Promise<vo
 /** Reads whatever the feed has not seen yet, from its cursor forward. */
 export async function drain(store: RootStore, client: Api = api): Promise<void> {
   const s = store.getState()
-  if (!s.feedFilters.sessionID) return
+  if (!s.feedFilters.workspaceID) return
   s.setFeedLoading(true)
   await read(store, client, s.feedCursor, 0, s.feedRequest)
 }
@@ -265,7 +206,7 @@ async function read(
   try {
     for (let page = 0; page < maxPages; page++) {
       if (store.getState().feedRequest !== id) return true
-      const got = await client.sessionTimeline(query(filters, cursor, feedPage))
+      const got = await client.workspaceTimeline(query(filters, cursor, feedPage))
       if (store.getState().feedRequest !== id) return true
       store.getState().appendFeed(got.events, got.next_seq)
       cursor = got.next_seq
@@ -288,7 +229,7 @@ async function read(
 
 function query(f: FeedFilters, afterSeq: number, limit: number): TimelineQuery {
   return {
-    session_id: f.sessionID,
+    workspace_id: f.workspaceID,
     run_id: f.runID || undefined,
     member_id: f.memberID || undefined,
     types: f.type ? [f.type] : undefined,

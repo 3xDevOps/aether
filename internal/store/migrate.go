@@ -296,6 +296,271 @@ CREATE TABLE harness_definitions (
 	`
 ALTER TABLE runs ADD COLUMN reason TEXT NOT NULL DEFAULT '';
 `,
+	// v12: the session layer is removed. Runs and everything that hung off
+	// a session now hang off the workspace directly, and the workspace
+	// absorbs the session's base branch and steer-others policy.
+	//
+	// Tables are rebuilt rather than altered because SQLite cannot drop a
+	// column that carries a foreign key. The rebuild follows the v2
+	// pattern - stage into a scratch table, drop, recreate under the
+	// original name - because ALTER TABLE ... RENAME re-parses every other
+	// table's schema, which fails while a referenced table is missing.
+	// Deferred foreign keys hold the referencing tables together until the
+	// migration commits.
+	//
+	// Collapse rules, chosen so nothing silently widens: the base branch
+	// comes from the workspace's oldest session, the steer-others policy is
+	// restrictive if any session was restrictive, merged budgets take the
+	// tightest cap and drop any single session's admin override, and a
+	// template name claimed by two sessions keeps the older definition
+	// with its schedule remapped onto it.
+	//
+	// The events table is rebuilt here too. It is created by
+	// internal/events.OpenSQLiteLog outside this ladder, but it lives in
+	// the same file, and only this migration can still read the sessions
+	// table it needs to rescope its rows. Keep eventsSchema in
+	// internal/events/sqlitelog.go in step with the shape below.
+	`
+PRAGMA defer_foreign_keys = ON;
+
+ALTER TABLE workspaces ADD COLUMN base_branch TEXT NOT NULL DEFAULT 'main';
+ALTER TABLE workspaces ADD COLUMN steer_others TEXT NOT NULL DEFAULT '';
+UPDATE workspaces SET base_branch = COALESCE((
+	SELECT s.base_branch FROM sessions s
+	WHERE s.workspace_id = workspaces.id AND s.base_branch <> ''
+	ORDER BY s.created_at, s.id LIMIT 1
+), 'main');
+UPDATE workspaces SET steer_others = 'admins_only' WHERE EXISTS (
+	SELECT 1 FROM sessions s
+	WHERE s.workspace_id = workspaces.id AND s.steer_others = 'admins_only'
+);
+
+CREATE TABLE runs_migrate AS
+	SELECT r.id, s.workspace_id, r.member_id, r.task, r.harness, r.mode, r.status,
+	       r.reason, r.branch, r.worktree, r.protected, r.profile_snapshot_id,
+	       r.tool_snapshot_id, r.created_at, r.started_at, r.finished_at
+	FROM runs r JOIN sessions s ON s.id = r.session_id;
+CREATE TABLE approvals_migrate AS
+	SELECT a.id, s.workspace_id, a.run_id, a.source_id, a.action, a.detail,
+	       a.decision, a.decided_by, a.created_at, a.decided_at
+	FROM approvals a JOIN sessions s ON s.id = a.session_id;
+CREATE TABLE run_costs_migrate AS
+	SELECT c.run_id, s.workspace_id, c.member_id, c.input_tokens, c.output_tokens,
+	       c.cost_usd, c.metered, c.recorded_at
+	FROM run_costs c JOIN sessions s ON s.id = c.session_id;
+-- Merging budgets must never widen one. The tightest cap wins, an admin
+-- override on any single session is dropped rather than extended over the
+-- whole workspace, and a warning threshold that ends up at or above the
+-- surviving cap is cleared, because a warning that can only fire once
+-- spending is already refused is noise. An admin re-grants the override
+-- deliberately after the upgrade.
+CREATE TABLE workspace_budgets_migrate AS
+	SELECT s.workspace_id AS workspace_id,
+	       COALESCE(MIN(NULLIF(b.limit_usd, 0)), 0) AS limit_usd,
+	       CASE
+	            WHEN COALESCE(MIN(NULLIF(b.warn_usd, 0)), 0)
+	                 < COALESCE(MIN(NULLIF(b.limit_usd, 0)), 0)
+	            THEN COALESCE(MIN(NULLIF(b.warn_usd, 0)), 0)
+	            ELSE 0
+	       END AS warn_usd,
+	       0 AS override,
+	       (SELECT b2.updated_by FROM session_budgets b2
+	        JOIN sessions s2 ON s2.id = b2.session_id
+	        WHERE s2.workspace_id = s.workspace_id
+	        ORDER BY b2.updated_at DESC, b2.session_id DESC LIMIT 1) AS updated_by,
+	       MAX(b.updated_at) AS updated_at
+	FROM session_budgets b JOIN sessions s ON s.id = b.session_id
+	GROUP BY s.workspace_id;
+CREATE TABLE templates_migrate AS
+	SELECT MIN(t.id) AS id, s.workspace_id AS workspace_id, t.name AS name,
+	       t.task AS task, t.harness AS harness, t.mode AS mode, t.params AS params,
+	       t.budget_usd AS budget_usd, t.created_at AS created_at
+	FROM templates t JOIN sessions s ON s.id = t.session_id
+	GROUP BY s.workspace_id, t.name;
+-- Templates de-duplicate by (workspace, name), so a schedule may point at
+-- a template ID that no longer exists. Remap it onto the survivor rather
+-- than dropping it: a workspace must not silently stop running scheduled
+-- work because of an upgrade. At most one schedule exists per template
+-- and templates keep one row per name, so when two collapsed templates
+-- both carried a schedule the oldest wins, matching the template rule.
+CREATE TABLE schedules_migrate AS
+	SELECT MIN(sc.id) AS id, keep.id AS template_id, sc.cron AS cron,
+	       sc.member_id AS member_id, sc.created_at AS created_at,
+	       sc.last_fired_at AS last_fired_at
+	FROM schedules sc
+	JOIN templates t ON t.id = sc.template_id
+	JOIN sessions s ON s.id = t.session_id
+	JOIN templates_migrate keep
+	  ON keep.workspace_id = s.workspace_id AND keep.name = t.name
+	GROUP BY keep.id;
+CREATE TABLE run_messages_migrate AS
+	SELECT m.id, s.workspace_id, m.from_run, m.to_run, m.body, m.delivery_token,
+	       m.created_at, m.delivered_at, m.acked_at
+	FROM run_messages m JOIN sessions s ON s.id = m.session_id;
+
+-- The event log is created by internal/events.OpenSQLiteLog, not by this
+-- ladder, so on a fresh database it does not exist yet. Creating it in the
+-- old shape first makes the rebuild below uniform either way, and staging
+-- it here is what lets it read the sessions table before that table goes.
+CREATE TABLE IF NOT EXISTS events (
+	seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+	id         TEXT NOT NULL UNIQUE,
+	ts         INTEGER NOT NULL,
+	session_id TEXT NOT NULL,
+	run_id     TEXT NOT NULL,
+	actor_id   TEXT NOT NULL,
+	type       TEXT NOT NULL,
+	payload    TEXT NOT NULL
+);
+-- The four session-scoped event type strings were renamed with the scope
+-- they name. The decoder resolves a payload codec by exact type string, so
+-- a row left under its old name is not merely mislabelled: reading it back
+-- fails the whole page with "unknown event type".
+CREATE TABLE events_migrate AS
+	SELECT e.seq, e.id, e.ts, s.workspace_id, e.run_id, e.actor_id,
+	       CASE e.type
+	            WHEN 'session.presence' THEN 'workspace.presence'
+	            WHEN 'session.approval' THEN 'workspace.approval'
+	            WHEN 'session.timeline' THEN 'workspace.timeline'
+	            WHEN 'session.budget'   THEN 'workspace.budget'
+	            ELSE e.type
+	       END AS type,
+	       e.payload
+	FROM events e JOIN sessions s ON s.id = e.session_id;
+
+DROP TABLE schedules;
+DROP TABLE run_messages;
+DROP TABLE run_costs;
+DROP TABLE session_budgets;
+DROP TABLE approvals;
+DROP TABLE templates;
+DROP TABLE runs;
+DROP TABLE sessions;
+
+CREATE TABLE runs (
+	id                  TEXT PRIMARY KEY,
+	workspace_id        TEXT NOT NULL REFERENCES workspaces(id),
+	member_id           TEXT NOT NULL REFERENCES members(id),
+	task                TEXT NOT NULL,
+	harness             TEXT NOT NULL,
+	mode                TEXT NOT NULL,
+	status              TEXT NOT NULL,
+	reason              TEXT NOT NULL DEFAULT '',
+	branch              TEXT NOT NULL,
+	worktree            TEXT NOT NULL,
+	protected           INTEGER NOT NULL DEFAULT 0,
+	profile_snapshot_id TEXT NOT NULL DEFAULT '',
+	tool_snapshot_id    TEXT NOT NULL DEFAULT '',
+	created_at          INTEGER NOT NULL,
+	started_at          INTEGER,
+	finished_at         INTEGER
+);
+INSERT INTO runs SELECT * FROM runs_migrate;
+CREATE INDEX idx_runs_workspace ON runs(workspace_id);
+CREATE INDEX idx_runs_member ON runs(member_id);
+CREATE INDEX idx_runs_status ON runs(status);
+
+CREATE TABLE approvals (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	run_id       TEXT NOT NULL REFERENCES runs(id),
+	source_id    TEXT NOT NULL DEFAULT '',
+	action       TEXT NOT NULL,
+	detail       TEXT NOT NULL DEFAULT '',
+	decision     TEXT NOT NULL,
+	decided_by   TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	decided_at   INTEGER
+);
+INSERT INTO approvals SELECT * FROM approvals_migrate;
+CREATE INDEX idx_approvals_workspace ON approvals(workspace_id, decision);
+CREATE UNIQUE INDEX idx_approvals_source ON approvals(run_id, source_id) WHERE source_id <> '';
+
+CREATE TABLE run_costs (
+	run_id        TEXT PRIMARY KEY REFERENCES runs(id),
+	workspace_id  TEXT NOT NULL REFERENCES workspaces(id),
+	member_id     TEXT NOT NULL REFERENCES members(id),
+	input_tokens  INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	cost_usd      REAL NOT NULL DEFAULT 0,
+	metered       INTEGER NOT NULL DEFAULT 0,
+	recorded_at   INTEGER NOT NULL
+);
+INSERT INTO run_costs SELECT * FROM run_costs_migrate;
+CREATE INDEX idx_run_costs_workspace ON run_costs(workspace_id);
+CREATE INDEX idx_run_costs_member ON run_costs(member_id);
+
+CREATE TABLE workspace_budgets (
+	workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+	limit_usd    REAL NOT NULL,
+	warn_usd     REAL NOT NULL DEFAULT 0,
+	override     INTEGER NOT NULL DEFAULT 0,
+	updated_by   TEXT NOT NULL DEFAULT '',
+	updated_at   INTEGER NOT NULL
+);
+INSERT INTO workspace_budgets SELECT * FROM workspace_budgets_migrate;
+
+CREATE TABLE templates (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	name         TEXT NOT NULL,
+	task         TEXT NOT NULL,
+	harness      TEXT NOT NULL,
+	mode         TEXT NOT NULL,
+	params       TEXT NOT NULL DEFAULT '{}',
+	budget_usd   REAL NOT NULL DEFAULT 0,
+	created_at   INTEGER NOT NULL,
+	UNIQUE (workspace_id, name)
+);
+INSERT INTO templates SELECT * FROM templates_migrate;
+
+CREATE TABLE schedules (
+	id            TEXT PRIMARY KEY,
+	template_id   TEXT NOT NULL UNIQUE REFERENCES templates(id) ON DELETE CASCADE,
+	cron          TEXT NOT NULL,
+	member_id     TEXT NOT NULL REFERENCES members(id),
+	created_at    INTEGER NOT NULL,
+	last_fired_at INTEGER
+);
+INSERT INTO schedules SELECT * FROM schedules_migrate;
+
+CREATE TABLE run_messages (
+	id             TEXT PRIMARY KEY,
+	workspace_id   TEXT NOT NULL REFERENCES workspaces(id),
+	from_run       TEXT NOT NULL REFERENCES runs(id),
+	to_run         TEXT NOT NULL REFERENCES runs(id),
+	body           TEXT NOT NULL,
+	delivery_token TEXT NOT NULL DEFAULT '',
+	created_at     INTEGER NOT NULL,
+	delivered_at   INTEGER,
+	acked_at       INTEGER
+);
+INSERT INTO run_messages SELECT * FROM run_messages_migrate;
+CREATE INDEX idx_run_messages_inbox ON run_messages(to_run, acked_at, id);
+
+DROP TABLE events;
+CREATE TABLE events (
+	seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+	id           TEXT NOT NULL UNIQUE,
+	ts           INTEGER NOT NULL,
+	workspace_id TEXT NOT NULL,
+	run_id       TEXT NOT NULL,
+	actor_id     TEXT NOT NULL,
+	type         TEXT NOT NULL,
+	payload      TEXT NOT NULL
+);
+INSERT INTO events SELECT * FROM events_migrate;
+CREATE INDEX idx_events_workspace_seq ON events (workspace_id, seq);
+
+DROP TABLE runs_migrate;
+DROP TABLE approvals_migrate;
+DROP TABLE run_costs_migrate;
+DROP TABLE workspace_budgets_migrate;
+DROP TABLE templates_migrate;
+DROP TABLE schedules_migrate;
+DROP TABLE run_messages_migrate;
+DROP TABLE events_migrate;
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

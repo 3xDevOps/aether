@@ -1,7 +1,7 @@
 // The one place the dashboard talks to the server. Every endpoint the SPA
 // uses lives here, so a change to the gateway's route table is a one-file
-// edit. The contract is docs/dashboard-api.md: POST /api/v1/<rpc.method> with
-// the method's params as the body, bearer token from `aether dash`.
+// edit. The contract is docs/local-gateway.md: POST /api/v1/<rpc.method> with
+// the method's params as the body, bearer token from `aether gui`.
 
 import type {
   AgentDefinition,
@@ -24,7 +24,6 @@ import type {
   RunPatch,
   Schedule,
   ServerInfo,
-  Session,
   SyncSessionState,
   SyncStatusResult,
   Template,
@@ -48,7 +47,7 @@ export class ApiError extends Error {
   }
 }
 
-// Every request carries a token, loopback included: `aether dash` mints one
+// Every request carries a token, loopback included: `aether gui` mints one
 // and opens a tokened URL. Keep the token out of the address bar once we have
 // it.
 const tokenKey = 'aether.token'
@@ -132,18 +131,14 @@ export function socketURL(path: string): string {
 // tickets that use them.
 export const api = {
   serverInfo: () => call<ServerInfo>('server.info'),
-  sessionList: (workspaceID?: string) =>
-    call<{ sessions: Session[] }>('session.list', {
-      workspace_id: workspaceID,
-    }).then((r) => r.sessions),
   memberList: () =>
     call<{ members: Member[] }>('member.list').then((r) => r.members),
-  runList: (params: { session_id?: string; active_only?: boolean } = {}) =>
+  runList: (params: { workspace_id?: string; active_only?: boolean } = {}) =>
     call<{ runs: Run[] }>('run.list', params).then((r) => r.runs),
   runGet: (runID: string) =>
     call<{ run: Run }>('run.get', { run_id: runID }).then((r) => r.run),
   runLaunch: (params: {
-    session_id: string
+    workspace_id: string
     task: string
     harness: string
     mode?: string
@@ -157,9 +152,9 @@ export const api = {
     call<{ run: Run }>('run.close', { run_id: runID, outcome }).then((r) => r.run),
   runHandoff: (runID: string, toMemberID: string) =>
     call<unknown>('run.handoff', { run_id: runID, to_member_id: toMemberID }),
-  approvalList: (sessionID: string, all = false) =>
+  approvalList: (workspaceID: string, all = false) =>
     call<{ approvals: Approval[] }>('approval.list', {
-      session_id: sessionID,
+      workspace_id: workspaceID,
       all,
     }).then((r) => r.approvals),
   approvalDecide: (runID: string, requestID: string, approve: boolean) =>
@@ -170,23 +165,23 @@ export const api = {
     }).then((r) => r.approval),
   presenceRoster: () =>
     call<{ members: PresenceEntry[] }>('presence.roster').then((r) => r.members),
-  presenceHeartbeat: (sessionID: string) =>
+  presenceHeartbeat: (workspaceID: string) =>
     call<{ ttl_seconds: number }>('presence.heartbeat', {
-      session_id: sessionID,
+      workspace_id: workspaceID,
     }).then((r) => r.ttl_seconds),
-  budgetGet: (sessionID: string) =>
-    call<BudgetReport>('budget.get', { session_id: sessionID }),
-  templateList: (sessionID: string) =>
+  budgetGet: (workspaceID: string) =>
+    call<BudgetReport>('budget.get', { workspace_id: workspaceID }),
+  templateList: (workspaceID: string) =>
     call<{ templates: Template[] }>('template.list', {
-      session_id: sessionID,
+      workspace_id: workspaceID,
     }).then((r) => r.templates),
-  templateLaunch: (sessionID: string, name: string) =>
-    call<TemplateLaunch>('template.launch', { session_id: sessionID, name }),
-  sessionTimeline: (query: TimelineQuery) =>
-    call<TimelinePage>('session.timeline', query),
+  templateLaunch: (workspaceID: string, name: string) =>
+    call<TemplateLaunch>('template.launch', { workspace_id: workspaceID, name }),
+  workspaceTimeline: (query: TimelineQuery) =>
+    call<TimelinePage>('workspace.timeline', query),
   runOverlaps: () =>
     call<{ overlaps: Overlap[] }>('run.overlaps').then((r) => r.overlaps),
-  // Admin and membership: invites, approvals, colors, workspaces, sessions.
+  // Admin and membership: invites, approvals, colors, workspaces.
   memberInvite: (ttlSeconds?: number) =>
     call<{ code: string; expires_at: string }>('member.invite', {
       ttl_seconds: ttlSeconds,
@@ -205,24 +200,27 @@ export const api = {
     call<{ member: Member }>('member.role', { member_id: memberID, role }).then(
       (r) => r.member,
     ),
-  workspaceAdd: (params: { name: string; environment?: unknown }) =>
+  workspaceAdd: (params: {
+    name: string
+    base_branch?: string
+    environment?: unknown
+  }) =>
     call<{ workspace: Workspace }>('workspace.add', params).then(
       (r) => r.workspace,
     ),
+  workspaceGet: (workspaceID: string) =>
+    call<{ workspace: Workspace }>('workspace.get', {
+      workspace_id: workspaceID,
+    }).then((r) => r.workspace),
   workspaceListFull: () =>
     call<{ workspaces: Workspace[] }>('workspace.list').then(
       (r) => r.workspaces,
     ),
-  sessionNew: (params: {
-    workspace_id: string
-    name?: string
-    base_branch?: string
-  }) => call<{ session: Session }>('session.new', params).then((r) => r.session),
-  sessionSettings: (params: { session_id: string; steer_others?: string }) =>
-    call<{ session: Session }>('session.settings', {
-      session_id: params.session_id,
+  workspaceSettings: (params: { workspace_id: string; steer_others?: string }) =>
+    call<{ workspace: Workspace }>('workspace.settings', {
+      workspace_id: params.workspace_id,
       steer_others: params.steer_others ?? '',
-    }).then((r) => r.session),
+    }).then((r) => r.workspace),
   // Workspace tool snapshots. Every method addresses the workspace by
   // exactly one of id or name, like the protocol's WorkspaceSelector.
   toolsList: (ws: WorkspaceSelector) =>
@@ -241,19 +239,19 @@ export const api = {
   // Budgets: the server clears a budget on a limit of zero or less, so
   // `clear` is spelled here rather than by every caller.
   budgetSet: (params: {
-    session_id: string
+    workspace_id: string
     limit_usd?: number
     warn_usd?: number
     clear?: boolean
   }) =>
     call<BudgetReport>('budget.set', {
-      session_id: params.session_id,
+      workspace_id: params.workspace_id,
       limit_usd: params.clear ? 0 : (params.limit_usd ?? 0),
       warn_usd: params.warn_usd,
     }),
   // Templates and their cron schedules.
   templateSave: (params: {
-    session_id: string
+    workspace_id: string
     name: string
     task: string
     harness: string
@@ -262,18 +260,22 @@ export const api = {
     call<{ template: Template }>('template.save', params).then(
       (r) => r.template,
     ),
-  templateDelete: (sessionID: string, name: string) =>
-    call<unknown>('template.delete', { session_id: sessionID, name }),
-  scheduleList: (sessionID: string) =>
+  templateDelete: (workspaceID: string, name: string) =>
+    call<unknown>('template.delete', { workspace_id: workspaceID, name }),
+  scheduleList: (workspaceID: string) =>
     call<{ schedules: Schedule[] }>('schedule.list', {
-      session_id: sessionID,
+      workspace_id: workspaceID,
     }).then((r) => r.schedules),
-  scheduleSave: (params: { session_id: string; template: string; cron: string }) =>
+  scheduleSave: (params: {
+    workspace_id: string
+    template: string
+    cron: string
+  }) =>
     call<{ schedule: Schedule }>('schedule.save', params).then(
       (r) => r.schedule,
     ),
-  scheduleDelete: (sessionID: string, template: string) =>
-    call<unknown>('schedule.delete', { session_id: sessionID, template }),
+  scheduleDelete: (workspaceID: string, template: string) =>
+    call<unknown>('schedule.delete', { workspace_id: workspaceID, template }),
   // Harness profiles and custom agents.
   profileStatus: (harness: string) =>
     call<ProfileStatus>('profile.status', { harness }),
@@ -289,7 +291,7 @@ export const api = {
     call<{ run: Run }>('run.relaunch', { run_id: runID }).then((r) => r.run),
   // The two endpoints that are not RPC methods: patch text is a read of a
   // working tree, and disk usage has no place on the frozen server.info
-  // result. See docs/dashboard-api.md.
+  // result. See docs/local-gateway.md.
   runPatch: (runID: string) =>
     get<RunPatch>(`/run/${encodeURIComponent(runID)}/patch`),
   disk: () => get<DiskUsage>('/disk'),

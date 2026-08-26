@@ -4,7 +4,7 @@ The browser client the server embeds and serves. Bun installs packages and
 runs the scripts, Vite bundles, React 19 + TypeScript render, Tailwind v4 and
 shadcn/ui (new-york, neutral, CSS variables) style, Zustand holds the state.
 
-The gateway it talks to is documented in `docs/dashboard-api.md`; this guide
+The gateway it talks to is documented in `docs/local-gateway.md`; this guide
 describes the dashboard's public route, store, and component structure.
 
 ## Commands
@@ -18,7 +18,8 @@ cd web && bun run typecheck  # tsc --noEmit
 ```
 
 `bun run dev` proxies to `http://127.0.0.1:8080` by default; point it
-elsewhere with `AETHER_DASHBOARD=http://127.0.0.1:<dashboard-port>`.
+elsewhere with `AETHER_DASHBOARD=http://127.0.0.1:<port>` naming a running
+`aether gui --port <port>`.
 
 ## Build pipeline and the embed
 
@@ -52,14 +53,25 @@ name and renders it with `route.params`. Navigation is a store action -
 screen with a reveal path, and every surface routes through the same call.
 
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
-one file each (`server`, `sessions`, `runs`, `members`, `terminal`, `board`,
-`palette`, `approvals`, `presence`, `cost`, `timeline`, `diff`, `ui`). A new
-feature adds a slice file and one spread in `createRootStore`.
-Slices are typed against the whole root state, so a slice may read another's
-data. Only view preferences (theme, sidebar width and collapse state, grouping,
-the Idle column) are persisted; server data is always re-fetched.
+one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
+`palette`, `approvals`, `presence`, `cost`, `timeline`, `diff`, `shell`,
+`local`, `ui`). A new feature adds a slice file and one spread in
+`createRootStore`. Slices are typed against the whole root state, so a slice
+may read another's data. Only view preferences (theme, sidebar width and
+collapse state, `activeWorkspace`, grouping) are persisted; server data is
+always re-fetched.
 
-Derived data (the sidebar tree, the attention-ordered run list) lives in
+**`activeWorkspace` is the scope every surface reads.** It lives on the `ui`
+slice and names the workspace the sidebar's run list, the board, launches,
+templates, budget dialogs and the activity feed all act on. Empty means "all",
+which is what the board falls back to before hydration has named one.
+`setActiveWorkspace` carries an open `workspace` route along with it, so the
+switcher can never say one workspace while the view beside it acts on another,
+and `navigate('workspace', ...)` makes the workspace it opens the active scope
+for the same reason.
+
+Derived data (the sidebar's grouped run list, the attention-ordered run list)
+lives in
 `src/store/selectors.ts` as pure functions over a narrow input type, wrapped by
 memoizing hooks in `src/store/hooks.ts`. Selectors that build new arrays must
 not be passed to `useStore` directly. A view that owns its own derived shape
@@ -89,6 +101,29 @@ render its own links and buttons; everything else on the card is one target
 that reveals the run. Conflict chips () and watcher avatars and approval
 badges () belong in these slots, not in `run-card.tsx`.
 
+## Sidebar
+
+`src/components/shell/sidebar.tsx` is a workspace switcher over a flat list of
+that workspace's runs. There is no run tree: one workspace is in view at a
+time, so the outer level had nothing left to hold, and the runs group instead
+by state or by owning member (the `groupBy` preference, toggled in the header
+and persisted). The only collapse state left is the whole sidebar's.
+
+- **The switcher sits above everything it scopes**, and appears only when there
+  is a choice: a single workspace renders as a plain label with its base branch
+  under it, because a picker with one option is a control that cannot be used.
+- **The runs come from `sidebarRuns`/`sidebarGroups`** in
+  `src/store/selectors.ts`, filtered to `activeWorkspace` and sorted
+  worst-state-first, then most-recently-changed-first, so what needs a human is
+  at the top of whichever group it is in. An empty scope shows every run, which
+  is what the list falls back to before hydration has named a workspace.
+- **The attention badge counts, it does not navigate.** The runs below are
+  already sorted worst-first, so the number is for a scrolled sidebar or a
+  stall that landed while the member was elsewhere in the app.
+- **Below the runs, the nav links are capability-gated** on the method or local
+  verb that powers each view, so a gateway that cannot serve a surface never
+  shows the way in.
+
 ## Title bar
 
 `src/components/shell/title-bar.tsx` is the desktop shell's window chrome.
@@ -110,9 +145,11 @@ keeps the browser's own chrome.
 ## Data flow
 
 `connect()` in `src/store/sync.ts` owns the whole lifecycle. One round of HTTP
-fetches hydrates the store (`server.info`, `session.list`, `member.list`,
+fetches hydrates the store (`server.info`, `workspace.list`, `member.list`,
 `run.list`, `run.overlaps`, and `GET /api/v1/capabilities`), then `/ws/events`
-is the only thing that changes it. The capabilities fetch may fail without
+is the only thing that changes it. Hydration also repairs the scope: an unset
+`activeWorkspace`, or one naming a workspace that is gone, falls back to the
+first by ID rather than leaving every scoped surface pointed at nothing. The capabilities fetch may fail without
 failing hydration - a legacy gateway has no such endpoint - and the store
 then holds `null`. The snapshot also seeds the board's paused map from each
 run's wire `paused` field, skipping runs that do not carry it.
@@ -150,32 +187,36 @@ run's wire `paused` field, skipping runs that do not carry it.
   the page suppresses the toast that would otherwise repeat it. Its Retry
   button clears the connection state and remounts the subscribe-and-hydrate
   cycle, rather than reloading the page and dropping the in-memory token.
-- **A `1008` close naming the dead token stops the stream for good.** The
-  gateway's close reason distinguishes the token watch from a refused
-  subscribe or a transient membership check, which the next reconnect can
-  outlive and so are retried; only `dashboard token revoked or expired` is
-  terminal, and the panes then say to mint a fresh token with `aether dash`.
+- **A `1008` close naming a dead token stops the stream for good.** The
+  gateway closes `1008` for a refused subscribe or a transient membership
+  check too, which the next reconnect can outlive and so are retried; only
+  `dashboard token revoked or expired` is terminal, because reconnecting
+  would carry the same dead token. The panes then say to open a fresh link
+  with `aether gui`, which is the whole fix: the token is minted per
+  process, so a page that outlived its `aether gui` needs a new one.
 - A `run.status` event for a run the client has never seen fetches that run
   before the event is applied, which is what keeps two quick transitions of a
   brand new run in order. If the fetch fails the event is unresolved: the
   cursor stays put and a fresh snapshot is taken to repair the store. An event
-  naming an unknown session re-fetches `session.list`, because sessions arrive
-  only by fetch and a run under an unknown session would render nowhere. An
+  naming an unknown workspace re-fetches `workspace.list`, because workspaces
+  arrive only by fetch and a run under an unknown one would render nowhere. An
   event whose actor is not in the members map re-fetches `member.list` for the
   same reason: no `member.*` event exists, so a teammate who joined after
   hydration would otherwise render as a raw ID forever. A
-  `session.timeline` entry of kind `handoff` re-reads its run the same way,
+  `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
 
 **The capabilities descriptor is the transport seam.** The store holds the
 `GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, `local`), and
 `useCapability()` in `src/store/hooks.ts` wraps it as three predicates -
 `hasMethod`, `hasLocal`, `hasWS` - with `methods: ["*"]` meaning everything.
-When the descriptor is `null` (a legacy gateway), the fallback assumes the
-remote surface: every method, `events` and `attach` sockets, no local verbs.
-Views gate on these predicates rather than sniffing the URL, which is what
-lets the same SPA serve the remote dashboard and the local gateway's
-capability-gated surfaces (`docs/local-gateway.md`).
+When the descriptor is `null` (a gateway that predates the endpoint), the
+fallback is the read-and-steer method set every gateway has always served,
+`events` and `attach` sockets, and no local verbs, so an unknown gateway
+degrades to monitoring rather than to "everything". Views gate on these
+predicates rather than sniffing the URL, which is what lets the same SPA
+render against a gateway with or without the local surfaces
+(`docs/local-gateway.md`).
 
 **Capability is half the gate; the caller's role is the other half.**
 Transport capability answers what the gateway can carry, not what this member
@@ -197,9 +238,11 @@ the views call; the team-feature methods arrive with the tickets that use them.
 Every call is a `POST /api/v1/<method>` bar two `GET`s - the diff tab's patch
 text and the status bar's disk number - because those are reads of a working
 tree and a filesystem rather than RPC methods.
-The token arrives as `?token=`
-(from `aether dash --url`), moves into session storage, and is sent as
-`Authorization: Bearer` on HTTP and as `?token=` on WebSockets.
+The token arrives as `?token=` in the URL `aether gui` opens (or prints with
+`--url`), moves into session storage, and is sent as
+`Authorization: Bearer` on HTTP and as `?token=` on WebSockets. It is minted
+per `aether gui` process: no TTL, nothing to revoke, and it stops working
+the moment that process exits.
 
 The status bar's disk gauge renders when `server.info` carries a `disk`
 object (`used_bytes`, `total_bytes`). That field does not arrive with
@@ -214,27 +257,30 @@ be an invention.
 
 ## Run board
 
-`src/routes/board/` is the default center view: run cards in the four buckets
-the GUI spec copies from Orca. `needs-attention` is Needs You (both stalls and
-clean exits waiting on `run.close` - the card's reason line tells them apart),
-`queued`/`provisioning`/`running` is Working, the terminal statuses are Done.
+`src/routes/board/` is the default center view: the active workspace's run
+cards in the three buckets the GUI spec copies from Orca. `needs-attention` is
+Needs You (both stalls and clean exits waiting on `run.close` - the card's
+reason line tells them apart), `queued`/`provisioning`/`running` is Working,
+the terminal statuses are Done.
 An active run whose approval request is still pending also presents as
 needs-attention on the board and in the sidebar - the pause is invisible in
 the domain status, so `runState` takes a pending flag fed from the approval
 inbox. Cards sort by last state change, newest first; the columns are
 untinted and the card carries the state colour.
 
-Three things the buckets do not come from the run status alone:
+Three buckets, and no Idle column: a card is a run, and no run status maps
+to idle, so an idle column could only ever hold something that is not a card.
+A workspace with nothing running is an empty board under a switcher that names
+it, which says the same thing.
 
-- **Idle** holds *sessions* with nothing active rather than runs, because no
-  run status maps to idle. It is hidden until the header toggle asks for it,
-  and the preference is persisted.
+Two things the buckets do not come from the run status alone:
+
 - **Paused** is a badge, not a bucket. A paused run still reads `running` in
   the domain enum, so the wire `Run` carries a `paused` field the gateway
   decorates from the scheduler on `run.get` and `run.list`, never derived
   from the stored run. The hydration snapshot seeds the board's map from it
   (`seedPaused`, skipping runs without the field - a legacy gateway), and
-  live `pause`/`resume` entries on the `session.timeline` event stream keep
+  live `pause`/`resume` entries on the `workspace.timeline` event stream keep
   it current (`pausedFromTimeline` in `src/store/board.ts`).
 - **Unseen** marks a run whose state changed since someone acknowledged it.
   An ack records the status *and* the change time, because `stateChangedAt` is
@@ -244,9 +290,9 @@ Three things the buckets do not come from the run status alone:
   needed the human. Acks live in the board slice and are app-wide: `navigate()`
   acknowledges whenever the route it is given carries a `runId`, so every
   surface that reveals a run mutes its sidebar row and its board card together,
-  and the board header marks everything at once. They are session-scoped on
-  purpose - nothing is acknowledged when the page loads, so a fresh tab shows
-  what is waiting rather than remembering that yesterday's you looked at it.
+  and the board header marks everything at once. They last only as long as the
+  tab - nothing is acknowledged when the page loads, so a fresh tab shows what
+  is waiting rather than remembering that yesterday's you looked at it.
 
 ### Reason and paused on the wire
 
@@ -265,7 +311,7 @@ oldest pending request's action as the summary.
 wire (above), a reload shows the badge for a run paused earlier, and the
 palette offers the right one of pause/resume. Against a legacy gateway
 whose runs carry no `paused` field the state stays unknown until a live
-`session.timeline` pause or resume arrives, and the palette offers
+`workspace.timeline` pause or resume arrives, and the palette offers
 neither verb rather than the one the server would refuse.
 
 ## Command palette
@@ -273,26 +319,32 @@ neither verb rather than the one the server would refuse.
 `src/components/palette/` is the cmdk palette: `⌘K`/`Ctrl+K` anywhere, or the
 button it registers into the `statusbar` slot (it has no home of its own in the
 shell, and the dialog portals out of the status bar anyway). It jumps to runs
-and sessions, carries the board's own commands, and steers **the run the center
-view is showing** - any run-detail tab, since it keys on `route.params.runId`
+and workspaces - opening a workspace also makes it the active scope, so the
+sidebar and the board follow - carries the board's own commands, and steers
+**the run the center view is showing** - any run-detail tab, since it keys on `route.params.runId`
 rather than on a route name. From the board there is none, so reveal a run
 first. The
 two verbs that need prose, launch and inject, open a dialog; the rest call the
 gateway directly and let the event stream report the result, so no palette
 action writes run state into the store. A third dialog launches from a
-template: it lists the chosen session's templates over `template.list` and
+template: it lists the active workspace's templates over `template.list` and
 starts the run with `template.launch` (both on `lib/api.ts` like every other
 call), then reveals it. Its open state lives with the dialog host in
 `index.tsx`, not in the store's dialog union.
 
 The launch form lists the harness names from `internal/harness` because there
-is no `harness.list` method on the gateway's allowlist. A name the server does
-not know is refused by the server, not by the form.
+is no `harness.list` control-channel method. A name the server does not know
+is refused by the server, not by the form.
+
+Neither launch form asks which workspace to launch into: both take
+`activeWorkspace` and say where the run will land, naming the workspace and its
+base branch. The switcher is the picker, so a second one inside the dialog
+would be a place for the two to disagree.
 
 ## Terminal view
 
 `src/routes/terminal/` is the run-detail Terminal tab: xterm.js over
-`/ws/attach/<run>` (`docs/dashboard-api.md`). The run-detail routes share one
+`/ws/attach/<run>` (`docs/local-gateway.md`). The run-detail routes share one
 tab strip (`tabs.tsx`), so Overview, Terminal, Diff and Events are registry
 routes on the same `runId`.
 
@@ -349,7 +401,7 @@ re-reads them when the dark class on `<html>` changes.
 
 ## Run events tab
 
-`src/routes/terminal/events.tsx` is the run-detail Events tab: the session
+`src/routes/terminal/events.tsx` is the run-detail Events tab: the workspace
 activity feed pinned to the run in view. It drives the same feed slice and
 paging readers the team activity view uses (`openFeed`, `drain`,
 `olderFeed`), and both views render rows through the one shared component
@@ -366,7 +418,7 @@ both what it renders and the overlap set the conflict chips read.
 
 - **The patch is fetched, the events only say when.** `run.diff` carries
   per-file stats and no text, so a snapshot bumps the run's `revision` and the
-  tab re-fetches `GET /api/v1/run/<id>/patch` (`docs/dashboard-api.md`)
+  tab re-fetches `GET /api/v1/run/<id>/patch` (`docs/local-gateway.md`)
   whenever that has moved past the `fetched` revision the stored patch answers
   for. Counters rather than a stale flag, because a snapshot landing *during*
   a request would write true over true and then be cleared by the response:
@@ -414,7 +466,7 @@ defect.
 
 ## Team surfaces
 
-`src/routes/team/` is presence, the shared approval inbox, the session
+`src/routes/team/` is presence, the shared approval inbox, the workspace
 activity feed and budgets - the four readouts of the team features
 (`internal/approvals`, `internal/timeline`, `internal/cost`). None of them owns
 a view of its own in the shell: they reach the run card and the status bar
@@ -429,34 +481,32 @@ routes (`approvals`, `timeline`).
   chatty run does not become a request per event. It is mounted from the
   status-bar contribution, the one surface that is always on screen, which is
   also where the presence heartbeat lives.
-- **The recurring read is bounded; the wide read is not recurring.** Every one
-  of these reads is per session on the wire, and `session.list` returns every
-  session that ever existed - nothing retires them - so re-reading all of them
-  on every burst of events would grow with the age of the deployment rather
-  than with what is happening on it. `refreshSessions` bounds *that* path to
-  the sessions with a run still going, whatever the centre view is showing,
-  and any session whose stored inbox still holds an undecided request - a
-  pending approval outlives its run, and the badge has to clear when a
-  teammate decides it from anywhere. But two of these surfaces answer a
-  question about the whole
-  deployment - the worst budget state anywhere, and the size of the whole
-  queue - and a session does not stop being over its cap or holding a pending
-  request when its last run finishes. So `refreshAllSessions` reads every
-  session once, driven by the set of session IDs changing: at first hydration,
-  and thereafter only when a session is created or removed. Events never
-  trigger it.
-- **The heartbeat is narrower still.** It claims only the session in view,
-  because presence is keyed on (member, session) and beating them all would
-  report you online to teammates in sessions you have never opened.
-- **The queue is every session's, in one list.** The inbox view reads them all
-  again when it opens, because it is the surface that shows the requests
+- **One refresh covers every workspace, and there is only the one.** These
+  reads are per workspace on the wire, and a workspace is a repo plus its
+  environment plan: a deployment has a handful of them and they outlive every
+  run in them. So `refreshTeam` reads all of them each time rather than
+  splitting into a bounded recurring pass and a wide occasional one. Both
+  readouts it feeds ask a whole-deployment question anyway - the status bar
+  claims the worst budget state anywhere, and the badge claims the size of the
+  whole queue - and a workspace does not stop being over its cap or holding an
+  undecided request when its last run finishes, so no subset could answer
+  either one. Failures leave the last good data in place.
+- **The heartbeat is narrower.** It claims only the workspace in view -
+  `focusedWorkspace` prefers the route's `workspaceId`, then the workspace of
+  the run in view, then `activeWorkspace` - because presence is keyed on
+  (member, workspace) and beating them all would report you online to
+  teammates in workspaces you have never opened.
+- **The queue is every workspace's, in one list.** The inbox view reads them
+  all again when it opens, because it is the surface that shows the requests
   themselves rather than a count.
+  Each row names the workspace the request belongs to, since the list crosses
+  them.
   Decisions go through `approval.decide` with the run the request belongs to,
   so the server attributes them and applies the steer check: a refusal is
   rendered as the server's answer, never predicted by the form. A request the
   user has just decided stays on screen reporting its outcome, laid over the
   fetched queue, because the next fetch no longer returns it.
-- **The feed opens at the end of the log.** `session.timeline` pages forward
+- **The feed opens at the end of the log.** `workspace.timeline` pages forward
   from a cursor only, so the view first asks for a page past the end - that
   answer carries the log head - and opens a window back from it; the live tail
   is the same paging call from the cursor the window reached. "Load older"
@@ -468,14 +518,26 @@ routes (`approvals`, `timeline`).
   When that budget does run out the view says so rather than stopping
   quietly. Every open stamps the read, so pages still arriving under the
   filters the user just left write nothing. Actor dots are the member's own
-  colour from the member payload.
+  colour from the member payload. This is the one scoped surface that keeps a
+  workspace picker of its own, because comparing what happened in one workspace
+  against another is the question the view exists to answer; it opens on the
+  active workspace and switching it clears the run filter, since a run belongs
+  to exactly one workspace.
 - **A budget warns, it never stops anything.** The status bar shows the spend
-  and the worst state any session is in (`ok`, `warn`, `exceeded`) - every
-  session, finished ones included, which is what the wide read above is for -
-  and says so in those words. `budget.set` is deliberately off the gateway allowlist, so
-  there is no editing UI: budgets are set over SSH. A spend that includes
-  unmetered runs renders as a floor (`$1.20+`), because a harness with no
-  adapter reports nothing.
+  and the worst state any workspace is in (`ok`, `warn`, `exceeded`) - every
+  workspace, ones with nothing running included, which is what the wide read
+  above is for - and says so in those words, naming each workspace and its cap
+  in the tooltip. A spend that includes unmetered runs renders as a floor
+  (`$1.20+`), because a harness with no adapter reports nothing.
+- **The two admin dialogs live on the workspace view, not the status bar.**
+  `routes/workspace.tsx` is one workspace: its name, its base branch, its runs,
+  and buttons for the budget (`budget.set`) and the steering policy
+  (`workspace.settings`), each gated on `hasMethod` for the method behind it. A
+  spend ceiling and a steering policy belong beside the thing they govern
+  rather than in a header two views away. The settings dialog shows the base
+  branch without offering to change it: runs have already forked from it, so
+  editing it there would only make the displayed branch disagree with the
+  branches on disk.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored
@@ -493,8 +555,8 @@ routes (`approvals`, `timeline`).
 - **Two glyphs, two layers.** The harness glyph says who is running, the state
   dot says what state - never merged into one mark. Presentation states
   (`working`, `waiting`, `needs-attention`, `failed`, `done`, `idle`) are
-  derived in `src/lib/status.ts`; the domain status enum is untouched. A
-  session row shows the worst state of its runs.
+  derived in `src/lib/status.ts`; the domain status enum is untouched. A group
+  header shows the worst state of the runs under it.
 - **Member colour attributes, it does not fill.** The avatar rings itself in
   the member's colour and keeps its initials in the foreground token, because
   the colour is arbitrary server data with no contrast guarantee in either
@@ -515,19 +577,25 @@ fetch, the cursorless reconnect, and the hydration retry. The terminal is driven
 stub: the attach client's own tests cover the header, the reconnect and the
 refusals, and the view is rendered with a real xterm instance to prove
 the toggle and the steer refusal reach the UI. The board and the palette are
-rendered against a seeded store: bucket membership and ordering, the ack
-muting a card and a later state change bringing the emphasis back, the paused
-badge going on and off through a real `session.timeline` pause and resume run
-through `applyEvent`, the Idle toggle, a slot contributor reaching the card,
-and the palette jumping, steering from a run-detail tab, withholding both pause
-and resume while the paused state is unknown, launching, and offering only
-members who can own a run as handoff targets, never a viewer. The team surfaces are driven through the same stub
+rendered against a seeded store: bucket membership and ordering, the board
+showing only the active workspace and following a switch, the board falling
+back to every run before hydration has named one, the ack muting a card and a
+later state change bringing the emphasis back, the paused badge going on and
+off through a real `workspace.timeline` pause and resume run through
+`applyEvent`, a slot contributor reaching the card, and the palette jumping,
+switching the active workspace and opening it, steering from a run-detail tab,
+withholding both pause and resume while the paused state is unknown, launching
+into the active workspace, and offering only members who can own a run as
+handoff targets, never a viewer. The sidebar covers the switcher naming a
+sole workspace instead of offering a picker, a switch rescoping the run list,
+and the attention badge counting. The team surfaces are driven through the same stub
 API: the status bar reading roster, queue and budget and rendering all three,
 the approval badge and watcher avatars reaching a real run card, a decision
 going out as `approval.decide` and coming back attributed, a steer refusal
-surfacing instead of being guessed at, the recurring refresh staying bounded
-to live sessions while a finished session's exceeded budget still reaches the
-readout, and the feed opening its window at the log head, walking it back
+surfacing instead of being guessed at, the refresh covering every workspace
+rather than only the ones with live runs, the heartbeat claiming only the
+workspace in view, an over-cap workspace staying in the readout after its last
+run finishes, and the feed opening its window at the log head, walking it back
 without re-reading, narrowing on a filter, and abandoning a page that belongs
 to filters the user has left. The Members roster is rendered both ways: an
 admin approving, inviting and changing another member's role with the roster

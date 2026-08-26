@@ -22,11 +22,10 @@ func TestRunCostMeteredWins(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
 
-	unmetered := &RunCost{RunID: r.ID, SessionID: s.ID, MemberID: m.ID}
+	unmetered := &RunCost{RunID: r.ID, WorkspaceID: w.ID, MemberID: m.ID}
 	if err := db.PutRunCost(ctx, unmetered); err != nil {
 		t.Fatalf("PutRunCost unmetered: %v", err)
 	}
@@ -40,7 +39,7 @@ func TestRunCostMeteredWins(t *testing.T) {
 
 	// A late adapter result upgrades the record.
 	if err = db.PutRunCost(ctx, &RunCost{
-		RunID: r.ID, SessionID: s.ID, MemberID: m.ID,
+		RunID: r.ID, WorkspaceID: w.ID, MemberID: m.ID,
 		InputTokens: 1200, OutputTokens: 340, CostUSD: 0.42, Metered: true,
 	}); err != nil {
 		t.Fatalf("PutRunCost metered: %v", err)
@@ -53,7 +52,7 @@ func TestRunCostMeteredWins(t *testing.T) {
 	}
 
 	// A later unmetered marker must not erase them.
-	if err = db.PutRunCost(ctx, &RunCost{RunID: r.ID, SessionID: s.ID, MemberID: m.ID}); err != nil {
+	if err = db.PutRunCost(ctx, &RunCost{RunID: r.ID, WorkspaceID: w.ID, MemberID: m.ID}); err != nil {
 		t.Fatalf("PutRunCost unmetered again: %v", err)
 	}
 	if got, err = db.GetRunCost(ctx, r.ID); err != nil {
@@ -63,7 +62,7 @@ func TestRunCostMeteredWins(t *testing.T) {
 		t.Fatalf("record = %+v, want the metered numbers preserved", got)
 	}
 
-	list, err := db.ListRunCosts(ctx, s.ID)
+	list, err := db.ListRunCosts(ctx, w.ID)
 	if err != nil {
 		t.Fatalf("ListRunCosts: %v", err)
 	}
@@ -73,30 +72,29 @@ func TestRunCostMeteredWins(t *testing.T) {
 	if _, err := db.GetRunCost(ctx, "run_missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetRunCost on missing run: %v, want ErrNotFound", err)
 	}
-	if err := db.PutRunCost(ctx, &RunCost{RunID: "run_missing", SessionID: s.ID, MemberID: m.ID}); !errors.Is(err, ErrNotFound) {
+	if err := db.PutRunCost(ctx, &RunCost{RunID: "run_missing", WorkspaceID: w.ID, MemberID: m.ID}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("PutRunCost for an unknown run: %v, want ErrNotFound", err)
 	}
 }
 
-// TestSessionBudgetRoundTrip covers the budget row: upsert, validation,
+// TestWorkspaceBudgetRoundTrip covers the budget row: upsert, validation,
 // and clearing.
-func TestSessionBudgetRoundTrip(t *testing.T) {
+func TestWorkspaceBudgetRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
 
-	if _, err := db.GetSessionBudget(ctx, s.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetSessionBudget with none set: %v, want ErrNotFound", err)
+	if _, err := db.GetWorkspaceBudget(ctx, w.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetWorkspaceBudget with none set: %v, want ErrNotFound", err)
 	}
-	b := &SessionBudget{SessionID: s.ID, LimitUSD: 25, WarnUSD: 20, UpdatedBy: m.ID}
-	if err := db.SetSessionBudget(ctx, b); err != nil {
-		t.Fatalf("SetSessionBudget: %v", err)
+	b := &WorkspaceBudget{WorkspaceID: w.ID, LimitUSD: 25, WarnUSD: 20, UpdatedBy: m.ID}
+	if err := db.SetWorkspaceBudget(ctx, b); err != nil {
+		t.Fatalf("SetWorkspaceBudget: %v", err)
 	}
-	got, err := db.GetSessionBudget(ctx, s.ID)
+	got, err := db.GetWorkspaceBudget(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("GetSessionBudget: %v", err)
+		t.Fatalf("GetWorkspaceBudget: %v", err)
 	}
 	if got.LimitUSD != 25 || got.WarnUSD != 20 || got.Override || got.UpdatedBy != m.ID {
 		t.Fatalf("budget = %+v, want the values just written", got)
@@ -104,34 +102,34 @@ func TestSessionBudgetRoundTrip(t *testing.T) {
 
 	b.Override = true
 	b.WarnUSD = 0
-	if err = db.SetSessionBudget(ctx, b); err != nil {
-		t.Fatalf("SetSessionBudget override: %v", err)
+	if err = db.SetWorkspaceBudget(ctx, b); err != nil {
+		t.Fatalf("SetWorkspaceBudget override: %v", err)
 	}
-	if got, err = db.GetSessionBudget(ctx, s.ID); err != nil {
-		t.Fatalf("GetSessionBudget after override: %v", err)
+	if got, err = db.GetWorkspaceBudget(ctx, w.ID); err != nil {
+		t.Fatalf("GetWorkspaceBudget after override: %v", err)
 	}
 	if !got.Override || got.WarnUSD != 0 {
 		t.Fatalf("budget = %+v, want override on and no warning threshold", got)
 	}
 
-	if err := db.SetSessionBudget(ctx, &SessionBudget{SessionID: s.ID, LimitUSD: 0}); err == nil {
-		t.Fatal("SetSessionBudget accepted a non-positive limit")
+	if err := db.SetWorkspaceBudget(ctx, &WorkspaceBudget{WorkspaceID: w.ID, LimitUSD: 0}); err == nil {
+		t.Fatal("SetWorkspaceBudget accepted a non-positive limit")
 	}
-	if err := db.SetSessionBudget(ctx, &SessionBudget{SessionID: s.ID, LimitUSD: 5, WarnUSD: 9}); err == nil {
-		t.Fatal("SetSessionBudget accepted a warning threshold above the limit")
+	if err := db.SetWorkspaceBudget(ctx, &WorkspaceBudget{WorkspaceID: w.ID, LimitUSD: 5, WarnUSD: 9}); err == nil {
+		t.Fatal("SetWorkspaceBudget accepted a warning threshold above the limit")
 	}
-	if err := db.SetSessionBudget(ctx, &SessionBudget{SessionID: "sess_missing", LimitUSD: 5}); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("SetSessionBudget for an unknown session: %v, want ErrNotFound", err)
+	if err := db.SetWorkspaceBudget(ctx, &WorkspaceBudget{WorkspaceID: "ws_missing", LimitUSD: 5}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetWorkspaceBudget for an unknown workspace: %v, want ErrNotFound", err)
 	}
 
-	if err := db.DeleteSessionBudget(ctx, s.ID); err != nil {
-		t.Fatalf("DeleteSessionBudget: %v", err)
+	if err := db.DeleteWorkspaceBudget(ctx, w.ID); err != nil {
+		t.Fatalf("DeleteWorkspaceBudget: %v", err)
 	}
-	if _, err := db.GetSessionBudget(ctx, s.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetSessionBudget after delete: %v, want ErrNotFound", err)
+	if _, err := db.GetWorkspaceBudget(ctx, w.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetWorkspaceBudget after delete: %v, want ErrNotFound", err)
 	}
-	if err := db.DeleteSessionBudget(ctx, s.ID); err != nil {
-		t.Fatalf("DeleteSessionBudget is not idempotent: %v", err)
+	if err := db.DeleteWorkspaceBudget(ctx, w.ID); err != nil {
+		t.Fatalf("DeleteWorkspaceBudget is not idempotent: %v", err)
 	}
 }
 
@@ -187,14 +185,14 @@ func TestCostMigrationUpgradesExistingDatabase(t *testing.T) {
 		t.Fatalf("GetRun after migration: %v", err)
 	}
 	if err = db.PutRunCost(ctx, &RunCost{
-		RunID: "r1", SessionID: "s1", MemberID: "m1", CostUSD: 1.5, Metered: true,
+		RunID: "r1", WorkspaceID: "w1", MemberID: "m1", CostUSD: 1.5, Metered: true,
 	}); err != nil {
 		t.Fatalf("PutRunCost after migration: %v", err)
 	}
-	if err = db.SetSessionBudget(ctx, &SessionBudget{SessionID: "s1", LimitUSD: 10, UpdatedBy: "m1"}); err != nil {
-		t.Fatalf("SetSessionBudget after migration: %v", err)
+	if err = db.SetWorkspaceBudget(ctx, &WorkspaceBudget{WorkspaceID: "w1", LimitUSD: 10, UpdatedBy: "m1"}); err != nil {
+		t.Fatalf("SetWorkspaceBudget after migration: %v", err)
 	}
-	list, err := db.ListRunCosts(ctx, "s1")
+	list, err := db.ListRunCosts(ctx, "w1")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("ListRunCosts after migration: %v, %+v", err, list)
 	}

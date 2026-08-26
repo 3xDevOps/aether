@@ -29,27 +29,16 @@ func (e WorkspaceEnvironment) Valid() bool {
 }
 
 // WorkspaceAddParams are the params of workspace.add (admin only).
+// BaseBranch defaults to "main" when empty.
 type WorkspaceAddParams struct {
 	Name        string               `json:"name"`
 	Environment WorkspaceEnvironment `json:"environment"`
+	BaseBranch  string               `json:"base_branch,omitempty"`
 }
 
 // WorkspaceAddResult is the result of workspace.add.
 type WorkspaceAddResult struct {
 	Workspace Workspace `json:"workspace"`
-}
-
-// SessionNewParams are the params of session.new. BaseBranch defaults to
-// "main" when empty. Any non-pending member may call this.
-type SessionNewParams struct {
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	BaseBranch  string `json:"base_branch,omitempty"`
-}
-
-// SessionNewResult is the result of session.new.
-type SessionNewResult struct {
-	Session Session `json:"session"`
 }
 
 // MemberInviteParams are the params of member.invite (admin only).

@@ -137,8 +137,7 @@ func registerMethod(name string, h methodHandler) {
 func init() {
 	registerMethod(protocol.MethodServerInfo, (*Server).serverInfo)
 	registerMethod(protocol.MethodWorkspaceList, (*Server).workspaceList)
-	registerMethod(protocol.MethodSessionList, (*Server).sessionList)
-	registerMethod(protocol.MethodSessionGet, (*Server).sessionGet)
+	registerMethod(protocol.MethodWorkspaceGet, (*Server).workspaceGet)
 	registerMethod(protocol.MethodMemberApprove, (*Server).memberApprove)
 	registerMethod(protocol.MethodMemberList, (*Server).memberList)
 	registerMethod(protocol.MethodRunList, (*Server).runList)

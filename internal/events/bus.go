@@ -15,18 +15,18 @@ var (
 	ErrNoLog = errors.New("events: replay requested but bus has no event log")
 	// ErrNoPayload is returned when publishing an event without a payload.
 	ErrNoPayload = errors.New("events: event has no payload")
-	// ErrNoSession is returned when publishing an event without a session
-	// scope. Every event is session-scoped: this keeps the persisted log
-	// complete, so sequence cursors are durable and replay can return
-	// everything live subscribers saw.
-	ErrNoSession = errors.New("events: event has no session scope")
+	// ErrNoWorkspace is returned when publishing an event without a
+	// workspace scope. Every event is workspace-scoped: this keeps the
+	// persisted log complete, so sequence cursors are durable and replay
+	// can return everything live subscribers saw.
+	ErrNoWorkspace = errors.New("events: event has no workspace scope")
 )
 
 // Filter selects a subset of the event stream. The zero value matches
 // every event; each set field narrows the match.
 type Filter struct {
-	// Session matches only events scoped to this session.
-	Session domain.SessionID
+	// Workspace matches only events scoped to this workspace.
+	Workspace domain.WorkspaceID
 	// Run matches only events carrying this run ID.
 	Run domain.RunID
 	// Types matches only events whose Type is listed. Empty means all.
@@ -35,7 +35,7 @@ type Filter struct {
 
 // Matches reports whether e passes the filter.
 func (f Filter) Matches(e Event) bool {
-	if f.Session != "" && e.SessionID != f.Session {
+	if f.Workspace != "" && e.WorkspaceID != f.Workspace {
 		return false
 	}
 	if f.Run != "" && e.RunID != f.Run {
@@ -86,9 +86,9 @@ type Subscription interface {
 	Dropped() uint64
 	// Err reports why the subscription terminated. It is meaningful once
 	// Events is closed: nil means a clean shutdown (Close on the
-	// subscription or the bus); non-nil means the subscription failed —
+	// subscription or the bus); non-nil means the subscription failed -
 	// e.g. a replay read error or the Subscribe context being cancelled
-	// mid-replay — and the consumer should re-subscribe from its last
+	// mid-replay - and the consumer should re-subscribe from its last
 	// seen cursor rather than treat the stream as complete.
 	Err() error
 	// Close cancels the subscription and closes the Events channel.
@@ -101,7 +101,7 @@ type Subscription interface {
 type Bus interface {
 	// Publish assigns the event its sequence cursor, ID, and timestamp
 	// (where unset), persists it, and fans it out to matching
-	// subscribers. Events must be session-scoped (ErrNoSession
+	// subscribers. Events must be workspace-scoped (ErrNoWorkspace
 	// otherwise), so with an EventLog attached every published event is
 	// persisted and sequence cursors survive restarts. Publish never
 	// blocks on slow subscribers; concurrent publishes serialize on the
@@ -115,9 +115,9 @@ type Bus interface {
 	Close() error
 }
 
-// EventLog is append-only persistence for session-scoped events; it backs
-// replay and, later, the session timeline. Implementations must return
-// events ordered by Seq ascending.
+// EventLog is append-only persistence for workspace-scoped events; it
+// backs replay and, later, the workspace timeline. Implementations must
+// return events ordered by Seq ascending.
 type EventLog interface {
 	// Append durably stores e. Seq must already be assigned and unique.
 	Append(ctx context.Context, e Event) error

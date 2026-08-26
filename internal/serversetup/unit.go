@@ -14,16 +14,13 @@ const RestartCommand = "systemctl restart " + ServiceName
 
 // ServiceDefaults are the options the packaged unit used to hardcode in its
 // ExecStart before they moved into the config file. They are the posture of
-// a machine running aether-server as a service, which is not the same as the
-// posture of the bare `serve` command: notably the service publishes the
-// dashboard on 8080, while `serve` denies it unless asked. Install seeds a
-// new config file with these so moving the options out of the unit does not
-// quietly change what a fresh install does.
+// a machine running aether-server as a service. Install seeds a new config
+// file with these so moving the options out of the unit does not quietly
+// change what a fresh install does.
 func ServiceDefaults() map[string]string {
 	return map[string]string{
-		"data-dir":       "/var/lib/aether",
-		"addr":           ":2222",
-		"dashboard-port": "8080",
+		"data-dir": "/var/lib/aether",
+		"addr":     ":2222",
 	}
 }
 
@@ -53,7 +50,7 @@ Type=simple
 # the tailscaled socket (tailscale set --operator=aether) if you want tailnet
 # identity auth.
 #
-# Options (listen address, dashboard port, data dir, tailnet policy) live in
+# Options (listen address, data dir, tailnet policy) live in
 # the config file below, which is operator-owned and survives binary updates
 # and unit reinstalls. Set them with "aether-server config set <key> <value>"
 # or "aether-server setup" - do not edit this ExecStart.

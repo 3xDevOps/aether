@@ -11,29 +11,29 @@ import (
 )
 
 func init() {
-	registerGuarded(protocol.MethodSessionSettings, permissions.SessionAdmin, nil, (*Server).sessionSettings)
+	registerGuarded(protocol.MethodWorkspaceSettings, permissions.WorkspaceAdmin, nil, (*Server).workspaceSettings)
 	registerGuarded(protocol.MethodRunProtect, permissions.Protect, runTarget, (*Server).runProtect)
 }
 
-// sessionSettings updates a session's settings (admin only; the guard has
-// already checked SessionAdmin). The change is stamped into the session
-// timeline attributed to the caller.
-func (s *Server) sessionSettings(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	p, perr := decodeParams[protocol.SessionSettingsParams](params)
+// workspaceSettings updates a workspace's settings (admin only; the guard
+// has already checked WorkspaceAdmin). The change is stamped into the
+// workspace timeline attributed to the caller.
+func (s *Server) workspaceSettings(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.WorkspaceSettingsParams](params)
 	if perr != nil {
 		return nil, perr
 	}
-	if p.SessionID == "" {
-		return nil, invalidParams("session_id is required")
+	if p.WorkspaceID == "" {
+		return nil, invalidParams("workspace_id is required")
 	}
 	if !domain.ValidSteerOthers(p.SteerOthers) {
 		return nil, invalidParams(`steer_others must be "" or "admins_only"`)
 	}
-	id := domain.SessionID(p.SessionID)
-	if err := s.cfg.Store.SetSessionSteerOthers(ctx, id, p.SteerOthers); err != nil {
+	id := domain.WorkspaceID(p.WorkspaceID)
+	if err := s.cfg.Store.SetWorkspaceSteerOthers(ctx, id, p.SteerOthers); err != nil {
 		return nil, rpcError(err)
 	}
-	sess, err := s.cfg.Store.GetSession(ctx, id)
+	ws, err := s.cfg.Store.GetWorkspace(ctx, id)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -42,19 +42,19 @@ func (s *Server) sessionSettings(ctx context.Context, member domain.MemberID, pa
 		setting = "default"
 	}
 	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
-		SessionID: sess.ID,
-		ActorID:   member,
+		WorkspaceID: ws.ID,
+		ActorID:     member,
 		Payload: events.TimelinePayload{
 			Kind:    events.TimelineNote,
-			Message: "session settings: steer_others set to " + setting,
+			Message: "workspace settings: steer_others set to " + setting,
 		},
 	})
-	return protocol.SessionSettingsResult{Session: protocol.SessionFromDomain(sess)}, nil
+	return protocol.WorkspaceSettingsResult{Workspace: protocol.WorkspaceFromDomain(ws)}, nil
 }
 
 // runProtect toggles a run's protected flag (owner or admin; the guard has
 // already checked Protect against the run). The change is stamped into the
-// session timeline attributed to the caller.
+// workspace timeline attributed to the caller.
 func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.RunProtectParams](params)
 	if perr != nil {
@@ -76,10 +76,10 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 		msg = "run protection enabled"
 	}
 	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
-		SessionID: run.SessionID,
-		RunID:     run.ID,
-		ActorID:   member,
-		Payload:   events.TimelinePayload{Kind: events.TimelineNote, Message: msg},
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		ActorID:     member,
+		Payload:     events.TimelinePayload{Kind: events.TimelineNote, Message: msg},
 	})
 	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
 }

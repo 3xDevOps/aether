@@ -73,9 +73,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
         {step === 2 && (
           <RepoStep client={client} workspace={workspace} onNext={() => setStep(3)} />
         )}
-        {step === 3 && (
-          <FirstRunStep client={client} caps={caps} workspace={workspace} />
-        )}
+        {step === 3 && <FirstRunStep client={client} workspace={workspace} />}
 
         {step > 0 && (
           <button

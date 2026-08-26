@@ -7,10 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
-	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -183,51 +179,6 @@ func TestExecAndShellRejected(t *testing.T) {
 	_ = sess.Close()
 }
 
-func TestDirectTCPIPForward(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprint(w, "dashboard says hi")
-	}))
-	defer backend.Close()
-	_, portStr, _ := net.SplitHostPort(backend.Listener.Addr().String())
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		t.Fatalf("backend port %q: %v", portStr, err)
-	}
-
-	e := newTestEnv(t, func(c *Config) { c.DashboardPort = port })
-	client := e.dial(t)
-
-	httpc := &http.Client{Transport: &http.Transport{
-		DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
-			return client.Dial(network, addr)
-		},
-	}}
-	resp, err := httpc.Get("http://127.0.0.1:" + portStr + "/")
-	if err != nil {
-		t.Fatalf("GET through forward: %v", err)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if string(body) != "dashboard says hi" {
-		t.Errorf("body = %q", body)
-	}
-
-	if _, err := client.Dial("tcp", "127.0.0.1:1"); err == nil {
-		t.Error("forward to a non-dashboard port was allowed")
-	}
-	if _, err := client.Dial("tcp", "example.com:"+portStr); err == nil {
-		t.Error("forward to a non-loopback host was allowed")
-	}
-}
-
-func TestDirectTCPIPDeniedByDefault(t *testing.T) {
-	e := newTestEnv(t, nil) // DashboardPort 0
-	client := e.dial(t)
-	if _, err := client.Dial("tcp", "127.0.0.1:80"); err == nil {
-		t.Error("forward allowed with DashboardPort 0")
-	}
-}
-
 func TestEventsSubscribeAndStream(t *testing.T) {
 	e := newTestEnv(t, nil)
 	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemEvents, nil)
@@ -245,13 +196,13 @@ func TestEventsSubscribeAndStream(t *testing.T) {
 
 	// A non-matching event (different run) must not arrive.
 	if _, err := e.bus.Publish(context.Background(), events.Event{
-		SessionID: e.sess.ID, RunID: "run_other",
+		WorkspaceID: e.ws.ID, RunID: "run_other",
 		Payload: events.RunStatusPayload{To: "running"},
 	}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 	if _, err := e.bus.Publish(context.Background(), events.Event{
-		SessionID: e.sess.ID, RunID: e.run.ID, ActorID: e.member.ID,
+		WorkspaceID: e.ws.ID, RunID: e.run.ID, ActorID: e.member.ID,
 		Payload: events.RunStatusPayload{From: "running", To: "needs-attention", Reason: "stalled"},
 	}); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -259,7 +210,7 @@ func TestEventsSubscribeAndStream(t *testing.T) {
 
 	var ev protocol.Event
 	readJSONLine(t, r, &ev)
-	if ev.Type != "run.status" || ev.RunID != string(e.run.ID) || ev.SessionID != string(e.sess.ID) {
+	if ev.Type != "run.status" || ev.RunID != string(e.run.ID) || ev.WorkspaceID != string(e.ws.ID) {
 		t.Errorf("event = %+v", ev)
 	}
 	if ev.Seq == 0 || ev.ID == "" {

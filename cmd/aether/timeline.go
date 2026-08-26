@@ -23,31 +23,31 @@ const timelinePageSize = 200
 func init() {
 	register(command{
 		name:  "timeline",
-		short: "show a session's history, filterable and exportable as JSONL",
+		short: "show a workspace's history, filterable and exportable as JSONL",
 		run:   runTimeline,
 	})
 }
 
 func runTimeline(args []string) error {
 	fs := flag.NewFlagSet("timeline", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	run := fs.String("run", "", "only events for this run")
 	member := fs.String("member", "", "only events by this member (ID or display name)")
-	types := fs.String("type", "", "comma-separated event types, e.g. run.status,session.timeline")
+	types := fs.String("type", "", "comma-separated event types, e.g. run.status,workspace.timeline")
 	limit := fs.Int("limit", 200, "stop after this many entries (0 for the whole history)")
 	jsonl := fs.Bool("jsonl", false, "write one JSON event per line instead of a table")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
-		params := protocol.SessionTimelineParams{
-			SessionID: sessID,
-			RunID:     *run,
-			Types:     splitTypes(*types),
+		params := protocol.WorkspaceTimelineParams{
+			WorkspaceID: wsID,
+			RunID:       *run,
+			Types:       splitTypes(*types),
 		}
 		if *member != "" {
 			m, merr := resolveMember(c, *member)
@@ -88,15 +88,15 @@ func splitTypes(list string) []string {
 // eachTimelinePage walks the history a page at a time, stopping when the
 // server reports no more, when want entries have been visited (want zero
 // means the whole history), or when visit fails.
-func eachTimelinePage(c *protocol.Client, params protocol.SessionTimelineParams, want int, visit func([]protocol.Event) error) error {
+func eachTimelinePage(c *protocol.Client, params protocol.WorkspaceTimelineParams, want int, visit func([]protocol.Event) error) error {
 	seen := 0
 	for {
 		params.Limit = timelinePageSize
 		if want > 0 && want-seen < timelinePageSize {
 			params.Limit = want - seen
 		}
-		var res protocol.SessionTimelineResult
-		if err := c.Call(protocol.MethodSessionTimeline, params, &res); err != nil {
+		var res protocol.WorkspaceTimelineResult
+		if err := c.Call(protocol.MethodWorkspaceTimeline, params, &res); err != nil {
 			return err
 		}
 		if err := visit(res.Events); err != nil {
@@ -111,7 +111,7 @@ func eachTimelinePage(c *protocol.Client, params protocol.SessionTimelineParams,
 	}
 }
 
-func printTimeline(c *protocol.Client, params protocol.SessionTimelineParams, want int, byID map[string]protocol.Member) error {
+func printTimeline(c *protocol.Client, params protocol.WorkspaceTimelineParams, want int, byID map[string]protocol.Member) error {
 	color := term.IsTerminal(int(os.Stdout.Fd()))
 	name := func(id string) string {
 		m, ok := byID[id]

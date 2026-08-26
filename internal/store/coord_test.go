@@ -24,12 +24,11 @@ func TestRunMailboxDeliveryTokens(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	from := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
-	to := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
 
-	first := &RunMessage{SessionID: s.ID, FromRun: from.ID, ToRun: to.ID, Body: "rewriting login()"}
+	first := &RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: "rewriting login()"}
 	if err := db.AppendRunMessage(ctx, first, 100); err != nil {
 		t.Fatalf("AppendRunMessage: %v", err)
 	}
@@ -51,7 +50,7 @@ func TestRunMailboxDeliveryTokens(t *testing.T) {
 	// A second message arrives before the first batch is acknowledged: the
 	// token binds the exact batch it was issued for, so the retry returns
 	// that batch alone.
-	second := &RunMessage{SessionID: s.ID, FromRun: from.ID, ToRun: to.ID, Body: "going ahead"}
+	second := &RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: "going ahead"}
 	if aerr := db.AppendRunMessage(ctx, second, 100); aerr != nil {
 		t.Fatalf("AppendRunMessage (second): %v", aerr)
 	}
@@ -99,18 +98,17 @@ func TestRunMailboxInboxCap(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	from := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
-	to := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
 
 	for i := range 3 {
-		msg := &RunMessage{SessionID: s.ID, FromRun: from.ID, ToRun: to.ID, Body: fmt.Sprintf("m%d", i)}
+		msg := &RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: fmt.Sprintf("m%d", i)}
 		if err := db.AppendRunMessage(ctx, msg, 3); err != nil {
 			t.Fatalf("AppendRunMessage %d: %v", i, err)
 		}
 	}
-	over := &RunMessage{SessionID: s.ID, FromRun: from.ID, ToRun: to.ID, Body: "one too many"}
+	over := &RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: "one too many"}
 	if err := db.AppendRunMessage(ctx, over, 3); !errors.Is(err, ErrInboxFull) {
 		t.Fatalf("AppendRunMessage past the cap = %v, want ErrInboxFull", err)
 	}
@@ -133,15 +131,14 @@ func TestRunMailboxRejectsUnknownRuns(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
 
-	err := db.AppendRunMessage(ctx, &RunMessage{SessionID: s.ID, FromRun: r.ID, ToRun: "nope", Body: "hi"}, 100)
+	err := db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: w.ID, FromRun: r.ID, ToRun: "nope", Body: "hi"}, 100)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("AppendRunMessage to an unknown run = %v, want ErrNotFound", err)
 	}
-	if err := db.AppendRunMessage(ctx, &RunMessage{SessionID: s.ID, ToRun: r.ID, Body: "hi"}, 100); err == nil {
+	if err := db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: w.ID, ToRun: r.ID, Body: "hi"}, 100); err == nil {
 		t.Fatal("AppendRunMessage without a sender = nil, want an error")
 	}
 }
@@ -195,10 +192,10 @@ func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
-	if _, gerr := db.GetSession(ctx, "s1"); gerr != nil {
-		t.Fatalf("GetSession after migration: %v", gerr)
+	if _, gerr := db.GetWorkspace(ctx, "w1"); gerr != nil {
+		t.Fatalf("GetWorkspace after migration: %v", gerr)
 	}
-	if aerr := db.AppendRunMessage(ctx, &RunMessage{SessionID: "s1", FromRun: "r1", ToRun: "r2", Body: "hi"}, 100); aerr != nil {
+	if aerr := db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: "w1", FromRun: "r1", ToRun: "r2", Body: "hi"}, 100); aerr != nil {
 		t.Fatalf("AppendRunMessage after migration: %v", aerr)
 	}
 	_, token, err := db.DeliverRunMessages(ctx, "r2", "", 100)
@@ -245,15 +242,14 @@ func TestDeliverRunMessagesSurvivesConcurrentCommits(t *testing.T) {
 
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, reader)
-	s := mustCreateSession(t, reader, w.ID)
 	m := mustCreateMember(t, reader)
-	from := mustCreateRun(t, reader, s.ID, m.ID, domain.RunRunning)
-	to := mustCreateRun(t, reader, s.ID, m.ID, domain.RunRunning)
-	noise := mustCreateRun(t, reader, s.ID, m.ID, domain.RunRunning)
+	from := mustCreateRun(t, reader, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, reader, w.ID, m.ID, domain.RunRunning)
+	noise := mustCreateRun(t, reader, w.ID, m.ID, domain.RunRunning)
 
 	const messages = 40
 	for i := range messages {
-		msg := &RunMessage{SessionID: s.ID, FromRun: from.ID, ToRun: to.ID, Body: fmt.Sprintf("m%d", i)}
+		msg := &RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: fmt.Sprintf("m%d", i)}
 		if aerr := reader.AppendRunMessage(ctx, msg, messages); aerr != nil {
 			t.Fatalf("seed %d: %v", i, aerr)
 		}
@@ -274,7 +270,7 @@ func TestDeliverRunMessagesSurvivesConcurrentCommits(t *testing.T) {
 			// Errors here are the writer losing a race, which is not what
 			// this test is about.
 			_ = writer.AppendRunMessage(ctx,
-				&RunMessage{SessionID: s.ID, FromRun: from.ID, ToRun: noise.ID, Body: "noise"}, 1<<20)
+				&RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: noise.ID, Body: "noise"}, 1<<20)
 		}
 	}()
 	defer func() {
@@ -303,13 +299,12 @@ func TestDeleteRunMessagesRetiresTheWholeMailbox(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	from := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
-	to := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
 
 	for _, body := range []string{"first", "second"} {
-		msg := &RunMessage{SessionID: s.ID, FromRun: from.ID, ToRun: to.ID, Body: body}
+		msg := &RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: body}
 		if err := db.AppendRunMessage(ctx, msg, 100); err != nil {
 			t.Fatalf("AppendRunMessage(%s): %v", body, err)
 		}

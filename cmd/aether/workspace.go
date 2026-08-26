@@ -119,35 +119,35 @@ func workspaceBootstrap(args []string) error {
 func workspaceInit(args []string) error {
 	fs := flag.NewFlagSet("workspace init", flag.ContinueOnError)
 	image := fs.String("image", "", "custom container image (empty selects the server neutral image)")
+	base := fs.String("base", "", "branch new run worktrees are cut from (default main)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" {
-		return fmt.Errorf("usage: aether workspace init <name> [--image <image>]")
+		return fmt.Errorf("usage: aether workspace init <name> [--image <image>] [--base <branch>]")
 	}
-	return withControl(func(c *protocol.Client) error {
-		var res protocol.WorkspaceAddResult
-		if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{
-			Name:        name,
-			Environment: workspaceEnvironment(*image),
-		}, &res); err != nil {
-			return err
-		}
-		fmt.Printf("workspace %s %s\n", res.Workspace.ID, res.Workspace.Name)
-		return nil
-	})
+	return createWorkspace(name, *image, *base)
 }
 
 func workspaceAdd(args []string) error {
 	fs := flag.NewFlagSet("workspace add", flag.ContinueOnError)
 	image := fs.String("image", "", "container image for runs")
+	base := fs.String("base", "", "branch new run worktrees are cut from (default main)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" || *image == "" {
-		return fmt.Errorf("usage: aether workspace add <name> --image <image>")
+		return fmt.Errorf("usage: aether workspace add <name> --image <image> [--base <branch>]")
 	}
+	return createWorkspace(name, *image, *base)
+}
+
+// createWorkspace is the one wire call behind init and add; the two differ
+// only in whether an image is required. An empty base branch lets the
+// server apply its default rather than the CLI guessing one.
+func createWorkspace(name, image, base string) error {
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.WorkspaceAddResult
 		if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{
 			Name:        name,
-			Environment: workspaceEnvironment(*image),
+			Environment: workspaceEnvironment(image),
+			BaseBranch:  base,
 		}, &res); err != nil {
 			return err
 		}

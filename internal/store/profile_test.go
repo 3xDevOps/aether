@@ -116,9 +116,8 @@ func TestSetRunProfileSnapshot(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunQueued)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunQueued)
 
 	snap := &domain.ProfileSnapshot{MemberID: m.ID, Harness: "claude", Digest: "d1"}
 	if err := db.SaveProfileSnapshot(ctx, snap, []ProfileFile{{Path: "a", Mode: 0o644, Content: []byte("x")}}); err != nil {
@@ -162,9 +161,8 @@ func TestPruneKeepsPinnedRunSnapshot(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunQueued)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunQueued)
 
 	var ids []domain.ProfileSnapshotID
 	for i := 0; i < 12; i++ {

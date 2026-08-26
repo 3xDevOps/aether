@@ -2,12 +2,16 @@ package mcpbridge
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -107,10 +111,62 @@ func (f *fakeCoord) seen() []protocol.Request {
 	return append([]protocol.Request(nil), f.requests...)
 }
 
+// readUntilAcked calls the inbox tool until the service sees a read that
+// carries token, then returns every inbox call seen so far.
+//
+// The token a read acknowledges is promoted when that read's response is
+// written, which the bridge does after the calling client has already
+// decoded the result. A client that reads twice in a row can therefore
+// send the second read before the first read's acknowledgement exists, and
+// the batch is legitimately redelivered. Retrying is what a real agent
+// does; asserting a fixed call count races the promotion.
+func (f *fakeCoord) readUntilAcked(t *testing.T, cs *mcp.ClientSession, token string, out *inboxOutput) []protocol.Request {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var inboxes []protocol.Request
+		for _, req := range f.seen() {
+			if req.Method != protocol.MethodCoordInbox {
+				continue
+			}
+			inboxes = append(inboxes, req)
+			if bytes.Contains(req.Params, []byte(token)) {
+				return inboxes
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no inbox read acknowledged %q after %d calls", token, len(inboxes))
+		}
+		callTool(t, cs, toolInbox, nil, out)
+	}
+}
+
+// readUntilEmpty calls the inbox tool until it comes back empty, meaning
+// the batch it last delivered has been acknowledged and retired.
+//
+// Same reason as readUntilAcked: the acknowledgement token is promoted on
+// the bridge's write path, after the calling client already decoded its
+// result, so a read issued immediately afterwards can race the promotion
+// and be handed the same batch again. At-least-once delivery makes that
+// correct, not a failure, so the test retries the way an agent would.
+func readUntilEmpty(t *testing.T, cs *mcp.ClientSession, out *inboxOutput) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		callTool(t, cs, toolInbox, nil, out)
+		if len(out.Messages) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("inbox never drained; still holding %+v", out.Messages)
+		}
+	}
+}
+
 // golden reads one of the pinned fixtures.
 func golden(t *testing.T, name string) []protocol.Response {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v1", name))
+	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v2", name))
 	if err != nil {
 		t.Fatalf("read golden %s: %v", name, err)
 	}
@@ -129,7 +185,7 @@ func golden(t *testing.T, name string) []protocol.Response {
 // can assert the bridge puts the same bytes on the wire.
 func goldenRequests(t *testing.T) []protocol.Request {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v1", "requests.ndjson"))
+	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v2", "requests.ndjson"))
 	if err != nil {
 		t.Fatalf("read golden requests: %v", err)
 	}

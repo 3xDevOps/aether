@@ -48,7 +48,7 @@ func TestHarnessMCPRegistration(t *testing.T) {
 	}
 	e.sched.UseCoordination(coord, filepath.Join(dir, "runtime", "bin"))
 
-	registered, err := e.sched.Launch(t.Context(), e.sess.ID, e.member.ID, "add OAuth login", "claude", domain.LaunchTUI)
+	registered, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "add OAuth login", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("launch claude run: %v", err)
 	}

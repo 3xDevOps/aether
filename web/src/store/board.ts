@@ -25,14 +25,11 @@ export interface BoardSlice {
    * looks the same as one that was never paused.
    */
   pausedRuns: Record<string, boolean>
-  /** The Idle column is hidden until asked for. */
-  showIdle: boolean
   ackRun: (runID: string) => void
   ackAll: () => void
   setPaused: (runID: string, paused: boolean) => void
   /** Replaces the map wholesale; the hydration snapshot is authoritative. */
   seedPaused: (entries: Record<string, boolean>) => void
-  toggleIdle: () => void
 }
 
 const ackOf = (run: RunRecord): Ack => ({
@@ -43,7 +40,6 @@ const ackOf = (run: RunRecord): Ack => ({
 export const createBoardSlice: SliceCreator<BoardSlice> = (set) => ({
   acked: {},
   pausedRuns: {},
-  showIdle: false,
   ackRun: (runID) =>
     set((s) => {
       const run = s.runs[runID]
@@ -56,7 +52,6 @@ export const createBoardSlice: SliceCreator<BoardSlice> = (set) => ({
   setPaused: (runID, paused) =>
     set((s) => ({ pausedRuns: { ...s.pausedRuns, [runID]: paused } })),
   seedPaused: (pausedRuns) => set({ pausedRuns }),
-  toggleIdle: () => set((s) => ({ showIdle: !s.showIdle })),
 })
 
 /**
@@ -69,7 +64,7 @@ export function isUnseen(acked: Record<string, Ack>, run: RunRecord): boolean {
   return !ack || ack.status !== run.status || ack.at !== run.stateChangedAt
 }
 
-/** Reads a session.timeline payload as a pause state change, or null. */
+/** Reads a workspace.timeline payload as a pause state change, or null. */
 export function pausedFromTimeline(payload: unknown): boolean | null {
   const kind = (payload as { kind?: string } | null)?.kind
   if (kind === 'pause') return true

@@ -2,19 +2,19 @@ import type { Approval } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 export interface ApprovalsSlice {
-  /** Session ID to that session's inbox, as the last fetch saw it. */
+  /** Workspace ID to that workspace's inbox, as the last fetch saw it. */
   inbox: Record<string, Approval[]>
   /** The inbox view also lists already-decided requests when set. */
   showDecided: boolean
-  setInbox: (sessionID: string, approvals: Approval[]) => void
+  setInbox: (workspaceID: string, approvals: Approval[]) => void
   setShowDecided: (show: boolean) => void
 }
 
 export const createApprovalsSlice: SliceCreator<ApprovalsSlice> = (set) => ({
   inbox: {},
   showDecided: false,
-  setInbox: (sessionID, approvals) =>
-    set((s) => ({ inbox: { ...s.inbox, [sessionID]: approvals } })),
+  setInbox: (workspaceID, approvals) =>
+    set((s) => ({ inbox: { ...s.inbox, [workspaceID]: approvals } })),
   setShowDecided: (showDecided) => set({ showDecided }),
 })
 

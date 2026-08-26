@@ -92,7 +92,7 @@ func TestIntegrationCoordinationEndToEnd(t *testing.T) {
 	attA.waitOutput(t, "inbox:"+bodyB)
 	attB.waitOutput(t, "inbox:"+bodyA)
 
-	// The whole exchange is on the session timeline - the notice each run
+	// The whole exchange is on the workspace timeline - the notice each run
 	// was given and the message each one sent - attributed to the owner of
 	// the run it happened to.
 	waitEvent(t, sub, &seen, "run A's notice entry", coordNoticeNote(runA.ID, e.ada.id, runB.ID))
@@ -217,10 +217,9 @@ type coordEnv struct {
 	dataDir string
 	keyPath string
 
-	ws   *domain.Workspace
-	sess *domain.Session
-	ada  coordMember
-	bo   coordMember
+	ws  *domain.Workspace
+	ada coordMember
+	bo  coordMember
 }
 
 // coordMember is one seeded member and the key its client connects with.
@@ -249,13 +248,13 @@ func newCoordEnv(ctx context.Context, t *testing.T, disabled bool) (*coordEnv, *
 	e.ada = coordMember{id: e.seedMember(ctx, t, srv, "Ada", "#e6194b", adaKey), key: adaKey}
 	e.bo = coordMember{id: e.seedMember(ctx, t, srv, "Bo", "#3cb44b", boKey), key: boKey}
 
-	e.ws = &domain.Workspace{Name: "coord", Environment: domain.WorkspaceEnvironment{CustomImage: "e2e/fake"}}
+	e.ws = &domain.Workspace{
+		Name:        "coord",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "e2e/fake"},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err := srv.srv.Store().CreateWorkspace(ctx, e.ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
-	}
-	e.sess = &domain.Session{WorkspaceID: e.ws.ID, Name: "coordination", BaseBranch: "main"}
-	if err := srv.srv.Store().CreateSession(ctx, e.sess); err != nil {
-		t.Fatalf("seed session: %v", err)
 	}
 	e.seedRepo(t, srv.addr)
 	return e, srv
@@ -345,7 +344,7 @@ func (e *coordEnv) launch(t *testing.T, ctrl *protocol.Client, task, harnessName
 	t.Helper()
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(e.sess.ID), Task: task, Harness: harnessName,
+		WorkspaceID: string(e.ws.ID), Task: task, Harness: harnessName,
 	}, &launched); err != nil {
 		t.Fatalf("run.launch %q on harness %s: %v", task, harnessName, err)
 	}

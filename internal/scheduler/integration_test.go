@@ -42,7 +42,7 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 
-	run, err := e.sched.Launch(ctx, e.sess.ID, e.member.ID, "integration smoke", "fake", domain.LaunchTUI)
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "integration smoke", "fake", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}

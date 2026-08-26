@@ -53,7 +53,7 @@ export function ApprovalBadge({ run }: CardSlotProps) {
 }
 
 /**
- * The shared inbox: every session's pending permission requests and plan
+ * The shared inbox: every workspace's pending permission requests and plan
  * pauses in one queue. Decisions go through `approval.decide`, so the
  * server attributes them and the refusal a member without steer gets is the
  * server's, never the form's.
@@ -65,8 +65,8 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
   const [decisions, setDecisions] = useState<Record<string, Approval>>({})
   const waiting = pendingApprovals(inbox).length
 
-  // The background refresh only covers live sessions. This is the view that
-  // claims to show the whole queue, so opening it reads them all.
+  // The background refresh runs on the event cursor. This is the view that
+  // claims to show the whole queue, so opening it reads it directly.
   useEffect(() => {
     void refreshInbox(useStore, client)
   }, [client, showDecided])
@@ -128,7 +128,7 @@ function Row({
   client: Api
   onDecided: (approval: Approval) => void
 }) {
-  const session = useStore((s) => s.sessions[approval.session_id])
+  const workspace = useStore((s) => s.workspaces[approval.workspace_id])
   const run = useStore((s) => s.runs[approval.run_id])
   const decider = useStore((s) =>
     approval.decided_by ? s.members[approval.decided_by] : undefined,
@@ -181,7 +181,7 @@ function Row({
       </div>
 
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <span>{session?.name ?? approval.session_id}</span>
+        <span>{workspace?.name ?? approval.workspace_id}</span>
         {run && (
           <button
             type="button"

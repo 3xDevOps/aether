@@ -232,7 +232,7 @@ func TestInstallSeedsThePackagedServicePosture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"addr": ":2222", "dashboard-port": "8080", "data-dir": "/var/lib/aether"}
+	want := map[string]string{"addr": ":2222", "data-dir": "/var/lib/aether"}
 	if !maps.Equal(values, want) {
 		t.Errorf("seeded config = %v, want the posture the old ExecStart hardcoded %v", values, want)
 	}
@@ -251,7 +251,6 @@ func TestInstallLayersGivenValuesOverServiceDefaults(t *testing.T) {
 	}
 	want := map[string]string{
 		"addr":              ":2300",
-		"dashboard-port":    "8080",
 		"data-dir":          "/var/lib/aether",
 		"tailnet-auto-join": "true",
 	}

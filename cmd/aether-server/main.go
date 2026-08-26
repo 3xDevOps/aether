@@ -1,5 +1,5 @@
 // Command aether-server is the Aether server: embedded SSH transport,
-// run scheduler, event bus, and dashboard in a single binary.
+// run scheduler, and event bus in a single binary.
 package main
 
 import (
@@ -74,11 +74,9 @@ type serveOptions struct {
 	dataDir              *string
 	addr                 *string
 	neutralImage         *string
-	dashboardPort        *int
 	harnessDefinitions   *string
 	tailnetAutoJoin      *bool
 	tailnetRequireKey    *bool
-	dashboardAddr        *string
 	conflictCoordination *bool
 	stallThreshold       *time.Duration
 	pollInterval         *time.Duration
@@ -97,12 +95,10 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.addr = fs.String("addr", server.DefaultAddr, "SSH listen address")
 	o.neutralImage = fs.String("neutral-image", server.DefaultNeutralImage,
 		"server-owned neutral bootstrap image for workspaces without a custom image")
-	o.dashboardPort = fs.Int("dashboard-port", 0, "local dashboard port reachable via SSH forwards (0 = deny)")
 	o.harnessDefinitions = fs.String("harness-definitions", os.Getenv("AETHER_HARNESS_DEFINITIONS"),
 		`JSON object of administrator-owned generic harness definitions`)
 	o.tailnetAutoJoin = fs.Bool("tailnet-auto-join", false, "register unknown tailnet identities as approved members instead of pending")
 	o.tailnetRequireKey = fs.Bool("tailnet-require-key", false, "additionally require pubkey verification on tailnet connections")
-	o.dashboardAddr = fs.String("dashboard-addr", "", "expose the dashboard directly on this address (empty = loopback only)")
 	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
 		"how long a run may go with no output and no file changes before it parks needs-attention (0 = 10m)")
@@ -139,11 +135,9 @@ func serve(args []string) error {
 		DataDir:           *o.dataDir,
 		Addr:              *o.addr,
 		NeutralImage:      *o.neutralImage,
-		DashboardPort:     *o.dashboardPort,
 		Harnesses:         harnesses,
 		TailnetAutoJoin:   *o.tailnetAutoJoin,
 		TailnetRequireKey: *o.tailnetRequireKey,
-		DashboardAddr:     *o.dashboardAddr,
 
 		CoordinationDisabled: !*o.conflictCoordination,
 

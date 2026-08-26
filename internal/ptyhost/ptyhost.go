@@ -253,7 +253,7 @@ func (h *Host) Attach(ctx context.Context, run domain.RunID, member domain.Membe
 			}
 			// Closed cleanly (session ended or host stopped): give the
 			// write loop a bounded chance to drain the remaining output,
-			// still honoring ctx — a client that stopped reading must
+			// still honoring ctx - a client that stopped reading must
 			// never pin this handler.
 			t := time.NewTimer(drainTimeout)
 			defer t.Stop()

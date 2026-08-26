@@ -33,10 +33,10 @@ func init() {
 // guardedRuns launches through the same controller the RPC handlers use,
 // read at launch time rather than at build time so a template launch or a
 // cron fire goes through every gate another service decorated it with -
-// the session budget () above all - no matter which service was
+// the workspace budget () above all - no matter which service was
 // built first.
 type guardedRuns struct{ ssh *sshd.Config }
 
-func (g guardedRuns) Launch(ctx context.Context, session domain.SessionID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
-	return g.ssh.Runs.Launch(ctx, session, member, task, harness, mode)
+func (g guardedRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+	return g.ssh.Runs.Launch(ctx, workspace, member, task, harness, mode)
 }

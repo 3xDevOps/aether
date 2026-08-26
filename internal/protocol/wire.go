@@ -13,14 +13,14 @@ import (
 // decorated by handlers from the scheduler, never derived from the
 // stored run.
 type Run struct {
-	ID        string `json:"id"`
-	SessionID string `json:"session_id"`
-	MemberID  string `json:"member_id"`
-	Task      string `json:"task"`
-	Harness   string `json:"harness"`
-	Mode      string `json:"mode"`
-	Status    string `json:"status"`
-	Reason    string `json:"reason,omitempty"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	MemberID    string `json:"member_id"`
+	Task        string `json:"task"`
+	Harness     string `json:"harness"`
+	Mode        string `json:"mode"`
+	Status      string `json:"status"`
+	Reason      string `json:"reason,omitempty"`
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused            bool    `json:"paused"`
@@ -33,22 +33,14 @@ type Run struct {
 	ToolSnapshotID    string  `json:"tool_snapshot_id,omitempty"`
 }
 
-// Session is the wire form of a session.
-type Session struct {
+// Workspace is the wire form of a workspace; image, env, and setup script
+// stay server-side.
+type Workspace struct {
 	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
 	BaseBranch  string `json:"base_branch"`
 	SteerOthers string `json:"steer_others,omitempty"`
 	CreatedAt   string `json:"created_at"`
-}
-
-// Workspace is the wire form of a workspace; image, env, and setup script
-// stay server-side.
-type Workspace struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"created_at"`
 }
 
 // Member is the wire form of a member. Pending appears only while the
@@ -64,14 +56,14 @@ type Member struct {
 // Event is the wire envelope streamed on the events subsystem. Payload is
 // the raw JSON of the corresponding internal/events payload struct.
 type Event struct {
-	ID        string          `json:"id"`
-	Seq       uint64          `json:"seq"`
-	Time      string          `json:"time"`
-	SessionID string          `json:"session_id"`
-	RunID     string          `json:"run_id"`
-	ActorID   string          `json:"actor_id"`
-	Type      string          `json:"type"`
-	Payload   json.RawMessage `json:"payload"`
+	ID          string          `json:"id"`
+	Seq         uint64          `json:"seq"`
+	Time        string          `json:"time"`
+	WorkspaceID string          `json:"workspace_id"`
+	RunID       string          `json:"run_id"`
+	ActorID     string          `json:"actor_id"`
+	Type        string          `json:"type"`
+	Payload     json.RawMessage `json:"payload"`
 }
 
 func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -88,7 +80,7 @@ func rfc3339Ptr(t *time.Time) *string {
 func RunFromDomain(r *domain.Run) Run {
 	return Run{
 		ID:                string(r.ID),
-		SessionID:         string(r.SessionID),
+		WorkspaceID:       string(r.WorkspaceID),
 		MemberID:          string(r.MemberID),
 		Task:              r.Task,
 		Harness:           r.Harness,
@@ -105,24 +97,14 @@ func RunFromDomain(r *domain.Run) Run {
 	}
 }
 
-// SessionFromDomain converts a domain session to its wire form.
-func SessionFromDomain(s *domain.Session) Session {
-	return Session{
-		ID:          string(s.ID),
-		WorkspaceID: string(s.WorkspaceID),
-		Name:        s.Name,
-		BaseBranch:  s.BaseBranch,
-		SteerOthers: s.SteerOthers,
-		CreatedAt:   rfc3339(s.CreatedAt),
-	}
-}
-
 // WorkspaceFromDomain converts a domain workspace to its wire form.
 func WorkspaceFromDomain(w *domain.Workspace) Workspace {
 	return Workspace{
-		ID:        string(w.ID),
-		Name:      w.Name,
-		CreatedAt: rfc3339(w.CreatedAt),
+		ID:          string(w.ID),
+		Name:        w.Name,
+		BaseBranch:  w.BaseBranch,
+		SteerOthers: w.SteerOthers,
+		CreatedAt:   rfc3339(w.CreatedAt),
 	}
 }
 
@@ -142,7 +124,6 @@ type ServerInfoResult struct {
 	ServerVersion   string `json:"server_version"`
 	ProtocolVersion string `json:"protocol_version"`
 	Time            string `json:"time"`
-	DashboardPort   int    `json:"dashboard_port"`
 	Member          Member `json:"member"`
 	// TailnetHostname is the server's MagicDNS name, discovered once at
 	// startup; empty when the server is not on a tailnet.
@@ -157,24 +138,14 @@ type WorkspaceListResult struct {
 	Workspaces []Workspace `json:"workspaces"`
 }
 
-// SessionListParams are the params of session.list.
-type SessionListParams struct {
-	WorkspaceID string `json:"workspace_id,omitempty"`
+// WorkspaceGetParams are the params of workspace.get.
+type WorkspaceGetParams struct {
+	WorkspaceID string `json:"workspace_id"`
 }
 
-// SessionListResult is the result of session.list.
-type SessionListResult struct {
-	Sessions []Session `json:"sessions"`
-}
-
-// SessionGetParams are the params of session.get.
-type SessionGetParams struct {
-	SessionID string `json:"session_id"`
-}
-
-// SessionGetResult is the result of session.get.
-type SessionGetResult struct {
-	Session Session `json:"session"`
+// WorkspaceGetResult is the result of workspace.get.
+type WorkspaceGetResult struct {
+	Workspace Workspace `json:"workspace"`
 }
 
 // MemberListResult is the result of member.list.
@@ -208,17 +179,17 @@ type MemberColorResult struct {
 
 // RunLaunchParams are the params of run.launch.
 type RunLaunchParams struct {
-	SessionID string `json:"session_id"`
-	Task      string `json:"task"`
-	Harness   string `json:"harness"`
-	Mode      string `json:"mode,omitempty"`
+	WorkspaceID string `json:"workspace_id"`
+	Task        string `json:"task"`
+	Harness     string `json:"harness"`
+	Mode        string `json:"mode,omitempty"`
 }
 
 // RunListParams are the params of run.list.
 type RunListParams struct {
-	SessionID  string `json:"session_id,omitempty"`
-	MemberID   string `json:"member_id,omitempty"`
-	ActiveOnly bool   `json:"active_only,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	MemberID    string `json:"member_id,omitempty"`
+	ActiveOnly  bool   `json:"active_only,omitempty"`
 }
 
 // RunListResult is the result of run.list.
@@ -264,16 +235,16 @@ type RunProtectParams struct {
 	Protected bool   `json:"protected"`
 }
 
-// SessionSettingsParams are the params of session.settings (admin only).
-// SteerOthers is "" (permissive default) or "admins_only".
-type SessionSettingsParams struct {
-	SessionID   string `json:"session_id"`
+// WorkspaceSettingsParams are the params of workspace.settings (admin
+// only). SteerOthers is "" (permissive default) or "admins_only".
+type WorkspaceSettingsParams struct {
+	WorkspaceID string `json:"workspace_id"`
 	SteerOthers string `json:"steer_others"`
 }
 
-// SessionSettingsResult is the result of session.settings.
-type SessionSettingsResult struct {
-	Session Session `json:"session"`
+// WorkspaceSettingsResult is the result of workspace.settings.
+type WorkspaceSettingsResult struct {
+	Workspace Workspace `json:"workspace"`
 }
 
 // RunPullResult is the result of run.pull: fetch coordinates for the run's
@@ -288,11 +259,11 @@ type RunPullResult struct {
 // SubscribeRequest is the single negotiation line a client sends after
 // opening the events subsystem.
 type SubscribeRequest struct {
-	SessionID string   `json:"session_id,omitempty"`
-	RunID     string   `json:"run_id,omitempty"`
-	Types     []string `json:"types,omitempty"`
-	Replay    bool     `json:"replay,omitempty"`
-	AfterSeq  uint64   `json:"after_seq,omitempty"`
+	WorkspaceID string   `json:"workspace_id,omitempty"`
+	RunID       string   `json:"run_id,omitempty"`
+	Types       []string `json:"types,omitempty"`
+	Replay      bool     `json:"replay,omitempty"`
+	AfterSeq    uint64   `json:"after_seq,omitempty"`
 }
 
 // SubscribeResponse acknowledges a SubscribeRequest; on failure the server

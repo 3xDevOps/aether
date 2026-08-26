@@ -3,8 +3,8 @@ import type { SliceCreator } from '@/store/slice'
 
 export interface PresenceSlice {
   /**
-   * The live roster. Presence is per session, so one member appears once
-   * per session they are present in.
+   * The live roster. Presence is per workspace, so one member appears once
+   * per workspace they are present in.
    */
   presence: PresenceEntry[]
   setPresence: (entries: PresenceEntry[]) => void
@@ -15,7 +15,7 @@ export const createPresenceSlice: SliceCreator<PresenceSlice> = (set) => ({
   setPresence: (presence) => set({ presence }),
 })
 
-/** Who is online anywhere, deduplicated across sessions. */
+/** Who is online anywhere, deduplicated across workspaces. */
 export function onlineMembers(presence: PresenceEntry[]): string[] {
   return [...new Set(presence.map((p) => p.member_id))].sort()
 }

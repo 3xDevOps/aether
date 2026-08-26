@@ -1,4 +1,0 @@
-{"jsonrpc":"2.0","id":1,"method":"coord.status"}
-{"jsonrpc":"2.0","id":2,"method":"coord.send","params":{"to_run_id":"run_02","body":"I'm rewriting login(); done in ~10 min."}}
-{"jsonrpc":"2.0","id":3,"method":"coord.inbox"}
-{"jsonrpc":"2.0","id":4,"method":"coord.inbox","params":{"ack_token":"01k1h7m4z9q0r8s5t2v6w3x7y1"}}

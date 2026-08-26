@@ -23,19 +23,19 @@ func runInbox(args []string) error {
 		switch args[0] {
 		case "approve", "deny":
 			if len(args) < 2 {
-				return fmt.Errorf("usage: aether inbox %s <request-id> [--session]", args[0])
+				return fmt.Errorf("usage: aether inbox %s <request-id> [--workspace]", args[0])
 			}
 			return inboxDecide(args[0] == "approve", args[1], args[2:])
 		}
 	}
 	fs := flag.NewFlagSet("inbox", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	all := fs.Bool("all", false, "include already decided requests")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		list, err := inboxList(c, *session, *all)
+		list, err := inboxList(c, *workspace, *all)
 		if err != nil {
 			return err
 		}
@@ -51,12 +51,12 @@ func runInbox(args []string) error {
 
 func inboxDecide(approve bool, requestID string, args []string) error {
 	fs := flag.NewFlagSet("inbox decide", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		list, err := inboxList(c, *session, true)
+		list, err := inboxList(c, *workspace, true)
 		if err != nil {
 			return err
 		}
@@ -82,15 +82,15 @@ func inboxDecide(approve bool, requestID string, args []string) error {
 	})
 }
 
-func inboxList(c *protocol.Client, session string, all bool) ([]protocol.Approval, error) {
-	sessID, err := resolveSession(c, session)
+func inboxList(c *protocol.Client, workspace string, all bool) ([]protocol.Approval, error) {
+	wsID, err := resolveWorkspace(c, workspace)
 	if err != nil {
 		return nil, err
 	}
 	var res protocol.ApprovalListResult
 	if err := c.Call(protocol.MethodApprovalList, protocol.ApprovalListParams{
-		SessionID: sessID,
-		All:       all,
+		WorkspaceID: wsID,
+		All:         all,
 	}, &res); err != nil {
 		return nil, err
 	}

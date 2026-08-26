@@ -17,12 +17,12 @@ describe('run list empty states', () => {
     useStore.setState({
       hydrated: false,
       hydrationError:
-        'dashboard token revoked or expired; mint one with `aether dash`',
+        'dashboard token revoked or expired; mint one with `aether gui`',
       streamDead: true,
     })
     render(<RunList runs={[]} empty="No runs yet" />)
     // Nothing retries a dead token; saying so is what points at the fix.
-    expect(screen.getByText(/aether dash/)).toBeDefined()
+    expect(screen.getByText(/aether gui/)).toBeDefined()
     expect(screen.queryByText(/Retrying/)).toBeNull()
   })
 })

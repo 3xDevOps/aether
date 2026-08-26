@@ -55,6 +55,6 @@ func TestWorkspaceToolsResetUsesToolManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(remaining) != 0 {
-		t.Fatalf("pending sessions remain after reset: %d", len(remaining))
+		t.Fatalf("pending workspace shells remain after reset: %d", len(remaining))
 	}
 }

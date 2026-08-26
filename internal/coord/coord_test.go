@@ -133,15 +133,15 @@ func (f *fakePTY) all() []injection {
 // harness is a coordination service over a real store and bus, with the
 // radar and the terminals faked and the clock under test control.
 type harness struct {
-	t       *testing.T
-	dir     string
-	db      *store.DB
-	bus     *events.InProc
-	peers   *fakePeers
-	pty     *fakePTY
-	svc     *Service
-	session domain.SessionID
-	runs    []*domain.Run
+	t         *testing.T
+	dir       string
+	db        *store.DB
+	bus       *events.InProc
+	peers     *fakePeers
+	pty       *fakePTY
+	svc       *Service
+	workspace domain.WorkspaceID
+	runs      []*domain.Run
 
 	clockMu sync.Mutex
 	clock   time.Time
@@ -162,13 +162,13 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *harness {
 	}
 	t.Cleanup(func() { _ = bus.Close() })
 
-	ws := &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+	ws := &domain.Workspace{
+		Name:        "proj",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if werr := db.CreateWorkspace(ctx, ws); werr != nil {
 		t.Fatalf("create workspace: %v", werr)
-	}
-	ses := &domain.Session{WorkspaceID: ws.ID, Name: "auth", BaseBranch: "main"}
-	if serr := db.CreateSession(ctx, ses); serr != nil {
-		t.Fatalf("create session: %v", serr)
 	}
 	mem := &domain.Member{DisplayName: "Ada", TailnetLogin: "ada@example.com", Color: "#e6194b", Role: domain.RoleCollaborator}
 	if merr := db.CreateMember(ctx, mem); merr != nil {
@@ -176,23 +176,23 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *harness {
 	}
 
 	h := &harness{
-		t:       t,
-		dir:     dir,
-		db:      db,
-		bus:     bus,
-		peers:   &fakePeers{},
-		pty:     &fakePTY{},
-		session: ses.ID,
-		clock:   time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+		t:         t,
+		dir:       dir,
+		db:        db,
+		bus:       bus,
+		peers:     &fakePeers{},
+		pty:       &fakePTY{},
+		workspace: ws.ID,
+		clock:     time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
 	}
 	for i := range runs {
 		r := &domain.Run{
-			SessionID: ses.ID,
-			MemberID:  mem.ID,
-			Task:      fmt.Sprintf("task %d", i),
-			Harness:   "claude",
-			Mode:      domain.LaunchTUI,
-			Status:    domain.RunRunning,
+			WorkspaceID: ws.ID,
+			MemberID:    mem.ID,
+			Task:        fmt.Sprintf("task %d", i),
+			Harness:     "claude",
+			Mode:        domain.LaunchTUI,
+			Status:      domain.RunRunning,
 		}
 		if rerr := db.CreateRun(ctx, r); rerr != nil {
 			t.Fatalf("create run %d: %v", i, rerr)

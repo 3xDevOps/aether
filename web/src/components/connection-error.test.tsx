@@ -34,6 +34,6 @@ describe('ConnectionError', () => {
     )
 
     expect(screen.getByRole('heading', { name: 'This dashboard link has expired' })).toBeDefined()
-    expect(screen.getByText(/aether dash/i)).toBeDefined()
+    expect(screen.getByText(/aether gui/i)).toBeDefined()
   })
 })

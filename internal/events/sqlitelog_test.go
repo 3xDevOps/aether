@@ -32,22 +32,22 @@ func appendN(t *testing.T, log *SQLiteLog, events ...Event) {
 	}
 }
 
-func logEvent(seq uint64, session domain.SessionID, run domain.RunID, p Payload) Event {
+func logEvent(seq uint64, workspace domain.WorkspaceID, run domain.RunID, p Payload) Event {
 	return Event{
-		ID:        newEventID(),
-		Seq:       seq,
-		Time:      time.Unix(0, int64(seq)*1e6).UTC(),
-		SessionID: session,
-		RunID:     run,
-		ActorID:   "m1",
-		Type:      p.EventType(),
-		Payload:   p,
+		ID:          newEventID(),
+		Seq:         seq,
+		Time:        time.Unix(0, int64(seq)*1e6).UTC(),
+		WorkspaceID: workspace,
+		RunID:       run,
+		ActorID:     "m1",
+		Type:        p.EventType(),
+		Payload:     p,
 	}
 }
 
 func TestSQLiteLogAppendRead(t *testing.T) {
 	log := newTestLog(t)
-	want := logEvent(1, "s1", "r1", RunStatusPayload{From: domain.RunQueued, To: domain.RunProvisioning})
+	want := logEvent(1, "w1", "r1", RunStatusPayload{From: domain.RunQueued, To: domain.RunProvisioning})
 	appendN(t, log, want)
 
 	got, err := log.Read(context.Background(), Filter{}, 0, 0, 10)
@@ -65,11 +65,11 @@ func TestSQLiteLogAppendRead(t *testing.T) {
 func TestSQLiteLogFiltersAndBounds(t *testing.T) {
 	log := newTestLog(t)
 	appendN(t, log,
-		logEvent(1, "s1", "r1", RunStatusPayload{To: domain.RunRunning}),
-		logEvent(2, "s1", "r2", RunDiffPayload{Files: []FileDiffStat{{Path: "a.go", Additions: 1}}}),
-		logEvent(3, "s2", "r3", RunStatusPayload{To: domain.RunFailed}),
-		logEvent(4, "s1", "r1", TimelinePayload{Kind: TimelineKill}),
-		logEvent(5, "s1", "", PresencePayload{State: PresenceOnline}),
+		logEvent(1, "w1", "r1", RunStatusPayload{To: domain.RunRunning}),
+		logEvent(2, "w1", "r2", RunDiffPayload{Files: []FileDiffStat{{Path: "a.go", Additions: 1}}}),
+		logEvent(3, "w2", "r3", RunStatusPayload{To: domain.RunFailed}),
+		logEvent(4, "w1", "r1", TimelinePayload{Kind: TimelineKill}),
+		logEvent(5, "w1", "", PresencePayload{State: PresenceOnline}),
 	)
 	ctx := context.Background()
 
@@ -97,13 +97,13 @@ func TestSQLiteLogFiltersAndBounds(t *testing.T) {
 		}
 	}
 
-	eq("session filter", seqs(Filter{Session: "s1"}, 0, 0, 10), []uint64{1, 2, 4, 5})
+	eq("workspace filter", seqs(Filter{Workspace: "w1"}, 0, 0, 10), []uint64{1, 2, 4, 5})
 	eq("run filter", seqs(Filter{Run: "r1"}, 0, 0, 10), []uint64{1, 4})
 	eq("type filter", seqs(Filter{Types: []Type{TypeRunStatus, TypeTimeline}}, 0, 0, 10), []uint64{1, 3, 4})
-	eq("after cursor", seqs(Filter{Session: "s1"}, 2, 0, 10), []uint64{4, 5})
+	eq("after cursor", seqs(Filter{Workspace: "w1"}, 2, 0, 10), []uint64{4, 5})
 	eq("upper bound", seqs(Filter{}, 1, 4, 10), []uint64{2, 3, 4})
 	eq("limit", seqs(Filter{}, 0, 0, 2), []uint64{1, 2})
-	eq("combined", seqs(Filter{Session: "s1", Run: "r1", Types: []Type{TypeTimeline}}, 0, 0, 10), []uint64{4})
+	eq("combined", seqs(Filter{Workspace: "w1", Run: "r1", Types: []Type{TypeTimeline}}, 0, 0, 10), []uint64{4})
 }
 
 func TestSQLiteLogLastSeq(t *testing.T) {
@@ -119,8 +119,8 @@ func TestSQLiteLogLastSeq(t *testing.T) {
 	}
 
 	appendN(t, log,
-		logEvent(3, "s1", "", PresencePayload{State: PresenceOnline}),
-		logEvent(7, "s1", "", PresencePayload{State: PresenceOffline}),
+		logEvent(3, "w1", "", PresencePayload{State: PresenceOnline}),
+		logEvent(7, "w1", "", PresencePayload{State: PresenceOffline}),
 	)
 	last, err = log.LastSeq(ctx)
 	if err != nil {
@@ -137,7 +137,7 @@ func TestSQLiteLogPersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	appendN(t, log, logEvent(1, "s1", "r1", RunCostPayload{InputTokens: 5, OutputTokens: 6, CostUSD: 0.01, Metered: true}))
+	appendN(t, log, logEvent(1, "w1", "r1", RunCostPayload{InputTokens: 5, OutputTokens: 6, CostUSD: 0.01, Metered: true}))
 	if closeErr := log.Close(); closeErr != nil {
 		t.Fatalf("close: %v", closeErr)
 	}
@@ -173,7 +173,7 @@ func TestSQLiteLogPathWithURISpecialChars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open with special chars in path: %v", err)
 	}
-	appendN(t, log, logEvent(1, "s1", "r1", RunStatusPayload{To: domain.RunRunning}))
+	appendN(t, log, logEvent(1, "w1", "r1", RunStatusPayload{To: domain.RunRunning}))
 	if closeErr := log.Close(); closeErr != nil {
 		t.Fatalf("close: %v", closeErr)
 	}
@@ -197,7 +197,7 @@ func TestSQLiteLogPathWithURISpecialChars(t *testing.T) {
 
 func TestSQLiteLogAppendDuplicateSeqFails(t *testing.T) {
 	log := newTestLog(t)
-	e := logEvent(1, "s1", "", PresencePayload{State: PresenceOnline})
+	e := logEvent(1, "w1", "", PresencePayload{State: PresenceOnline})
 	appendN(t, log, e)
 	if err := log.Append(context.Background(), e); err == nil {
 		t.Fatal("duplicate seq append succeeded, want error")

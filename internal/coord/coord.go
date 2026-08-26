@@ -12,7 +12,7 @@
 //
 // Nothing here blocks, locks, or arbitrates. A send is authorized only
 // against a live radar overlap (or its grace window), is size-capped,
-// rate-limited, depth-capped, and stamped into the session timeline;
+// rate-limited, depth-capped, and stamped into the workspace timeline;
 // beyond that the agents are on their own, and the radar chips remain the
 // human safety net.
 package coord

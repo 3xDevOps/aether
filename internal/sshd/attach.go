@@ -110,10 +110,10 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 
 func (s *Server) publishPresence(run *domain.Run, member domain.MemberID, state events.PresenceState) {
 	_, _ = s.cfg.Bus.Publish(context.Background(), events.Event{
-		SessionID: run.SessionID,
-		RunID:     run.ID,
-		ActorID:   member,
-		Payload:   events.PresencePayload{State: state},
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		ActorID:     member,
+		Payload:     events.PresencePayload{State: state},
 	})
 }
 

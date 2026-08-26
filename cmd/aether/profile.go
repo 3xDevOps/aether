@@ -43,7 +43,7 @@ func (s *stringList) Set(v string) error {
 func profilePush(args []string) error {
 	fs := flag.NewFlagSet("profile push", flag.ExitOnError)
 	agent := fs.String("agent", "", "harness name")
-	session := fs.String("session", "", "optional session ID for --allow-secret audit")
+	workspace := fs.String("workspace", "", "optional workspace ID for --allow-secret audit")
 	var allow stringList
 	fs.Var(&allow, "allow-secret", "allow a scanned secret in this file (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -52,15 +52,15 @@ func profilePush(args []string) error {
 	if *agent == "" {
 		return fmt.Errorf("usage: aether profile push --agent <harness> [--allow-secret <file> ...]")
 	}
-	if len(allow) > 0 && *session == "" {
-		return fmt.Errorf("profile push: --allow-secret requires --session")
+	if len(allow) > 0 && *workspace == "" {
+		return fmt.Errorf("profile push: --allow-secret requires --workspace")
 	}
 	files, err := cliprofile.Discover(*agent, allow)
 	if err != nil {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		snap, err := cliprofile.Push(c, *agent, files, allow, *session)
+		snap, err := cliprofile.Push(c, *agent, files, allow, *workspace)
 		if err != nil {
 			return err
 		}

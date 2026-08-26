@@ -19,18 +19,18 @@ func init() {
 
 func runCost(args []string) error {
 	fs := flag.NewFlagSet("cost", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	runs := fs.Bool("runs", false, "list every run's usage, not just the per-member split")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		var res protocol.CostReportResult
-		if err := c.Call(protocol.MethodCostReport, protocol.CostReportParams{SessionID: sessID}, &res); err != nil {
+		if err := c.Call(protocol.MethodCostReport, protocol.CostReportParams{WorkspaceID: wsID}, &res); err != nil {
 			return err
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -71,7 +71,7 @@ func meteredLabel(metered bool) string {
 func unmeteredNote(total protocol.CostRollup) string {
 	if total.Unmetered == 0 {
 		if total.Runs == 0 {
-			return "no usage recorded for this session yet"
+			return "no usage recorded for this workspace yet"
 		}
 		return fmt.Sprintf("all %d runs metered", total.Runs)
 	}

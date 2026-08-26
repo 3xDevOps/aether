@@ -34,12 +34,12 @@ func publish(t *testing.T, b *InProc, e Event) Event {
 	return out
 }
 
-func statusEvent(session domain.SessionID, run domain.RunID, to domain.RunStatus) Event {
+func statusEvent(workspace domain.WorkspaceID, run domain.RunID, to domain.RunStatus) Event {
 	return Event{
-		SessionID: session,
-		RunID:     run,
-		ActorID:   "m1",
-		Payload:   RunStatusPayload{To: to},
+		WorkspaceID: workspace,
+		RunID:       run,
+		ActorID:     "m1",
+		Payload:     RunStatusPayload{To: to},
 	}
 }
 
@@ -64,7 +64,7 @@ func collect(t *testing.T, sub Subscription, n int) []Event {
 
 func TestPublishStampsEnvelope(t *testing.T) {
 	b := newTestBus(t, nil)
-	e := publish(t, b, statusEvent("s1", "r1", domain.RunRunning))
+	e := publish(t, b, statusEvent("w1", "r1", domain.RunRunning))
 	if e.Seq != 1 {
 		t.Errorf("seq = %d, want 1", e.Seq)
 	}
@@ -77,23 +77,23 @@ func TestPublishStampsEnvelope(t *testing.T) {
 	if e.Type != TypeRunStatus {
 		t.Errorf("type = %q, want %q (derived from payload)", e.Type, TypeRunStatus)
 	}
-	if next := publish(t, b, statusEvent("s1", "r1", domain.RunFailed)); next.Seq != 2 {
+	if next := publish(t, b, statusEvent("w1", "r1", domain.RunFailed)); next.Seq != 2 {
 		t.Errorf("second seq = %d, want 2", next.Seq)
 	}
 }
 
 func TestPublishValidation(t *testing.T) {
 	b := newTestBus(t, nil)
-	if _, err := b.Publish(context.Background(), Event{SessionID: "s1"}); !errors.Is(err, ErrNoPayload) {
+	if _, err := b.Publish(context.Background(), Event{WorkspaceID: "w1"}); !errors.Is(err, ErrNoPayload) {
 		t.Errorf("nil payload: got %v, want ErrNoPayload", err)
 	}
-	if _, err := b.Publish(context.Background(), Event{Payload: PresencePayload{State: PresenceOnline}}); !errors.Is(err, ErrNoSession) {
-		t.Errorf("no session: got %v, want ErrNoSession", err)
+	if _, err := b.Publish(context.Background(), Event{Payload: PresencePayload{State: PresenceOnline}}); !errors.Is(err, ErrNoWorkspace) {
+		t.Errorf("no workspace: got %v, want ErrNoWorkspace", err)
 	}
 	_, err := b.Publish(context.Background(), Event{
-		SessionID: "s1",
-		Type:      TypePresence,
-		Payload:   RunStatusPayload{To: domain.RunRunning},
+		WorkspaceID: "w1",
+		Type:        TypePresence,
+		Payload:     RunStatusPayload{To: domain.RunRunning},
 	})
 	if err == nil {
 		t.Error("mismatched type accepted, want error")
@@ -108,9 +108,9 @@ func TestFanOutToMultipleSubscribers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("subscribe all: %v", err)
 	}
-	s1Only, err := b.Subscribe(ctx, SubscribeOptions{Filter: Filter{Session: "s1"}})
+	w1Only, err := b.Subscribe(ctx, SubscribeOptions{Filter: Filter{Workspace: "w1"}})
 	if err != nil {
-		t.Fatalf("subscribe session: %v", err)
+		t.Fatalf("subscribe workspace: %v", err)
 	}
 	r2Status, err := b.Subscribe(ctx, SubscribeOptions{
 		Filter: Filter{Run: "r2", Types: []Type{TypeRunStatus}},
@@ -119,10 +119,10 @@ func TestFanOutToMultipleSubscribers(t *testing.T) {
 		t.Fatalf("subscribe run+type: %v", err)
 	}
 
-	publish(t, b, statusEvent("s1", "r1", domain.RunRunning))
-	publish(t, b, statusEvent("s2", "r2", domain.RunRunning))
-	publish(t, b, Event{SessionID: "s1", RunID: "r2", Payload: RunDiffPayload{}})
-	publish(t, b, statusEvent("s1", "r2", domain.RunMerged))
+	publish(t, b, statusEvent("w1", "r1", domain.RunRunning))
+	publish(t, b, statusEvent("w2", "r2", domain.RunRunning))
+	publish(t, b, Event{WorkspaceID: "w1", RunID: "r2", Payload: RunDiffPayload{}})
+	publish(t, b, statusEvent("w1", "r2", domain.RunMerged))
 
 	gotAll := collect(t, all, 4)
 	for i, e := range gotAll {
@@ -131,14 +131,14 @@ func TestFanOutToMultipleSubscribers(t *testing.T) {
 		}
 	}
 
-	gotS1 := collect(t, s1Only, 3)
-	for _, e := range gotS1 {
-		if e.SessionID != "s1" {
-			t.Errorf("session filter leaked event %#v", e)
+	gotW1 := collect(t, w1Only, 3)
+	for _, e := range gotW1 {
+		if e.WorkspaceID != "w1" {
+			t.Errorf("workspace filter leaked event %#v", e)
 		}
 	}
-	if gotS1[0].Seq != 1 || gotS1[1].Seq != 3 || gotS1[2].Seq != 4 {
-		t.Errorf("session filter seqs = %d,%d,%d, want 1,3,4", gotS1[0].Seq, gotS1[1].Seq, gotS1[2].Seq)
+	if gotW1[0].Seq != 1 || gotW1[1].Seq != 3 || gotW1[2].Seq != 4 {
+		t.Errorf("workspace filter seqs = %d,%d,%d, want 1,3,4", gotW1[0].Seq, gotW1[1].Seq, gotW1[2].Seq)
 	}
 
 	gotR2 := collect(t, r2Status, 2)
@@ -172,7 +172,7 @@ func TestSlowConsumerDoesNotBlockPublisher(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		for i := 0; i < total; i++ {
-			if _, err := b.Publish(ctx, statusEvent("s1", "r1", domain.RunRunning)); err != nil {
+			if _, err := b.Publish(ctx, statusEvent("w1", "r1", domain.RunRunning)); err != nil {
 				done <- err
 				return
 			}
@@ -217,14 +217,14 @@ func TestReplayFromCursorWithGaplessLiveHandoff(t *testing.T) {
 
 	var cursor uint64
 	for i := 0; i < persisted; i++ {
-		e := publish(t, b, statusEvent("s1", "r1", domain.RunRunning))
+		e := publish(t, b, statusEvent("w1", "r1", domain.RunRunning))
 		if i == persisted/2-1 {
 			cursor = e.Seq
 		}
 	}
 
 	sub, err := b.Subscribe(ctx, SubscribeOptions{
-		Filter:   Filter{Session: "s1"},
+		Filter:   Filter{Workspace: "w1"},
 		Replay:   true,
 		AfterSeq: cursor,
 		Buffer:   persisted + live,
@@ -237,7 +237,7 @@ func TestReplayFromCursorWithGaplessLiveHandoff(t *testing.T) {
 	// the handoff from persisted to live delivery.
 	go func() {
 		for i := 0; i < live; i++ {
-			b.Publish(ctx, statusEvent("s1", "r1", domain.RunRunning)) //nolint:errcheck
+			b.Publish(ctx, statusEvent("w1", "r1", domain.RunRunning)) //nolint:errcheck
 		}
 	}()
 
@@ -254,16 +254,16 @@ func TestReplayFromCursorWithGaplessLiveHandoff(t *testing.T) {
 	}
 }
 
-func TestReplayOnlyMatchingSession(t *testing.T) {
+func TestReplayOnlyMatchingWorkspace(t *testing.T) {
 	log := newTestLog(t)
 	b := newTestBus(t, log)
 
-	publish(t, b, statusEvent("s1", "r1", domain.RunRunning))
-	publish(t, b, statusEvent("s2", "r2", domain.RunRunning))
-	publish(t, b, statusEvent("s1", "r1", domain.RunMerged))
+	publish(t, b, statusEvent("w1", "r1", domain.RunRunning))
+	publish(t, b, statusEvent("w2", "r2", domain.RunRunning))
+	publish(t, b, statusEvent("w1", "r1", domain.RunMerged))
 
 	sub, err := b.Subscribe(context.Background(), SubscribeOptions{
-		Filter: Filter{Session: "s1"},
+		Filter: Filter{Workspace: "w1"},
 		Replay: true,
 	})
 	if err != nil {
@@ -294,14 +294,14 @@ func TestSequenceResumesFromLog(t *testing.T) {
 	defer func() { _ = log.Close() }()
 
 	b1 := newTestBus(t, log)
-	publish(t, b1, statusEvent("s1", "r1", domain.RunQueued))
-	publish(t, b1, statusEvent("s1", "r1", domain.RunProvisioning))
+	publish(t, b1, statusEvent("w1", "r1", domain.RunQueued))
+	publish(t, b1, statusEvent("w1", "r1", domain.RunProvisioning))
 	if err := b1.Close(); err != nil {
 		t.Fatalf("close first bus: %v", err)
 	}
 
 	b2 := newTestBus(t, log)
-	e := publish(t, b2, statusEvent("s1", "r1", domain.RunRunning))
+	e := publish(t, b2, statusEvent("w1", "r1", domain.RunRunning))
 	if e.Seq != 3 {
 		t.Fatalf("seq after restart = %d, want 3", e.Seq)
 	}
@@ -333,7 +333,7 @@ func (f *faultLog) Append(ctx context.Context, e Event) error {
 func TestReplayFailureSurfacesErr(t *testing.T) {
 	readErr := errors.New("disk exploded")
 	b := newTestBus(t, &faultLog{EventLog: newTestLog(t), readErr: readErr})
-	publish(t, b, statusEvent("s1", "r1", domain.RunRunning))
+	publish(t, b, statusEvent("w1", "r1", domain.RunRunning))
 
 	sub, err := b.Subscribe(context.Background(), SubscribeOptions{Replay: true})
 	if err != nil {
@@ -355,8 +355,8 @@ func TestReplayFailureSurfacesErr(t *testing.T) {
 func TestCancelledReplaySurfacesErr(t *testing.T) {
 	log := newTestLog(t)
 	b := newTestBus(t, log)
-	publish(t, b, statusEvent("s1", "r1", domain.RunRunning))
-	publish(t, b, statusEvent("s1", "r1", domain.RunMerged))
+	publish(t, b, statusEvent("w1", "r1", domain.RunRunning))
+	publish(t, b, statusEvent("w1", "r1", domain.RunMerged))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -406,12 +406,12 @@ func TestAppendErrorAfterCommitDoesNotPoisonSequence(t *testing.T) {
 	fl := &faultLog{EventLog: log, appendErr: context.Canceled}
 	b := newTestBus(t, fl)
 
-	if _, err := b.Publish(context.Background(), statusEvent("s1", "r1", domain.RunRunning)); err == nil {
+	if _, err := b.Publish(context.Background(), statusEvent("w1", "r1", domain.RunRunning)); err == nil {
 		t.Fatal("publish succeeded despite append error")
 	}
 
 	fl.appendErr = nil
-	e := publish(t, b, statusEvent("s1", "r1", domain.RunMerged))
+	e := publish(t, b, statusEvent("w1", "r1", domain.RunMerged))
 	if e.Seq != 2 {
 		t.Fatalf("seq after committed-but-errored append = %d, want 2", e.Seq)
 	}
@@ -423,7 +423,7 @@ func TestSubscriptionClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
-	publish(t, b, statusEvent("s1", "r1", domain.RunRunning))
+	publish(t, b, statusEvent("w1", "r1", domain.RunRunning))
 	collect(t, sub, 1)
 	if err := sub.Close(); err != nil {
 		t.Fatalf("close: %v", err)
@@ -436,7 +436,7 @@ func TestSubscriptionClose(t *testing.T) {
 	case <-time.After(testTimeout):
 		t.Fatal("events channel not closed")
 	}
-	publish(t, b, statusEvent("s1", "r1", domain.RunMerged))
+	publish(t, b, statusEvent("w1", "r1", domain.RunMerged))
 }
 
 func TestBusClose(t *testing.T) {
@@ -456,7 +456,7 @@ func TestBusClose(t *testing.T) {
 	case <-time.After(testTimeout):
 		t.Fatal("events channel not closed after bus close")
 	}
-	if _, err := b.Publish(context.Background(), statusEvent("s1", "r1", domain.RunRunning)); !errors.Is(err, ErrBusClosed) {
+	if _, err := b.Publish(context.Background(), statusEvent("w1", "r1", domain.RunRunning)); !errors.Is(err, ErrBusClosed) {
 		t.Fatalf("publish after close: got %v, want ErrBusClosed", err)
 	}
 	if _, err := b.Subscribe(context.Background(), SubscribeOptions{}); !errors.Is(err, ErrBusClosed) {
@@ -484,7 +484,7 @@ func TestConcurrentPublishers(t *testing.T) {
 		go func(p int) {
 			for i := 0; i < perPublisher; i++ {
 				run := domain.RunID(fmt.Sprintf("r%d", p))
-				if _, pubErr := b.Publish(ctx, statusEvent("s1", run, domain.RunRunning)); pubErr != nil {
+				if _, pubErr := b.Publish(ctx, statusEvent("w1", run, domain.RunRunning)); pubErr != nil {
 					errs <- pubErr
 					return
 				}

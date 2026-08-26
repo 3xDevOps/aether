@@ -1,21 +1,22 @@
 // Package permissions is the pure capability policy for Aether: who may
 // view, steer, kill, hand off, protect, launch, and administer, given the
-// actor's role, run ownership, the run's protected flag, and the session's
-// steer-others setting. It performs no I/O - callers resolve the actor and
-// target from the store and map ErrDenied to the wire's CodeDenied.
+// actor's role, run ownership, the run's protected flag, and the
+// workspace's steer-others setting. It performs no I/O - callers resolve
+// the actor and target from the store and map ErrDenied to the wire's
+// CodeDenied.
 //
 // The policy is the design doc's role table:
 //
-//	| Role         | Own runs   | Others' runs        | Session                |
+//	| Role         | Own runs   | Others' runs        | Workspace              |
 //	|--------------|------------|---------------------|------------------------|
 //	| viewer       | -          | view                | read feed              |
 //	| collaborator | everything | view + steer + kill | launch runs            |
 //	| admin        | everything | everything          | members, settings, ... |
 //
-// modified by two restrictions: a session with steer_others=admins_only
+// modified by two restrictions: a workspace with steer_others=admins_only
 // limits steering and killing others' runs to owner and admins, and a
 // protected run limits steer AND kill to its owner and admins regardless
-// of the session setting.
+// of the workspace setting.
 //
 // Git push over SSH is the Push capability: writing to a workspace's
 // repository is a collaborator action, so a viewer is read-only on the
@@ -50,9 +51,9 @@ const (
 	Handoff Capability = "handoff"
 	// Protect toggles a run's protected flag; owner or admin only.
 	Protect Capability = "protect"
-	// SessionAdmin is session administration (membership, settings);
+	// WorkspaceAdmin is workspace administration (membership, settings);
 	// admin only.
-	SessionAdmin Capability = "session_admin"
+	WorkspaceAdmin Capability = "workspace_admin"
 )
 
 // Actor is the member attempting the action.
@@ -61,17 +62,17 @@ type Actor struct {
 	Role domain.Role
 }
 
-// Target describes the acted-on run and its session's policy. The zero
+// Target describes the acted-on run and its workspace's policy. The zero
 // value is correct for capabilities that target no run (Launch,
-// SessionAdmin).
+// WorkspaceAdmin).
 type Target struct {
 	// Owner is the targeted run's owning member; empty when no run is
 	// targeted.
 	Owner domain.MemberID
 	// Protected restricts Steer and Kill to owner and admins regardless
-	// of the session setting.
+	// of the workspace setting.
 	Protected bool
-	// SteerOthers is the session's steer-others policy: "" (permissive
+	// SteerOthers is the workspace's steer-others policy: "" (permissive
 	// default) or domain.SteerOthersAdminsOnly.
 	SteerOthers string
 }
@@ -96,8 +97,8 @@ func Check(cap Capability, actor Actor, target Target) error {
 	switch cap {
 	case View:
 		return nil
-	case SessionAdmin:
-		return deny("session administration requires the admin role")
+	case WorkspaceAdmin:
+		return deny("workspace administration requires the admin role")
 	case Launch:
 		if actor.Role == domain.RoleCollaborator {
 			return nil
@@ -129,7 +130,7 @@ func Check(cap Capability, actor Actor, target Target) error {
 			return deny("run is protected: only its owner or an admin may " + string(cap))
 		}
 		if target.SteerOthers == domain.SteerOthersAdminsOnly {
-			return deny("session restricts " + string(cap) + " of others' runs to their owner and admins")
+			return deny("workspace restricts " + string(cap) + " of others' runs to their owner and admins")
 		}
 		return nil
 	}

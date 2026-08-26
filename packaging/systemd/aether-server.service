@@ -19,7 +19,7 @@ Type=simple
 # the tailscaled socket (tailscale set --operator=aether) if you want tailnet
 # identity auth.
 #
-# Options (listen address, dashboard port, data dir, tailnet policy) live in
+# Options (listen address, data dir, tailnet policy) live in
 # the config file below, which is operator-owned and survives binary updates
 # and unit reinstalls. Set them with "aether-server config set <key> <value>"
 # or "aether-server setup" - do not edit this ExecStart.

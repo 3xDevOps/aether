@@ -8,14 +8,14 @@ import (
 	"testing"
 )
 
-// TestCoordWireV1Golden pins coordination wire v1: every field name,
+// TestCoordWireV2Golden pins coordination wire v2: every field name,
 // every omitted optional, and the order they serialize in. The bridge
 // inside a container is built against these bytes and outlives the server
 // that wrote them, so a change here that is not a new wire version is a
 // break. The error responses are pinned separately by
-// TestCoordWireV1ErrorsGolden, which provokes each one from the real
+// TestCoordWireV2ErrorsGolden, which provokes each one from the real
 // coord service instead of restating it as a literal.
-func TestCoordWireV1Golden(t *testing.T) {
+func TestCoordWireV2Golden(t *testing.T) {
 	ack := "01k1h7m4z9q0r8s5t2v6w3x7y1"
 
 	requests := []Request{
@@ -31,7 +31,7 @@ func TestCoordWireV1Golden(t *testing.T) {
 		{JSONRPC: "2.0", ID: json.RawMessage("1"), Result: mustJSON(t, CoordStatusResult{
 			WireVersion: CoordWireVersion,
 			RunID:       "run_01",
-			SessionID:   "ses_01",
+			WorkspaceID: "ws_01",
 			MemberID:    "mem_01",
 			Task:        "add OAuth login",
 			Peers: []CoordPeer{
@@ -90,7 +90,7 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 
 func goldenLines(t *testing.T, name string) [][]byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "coord-v1", name))
+	data, err := os.ReadFile(filepath.Join("testdata", "coord-v2", name))
 	if err != nil {
 		t.Fatalf("read golden %s: %v", name, err)
 	}

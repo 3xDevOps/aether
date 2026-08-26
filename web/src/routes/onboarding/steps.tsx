@@ -13,7 +13,6 @@ import type {
   AgentInfo,
   LinkRepoResult,
   LinkStatus,
-  Session,
   Workspace,
 } from '@/lib/types'
 import { useStore } from '@/store'
@@ -92,7 +91,8 @@ export function LinkStep({ client, onNext }: { client: Api; onNext: () => void }
  * Step 2: pick the workspace runs will live in. With none on the server and
  * the add capability present, creation is inline; the form mirrors
  * protocol.WorkspaceAddParams - custom image, or the server's neutral image
- * when the field is left empty.
+ * when the field is left empty. The base branch is the ref every run in the
+ * workspace forks from, so it is settled here rather than per run.
  */
 export function WorkspaceStep({
   client,
@@ -106,6 +106,7 @@ export function WorkspaceStep({
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('')
+  const [baseBranch, setBaseBranch] = useState('main')
   const [image, setImage] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -125,7 +126,13 @@ export function WorkspaceStep({
       const environment = image.trim()
         ? { custom_image: image.trim() }
         : { neutral_image: true }
-      onNext(await client.workspaceAdd({ name: name.trim(), environment }))
+      onNext(
+        await client.workspaceAdd({
+          name: name.trim(),
+          base_branch: baseBranch.trim(),
+          environment,
+        }),
+      )
     } catch (err) {
       setError(message(err))
     } finally {
@@ -143,6 +150,9 @@ export function WorkspaceStep({
           {workspaces.map((w) => (
             <li key={w.id} className="flex items-center gap-2 px-3 py-2 text-sm">
               <span className="min-w-0 flex-1 truncate">{w.name}</span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {w.base_branch}
+              </span>
               <Button
                 size="sm"
                 variant="outline"
@@ -179,6 +189,14 @@ export function WorkspaceStep({
               />
             </label>
             <label className="block space-y-1 text-sm">
+              Base branch
+              <input
+                className={field}
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+              />
+            </label>
+            <label className="block space-y-1 text-sm">
               Custom image (optional)
               <input
                 className={field}
@@ -187,7 +205,11 @@ export function WorkspaceStep({
                 onChange={(e) => setImage(e.target.value)}
               />
             </label>
-            <Button type="submit" size="sm" disabled={busy || !name.trim()}>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={busy || !name.trim() || !baseBranch.trim()}
+            >
               Create workspace
             </Button>
           </form>
@@ -312,24 +334,19 @@ export function RepoStep({
 }
 
 /**
- * Step 4: the first run. Session is picked or created (creation gated on
- * session.new), the harness comes from agent.list with a free-text fallback,
- * and launch lands the user on the run view.
+ * Step 4: the first run, in the workspace step 2 settled on. The harness
+ * comes from agent.list with a free-text fallback, and launch lands the user
+ * on the run view.
  */
 export function FirstRunStep({
   client,
-  caps,
   workspace,
 }: {
   client: Api
-  caps: Capability
   workspace: Workspace | null
 }) {
   const navigate = useStore((s) => s.navigate)
-  const [sessions, setSessions] = useState<Session[] | null>(null)
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
-  const [sessionID, setSessionID] = useState('')
-  const [newName, setNewName] = useState('')
   const [harness, setHarness] = useState('')
   const [custom, setCustom] = useState('')
   const [task, setTask] = useState('')
@@ -337,45 +354,24 @@ export function FirstRunStep({
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    client
-      .sessionList(workspace?.id)
-      .then(setSessions)
-      .catch((err) => setError(message(err)))
     // agent.list failing is not fatal: the harness field falls back to text.
     client
       .agentList()
       .then(setAgents)
       .catch(() => setAgents([]))
-  }, [client, workspace])
+  }, [client])
 
-  const canCreate = caps.hasMethod('session.new')
   const freeText = agents !== null && agents.length === 0
   const chosen = freeText || harness === '__custom' ? custom.trim() : harness
-  const ready =
-    task.trim() !== '' &&
-    chosen !== '' &&
-    sessionID !== '' &&
-    (sessionID !== '__new' || newName.trim() !== '')
+  const ready = task.trim() !== '' && chosen !== '' && workspace !== null
 
   const launch = async () => {
     setBusy(true)
     setError(null)
     try {
-      let sid = sessionID
-      if (sid === '__new') {
-        if (!workspace) throw new Error('no workspace selected; go back a step')
-        const created = await client.sessionNew({
-          workspace_id: workspace.id,
-          name: newName.trim(),
-        })
-        sid = created.id
-        // Keep the created session: if the launch below fails, a retry
-        // must reuse it rather than create a duplicate.
-        setSessions((prev) => [...(prev ?? []), created])
-        setSessionID(created.id)
-      }
+      if (!workspace) throw new Error('no workspace selected; go back a step')
       const run = await client.runLaunch({
-        session_id: sid,
+        workspace_id: workspace.id,
         task: task.trim(),
         harness: chosen,
       })
@@ -390,33 +386,11 @@ export function FirstRunStep({
   return (
     <section aria-label="First run" className="space-y-3">
       <h2 className="text-sm font-medium">Launch your first run</h2>
-      <label className="block space-y-1 text-sm">
-        Session
-        <select
-          className={field}
-          value={sessionID}
-          onChange={(e) => setSessionID(e.target.value)}
-        >
-          <option value="">Choose a session</option>
-          {(sessions ?? []).map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-          {canCreate && <option value="__new">New session...</option>}
-        </select>
-      </label>
-      {sessionID === '__new' && (
-        <label className="block space-y-1 text-sm">
-          New session name
-          <input
-            className={field}
-            value={newName}
-            placeholder="myproject"
-            onChange={(e) => setNewName(e.target.value)}
-          />
-        </label>
-      )}
+      <p className="text-sm text-muted-foreground">
+        The run forks from{' '}
+        <span className="font-mono">{workspace?.base_branch ?? 'the base branch'}</span>{' '}
+        in {workspace?.name ?? 'your workspace'}.
+      </p>
       {freeText ? (
         <label className="block space-y-1 text-sm">
           Harness

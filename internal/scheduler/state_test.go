@@ -21,7 +21,7 @@ func TestProvisioningFailureReasonRedactsSetupDiagnostics(t *testing.T) {
 	e.rt.startErr = errors.New("runtime: setup script exited 17: + echo " + secret + "\n/srv/aether/run-secret")
 	t.Setenv(fakeAgentEnv, "fake-agent")
 
-	_, launchErr := e.sched.Launch(t.Context(), e.sess.ID, e.member.ID, "task", "fake", domain.LaunchTUI)
+	_, launchErr := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "task", "fake", domain.LaunchTUI)
 	if launchErr == nil {
 		t.Fatal("Launch succeeded despite setup failure")
 	}

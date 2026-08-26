@@ -81,7 +81,7 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 	return protocol.CoordStatusResult{
 		WireVersion: protocol.CoordWireVersion,
 		RunID:       string(self.ID),
-		SessionID:   string(self.SessionID),
+		WorkspaceID: string(self.WorkspaceID),
 		MemberID:    string(self.MemberID),
 		Task:        self.Task,
 		Peers:       peers,
@@ -152,7 +152,7 @@ func (s *Service) Send(ctx context.Context, from domain.RunID, p protocol.CoordS
 		}
 	}
 
-	msg := &store.RunMessage{SessionID: sender.SessionID, FromRun: from, ToRun: to, Body: p.Body}
+	msg := &store.RunMessage{WorkspaceID: sender.WorkspaceID, FromRun: from, ToRun: to, Body: p.Body}
 	if err := s.cfg.Mail.AppendRunMessage(ctx, msg, protocol.CoordMaxUnread); err != nil {
 		if errors.Is(err, store.ErrInboxFull) {
 			return protocol.CoordSendResult{}, &protocol.Error{
@@ -213,35 +213,30 @@ func (s *Service) resolveRun(ctx context.Context, method string, run domain.RunI
 	return r, nil
 }
 
-// stamp records the message in the sending run's session timeline,
-// attributed to the run's owner. A cross-session send within one
-// workspace is allowed, so the receiving session's humans get the message
-// on their timeline as well; a same-session send already shows it once.
-// Every coordination message is auditable; a publish failure never fails
-// the send, which is already durable.
+// stamp records the message in the workspace timeline, attributed to the
+// sending run's owner. Radar peers are always runs of the same workspace,
+// so one note covers both sides of the exchange. Every coordination
+// message is auditable; a publish failure never fails the send, which is
+// already durable.
 func (s *Service) stamp(ctx context.Context, sender, target *domain.Run, body string) {
-	s.stampNote(ctx, sender, sender.SessionID, sender.ID,
+	s.stampNote(ctx, sender, sender.WorkspaceID, sender.ID,
 		fmt.Sprintf("coordination message to run %s: %s", target.ID, body))
-	if target.SessionID != sender.SessionID {
-		s.stampNote(ctx, sender, target.SessionID, target.ID,
-			fmt.Sprintf("coordination message from run %s: %s", sender.ID, body))
-	}
 }
 
 // stampNote publishes one timeline note for a coordination message,
 // attributed to the sending run's owner.
-func (s *Service) stampNote(ctx context.Context, sender *domain.Run, session domain.SessionID, run domain.RunID, message string) {
+func (s *Service) stampNote(ctx context.Context, sender *domain.Run, workspace domain.WorkspaceID, run domain.RunID, message string) {
 	_, err := s.cfg.Bus.Publish(ctx, events.Event{
-		SessionID: session,
-		RunID:     run,
-		ActorID:   sender.MemberID,
+		WorkspaceID: workspace,
+		RunID:       run,
+		ActorID:     sender.MemberID,
 		Payload: events.TimelinePayload{
 			Kind:    events.TimelineNote,
 			Message: message,
 		},
 	})
 	if err != nil {
-		slog.Warn("coord: timeline stamp failed", "run", sender.ID, "session", session, "error", err)
+		slog.Warn("coord: timeline stamp failed", "run", sender.ID, "workspace", workspace, "error", err)
 	}
 }
 

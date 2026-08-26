@@ -22,22 +22,22 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// TestCoordWireV1ErrorsGolden pins testdata/coord-v1/errors.ndjson to the
+// TestCoordWireV2ErrorsGolden pins testdata/coord-v2/errors.ndjson to the
 // bytes the real coordination service produces: each documented failure
 // is provoked against internal/coord and the raw response read off the
 // run's unix socket, so an error string or code changed in the service
 // breaks this golden rather than only the service's own unit tests.
-// requests.ndjson and success.ndjson stay pinned by TestCoordWireV1Golden,
+// requests.ndjson and success.ndjson stay pinned by TestCoordWireV2Golden,
 // which marshals the same structs both endpoints serialize.
-func TestCoordWireV1ErrorsGolden(t *testing.T) {
+func TestCoordWireV2ErrorsGolden(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("coord.Provision binds an AF_UNIX listener and chmods the run directory to 0700 and the socket to 0666")
 	}
 	ctx := context.Background()
 	runs := &wireRuns{runs: make(map[domain.RunID]*domain.Run)}
-	runs.set(domain.Run{ID: "run_01", SessionID: "ses_01", MemberID: "mem_01", Status: domain.RunRunning})
-	runs.set(domain.Run{ID: "run_02", SessionID: "ses_01", MemberID: "mem_02", Status: domain.RunRunning})
-	runs.set(domain.Run{ID: "run_09", SessionID: "ses_01", MemberID: "mem_03", Status: domain.RunRunning})
+	runs.set(domain.Run{ID: "run_01", WorkspaceID: "ws_01", MemberID: "mem_01", Status: domain.RunRunning})
+	runs.set(domain.Run{ID: "run_02", WorkspaceID: "ws_01", MemberID: "mem_02", Status: domain.RunRunning})
+	runs.set(domain.Run{ID: "run_09", WorkspaceID: "ws_01", MemberID: "mem_03", Status: domain.RunRunning})
 
 	cfg := coord.Config{
 		Dir:   filepath.Join(t.TempDir(), "coord"),
@@ -98,10 +98,10 @@ func TestCoordWireV1ErrorsGolden(t *testing.T) {
 	runs.del("run_09")
 	got = append(got, call(2, protocol.MethodCoordSend, send("run_09", "ping")))
 	// 3: an authorized peer that has finished.
-	runs.set(domain.Run{ID: "run_02", SessionID: "ses_01", MemberID: "mem_02", Status: domain.RunFailed})
+	runs.set(domain.Run{ID: "run_02", WorkspaceID: "ws_01", MemberID: "mem_02", Status: domain.RunFailed})
 	got = append(got, call(3, protocol.MethodCoordSend, send("run_02", "ping")))
 	// 4: the peer is back, but its inbox is at the depth cap.
-	runs.set(domain.Run{ID: "run_02", SessionID: "ses_01", MemberID: "mem_02", Status: domain.RunRunning})
+	runs.set(domain.Run{ID: "run_02", WorkspaceID: "ws_01", MemberID: "mem_02", Status: domain.RunRunning})
 	got = append(got, call(4, protocol.MethodCoordSend, send("run_02", "ping")))
 	// Each send above spent a burst token; spend the last one so the next
 	// send is throttled.
@@ -146,7 +146,7 @@ func TestCoordWireV1ErrorsGolden(t *testing.T) {
 
 func readGoldenLines(t *testing.T, name string) [][]byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "coord-v1", name))
+	data, err := os.ReadFile(filepath.Join("testdata", "coord-v2", name))
 	if err != nil {
 		t.Fatalf("read golden %s: %v", name, err)
 	}

@@ -25,11 +25,10 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
 
 	tpl := &Template{
-		SessionID: s.ID, Name: "nightly-deps", Task: "upgrade {{ecosystem}} deps",
+		WorkspaceID: w.ID, Name: "nightly-deps", Task: "upgrade {{ecosystem}} deps",
 		Harness: "claude", Mode: domain.LaunchHeadless,
 		Params: map[string]string{"ecosystem": "go"}, BudgetUSD: 2.50,
 	}
@@ -41,7 +40,7 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 	}
 
 	replacement := &Template{
-		SessionID: s.ID, Name: "nightly-deps", Task: "upgrade {{ecosystem}} deps and run tests",
+		WorkspaceID: w.ID, Name: "nightly-deps", Task: "upgrade {{ecosystem}} deps and run tests",
 		Harness: "claude", Mode: domain.LaunchHeadless,
 		Params: map[string]string{"ecosystem": "npm"},
 	}
@@ -52,14 +51,14 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 		t.Fatalf("replace changed identity: %+v, want ID %s", replacement, tpl.ID)
 	}
 
-	got, err := db.GetTemplate(ctx, s.ID, "nightly-deps")
+	got, err := db.GetTemplate(ctx, w.ID, "nightly-deps")
 	if err != nil {
 		t.Fatalf("GetTemplate: %v", err)
 	}
 	if got.Task != replacement.Task || got.Params["ecosystem"] != "npm" || got.BudgetUSD != 0 {
 		t.Fatalf("template after replace = %+v, want the replacement's fields", got)
 	}
-	list, err := db.ListTemplates(ctx, s.ID)
+	list, err := db.ListTemplates(ctx, w.ID)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("ListTemplates = %+v (err %v), want one", list, err)
 	}
@@ -72,7 +71,7 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 	if err = db.MarkScheduleFired(ctx, sched.ID, fired); err != nil {
 		t.Fatalf("MarkScheduleFired: %v", err)
 	}
-	schedules, err := db.ListSchedules(ctx, s.ID)
+	schedules, err := db.ListSchedules(ctx, w.ID)
 	if err != nil || len(schedules) != 1 {
 		t.Fatalf("ListSchedules = %+v (err %v), want one", schedules, err)
 	}
@@ -96,16 +95,16 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 		t.Fatalf("schedule for missing template = %v, want ErrNotFound", err)
 	}
 
-	if err = db.DeleteTemplate(ctx, s.ID, "nightly-deps"); err != nil {
+	if err = db.DeleteTemplate(ctx, w.ID, "nightly-deps"); err != nil {
 		t.Fatalf("DeleteTemplate: %v", err)
 	}
 	if schedules, err = db.ListSchedules(ctx, ""); err != nil || len(schedules) != 0 {
 		t.Fatalf("schedules after template delete = %+v (err %v), want none", schedules, err)
 	}
-	if _, err := db.GetTemplate(ctx, s.ID, "nightly-deps"); !errors.Is(err, ErrNotFound) {
+	if _, err := db.GetTemplate(ctx, w.ID, "nightly-deps"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetTemplate after delete = %v, want ErrNotFound", err)
 	}
-	if err := db.DeleteTemplate(ctx, s.ID, "nightly-deps"); !errors.Is(err, ErrNotFound) {
+	if err := db.DeleteTemplate(ctx, w.ID, "nightly-deps"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second DeleteTemplate = %v, want ErrNotFound", err)
 	}
 }
@@ -154,10 +153,10 @@ func TestTemplatesMigrationUpgradesPreviousVersion(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
-	if _, err := db.GetSession(ctx, "s1"); err != nil {
-		t.Fatalf("GetSession after migration: %v", err)
+	if _, err := db.GetWorkspace(ctx, "w1"); err != nil {
+		t.Fatalf("GetWorkspace after migration: %v", err)
 	}
-	tpl := &Template{SessionID: "s1", Name: "nightly", Task: "sweep", Harness: "claude", Mode: domain.LaunchHeadless}
+	tpl := &Template{WorkspaceID: "w1", Name: "nightly", Task: "sweep", Harness: "claude", Mode: domain.LaunchHeadless}
 	if err := db.SaveTemplate(ctx, tpl); err != nil {
 		t.Fatalf("SaveTemplate after migration: %v", err)
 	}

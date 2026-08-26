@@ -144,21 +144,21 @@ func TestPinRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	w := &domain.Workspace{Name: "ws", Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"}}
+	w := &domain.Workspace{
+		Name:        "ws",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err = db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	sess := &domain.Session{WorkspaceID: w.ID, Name: "s", BaseBranch: "main"}
-	if err = db.CreateSession(ctx, sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
 	run := &domain.Run{
-		SessionID: sess.ID,
-		MemberID:  m.ID,
-		Task:      "t",
-		Harness:   "claude",
-		Mode:      domain.LaunchTUI,
-		Status:    domain.RunQueued,
+		WorkspaceID: w.ID,
+		MemberID:    m.ID,
+		Task:        "t",
+		Harness:     "claude",
+		Mode:        domain.LaunchTUI,
+		Status:      domain.RunQueued,
 	}
 	if err = db.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)

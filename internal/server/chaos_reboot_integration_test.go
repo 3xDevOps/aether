@@ -50,7 +50,7 @@ func TestIntegrationChaosRebootSurvivingContainer(t *testing.T) {
 	ctrl, client := env.connect(t)
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(env.sess.ID), Task: "chaos reboot survivor", Harness: "fake",
+		WorkspaceID: string(env.ws.ID), Task: "chaos reboot survivor", Harness: "fake",
 	}, &launched); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestIntegrationChaosRebootLostContainer(t *testing.T) {
 	ctrl, client := env.connect(t)
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(env.sess.ID), Task: "chaos reboot casualty", Harness: "fake",
+		WorkspaceID: string(env.ws.ID), Task: "chaos reboot casualty", Harness: "fake",
 	}, &launched); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
@@ -185,7 +185,6 @@ type chaosEnv struct {
 	keyPath string
 	signer  ssh.Signer
 	ws      *domain.Workspace
-	sess    *domain.Session
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
@@ -209,8 +208,8 @@ func newChaosEnv(ctx context.Context, t *testing.T) *chaosEnv {
 	return e
 }
 
-// seedStore writes the member, workspace and session straight into the
-// SQLite file before the server ever opens it. The child process has no
+// seedStore writes the member and workspace straight into the SQLite file
+// before the server ever opens it. The child process has no
 // bootstrap path a test can drive, and the store is the same contract
 // either way.
 func (e *chaosEnv) seedStore(t *testing.T) {
@@ -232,13 +231,13 @@ func (e *chaosEnv) seedStore(t *testing.T) {
 	if err := db.CreateMember(e.ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
-	e.ws = &domain.Workspace{Name: "chaos", Environment: domain.WorkspaceEnvironment{CustomImage: "busybox"}}
+	e.ws = &domain.Workspace{
+		Name:        "chaos",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "busybox"},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err := db.CreateWorkspace(e.ctx, e.ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
-	}
-	e.sess = &domain.Session{WorkspaceID: e.ws.ID, Name: "chaos", BaseBranch: "main"}
-	if err := db.CreateSession(e.ctx, e.sess); err != nil {
-		t.Fatalf("seed session: %v", err)
 	}
 }
 

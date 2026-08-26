@@ -1,15 +1,16 @@
 # The local gateway (`aether gui`)
 
 `aether gui` serves the dashboard from the user's own machine
-(`internal/localgw`): the same embedded SPA as the server's dashboard
-gateway, the same `/api/v1` shape, proxied over the machine's SSH
-connection to the linked server. Because the identity is the member's own
-SSH key rather than a minted dashboard token, the **full control-channel
-method map** is reachable - no allowlist - plus the client-machine verbs
-under `/local/v1` that only a machine with the user's repository and SSH
-key can offer. The security stances are in
-[security.md](security.md#the-local-gateway); the remote gateway and the
-shared WebSocket framing are in [dashboard-api.md](dashboard-api.md).
+(`internal/localgw`): the embedded SPA, the `/api/v1` shape, and the
+WebSocket surfaces, all proxied over the machine's SSH connection to the
+linked server. It is the only web transport Aether ships; the server itself
+listens on SSH and nothing else. Because the identity is the member's own
+SSH key rather than a token minted somewhere else, the **full
+control-channel method map** is reachable - no allowlist - plus the
+client-machine verbs under `/local/v1` that only a machine with the user's
+repository and SSH key can offer. The security stances are in
+[security.md](security.md#the-dashboard-gateway); the SPA that runs against
+it is in [dashboard-frontend.md](dashboard-frontend.md).
 
 ## Running it
 
@@ -81,9 +82,42 @@ and prefix as a `POST /api/v1` error.
 | `GET` | `/ws/shell` | interactive workspace shell (WebSocket) |
 | `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
 
-An `/api/`, `/ws/`, or `/local/` path hit with the wrong method answers
-`405` with a JSON error body instead of falling through to the SPA.
-Request bodies are capped at 1 MiB, matching the remote gateway.
+Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
+embedded `web/dist`, without a token - the SPA bundle is not secret and has
+to load before it can present one. Unknown paths fall back to `index.html`
+so client-side routing works on a hard refresh. An `/api/`, `/ws/`, or
+`/local/` path hit with the wrong method is the exception: it answers `405`
+with a JSON error body instead of falling through to the SPA, so a
+wrong-verb client bug cannot masquerade as a `200`. Request bodies are
+capped at 1 MiB.
+
+### `POST /api/v1/<method>`
+
+The path segment after `/api/v1/` is the JSON-RPC method name, dots
+included: `POST /api/v1/run.list`. The request body is the method's
+`params` object (an empty body means no params). Success is `200` with the
+method's result object as the whole body; failure is a non-2xx status with
+the JSON-RPC error object wrapped:
+
+```json
+{"error":{"code":-32001,"message":"run.kill: permission denied"}}
+```
+
+Status mapping (the code is the authority; the status is a convenience):
+
+| JSON-RPC code | HTTP |
+| --- | --- |
+| `-32700` parse, `-32600` invalid request, `-32602` invalid params | 400 |
+| unauthenticated (no/expired token) | 401 |
+| `-32001` denied | 403 |
+| `-32000` not found | 404 |
+| `-32002` invalid state, `-32003` conflict | 409 |
+| `-32603` internal | 500 |
+| `-32004` unavailable | 503 |
+
+Param and result shapes are the ones in `internal/protocol` (`wire.go` and
+the per-feature files), unchanged by this transport, and every call passes
+the same capability checks the SSH transport applies.
 
 ### `GET /api/v1/capabilities`
 
@@ -94,9 +128,96 @@ Request bodies are capped at 1 MiB, matching the remote gateway.
 ```
 
 `methods` is `["*"]` because this gateway forwards every control-channel
-method; `ws` adds `shell` to the remote gateway's `events` and `attach`;
-`local` is the sorted `/local/v1` verb list. The SPA's `useCapability`
-seam reads this to gate the local-only surfaces.
+method; `ws` lists the WebSocket surfaces it serves; `local` is the sorted
+`/local/v1` verb list. A client probes this rather than hard-coding what it
+is talking to; the SPA's `useCapability` seam reads it to gate the
+local-only surfaces.
+
+### `GET /api/v1/run/<run_id>/patch`
+
+Not an RPC method, because patch text is a read of a working tree rather
+than a control-channel call. `run.diff` events carry per-file stats only and
+no patch text is stored anywhere in the server, so the diff timeline reads
+the text here and uses those events to know when to ask again.
+
+The server renders the run checkout's whole diff against the fork point its
+identity record pins (the `aether.base` commit), covering committed work,
+uncommitted edits and untracked files alike - the same set of changes a
+`run.diff` snapshot counts. Rendering leaves the checkout alone: the worktree
+is staged into a scratch index with its own scratch object directory, so
+nothing under the checkout's `.git` - not even the loose objects staging
+hashes - is ever written, and the scratch files are deleted once the patch
+is rendered.
+
+```json
+{"run_id":"run_01H...","base":"9f2c1e...","patch":"diff --git a/main.go b/main.go\n...","truncated":false}
+```
+
+- Visibility is `run.get`'s, applied by calling it: a member who could not
+  read the run over the control channel gets that method's refusal here,
+  unchanged.
+- `truncated` reports that the diff outgrew the 512 KiB ceiling; `patch` then
+  ends at the last whole line that fit. Read the run branch over git for the
+  rest - the dashboard renders diffs, it does not serve repositories.
+- `503` with `-32004` when the server has no git engine wired, when the run
+  has no checkout left to diff (it finished and was cleaned up), or when
+  rendering ran past the engine's 30s ceiling - the same bound a diff
+  snapshot's git work gets, because staging re-hashes every untracked file
+  and a worktree holding a large un-ignored tree would otherwise be
+  unbounded.
+
+### `GET /api/v1/disk`
+
+Usage of the filesystem holding the server's data directory, for the status
+bar's disk gauge:
+
+```json
+{"used_bytes":21474836480,"total_bytes":107374182400,"free_bytes":85899345920,
+ "worktree_bytes":3221225472,"transcript_bytes":104857600,"database_bytes":52428800}
+```
+
+`used_bytes` and `total_bytes` describe the whole filesystem - the gauge
+answers "is the disk filling up", which is not a question about Aether's own
+footprint. `free_bytes` is what an unprivileged writer can still claim, which
+is the number the scheduler's free-space floor is checked against, and is
+smaller than `total - used` wherever the filesystem reserves blocks.
+
+The last three are the directories that grow without bound and are the only
+part an operator can act on: run checkouts (garbage-collected after their
+TTL), transcripts, and the SQLite file the persisted event log shares with
+the store. The event log has no file of its own to measure, so the database
+line covers both. A component that cannot be read contributes zero rather
+than failing the whole reading. Measurement lives in `internal/disk`, shared
+with the scheduler's floor so the gauge and the refusal can never disagree
+about the same disk.
+
+`protocol.ServerInfoResult` is shared with the CLI and frozen, and the number
+is of no use to a terminal client, so it is read here instead of being added
+to `server.info`. Any member may read it, because it says how much room the
+deployment has left, not what anyone is running. `503` with `-32004` when the
+server was not told where the data directory is, or the platform has no
+`statfs` (the server ships for linux; the read refuses rather than reporting
+zero anywhere else).
+
+### `run.patch` and `server.disk` on the control channel
+
+The two `GET` endpoints above are backed by SSH control-channel methods,
+because this gateway proxies the whole API shape over SSH and needs both
+reads without a listener on the server.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `run.patch` | `RunIDParams` (`{"run_id":"..."}`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
+| `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+
+- The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
+  that the patch ends at the last whole line that fit.
+- Both answer `-32004` (unavailable) when the read cannot be served:
+  `run.patch` when diff rendering is not enabled (no git engine wired) or the
+  run has no checkout left to diff, `server.disk` when the server was not
+  told where the data directory is or the filesystem holding it could not be
+  read. The underlying errors name server-side paths, so they are not echoed
+  to the client.
 
 ## `/local/v1` verbs
 
@@ -135,15 +256,80 @@ authority.
 
 ## WebSockets
 
-`/ws/events` and `/ws/attach/<run_id>` speak exactly the framing
-documented in [dashboard-api.md](dashboard-api.md) - subscribe header,
-`{"ok":...}` ack, text event frames and the `4000` backlog close on
-events; binary output and JSON `input`/`resize` control frames on attach.
-One difference from the remote gateway: there is no token watch closing
-live sockets with `1008`, because the token cannot be revoked - it lives
-and dies with the process.
+Cross-origin WebSocket handshakes are rejected; the SPA is served from the
+same origin as the API. Every handshake carries the token, as
+`Authorization: Bearer` or `?token=` - browsers cannot set headers on a
+WebSocket handshake. There is no token watch closing live sockets, because
+the token cannot be revoked: it lives and dies with the process.
 
-`GET /ws/shell` is local-only: an interactive workspace shell (bootstrap
+### `GET /ws/events`
+
+Same subscription semantics as the SSH events subsystem, so a client that
+lost its socket resumes without gaps.
+
+1. Client sends one **text** frame: a `SubscribeRequest`. The header must
+   arrive within 10 seconds or the socket is closed; frames sent after it
+   are discarded, so an application-level keepalive does not tear the
+   stream down.
+
+   ```json
+   {"workspace_id":"","run_id":"","types":[],"replay":true,"after_seq":412}
+   ```
+
+2. Server answers one **text** frame: `{"ok":true}`, or
+   `{"ok":false,"code":-32004,"error":"..."}` followed by a close.
+3. Server then streams one **text** frame per event, each a `protocol.Event`:
+
+   ```json
+   {"id":"evt_01H...","seq":413,"time":"2026-08-14T10:00:00.123456Z",
+    "workspace_id":"ws_...","run_id":"run_...","actor_id":"mem_...",
+    "type":"run.status","payload":{...}}
+   ```
+
+Reconnect contract: track the highest `seq` you have seen and resubscribe
+with `"replay":true,"after_seq":<last seq>`. If the per-client buffer
+overflows the socket closes with code **4000** (`event backlog dropped`) -
+that close is the signal to resubscribe from your last `seq`, not an error
+to surface.
+
+### `GET /ws/attach/<run_id>`
+
+PTY attach. Output is binary, control is JSON, matching the terminal view's
+needs.
+
+1. Client sends one **text** frame with the attach header (the run comes
+   from the path). The header must arrive within 10 seconds or the socket
+   is closed. Write is opt-in - the header of a read-only mirror is just
+   `{}`:
+
+   ```json
+   {"write":true,"cols":120,"rows":40}
+   ```
+
+2. Server answers one **text** frame: `{"ok":true,"cols":120,"rows":40}`,
+   or `{"ok":false,"code":-32001,"error":"..."}` followed by a close.
+   A write attach is refused with `-32001` unless the member holds the
+   **steer** capability on that run; dropping `"write"` always works for
+   a member who can see the run. An unknown run is refused with `-32000`,
+   a run with no live terminal with `-32004`.
+3. Server then streams terminal output as **binary** frames.
+4. Client sends **text** control frames:
+
+   ```json
+   {"type":"input","data":"ls -la\r"}
+   {"type":"resize","cols":132,"rows":50}
+   ```
+
+   Control frames from a read-only attach are ignored. Only write-capable
+   attaches affect the shared terminal geometry. Client frames are capped at
+   64 KiB; the SPA splits larger input (a paste) across several ordered
+   `input` frames.
+
+Closing the socket detaches; the run is unaffected.
+
+### `GET /ws/shell`
+
+An interactive workspace shell (bootstrap
 tools, harness login, agent setup) with the attach socket's frame
 protocol - binary output, JSON control frames for input and resize,
 always honored.

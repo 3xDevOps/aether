@@ -4,8 +4,7 @@ import type { GatewayCapabilities, Member } from '@/lib/types'
 import { useStore } from '@/store'
 import {
   sidebarGroups,
-  sidebarSessions,
-  sortRuns,
+  sidebarRuns,
   type SidebarGroup,
   type SidebarRun,
 } from '@/store/selectors'
@@ -21,14 +20,14 @@ export function usePendingApprovalRuns(): Set<string> {
 }
 
 function useSidebarInput() {
-  const sessions = useStore((s) => s.sessions)
+  const workspace = useStore((s) => s.activeWorkspace)
   const runs = useStore((s) => s.runs)
   const members = useStore((s) => s.members)
   const groupBy = useStore((s) => s.groupBy)
   const pending = usePendingApprovalRuns()
   return useMemo(
-    () => ({ sessions, runs, members, groupBy, pending }),
-    [sessions, runs, members, groupBy, pending],
+    () => ({ workspace, runs, members, groupBy, pending }),
+    [workspace, runs, members, groupBy, pending],
   )
 }
 
@@ -45,21 +44,15 @@ export function useSidebarGroups(): SidebarGroup[] {
 export function useAttentionCount(): number {
   const input = useSidebarInput()
   return useMemo(
-    () =>
-      sidebarSessions(input)
-        .flatMap((entry) => entry.runs)
-        .filter((r) => r.state === 'needs-attention').length,
+    () => sidebarRuns(input).filter((r) => r.state === 'needs-attention').length,
     [input],
   )
 }
 
-/** Every run, worst state and most recent change first. */
+/** Every run in the active workspace, worst state and most recent change first. */
 export function useAttentionRuns(): SidebarRun[] {
   const input = useSidebarInput()
-  return useMemo(
-    () => sortRuns(sidebarSessions(input).flatMap((entry) => entry.runs)),
-    [input],
-  )
+  return useMemo(() => sidebarRuns(input), [input])
 }
 
 /** What the connected gateway can do, queryable per method, verb and socket. */
@@ -70,17 +63,15 @@ export interface Capability {
 }
 
 /**
- * The pre-capabilities allowlist: the browser-transport methods a legacy
- * remote gateway (internal/dashboard/api.go's apiMethods before the
- * /capabilities endpoint existed) will serve. Everything else answers 403
- * "available on the SSH control channel only", so gating against a null
- * capabilities result must fall back to this list, never to "everything".
+ * The fallback allowlist for a gateway whose /capabilities endpoint did not
+ * answer. It is the read-and-steer set every gateway serves; the admin
+ * surfaces stay hidden rather than rendering buttons that would fail, so an
+ * unknown gateway degrades to monitoring instead of to "everything".
  */
 const LEGACY_REMOTE_METHODS: Record<string, true> = {
   'server.info': true,
   'workspace.list': true,
-  'session.list': true,
-  'session.get': true,
+  'workspace.get': true,
   'member.list': true,
   'run.launch': true,
   'run.list': true,
@@ -95,7 +86,7 @@ const LEGACY_REMOTE_METHODS: Record<string, true> = {
   'approval.decide': true,
   'presence.roster': true,
   'presence.heartbeat': true,
-  'session.timeline': true,
+  'workspace.timeline': true,
   'cost.report': true,
   'budget.get': true,
   'run.overlaps': true,

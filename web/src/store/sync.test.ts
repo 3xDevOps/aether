@@ -8,9 +8,10 @@ import {
   alice,
   bob,
   fakeApi,
+  otherWorkspace,
   run,
   serverInfo as serverInfoFixture,
-  session,
+  workspace,
 } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
@@ -19,7 +20,7 @@ function statusEvent(over: Partial<Event> = {}): Event {
     id: 'evt_1',
     seq: 5,
     time: '2026-08-14T11:00:00Z',
-    session_id: session.id,
+    workspace_id: workspace.id,
     run_id: 'run_1',
     actor_id: '',
     type: 'run.status',
@@ -36,9 +37,35 @@ describe('hydrate', () => {
     const s = store.getState()
     expect(s.hydrated).toBe(true)
     expect(s.info?.server_version).toBe('1.2.3')
-    expect(Object.keys(s.sessions)).toHaveLength(2)
+    expect(Object.keys(s.workspaces)).toHaveLength(2)
     expect(Object.keys(s.members)).toHaveLength(2)
     expect(s.runs.run_1.status).toBe('running')
+  })
+
+  it('points the app at a workspace, keeping one the member already chose', async () => {
+    // Nothing chosen: the lowest id wins, so two tabs hydrating off the same
+    // list land on the same scope.
+    const fresh = createRootStore()
+    await hydrate(fresh, fakeApi())
+    expect(fresh.getState().activeWorkspace).toBe(workspace.id)
+
+    // A choice that still exists is never overridden by a re-hydration.
+    const chosen = createRootStore()
+    chosen.getState().setActiveWorkspace(otherWorkspace.id)
+    await hydrate(chosen, fakeApi())
+    expect(chosen.getState().activeWorkspace).toBe(otherWorkspace.id)
+  })
+
+  it('re-points a scope whose workspace is gone, so no surface is left blank', async () => {
+    const store = createRootStore()
+    store.getState().setActiveWorkspace('wsp_deleted')
+
+    await hydrate(
+      store,
+      fakeApi({ workspaceListFull: vi.fn(async () => [otherWorkspace]) }),
+    )
+
+    expect(store.getState().activeWorkspace).toBe(otherWorkspace.id)
   })
 
   it('records the failure instead of throwing', async () => {
@@ -76,7 +103,8 @@ describe('hydrate', () => {
 
     // And the board card carries the badge straight from the snapshot.
     const { columns } = board({
-      sessions: s.sessions,
+      workspace: s.activeWorkspace,
+      workspaces: s.workspaces,
       runs: s.runs,
       members: s.members,
       acked: s.acked,
@@ -322,7 +350,7 @@ describe('applyEvent', () => {
     await applyEvent(
       store,
       statusEvent({
-        type: 'session.timeline',
+        type: 'workspace.timeline',
         payload: { kind: 'handoff', message: bob.id },
       }),
       client,
@@ -356,19 +384,19 @@ describe('applyEvent', () => {
     expect(store.getState().members[bob.id]).toBeDefined()
   })
 
-  it('re-fetches the session list when an event names one it does not know', async () => {
+  it('re-fetches the workspace list when an event names one it does not know', async () => {
     const store = createRootStore()
-    const sessionList = vi
+    const workspaceListFull = vi
       .fn()
       .mockResolvedValueOnce([])
-      .mockResolvedValue([session])
-    const client = fakeApi({ sessionList })
+      .mockResolvedValue([workspace])
+    const client = fakeApi({ workspaceListFull })
     await hydrate(store, client)
-    expect(store.getState().sessions[session.id]).toBeUndefined()
+    expect(store.getState().workspaces[workspace.id]).toBeUndefined()
 
     await applyEvent(store, statusEvent(), client)
 
-    expect(store.getState().sessions[session.id]).toBeDefined()
+    expect(store.getState().workspaces[workspace.id]).toBeDefined()
   })
 })
 
@@ -509,7 +537,7 @@ describe('connect', () => {
     })
 
     expect(store.getState().connection).toBe('offline')
-    expect(store.getState().hydrationError).toContain('aether dash')
+    expect(store.getState().hydrationError).toContain('aether gui')
     // The panes key on this to say "dead token" rather than "retrying".
     expect(store.getState().streamDead).toBe(true)
     await new Promise((resolve) => setTimeout(resolve, 700))

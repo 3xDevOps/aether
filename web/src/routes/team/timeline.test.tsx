@@ -6,7 +6,14 @@ import { TimelineFeed } from '@/routes/team/timeline'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { emptyFilters } from '@/store/timeline'
-import { alice, bob, fakeApi, otherSession, run, session } from '@/test/fixtures'
+import {
+  alice,
+  bob,
+  fakeApi,
+  otherWorkspace,
+  run,
+  workspace,
+} from '@/test/fixtures'
 
 // Well past the 500-seq window, so the arithmetic is visible: an
 // implementation that ignored the probe and started at zero would fail.
@@ -18,17 +25,17 @@ const history: Event[] = [
     id: 'evt_1',
     seq: 4198,
     time: '2026-08-14T10:03:00Z',
-    session_id: session.id,
+    workspace_id: workspace.id,
     run_id: 'run_1',
     actor_id: alice.id,
-    type: 'session.timeline',
+    type: 'workspace.timeline',
     payload: { kind: 'pause' },
   },
   {
     id: 'evt_2',
     seq: 4199,
     time: '2026-08-14T10:04:00Z',
-    session_id: session.id,
+    workspace_id: workspace.id,
     run_id: 'run_1',
     actor_id: bob.id,
     type: 'run.status',
@@ -42,10 +49,10 @@ const olderHistory: Event[] = [
     id: 'evt_0',
     seq: 3400,
     time: '2026-08-14T09:00:00Z',
-    session_id: session.id,
+    workspace_id: workspace.id,
     run_id: 'run_1',
     actor_id: alice.id,
-    type: 'session.timeline',
+    type: 'workspace.timeline',
     payload: { kind: 'resume' },
   },
 ]
@@ -54,7 +61,7 @@ const olderHistory: Event[] = [
 // end: that answer carries the log head the window opens back from.
 function feedApi(events = history) {
   return fakeApi({
-    sessionTimeline: vi.fn(async (q: TimelineQuery) => {
+    workspaceTimeline: vi.fn(async (q: TimelineQuery) => {
       const after = q.after_seq ?? 0
       if (after >= Number.MAX_SAFE_INTEGER)
         return { events: [], next_seq: head, more: false }
@@ -67,7 +74,8 @@ function feedApi(events = history) {
 
 function seed() {
   useStore.setState({
-    sessions: { [session.id]: session },
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: { run_1: toRecord(run()) },
     feed: [],
@@ -87,12 +95,12 @@ function seed() {
 /** The after_seq of every page request, ignoring the head probe. */
 function windowsAsked(client: Api): number[] {
   return vi
-    .mocked(client.sessionTimeline)
+    .mocked(client.workspaceTimeline)
     .mock.calls.map(([q]) => q.after_seq ?? 0)
     .filter((seq) => seq < Number.MAX_SAFE_INTEGER)
 }
 
-describe('session activity feed', () => {
+describe('workspace activity feed', () => {
   it('opens a window at the end of the log and lists it newest first', async () => {
     const client = feedApi()
     seed()
@@ -107,6 +115,25 @@ describe('session activity feed', () => {
       'background-color',
     )
     expect(windowsAsked(client)).toEqual([head - window])
+  })
+
+  // The sidebar names the scope everywhere else; here it is only the
+  // default, because comparing workspaces is what an activity log is for.
+  it('opens on the active workspace', async () => {
+    const client = feedApi()
+    seed()
+    useStore.setState({
+      workspaces: {
+        [workspace.id]: workspace,
+        [otherWorkspace.id]: otherWorkspace,
+      },
+      activeWorkspace: otherWorkspace.id,
+    })
+    render(<TimelineFeed params={{}} client={client} />)
+
+    await vi.waitFor(() =>
+      expect(useStore.getState().feedFilters.workspaceID).toBe(otherWorkspace.id),
+    )
   })
 
   it('walks the window back without re-reading what it already has', async () => {
@@ -132,11 +159,14 @@ describe('session activity feed', () => {
     expect(rows[2].textContent).toContain('resume')
   })
 
-  it('clears the run filter when the session changes', async () => {
+  it('clears the run filter when the workspace changes', async () => {
     const client = feedApi()
     seed()
     useStore.setState({
-      sessions: { [session.id]: session, [otherSession.id]: otherSession },
+      workspaces: {
+        [workspace.id]: workspace,
+        [otherWorkspace.id]: otherWorkspace,
+      },
     })
     render(<TimelineFeed params={{}} client={client} />)
     await screen.findByText(/waiting on a question/)
@@ -146,15 +176,15 @@ describe('session activity feed', () => {
       expect(useStore.getState().feedFilters.runID).toBe('run_1'),
     )
 
-    // A run belongs to one session: keeping the filter would query the new
-    // session for a run it does not have.
-    fireEvent.change(screen.getByLabelText('Session'), {
-      target: { value: otherSession.id },
+    // A run belongs to one workspace: keeping the filter would query the new
+    // workspace for a run it does not have.
+    fireEvent.change(screen.getByLabelText('Workspace'), {
+      target: { value: otherWorkspace.id },
     })
 
     await vi.waitFor(() => {
       const f = useStore.getState().feedFilters
-      expect(f.sessionID).toBe(otherSession.id)
+      expect(f.workspaceID).toBe(otherWorkspace.id)
       expect(f.runID).toBe('')
     })
   })
@@ -170,7 +200,7 @@ describe('session activity feed', () => {
     })
 
     await vi.waitFor(() =>
-      expect(client.sessionTimeline).toHaveBeenCalledWith(
+      expect(client.workspaceTimeline).toHaveBeenCalledWith(
         expect.objectContaining({ types: ['run.status'] }),
       ),
     )
@@ -179,12 +209,14 @@ describe('session activity feed', () => {
   it('puts the floor back when a load-older read fails, so a retry fills the gap', async () => {
     const client = feedApi()
     seed()
-    useStore.setState({ feedFilters: { ...emptyFilters, sessionID: session.id } })
+    useStore.setState({
+      feedFilters: { ...emptyFilters, workspaceID: workspace.id },
+    })
     await openFeed(useStore, client)
     expect(useStore.getState().feedFloor).toBe(head - window)
 
     const failing = fakeApi({
-      sessionTimeline: vi.fn(async () => {
+      workspaceTimeline: vi.fn(async () => {
         throw new Error('502 Bad Gateway')
       }),
     })
@@ -206,14 +238,16 @@ describe('session activity feed', () => {
       release = resolve
     })
     const client = fakeApi({
-      sessionTimeline: vi.fn(async (q: TimelineQuery) =>
+      workspaceTimeline: vi.fn(async (q: TimelineQuery) =>
         (q.after_seq ?? 0) >= Number.MAX_SAFE_INTEGER
           ? { events: [], next_seq: head, more: false }
           : inFlight,
       ),
     })
     seed()
-    useStore.setState({ feedFilters: { ...emptyFilters, sessionID: session.id } })
+    useStore.setState({
+      feedFilters: { ...emptyFilters, workspaceID: workspace.id },
+    })
 
     const reading = openFeed(useStore, client)
     await vi.waitFor(() =>

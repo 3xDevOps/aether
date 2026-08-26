@@ -45,7 +45,6 @@ const groups: { name: string; entries: [string, string][] }[] = [
       ['Open the run board / list', 'Jump between the board and the flat overview'],
       ['Launch a run / from a template', 'Start new work'],
       ['Mark all runs seen', 'Clear the attention markers'],
-      ['Show / Hide idle sessions', 'Toggle idle sessions on the board'],
     ],
   },
 ]

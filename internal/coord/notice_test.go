@@ -16,9 +16,9 @@ import (
 func (h *harness) announce(t *testing.T, run domain.RunID, peers ...events.OverlapPeer) {
 	t.Helper()
 	if _, err := h.bus.Publish(context.Background(), events.Event{
-		SessionID: h.session,
-		RunID:     run,
-		Payload:   events.OverlapPayload{With: peers},
+		WorkspaceID: h.workspace,
+		RunID:       run,
+		Payload:     events.OverlapPayload{With: peers},
 	}); err != nil {
 		t.Fatalf("publish overlap: %v", err)
 	}
@@ -126,12 +126,12 @@ func TestNoticeEscapesPeerDisplayName(t *testing.T) {
 		t.Fatalf("create member: %v", err)
 	}
 	peer := &domain.Run{
-		SessionID: h.session,
-		MemberID:  evil.ID,
-		Task:      "task",
-		Harness:   "claude",
-		Mode:      domain.LaunchTUI,
-		Status:    domain.RunRunning,
+		WorkspaceID: h.workspace,
+		MemberID:    evil.ID,
+		Task:        "task",
+		Harness:     "claude",
+		Mode:        domain.LaunchTUI,
+		Status:      domain.RunRunning,
 	}
 	if err := h.db.CreateRun(ctx, peer); err != nil {
 		t.Fatalf("create run: %v", err)

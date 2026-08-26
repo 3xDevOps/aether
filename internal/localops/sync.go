@@ -31,7 +31,7 @@ const (
 
 // Terminal-entry retention: on Start, stopped/error entries older than
 // syncSweepAfter are dropped, and at most syncMaxTerminal ended entries
-// are retained overall — oldest evicted first, conflicts last.
+// are retained overall - oldest evicted first, conflicts last.
 const (
 	syncSweepAfter  = 5 * time.Minute
 	syncMaxTerminal = 16
@@ -96,7 +96,7 @@ func NewSyncManager() *SyncManager {
 // sweepLocked bounds the session map for a long-lived gateway process.
 // Stopped/error entries older than syncSweepAfter go immediately; then,
 // if more than syncMaxTerminal ended entries remain, the oldest are
-// evicted — conflicts last, since a conflict is standing user-facing
+// evicted - conflicts last, since a conflict is standing user-facing
 // state the user still needs to see. Callers hold m.mu.
 func (m *SyncManager) sweepLocked(now time.Time) {
 	type ended struct {

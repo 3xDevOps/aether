@@ -15,12 +15,12 @@ import (
 // an opaque string rather than importing the event vocabulary.
 const ApprovalRequested = "requested"
 
-// Approval is one entry in a session's approval inbox: a permission
+// Approval is one entry in a workspace's approval inbox: a permission
 // request raised by a run, plus the decision a member made on it.
 type Approval struct {
-	ID        string
-	SessionID domain.SessionID
-	RunID     domain.RunID
+	ID          string
+	WorkspaceID domain.WorkspaceID
+	RunID       domain.RunID
 	// SourceID is the raising request's own identity within its run - the
 	// agent's tool-use id for the pause. It is unique per run, so the same
 	// pause delivered twice cannot become two requests. Empty means the
@@ -45,19 +45,19 @@ type ApprovalStore interface {
 	// request is loaded back into a instead of a second row being inserted.
 	CreateApproval(ctx context.Context, a *Approval) error
 	GetApproval(ctx context.Context, id string) (*Approval, error)
-	// ListApprovals returns a session's requests oldest first; decision
+	// ListApprovals returns a workspace's requests oldest first; decision
 	// narrows to one decision value, empty returns all.
-	ListApprovals(ctx context.Context, session domain.SessionID, decision string) ([]*Approval, error)
+	ListApprovals(ctx context.Context, workspace domain.WorkspaceID, decision string) ([]*Approval, error)
 	// DecideApproval records a decision on a still-undecided request.
 	// A request that was already decided returns ErrConflict.
 	DecideApproval(ctx context.Context, id, decision string, by domain.MemberID, at time.Time) error
 }
 
-const approvalCols = `id, session_id, run_id, source_id, action, detail, decision, decided_by, created_at, decided_at`
+const approvalCols = `id, workspace_id, run_id, source_id, action, detail, decision, decided_by, created_at, decided_at`
 
 func (d *DB) CreateApproval(ctx context.Context, a *Approval) error {
-	if a.SessionID == "" || a.RunID == "" || a.Action == "" {
-		return errors.New("store: create approval: session_id, run_id, and action are required")
+	if a.WorkspaceID == "" || a.RunID == "" || a.Action == "" {
+		return errors.New("store: create approval: workspace_id, run_id, and action are required")
 	}
 	id, ts, err := prepareCreate(a.CreatedAt)
 	if err != nil {
@@ -71,7 +71,7 @@ func (d *DB) CreateApproval(ctx context.Context, a *Approval) error {
 		`INSERT INTO approvals (`+approvalCols+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, NULL)
 		 ON CONFLICT (run_id, source_id) WHERE source_id <> '' DO NOTHING`,
-		id, a.SessionID, a.RunID, a.SourceID, a.Action, a.Detail, ApprovalRequested, createdAt,
+		id, a.WorkspaceID, a.RunID, a.SourceID, a.Action, a.Detail, ApprovalRequested, createdAt,
 	)
 	if err != nil {
 		return fmt.Errorf("store: create approval: %w", mapConstraint(err, ErrNotFound))
@@ -108,9 +108,9 @@ func (d *DB) GetApproval(ctx context.Context, id string) (*Approval, error) {
 	return a, nil
 }
 
-func (d *DB) ListApprovals(ctx context.Context, session domain.SessionID, decision string) ([]*Approval, error) {
-	query := `SELECT ` + approvalCols + ` FROM approvals WHERE session_id = ?`
-	args := []any{session}
+func (d *DB) ListApprovals(ctx context.Context, workspace domain.WorkspaceID, decision string) ([]*Approval, error) {
+	query := `SELECT ` + approvalCols + ` FROM approvals WHERE workspace_id = ?`
+	args := []any{workspace}
 	if decision != "" {
 		query += ` AND decision = ?`
 		args = append(args, decision)
@@ -157,7 +157,7 @@ func scanApproval(row interface{ Scan(...any) error }) (*Approval, error) {
 		createdAt int64
 		decidedAt *int64
 	)
-	if err := row.Scan(&a.ID, &a.SessionID, &a.RunID, &a.SourceID, &a.Action, &a.Detail,
+	if err := row.Scan(&a.ID, &a.WorkspaceID, &a.RunID, &a.SourceID, &a.Action, &a.Detail,
 		&a.Decision, &a.DecidedBy, &createdAt, &decidedAt); err != nil {
 		return nil, err
 	}

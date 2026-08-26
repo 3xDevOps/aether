@@ -54,9 +54,9 @@ func TestDecodePayloadUnknownType(t *testing.T) {
 
 func TestFilterMatches(t *testing.T) {
 	e := Event{
-		SessionID: "s1",
-		RunID:     "r1",
-		Type:      TypeRunStatus,
+		WorkspaceID: "w1",
+		RunID:       "r1",
+		Type:        TypeRunStatus,
 	}
 	cases := []struct {
 		name string
@@ -64,14 +64,14 @@ func TestFilterMatches(t *testing.T) {
 		want bool
 	}{
 		{"zero matches all", Filter{}, true},
-		{"session match", Filter{Session: "s1"}, true},
-		{"session mismatch", Filter{Session: "s2"}, false},
+		{"workspace match", Filter{Workspace: "w1"}, true},
+		{"workspace mismatch", Filter{Workspace: "w2"}, false},
 		{"run match", Filter{Run: "r1"}, true},
 		{"run mismatch", Filter{Run: "r2"}, false},
 		{"type match", Filter{Types: []Type{TypePresence, TypeRunStatus}}, true},
 		{"type mismatch", Filter{Types: []Type{TypePresence}}, false},
-		{"all fields match", Filter{Session: "s1", Run: "r1", Types: []Type{TypeRunStatus}}, true},
-		{"one field mismatch", Filter{Session: "s1", Run: "r2", Types: []Type{TypeRunStatus}}, false},
+		{"all fields match", Filter{Workspace: "w1", Run: "r1", Types: []Type{TypeRunStatus}}, true},
+		{"one field mismatch", Filter{Workspace: "w1", Run: "r2", Types: []Type{TypeRunStatus}}, false},
 	}
 	for _, tc := range cases {
 		if got := tc.f.Matches(e); got != tc.want {
