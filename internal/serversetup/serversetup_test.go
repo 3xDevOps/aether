@@ -96,7 +96,7 @@ func TestLoadReadsFile(t *testing.T) {
 func testFlags() (*flag.FlagSet, *string, *int, *bool) {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", ":2222", "SSH listen address")
-	port := fs.Int("dashboard-port", 0, "dashboard port")
+	port := fs.Int("poll-seconds", 0, "poll period")
 	autoJoin := fs.Bool("tailnet-auto-join", false, "auto-join")
 	return fs, addr, port, autoJoin
 }
@@ -106,7 +106,7 @@ func TestApplySetsFlagsNotPassedExplicitly(t *testing.T) {
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	err := Apply(fs, map[string]string{"addr": ":2300", "dashboard-port": "9090", "tailnet-auto-join": "true"})
+	_, err := Apply(fs, map[string]string{"addr": ":2300", "poll-seconds": "9090", "tailnet-auto-join": "true"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestApplyExplicitFlagBeatsConfigFile(t *testing.T) {
 	if err := fs.Parse([]string{"-addr", ":2400"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Apply(fs, map[string]string{"addr": ":2300", "dashboard-port": "9090"}); err != nil {
+	if _, err := Apply(fs, map[string]string{"addr": ":2300", "poll-seconds": "9090"}); err != nil {
 		t.Fatal(err)
 	}
 	if *addr != ":2400" {
@@ -136,7 +136,7 @@ func TestApplyRejectsUnknownKey(t *testing.T) {
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	err := Apply(fs, map[string]string{"addr": ":2300", "dashbord-port": "9090"})
+	_, err := Apply(fs, map[string]string{"addr": ":2300", "dashbord-port": "9090"})
 	if err == nil {
 		t.Fatal("want an error naming the typo'd key")
 	}
@@ -153,9 +153,9 @@ func TestApplyRejectsUnparseableValue(t *testing.T) {
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	err := Apply(fs, map[string]string{"dashboard-port": "eighty-eighty"})
-	if err == nil || !strings.Contains(err.Error(), "dashboard-port") {
-		t.Fatalf("err = %v, want it to name dashboard-port", err)
+	_, err := Apply(fs, map[string]string{"poll-seconds": "eighty-eighty"})
+	if err == nil || !strings.Contains(err.Error(), "poll-seconds") {
+		t.Fatalf("err = %v, want it to name poll-seconds", err)
 	}
 }
 
@@ -169,9 +169,9 @@ func TestApplyLeavesFlagsUntouchedWhenAValueFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := *addr
-	err := Apply(fs, map[string]string{
-		"addr":           ":9999",
-		"dashboard-port": "eighty-eighty",
+	_, err := Apply(fs, map[string]string{
+		"addr":         ":9999",
+		"poll-seconds": "eighty-eighty",
 	})
 	if err == nil {
 		t.Fatal("Apply accepted an unparseable value")
@@ -325,5 +325,53 @@ func TestInstallKeepsExistingConfigUnlessForced(t *testing.T) {
 	values, _ = Load(configPath)
 	if values["addr"] != ":9999" {
 		t.Errorf("addr = %q, want --force to overwrite", values["addr"])
+	}
+}
+
+// An option this server no longer has must not stop it from booting. A
+// config file is operator-owned and survives upgrades, so a key that was
+// valid before the upgrade and is gone after it is the normal shape of a
+// removed feature, not a typo. Refusing to start there turns "we deleted a
+// flag" into "your server is down until you edit a file by hand".
+func TestApplyRetiresRemovedOptionsInsteadOfFailing(t *testing.T) {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	addr := fs.String("addr", ":2222", "")
+	if err := fs.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	retired, err := Apply(fs, map[string]string{
+		"addr":           ":2300",
+		"dashboard-port": "8080",
+		"dashboard-addr": "100.64.0.1:8080",
+	})
+	if err != nil {
+		t.Fatalf("Apply with retired keys: %v, want it to carry on", err)
+	}
+	if *addr != ":2300" {
+		t.Errorf("addr = %q, want the live key still applied", *addr)
+	}
+	want := []string{"dashboard-addr", "dashboard-port"}
+	if len(retired) != len(want) {
+		t.Fatalf("retired = %v, want %v", retired, want)
+	}
+	for i, key := range want {
+		if retired[i] != key {
+			t.Errorf("retired[%d] = %q, want %q", i, retired[i], key)
+		}
+	}
+}
+
+// A key that was never an option is still a typo, and a typo has to be
+// loud: silently ignoring it means a setting the operator believes is in
+// force never was.
+func TestApplyStillRejectsAnUnknownOption(t *testing.T) {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.String("addr", ":2222", "")
+	if err := fs.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(fs, map[string]string{"addrr": ":2300"}); err == nil {
+		t.Fatal("Apply accepted an unknown option, want an error")
 	}
 }

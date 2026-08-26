@@ -237,8 +237,12 @@ func TestServiceDefaultsApplyToRealServeFlags(t *testing.T) {
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := serversetup.Apply(fs, serversetup.ServiceDefaults()); err != nil {
+	retired, err := serversetup.Apply(fs, serversetup.ServiceDefaults())
+	if err != nil {
 		t.Fatalf("ServiceDefaults is not accepted by serve: %v", err)
+	}
+	if len(retired) != 0 {
+		t.Errorf("ServiceDefaults seeds retired options %v", retired)
 	}
 	if *o.addr != ":2222" || *o.dataDir != "/var/lib/aether" {
 		t.Errorf("addr=%q data-dir=%q, want the packaged unit's values", *o.addr, *o.dataDir)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -171,8 +172,15 @@ func applyConfigFile(fs *flag.FlagSet, path string, optional bool) (string, erro
 	if err != nil {
 		return "", err
 	}
-	if err := serversetup.Apply(fs, values); err != nil {
+	retired, err := serversetup.Apply(fs, values)
+	if err != nil {
 		return "", err
+	}
+	// A key left over from a removed feature is worth saying out loud once
+	// - the operator set it deliberately and it is no longer doing
+	// anything - but it is not worth refusing to boot over.
+	for _, key := range retired {
+		slog.Warn("config: option no longer exists and is ignored", "option", key, "file", path)
 	}
 	if len(values) == 0 {
 		return "", nil

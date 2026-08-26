@@ -379,9 +379,21 @@ server chown run checkouts to that UID, which needs `CAP_CHOWN`. The header
 comment in the unit spells out how to run unprivileged instead, and what you
 give up.
 
-Edit `ExecStart` to change ports or the data directory. Key-driven harnesses
-read the documented API-key environment variable names from
-`/etc/aether/aether-server.env`, which the unit loads if it exists. Provide
+Options live in `/etc/aether/server.conf`, not in `ExecStart`. The file is
+operator-owned, so binary updates and unit reinstalls never rewrite it. Change
+it with `aether-server config set <key> <value>` (or `config edit`), then
+restart. `aether-server config show` prints every option with the value that
+would be used and where it came from.
+
+An option removed in a later release does not stop the server: it logs one
+warning naming the key and the file, and boots on the remaining settings.
+`config show` flags the same keys so you can drop the lines with
+`aether-server config edit` when convenient. A key that was never an option
+is still an error, because a typo means a setting you believe is in force
+never was.
+
+Key-driven harnesses read the documented API-key environment variable names
+from `/etc/aether/aether-server.env`, which the unit loads if it exists. Provide
 those values through your deployment's secret manager; do not commit them or
 paste them into public configuration examples.
 
