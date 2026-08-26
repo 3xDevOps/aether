@@ -181,8 +181,8 @@ Build from source (needs Node 22+):
 
 ```sh
 cd desktop
-npm ci        # or npm install when there is no lockfile
-npm run dist  # installers into desktop/dist/
+npm install
+npm run dist  # installers for this OS into desktop/dist/
 ```
 
 `npm run start` runs it unpackaged during development.
@@ -193,6 +193,51 @@ gateway it prints. Context isolation is on, the renderer is sandboxed, and no
 Node API is exposed to the page - a compromised dashboard page gets exactly
 what a browser tab would get, nothing more. Links to anything other than the
 gateway open in your real browser.
+
+### Building for all three operating systems
+
+`npm run dist` only builds the targets electron-builder configures for the
+machine you run it on. Installers for every platform need either one machine
+per platform (what a CI matrix does) or the cross-build routes below.
+
+| Artifact | On Linux | On macOS | On Windows |
+| --- | --- | --- | --- |
+| Linux `.AppImage`, `.deb` | `npm run dist -- --linux` | Docker image | Docker image |
+| Windows `.exe` (NSIS) | Docker image | native tooling | `npm run dist -- --win` |
+| macOS `.zip` | `npm run dist -- --mac zip` | `npm run dist -- --mac` | Docker image |
+| macOS `.dmg` | macOS only | `npm run dist -- --mac` | macOS only |
+
+The Docker image is electron-builder's own Wine image, so a Linux box can
+produce Linux and Windows installers plus an unsigned macOS zip:
+
+```sh
+cd desktop
+npm install
+npm run dist -- --linux --mac zip   # AppImage, deb, macOS zip
+
+mkdir -p ~/.cache/aether-desktop-build
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/home/builder \
+  -v "$PWD:/project" \
+  -v "$HOME/.cache/aether-desktop-build:/home/builder" \
+  electronuserland/builder:wine \
+  npx electron-builder --win --publish never   # NSIS .exe
+```
+
+Run the container as your own user, with a writable `HOME` on a cache
+directory: as root it writes root-owned files into `dist/` and into the
+electron-builder download cache, which then breaks later builds. That cache
+mount is also what keeps the container from re-downloading the ~100 MB
+Electron runtime every time.
+
+Two limits are not worked around:
+
+- **`.dmg` requires macOS.** The `dmg-license` module it needs is a macOS-only
+  optional dependency, so a Linux or Windows host can only produce the macOS
+  `.zip`. Both install the same `Aether.app`.
+- **Signing requires the target OS and a certificate.** Cross-built Windows
+  and macOS artifacts are unsigned, so they trip SmartScreen and Gatekeeper,
+  and auto-update refuses them. Ship signed builds from real macOS and Windows
+  runners; treat cross-builds as test artifacts.
 
 ## Server prerequisites
 

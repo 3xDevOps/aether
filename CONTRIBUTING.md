@@ -19,6 +19,7 @@ coding agents, built as a Go server, a Go CLI, and an embedded web dashboard.
 | Bun | 1.3+ | Dashboard build and tests |
 | Docker | recent | Integration tests and server runtime |
 | git | recent | Integration tests and workspace transport |
+| Node | 22+ | Desktop shell in `desktop/` (optional) |
 
 SQLite is pure Go and the project builds with `CGO_ENABLED=0`.
 
@@ -52,6 +53,18 @@ bun install --frozen-lockfile
 bun run typecheck
 bun run test
 ```
+
+The desktop shell builds from `desktop/`:
+
+```sh
+npm install
+npm run dist   # installers for this OS into desktop/dist/
+```
+
+`npm run dist` packages only the current platform's targets. See
+[docs/install.md](docs/install.md#building-for-all-three-operating-systems)
+for building Linux, Windows, and macOS artifacts from one machine, and for
+the two cases (`.dmg` and code signing) that require the real OS.
 
 ## Development deploy
 
