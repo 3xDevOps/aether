@@ -29,10 +29,14 @@ func inboxEnv(t *testing.T) *testEnv {
 	})
 }
 
-// eventually polls fn until it reports success or the deadline passes.
+// eventually polls fn until it reports success or the deadline passes. The
+// deadline is generous because CI runners are small and run every package
+// in parallel: a background loop on a short ticker can be starved for far
+// longer than its period, and the cost of a slow pass is a few seconds
+// while the cost of a tight bound is a flake that fails the whole run.
 func eventually(t *testing.T, what string, fn func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if fn() {
 			return
