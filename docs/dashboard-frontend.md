@@ -177,6 +177,20 @@ Views gate on these predicates rather than sniffing the URL, which is what
 lets the same SPA serve the remote dashboard and the local gateway's
 capability-gated surfaces (`docs/local-gateway.md`).
 
+**Capability is half the gate; the caller's role is the other half.**
+Transport capability answers what the gateway can carry, not what this member
+may do, and the local gateway advertises `methods: ["*"]` - so gating on
+capability alone put Invite, Approve and Remove in front of a collaborator who
+then learned the truth from a `403`. `useSelfRole()` and `useIsAdmin()` in the
+same hooks file read the role off `server.info`'s member record, and every
+admin affordance now needs both predicates: the gateway can carry the method
+*and* the caller holds the admin role. Reads are gated on capability only, so
+the roster itself is reachable on the remote dashboard - `member.list` is
+allowlisted, `member.approve` is not, and both the sidebar link and the
+palette's Go-to entry gate on `member.list`. A non-admin gets the roster
+read-only, with the header saying so rather than leaving them to infer it from
+absent buttons.
+
 Every request goes through `src/lib/api.ts` - the only module that knows route
 shapes, the bearer token, and error decoding. It carries exactly the methods
 the views call; the team-feature methods arrive with the tickets that use them.
@@ -506,7 +520,8 @@ muting a card and a later state change bringing the emphasis back, the paused
 badge going on and off through a real `session.timeline` pause and resume run
 through `applyEvent`, the Idle toggle, a slot contributor reaching the card,
 and the palette jumping, steering from a run-detail tab, withholding both pause
-and resume while the paused state is unknown, and launching. The team surfaces are driven through the same stub
+and resume while the paused state is unknown, launching, and offering only
+members who can own a run as handoff targets, never a viewer. The team surfaces are driven through the same stub
 API: the status bar reading roster, queue and budget and rendering all three,
 the approval badge and watcher avatars reaching a real run card, a decision
 going out as `approval.decide` and coming back attributed, a steer refusal
@@ -514,7 +529,14 @@ surfacing instead of being guessed at, the recurring refresh staying bounded
 to live sessions while a finished session's exceeded budget still reaches the
 readout, and the feed opening its window at the log head, walking it back
 without re-reading, narrowing on a filter, and abandoning a page that belongs
-to filters the user has left. The diff tab covers the parser on the
+to filters the user has left. The Members roster is rendered both ways: an
+admin approving, inviting and changing another member's role with the roster
+refetching after, the server's refusal rendered verbatim when a role change is
+denied, the confirmation an admin must clear before giving up their own admin
+role, and a non-admin getting the same roster as read-only text with no admin
+verbs - which the sidebar and the palette match by keeping Members reachable
+behind the narrow remote allowlist while every other admin entry stays
+hidden. The diff tab covers the parser on the
 shapes that would break it - a deletion, a new file, a removed line that reads
 exactly like a file marker - then the fetch, the truncation notice, a snapshot
 refetching and narrowing the patch, and a conflict chip naming its member and

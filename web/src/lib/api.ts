@@ -200,6 +200,11 @@ export const api = {
   /** Sets the caller's own attribution color. */
   memberColor: (color: string) =>
     call<{ member: Member }>('member.color', { color }).then((r) => r.member),
+  /** Sets another member's role; admin only, and never the last admin. */
+  memberRole: (memberID: string, role: Member['role']) =>
+    call<{ member: Member }>('member.role', { member_id: memberID, role }).then(
+      (r) => r.member,
+    ),
   workspaceAdd: (params: { name: string; environment?: unknown }) =>
     call<{ workspace: Workspace }>('workspace.add', params).then(
       (r) => r.workspace,

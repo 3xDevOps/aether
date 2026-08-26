@@ -69,7 +69,7 @@ Every CLI capability, sorted by why the browser dashboard lacks it:
 | Category | Capabilities | Gap |
 | --- | --- | --- |
 | Already in the SPA | board, terminal mirror/steer, diff, events, approvals, presence, cost readout, `run.launch/inject/kill/pause/resume/close/handoff`, `template.launch` | none |
-| SSH-identity RPC | `session.new/settings`, `workspace.add`, `workspace.tools.*`, `member.invite/approve/remove/color`, `budget.set`, `template.save/delete`, `schedule.*`, `profile.*`, `agent.register/list`, `run.protect`, `run.relaunch`, `run.pull` | off the HTTP allowlist by design |
+| SSH-identity RPC | `session.new/settings`, `workspace.add`, `workspace.tools.*`, `member.invite/approve/remove/color/role`, `budget.set`, `template.save/delete`, `schedule.*`, `profile.*`, `agent.register/list`, `run.protect`, `run.relaunch`, `run.pull` | off the HTTP allowlist by design |
 | Interactive PTY beyond run attach | `agent add`, `setup`, `workspace bootstrap` (the three workspace-shell modes) | remote gateway has `/ws/attach/<run>` only |
 | Local machine verbs | `link` (config + git remote), `pull` (git fetch), `sync` (mutagen overlay), `daemon` (install/run), `image` (scaffold files), `update` | a browser tab has no filesystem, git, or ssh-agent |
 
@@ -161,7 +161,8 @@ All through the existing seams; the shell, `sync.ts` lifecycle, and
 - **Workspaces**: add, image policy display, tools list/verify/rollback,
   bootstrap behind the same shell pane.
 - **Members**: roster with invite (one-time code with expiry and a copy
-  button), approve pending, remove, color picker.
+  button), approve pending, role change (viewer/collaborator/admin, with
+  the last-admin refusal left to the server), remove, color picker.
 - **Sessions**: new session, settings (steer policy and the rest).
 - **Templates and schedules**: save/delete forms, cron editor with
   next-fire preview from `schedule.list`.
@@ -266,7 +267,7 @@ mostly independent.
    `useCapability` hook; palette verbs and routes register with a
    capability key. Test: same bundle against remote-gateway and
    local-gateway descriptors shows/hides correctly.
-10. **Admin surfaces.** Members (invite/approve/remove/color), sessions
+10. **Admin surfaces.** Members (invite/approve/role/remove/color), sessions
     (new/settings), workspaces (add, tools list/verify/rollback),
     budgets (set), templates and schedules (save/delete, cron editor).
     One slice + route per surface through the registry. Test: rendered

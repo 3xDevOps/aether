@@ -109,21 +109,19 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	if p.MemberID == "" {
 		return nil, invalidParams("member_id is required")
 	}
+	// Same read-then-write hazard as member.role: without this lock a
+	// removal and a demotion racing each other can both see two admins.
+	s.registerMu.Lock()
+	defer s.registerMu.Unlock()
 	id := domain.MemberID(p.MemberID)
 	target, err := s.cfg.Store.GetMember(ctx, id)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	if target.Role == domain.RoleAdmin {
-		members, lerr := s.cfg.Store.ListMembers(ctx)
-		if lerr != nil {
-			return nil, rpcError(lerr)
-		}
-		admins := 0
-		for _, m := range members {
-			if m.Role == domain.RoleAdmin {
-				admins++
-			}
+		admins, cerr := s.countAdmins(ctx)
+		if cerr != nil {
+			return nil, cerr
 		}
 		if admins <= 1 {
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to delete the last admin"}
@@ -133,4 +131,21 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 		return nil, rpcError(err)
 	}
 	return struct{}{}, nil
+}
+
+// countAdmins reports how many members currently hold the admin role. It
+// backs the last-admin invariant: the deployment must never lose its
+// ability to administer itself, whether through removal or demotion.
+func (s *Server) countAdmins(ctx context.Context) (int, *protocol.Error) {
+	members, err := s.cfg.Store.ListMembers(ctx)
+	if err != nil {
+		return 0, rpcError(err)
+	}
+	admins := 0
+	for _, m := range members {
+		if m.Role == domain.RoleAdmin {
+			admins++
+		}
+	}
+	return admins, nil
 }

@@ -128,9 +128,11 @@ type Server struct {
 	// per-subsystem); Close waits on it so no handler outlives shutdown.
 	wg sync.WaitGroup
 
-	// registerMu serializes member auto-registration so two concurrent
-	// first contacts cannot both observe an empty member table and both
-	// bootstrap as admin.
+	// registerMu serializes membership writes that depend on a prior read
+	// of the member table: two concurrent first contacts must not both
+	// observe an empty table and both bootstrap as admin, and two
+	// concurrent demotions must not both observe two admins and leave the
+	// deployment with none.
 	registerMu sync.Mutex
 
 	mu    sync.Mutex
