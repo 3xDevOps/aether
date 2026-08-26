@@ -31,7 +31,7 @@ func TestSlugify(t *testing.T) {
 // 26-character prefix nobody can retype.
 func TestRunBranchLeadsWithTheTask(t *testing.T) {
 	const run = "01m0h6tym4y65102a721nq0jf3"
-	got := runBranch(run, "fix the bug", shortID(run))
+	got := runBranch("fix the bug", shortID(run))
 	if want := "aether/run-fix-the-bug-nq0jf3"; got != want {
 		t.Errorf("runBranch = %q, want %q", got, want)
 	}
@@ -42,7 +42,7 @@ func TestRunBranchLeadsWithTheTask(t *testing.T) {
 
 func TestRunBranchWithoutAUsableTask(t *testing.T) {
 	const run = "01m0h6tym4y65102a721nq0jf3"
-	if got := runBranch(run, "!!!", shortID(run)); got != "aether/run-nq0jf3" {
+	if got := runBranch("!!!", shortID(run)); got != "aether/run-nq0jf3" {
 		t.Errorf("runBranch with empty slug = %q", got)
 	}
 }

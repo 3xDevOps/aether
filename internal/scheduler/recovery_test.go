@@ -90,8 +90,8 @@ func TestRecoveryOfLegacySidecarKeepsWorkspaceScope(t *testing.T) {
 		t.Fatalf("read sidecar: %v", err)
 	}
 	var fields map[string]any
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		t.Fatalf("decode sidecar: %v", err)
+	if decErr := json.Unmarshal(raw, &fields); decErr != nil {
+		t.Fatalf("decode sidecar: %v", decErr)
 	}
 	delete(fields, "workspace_id")
 	fields["session_id"] = "sess_legacy"

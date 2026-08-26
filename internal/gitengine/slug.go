@@ -55,7 +55,7 @@ func shortID(run domain.RunID) string {
 // so the branch reads as what it is in `git branch` output, and the ID
 // trails as the disambiguator. Callers pass a short ID; uniqueRunBranch
 // passes the full one when a short branch is already taken.
-func runBranch(run domain.RunID, task, id string) string {
+func runBranch(task, id string) string {
 	if slug := slugify(task); slug != "" {
 		return "aether/run-" + slug + "-" + id
 	}

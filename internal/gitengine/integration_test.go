@@ -368,8 +368,8 @@ func TestFailedCheckoutReleasesItsBranchName(t *testing.T) {
 	if err == nil {
 		t.Fatal("checkout with an unwritable sidecar path succeeded, want a failure")
 	}
-	if err := os.RemoveAll(sidecar); err != nil {
-		t.Fatalf("free the sidecar path: %v", err)
+	if rmErr := os.RemoveAll(sidecar); rmErr != nil {
+		t.Fatalf("free the sidecar path: %v", rmErr)
 	}
 
 	if exists, existsErr := e.WorkspaceBranchExists(ctx, "ws1", short); existsErr != nil {

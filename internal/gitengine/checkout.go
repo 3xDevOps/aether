@@ -113,8 +113,8 @@ func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 		return "", "", fmt.Errorf("gitengine: base branch %q has no commits: %w", baseBranch, err)
 	}
 
-	if _, err := e.git(ctx, "", "clone", "--local", "--no-checkout", repo, checkoutPath); err != nil {
-		return "", "", err
+	if _, cloneErr := e.git(ctx, "", "clone", "--local", "--no-checkout", repo, checkoutPath); cloneErr != nil {
+		return "", "", cloneErr
 	}
 	cleanup := func() { _ = os.RemoveAll(checkoutPath) }
 
@@ -168,7 +168,7 @@ func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 // the ref already exists, which makes the claim atomic across concurrent
 // provisioning.
 func (e *Engine) uniqueRunBranch(ctx context.Context, repo, base string, run domain.RunID, task string) (string, error) {
-	short := runBranch(run, task, shortID(run))
+	short := runBranch(task, shortID(run))
 	claimed, err := e.claimBranch(ctx, repo, short, base)
 	if err != nil {
 		return "", err
@@ -176,7 +176,7 @@ func (e *Engine) uniqueRunBranch(ctx context.Context, repo, base string, run dom
 	if claimed {
 		return short, nil
 	}
-	full := runBranch(run, task, string(run))
+	full := runBranch(task, string(run))
 	claimed, err = e.claimBranch(ctx, repo, full, base)
 	if err != nil {
 		return "", err

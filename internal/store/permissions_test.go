@@ -87,8 +87,8 @@ func TestWorkspaceBaseBranchDefaults(t *testing.T) {
 	}
 
 	w.BaseBranch = "develop"
-	if err := db.UpdateWorkspace(ctx, w); err != nil {
-		t.Fatalf("UpdateWorkspace: %v", err)
+	if updateErr := db.UpdateWorkspace(ctx, w); updateErr != nil {
+		t.Fatalf("UpdateWorkspace: %v", updateErr)
 	}
 	if got, err = db.GetWorkspace(ctx, w.ID); err != nil {
 		t.Fatalf("GetWorkspace after update: %v", err)

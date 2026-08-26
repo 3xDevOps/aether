@@ -221,10 +221,10 @@ func TestSessionCollapseMigrationRewritesEventScope(t *testing.T) {
 
 	var scope string
 	var seq uint64
-	if err := db.db.QueryRowContext(context.Background(),
+	if scanErr := db.db.QueryRowContext(context.Background(),
 		`SELECT workspace_id, seq FROM events WHERE id = 'e1'`,
-	).Scan(&scope, &seq); err != nil {
-		t.Fatalf("read migrated event scope: %v", err)
+	).Scan(&scope, &seq); scanErr != nil {
+		t.Fatalf("read migrated event scope: %v", scanErr)
 	}
 	if scope != "w1" {
 		t.Errorf("event workspace scope = %q, want w1", scope)
