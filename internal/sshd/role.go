@@ -40,6 +40,13 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	if !role.Valid() {
 		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, or admin", p.Role))
 	}
+	// The last-admin check below reads the member table and then writes to
+	// it. Without serialization two admins demoting each other at once
+	// would both count two admins, both proceed, and leave the deployment
+	// with none and no way back. registerMu is the same lock bootstrap
+	// uses to keep its own read-then-write of this table honest.
+	s.registerMu.Lock()
+	defer s.registerMu.Unlock()
 	m, err := s.cfg.Store.GetMember(ctx, domain.MemberID(p.MemberID))
 	if err != nil {
 		return nil, rpcError(err)

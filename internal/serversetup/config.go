@@ -67,8 +67,12 @@ func Load(path string) (map[string]string, error) {
 // explicitly. It must be called after set.Parse: explicitness is read from
 // set.Visit, which visits only flags actually set. That yields the precedence
 // explicit flag > config file > flag default without naming a single option
-// here. An unrecognised key is an error, so a typo is never silently ignored,
-// and keys are checked before anything is applied.
+// here.
+//
+// It is all or nothing. An unrecognised key or an unparseable value leaves
+// set untouched, so a caller that reports the error and carries on cannot
+// run against a half-applied config. Values are parsed into a scratch
+// FlagSet first, which is also what rejects a bad value.
 func Apply(set *flag.FlagSet, values map[string]string) error {
 	explicit := make(map[string]bool)
 	set.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
@@ -78,13 +82,29 @@ func Apply(set *flag.FlagSet, values map[string]string) error {
 			return fmt.Errorf("serversetup: unknown option %q", key)
 		}
 	}
+	// Snapshot what is about to be overwritten so an unparseable value
+	// late in the file cannot leave the earlier keys applied. Every flag
+	// Value round-trips through its own String form, which is what
+	// flag.PrintDefaults relies on.
+	prior := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if explicit[key] {
+			continue
+		}
+		prior[key] = set.Lookup(key).Value.String()
+	}
+	applied := make([]string, 0, len(keys))
 	for _, key := range keys {
 		if explicit[key] {
 			continue
 		}
 		if err := set.Set(key, values[key]); err != nil {
+			for _, done := range applied {
+				_ = set.Set(done, prior[done])
+			}
 			return fmt.Errorf("serversetup: option %q: %w", key, err)
 		}
+		applied = append(applied, key)
 	}
 	return nil
 }

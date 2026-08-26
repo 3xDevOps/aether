@@ -157,3 +157,45 @@ func TestMemberRoleRejectsBadInput(t *testing.T) {
 		})
 	}
 }
+
+// Two admins demoting each other at the same instant must not both win.
+// The guard reads the member table and then writes to it, so without
+// serialization both calls count two admins, both proceed, and the
+// deployment is left with none and no way to administer it again.
+func TestConcurrentDemotionsKeepAnAdmin(t *testing.T) {
+	e := newTestEnv(t, nil)
+	// e.member is the seeded admin; Bea is the second one.
+	beaSigner, bea := addMember(t, e, "Bea", domain.RoleAdmin, false)
+	adminC := controlClient(t, e)
+	beaC := controlAs(t, e, beaSigner)
+
+	// Each admin demotes the other, as simultaneously as we can arrange.
+	start := make(chan struct{})
+	done := make(chan struct{}, 2)
+	demote := func(c *protocol.Client, target domain.MemberID) {
+		<-start
+		_ = c.Call(protocol.MethodMemberRole, protocol.MemberRoleParams{
+			MemberID: string(target), Role: string(domain.RoleCollaborator),
+		}, nil)
+		done <- struct{}{}
+	}
+	go demote(adminC, bea.ID)
+	go demote(beaC, e.member.ID)
+	close(start)
+	<-done
+	<-done
+
+	members, err := e.store.ListMembers(context.Background())
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+	admins := 0
+	for _, m := range members {
+		if m.Role == domain.RoleAdmin {
+			admins++
+		}
+	}
+	if admins == 0 {
+		t.Fatal("both demotions succeeded: the deployment has no admin left")
+	}
+}

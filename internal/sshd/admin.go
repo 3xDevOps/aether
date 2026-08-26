@@ -109,6 +109,10 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	if p.MemberID == "" {
 		return nil, invalidParams("member_id is required")
 	}
+	// Same read-then-write hazard as member.role: without this lock a
+	// removal and a demotion racing each other can both see two admins.
+	s.registerMu.Lock()
+	defer s.registerMu.Unlock()
 	id := domain.MemberID(p.MemberID)
 	target, err := s.cfg.Store.GetMember(ctx, id)
 	if err != nil {

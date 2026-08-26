@@ -159,6 +159,31 @@ func TestApplyRejectsUnparseableValue(t *testing.T) {
 	}
 }
 
+// A bad value late in the file must not leave the earlier keys applied.
+// Keys are applied in sorted order, so "addr" is reached before the
+// "dashboard-port" that fails; a caller which reports the error and reads
+// the FlagSet anyway must still see the untouched defaults.
+func TestApplyLeavesFlagsUntouchedWhenAValueFails(t *testing.T) {
+	fs, addr, port, _ := testFlags()
+	if err := fs.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	before := *addr
+	err := Apply(fs, map[string]string{
+		"addr":           ":9999",
+		"dashboard-port": "eighty-eighty",
+	})
+	if err == nil {
+		t.Fatal("Apply accepted an unparseable value")
+	}
+	if *addr != before {
+		t.Errorf("addr = %q after a failed Apply, want the untouched %q", *addr, before)
+	}
+	if *port != 0 {
+		t.Errorf("dashboard-port = %d after a failed Apply, want 0", *port)
+	}
+}
+
 // TestPackagedUnitMatchesDefaultUnit is the single-source-of-truth invariant:
 // scripts/deploy.sh installs the packaged file while `aether-server install`
 // writes DefaultUnit(), so the two must be byte-identical.

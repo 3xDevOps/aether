@@ -107,17 +107,22 @@ func configEdit(w io.Writer, path string) error {
 			return err
 		}
 	}
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "/usr/bin/editor"
-		if _, err := os.Stat(editor); err != nil {
-			editor = "vi"
+	// EDITOR commonly carries arguments ("code --wait", "emacs -nw"), so
+	// it is split the way cmd/aether/agent.go splits its own command
+	// strings. exec.Command never invokes a shell, so a value with shell
+	// metacharacters is looked up as a literal name and fails safely.
+	editor := strings.Fields(os.Getenv("EDITOR"))
+	if len(editor) == 0 {
+		fallback := "/usr/bin/editor"
+		if _, err := os.Stat(fallback); err != nil {
+			fallback = "vi"
 		}
+		editor = []string{fallback}
 	}
-	cmd := exec.Command(editor, path)
+	cmd := exec.Command(editor[0], append(editor[1:], path)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s %s: %w", editor, path, err)
+		return fmt.Errorf("%s %s: %w", strings.Join(editor, " "), path, err)
 	}
 	values, err := serversetup.Load(path)
 	if err != nil {

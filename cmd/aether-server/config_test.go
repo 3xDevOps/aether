@@ -247,3 +247,55 @@ func TestServiceDefaultsApplyToRealServeFlags(t *testing.T) {
 		t.Errorf("addr=%q data-dir=%q, want the packaged unit's values", *o.addr, *o.dataDir)
 	}
 }
+
+// fakeEditor writes a script that appends body to the file it is handed,
+// and returns an EDITOR value that invokes it WITH AN ARGUMENT. Editors are
+// routinely configured that way ("code --wait", "emacs -nw"), which only
+// works if EDITOR is split into words rather than treated as one filename.
+func fakeEditor(t *testing.T, body string) string {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "editor.sh")
+	// $1 because the wrapper is invoked as "editor.sh --wait <path>".
+	content := "#!/bin/sh\nprintf '%s\\n' " + body + " > \"$2\"\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script + " --wait"
+}
+
+func TestConfigEditRunsAnEditorCarryingArguments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	t.Setenv("EDITOR", fakeEditor(t, "'addr = :2401'"))
+	var out bytes.Buffer
+	if err := configEdit(&out, path); err != nil {
+		t.Fatalf("configEdit: %v", err)
+	}
+	values, err := serversetup.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["addr"] != ":2401" {
+		t.Errorf("addr = %q, want the value the editor wrote", values["addr"])
+	}
+}
+
+// A crashed or cancelled editor must surface, not be mistaken for success.
+func TestConfigEditReportsAFailingEditor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	t.Setenv("EDITOR", "false")
+	var out bytes.Buffer
+	if err := configEdit(&out, path); err == nil {
+		t.Fatal("configEdit ignored a nonzero editor exit")
+	}
+}
+
+// The post-edit reparse is what stops a typo reaching the next restart.
+func TestConfigEditRejectsAnEditThatBreaksTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	t.Setenv("EDITOR", fakeEditor(t, "'dashbord-port = 9'"))
+	var out bytes.Buffer
+	err := configEdit(&out, path)
+	if err == nil || !strings.Contains(err.Error(), "dashbord-port") {
+		t.Fatalf("err = %v, want it to name the unknown key", err)
+	}
+}
