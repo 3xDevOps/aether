@@ -63,23 +63,50 @@ func Load(path string) (map[string]string, error) {
 	return values, nil
 }
 
+// retiredOptions are keys that were real `serve` options in an earlier
+// release. A config file is operator-owned and survives upgrades, so one
+// of these outliving the flag it named is the normal shape of a removed
+// feature rather than a typo. Apply reports them and carries on; refusing
+// to start would turn deleting a flag into an outage that only a hand edit
+// clears.
+//
+// Entries stay here permanently. The cost is one line; the cost of taking
+// one out is a server that will not boot for whoever upgrades late.
+var retiredOptions = map[string]bool{
+	// Removed with `aether dash` and the server-hosted dashboard, which
+	// `aether gui` replaced.
+	"dashboard-port": true,
+	"dashboard-addr": true,
+}
+
 // Apply sets values on set, skipping every flag the operator already passed
 // explicitly. It must be called after set.Parse: explicitness is read from
 // set.Visit, which visits only flags actually set. That yields the precedence
 // explicit flag > config file > flag default without naming a single option
 // here.
 //
-// It is all or nothing. An unrecognised key or an unparseable value leaves
-// set untouched, so a caller that reports the error and carries on cannot
-// run against a half-applied config. Values are parsed into a scratch
-// FlagSet first, which is also what rejects a bad value.
-func Apply(set *flag.FlagSet, values map[string]string) error {
+// It returns the retired keys it ignored, sorted, so the caller can say so
+// once at startup. An unknown key that was never an option is still an
+// error: silently dropping a typo means a setting the operator believes is
+// in force never was.
+//
+// Applying is all or nothing. An unparseable value leaves set untouched, so
+// a caller that reports the error and carries on cannot run against a
+// half-applied config.
+func Apply(set *flag.FlagSet, values map[string]string) ([]string, error) {
 	explicit := make(map[string]bool)
 	set.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
-	keys := slices.Sorted(maps.Keys(values))
-	for _, key := range keys {
-		if set.Lookup(key) == nil {
-			return fmt.Errorf("serversetup: unknown option %q", key)
+	all := slices.Sorted(maps.Keys(values))
+	var retired []string
+	keys := make([]string, 0, len(all))
+	for _, key := range all {
+		switch {
+		case set.Lookup(key) != nil:
+			keys = append(keys, key)
+		case retiredOptions[key]:
+			retired = append(retired, key)
+		default:
+			return nil, fmt.Errorf("serversetup: unknown option %q", key)
 		}
 	}
 	// Snapshot what is about to be overwritten so an unparseable value
@@ -102,11 +129,11 @@ func Apply(set *flag.FlagSet, values map[string]string) error {
 			for _, done := range applied {
 				_ = set.Set(done, prior[done])
 			}
-			return fmt.Errorf("serversetup: option %q: %w", key, err)
+			return nil, fmt.Errorf("serversetup: option %q: %w", key, err)
 		}
 		applied = append(applied, key)
 	}
-	return nil
+	return retired, nil
 }
 
 // Render writes values back out as a config file body, keys sorted so the

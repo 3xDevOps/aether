@@ -54,8 +54,12 @@ func configShow(w io.Writer, path string) error {
 		return err
 	}
 	fs := serveFlagSet()
-	if err := serversetup.Apply(fs, values); err != nil {
+	retired, err := serversetup.Apply(fs, values)
+	if err != nil {
 		return err
+	}
+	for _, key := range retired {
+		_, _ = fmt.Fprintf(w, "note: %q is no longer an option and is ignored; drop the line with `aether-server config edit`\n", key)
 	}
 	if len(values) == 0 {
 		_, _ = fmt.Fprintf(w, "%s (no config file; every option is at its default)\n\n", path)
@@ -128,8 +132,12 @@ func configEdit(w io.Writer, path string) error {
 	if err != nil {
 		return err
 	}
-	if err := serversetup.Apply(serveFlagSet(), values); err != nil {
+	retired, err := serversetup.Apply(serveFlagSet(), values)
+	if err != nil {
 		return err
+	}
+	for _, key := range retired {
+		_, _ = fmt.Fprintf(w, "note: %q is no longer an option and is ignored\n", key)
 	}
 	_, _ = fmt.Fprintf(w, "apply it with:\n  %s\n", serversetup.RestartCommand)
 	return nil
