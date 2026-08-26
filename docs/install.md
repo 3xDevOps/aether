@@ -177,7 +177,22 @@ bundle the binary; it looks for `aether` (`aether.exe` on Windows) in
 launching fails with "aether CLI not found", set `AETHER_BIN` to the binary's
 full path.
 
-Build from source (needs Node 22+):
+**The dashboard ships inside the CLI, not inside this app.** The Electron
+package is a window and a sidecar launcher: roughly four JavaScript files. The
+SPA - every view, style, font, and the Aether mark - is embedded in the
+`aether` binary (`web/embed.go`) and served by `aether gui`. So a dashboard
+change reaches the window only when the CLI is rebuilt and reinstalled:
+
+```sh
+make build && sudo install -m 0755 dist/aether /usr/local/bin/aether
+```
+
+Rebuilding the desktop package will not do it, and neither will deleting and
+reinstalling the app. If the window renders an older dashboard than the
+checkout, an older `aether` is on your `PATH`; `aether version` prints the
+commit it was built from.
+
+Build the app from source (needs Node 22+):
 
 ```sh
 cd desktop
@@ -186,6 +201,12 @@ npm run dist  # installers for this OS into desktop/dist/
 ```
 
 `npm run start` runs it unpackaged during development.
+
+The app icon is the Aether mark on the dashboard's dark background, generated
+from `web/public/aether-mark.png` into `desktop/build/`: an `icons/` set from
+16px to 1024px, plus a multi-size `icon.ico` for Windows. Linux installs the
+whole set, macOS converts it to `.icns`. Regenerate with
+`python3 desktop/build/make-icons.py` after the mark changes.
 
 Security posture: the sidecar `aether gui` process owns the SSH identity and
 every credential; the window is just a browser locked to the tokened loopback
