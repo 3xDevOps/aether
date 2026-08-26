@@ -149,7 +149,7 @@ func TestWorkspaceShellUsesPinnedSnapshotPathAfterHeadChange(t *testing.T) {
 		t.Fatal(promoteErr)
 	}
 	run := &domain.Run{
-		ID: "pin-run", SessionID: e.sess.ID, MemberID: e.member.ID, Task: "pin tools",
+		ID: "pin-run", WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "pin tools",
 		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 	}
 	if createRunErr := e.db.CreateRun(t.Context(), run); createRunErr != nil {

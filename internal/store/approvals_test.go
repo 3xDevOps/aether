@@ -22,11 +22,10 @@ func TestApprovalInboxRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
 
-	a := &Approval{SessionID: s.ID, RunID: r.ID, Action: "ExitPlanMode", Detail: "1. do the thing"}
+	a := &Approval{WorkspaceID: w.ID, RunID: r.ID, Action: "ExitPlanMode", Detail: "1. do the thing"}
 	if err := db.CreateApproval(ctx, a); err != nil {
 		t.Fatalf("CreateApproval: %v", err)
 	}
@@ -34,7 +33,7 @@ func TestApprovalInboxRoundTrip(t *testing.T) {
 		t.Fatalf("CreateApproval did not stamp the row: %+v", a)
 	}
 
-	pending, err := db.ListApprovals(ctx, s.ID, ApprovalRequested)
+	pending, err := db.ListApprovals(ctx, w.ID, ApprovalRequested)
 	if err != nil {
 		t.Fatalf("ListApprovals: %v", err)
 	}
@@ -53,10 +52,10 @@ func TestApprovalInboxRoundTrip(t *testing.T) {
 		t.Fatalf("decided approval = %+v, want approved and attributed", got)
 	}
 
-	if pending, err = db.ListApprovals(ctx, s.ID, ApprovalRequested); err != nil || len(pending) != 0 {
+	if pending, err = db.ListApprovals(ctx, w.ID, ApprovalRequested); err != nil || len(pending) != 0 {
 		t.Fatalf("pending after decision = %+v (err %v), want none", pending, err)
 	}
-	if all, aerr := db.ListApprovals(ctx, s.ID, ""); aerr != nil || len(all) != 1 {
+	if all, aerr := db.ListApprovals(ctx, w.ID, ""); aerr != nil || len(all) != 1 {
 		t.Fatalf("all approvals = %+v (err %v), want one", all, aerr)
 	}
 
@@ -66,7 +65,7 @@ func TestApprovalInboxRoundTrip(t *testing.T) {
 	if err := db.DecideApproval(ctx, "appr_missing", "approved", m.ID, a.CreatedAt); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("decision on missing request = %v, want ErrNotFound", err)
 	}
-	if err := db.CreateApproval(ctx, &Approval{SessionID: s.ID, RunID: "run_missing", Action: "x"}); !errors.Is(err, ErrNotFound) {
+	if err := db.CreateApproval(ctx, &Approval{WorkspaceID: w.ID, RunID: "run_missing", Action: "x"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("approval for missing run = %v, want ErrNotFound", err)
 	}
 }
@@ -120,7 +119,7 @@ func TestApprovalsMigrationUpgradesPreviousVersion(t *testing.T) {
 	if _, err := db.GetRun(ctx, "r1"); err != nil {
 		t.Fatalf("GetRun after migration: %v", err)
 	}
-	a := &Approval{SessionID: "s1", RunID: "r1", Action: "Bash", Detail: "rm -rf build"}
+	a := &Approval{WorkspaceID: "w1", RunID: "r1", Action: "Bash", Detail: "rm -rf build"}
 	if err := db.CreateApproval(ctx, a); err != nil {
 		t.Fatalf("CreateApproval after migration: %v", err)
 	}

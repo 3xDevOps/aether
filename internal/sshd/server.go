@@ -2,10 +2,10 @@
 // client rides. It authenticates members - by Tailscale WhoIs identity
 // when a resolver is configured, falling back to public key against the
 // store - and multiplexes git transport (exec), the JSON-RPC control
-// channel, the event stream, PTY attach (subsystems), and the dashboard
-// port-forward (direct-tcpip) over one port. It owns no run lifecycle,
-// git, or PTY logic - everything mutating state is delegated through the
-// consumer-side seam interfaces or the store.
+// channel, the event stream, and PTY attach (subsystems) over one port.
+// It owns no run lifecycle, git, or PTY logic - everything mutating
+// state is delegated through the consumer-side seam interfaces or the
+// store.
 package sshd
 
 import (
@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
@@ -62,14 +61,13 @@ const (
 // Config wires the server to its collaborators. All collaborators are
 // required.
 type Config struct {
-	Addr          string // default ":2222"
-	HostKeyPath   string // <data>/ssh/host_ed25519_key; generated on first start if absent
-	DashboardPort int    // direct-tcpip forwards allowed only to 127.0.0.1:this; 0 = deny all forwards
-	Store         store.Store
-	Bus           events.Bus
-	Git           GitTransport
-	PTY           PTYAttacher
-	Runs          RunController
+	Addr        string // default ":2222"
+	HostKeyPath string // <data>/ssh/host_ed25519_key; generated on first start if absent
+	Store       store.Store
+	Bus         events.Bus
+	Git         GitTransport
+	PTY         PTYAttacher
+	Runs        RunController
 
 	// Toolenv provides server-owned snapshot lifecycle operations for SSH
 	// control methods. It is optional in narrow unit-test configurations.
@@ -139,11 +137,8 @@ type Server struct {
 	// syncChannels counts each member's live aether-sync channels, for
 	// the per-member concurrency cap (see claimSyncChannel).
 	syncChannels map[domain.MemberID]int
-	// mintBuckets rate-limits each member's dash.token.mint calls;
-	// created lazily so the dashboard Bridge's bare Server gets one too.
-	mintBuckets map[domain.MemberID]*mintBucket
-	closed      bool
-	baseCtx     context.Context
+	closed       bool
+	baseCtx      context.Context
 }
 
 // New builds a server, loading (or generating) the host key.
@@ -318,7 +313,7 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 // beginHandler registers a goroutine with the shutdown WaitGroup unless
-// the server is closed. The Add happens under mu — Close flips closed
+// the server is closed. The Add happens under mu - Close flips closed
 // before it waits, so an Add can never race its Wait.
 func (s *Server) beginHandler() bool {
 	s.mu.Lock()
@@ -462,53 +457,8 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 		switch nc.ChannelType() {
 		case "session":
 			s.spawn(func() { s.handleSession(ctx, member, nc) })
-		case "direct-tcpip":
-			s.spawn(func() { s.handleDirectTCPIP(ctx, member, nc) })
 		default:
 			_ = nc.Reject(ssh.UnknownChannelType, "unsupported channel type")
 		}
 	}
-}
-
-// handleDirectTCPIP serves the dashboard port-forward: the only allowed
-// destination is 127.0.0.1:DashboardPort.
-func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, nc ssh.NewChannel) {
-	var p struct {
-		DestAddr string
-		DestPort uint32
-		OrigAddr string
-		OrigPort uint32
-	}
-	if err := ssh.Unmarshal(nc.ExtraData(), &p); err != nil {
-		_ = nc.Reject(ssh.ConnectionFailed, "malformed direct-tcpip request")
-		return
-	}
-	if s.cfg.DashboardPort == 0 || int(p.DestPort) != s.cfg.DashboardPort || !isLoopback(p.DestAddr) {
-		_ = nc.Reject(ssh.Prohibited, "forwarding allowed only to the dashboard port")
-		return
-	}
-	if err := s.checkMember(ctx, member); err != nil {
-		_ = nc.Reject(ssh.Prohibited, "member no longer authorized")
-		return
-	}
-	dst, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(s.cfg.DashboardPort)))
-	if err != nil {
-		_ = nc.Reject(ssh.ConnectionFailed, "dashboard unreachable")
-		return
-	}
-	ch, reqs, err := nc.Accept()
-	if err != nil {
-		_ = dst.Close()
-		return
-	}
-	go ssh.DiscardRequests(reqs)
-	pipe(ch, dst)
-}
-
-func isLoopback(host string) bool {
-	switch host {
-	case "127.0.0.1", "localhost", "::1":
-		return true
-	}
-	return false
 }

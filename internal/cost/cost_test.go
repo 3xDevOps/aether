@@ -9,7 +9,7 @@ import (
 )
 
 // TestRollUpAttributesPerMemberAndKeepsUnmeteredOut proves the rollup
-// math: metered runs add up per member and for the session, unmetered
+// math: metered runs add up per member and for the workspace, unmetered
 // runs are counted but contribute no numbers, and any of them makes the
 // totals advisory.
 func TestRollUpAttributesPerMemberAndKeepsUnmeteredOut(t *testing.T) {
@@ -20,7 +20,7 @@ func TestRollUpAttributesPerMemberAndKeepsUnmeteredOut(t *testing.T) {
 		// A PTY-only run: never measured, so it adds a run and nothing else.
 		{RunID: "r4", MemberID: "bob"},
 	}
-	rep := Roll("s1", records)
+	rep := Roll("ws1", records)
 
 	if rep.Total.Runs != 4 || rep.Total.Metered != 3 || rep.Total.Unmetered != 1 {
 		t.Fatalf("total run counts = %+v, want 4 runs / 3 metered / 1 unmetered", rep.Total)
@@ -46,8 +46,8 @@ func TestRollUpAttributesPerMemberAndKeepsUnmeteredOut(t *testing.T) {
 		t.Fatalf("bob = %+v, want 1 metered + 1 unmetered run", bob)
 	}
 
-	// An empty session is not advisory: nothing is missing.
-	if empty := Roll("s2", nil); empty.Total.Runs != 0 || empty.Total.Advisory() {
+	// An empty workspace is not advisory: nothing is missing.
+	if empty := Roll("ws2", nil); empty.Total.Runs != 0 || empty.Total.Advisory() {
 		t.Fatalf("empty rollup = %+v, want zero and not advisory", empty.Total)
 	}
 }
@@ -55,10 +55,10 @@ func TestRollUpAttributesPerMemberAndKeepsUnmeteredOut(t *testing.T) {
 // TestBudgetStateTransitions walks spend across a budget's thresholds and
 // checks both the reported state and whether a new run is admitted.
 func TestBudgetStateTransitions(t *testing.T) {
-	budget := &store.SessionBudget{SessionID: "s1", LimitUSD: 10, WarnUSD: 8}
+	budget := &store.WorkspaceBudget{WorkspaceID: "ws1", LimitUSD: 10, WarnUSD: 8}
 	cases := []struct {
 		name    string
-		budget  *store.SessionBudget
+		budget  *store.WorkspaceBudget
 		spend   float64
 		state   events.BudgetState
 		admits  bool
@@ -72,12 +72,12 @@ func TestBudgetStateTransitions(t *testing.T) {
 		{name: "past cap", budget: budget, spend: 25, state: events.BudgetExceeded, admits: false},
 		{
 			name:   "past cap with override",
-			budget: &store.SessionBudget{SessionID: "s1", LimitUSD: 10, WarnUSD: 8, Override: true},
+			budget: &store.WorkspaceBudget{WorkspaceID: "ws1", LimitUSD: 10, WarnUSD: 8, Override: true},
 			spend:  25, state: events.BudgetExceeded, admits: true,
 		},
 		{
 			name:   "no warning threshold stays ok until the cap",
-			budget: &store.SessionBudget{SessionID: "s1", LimitUSD: 10},
+			budget: &store.WorkspaceBudget{WorkspaceID: "ws1", LimitUSD: 10},
 			spend:  9.99, state: events.BudgetOK, admits: true,
 		},
 	}
@@ -88,7 +88,7 @@ func TestBudgetStateTransitions(t *testing.T) {
 			if got != tc.state {
 				t.Fatalf("state = %q, want %q", got, tc.state)
 			}
-			st := Status{Session: "s1", Budget: tc.budget, State: got, Spend: spend}
+			st := Status{Workspace: "ws1", Budget: tc.budget, State: got, Spend: spend}
 			if st.Admits() != tc.admits {
 				t.Fatalf("admits = %v, want %v", st.Admits(), tc.admits)
 			}
@@ -98,10 +98,10 @@ func TestBudgetStateTransitions(t *testing.T) {
 
 // TestUnmeteredSpendNeverCountsTowardTheCap pins the honesty rule: a cap
 // is decided from measured spend only, so unmetered runs cannot push a
-// session over it - the state is a floor and says so.
+// workspace over it - the state is a floor and says so.
 func TestUnmeteredSpendNeverCountsTowardTheCap(t *testing.T) {
-	budget := &store.SessionBudget{SessionID: "s1", LimitUSD: 10}
-	spend := Roll("s1", []*store.RunCost{
+	budget := &store.WorkspaceBudget{WorkspaceID: "ws1", LimitUSD: 10}
+	spend := Roll("ws1", []*store.RunCost{
 		{RunID: "r1", MemberID: "ada", CostUSD: 9, Metered: true},
 		{RunID: "r2", MemberID: "ada"},
 		{RunID: "r3", MemberID: "ada"},

@@ -8,7 +8,7 @@ import { useStore } from '@/store'
 import { initialDiff, type RunDiffState } from '@/store/diff'
 import { toRecord } from '@/store/runs'
 import type { RunPatch } from '@/lib/types'
-import { alice, bob, run, session } from '@/test/fixtures'
+import { alice, bob, run, workspace } from '@/test/fixtures'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -55,7 +55,8 @@ const peerRun = run({ id: 'run_2', member_id: bob.id, task: 'the other run' })
 
 function seed(diff?: Partial<RunDiffState>) {
   useStore.setState({
-    sessions: { [session.id]: session },
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: { [active.id]: toRecord(active), [peerRun.id]: toRecord(peerRun) },
     diffs: diff ? { [active.id]: { ...initialDiff, ...diff } } : {},

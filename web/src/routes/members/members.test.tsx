@@ -3,7 +3,7 @@ import { ApiError } from '@/lib/api'
 import type { Member } from '@/lib/types'
 import { MembersRoute } from '@/routes/members'
 import { useStore, type RootState } from '@/store'
-import { alice, bob, fakeApi, serverInfo, session } from '@/test/fixtures'
+import { alice, bob, fakeApi, serverInfo, workspace } from '@/test/fixtures'
 
 const pendingCara: Member = {
   id: 'mem_cara',
@@ -15,7 +15,8 @@ const pendingCara: Member = {
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
-    sessions: { [session.id]: session },
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
     members: { [alice.id]: alice, [bob.id]: bob },
     presence: [],
     info: serverInfo,

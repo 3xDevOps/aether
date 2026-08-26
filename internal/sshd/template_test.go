@@ -85,16 +85,16 @@ func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
 	defer func() { _ = timeline.Close() }()
 
 	save := protocol.TemplateSaveParams{
-		SessionID: string(e.sess.ID),
-		Name:      "nightly-deps",
-		Task:      "upgrade {{ecosystem}} deps",
-		Harness:   "claude",
-		Mode:      "headless",
-		Params:    map[string]string{"ecosystem": "go"},
-		BudgetUSD: 2.5,
+		WorkspaceID: string(e.ws.ID),
+		Name:        "nightly-deps",
+		Task:        "upgrade {{ecosystem}} deps",
+		Harness:     "claude",
+		Mode:        "headless",
+		Params:      map[string]string{"ecosystem": "go"},
+		BudgetUSD:   2.5,
 	}
 
-	// Templates are session configuration: a collaborator may use them,
+	// Templates are workspace configuration: a collaborator may use them,
 	// only an admin may define them.
 	var pe *protocol.Error
 	if err := bobControl.Call(protocol.MethodTemplateSave, save, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
@@ -107,7 +107,7 @@ func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
 
 	var list protocol.TemplateListResult
 	if err := bobControl.Call(protocol.MethodTemplateList, protocol.TemplateListParams{
-		SessionID: string(e.sess.ID),
+		WorkspaceID: string(e.ws.ID),
 	}, &list); err != nil {
 		t.Fatalf("template.list: %v", err)
 	}
@@ -118,23 +118,23 @@ func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
 	// Launched by hand, with a parameter overriding the default.
 	var launched protocol.TemplateLaunchResult
 	if err := bobControl.Call(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{
-		SessionID: string(e.sess.ID),
-		Name:      "nightly-deps",
-		Params:    map[string]string{"ecosystem": "npm"},
+		WorkspaceID: string(e.ws.ID),
+		Name:        "nightly-deps",
+		Params:      map[string]string{"ecosystem": "npm"},
 	}, &launched); err != nil {
 		t.Fatalf("template.launch: %v", err)
 	}
 	if launched.BaseBranch != "main" || launched.BaseAge != "10d" {
 		t.Fatalf("launch reported base %q age %q, want main 10d", launched.BaseBranch, launched.BaseAge)
 	}
-	wantManual := "launch:" + string(e.sess.ID) + ":" + string(bob.ID) + ":upgrade npm deps:claude:headless"
+	wantManual := "launch:" + string(e.ws.ID) + ":" + string(bob.ID) + ":upgrade npm deps:claude:headless"
 	if calls := e.runs.Calls(); len(calls) != 1 || calls[0] != wantManual {
 		t.Fatalf("calls after manual launch = %v, want [%s]", calls, wantManual)
 	}
 
 	// An unknown parameter is a typo, not a silent no-op.
 	if err := bobControl.Call(protocol.MethodTemplateLaunch, protocol.TemplateLaunchParams{
-		SessionID: string(e.sess.ID), Name: "nightly-deps", Params: map[string]string{"nope": "x"},
+		WorkspaceID: string(e.ws.ID), Name: "nightly-deps", Params: map[string]string{"nope": "x"},
 	}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
 		t.Fatalf("launch with an unknown parameter = %v, want CodeInvalidParams", err)
 	}
@@ -142,7 +142,7 @@ func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
 	// Scheduling is launching: a standing order for future runs.
 	var scheduled protocol.ScheduleSaveResult
 	if err := bobControl.Call(protocol.MethodScheduleSave, protocol.ScheduleSaveParams{
-		SessionID: string(e.sess.ID), Template: "nightly-deps", Cron: "* * * * *",
+		WorkspaceID: string(e.ws.ID), Template: "nightly-deps", Cron: "* * * * *",
 	}, &scheduled); err != nil {
 		t.Fatalf("schedule.save: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
 
 	// The clock reaches the slot: the loop fires exactly one run.
 	clock.set(time.Date(2026, 8, 13, 3, 1, 30, 0, time.UTC))
-	wantFired := "launch:" + string(e.sess.ID) + ":" + string(bob.ID) + ":upgrade go deps:claude:headless"
+	wantFired := "launch:" + string(e.ws.ID) + ":" + string(bob.ID) + ":upgrade go deps:claude:headless"
 	eventually(t, "the schedule to fire", func() bool {
 		calls := e.runs.Calls()
 		return len(calls) == 2 && calls[1] == wantFired
@@ -166,7 +166,7 @@ func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
 	// A hand-launched run of the same prompt is indistinguishable from the
 	// fired one: same scheduler call, same arguments.
 	if err := bobControl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(e.sess.ID), Task: "upgrade go deps", Harness: "claude", Mode: "headless",
+		WorkspaceID: string(e.ws.ID), Task: "upgrade go deps", Harness: "claude", Mode: "headless",
 	}, nil); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
 	}
 }
 
-// awaitTimeline waits for a session.timeline entry whose message contains
+// awaitTimeline waits for a workspace.timeline entry whose message contains
 // want, and returns it.
 func awaitTimeline(t *testing.T, sub events.Subscription, want string) string {
 	t.Helper()

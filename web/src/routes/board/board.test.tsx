@@ -6,17 +6,25 @@ import { useBoard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { applyEvent } from '@/store/sync'
-import { alice, approval, bob, fakeApi, otherSession, run, session } from '@/test/fixtures'
+import {
+  alice,
+  approval,
+  bob,
+  fakeApi,
+  otherWorkspace,
+  run,
+  workspace,
+} from '@/test/fixtures'
 
-function seed(runs: Run[]) {
+function seed(runs: Run[], active = workspace.id) {
   useStore.setState({
-    sessions: { [session.id]: session, [otherSession.id]: otherSession },
+    workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
+    activeWorkspace: active,
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: Object.fromEntries(runs.map((r) => [r.id, toRecord(r)])),
     acked: {},
     pausedRuns: {},
     inbox: {},
-    showIdle: false,
     hydrated: true,
     hydrationError: null,
     lastSeq: 0,
@@ -42,8 +50,13 @@ const merged = run({
   id: 'run_merged',
   task: 'landed already',
   status: 'merged',
-  session_id: otherSession.id,
   finished_at: '2026-08-14T10:30:00Z',
+})
+const elsewhere = run({
+  id: 'run_elsewhere',
+  task: 'another workspace entirely',
+  status: 'running',
+  workspace_id: otherWorkspace.id,
 })
 
 // The columns are landmarks; a plain label lookup would also hit the state
@@ -52,7 +65,7 @@ function column(label: string) {
   return within(screen.getByRole('region', { name: label }))
 }
 
-/** One real session.timeline steering entry, through the real event path. */
+/** One real workspace.timeline steering entry, through the real event path. */
 function timeline(kind: 'pause' | 'resume', seq: number) {
   applyEvent(
     useStore,
@@ -60,10 +73,10 @@ function timeline(kind: 'pause' | 'resume', seq: number) {
       id: `evt_${seq}`,
       seq,
       time: '2026-08-14T11:30:00Z',
-      session_id: session.id,
+      workspace_id: workspace.id,
       run_id: working.id,
       actor_id: alice.id,
-      type: 'session.timeline',
+      type: 'workspace.timeline',
       payload: { kind },
     },
     fakeApi(),
@@ -71,7 +84,7 @@ function timeline(kind: 'pause' | 'resume', seq: number) {
 }
 
 describe('run board', () => {
-  it('deals runs into the four buckets, newest change first', () => {
+  it('deals runs into the three buckets, newest change first', () => {
     seed([stalled, working, queued, merged])
     render(<Board />)
 
@@ -83,6 +96,27 @@ describe('run board', () => {
       .getAllByRole('article')
       .map((card) => within(card).getByRole('button').getAttribute('aria-label'))
     expect(tasks).toEqual(['not started', 'still going'])
+  })
+
+  it('shows only the active workspace, and follows a switch', () => {
+    seed([working, elsewhere])
+    render(<Board />)
+
+    expect(column('Working').getByText('still going')).toBeDefined()
+    expect(column('Working').queryByText('another workspace entirely')).toBeNull()
+
+    act(() => useStore.getState().setActiveWorkspace(otherWorkspace.id))
+
+    expect(column('Working').getByText('another workspace entirely')).toBeDefined()
+    expect(column('Working').queryByText('still going')).toBeNull()
+  })
+
+  it('shows every run before hydration has named a workspace', () => {
+    seed([working, elsewhere], '')
+    render(<Board />)
+
+    expect(column('Working').getByText('still going')).toBeDefined()
+    expect(column('Working').getByText('another workspace entirely')).toBeDefined()
   })
 
   it('mutes a card once its run is acknowledged', () => {
@@ -156,7 +190,7 @@ describe('run board', () => {
     act(() =>
       useStore
         .getState()
-        .setInbox(session.id, [approval({ run_id: working.id })]),
+        .setInbox(workspace.id, [approval({ run_id: working.id })]),
     )
 
     expect(column('Needs You').getByText('still going')).toBeDefined()
@@ -169,7 +203,7 @@ describe('run board', () => {
     act(() =>
       useStore
         .getState()
-        .setInbox(session.id, [
+        .setInbox(workspace.id, [
           approval({ run_id: working.id, decision: 'approved' }),
         ]),
     )
@@ -179,7 +213,7 @@ describe('run board', () => {
   it('keeps the board identity across an inbox refresh that changed nothing', () => {
     seed([working])
     act(() =>
-      useStore.getState().setInbox(session.id, [approval({ run_id: working.id })]),
+      useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]),
     )
     const { result } = renderHook(() => useBoard())
     const before = result.current
@@ -187,22 +221,9 @@ describe('run board', () => {
     // A refetch builds fresh approval objects; unchanged content must not
     // rebuild the derived board (and with it, the rendered tree).
     act(() =>
-      useStore.getState().setInbox(session.id, [approval({ run_id: working.id })]),
+      useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]),
     )
     expect(result.current).toBe(before)
-  })
-
-  it('hides idle sessions until asked, then lists the ones with nothing active', () => {
-    seed([working, merged])
-    render(<Board />)
-    expect(screen.queryByRole('region', { name: 'Idle' })).toBeNull()
-
-    fireEvent.click(screen.getByTitle('Show idle sessions'))
-
-    // ses_2 only holds a merged run; ses_1 is still working.
-    const idle = column('Idle')
-    expect(idle.getByText(otherSession.name)).toBeDefined()
-    expect(idle.queryByText(session.name)).toBeNull()
   })
 
   it('renders what another feature registered into a card slot', () => {

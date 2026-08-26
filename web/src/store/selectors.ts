@@ -1,14 +1,13 @@
-// Sidebar shape: sessions with their runs nested, grouped and sorted so the
+// Sidebar shape: the runs of the active workspace, grouped and sorted so the
 // things that need a human come first.
 
 import {
-  rollup,
   runState,
   stateLabel,
   stateRank,
   type PresentationState,
 } from '@/lib/status'
-import type { Member, Session } from '@/lib/types'
+import type { Member } from '@/lib/types'
 import type { RunRecord } from '@/store/runs'
 import type { GroupBy } from '@/store/ui'
 
@@ -19,9 +18,12 @@ import type { GroupBy } from '@/store/ui'
  * here because a run holding a pending approval presents as needs-attention;
  * it arrives pre-derived (usePendingApprovalRuns) so an inbox refetch that
  * changed nothing keeps its identity.
+ *
+ * An empty workspace shows every run: that is what the board falls back to
+ * before hydration has named one.
  */
 export interface SidebarInput {
-  sessions: Record<string, Session>
+  workspace: string
   runs: Record<string, RunRecord>
   members: Record<string, Member>
   groupBy: GroupBy
@@ -34,20 +36,16 @@ export interface SidebarRun {
   owner?: Member
 }
 
-export interface SidebarSession {
-  session: Session
-  runs: SidebarRun[]
-  state: PresentationState
-  changedAt: string
-}
-
 export interface SidebarGroup {
   key: string
   label: string
-  sessions: SidebarSession[]
+  runs: SidebarRun[]
 }
 
-function byAttention(a: { state: PresentationState; changedAt: string }, b: typeof a): number {
+function byAttention(
+  a: { state: PresentationState; changedAt: string },
+  b: typeof a,
+): number {
   const rank = stateRank(a.state) - stateRank(b.state)
   return rank !== 0 ? rank : b.changedAt.localeCompare(a.changedAt)
 }
@@ -62,60 +60,49 @@ export function sortRuns(runs: SidebarRun[]): SidebarRun[] {
   )
 }
 
-export function sidebarSessions(s: SidebarInput): SidebarSession[] {
-  const runsBySession = new Map<string, SidebarRun[]>()
+/** Every run in scope, worst state and most recent change first. */
+export function sidebarRuns(s: SidebarInput): SidebarRun[] {
+  const entries: SidebarRun[] = []
   for (const run of Object.values(s.runs)) {
-    const entry = {
+    if (s.workspace && run.workspace_id !== s.workspace) continue
+    entries.push({
       run,
       state: runState(run.status, s.pending.has(run.id)),
       owner: s.members[run.member_id],
-    }
-    const list = runsBySession.get(run.session_id)
-    if (list) list.push(entry)
-    else runsBySession.set(run.session_id, [entry])
+    })
   }
-
-  return Object.values(s.sessions).map((session) => {
-    const runs = sortRuns(runsBySession.get(session.id) ?? [])
-    return {
-      session,
-      runs,
-      state: rollup(runs.map((r) => r.state)),
-      changedAt: runs[0]?.run.stateChangedAt ?? session.created_at,
-    }
-  })
+  return sortRuns(entries)
 }
 
 /**
- * Group by the session's rolled-up state, or by the member owning its most
- * recently changed run. Groups and sessions both sort worst-state-first, then
- * most-recently-changed-first.
+ * Group by run state, or by the owning member. Groups and runs both sort
+ * worst-state-first, then most-recently-changed-first.
  */
 export function sidebarGroups(s: SidebarInput): SidebarGroup[] {
-  const sessions = sidebarSessions(s).sort(byAttention)
   const groups = new Map<string, SidebarGroup>()
 
-  for (const entry of sessions) {
+  for (const entry of sidebarRuns(s)) {
     const [key, label] =
-      s.groupBy === 'status' ? [entry.state, stateLabel[entry.state]] : ownerOf(entry)
+      s.groupBy === 'status'
+        ? [entry.state, stateLabel[entry.state]]
+        : ownerOf(entry)
     const group = groups.get(key)
-    if (group) group.sessions.push(entry)
-    else groups.set(key, { key, label, sessions: [entry] })
+    if (group) group.runs.push(entry)
+    else groups.set(key, { key, label, runs: [entry] })
   }
 
   const order = [...groups.values()]
   if (s.groupBy === 'status') {
     return order.sort(
       (a, b) =>
-        stateRank(a.key as PresentationState) - stateRank(b.key as PresentationState),
+        stateRank(a.key as PresentationState) -
+        stateRank(b.key as PresentationState),
     )
   }
   return order.sort((a, b) => a.label.localeCompare(b.label))
 }
 
-function ownerOf(entry: SidebarSession): [string, string] {
-  const owner = entry.runs[0]?.owner
-  if (owner) return [owner.id, owner.display_name]
-  const memberID = entry.runs[0]?.run.member_id
-  return memberID ? [memberID, memberID] : ['unassigned', 'No runs']
+function ownerOf(entry: SidebarRun): [string, string] {
+  if (entry.owner) return [entry.owner.id, entry.owner.display_name]
+  return [entry.run.member_id, entry.run.member_id]
 }

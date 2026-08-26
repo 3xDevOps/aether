@@ -1,0 +1,8 @@
+{"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"coord.send: run run_09 is not an authorized peer of run run_01"}}
+{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"coord.send: unknown run run_09"}}
+{"jsonrpc":"2.0","id":3,"error":{"code":-32004,"message":"coord.send: run run_02 has finished"}}
+{"jsonrpc":"2.0","id":4,"error":{"code":-32003,"message":"coord.send: run run_02 inbox is full (100 unacknowledged messages)"}}
+{"jsonrpc":"2.0","id":5,"error":{"code":-32003,"message":"coord.send: rate limit exceeded (burst 5, 1 message per 5s)"}}
+{"jsonrpc":"2.0","id":6,"error":{"code":-32602,"message":"coord.send: body exceeds 4096 bytes"}}
+{"jsonrpc":"2.0","id":7,"error":{"code":-32004,"message":"coord.send: conflict coordination is disabled"}}
+{"jsonrpc":"2.0","id":8,"error":{"code":-32601,"message":"method not found: run.kill"}}

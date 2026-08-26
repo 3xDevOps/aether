@@ -70,7 +70,7 @@ func (e *Engine) servePack(ctx context.Context, ws domain.WorkspaceID, service s
 	// Feed stdin through our own *os.File pipe instead of handing the
 	// reader to exec: exec's managed stdin copy blocks Wait until the
 	// reader returns, and not even WaitDelay can abandon it (it closes the
-	// pipe, then still waits for the copy goroutine — which is stuck in
+	// pipe, then still waits for the copy goroutine - which is stuck in
 	// Read on the SSH channel, not in Write). A client that holds the
 	// channel open, or ctx cancellation during a stalled exchange, would
 	// pin the handler forever. With an *os.File the child reads the fd

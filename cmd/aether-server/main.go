@@ -1,5 +1,5 @@
 // Command aether-server is the Aether server: embedded SSH transport,
-// run scheduler, event bus, and dashboard in a single binary.
+// run scheduler, and event bus in a single binary.
 package main
 
 import (
@@ -46,9 +46,9 @@ func usage() {
 
 commands:
   serve    run the server (flags: --data-dir, --addr, --neutral-image,
-           --harness-definitions, --dashboard-port, --dashboard-addr,
-           --tailnet-auto-join, --tailnet-require-key, --conflict-coordination,
-           --stall-threshold, --poll-interval, --checkout-ttl, --min-free-disk)
+           --harness-definitions, --tailnet-auto-join, --tailnet-require-key,
+           --conflict-coordination, --stall-threshold, --poll-interval,
+           --checkout-ttl, --min-free-disk)
   version  print the version`)
 }
 
@@ -58,12 +58,10 @@ func serve(args []string) error {
 	addr := fs.String("addr", server.DefaultAddr, "SSH listen address")
 	neutralImage := fs.String("neutral-image", server.DefaultNeutralImage,
 		"server-owned neutral bootstrap image for workspaces without a custom image")
-	dashboardPort := fs.Int("dashboard-port", 0, "local dashboard port reachable via SSH forwards (0 = deny)")
 	harnessDefinitions := fs.String("harness-definitions", os.Getenv("AETHER_HARNESS_DEFINITIONS"),
 		`JSON object of administrator-owned generic harness definitions`)
 	tailnetAutoJoin := fs.Bool("tailnet-auto-join", false, "register unknown tailnet identities as approved members instead of pending")
 	tailnetRequireKey := fs.Bool("tailnet-require-key", false, "additionally require pubkey verification on tailnet connections")
-	dashboardAddr := fs.String("dashboard-addr", "", "expose the dashboard directly on this address (empty = loopback only)")
 	conflictCoordination := fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
 	stallThreshold := fs.Duration("stall-threshold", 0,
 		"how long a run may go with no output and no file changes before it parks needs-attention (0 = 10m)")
@@ -87,11 +85,9 @@ func serve(args []string) error {
 		DataDir:           *dataDir,
 		Addr:              *addr,
 		NeutralImage:      *neutralImage,
-		DashboardPort:     *dashboardPort,
 		Harnesses:         harnesses,
 		TailnetAutoJoin:   *tailnetAutoJoin,
 		TailnetRequireKey: *tailnetRequireKey,
-		DashboardAddr:     *dashboardAddr,
 
 		CoordinationDisabled: !*conflictCoordination,
 

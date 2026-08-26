@@ -76,9 +76,6 @@ type Config struct {
 	// environment selects the neutral base. Empty uses DefaultNeutralImage.
 	// Workspace shell requests cannot override this value.
 	NeutralImage string
-	// DashboardPort is the only allowed direct-tcpip forward target on
-	// 127.0.0.1; 0 denies all forwards.
-	DashboardPort int
 	// Runtime overrides the container runtime; nil means the local Docker
 	// daemon.
 	Runtime runtime.Runtime
@@ -88,10 +85,6 @@ type Config struct {
 	// TailnetRequireKey additionally requires pubkey verification on
 	// tailnet connections.
 	TailnetRequireKey bool
-	// DashboardAddr exposes the dashboard gateway directly on this address
-	// instead of the loopback-only default. Direct exposure requires bearer
-	// tokens minted over the SSH control channel.
-	DashboardAddr string
 	// CoordinationDisabled turns the conflict coordination kill switch off.
 	// The zero value keeps coordination enabled, which is the shipped
 	// default.
@@ -241,7 +234,6 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	sshCfg := sshd.Config{
 		Addr:              cfg.Addr,
 		HostKeyPath:       filepath.Join(cfg.DataDir, "ssh", "host_ed25519_key"),
-		DashboardPort:     cfg.DashboardPort,
 		Store:             s.db,
 		Bus:               s.bus,
 		Git:               lazyGit{s.git},

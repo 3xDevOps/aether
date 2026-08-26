@@ -35,7 +35,6 @@ type testEnv struct {
 	sched  *Scheduler
 	cfg    Config
 	ws     *domain.Workspace
-	sess   *domain.Session
 	member *domain.Member
 }
 
@@ -75,13 +74,13 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		pty: newFakePTY(),
 	}
 	ctx := t.Context()
-	e.ws = &domain.Workspace{Name: "ws", Environment: domain.WorkspaceEnvironment{CustomImage: "busybox:1.36", Variables: map[string]string{"WS": "1"}}}
+	e.ws = &domain.Workspace{
+		Name:        "ws",
+		BaseBranch:  "main",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "busybox:1.36", Variables: map[string]string{"WS": "1"}},
+	}
 	if cerr := db.CreateWorkspace(ctx, e.ws); cerr != nil {
 		t.Fatalf("create workspace: %v", cerr)
-	}
-	e.sess = &domain.Session{WorkspaceID: e.ws.ID, Name: "main effort", BaseBranch: "main"}
-	if cerr := db.CreateSession(ctx, e.sess); cerr != nil {
-		t.Fatalf("create session: %v", cerr)
 	}
 	e.member = &domain.Member{DisplayName: "Ada", PublicKey: testPublicKey(t), Color: "#e6194b", Role: domain.RoleCollaborator}
 	if cerr := db.CreateMember(ctx, e.member); cerr != nil {
@@ -109,7 +108,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 }
 
 // newScheduler builds a second scheduler over the same store, state dir,
-// and bus — a "rebooted server" — with fresh PTY state and the given
+// and bus - a "rebooted server" - with fresh PTY state and the given
 // runtime.
 func (e *testEnv) newScheduler(t *testing.T, rt *fakeRuntime, pty *fakePTY) *Scheduler {
 	t.Helper()
@@ -127,7 +126,7 @@ func (e *testEnv) newScheduler(t *testing.T, rt *fakeRuntime, pty *fakePTY) *Sch
 func (e *testEnv) subscribe(t *testing.T) events.Subscription {
 	t.Helper()
 	sub, err := e.bus.Subscribe(t.Context(), events.SubscribeOptions{
-		Filter: events.Filter{Session: e.sess.ID},
+		Filter: events.Filter{Workspace: e.ws.ID},
 	})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
@@ -141,7 +140,7 @@ func (e *testEnv) subscribe(t *testing.T) events.Subscription {
 func (e *testEnv) launchFake(t *testing.T, task string) (*domain.Run, *fakeContainer) {
 	t.Helper()
 	t.Setenv(fakeAgentEnv, "fake-agent {task}")
-	run, err := e.sched.Launch(t.Context(), e.sess.ID, e.member.ID, task, "fake", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, task, "fake", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -249,11 +248,17 @@ func TestHappyPath(t *testing.T) {
 	if c.spec.Env["AETHER_RUN_ID"] != string(run.ID) || c.spec.Env["TERM"] != "xterm-256color" {
 		t.Fatalf("container env = %v", c.spec.Env)
 	}
+	if c.spec.Env["AETHER_WORKSPACE_ID"] != string(e.ws.ID) {
+		t.Fatalf("container workspace env = %q, want %q", c.spec.Env["AETHER_WORKSPACE_ID"], e.ws.ID)
+	}
 	if c.spec.WorktreeHostPath != run.Worktree || c.spec.WorktreeMountPath != "/workspace" {
 		t.Fatalf("worktree mount = %q -> %q", c.spec.WorktreeHostPath, c.spec.WorktreeMountPath)
 	}
 	if _, err := os.Stat(e.sched.sidecarPath(run.ID)); err != nil {
 		t.Fatalf("sidecar missing while running: %v", err)
+	}
+	if ws, watching := e.git.watchingFor(run.ID); !watching || ws != e.ws.ID {
+		t.Fatalf("diff watch scope = %q (watching=%v), want %q", ws, watching, e.ws.ID)
 	}
 
 	prov := waitStatusEvent(t, sub, run.ID, domain.RunProvisioning)
@@ -343,7 +348,7 @@ func TestProvisioningFailure(t *testing.T) {
 	e.rt.createErr = errors.New("no such image")
 
 	t.Setenv(fakeAgentEnv, "fake-agent")
-	_, err := e.sched.Launch(t.Context(), e.sess.ID, e.member.ID, "task", "fake", domain.LaunchTUI)
+	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "task", "fake", domain.LaunchTUI)
 	if err == nil {
 		t.Fatal("Launch succeeded despite runtime failure")
 	}
@@ -361,18 +366,18 @@ func TestLaunchValidation(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
-	if _, err := e.sched.Launch(ctx, e.sess.ID, e.member.ID, "t", "unknown-harness", domain.LaunchTUI); err == nil {
+	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "t", "unknown-harness", domain.LaunchTUI); err == nil {
 		t.Fatal("unknown harness accepted")
 	}
-	if _, err := e.sched.Launch(ctx, e.sess.ID, e.member.ID, "t", "claude", domain.LaunchMode("bogus")); err == nil {
+	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "t", "claude", domain.LaunchMode("bogus")); err == nil {
 		t.Fatal("invalid mode accepted")
 	}
 	t.Setenv(fakeAgentEnv, "fake-agent")
-	if _, err := e.sched.Launch(ctx, "sess_missing", e.member.ID, "t", "fake", domain.LaunchTUI); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("missing session error = %v, want ErrNotFound", err)
+	if _, err := e.sched.Launch(ctx, "ws_missing", e.member.ID, "t", "fake", domain.LaunchTUI); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing workspace error = %v, want ErrNotFound", err)
 	}
 	t.Setenv(fakeAgentEnv, "")
-	if _, err := e.sched.Launch(ctx, e.sess.ID, e.member.ID, "t", "fake", domain.LaunchTUI); err == nil {
+	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "t", "fake", domain.LaunchTUI); err == nil {
 		t.Fatal("fake harness with empty AETHER_FAKE_AGENT accepted")
 	}
 }
@@ -453,7 +458,7 @@ func TestLaunchCredentialMounts(t *testing.T) {
 		cfg.HomesDir = homes
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
-	run, err := e.sched.Launch(t.Context(), e.sess.ID, e.member.ID, "with creds", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "with creds", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -482,7 +487,7 @@ func TestLaunchCredentialMounts(t *testing.T) {
 		t.Errorf("credential home not created on host: %v", err)
 	}
 	// A second run of the same member+harness shares the same home.
-	run2, err := e.sched.Launch(t.Context(), e.sess.ID, e.member.ID, "later run", "claude", domain.LaunchTUI)
+	run2, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "later run", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("second Launch: %v", err)
 	}
@@ -497,7 +502,7 @@ func TestLaunchCredentialMounts(t *testing.T) {
 // numeric users, and the credential mounts land under that home).
 func TestContainerSpecNonRootHome(t *testing.T) {
 	e := newTestEnv(t, nil)
-	run := &domain.Run{ID: "run-x", SessionID: e.sess.ID, MemberID: e.member.ID}
+	run := &domain.Run{ID: "run-x", WorkspaceID: e.ws.ID, MemberID: e.member.ID}
 	plan := &EnvironmentPlan{Image: "busybox:1.36", Env: map[string]string{"HOME": "/home/aether"}, User: "1000:1000"}
 	spec := e.sched.containerSpec(run, e.member, []string{"agent"}, plan)
 	if spec.Env["HOME"] != "/home/aether" {
@@ -675,7 +680,7 @@ func TestLaunchProfileAndCredentialMounts(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 
-	run, err := e.sched.Launch(ctx, e.sess.ID, e.member.ID, "with profile", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "with profile", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -733,7 +738,7 @@ func TestLaunchProfileAndCredentialMounts(t *testing.T) {
 	}
 
 	// A second run gets its own dest; writing the first does not change it.
-	run2, err := e.sched.Launch(ctx, e.sess.ID, e.member.ID, "later", "claude", domain.LaunchTUI)
+	run2, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "later", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("second Launch: %v", err)
 	}
@@ -752,7 +757,7 @@ func TestLaunchWithoutSnapshotSkipsProfileMount(t *testing.T) {
 		cfg.HomesDir = homes
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
-	run, err := e.sched.Launch(t.Context(), e.sess.ID, e.member.ID, "no snap", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "no snap", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}

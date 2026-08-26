@@ -32,10 +32,10 @@ func costEnv(t *testing.T) *testEnv {
 	})
 }
 
-// A session hits its cap: the new run is refused with a clear error, the
+// A workspace hits its cap: the new run is refused with a clear error, the
 // run already running finishes untouched and keeps its metered record,
 // and an admin's override admits the next run.
-func TestSessionBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
+func TestWorkspaceBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 	e := costEnv(t)
 	ctx := context.Background()
 	control := controlAs(t, e, e.signer)
@@ -50,7 +50,7 @@ func TestSessionBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 
 	var budget protocol.BudgetResult
 	if err := control.Call(protocol.MethodBudgetSet, protocol.BudgetSetParams{
-		SessionID: string(e.sess.ID), LimitUSD: 1, WarnUSD: 0.5,
+		WorkspaceID: string(e.ws.ID), LimitUSD: 1, WarnUSD: 0.5,
 	}, &budget); err != nil {
 		t.Fatalf("budget.set: %v", err)
 	}
@@ -60,18 +60,18 @@ func TestSessionBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 
 	// The adapter meters Ada's running run past the cap.
 	if _, err := e.bus.Publish(ctx, events.Event{
-		SessionID: e.sess.ID,
-		RunID:     e.run.ID,
+		WorkspaceID: e.ws.ID,
+		RunID:       e.run.ID,
 		Payload: events.RunCostPayload{
 			InputTokens: 40124, OutputTokens: 1834, CostUSD: 1.25, Metered: true,
 		},
 	}); err != nil {
 		t.Fatalf("publish run cost: %v", err)
 	}
-	eventually(t, "the session's spend to reach the cap", func() bool {
+	eventually(t, "the workspace's spend to reach the cap", func() bool {
 		budget = protocol.BudgetResult{}
 		if err := control.Call(protocol.MethodBudgetGet, protocol.BudgetGetParams{
-			SessionID: string(e.sess.ID),
+			WorkspaceID: string(e.ws.ID),
 		}, &budget); err != nil {
 			t.Fatalf("budget.get: %v", err)
 		}
@@ -87,12 +87,12 @@ func TestSessionBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 	// A new run is refused, and the refusal happens before the scheduler
 	// is ever asked.
 	launchErr := control.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(e.sess.ID), Task: "another thing", Harness: "claude", Mode: "tui",
+		WorkspaceID: string(e.ws.ID), Task: "another thing", Harness: "claude", Mode: "tui",
 	}, nil)
 	if launchErr == nil {
 		t.Fatal("run.launch succeeded past the cap")
 	}
-	if !strings.Contains(launchErr.Error(), "session budget exceeded") ||
+	if !strings.Contains(launchErr.Error(), "workspace budget exceeded") ||
 		!strings.Contains(launchErr.Error(), "$1.25 of its $1.00 cap") {
 		t.Fatalf("refusal = %v, want a clear budget message", launchErr)
 	}
@@ -105,9 +105,9 @@ func TestSessionBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 	// The run already running is never touched: it finishes on its own and
 	// its metered record survives the terminal transition.
 	if _, err := e.bus.Publish(ctx, events.Event{
-		SessionID: e.sess.ID,
-		RunID:     e.run.ID,
-		Payload:   events.RunStatusPayload{From: domain.RunRunning, To: domain.RunMerged},
+		WorkspaceID: e.ws.ID,
+		RunID:       e.run.ID,
+		Payload:     events.RunStatusPayload{From: domain.RunRunning, To: domain.RunMerged},
 	}); err != nil {
 		t.Fatalf("publish terminal status: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestSessionBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 	eventually(t, "the finished run's usage to settle", func() bool {
 		report = protocol.CostReportResult{}
 		if err := control.Call(protocol.MethodCostReport, protocol.CostReportParams{
-			SessionID: string(e.sess.ID),
+			WorkspaceID: string(e.ws.ID),
 		}, &report); err != nil {
 			t.Fatalf("cost.report: %v", err)
 		}
@@ -136,12 +136,12 @@ func TestSessionBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 	// Only an admin may move the budget.
 	viewerSigner, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
 	wantDenied(t, controlAs(t, e, viewerSigner).Call(protocol.MethodBudgetSet, protocol.BudgetSetParams{
-		SessionID: string(e.sess.ID), LimitUSD: 100,
+		WorkspaceID: string(e.ws.ID), LimitUSD: 100,
 	}, nil), "viewer budget.set")
 
 	// The admin overrides the cap; the next run is admitted.
 	if err := control.Call(protocol.MethodBudgetSet, protocol.BudgetSetParams{
-		SessionID: string(e.sess.ID), LimitUSD: 1, Override: true,
+		WorkspaceID: string(e.ws.ID), LimitUSD: 1, Override: true,
 	}, &budget); err != nil {
 		t.Fatalf("budget.set override: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestSessionBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 	}
 	var launched protocol.RunResult
 	if err := control.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(e.sess.ID), Task: "another thing", Harness: "claude", Mode: "tui",
+		WorkspaceID: string(e.ws.ID), Task: "another thing", Harness: "claude", Mode: "tui",
 	}, &launched); err != nil {
 		t.Fatalf("run.launch under override: %v", err)
 	}
@@ -175,9 +175,9 @@ func TestRunWithoutAdapterIsUnmeteredNotZero(t *testing.T) {
 	defer func() { _ = costs.Close() }()
 
 	if _, err := e.bus.Publish(ctx, events.Event{
-		SessionID: e.sess.ID,
-		RunID:     e.run.ID,
-		Payload:   events.RunStatusPayload{From: domain.RunRunning, To: domain.RunFailed},
+		WorkspaceID: e.ws.ID,
+		RunID:       e.run.ID,
+		Payload:     events.RunStatusPayload{From: domain.RunRunning, To: domain.RunFailed},
 	}); err != nil {
 		t.Fatalf("publish terminal status: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestRunWithoutAdapterIsUnmeteredNotZero(t *testing.T) {
 	eventually(t, "the unmetered run to be recorded", func() bool {
 		report = protocol.CostReportResult{}
 		if err := control.Call(protocol.MethodCostReport, protocol.CostReportParams{
-			SessionID: string(e.sess.ID),
+			WorkspaceID: string(e.ws.ID),
 		}, &report); err != nil {
 			t.Fatalf("cost.report: %v", err)
 		}
@@ -209,7 +209,7 @@ func TestRunWithoutAdapterIsUnmeteredNotZero(t *testing.T) {
 	// A budget over that spend is advisory and says so.
 	var budget protocol.BudgetResult
 	if err := control.Call(protocol.MethodBudgetSet, protocol.BudgetSetParams{
-		SessionID: string(e.sess.ID), LimitUSD: 5,
+		WorkspaceID: string(e.ws.ID), LimitUSD: 5,
 	}, &budget); err != nil {
 		t.Fatalf("budget.set: %v", err)
 	}

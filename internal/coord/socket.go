@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,10 +22,22 @@ import (
 
 const (
 	// SocketName is the coordination socket inside a run's directory. The
-	// name is the wire version's identity: a future version adds a name
-	// beside this one instead of replacing it, so a run that survives a
-	// restart keeps the socket its container was provisioned against.
-	SocketName = "coord.sock"
+	// name is the wire version's identity: the status result changed shape
+	// at v2, so v2 answers on its own name rather than serving a different
+	// shape on the name a v1 container was provisioned against.
+	//
+	// Every version's name is the same length. A unix socket path is
+	// capped near 108 bytes, and this one already carries the state
+	// directory plus a 26-character run ID, so a longer name would spend
+	// budget that belongs to the operator's data directory.
+	SocketName = "coord2.sock"
+	// legacySocketName is the v1 socket. A container provisioned before
+	// the v2 cutover holds a bridge that dials it, and that bridge speaks
+	// a shape this server no longer produces. Recovery unlinks it instead
+	// of binding it, so the run's coordination reports itself unavailable
+	// - which the agent already handles - rather than reading a status
+	// with fields it cannot see.
+	legacySocketName = "coord.sock"
 	// ConfigName is the optional harness config a launch profile points
 	// the agent at. Its content belongs to the harness registry; this
 	// package owns only where it lives and that it is read-only.
@@ -32,10 +45,22 @@ const (
 )
 
 // wireSocketNames are the socket names this server serves, one per
-// coordination wire version - coord.sock is v1. Recovery rebinds every
-// name it finds in a surviving run's directory, so a run keeps every wire
-// version its container references.
+// coordination wire version it still speaks. Recovery rebinds every name
+// it finds in a surviving run's directory, so a run keeps every wire
+// version its container references and this server still answers.
 var wireSocketNames = []string{SocketName}
+
+// retiredSocketNames are wire versions this server no longer speaks.
+// Recovery removes them from a surviving run's directory so a stale
+// bridge fails to connect outright instead of being answered in a shape
+// it cannot parse.
+var retiredSocketNames = []string{legacySocketName}
+
+// maxSocketPath is the ceiling on a unix socket path: sun_path holds 108
+// bytes including the terminator, so 107 characters are usable. The
+// kernel reports an over-long path as EINVAL, which reads like a bug in
+// this code rather than a state directory nested too deep.
+const maxSocketPath = 107
 
 // Host-side modes. The parent is private to the server; the per-run
 // directory and the socket are what a container sees through the bind
@@ -178,12 +203,19 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 		dir := filepath.Join(s.cfg.Dir, e.Name())
 		switch {
 		case s.cfg.Disabled:
-			for _, name := range wireSocketNames {
+			for _, name := range slices.Concat(wireSocketNames, retiredSocketNames) {
 				if err := removeFile(filepath.Join(dir, name)); err != nil {
 					return fmt.Errorf("coord: unlink %s: %w", filepath.Join(dir, name), err)
 				}
 			}
 		case active[run]:
+			// A retired version's socket goes first: leaving it bound
+			// would answer an old bridge in a shape it cannot read.
+			for _, name := range retiredSocketNames {
+				if err := removeFile(filepath.Join(dir, name)); err != nil {
+					return fmt.Errorf("coord: unlink %s: %w", filepath.Join(dir, name), err)
+				}
+			}
 			for _, name := range survivingSockets(dir) {
 				if err := s.listen(run, name); err != nil {
 					return err
@@ -224,6 +256,13 @@ func (s *Service) listen(run domain.RunID, name string) error {
 		return err
 	}
 	path := filepath.Join(dir, name)
+	// A unix socket path is capped by sun_path, and the kernel reports an
+	// over-long one as EINVAL, which reads like a bug in this code rather
+	// than a data directory nested too deep. Say what actually happened.
+	if len(path) > maxSocketPath {
+		return fmt.Errorf("coord: socket path %s is %d bytes, over the %d-byte limit: "+
+			"use a shorter state directory", path, len(path), maxSocketPath)
+	}
 	if rerr := removeFile(path); rerr != nil {
 		return fmt.Errorf("coord: unlink stale socket %s: %w", path, rerr)
 	}

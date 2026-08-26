@@ -92,7 +92,7 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if st.WireVersion != protocol.CoordWireVersion || st.RunID != string(a) || st.SessionID != string(h.session) {
+	if st.WireVersion != protocol.CoordWireVersion || st.RunID != string(a) || st.WorkspaceID != string(h.workspace) {
 		t.Fatalf("status identity = %+v, want the calling run", st)
 	}
 	listed := make(map[string]bool, len(st.Peers))
@@ -157,7 +157,7 @@ func TestSendCaps(t *testing.T) {
 		// The depth cap, not the rate, is under test: fill the inbox
 		// through the store and let one send hit the wall.
 		for range protocol.CoordMaxUnread {
-			msg := &store.RunMessage{SessionID: h.session, FromRun: h.run(0), ToRun: h.run(1), Body: "filler"}
+			msg := &store.RunMessage{WorkspaceID: h.workspace, FromRun: h.run(0), ToRun: h.run(1), Body: "filler"}
 			if err := h.db.AppendRunMessage(ctx, msg, protocol.CoordMaxUnread); err != nil {
 				t.Fatalf("seed mailbox: %v", err)
 			}
@@ -409,34 +409,15 @@ func TestInboxRateLimit(t *testing.T) {
 	}
 }
 
-// TestCrossSessionSendStampsBothTimelines covers the allowed cross-session
-// case: the humans supervising the receiving run must see the incoming
-// message on their own session's timeline, not just the sender's.
-func TestCrossSessionSendStampsBothTimelines(t *testing.T) {
-	h := newHarness(t, 1)
+// TestSendStampsOneWorkspaceNote pins the audit trail a send leaves.
+// Radar peers are always runs of the same workspace, so both sides of the
+// exchange share one timeline and one note covers it: a second stamp would
+// only double the entry the humans read.
+func TestSendStampsOneWorkspaceNote(t *testing.T) {
+	h := newHarness(t, 2)
 	ctx := context.Background()
-	a := h.run(0)
-
-	home, err := h.db.GetSession(ctx, h.session)
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	other := &domain.Session{WorkspaceID: home.WorkspaceID, Name: "billing", BaseBranch: "main"}
-	if cerr := h.db.CreateSession(ctx, other); cerr != nil {
-		t.Fatalf("create session: %v", cerr)
-	}
-	b := &domain.Run{
-		SessionID: other.ID,
-		MemberID:  h.runs[0].MemberID,
-		Task:      "task b",
-		Harness:   "claude",
-		Mode:      domain.LaunchTUI,
-		Status:    domain.RunRunning,
-	}
-	if cerr := h.db.CreateRun(ctx, b); cerr != nil {
-		t.Fatalf("create run: %v", cerr)
-	}
-	h.peers.pair(a, b.ID, "src/auth.go")
+	a, b := h.run(0), h.run(1)
+	h.peers.pair(a, b, "src/auth.go")
 
 	timeline, err := h.bus.Subscribe(ctx, events.SubscribeOptions{
 		Filter: events.Filter{Types: []events.Type{events.TypeTimeline}},
@@ -446,28 +427,37 @@ func TestCrossSessionSendStampsBothTimelines(t *testing.T) {
 	}
 	defer timeline.Close() //nolint:errcheck // test cleanup
 
-	if _, serr := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b.ID), Body: "hold off on auth.go"}); serr != nil {
+	if _, serr := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "hold off on auth.go"}); serr != nil {
 		t.Fatalf("Send: %v", serr)
 	}
 
-	sessions := map[domain.SessionID]string{}
-	for range 2 {
-		select {
-		case e := <-timeline.Events():
-			p, ok := e.Payload.(events.TimelinePayload)
-			if !ok || e.ActorID != h.runs[0].MemberID {
-				t.Fatalf("timeline event = %+v, want a note attributed to the sender's owner", e)
-			}
-			sessions[e.SessionID] = p.Message
-		case <-time.After(2 * time.Second):
-			t.Fatalf("saw notes on %d timelines, want both sessions stamped", len(sessions))
+	var note events.Event
+	select {
+	case note = <-timeline.Events():
+	case <-time.After(2 * time.Second):
+		t.Fatal("the coordination message was never stamped into the timeline")
+	}
+	p, ok := note.Payload.(events.TimelinePayload)
+	if !ok || note.ActorID != h.runs[0].MemberID || note.WorkspaceID != h.workspace || note.RunID != a {
+		t.Fatalf("timeline event = %+v, want a note on the sender's run attributed to its owner", note)
+	}
+	if !strings.Contains(p.Message, "coordination message to run "+string(b)) {
+		t.Fatalf("note = %q, want the outgoing stamp", p.Message)
+	}
+
+	// A second send is what proves the first left exactly one note: its own
+	// stamp is the next event on the stream, with nothing between them.
+	if _, serr := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "still on it"}); serr != nil {
+		t.Fatalf("second Send: %v", serr)
+	}
+	select {
+	case next := <-timeline.Events():
+		np, nok := next.Payload.(events.TimelinePayload)
+		if !nok || !strings.Contains(np.Message, "still on it") {
+			t.Fatalf("second event = %+v, want the second send's own stamp and no duplicate of the first", next)
 		}
-	}
-	if !strings.Contains(sessions[h.session], "coordination message to run "+string(b.ID)) {
-		t.Fatalf("sender-session note = %q, want the outgoing stamp", sessions[h.session])
-	}
-	if !strings.Contains(sessions[other.ID], "coordination message from run "+string(a)) {
-		t.Fatalf("receiver-session note = %q, want the incoming stamp", sessions[other.ID])
+	case <-time.After(2 * time.Second):
+		t.Fatal("the second coordination message was never stamped")
 	}
 }
 

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { GatewayCapabilities } from '@/lib/types'
 import { SettingsRoute } from '@/routes/settings'
 import { useStore, type RootState } from '@/store'
-import { alice, fakeApi, serverInfo, session } from '@/test/fixtures'
+import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
 
 // The local gateway's descriptor: the client-machine verbs settings rides on.
 const localCaps: GatewayCapabilities = {
@@ -22,7 +22,8 @@ const localCaps: GatewayCapabilities = {
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
-    sessions: { [session.id]: session },
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
     members: { [alice.id]: alice },
     runs: {},
     syncSessions: {},

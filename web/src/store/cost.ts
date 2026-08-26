@@ -2,7 +2,7 @@ import type { BudgetReport, BudgetState } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 export interface CostSlice {
-  /** Session ID to its budget report: the cap, its state, and the spend. */
+  /** Workspace ID to its budget report: the cap, its state, and the spend. */
   budgets: Record<string, BudgetReport>
   setBudget: (report: BudgetReport) => void
 }
@@ -10,15 +10,15 @@ export interface CostSlice {
 export const createCostSlice: SliceCreator<CostSlice> = (set) => ({
   budgets: {},
   setBudget: (report) =>
-    set((s) => ({ budgets: { ...s.budgets, [report.session_id]: report } })),
+    set((s) => ({ budgets: { ...s.budgets, [report.workspace_id]: report } })),
 })
 
-/** Worst first: a warning anywhere outranks every session that is fine. */
+/** Worst first: a warning anywhere outranks every workspace that is fine. */
 const severity: BudgetState[] = ['exceeded', 'warn', 'ok']
 
 export interface CostTotals {
   costUSD: number
-  /** The worst state any budgeted session is in. */
+  /** The worst state any budgeted workspace is in. */
   state: BudgetState
   /**
    * True while any part of the spend is unmetered - a harness with no
@@ -26,7 +26,7 @@ export interface CostTotals {
    * measurement.
    */
   advisory: boolean
-  /** Sessions carrying a budget, worst state first. */
+  /** Workspaces carrying a budget, worst state first. */
   budgeted: BudgetReport[]
 }
 

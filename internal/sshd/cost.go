@@ -15,11 +15,11 @@ import (
 func init() {
 	registerMethod(protocol.MethodCostReport, (*Server).costReport)
 	registerMethod(protocol.MethodBudgetGet, (*Server).budgetGet)
-	registerGuarded(protocol.MethodBudgetSet, permissions.SessionAdmin, nil, (*Server).budgetSet)
+	registerGuarded(protocol.MethodBudgetSet, permissions.WorkspaceAdmin, nil, (*Server).budgetSet)
 }
 
 // GuardRuns wraps a run controller so a new run is admitted against its
-// session's budget before it starts. Runs already running are untouched -
+// workspace's budget before it starts. Runs already running are untouched -
 // a budget never stops work in flight. A nil service leaves the
 // controller as it is: budgets are a service, not a hard dependency.
 func GuardRuns(runs RunController, svc CostService, st store.Store) RunController {
@@ -37,11 +37,11 @@ type budgetGate struct {
 	store store.Store
 }
 
-func (g budgetGate) Launch(ctx context.Context, session domain.SessionID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
-	if err := g.svc.Admit(ctx, session, member); err != nil {
+func (g budgetGate) Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+	if err := g.svc.Admit(ctx, workspace, member); err != nil {
 		return nil, err
 	}
-	return g.RunController.Launch(ctx, session, member, task, harness, mode)
+	return g.RunController.Launch(ctx, workspace, member, task, harness, mode)
 }
 
 // Relaunch starts a fresh run from a finished one, so it is admitted like
@@ -51,7 +51,7 @@ func (g budgetGate) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, err
 	}
-	if err := g.svc.Admit(ctx, r.SessionID, actor); err != nil {
+	if err := g.svc.Admit(ctx, r.WorkspaceID, actor); err != nil {
 		return nil, err
 	}
 	return g.RunController.Relaunch(ctx, run, actor)
@@ -64,15 +64,16 @@ func (s *Server) costs() (CostService, *protocol.Error) {
 	return s.cfg.Services.Costs, nil
 }
 
-// costSession validates that a params session ID names a real session.
-func (s *Server) costSession(ctx context.Context, id string) (domain.SessionID, *protocol.Error) {
+// costWorkspace validates that a params workspace ID names a real
+// workspace.
+func (s *Server) costWorkspace(ctx context.Context, id string) (domain.WorkspaceID, *protocol.Error) {
 	if id == "" {
-		return "", invalidParams("session_id is required")
+		return "", invalidParams("workspace_id is required")
 	}
-	if _, err := s.cfg.Store.GetSession(ctx, domain.SessionID(id)); err != nil {
+	if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(id)); err != nil {
 		return "", rpcError(err)
 	}
-	return domain.SessionID(id), nil
+	return domain.WorkspaceID(id), nil
 }
 
 func (s *Server) costReport(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -84,19 +85,19 @@ func (s *Server) costReport(ctx context.Context, _ domain.MemberID, params json.
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.costSession(ctx, p.SessionID)
+	workspace, perr := s.costWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
-	rep, err := svc.Report(ctx, session)
+	rep, err := svc.Report(ctx, workspace)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	out := protocol.CostReportResult{
-		SessionID: string(session),
-		Total:     rollupWire(rep.Total),
-		Members:   make([]protocol.MemberCost, 0, len(rep.Members)),
-		Runs:      make([]protocol.RunCost, 0, len(rep.Runs)),
+		WorkspaceID: string(workspace),
+		Total:       rollupWire(rep.Total),
+		Members:     make([]protocol.MemberCost, 0, len(rep.Members)),
+		Runs:        make([]protocol.RunCost, 0, len(rep.Runs)),
 	}
 	for _, m := range rep.Members {
 		out.Members = append(out.Members, protocol.MemberCost{
@@ -127,11 +128,11 @@ func (s *Server) budgetGet(ctx context.Context, _ domain.MemberID, params json.R
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.costSession(ctx, p.SessionID)
+	workspace, perr := s.costWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
-	st, err := svc.Budget(ctx, session)
+	st, err := svc.Budget(ctx, workspace)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -147,14 +148,14 @@ func (s *Server) budgetSet(ctx context.Context, member domain.MemberID, params j
 	if perr != nil {
 		return nil, perr
 	}
-	session, perr := s.costSession(ctx, p.SessionID)
+	workspace, perr := s.costWorkspace(ctx, p.WorkspaceID)
 	if perr != nil {
 		return nil, perr
 	}
 	if p.WarnUSD < 0 || (p.LimitUSD > 0 && p.WarnUSD > p.LimitUSD) {
 		return nil, invalidParams("warn_usd must be between 0 and limit_usd")
 	}
-	st, err := svc.SetBudget(ctx, session, cost.Change{
+	st, err := svc.SetBudget(ctx, workspace, cost.Change{
 		LimitUSD: p.LimitUSD,
 		WarnUSD:  p.WarnUSD,
 		Override: p.Override,
@@ -178,19 +179,19 @@ func rollupWire(r cost.Rollup) protocol.CostRollup {
 
 func budgetWire(st cost.Status) protocol.BudgetResult {
 	out := protocol.BudgetResult{
-		SessionID: string(st.Session),
-		State:     string(st.State),
-		Spend:     rollupWire(st.Spend),
-		Advisory:  st.Spend.Advisory(),
+		WorkspaceID: string(st.Workspace),
+		State:       string(st.State),
+		Spend:       rollupWire(st.Spend),
+		Advisory:    st.Spend.Advisory(),
 	}
 	if st.Budget != nil {
 		out.Budget = &protocol.Budget{
-			SessionID: string(st.Budget.SessionID),
-			LimitUSD:  st.Budget.LimitUSD,
-			WarnUSD:   st.Budget.WarnUSD,
-			Override:  st.Budget.Override,
-			UpdatedBy: string(st.Budget.UpdatedBy),
-			UpdatedAt: st.Budget.UpdatedAt.UTC().Format(time.RFC3339),
+			WorkspaceID: string(st.Budget.WorkspaceID),
+			LimitUSD:    st.Budget.LimitUSD,
+			WarnUSD:     st.Budget.WarnUSD,
+			Override:    st.Budget.Override,
+			UpdatedBy:   string(st.Budget.UpdatedBy),
+			UpdatedAt:   st.Budget.UpdatedAt.UTC().Format(time.RFC3339),
 		}
 	}
 	return out

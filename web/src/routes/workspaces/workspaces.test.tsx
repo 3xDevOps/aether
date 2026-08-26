@@ -1,14 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import type { ToolSnapshot, Workspace } from '@/lib/types'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { ToolSnapshot } from '@/lib/types'
 import { WorkspacesRoute } from '@/routes/workspaces'
 import { useStore, type RootState } from '@/store'
-import { alice, fakeApi, serverInfo, session } from '@/test/fixtures'
-
-const workspace: Workspace = {
-  id: 'wsp_1',
-  name: 'team',
-  created_at: '2026-08-14T09:00:00Z',
-}
+import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
 
 const snapshot: ToolSnapshot = {
   id: 'snapshot_1',
@@ -30,7 +24,8 @@ const older: ToolSnapshot = {
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
-    sessions: { [session.id]: session },
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: '',
     members: { [alice.id]: alice },
     info: serverInfo,
     // workspace.add and the tools verbs are capability-gated; an upgraded
@@ -47,7 +42,7 @@ function seed(extra: Partial<RootState> = {}) {
 // so these tests advertise every method; a desktop gateway narrows this
 // via /capabilities.
 describe('workspaces view', () => {
-  it('submits the add form with a custom image environment', async () => {
+  it('submits the add form with a base branch and a custom image environment', async () => {
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => [workspace]),
       workspaceAdd: vi.fn(async () => workspace),
@@ -58,6 +53,9 @@ describe('workspaces view', () => {
 
     const form = within(await screen.findByRole('form', { name: 'Add workspace' }))
     fireEvent.change(form.getByLabelText(/^Name/), { target: { value: 'infra' } })
+    fireEvent.change(form.getByLabelText('Base branch'), {
+      target: { value: 'trunk' },
+    })
     fireEvent.change(form.getByLabelText(/Custom image/), {
       target: { value: 'ubuntu:24.04' },
     })
@@ -65,6 +63,7 @@ describe('workspaces view', () => {
 
     expect(client.workspaceAdd).toHaveBeenCalledWith({
       name: 'infra',
+      base_branch: 'trunk',
       environment: { custom_image: 'ubuntu:24.04' },
     })
   })
@@ -83,7 +82,44 @@ describe('workspaces view', () => {
 
     expect(client.workspaceAdd).toHaveBeenCalledWith({
       name: 'bare',
+      base_branch: 'main',
       environment: { neutral_image: true },
+    })
+  })
+
+  // The base branch and the steering policy live on the workspace now, so
+  // the admin list is where an operator compares them across workspaces.
+  it('shows each workspace base branch and steering policy', async () => {
+    const restricted = { ...workspace, steer_others: 'admins_only' }
+    const client = fakeApi({
+      workspaceListFull: vi.fn(async () => [restricted]),
+      toolsList: vi.fn(async () => []),
+    })
+    seed()
+    render(<WorkspacesRoute params={{}} client={client} />)
+
+    expect(await screen.findByText(workspace.base_branch)).toBeDefined()
+    expect(screen.getByText('admins steer others')).toBeDefined()
+  })
+
+  it('opens a workspace by making it the active scope', async () => {
+    const client = fakeApi({
+      workspaceListFull: vi.fn(async () => [workspace]),
+      toolsList: vi.fn(async () => []),
+    })
+    seed()
+    render(<WorkspacesRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+
+    // Every other scoped surface follows activeWorkspace, so navigating
+    // without setting it would leave the sidebar pointed elsewhere.
+    await waitFor(() => {
+      expect(useStore.getState().activeWorkspace).toBe(workspace.id)
+      expect(useStore.getState().route).toEqual({
+        name: 'workspace',
+        params: { workspaceId: workspace.id },
+      })
     })
   })
 

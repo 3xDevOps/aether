@@ -8,8 +8,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/gitengine"
 )
 
-// lazyGit wraps the git engine so the first touch of a workspace's repo —
-// git transport or run checkout — creates the bare repo on demand
+// lazyGit wraps the git engine so the first touch of a workspace's repo -
+// git transport or run checkout - creates the bare repo on demand
 // (InitWorkspaceRepo is idempotent). Workspaces created while the server
 // is running therefore work without a restart; both call sites (sshd and
 // the scheduler) have already validated the workspace against the store

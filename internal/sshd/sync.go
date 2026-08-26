@@ -507,7 +507,7 @@ const (
 // deduplicated when they are the same person.
 //
 // Nothing in the params was produced by the server, and the event reaches
-// every subscriber of the run's session, so the payload is bounded to
+// every subscriber of the run's workspace, so the payload is bounded to
 // what a conflict report can plausibly be: plain relative paths, free of
 // control characters that would otherwise reach a subscriber's terminal
 // verbatim. Within those bounds it exposes no more than comparable run
@@ -541,9 +541,9 @@ func (s *Server) syncConflict(ctx context.Context, member domain.MemberID, param
 		members = append(members, run.MemberID)
 	}
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
-		SessionID: run.SessionID,
-		RunID:     run.ID,
-		ActorID:   member,
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		ActorID:     member,
 		Payload: events.SyncConflictPayload{
 			RunID:         run.ID,
 			SyncSessionID: p.SyncSessionID,
@@ -556,15 +556,15 @@ func (s *Server) syncConflict(ctx context.Context, member domain.MemberID, param
 	// The typed event is only seen by a client that asked for its type,
 	// and the one client known to be watching this run (`aether sync`)
 	// filters for run.status. The run owner would otherwise never learn
-	// that their worktree is half-synced. The session timeline is this
+	// that their worktree is half-synced. The workspace timeline is this
 	// repo's stream for a noteworthy act on someone else's run - handoff,
 	// protection, and steer_others all stamp one - so the notice rides
 	// there, where members are already looking. It carries no path names:
 	// those stay in the typed event for a client that wants them.
 	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
-		SessionID: run.SessionID,
-		RunID:     run.ID,
-		ActorID:   member,
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		ActorID:     member,
 		Payload: events.TimelinePayload{
 			Kind:    events.TimelineNote,
 			Message: "live overlay paused on " + strconv.Itoa(len(p.Files)) + " sync conflict(s); the run worktree is canonical",

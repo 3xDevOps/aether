@@ -20,7 +20,6 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		ServerVersion:       version.Version,
 		ProtocolVersion:     protocol.Version,
 		Time:                time.Now().UTC().Format(time.RFC3339),
-		DashboardPort:       s.cfg.DashboardPort,
 		Member:              protocol.MemberFromDomain(m),
 		TailnetHostname:     s.cfg.TailnetHostname,
 		TailnetIdentityAuth: s.cfg.WhoIs != nil,
@@ -39,43 +38,19 @@ func (s *Server) workspaceList(ctx context.Context, _ domain.MemberID, _ json.Ra
 	return protocol.WorkspaceListResult{Workspaces: out}, nil
 }
 
-func (s *Server) sessionList(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	p, perr := decodeParams[protocol.SessionListParams](params)
+func (s *Server) workspaceGet(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.WorkspaceGetParams](params)
 	if perr != nil {
 		return nil, perr
 	}
-	var (
-		list []*domain.Session
-		err  error
-	)
-	if p.WorkspaceID != "" {
-		list, err = s.cfg.Store.ListSessionsByWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
-	} else {
-		list, err = s.cfg.Store.ListSessions(ctx)
+	if p.WorkspaceID == "" {
+		return nil, invalidParams("workspace_id is required")
 	}
+	ws, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	out := make([]protocol.Session, 0, len(list))
-	for _, sess := range list {
-		out = append(out, protocol.SessionFromDomain(sess))
-	}
-	return protocol.SessionListResult{Sessions: out}, nil
-}
-
-func (s *Server) sessionGet(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	p, perr := decodeParams[protocol.SessionGetParams](params)
-	if perr != nil {
-		return nil, perr
-	}
-	if p.SessionID == "" {
-		return nil, invalidParams("session_id is required")
-	}
-	sess, err := s.cfg.Store.GetSession(ctx, domain.SessionID(p.SessionID))
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	return protocol.SessionGetResult{Session: protocol.SessionFromDomain(sess)}, nil
+	return protocol.WorkspaceGetResult{Workspace: protocol.WorkspaceFromDomain(ws)}, nil
 }
 
 func (s *Server) memberList(ctx context.Context, _ domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
@@ -121,8 +96,8 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if perr != nil {
 		return nil, perr
 	}
-	if p.SessionID == "" || p.Task == "" || p.Harness == "" {
-		return nil, invalidParams("session_id, task, and harness are required")
+	if p.WorkspaceID == "" || p.Task == "" || p.Harness == "" {
+		return nil, invalidParams("workspace_id, task, and harness are required")
 	}
 	mode := domain.LaunchMode(p.Mode)
 	if p.Mode == "" {
@@ -131,7 +106,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if !mode.Valid() {
 		return nil, invalidParams("invalid mode: " + p.Mode)
 	}
-	run, err := s.cfg.Runs.Launch(ctx, domain.SessionID(p.SessionID), member, p.Task, p.Harness, mode)
+	run, err := s.cfg.Runs.Launch(ctx, domain.WorkspaceID(p.WorkspaceID), member, p.Task, p.Harness, mode)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -148,22 +123,22 @@ func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.Raw
 		err  error
 	)
 	switch {
-	case p.SessionID != "":
-		runs, err = s.cfg.Store.ListRunsBySession(ctx, domain.SessionID(p.SessionID))
+	case p.WorkspaceID != "":
+		runs, err = s.cfg.Store.ListRunsByWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID))
 	case p.MemberID != "":
 		runs, err = s.cfg.Store.ListRunsByMember(ctx, domain.MemberID(p.MemberID))
 	case p.ActiveOnly:
 		runs, err = s.cfg.Store.ListActiveRuns(ctx)
 	default:
-		var sessions []*domain.Session
-		sessions, err = s.cfg.Store.ListSessions(ctx)
-		for _, sess := range sessions {
+		var workspaces []*domain.Workspace
+		workspaces, err = s.cfg.Store.ListWorkspaces(ctx)
+		for _, ws := range workspaces {
 			if err != nil {
 				break
 			}
-			var sr []*domain.Run
-			sr, err = s.cfg.Store.ListRunsBySession(ctx, sess.ID)
-			runs = append(runs, sr...)
+			var wr []*domain.Run
+			wr, err = s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
+			runs = append(runs, wr...)
 		}
 	}
 	if err != nil {
@@ -301,10 +276,10 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 		return nil, rpcError(err)
 	}
 	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
-		SessionID: run.SessionID,
-		RunID:     run.ID,
-		ActorID:   member,
-		Payload:   events.TimelinePayload{Kind: events.TimelineHandoff, Message: p.ToMemberID},
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		ActorID:     member,
+		Payload:     events.TimelinePayload{Kind: events.TimelineHandoff, Message: p.ToMemberID},
 	})
 	return struct{}{}, nil
 }
@@ -318,13 +293,9 @@ func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.Raw
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	sess, err := s.cfg.Store.GetSession(ctx, run.SessionID)
-	if err != nil {
-		return nil, rpcError(err)
-	}
 	return protocol.RunPullResult{
-		WorkspaceID: string(sess.WorkspaceID),
-		RepoPath:    "/" + string(sess.WorkspaceID) + ".git",
+		WorkspaceID: string(run.WorkspaceID),
+		RepoPath:    "/" + string(run.WorkspaceID) + ".git",
 		Branch:      run.Branch,
 	}, nil
 }

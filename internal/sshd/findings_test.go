@@ -76,7 +76,7 @@ func TestEventsDropClosesBeforePostGapWrite(t *testing.T) {
 
 	mk := func(seq uint64) events.Event {
 		return events.Event{
-			ID: "evt", Seq: seq, Time: time.Now().UTC(), SessionID: e.sess.ID,
+			ID: "evt", Seq: seq, Time: time.Now().UTC(), WorkspaceID: e.ws.ID,
 			RunID: e.run.ID, Type: events.TypeRunStatus,
 			Payload: events.RunStatusPayload{To: "running"},
 		}
@@ -127,7 +127,7 @@ func TestEventsDropClosesBeforePostGapWrite(t *testing.T) {
 
 // TestEventsSurviveStdinHalfClose reproduces the piped-client trap: a
 // client that half-closes its write side (stdin EOF) must keep receiving
-// events — per the contract only closing the channel unsubscribes.
+// events - per the contract only closing the channel unsubscribes.
 func TestEventsSurviveStdinHalfClose(t *testing.T) {
 	e := newTestEnv(t, nil)
 	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemEvents, nil)
@@ -147,7 +147,7 @@ func TestEventsSurviveStdinHalfClose(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // let the EOF reach the server
 
 	if _, err := e.bus.Publish(context.Background(), events.Event{
-		SessionID: e.sess.ID, RunID: e.run.ID,
+		WorkspaceID: e.ws.ID, RunID: e.run.ID,
 		Payload: events.RunStatusPayload{To: "running"},
 	}); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -321,7 +321,7 @@ func TestHandshakeCap(t *testing.T) {
 
 // TestRemovedMemberLosesAccess reproduces the missing revocation path:
 // deleting a member must cut off their established connection's control
-// RPCs, git transport, and attach — not just future handshakes.
+// RPCs, git transport, and attach - not just future handshakes.
 func TestRemovedMemberLosesAccess(t *testing.T) {
 	e := newTestEnv(t, nil)
 	signer := newSigner(t)
@@ -379,10 +379,10 @@ type blockingRuns struct {
 	release chan struct{}
 }
 
-func (b *blockingRuns) Launch(ctx context.Context, session domain.SessionID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (b *blockingRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	close(b.entered)
 	<-b.release
-	return b.fakeRuns.Launch(ctx, session, member, task, harness, mode)
+	return b.fakeRuns.Launch(ctx, workspace, member, task, harness, mode)
 }
 
 // TestCloseWaitsForInFlightHandlers pins the shutdown contract Close now
@@ -396,7 +396,7 @@ func TestCloseWaitsForInFlightHandlers(t *testing.T) {
 
 	go func() {
 		_ = c.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-			SessionID: string(e.sess.ID), Task: "t", Harness: "claude",
+			WorkspaceID: string(e.ws.ID), Task: "t", Harness: "claude",
 		}, nil)
 	}()
 	select {

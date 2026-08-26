@@ -19,7 +19,7 @@ var (
 	// constraint (e.g. a member with the same public key already exists).
 	ErrConflict = errors.New("store: conflict")
 	// ErrInUse is returned when a delete is blocked by rows that still
-	// reference the target (e.g. a workspace with sessions).
+	// reference the target (e.g. a workspace with runs).
 	ErrInUse = errors.New("store: in use")
 )
 
@@ -30,7 +30,7 @@ var (
 // field of the identified row; CreatedAt is immutable and never written by
 // updates. Get and List return ErrNotFound / empty slices respectively
 // when nothing matches. Constraint violations surface as ErrConflict,
-// ErrInUse, or ErrNotFound (missing foreign key reference) — never as raw
+// ErrInUse, or ErrNotFound (missing foreign key reference) - never as raw
 // driver errors.
 //
 // Member public keys are canonicalized to "type base64" (options, comment,
@@ -44,16 +44,10 @@ type Store interface {
 	UpdateWorkspace(ctx context.Context, w *domain.Workspace) error
 	DeleteWorkspace(ctx context.Context, id domain.WorkspaceID) error
 
-	CreateSession(ctx context.Context, s *domain.Session) error
-	GetSession(ctx context.Context, id domain.SessionID) (*domain.Session, error)
-	ListSessions(ctx context.Context) ([]*domain.Session, error)
-	ListSessionsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Session, error)
-	UpdateSession(ctx context.Context, s *domain.Session) error
-	// SetSessionSteerOthers sets only the session's steer-others policy
-	// ("" or domain.SteerOthersAdminsOnly), leaving every other field
-	// untouched.
-	SetSessionSteerOthers(ctx context.Context, id domain.SessionID, steerOthers string) error
-	DeleteSession(ctx context.Context, id domain.SessionID) error
+	// SetWorkspaceSteerOthers sets only the workspace's steer-others
+	// policy ("" or domain.SteerOthersAdminsOnly), leaving every other
+	// field untouched.
+	SetWorkspaceSteerOthers(ctx context.Context, id domain.WorkspaceID, steerOthers string) error
 
 	CreateMember(ctx context.Context, m *domain.Member) error
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
@@ -68,7 +62,7 @@ type Store interface {
 
 	CreateRun(ctx context.Context, r *domain.Run) error
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
-	ListRunsBySession(ctx context.Context, id domain.SessionID) ([]*domain.Run, error)
+	ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Run, error)
 	ListRunsByMember(ctx context.Context, id domain.MemberID) ([]*domain.Run, error)
 	ListActiveRuns(ctx context.Context) ([]*domain.Run, error)
 	UpdateRun(ctx context.Context, r *domain.Run) error

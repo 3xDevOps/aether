@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { GatewayCapabilities } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { useStore, type RootState } from '@/store'
-import { alice, fakeApi, serverInfo, session, workspace } from '@/test/fixtures'
+import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
 
 // The local gateway's descriptor: full method map, shell socket, and the
 // client-machine verbs the wizard rides on.
@@ -15,7 +15,8 @@ const localCaps: GatewayCapabilities = {
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
-    sessions: { [session.id]: session },
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
     members: { [alice.id]: alice },
     info: serverInfo,
     capabilities: localCaps,
@@ -37,6 +38,16 @@ async function toRepoStep() {
   fireEvent.click(
     await screen.findByRole('button', { name: `Use ${workspace.name}` }),
   )
+}
+
+/** Walks all the way to the first-run step, through a repo link. */
+async function toFirstRunStep() {
+  await toRepoStep()
+  fireEvent.change(await screen.findByLabelText('Repository path'), {
+    target: { value: '/home/alice/code/myproject' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 }
 
 describe('onboarding wizard', () => {
@@ -89,6 +100,31 @@ describe('onboarding wizard', () => {
     expect(client.localLinkStatus).toHaveBeenCalledTimes(2)
   })
 
+  // Every run in a workspace forks from its base branch, so creation settles
+  // it once here rather than asking again per run.
+  it('creates the first workspace with a base branch', async () => {
+    const client = fakeApi({ workspaceListFull: vi.fn(async () => []) })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toWorkspaceStep()
+
+    const branch = await screen.findByLabelText('Base branch')
+    expect(branch).toHaveProperty('value', 'main')
+    fireEvent.change(screen.getByLabelText(/^Name/), {
+      target: { value: 'myproject' },
+    })
+    fireEvent.change(branch, { target: { value: 'trunk' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }))
+
+    await waitFor(() => {
+      expect(client.workspaceAdd).toHaveBeenCalledWith({
+        name: 'myproject',
+        base_branch: 'trunk',
+        environment: { neutral_image: true },
+      })
+    })
+  })
+
   it('links the repo to the picked workspace and shows the push command', async () => {
     const client = fakeApi()
     seed()
@@ -110,23 +146,17 @@ describe('onboarding wizard', () => {
     expect(cmd.value).toContain('git push -u aether')
   })
 
-  it('launches the first run and navigates to it', async () => {
+  it('launches the first run in the chosen workspace and navigates to it', async () => {
     const client = fakeApi()
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    await toRepoStep()
+    await toFirstRunStep()
 
-    fireEvent.change(await screen.findByLabelText('Repository path'), {
-      target: { value: '/home/alice/code/myproject' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    expect(await screen.findByRole('region', { name: 'First run' })).toBeDefined()
+    // The workspace was settled two steps back, so nothing here asks for a
+    // scope again.
+    expect(screen.queryByLabelText('Workspace')).toBeNull()
 
-    const region = await screen.findByRole('region', { name: 'First run' })
-    expect(region).toBeDefined()
-    fireEvent.change(await screen.findByLabelText('Session'), {
-      target: { value: session.id },
-    })
     fireEvent.change(screen.getByLabelText('Harness'), {
       target: { value: 'claude' },
     })
@@ -135,14 +165,13 @@ describe('onboarding wizard', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
-    // runLaunch resolves to the fixture run; the wizard hands off to the
-    // run view rather than holding a done screen.
-    expect(await screen.findByRole('region', { name: 'First run' })).toBeDefined()
     expect(client.runLaunch).toHaveBeenCalledWith({
-      session_id: session.id,
+      workspace_id: workspace.id,
       task: 'write a result file',
       harness: 'claude',
     })
+    // runLaunch resolves to the fixture run; the wizard hands off to the
+    // run view rather than holding a done screen.
     await waitFor(() => {
       expect(useStore.getState().route).toEqual({
         name: 'run',
@@ -151,71 +180,17 @@ describe('onboarding wizard', () => {
     })
   })
 
-  it('creates a session inline when session.new is offered', async () => {
-    const client = fakeApi({ sessionList: vi.fn(async () => []) })
-    seed()
-    render(<OnboardingRoute params={{}} client={client} />)
-    await toRepoStep()
-
-    fireEvent.change(await screen.findByLabelText('Repository path'), {
-      target: { value: '/home/alice/code/myproject' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-
-    fireEvent.change(await screen.findByLabelText('Session'), {
-      target: { value: '__new' },
-    })
-    fireEvent.change(await screen.findByLabelText('New session name'), {
-      target: { value: 'demo' },
-    })
-    fireEvent.change(screen.getByLabelText('Harness'), {
-      target: { value: 'claude' },
-    })
-    fireEvent.change(screen.getByLabelText('Task'), {
-      target: { value: 'write a result file' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
-
-    await waitFor(() => {
-      expect(client.sessionNew).toHaveBeenCalledWith({
-        workspace_id: workspace.id,
-        name: 'demo',
-      })
-      // The new session's id feeds the launch.
-      expect(client.runLaunch).toHaveBeenCalledWith({
-        session_id: session.id,
-        task: 'write a result file',
-        harness: 'claude',
-      })
-    })
-  })
-
-  it('reuses the created session when the launch itself fails and is retried', async () => {
-    // sessionNew succeeds but the first runLaunch fails: the retry must not
-    // mint a second session with the same name.
+  it('renders a launch refusal verbatim and lets the user retry', async () => {
     const runLaunch = vi
       .fn()
       .mockRejectedValueOnce(new Error('temporarily out of capacity'))
       .mockResolvedValue({ id: 'run_1' })
-    const client = fakeApi({ sessionList: vi.fn(async () => []), runLaunch })
+    const client = fakeApi({ runLaunch })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    await toRepoStep()
+    await toFirstRunStep()
 
-    fireEvent.change(await screen.findByLabelText('Repository path'), {
-      target: { value: '/home/alice/code/myproject' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-
-    fireEvent.change(await screen.findByLabelText('Session'), {
-      target: { value: '__new' },
-    })
-    fireEvent.change(await screen.findByLabelText('New session name'), {
-      target: { value: 'demo' },
-    })
-    fireEvent.change(screen.getByLabelText('Harness'), {
+    fireEvent.change(await screen.findByLabelText('Harness'), {
       target: { value: 'claude' },
     })
     fireEvent.change(screen.getByLabelText('Task'), {
@@ -223,21 +198,17 @@ describe('onboarding wizard', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
-    // The refusal renders verbatim and the picker now holds the created
-    // session, so the name field is gone.
     expect(await screen.findByText('temporarily out of capacity')).toBeDefined()
-    expect(screen.queryByLabelText('New session name')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() => {
       expect(client.runLaunch).toHaveBeenCalledTimes(2)
       expect(client.runLaunch).toHaveBeenLastCalledWith({
-        session_id: session.id,
+        workspace_id: workspace.id,
         task: 'write a result file',
         harness: 'claude',
       })
     })
-    expect(client.sessionNew).toHaveBeenCalledTimes(1)
   })
 })

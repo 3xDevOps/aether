@@ -310,7 +310,7 @@ type fakeGit struct {
 	mu                sync.Mutex
 	commits           map[domain.RunID][]string
 	published         map[domain.RunID]int
-	watching          map[domain.RunID]domain.SessionID
+	watching          map[domain.RunID]domain.WorkspaceID
 	lastFile          map[domain.RunID]time.Time
 	bases             map[domain.RunID]string
 	workspaceByRun    map[domain.RunID]domain.WorkspaceID
@@ -326,7 +326,7 @@ func newFakeGit(root string) *fakeGit {
 		root:              root,
 		commits:           make(map[domain.RunID][]string),
 		published:         make(map[domain.RunID]int),
-		watching:          make(map[domain.RunID]domain.SessionID),
+		watching:          make(map[domain.RunID]domain.WorkspaceID),
 		lastFile:          make(map[domain.RunID]time.Time),
 		bases:             make(map[domain.RunID]string),
 		workspaceByRun:    make(map[domain.RunID]domain.WorkspaceID),
@@ -400,10 +400,10 @@ func (g *fakeGit) RemoveRunCheckout(_ context.Context, run domain.RunID) error {
 	return os.RemoveAll(g.checkoutPath(run))
 }
 
-func (g *fakeGit) StartDiffWatch(_ context.Context, session domain.SessionID, run domain.RunID) error {
+func (g *fakeGit) StartDiffWatch(_ context.Context, workspace domain.WorkspaceID, run domain.RunID) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.watching[run] = session
+	g.watching[run] = workspace
 	return nil
 }
 
@@ -418,6 +418,15 @@ func (g *fakeGit) LastFileChange(run domain.RunID) (time.Time, bool) {
 	defer g.mu.Unlock()
 	t, ok := g.lastFile[run]
 	return t, ok
+}
+
+// watchingFor reports the workspace scope StartDiffWatch was called with,
+// and whether a watch is currently active for the run.
+func (g *fakeGit) watchingFor(run domain.RunID) (domain.WorkspaceID, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	ws, ok := g.watching[run]
+	return ws, ok
 }
 
 func (g *fakeGit) touch(run domain.RunID) {

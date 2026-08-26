@@ -110,7 +110,7 @@ func (f *fakeCoord) seen() []protocol.Request {
 // golden reads one of the pinned fixtures.
 func golden(t *testing.T, name string) []protocol.Response {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v1", name))
+	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v2", name))
 	if err != nil {
 		t.Fatalf("read golden %s: %v", name, err)
 	}
@@ -129,7 +129,7 @@ func golden(t *testing.T, name string) []protocol.Response {
 // can assert the bridge puts the same bytes on the wire.
 func goldenRequests(t *testing.T) []protocol.Request {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v1", "requests.ndjson"))
+	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v2", "requests.ndjson"))
 	if err != nil {
 		t.Fatalf("read golden requests: %v", err)
 	}

@@ -193,7 +193,7 @@ echo
 echo "next:"
 if [ "$COMPONENTS" != "client" ]; then
 	echo "  aether init                 # prepare /var/lib/aether and report the tailnet name"
-	echo "  aether-server serve --data-dir /var/lib/aether --addr :2222 --dashboard-port 8080"
+	echo "  aether-server serve --data-dir /var/lib/aether --addr :2222"
 fi
 echo "  aether link <server>:2222   # first link on a fresh server becomes admin"
 echo

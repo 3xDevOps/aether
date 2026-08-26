@@ -10,14 +10,14 @@ import { createPaletteSlice, type PaletteSlice } from '@/store/palette'
 import { createPresenceSlice, type PresenceSlice } from '@/store/presence'
 import { createRunsSlice, type RunsSlice } from '@/store/runs'
 import { createServerSlice, type ServerSlice } from '@/store/server'
-import { createSessionsSlice, type SessionsSlice } from '@/store/sessions'
+import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
 import { createShellSlice, type ShellSlice } from '@/store/shell'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createUiSlice, type UiSlice } from '@/store/ui'
 
 export type RootState = ServerSlice &
-  SessionsSlice &
+  WorkspacesSlice &
   RunsSlice &
   MembersSlice &
   TerminalSlice &
@@ -41,7 +41,7 @@ export function createRootStore() {
     persist(
       (...a) => ({
         ...createServerSlice(...a),
-        ...createSessionsSlice(...a),
+        ...createWorkspacesSlice(...a),
         ...createRunsSlice(...a),
         ...createMembersSlice(...a),
         ...createTerminalSlice(...a),
@@ -63,9 +63,8 @@ export function createRootStore() {
           theme: s.theme,
           sidebarWidth: s.sidebarWidth,
           sidebarCollapsed: s.sidebarCollapsed,
-          collapsedSessions: s.collapsedSessions,
+          activeWorkspace: s.activeWorkspace,
           groupBy: s.groupBy,
-          showIdle: s.showIdle,
         }),
       },
     ),

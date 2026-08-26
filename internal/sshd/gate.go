@@ -49,19 +49,19 @@ func resolveActor(ctx context.Context, st store.Store, id domain.MemberID) (perm
 }
 
 // resolveRunTarget loads the run's ownership and protection plus its
-// session's steer-others policy for a permission check.
+// workspace's steer-others policy for a permission check.
 func resolveRunTarget(ctx context.Context, st store.Store, id domain.RunID) (permissions.Target, error) {
 	run, err := st.GetRun(ctx, id)
 	if err != nil {
 		return permissions.Target{}, err
 	}
-	sess, err := st.GetSession(ctx, run.SessionID)
+	ws, err := st.GetWorkspace(ctx, run.WorkspaceID)
 	if err != nil {
 		return permissions.Target{}, err
 	}
 	return permissions.Target{
 		Owner:       run.MemberID,
 		Protected:   run.Protected,
-		SteerOthers: sess.SteerOthers,
+		SteerOthers: ws.SteerOthers,
 	}, nil
 }

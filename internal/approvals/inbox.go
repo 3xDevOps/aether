@@ -1,11 +1,11 @@
 // Package approvals is the shared approval inbox and the presence roster.
 //
-// The inbox is a session-wide queue of permission requests. Its source is
+// The inbox is a workspace-wide queue of permission requests. Its source is
 // the agent adapters: a run that pauses for a plan review or a permission
 // prompt surfaces as a run.agent pause record, which this service turns
 // into a stored request. Any member holding the steer capability decides
 // it; the decision is attributed to that member and stamped into the
-// timeline as a session.approval event. Auto mode is the default, so the
+// timeline as a workspace.approval event. Auto mode is the default, so the
 // queue is normally empty.
 //
 // The roster is presence: members are online while their heartbeats keep
@@ -217,11 +217,11 @@ func (s *Service) handle(ctx context.Context, e events.Event) {
 		}
 		switch p.State {
 		case events.PresenceWatching:
-			s.roster.watch(e.ActorID, e.SessionID, e.RunID)
+			s.roster.watch(e.ActorID, e.WorkspaceID, e.RunID)
 		case events.PresenceOnline:
 			// The SSH server publishes this when an attach ends; the
 			// member is still connected, just no longer watching.
-			s.roster.unwatch(e.ActorID, e.SessionID, e.RunID)
+			s.roster.unwatch(e.ActorID, e.WorkspaceID, e.RunID)
 		}
 	}
 	s.mu.Lock()
@@ -241,11 +241,11 @@ func (s *Service) raise(ctx context.Context, e events.Event, p events.AgentEvent
 		action = string(events.AgentPause)
 	}
 	a := &store.Approval{
-		SessionID: e.SessionID,
-		RunID:     e.RunID,
-		SourceID:  p.ToolUseID,
-		Action:    action,
-		Detail:    p.Detail,
+		WorkspaceID: e.WorkspaceID,
+		RunID:       e.RunID,
+		SourceID:    p.ToolUseID,
+		Action:      action,
+		Detail:      p.Detail,
 	}
 	if err := s.store.CreateApproval(ctx, a); err != nil {
 		slog.Warn("approvals: store request failed", "run", e.RunID, "error", err)
@@ -256,9 +256,9 @@ func (s *Service) raise(ctx context.Context, e events.Event, p events.AgentEvent
 
 func (s *Service) publish(ctx context.Context, a *store.Approval, actor domain.MemberID) {
 	if _, err := s.bus.Publish(ctx, events.Event{
-		SessionID: a.SessionID,
-		RunID:     a.RunID,
-		ActorID:   actor,
+		WorkspaceID: a.WorkspaceID,
+		RunID:       a.RunID,
+		ActorID:     actor,
 		Payload: events.ApprovalPayload{
 			RequestID: a.ID,
 			Action:    a.Action,
@@ -281,7 +281,7 @@ func (s *Service) sweep(ctx context.Context) {
 			return
 		case <-t.C:
 			for _, p := range s.roster.expire() {
-				s.publishPresence(ctx, p.Member, p.Session, events.PresenceOffline)
+				s.publishPresence(ctx, p.Member, p.Workspace, events.PresenceOffline)
 			}
 		}
 	}
@@ -289,14 +289,14 @@ func (s *Service) sweep(ctx context.Context) {
 
 // publishPresence announces a member-level transition (online, offline);
 // the run-level watching transitions are the SSH server's attach events.
-func (s *Service) publishPresence(ctx context.Context, member domain.MemberID, session domain.SessionID, state events.PresenceState) {
-	if session == "" {
+func (s *Service) publishPresence(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, state events.PresenceState) {
+	if workspace == "" {
 		return
 	}
 	if _, err := s.bus.Publish(ctx, events.Event{
-		SessionID: session,
-		ActorID:   member,
-		Payload:   events.PresencePayload{State: state},
+		WorkspaceID: workspace,
+		ActorID:     member,
+		Payload:     events.PresencePayload{State: state},
 	}); err != nil {
 		slog.Warn("approvals: publish presence failed", "member", member, "error", err)
 	}
@@ -324,13 +324,13 @@ func (s *Service) isClosed() bool {
 	return s.closed
 }
 
-// List returns a session's inbox, pending requests only unless all is set.
-func (s *Service) List(ctx context.Context, session domain.SessionID, all bool) ([]*store.Approval, error) {
+// List returns a workspace's inbox, pending requests only unless all is set.
+func (s *Service) List(ctx context.Context, workspace domain.WorkspaceID, all bool) ([]*store.Approval, error) {
 	decision := store.ApprovalRequested
 	if all {
 		decision = ""
 	}
-	list, err := s.store.ListApprovals(ctx, session, decision)
+	list, err := s.store.ListApprovals(ctx, workspace, decision)
 	if err != nil {
 		return nil, fmt.Errorf("approvals: list: %w", err)
 	}
@@ -364,20 +364,20 @@ func (s *Service) Decide(ctx context.Context, id string, run domain.RunID, appro
 
 // Heartbeat refreshes a member's presence, publishing the online
 // transition the first time they appear.
-func (s *Service) Heartbeat(ctx context.Context, member domain.MemberID, session domain.SessionID) error {
-	if member == "" || session == "" {
-		return errors.New("approvals: heartbeat needs a member and a session")
+func (s *Service) Heartbeat(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) error {
+	if member == "" || workspace == "" {
+		return errors.New("approvals: heartbeat needs a member and a workspace")
 	}
-	if s.roster.beat(member, session) {
-		s.publishPresence(ctx, member, session, events.PresenceOnline)
+	if s.roster.beat(member, workspace) {
+		s.publishPresence(ctx, member, workspace, events.PresenceOnline)
 	}
 	return nil
 }
 
-// Roster lists present members, narrowed to a session and to the watchers
-// of one run when either is given.
-func (s *Service) Roster(session domain.SessionID, run domain.RunID) []Presence {
-	return s.roster.snapshot(session, run)
+// Roster lists present members, narrowed to a workspace and to the
+// watchers of one run when either is given.
+func (s *Service) Roster(workspace domain.WorkspaceID, run domain.RunID) []Presence {
+	return s.roster.snapshot(workspace, run)
 }
 
 // TTL is how long a member stays online without heartbeating; clients use

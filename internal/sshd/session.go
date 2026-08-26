@@ -3,8 +3,6 @@ package sshd
 import (
 	"context"
 	"fmt"
-	"io"
-	"net"
 	"strings"
 	"sync"
 
@@ -197,28 +195,4 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 
 func sendExitStatus(ch ssh.Channel, code int) {
 	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{uint32(code)}))
-}
-
-// pipe copies both directions between an SSH channel and a TCP conn,
-// half-closing each side as its source drains.
-func pipe(ch ssh.Channel, conn net.Conn) {
-	done := make(chan struct{}, 2)
-	go func() {
-		_, _ = io.Copy(conn, ch)
-		if hc, ok := conn.(interface{ CloseWrite() error }); ok {
-			_ = hc.CloseWrite()
-		} else {
-			_ = conn.Close()
-		}
-		done <- struct{}{}
-	}()
-	go func() {
-		_, _ = io.Copy(ch, conn)
-		_ = ch.CloseWrite()
-		done <- struct{}{}
-	}()
-	<-done
-	<-done
-	_ = ch.Close()
-	_ = conn.Close()
 }

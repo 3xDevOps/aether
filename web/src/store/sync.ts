@@ -35,10 +35,10 @@ function classifyUnreachable(err: unknown): UnreachableKind | null {
 export async function hydrate(store: RootStore, client: Api = api): Promise<boolean> {
   const s = store.getState()
   try {
-    const [info, sessions, members, runs, overlaps, capabilities] =
+    const [info, workspaces, members, runs, overlaps, capabilities] =
       await Promise.all([
         client.serverInfo(),
-        client.sessionList(),
+        client.workspaceListFull(),
         client.memberList(),
         client.runList(),
         // The conflict radar is a warning system, not a data source the app
@@ -50,7 +50,17 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
         client.capabilities().catch(() => null),
       ])
     s.setInfo(info)
-    s.setSessions(sessions)
+    s.setWorkspaces(workspaces)
+    // Every scoped surface reads activeWorkspace, so it must name a
+    // workspace that exists: an unset one, or one deleted while we were
+    // away, falls back to the first by id rather than leaving the app
+    // pointed at nothing.
+    // Read after the fetches: `s` is the pre-await snapshot.
+    const active = store.getState().activeWorkspace
+    if (!active || !workspaces.some((w) => w.id === active)) {
+      const first = [...workspaces].sort((a, b) => a.id.localeCompare(b.id))[0]
+      if (first) s.setActiveWorkspace(first.id)
+    }
     s.setMembers(members)
     s.setRuns(runs)
     // The snapshot is authoritative for the paused badge; runs without the
@@ -104,11 +114,14 @@ export async function applyEvent(
     return false
   }
 
-  // Sessions arrive only by fetch, so an event for one we do not know means a
-  // teammate created it after we hydrated. Without this its runs would be
+  // Workspaces arrive only by fetch, so an event for one we do not know means
+  // a teammate created it after we hydrated. Without this its runs would be
   // stored but rendered nowhere.
-  if (ev.session_id && !store.getState().sessions[ev.session_id]) {
-    await client.sessionList().then(store.getState().setSessions).catch(ignore)
+  if (ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
+    await client
+      .workspaceListFull()
+      .then(store.getState().setWorkspaces)
+      .catch(ignore)
   }
 
   // Members likewise: no member.* event exists, so an actor we have never
@@ -158,7 +171,7 @@ export async function applyEvent(
       )
       break
     }
-    case 'session.timeline': {
+    case 'workspace.timeline': {
       // A paused run still reads `running`, so the board's paused badge comes
       // from the pause and resume steering entries.
       const paused = pausedFromTimeline(ev.payload)
@@ -282,7 +295,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       // the recovery hint.
       if (retryTimer) clearTimeout(retryTimer)
       store.getState().setStreamDead()
-      store.getState().setHydrated(false, `${reason}; mint one with \`aether dash\``)
+      store.getState().setHydrated(false, `${reason}; mint one with \`aether gui\``)
     },
     afterSeq: () => store.getState().lastSeq,
   })
@@ -294,6 +307,6 @@ export function connect(store: RootStore, client: Api = api): () => void {
   }
 }
 
-// A session list we could not refresh leaves the store as it was; the next
-// event for that session tries again.
+// A workspace list we could not refresh leaves the store as it was; the next
+// event for that workspace tries again.
 function ignore(): void {}

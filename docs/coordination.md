@@ -14,7 +14,7 @@ humans either way.
 ```
 <data>/coord/                       0700  coordination root, server-private
 <data>/coord/<run-id>/              0755  bind-mounted into the run container
-<data>/coord/<run-id>/coord.sock    0666  the coordination socket (wire v1)
+<data>/coord/<run-id>/coord2.sock   0666  the coordination socket (wire v2)
 <data>/coord/<run-id>/mcp.json      0444  harness config, written at provision
 ```
 
@@ -36,17 +36,17 @@ its container was provisioned against.
 
 On start the server walks `<data>/coord/`:
 
-- **Coordination enabled.** A run that is still active gets every
-  wire-version socket present in its directory rebound - the socket files
-  on disk are the record of what was provisioned - and the rebind creates a
-  new inode, which is what makes a bridge holding the old one redial. A run
-  that is no longer active has its directory removed and its mailbox rows
-  deleted.
+- **Coordination enabled.** A run that is still active has any retired
+  wire version's socket unlinked, then every socket still on disk for a
+  version this server speaks rebound - the socket files are the record of
+  what was provisioned - and the rebind creates a new inode, which is what
+  makes a bridge holding the old one redial. A run that is no longer active
+  has its directory removed and its mailbox rows deleted.
 - **Coordination disabled.** Old sockets are unlinked and nothing is
   recreated. The directory and its read-only config stay where a live
   container has them mounted; they are simply inert.
 
-## Wire v1
+## Wire v2
 
 Three methods, served as JSON-RPC 2.0 over the NDJSON framing the control
 channel uses (`internal/protocol`). Nothing else is reachable: no control
@@ -54,12 +54,18 @@ verb, no git, no other run's transcript.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `coord.status` | none | own run identity, the peers this run may message (state `active` or `grace` with an expiry), and the unread count |
+| `coord.status` | none | `wire_version`, own `run_id`, `workspace_id` and `member_id`, the peers this run may message (state `active` or `grace` with an expiry), and the unread count |
 | `coord.send` | `to_run_id`, `body` | `message_id` |
 | `coord.inbox` | optional `ack_token` | one batch of `messages` plus the `ack_token` that binds it |
 
 The exact bytes are pinned by the golden fixtures in
-`internal/protocol/testdata/coord-v1/`.
+`internal/protocol/testdata/coord-v2/`.
+
+The socket name carries the wire version, so a container provisioned before
+the v2 cutover holds a bridge dialling `coord.sock` and finds nothing: recovery
+unlinks a retired socket rather than binding it, and the run's coordination
+reports itself unavailable instead of answering in a shape that bridge cannot
+read.
 
 ### Connection limits
 
@@ -94,9 +100,8 @@ window that straddles the restart is not honoured on the other side.
 Anything else is `CodeDenied`.
 This is what keeps the
 mailbox from becoming a general agent-to-agent channel. Overlaps are
-workspace-scoped by construction, so a cross-workspace target can never
-pass; two runs in different sessions of one workspace can overlap, so a
-cross-session send within a workspace is allowed.
+workspace-scoped by construction, so a target in another workspace can never
+pass the check, whoever owns the two runs.
 
 **The edge is agent-derived, so a run may reach 8 peers at most.** The
 radar computes an overlap by intersecting the two runs' own diff
@@ -152,17 +157,15 @@ change, so an overlap first seen in a restart window whose file set never
 changes again can go unannounced - the radar chip still stands for the
 humans either way.
 
-Both halves are audited on the session timeline, as notes attributed to the
-owner of the run each one belongs to: a delivered notice
+Both halves are audited on the workspace timeline, as notes attributed to
+the owner of the run each one belongs to: a delivered notice
 (`coordination notice: run <peer> is also editing <files>`) on the run that
 was told, and every message (`coordination message to run <peer>: <body>`)
-on the run that sent it. A cross-session send within one workspace is
-additionally noted on the receiving run's session
-(`coordination message from run <peer>: <body>`, still attributed to the
-sender's owner), so the humans supervising the target see both halves of
-the exchange. A notice is stamped only once its banner has
-actually reached a terminal, so the feed never says an agent was told when
-its run had no live session.
+on the run that sent it. Both runs of an authorized pair are in the same
+workspace, so one note per exchange reaches the humans supervising either
+side. A notice is stamped only once its banner has actually reached a
+terminal, so the feed never says an agent was told when its run had no live
+terminal to tell.
 
 ## Kill switch
 

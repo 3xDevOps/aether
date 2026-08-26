@@ -20,11 +20,11 @@ type recordingLauncher struct {
 	tasks []string
 }
 
-func (l *recordingLauncher) Launch(_ context.Context, session domain.SessionID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (l *recordingLauncher) Launch(_ context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.tasks = append(l.tasks, task)
-	return &domain.Run{ID: "run_1", SessionID: session, MemberID: member, Task: task, Harness: harness, Mode: mode}, nil
+	return &domain.Run{ID: "run_1", WorkspaceID: workspace, MemberID: member, Task: task, Harness: harness, Mode: mode}, nil
 }
 
 func (l *recordingLauncher) count() int {
@@ -77,15 +77,15 @@ func TestScheduleMissedWhileDownIsSkippedNotCaughtUp(t *testing.T) {
 	if err = db.CreateMember(ctx, m); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
-	ws := &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+	ws := &domain.Workspace{
+		Name:        "proj",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	sess := &domain.Session{WorkspaceID: ws.ID, Name: "effort", BaseBranch: "main"}
-	if err = db.CreateSession(ctx, sess); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	tpl := &store.Template{SessionID: sess.ID, Name: "hourly", Task: "sweep", Harness: "claude", Mode: domain.LaunchHeadless}
+	tpl := &store.Template{WorkspaceID: ws.ID, Name: "hourly", Task: "sweep", Harness: "claude", Mode: domain.LaunchHeadless}
 	if err = db.SaveTemplate(ctx, tpl); err != nil {
 		t.Fatalf("save template: %v", err)
 	}
@@ -154,15 +154,15 @@ func TestImpossibleCronRuleIsRefusedAndNeverFires(t *testing.T) {
 	if err = db.CreateMember(ctx, m); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
-	ws := &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+	ws := &domain.Workspace{
+		Name:        "proj",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	sess := &domain.Session{WorkspaceID: ws.ID, Name: "effort", BaseBranch: "main"}
-	if err = db.CreateSession(ctx, sess); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	tpl := &store.Template{SessionID: sess.ID, Name: "nightly-deps", Task: "sweep", Harness: "claude", Mode: domain.LaunchHeadless}
+	tpl := &store.Template{WorkspaceID: ws.ID, Name: "nightly-deps", Task: "sweep", Harness: "claude", Mode: domain.LaunchHeadless}
 	if err = db.SaveTemplate(ctx, tpl); err != nil {
 		t.Fatalf("save template: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestImpossibleCronRuleIsRefusedAndNeverFires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, saveErr := svc.SaveSchedule(ctx, sess.ID, tpl.Name, "0 0 31 4 *", m.ID); !errors.Is(saveErr, ErrInvalidDefinition) {
+	if _, saveErr := svc.SaveSchedule(ctx, ws.ID, tpl.Name, "0 0 31 4 *", m.ID); !errors.Is(saveErr, ErrInvalidDefinition) {
 		t.Fatalf("SaveSchedule error = %v, want ErrInvalidDefinition", saveErr)
 	}
 
@@ -221,13 +221,13 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	if err = db.CreateMember(ctx, m); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
-	ws := &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+	ws := &domain.Workspace{
+		Name:        "proj",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
-	}
-	sess := &domain.Session{WorkspaceID: ws.ID, Name: "effort", BaseBranch: "main"}
-	if err = db.CreateSession(ctx, sess); err != nil {
-		t.Fatalf("create session: %v", err)
 	}
 
 	now := time.Date(2026, 8, 13, 3, 30, 0, 0, time.UTC)
@@ -245,18 +245,18 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 
 	// Saving the template itself is fine: a person launching it by hand
 	// supplies the value.
-	open := &store.Template{SessionID: sess.ID, Name: "triage", Task: "triage {{ticket}}", Harness: "claude"}
+	open := &store.Template{WorkspaceID: ws.ID, Name: "triage", Task: "triage {{ticket}}", Harness: "claude"}
 	if err = svc.Save(ctx, open); err != nil {
 		t.Fatalf("save open template: %v", err)
 	}
-	_, err = svc.SaveSchedule(ctx, sess.ID, "triage", "0 * * * *", m.ID)
+	_, err = svc.SaveSchedule(ctx, ws.ID, "triage", "0 * * * *", m.ID)
 	if !errors.Is(err, ErrInvalidDefinition) {
 		t.Fatalf("SaveSchedule error = %v, want ErrInvalidDefinition", err)
 	}
 	if !strings.Contains(err.Error(), "ticket") {
 		t.Fatalf("SaveSchedule error = %q, want it to name the missing parameter", err)
 	}
-	stored, err := db.ListSchedules(ctx, sess.ID)
+	stored, err := db.ListSchedules(ctx, ws.ID)
 	if err != nil {
 		t.Fatalf("list schedules: %v", err)
 	}
@@ -265,13 +265,13 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	}
 
 	ready := &store.Template{
-		SessionID: sess.ID, Name: "sweep", Task: "sweep {{ecosystem}}",
+		WorkspaceID: ws.ID, Name: "sweep", Task: "sweep {{ecosystem}}",
 		Params: map[string]string{"ecosystem": "go"}, Harness: "claude",
 	}
 	if err = svc.Save(ctx, ready); err != nil {
 		t.Fatalf("save defaulted template: %v", err)
 	}
-	if _, err = svc.SaveSchedule(ctx, sess.ID, "sweep", "0 * * * *", m.ID); err != nil {
+	if _, err = svc.SaveSchedule(ctx, ws.ID, "sweep", "0 * * * *", m.ID); err != nil {
 		t.Fatalf("SaveSchedule for a fully defaulted template: %v", err)
 	}
 	if err = svc.Start(ctx); err != nil {

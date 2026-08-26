@@ -1,7 +1,7 @@
-// The team surfaces (): presence, the shared approval inbox, the
-// session activity feed, and budgets. They reach into the run board and the
-// status bar through the slots those views expose, and the two full views
-// are ordinary registry routes.
+// The team surfaces: presence, the shared approval inbox, the workspace
+// activity feed, and budgets. They reach into the run board and the status
+// bar through the slots those views expose, and the two full views are
+// ordinary registry routes.
 
 import { registerSlot } from '@/components/slots'
 import type { Api } from '@/lib/api'

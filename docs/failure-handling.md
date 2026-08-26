@@ -79,20 +79,20 @@ against the runtime's actual containers:
 
 An interrupted run relaunches in one click (`aether relaunch <run>`, or the
 run card). The relaunch is a new run cloned from the published branch, and
-where the harness supports it the agent is asked to continue its session:
-Claude Code gets `--continue`. A harness with no resume flag starts fresh,
+where the harness supports it the agent is asked to continue its own
+conversation: Claude Code gets `--continue`. A harness with no resume flag starts fresh,
 and a deployment-supplied argv override never has one appended - nothing
 checks the override is still that CLI. See [harnesses.md](harnesses.md).
 
-`--continue` names no session. Every run mounts its checkout at the same
-container path and shares one credential home per member, so it resumes that
-member's most recent conversation at that path - which after a reboot that
+`--continue` names no conversation. Every run mounts its checkout at the
+same container path and shares one credential home per member, so it resumes
+that member's most recent conversation at that path - which after a reboot that
 interrupted several of their runs is not necessarily this one, and not
 necessarily one from this workspace. Treat the resume as a convenience, not
 a guarantee, and read the agent's first turn before steering it.
 
 Relaunching a run that finished on its own does *not* resume: there is no
-interrupted session behind it.
+interrupted conversation behind it.
 
 ### Disk pressure
 
@@ -130,7 +130,7 @@ partial work is committed as `wip:`.
 The notification path from there:
 
 - **Dashboard**: the sidebar badges how many runs are waiting on a human,
-  those sessions sort to the top, and the run card shows the reason.
+  those runs sort to the top, and the run card shows the reason.
 - **CLI**: `aether runs` prints a notice when any run is waiting;
   `aether runs --attention` lists only those.
 

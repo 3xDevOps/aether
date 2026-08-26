@@ -11,51 +11,90 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// TestSessionSteerOthersRoundTrip covers create/update/narrow-mutator
+// TestWorkspaceSteerOthersRoundTrip covers create/update/narrow-mutator
 // paths for the steer_others column, plus rejection of undefined values.
-func TestSessionSteerOthersRoundTrip(t *testing.T) {
+func TestWorkspaceSteerOthersRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
-	w := mustCreateWorkspace(t, db)
 
-	s := &domain.Session{WorkspaceID: w.ID, Name: "locked", BaseBranch: "main",
-		SteerOthers: domain.SteerOthersAdminsOnly}
-	if err := db.CreateSession(ctx, s); err != nil {
-		t.Fatalf("CreateSession: %v", err)
+	w := &domain.Workspace{
+		Name:        "locked",
+		BaseBranch:  "main",
+		SteerOthers: domain.SteerOthersAdminsOnly,
+		Environment: domain.WorkspaceEnvironment{CustomImage: "alpine:3.20"},
 	}
-	got, err := db.GetSession(ctx, s.ID)
+	if err := db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	got, err := db.GetWorkspace(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("GetSession: %v", err)
+		t.Fatalf("GetWorkspace: %v", err)
 	}
 	if got.SteerOthers != domain.SteerOthersAdminsOnly {
 		t.Fatalf("steer_others = %q, want %q", got.SteerOthers, domain.SteerOthersAdminsOnly)
 	}
 
-	if serr := db.SetSessionSteerOthers(ctx, s.ID, ""); serr != nil {
-		t.Fatalf("SetSessionSteerOthers: %v", serr)
+	if serr := db.SetWorkspaceSteerOthers(ctx, w.ID, ""); serr != nil {
+		t.Fatalf("SetWorkspaceSteerOthers: %v", serr)
 	}
-	got, err = db.GetSession(ctx, s.ID)
+	got, err = db.GetWorkspace(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("GetSession after set: %v", err)
+		t.Fatalf("GetWorkspace after set: %v", err)
 	}
 	if got.SteerOthers != "" {
 		t.Fatalf("steer_others = %q, want empty", got.SteerOthers)
 	}
 	// The narrow mutator touches nothing else.
-	if got.Name != "locked" || got.BaseBranch != "main" || !got.CreatedAt.Equal(s.CreatedAt) {
-		t.Fatalf("SetSessionSteerOthers clobbered fields: %+v", got)
+	if got.Name != "locked" || got.BaseBranch != "main" || !got.CreatedAt.Equal(w.CreatedAt) {
+		t.Fatalf("SetWorkspaceSteerOthers clobbered fields: %+v", got)
 	}
 
-	if err := db.SetSessionSteerOthers(ctx, s.ID, "sometimes"); err == nil {
-		t.Fatal("SetSessionSteerOthers accepted an undefined value")
+	if err := db.SetWorkspaceSteerOthers(ctx, w.ID, "sometimes"); err == nil {
+		t.Fatal("SetWorkspaceSteerOthers accepted an undefined value")
 	}
-	s.SteerOthers = "sometimes"
-	if err := db.UpdateSession(ctx, s); err == nil {
-		t.Fatal("UpdateSession accepted an undefined steer_others")
+	w.SteerOthers = "sometimes"
+	if err := db.UpdateWorkspace(ctx, w); err == nil {
+		t.Fatal("UpdateWorkspace accepted an undefined steer_others")
 	}
 
-	if err := db.SetSessionSteerOthers(ctx, "sess_missing", ""); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("SetSessionSteerOthers on missing row: %v, want ErrNotFound", err)
+	if err := db.SetWorkspaceSteerOthers(ctx, "ws_missing", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetWorkspaceSteerOthers on missing row: %v, want ErrNotFound", err)
+	}
+}
+
+// TestWorkspaceBaseBranchDefaults pins the fallback: a workspace created
+// without a base branch gets the default rather than an empty column.
+func TestWorkspaceBaseBranchDefaults(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	w := &domain.Workspace{
+		Name:        "bare",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "alpine:3.20"},
+	}
+	if err := db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if w.BaseBranch != domain.DefaultBaseBranch {
+		t.Fatalf("created base branch = %q, want %q", w.BaseBranch, domain.DefaultBaseBranch)
+	}
+	got, err := db.GetWorkspace(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if got.BaseBranch != domain.DefaultBaseBranch {
+		t.Fatalf("stored base branch = %q, want %q", got.BaseBranch, domain.DefaultBaseBranch)
+	}
+
+	w.BaseBranch = "develop"
+	if err := db.UpdateWorkspace(ctx, w); err != nil {
+		t.Fatalf("UpdateWorkspace: %v", err)
+	}
+	if got, err = db.GetWorkspace(ctx, w.ID); err != nil {
+		t.Fatalf("GetWorkspace after update: %v", err)
+	}
+	if got.BaseBranch != "develop" {
+		t.Fatalf("updated base branch = %q, want develop", got.BaseBranch)
 	}
 }
 
@@ -64,9 +103,8 @@ func TestSetRunProtected(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunRunning)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
 
 	if r.Protected {
 		t.Fatal("new run is protected by default")
@@ -103,7 +141,8 @@ func TestSetRunProtected(t *testing.T) {
 
 // TestPermissionsMigrationUpgradesV3 builds a genuine v3 database, seeds
 // rows, then opens it: v4 must add the columns with permissive defaults
-// and lose nothing.
+// and lose nothing. The seed uses the pre-v12 sessions shape on purpose;
+// the collapse migration rehomes it onto the workspace.
 func TestPermissionsMigrationUpgradesV3(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
@@ -150,12 +189,12 @@ func TestPermissionsMigrationUpgradesV3(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
-	sess, err := db.GetSession(ctx, "s1")
+	ws, err := db.GetWorkspace(ctx, "w1")
 	if err != nil {
-		t.Fatalf("GetSession after migration: %v", err)
+		t.Fatalf("GetWorkspace after migration: %v", err)
 	}
-	if sess.SteerOthers != "" {
-		t.Fatalf("migrated steer_others = %q, want permissive default", sess.SteerOthers)
+	if ws.SteerOthers != "" {
+		t.Fatalf("migrated steer_others = %q, want permissive default", ws.SteerOthers)
 	}
 	run, err := db.GetRun(ctx, "r1")
 	if err != nil {
@@ -165,8 +204,8 @@ func TestPermissionsMigrationUpgradesV3(t *testing.T) {
 		t.Fatal("migrated run is protected, want permissive default")
 	}
 	// The upgraded schema accepts the new values.
-	if err := db.SetSessionSteerOthers(ctx, "s1", domain.SteerOthersAdminsOnly); err != nil {
-		t.Fatalf("SetSessionSteerOthers after migration: %v", err)
+	if err := db.SetWorkspaceSteerOthers(ctx, "w1", domain.SteerOthersAdminsOnly); err != nil {
+		t.Fatalf("SetWorkspaceSteerOthers after migration: %v", err)
 	}
 	if err := db.SetRunProtected(ctx, "r1", true); err != nil {
 		t.Fatalf("SetRunProtected after migration: %v", err)

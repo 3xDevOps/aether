@@ -4,12 +4,9 @@ import {
   CheckCheck,
   Compass,
   Download,
-  Eye,
-  EyeOff,
   FileText,
   FolderGit2,
   GitMerge,
-  Layers,
   LayoutGrid,
   List,
   MessageSquarePlus,
@@ -55,13 +52,11 @@ export function PaletteBody({
   onTemplates: () => void
 }) {
   const runs = useAttentionRuns()
-  const sessions = useStore((s) => s.sessions)
+  const workspaces = useStore((s) => s.workspaces)
   const members = useStore((s) => s.members)
   const route = useStore((s) => s.route)
   const navigate = useStore((s) => s.navigate)
   const ackAll = useStore((s) => s.ackAll)
-  const showIdle = useStore((s) => s.showIdle)
-  const toggleIdle = useStore((s) => s.toggleIdle)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const pausedRuns = useStore((s) => s.pausedRuns)
   const cap = useCapability()
@@ -207,10 +202,6 @@ export function PaletteBody({
             <CheckCheck />
             Mark all runs seen
           </CommandItem>
-          <CommandItem onSelect={() => { onDone(); toggleIdle() }}>
-            {showIdle ? <EyeOff /> : <Eye />}
-            {showIdle ? 'Hide' : 'Show'} idle sessions
-          </CommandItem>
         </CommandGroup>
 
         {(cap.hasMethod('member.approve') ||
@@ -263,7 +254,7 @@ export function PaletteBody({
           {runs.map(({ run, state }) => (
             <CommandItem
               key={run.id}
-              value={`${run.task} ${run.branch} ${run.harness} ${sessions[run.session_id]?.name ?? ''} ${run.id}`}
+              value={`${run.task} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}`}
               onSelect={() => go('run', { runId: run.id })}
             >
               <StateDot state={state} />
@@ -275,15 +266,17 @@ export function PaletteBody({
           ))}
         </CommandGroup>
 
-        <CommandGroup heading="Sessions">
-          {Object.values(sessions).map((s) => (
+        <CommandGroup heading="Workspaces">
+          {Object.values(workspaces).map((w) => (
             <CommandItem
-              key={s.id}
-              value={`${s.name} ${s.base_branch} ${s.id}`}
-              onSelect={() => go('session', { sessionId: s.id })}
+              key={w.id}
+              value={`${w.name} ${w.base_branch} ${w.id}`}
+              // Opening a workspace also makes it the active scope, so the
+              // sidebar, the board and every launch follow.
+              onSelect={() => go('workspace', { workspaceId: w.id })}
             >
-              <Layers />
-              <span className="truncate">{s.name}</span>
+              <FolderGit2 />
+              <span className="truncate">{w.name}</span>
             </CommandItem>
           ))}
         </CommandGroup>

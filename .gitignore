@@ -50,3 +50,6 @@ desktop/dist/
 /aether.db*
 /aether-data/
 /.worktrees/
+
+# Local agent scratch: evidence and notes, never part of the public repo.
+.omo/

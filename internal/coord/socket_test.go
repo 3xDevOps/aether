@@ -244,6 +244,37 @@ func TestRestartRecovery(t *testing.T) {
 			t.Fatalf("the mounted config must stay in place: %v", err)
 		}
 	})
+
+	// A container provisioned before the v2 cutover holds a bridge that
+	// dials coord.sock and parses the v1 status shape. Serving v2 on that
+	// name would answer it in a shape it cannot read, so recovery retires
+	// the socket instead: the bridge fails to connect and the run reports
+	// coordination unavailable, which the agent already handles.
+	t.Run("retires an old version", func(t *testing.T) {
+		h := newHarness(t, 1)
+		h.start()
+		run := h.run(0)
+		if _, err := h.svc.Provision(ctx, run, nil); err != nil {
+			t.Fatalf("Provision: %v", err)
+		}
+		legacy := filepath.Join(h.dir, "coord", string(run), legacySocketName)
+		if err := os.WriteFile(legacy, nil, socketMode); err != nil {
+			t.Fatalf("stage a v1 socket: %v", err)
+		}
+		if err := h.svc.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+
+		h.restart(t, false)
+		if _, err := os.Lstat(legacy); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the v1 socket survived recovery: %v", err)
+		}
+		// The current version is still bound, so a re-provisioned bridge
+		// keeps working.
+		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), SocketName)); err != nil {
+			t.Errorf("the current socket must stay bound: %v", err)
+		}
+	})
 }
 
 // restart builds a second service over the same data directory, the way a

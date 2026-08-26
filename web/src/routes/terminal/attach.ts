@@ -1,6 +1,6 @@
 // The /ws/attach/{run} socket: one attach per mounted terminal, jittered
 // reconnect, read-only mirror unless the caller asks to steer. The contract is
-// docs/dashboard-api.md - one text header frame, one text ack, terminal output
+// docs/local-gateway.md - one text header frame, one text ack, terminal output
 // as binary frames, input and resizes as text control frames.
 
 import { api } from '@/lib/api'

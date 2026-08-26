@@ -29,7 +29,8 @@ type Config struct {
 }
 
 // Service records per-run usage from the bus, rolls it up per run,
-// member, and session, and enforces session budgets at run admission.
+// member, and workspace, and enforces workspace budgets at run
+// admission.
 type Service struct {
 	store Store
 	bus   events.Bus
@@ -41,9 +42,9 @@ type Service struct {
 	sub     events.Subscription
 	closed  bool
 	lastSeq uint64
-	// state is the last budget state published per session, so only
+	// state is the last budget state published per workspace, so only
 	// transitions reach the bus.
-	state map[domain.SessionID]events.BudgetState
+	state map[domain.WorkspaceID]events.BudgetState
 }
 
 // New builds the service; call Start to begin consuming events.
@@ -54,7 +55,7 @@ func New(cfg Config) (*Service, error) {
 	return &Service{
 		store: cfg.Store,
 		bus:   cfg.Bus,
-		state: map[domain.SessionID]events.BudgetState{},
+		state: map[domain.WorkspaceID]events.BudgetState{},
 	}, nil
 }
 
@@ -117,7 +118,7 @@ func (s *Service) subscribe(ctx context.Context, replay bool) (events.Subscripti
 }
 
 // consume dispatches bus events until the service is closed. Losing a
-// run.cost event would understate a session's spend for good, so a
+// run.cost event would understate a workspace's spend for good, so a
 // detected drop resubscribes with replay from the last handled cursor.
 func (s *Service) consume(ctx context.Context) {
 	for {
@@ -185,7 +186,7 @@ func (s *Service) handle(ctx context.Context, e events.Event) {
 	s.mu.Unlock()
 }
 
-// record stores a metered result and re-evaluates the session's budget.
+// record stores a metered result and re-evaluates the workspace's budget.
 func (s *Service) record(ctx context.Context, run domain.RunID, p events.RunCostPayload) {
 	r, err := s.store.GetRun(ctx, run)
 	if err != nil {
@@ -194,7 +195,7 @@ func (s *Service) record(ctx context.Context, run domain.RunID, p events.RunCost
 	}
 	c := &store.RunCost{
 		RunID:        r.ID,
-		SessionID:    r.SessionID,
+		WorkspaceID:  r.WorkspaceID,
 		MemberID:     r.MemberID,
 		InputTokens:  p.InputTokens,
 		OutputTokens: p.OutputTokens,
@@ -205,7 +206,7 @@ func (s *Service) record(ctx context.Context, run domain.RunID, p events.RunCost
 		slog.Warn("cost: record usage failed", "run", run, "error", err)
 		return
 	}
-	s.announce(ctx, r.SessionID)
+	s.announce(ctx, r.WorkspaceID)
 }
 
 // markUnmetered records a finished run nobody measured, and announces it
@@ -230,35 +231,35 @@ func (s *Service) markUnmetered(ctx context.Context, run domain.RunID) {
 		return
 	}
 	if err := s.store.PutRunCost(ctx, &store.RunCost{
-		RunID: r.ID, SessionID: r.SessionID, MemberID: r.MemberID,
+		RunID: r.ID, WorkspaceID: r.WorkspaceID, MemberID: r.MemberID,
 	}); err != nil {
 		slog.Warn("cost: record unmetered run failed", "run", run, "error", err)
 		return
 	}
 	if _, err := s.bus.Publish(ctx, events.Event{
-		SessionID: r.SessionID,
-		RunID:     r.ID,
-		Payload:   events.RunCostPayload{Metered: false},
+		WorkspaceID: r.WorkspaceID,
+		RunID:       r.ID,
+		Payload:     events.RunCostPayload{Metered: false},
 	}); err != nil {
 		slog.Warn("cost: publish unmetered signal failed", "run", run, "error", err)
 	}
-	s.announce(ctx, r.SessionID)
+	s.announce(ctx, r.WorkspaceID)
 }
 
-// Report rolls a session's recorded usage up per member and per run.
-func (s *Service) Report(ctx context.Context, session domain.SessionID) (Report, error) {
-	records, err := s.store.ListRunCosts(ctx, session)
+// Report rolls a workspace's recorded usage up per member and per run.
+func (s *Service) Report(ctx context.Context, workspace domain.WorkspaceID) (Report, error) {
+	records, err := s.store.ListRunCosts(ctx, workspace)
 	if err != nil {
-		return Report{}, fmt.Errorf("cost: report %s: %w", session, err)
+		return Report{}, fmt.Errorf("cost: report %s: %w", workspace, err)
 	}
-	return Roll(session, records), nil
+	return Roll(workspace, records), nil
 }
 
-// Budget reports a session's budget and where its spend sits against it.
-func (s *Service) Budget(ctx context.Context, session domain.SessionID) (Status, error) {
-	st, err := s.status(ctx, session)
+// Budget reports a workspace's budget and where its spend sits against it.
+func (s *Service) Budget(ctx context.Context, workspace domain.WorkspaceID) (Status, error) {
+	st, err := s.status(ctx, workspace)
 	if err != nil {
-		return Status{}, fmt.Errorf("cost: budget %s: %w", session, err)
+		return Status{}, fmt.Errorf("cost: budget %s: %w", workspace, err)
 	}
 	return st, nil
 }
@@ -266,48 +267,48 @@ func (s *Service) Budget(ctx context.Context, session domain.SessionID) (Status,
 // SetBudget applies an admin's change: a positive limit sets or replaces
 // the budget, anything else clears it. The resulting state is published
 // so the timeline and notifications see the edit.
-func (s *Service) SetBudget(ctx context.Context, session domain.SessionID, c Change, by domain.MemberID) (Status, error) {
+func (s *Service) SetBudget(ctx context.Context, workspace domain.WorkspaceID, c Change, by domain.MemberID) (Status, error) {
 	reason := fmt.Sprintf("budget set to $%.2f by %s", c.LimitUSD, by)
 	if c.LimitUSD <= 0 {
-		if err := s.store.DeleteSessionBudget(ctx, session); err != nil {
-			return Status{}, fmt.Errorf("cost: set budget %s: %w", session, err)
+		if err := s.store.DeleteWorkspaceBudget(ctx, workspace); err != nil {
+			return Status{}, fmt.Errorf("cost: set budget %s: %w", workspace, err)
 		}
 		reason = fmt.Sprintf("budget cleared by %s", by)
 	} else {
-		b := &store.SessionBudget{
-			SessionID: session,
-			LimitUSD:  c.LimitUSD,
-			WarnUSD:   c.WarnUSD,
-			Override:  c.Override,
-			UpdatedBy: by,
+		b := &store.WorkspaceBudget{
+			WorkspaceID: workspace,
+			LimitUSD:    c.LimitUSD,
+			WarnUSD:     c.WarnUSD,
+			Override:    c.Override,
+			UpdatedBy:   by,
 		}
-		if err := s.store.SetSessionBudget(ctx, b); err != nil {
-			return Status{}, fmt.Errorf("cost: set budget %s: %w", session, err)
+		if err := s.store.SetWorkspaceBudget(ctx, b); err != nil {
+			return Status{}, fmt.Errorf("cost: set budget %s: %w", workspace, err)
 		}
 		if c.Override {
 			reason += " (override on: the cap admits new runs)"
 		}
 	}
-	st, err := s.status(ctx, session)
+	st, err := s.status(ctx, workspace)
 	if err != nil {
-		return Status{}, fmt.Errorf("cost: set budget %s: %w", session, err)
+		return Status{}, fmt.Errorf("cost: set budget %s: %w", workspace, err)
 	}
 	s.publish(ctx, st, reason)
 	return st, nil
 }
 
-// Admit reports whether member may start a new run in session. It
+// Admit reports whether member may start a new run in workspace. It
 // re-checks the launch capability against a freshly read member row - the
 // RPC boundary's check is not this service's to trust - and then the
-// session's budget. A run already running is never affected: budgets gate
-// admission only.
-func (s *Service) Admit(ctx context.Context, session domain.SessionID, member domain.MemberID) error {
+// workspace's budget. A run already running is never affected: budgets
+// gate admission only.
+func (s *Service) Admit(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID) error {
 	if err := s.checkLaunch(ctx, member); err != nil {
 		return err
 	}
-	st, err := s.status(ctx, session)
+	st, err := s.status(ctx, workspace)
 	if err != nil {
-		return fmt.Errorf("cost: admit run in %s: %w", session, err)
+		return fmt.Errorf("cost: admit run in %s: %w", workspace, err)
 	}
 	if st.Admits() {
 		return nil
@@ -320,8 +321,8 @@ func (s *Service) Admit(ctx context.Context, session domain.SessionID, member do
 		advisory = fmt.Sprintf(" (%d of %d runs are unmetered, so the real spend is higher)",
 			st.Spend.Unmetered, st.Spend.Runs)
 	}
-	return fmt.Errorf("%w: %w: session %s has spent $%.2f of its $%.2f cap%s; an admin can raise the cap or set an override with `aether budget set`",
-		permissions.ErrDenied, ErrBudgetExceeded, session, st.Spend.CostUSD, st.Budget.LimitUSD, advisory)
+	return fmt.Errorf("%w: %w: workspace %s has spent $%.2f of its $%.2f cap%s; an admin can raise the cap or set an override with `aether budget set`",
+		permissions.ErrDenied, ErrBudgetExceeded, workspace, st.Spend.CostUSD, st.Budget.LimitUSD, advisory)
 }
 
 // checkLaunch re-resolves the member and checks the launch capability, so
@@ -344,15 +345,15 @@ func (s *Service) checkLaunch(ctx context.Context, member domain.MemberID) error
 	return nil
 }
 
-// status reads a session's budget and current spend.
-func (s *Service) status(ctx context.Context, session domain.SessionID) (Status, error) {
-	st := Status{Session: session, State: events.BudgetOK}
-	b, err := s.store.GetSessionBudget(ctx, session)
+// status reads a workspace's budget and current spend.
+func (s *Service) status(ctx context.Context, workspace domain.WorkspaceID) (Status, error) {
+	st := Status{Workspace: workspace, State: events.BudgetOK}
+	b, err := s.store.GetWorkspaceBudget(ctx, workspace)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Status{}, err
 	}
 	st.Budget = b
-	records, err := s.store.ListRunCosts(ctx, session)
+	records, err := s.store.ListRunCosts(ctx, workspace)
 	if err != nil {
 		return Status{}, err
 	}
@@ -363,17 +364,17 @@ func (s *Service) status(ctx context.Context, session domain.SessionID) (Status,
 	return st, nil
 }
 
-// announce publishes a session's budget state when it has moved since the
-// last announcement, so ok -> warn -> exceeded is a signal and steady
+// announce publishes a workspace's budget state when it has moved since
+// the last announcement, so ok -> warn -> exceeded is a signal and steady
 // state is silence.
-func (s *Service) announce(ctx context.Context, session domain.SessionID) {
-	st, err := s.status(ctx, session)
+func (s *Service) announce(ctx context.Context, workspace domain.WorkspaceID) {
+	st, err := s.status(ctx, workspace)
 	if err != nil {
-		slog.Warn("cost: budget evaluation failed", "session", session, "error", err)
+		slog.Warn("cost: budget evaluation failed", "workspace", workspace, "error", err)
 		return
 	}
 	s.mu.Lock()
-	changed := s.state[session] != st.State
+	changed := s.state[workspace] != st.State
 	s.mu.Unlock()
 	if !changed {
 		return
@@ -383,13 +384,13 @@ func (s *Service) announce(ctx context.Context, session domain.SessionID) {
 
 func (s *Service) publish(ctx context.Context, st Status, reason string) {
 	s.mu.Lock()
-	s.state[st.Session] = st.State
+	s.state[st.Workspace] = st.State
 	s.mu.Unlock()
 	if _, err := s.bus.Publish(ctx, events.Event{
-		SessionID: st.Session,
-		Payload:   st.payload(reason),
+		WorkspaceID: st.Workspace,
+		Payload:     st.payload(reason),
 	}); err != nil {
-		slog.Warn("cost: publish budget state failed", "session", st.Session, "error", err)
+		slog.Warn("cost: publish budget state failed", "workspace", st.Workspace, "error", err)
 	}
 }
 

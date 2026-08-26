@@ -61,9 +61,26 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">
                   {workspace.name}
                 </span>
+                <span className="font-mono text-xs text-muted-foreground">
+                  {workspace.base_branch}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {workspace.steer_others === 'admins_only'
+                    ? 'admins steer others'
+                    : 'everyone with steer'}
+                </span>
                 <span className="text-xs text-muted-foreground">
                   created {timeAgo(workspace.created_at)}
                 </span>
+                {/* Opening a workspace is also how a member changes scope:
+                    every other surface follows activeWorkspace. */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate('workspace', { workspaceId: workspace.id })}
+                >
+                  Open
+                </Button>
                 {caps.hasWS('shell') && (
                   <Button
                     size="sm"
@@ -94,6 +111,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
 
 function AddForm({ client, onAdded }: { client: Api; onAdded: () => void }) {
   const [name, setName] = useState('')
+  const [baseBranch, setBaseBranch] = useState('main')
   const [image, setImage] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -105,7 +123,11 @@ function AddForm({ client, onAdded }: { client: Api; onAdded: () => void }) {
       const environment = image.trim()
         ? { custom_image: image.trim() }
         : { neutral_image: true }
-      await client.workspaceAdd({ name: name.trim(), environment })
+      await client.workspaceAdd({
+        name: name.trim(),
+        base_branch: baseBranch.trim(),
+        environment,
+      })
       setName('')
       setImage('')
       onAdded()
@@ -136,6 +158,14 @@ function AddForm({ client, onAdded }: { client: Api; onAdded: () => void }) {
         />
       </label>
       <label className="flex-1 space-y-1 text-sm">
+        Base branch
+        <input
+          className={field}
+          value={baseBranch}
+          onChange={(e) => setBaseBranch(e.target.value)}
+        />
+      </label>
+      <label className="flex-1 space-y-1 text-sm">
         Custom image (optional)
         <input
           className={field}
@@ -144,7 +174,7 @@ function AddForm({ client, onAdded }: { client: Api; onAdded: () => void }) {
           onChange={(e) => setImage(e.target.value)}
         />
       </label>
-      <Button type="submit" disabled={busy || !name.trim()}>
+      <Button type="submit" disabled={busy || !name.trim() || !baseBranch.trim()}>
         Add
       </Button>
     </form>

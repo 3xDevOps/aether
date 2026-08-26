@@ -5,7 +5,8 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 // `bun run dev` serves the SPA on its own port and proxies the API and the
-// WebSockets to a running aether-server dashboard gateway.
+// WebSockets to a local gateway started by `aether gui --port 8080`. Point
+// AETHER_DASHBOARD at another address when the gateway binds elsewhere.
 const gateway = process.env.AETHER_DASHBOARD ?? 'http://127.0.0.1:8080'
 
 export default defineConfig({

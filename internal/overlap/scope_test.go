@@ -2,7 +2,6 @@ package overlap
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -10,32 +9,20 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
-// fakeLookup stands in for the store: the active runs plus the sessions
-// they belong to.
+// fakeLookup stands in for the store: the currently active runs.
 type fakeLookup struct {
-	runs     []*domain.Run
-	sessions map[domain.SessionID]*domain.Session
+	runs []*domain.Run
 }
 
 func (f *fakeLookup) ListActiveRuns(context.Context) ([]*domain.Run, error) { return f.runs, nil }
 
-func (f *fakeLookup) GetSession(_ context.Context, id domain.SessionID) (*domain.Session, error) {
-	s, ok := f.sessions[id]
-	if !ok {
-		return nil, fmt.Errorf("no session %s", id)
-	}
-	return s, nil
-}
-
-// oneSession is the single-workspace case: every run in session s1.
-var oneSession = &fakeLookup{sessions: map[domain.SessionID]*domain.Session{
-	"s1": {ID: "s1", WorkspaceID: "w1"},
-}}
+// oneWorkspace is the single-workspace case: every run in workspace w1.
+var oneWorkspace = &fakeLookup{}
 
 // TestOverlapIsScopedToWorkspace pins the only scope in which two runs can
 // really conflict: the same workspace, which is the same git repository.
 // Files like README.md exist in every repo, so runs in different workspaces
-// touching the same path are not in conflict - while two sessions on one
+// touching the same path are not in conflict - while two runs on one
 // workspace share a repo and are.
 func TestOverlapIsScopedToWorkspace(t *testing.T) {
 	ctx := context.Background()
@@ -47,14 +34,9 @@ func TestOverlapIsScopedToWorkspace(t *testing.T) {
 
 	lookup := &fakeLookup{
 		runs: []*domain.Run{
-			{ID: "r1", SessionID: "sA"},
-			{ID: "r2", SessionID: "sB"},
-			{ID: "r3", SessionID: "sC"},
-		},
-		sessions: map[domain.SessionID]*domain.Session{
-			"sA": {ID: "sA", WorkspaceID: "w1"},
-			"sB": {ID: "sB", WorkspaceID: "w2"},
-			"sC": {ID: "sC", WorkspaceID: "w1"},
+			{ID: "r1", WorkspaceID: "w1"},
+			{ID: "r2", WorkspaceID: "w2"},
+			{ID: "r3", WorkspaceID: "w1"},
 		},
 	}
 	idx := NewIndex(bus, lookup, nil)
@@ -65,7 +47,7 @@ func TestOverlapIsScopedToWorkspace(t *testing.T) {
 
 	for _, r := range lookup.runs {
 		if _, err = bus.Publish(ctx, events.Event{
-			SessionID: r.SessionID, RunID: r.ID,
+			WorkspaceID: r.WorkspaceID, RunID: r.ID,
 			Payload: events.RunDiffPayload{Files: []events.FileDiffStat{{Path: "README.md"}}},
 		}); err != nil {
 			t.Fatalf("publish diff: %v", err)

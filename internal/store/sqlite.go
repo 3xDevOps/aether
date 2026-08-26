@@ -72,7 +72,7 @@ func prepareCreate(createdAt time.Time) (id string, ts time.Time, err error) {
 }
 
 // encodeTime converts t to Unix nanoseconds, rejecting instants outside
-// the int64 range (roughly years 1678-2262) — notably the zero time.Time —
+// the int64 range (roughly years 1678-2262) - notably the zero time.Time -
 // instead of silently persisting an overflowed value.
 func encodeTime(t time.Time) (int64, error) {
 	n := t.UnixNano()
@@ -170,10 +170,26 @@ func normalizeWorkspaceEnvironment(e domain.WorkspaceEnvironment) (domain.Worksp
 	return e, nil
 }
 
+// validateWorkspace rejects undefined steer_others values before they are
+// persisted.
+func validateWorkspace(w *domain.Workspace, op string) error {
+	if !domain.ValidSteerOthers(w.SteerOthers) {
+		return fmt.Errorf("store: %s workspace: invalid steer_others %q", op, w.SteerOthers)
+	}
+	return nil
+}
+
 func (d *DB) CreateWorkspace(ctx context.Context, w *domain.Workspace) error {
+	if err := validateWorkspace(w, "create"); err != nil {
+		return err
+	}
 	id, ts, err := prepareCreate(w.CreatedAt)
 	if err != nil {
 		return err
+	}
+	baseBranch := w.BaseBranch
+	if baseBranch == "" {
+		baseBranch = domain.DefaultBaseBranch
 	}
 	envDef, err := normalizeWorkspaceEnvironment(w.Environment)
 	if err != nil {
@@ -196,13 +212,15 @@ func (d *DB) CreateWorkspace(ctx context.Context, w *domain.Workspace) error {
 		image = ""
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO workspaces (id, name, image, env, setup_script, created_at, environment)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO workspaces (id, name, image, env, setup_script, created_at, environment,
+		                         base_branch, steer_others)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, w.Name, image, string(variables), envDef.SetupPolicy.Script, createdAt, string(environment),
+		baseBranch, w.SteerOthers,
 	); err != nil {
 		return fmt.Errorf("store: create workspace: %w", mapConstraint(err, ErrNotFound))
 	}
-	w.ID, w.CreatedAt, w.Environment = domain.WorkspaceID(id), ts, envDef
+	w.ID, w.CreatedAt, w.Environment, w.BaseBranch = domain.WorkspaceID(id), ts, envDef, baseBranch
 	return nil
 }
 
@@ -213,7 +231,8 @@ func scanWorkspace(row interface{ Scan(...any) error }) (*domain.Workspace, erro
 		legacySetup, environment string
 		createdAt                int64
 	)
-	if err := row.Scan(&w.ID, &w.Name, &legacyImage, &legacyEnv, &legacySetup, &createdAt, &environment); err != nil {
+	if err := row.Scan(&w.ID, &w.Name, &legacyImage, &legacyEnv, &legacySetup, &createdAt,
+		&environment, &w.BaseBranch, &w.SteerOthers); err != nil {
 		return nil, err
 	}
 	if environment != "" && environment != "{}" {
@@ -237,7 +256,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (*domain.Workspace, erro
 	return &w, nil
 }
 
-const workspaceCols = `id, name, image, env, setup_script, created_at, environment`
+const workspaceCols = `id, name, image, env, setup_script, created_at, environment, base_branch, steer_others`
 
 func (d *DB) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
 	w, err := scanWorkspace(d.db.QueryRowContext(ctx,
@@ -261,9 +280,16 @@ func (d *DB) ListWorkspaces(ctx context.Context) ([]*domain.Workspace, error) {
 }
 
 func (d *DB) UpdateWorkspace(ctx context.Context, w *domain.Workspace) error {
+	if err := validateWorkspace(w, "update"); err != nil {
+		return err
+	}
 	envDef, err := normalizeWorkspaceEnvironment(w.Environment)
 	if err != nil {
 		return err
+	}
+	baseBranch := w.BaseBranch
+	if baseBranch == "" {
+		baseBranch = domain.DefaultBaseBranch
 	}
 	environment, err := json.Marshal(envDef)
 	if err != nil {
@@ -278,13 +304,27 @@ func (d *DB) UpdateWorkspace(ctx context.Context, w *domain.Workspace) error {
 		image = ""
 	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE workspaces SET name = ?, image = ?, env = ?, setup_script = ?, environment = ?
+		`UPDATE workspaces SET name = ?, image = ?, env = ?, setup_script = ?, environment = ?,
+		     base_branch = ?, steer_others = ?
 		 WHERE id = ?`,
-		w.Name, image, string(variables), envDef.SetupPolicy.Script, string(environment), w.ID))
+		w.Name, image, string(variables), envDef.SetupPolicy.Script, string(environment),
+		baseBranch, w.SteerOthers, w.ID))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update workspace: %w", mapConstraint(err, ErrNotFound))
 	} else if err == nil {
-		w.Environment = envDef
+		w.Environment, w.BaseBranch = envDef, baseBranch
+	}
+	return err
+}
+
+func (d *DB) SetWorkspaceSteerOthers(ctx context.Context, id domain.WorkspaceID, steerOthers string) error {
+	if !domain.ValidSteerOthers(steerOthers) {
+		return fmt.Errorf("store: set workspace steer_others: invalid value %q", steerOthers)
+	}
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE workspaces SET steer_others = ? WHERE id = ?`, steerOthers, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set workspace steer_others: %w", err)
 	}
 	return err
 }
@@ -509,7 +549,7 @@ func (d *DB) GetPendingWorkspaceShell(ctx context.Context, id string) (*PendingW
 	return s, nil
 }
 
-// ListPendingWorkspaceShellsBefore returns a bounded batch of stale sessions.
+// ListPendingWorkspaceShellsBefore returns a bounded batch of stale shells.
 func (d *DB) ListPendingWorkspaceShellsBefore(ctx context.Context, before time.Time, limit int) ([]*PendingWorkspaceShell, error) {
 	if limit <= 0 {
 		return nil, nil
@@ -608,102 +648,6 @@ func (d *DB) ListHarnessDefinitions(ctx context.Context, member domain.MemberID)
 
 func (d *DB) DeleteWorkspace(ctx context.Context, id domain.WorkspaceID) error {
 	return d.execDelete(ctx, "delete workspace", `DELETE FROM workspaces WHERE id = ?`, id)
-}
-
-// Sessions
-
-// validateSession rejects undefined steer_others values before they are
-// persisted.
-func validateSession(s *domain.Session, op string) error {
-	if !domain.ValidSteerOthers(s.SteerOthers) {
-		return fmt.Errorf("store: %s session: invalid steer_others %q", op, s.SteerOthers)
-	}
-	return nil
-}
-
-func (d *DB) CreateSession(ctx context.Context, s *domain.Session) error {
-	if err := validateSession(s, "create"); err != nil {
-		return err
-	}
-	id, ts, err := prepareCreate(s.CreatedAt)
-	if err != nil {
-		return err
-	}
-	createdAt, err := encodeTime(ts)
-	if err != nil {
-		return fmt.Errorf("store: create session: %w", err)
-	}
-	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO sessions (id, workspace_id, name, base_branch, steer_others, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		id, s.WorkspaceID, s.Name, s.BaseBranch, s.SteerOthers, createdAt,
-	); err != nil {
-		return fmt.Errorf("store: create session: %w", mapConstraint(err, ErrNotFound))
-	}
-	s.ID, s.CreatedAt = domain.SessionID(id), ts
-	return nil
-}
-
-func scanSession(row interface{ Scan(...any) error }) (*domain.Session, error) {
-	var (
-		s         domain.Session
-		createdAt int64
-	)
-	if err := row.Scan(&s.ID, &s.WorkspaceID, &s.Name, &s.BaseBranch, &s.SteerOthers, &createdAt); err != nil {
-		return nil, err
-	}
-	s.CreatedAt = decodeTime(createdAt)
-	return &s, nil
-}
-
-const sessionCols = `id, workspace_id, name, base_branch, steer_others, created_at`
-
-func (d *DB) GetSession(ctx context.Context, id domain.SessionID) (*domain.Session, error) {
-	s, err := scanSession(d.db.QueryRowContext(ctx,
-		`SELECT `+sessionCols+` FROM sessions WHERE id = ?`, id))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get session: %w", err)
-	}
-	return s, nil
-}
-
-func (d *DB) ListSessions(ctx context.Context) ([]*domain.Session, error) {
-	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+sessionCols+` FROM sessions ORDER BY id`)
-	if err != nil {
-		return nil, fmt.Errorf("store: list sessions: %w", err)
-	}
-	return collect(rows, scanSession)
-}
-
-func (d *DB) ListSessionsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Session, error) {
-	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+sessionCols+` FROM sessions WHERE workspace_id = ? ORDER BY id`, id)
-	if err != nil {
-		return nil, fmt.Errorf("store: list sessions by workspace: %w", err)
-	}
-	return collect(rows, scanSession)
-}
-
-func (d *DB) UpdateSession(ctx context.Context, s *domain.Session) error {
-	if err := validateSession(s, "update"); err != nil {
-		return err
-	}
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE sessions SET workspace_id = ?, name = ?, base_branch = ?, steer_others = ?
-		 WHERE id = ?`,
-		s.WorkspaceID, s.Name, s.BaseBranch, s.SteerOthers, s.ID))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: update session: %w", mapConstraint(err, ErrNotFound))
-	}
-	return err
-}
-
-func (d *DB) DeleteSession(ctx context.Context, id domain.SessionID) error {
-	return d.execDelete(ctx, "delete session", `DELETE FROM sessions WHERE id = ?`, id)
 }
 
 // Members
@@ -887,11 +831,11 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 		return fmt.Errorf("store: create run: finished at: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO runs (id, session_id, member_id, task, harness, mode, status,
+		`INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, tool_snapshot_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, r.SessionID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
+		id, r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.ToolSnapshotID,
 	); err != nil {
@@ -907,7 +851,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		createdAt             int64
 		startedAt, finishedAt *int64
 	)
-	if err := row.Scan(&r.ID, &r.SessionID, &r.MemberID, &r.Task, &r.Harness,
+	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.ToolSnapshotID); err != nil {
 		return nil, err
@@ -918,7 +862,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	return &r, nil
 }
 
-const runCols = `id, session_id, member_id, task, harness, mode, status,
+const runCols = `id, workspace_id, member_id, task, harness, mode, status,
 	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id, tool_snapshot_id`
 
 func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
@@ -933,11 +877,11 @@ func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 	return r, nil
 }
 
-func (d *DB) ListRunsBySession(ctx context.Context, id domain.SessionID) ([]*domain.Run, error) {
+func (d *DB) ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Run, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+runCols+` FROM runs WHERE session_id = ? ORDER BY id`, id)
+		`SELECT `+runCols+` FROM runs WHERE workspace_id = ? ORDER BY id`, id)
 	if err != nil {
-		return nil, fmt.Errorf("store: list runs by session: %w", err)
+		return nil, fmt.Errorf("store: list runs by workspace: %w", err)
 	}
 	return collect(rows, scanRun)
 }
@@ -986,12 +930,12 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		return fmt.Errorf("store: update run: finished at: %w", err)
 	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE runs SET session_id = ?, member_id = ?, task = ?, harness = ?,
+		`UPDATE runs SET workspace_id = ?, member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
 		     profile_snapshot_id = ?, tool_snapshot_id = ?
 		 WHERE id = ?`,
-		r.SessionID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
+		r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.ToolSnapshotID, r.ID))
 	if err != nil && !errors.Is(err, ErrNotFound) {
@@ -1057,10 +1001,9 @@ func (d *DB) SetRunToolSnapshot(ctx context.Context, id domain.RunID, snapshot d
 			  AND EXISTS (
 				SELECT 1
 				FROM tool_snapshots ts
-				JOIN sessions s ON s.workspace_id = ts.workspace_id
 				WHERE ts.id = ?
 				  AND ts.member_id = runs.member_id
-				  AND s.id = runs.session_id
+				  AND ts.workspace_id = runs.workspace_id
 			  )`, snapshot, id, snapshot)
 	}
 	if err != nil {
@@ -1081,18 +1024,6 @@ func (d *DB) SetRunProtected(ctx context.Context, id domain.RunID, protected boo
 		`UPDATE runs SET protected = ? WHERE id = ?`, protected, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: set run protected: %w", err)
-	}
-	return err
-}
-
-func (d *DB) SetSessionSteerOthers(ctx context.Context, id domain.SessionID, steerOthers string) error {
-	if !domain.ValidSteerOthers(steerOthers) {
-		return fmt.Errorf("store: set session steer_others: invalid value %q", steerOthers)
-	}
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE sessions SET steer_others = ? WHERE id = ?`, steerOthers, id))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: set session steer_others: %w", err)
 	}
 	return err
 }

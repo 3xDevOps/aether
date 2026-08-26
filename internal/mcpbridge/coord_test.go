@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func (p livePeers) Overlaps(context.Context) ([]overlap.Entry, error) {
 type coordStack struct {
 	svc        *coord.Service
 	bus        *events.InProc
-	session    domain.SessionID
+	workspace  domain.WorkspaceID
 	runA, runB domain.RunID
 	sockA      string
 	sockB      string
@@ -54,7 +55,15 @@ type coordStack struct {
 func newCoordStack(t *testing.T) *coordStack {
 	t.Helper()
 	ctx := t.Context()
-	dir := t.TempDir()
+	// t.TempDir() embeds the test's name, and these names are long enough
+	// to push a coordination socket past the 108-byte sun_path ceiling.
+	// Take a short root instead so the path budget belongs to the run ID
+	// rather than to the test name.
+	dir, err := os.MkdirTemp("", "coord")
+	if err != nil {
+		t.Fatalf("make temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	db, err := store.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
@@ -67,13 +76,13 @@ func newCoordStack(t *testing.T) *coordStack {
 	}
 	t.Cleanup(func() { _ = bus.Close() })
 
-	ws := &domain.Workspace{Name: "proj", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+	ws := &domain.Workspace{
+		Name:        "proj",
+		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if werr := db.CreateWorkspace(ctx, ws); werr != nil {
 		t.Fatalf("create workspace: %v", werr)
-	}
-	ses := &domain.Session{WorkspaceID: ws.ID, Name: "auth", BaseBranch: "main"}
-	if serr := db.CreateSession(ctx, ses); serr != nil {
-		t.Fatalf("create session: %v", serr)
 	}
 	mem := &domain.Member{DisplayName: "Ada", TailnetLogin: "ada@example.com", Color: "#e6194b", Role: domain.RoleCollaborator}
 	if merr := db.CreateMember(ctx, mem); merr != nil {
@@ -82,12 +91,12 @@ func newCoordStack(t *testing.T) *coordStack {
 	runs := make([]domain.RunID, 2)
 	for i := range runs {
 		r := &domain.Run{
-			SessionID: ses.ID,
-			MemberID:  mem.ID,
-			Task:      fmt.Sprintf("task %d", i),
-			Harness:   "claude",
-			Mode:      domain.LaunchTUI,
-			Status:    domain.RunRunning,
+			WorkspaceID: ws.ID,
+			MemberID:    mem.ID,
+			Task:        fmt.Sprintf("task %d", i),
+			Harness:     "claude",
+			Mode:        domain.LaunchTUI,
+			Status:      domain.RunRunning,
 		}
 		if rerr := db.CreateRun(ctx, r); rerr != nil {
 			t.Fatalf("create run %d: %v", i, rerr)
@@ -110,7 +119,7 @@ func newCoordStack(t *testing.T) *coordStack {
 		t.Fatalf("coord.Start: %v", serr)
 	}
 
-	s := &coordStack{svc: svc, bus: bus, session: ses.ID, runA: runs[0], runB: runs[1]}
+	s := &coordStack{svc: svc, bus: bus, workspace: ws.ID, runA: runs[0], runB: runs[1]}
 	for i, run := range runs {
 		provisioned, perr := svc.Provision(ctx, run, nil)
 		if perr != nil {
@@ -128,11 +137,11 @@ func newCoordStack(t *testing.T) *coordStack {
 
 // TestBridgeAgainstRealCoordination drives the spec's integration case end
 // to end: two agents, each on its own bridge, exchanging a message over
-// real sockets, with the send landing in the session timeline.
+// real sockets, with the send landing in the workspace timeline.
 func TestBridgeAgainstRealCoordination(t *testing.T) {
 	stack := newCoordStack(t)
 	sub, err := stack.bus.Subscribe(t.Context(), events.SubscribeOptions{
-		Filter: events.Filter{Session: stack.session},
+		Filter: events.Filter{Workspace: stack.workspace},
 	})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
@@ -281,7 +290,7 @@ func waitForTimeline(t *testing.T, sub events.Subscription, body string) {
 				return
 			}
 		case <-deadline:
-			t.Fatal("timed out waiting for the message to reach the session timeline")
+			t.Fatal("timed out waiting for the message to reach the workspace timeline")
 		}
 	}
 }

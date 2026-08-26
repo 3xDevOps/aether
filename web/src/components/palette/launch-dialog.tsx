@@ -23,10 +23,10 @@ const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 export function LaunchDialog() {
-  const sessions = useStore((s) => s.sessions)
+  const workspaceID = useStore((s) => s.activeWorkspace)
+  const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
-  const [sessionID, setSessionID] = useState(Object.keys(sessions)[0] ?? '')
   const [task, setTask] = useState('')
   const [harness, setHarness] = useState(harnesses[0])
   const [mode, setMode] = useState(modes[0])
@@ -36,7 +36,7 @@ export function LaunchDialog() {
     setLaunching(true)
     try {
       const run = await api.runLaunch({
-        session_id: sessionID,
+        workspace_id: workspaceID,
         task: task.trim(),
         harness,
         mode,
@@ -56,7 +56,7 @@ export function LaunchDialog() {
         <DialogHeader>
           <DialogTitle>Launch a run</DialogTitle>
           <DialogDescription>
-            The agent starts in a container on the session's base branch.
+            The agent starts in a container on the workspace's base branch.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -67,20 +67,20 @@ export function LaunchDialog() {
             void launch()
           }}
         >
-          <label className="block space-y-1 text-sm">
-            Session
-            <select
-              className={field}
-              value={sessionID}
-              onChange={(e) => setSessionID(e.target.value)}
-            >
-              {Object.values(sessions).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {/* Where the run lands, stated rather than asked: the sidebar's
+              switcher is the one place scope changes. */}
+          <p className="text-sm" aria-label="Target workspace">
+            {workspace ? (
+              <>
+                Launching into <span className="font-medium">{workspace.name}</span>{' '}
+                <span className="text-muted-foreground">({workspace.base_branch})</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">
+                Pick a workspace in the sidebar first.
+              </span>
+            )}
+          </p>
           <label className="block space-y-1 text-sm">
             Task
             <textarea
@@ -130,7 +130,7 @@ export function LaunchDialog() {
           <Button
             type="submit"
             form="launch-run"
-            disabled={launching || !task.trim() || !sessionID}
+            disabled={launching || !task.trim() || !workspaceID}
           >
             Launch
           </Button>

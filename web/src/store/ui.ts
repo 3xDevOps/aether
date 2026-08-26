@@ -16,13 +16,18 @@ export interface UiSlice {
   theme: Theme
   sidebarWidth: number
   sidebarCollapsed: boolean
-  collapsedSessions: string[]
+  /**
+   * The workspace every scoped surface acts on: the sidebar's run list, the
+   * board, launches, templates, budgets and the activity feed. Empty until
+   * hydration names one, which is why every consumer treats empty as "all".
+   */
+  activeWorkspace: string
   groupBy: GroupBy
   route: Route
   setTheme: (theme: Theme) => void
   setSidebarWidth: (width: number) => void
   toggleSidebar: () => void
-  toggleSession: (sessionID: string) => void
+  setActiveWorkspace: (workspaceID: string) => void
   setGroupBy: (groupBy: GroupBy) => void
   navigate: (name: string, params?: Record<string, string>) => void
 }
@@ -31,7 +36,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   theme: 'system',
   sidebarWidth: 280,
   sidebarCollapsed: false,
-  collapsedSessions: [],
+  activeWorkspace: '',
   groupBy: 'status',
   route: { name: 'board', params: {} },
   setTheme: (theme) => set({ theme }),
@@ -40,18 +45,27 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
       sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, width)),
     }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-  toggleSession: (sessionID) =>
+  // Switching scope carries the workspace route with it. Otherwise the
+  // switcher would say one workspace while the open view, its budget
+  // dialog and its settings dialog still acted on another.
+  setActiveWorkspace: (workspaceID) =>
     set((s) => ({
-      collapsedSessions: s.collapsedSessions.includes(sessionID)
-        ? s.collapsedSessions.filter((id) => id !== sessionID)
-        : [...s.collapsedSessions, sessionID],
+      activeWorkspace: workspaceID,
+      route:
+        s.route.name === 'workspace'
+          ? { name: 'workspace', params: { workspaceId: workspaceID } }
+          : s.route,
     })),
   setGroupBy: (groupBy) => set({ groupBy }),
   // Revealing a run acknowledges it, wherever the reveal came from: every
   // surface routes through this one call, so this is the only place the ack
-  // belongs.
+  // belongs. Opening a workspace also makes it the active scope, so the
+  // sidebar and every scoped surface follow the view.
   navigate: (name, params = {}) => {
     set({ route: { name, params } })
     if (params.runId) get().ackRun(params.runId)
+    if (name === 'workspace' && params.workspaceId) {
+      set({ activeWorkspace: params.workspaceId })
+    }
   },
 })

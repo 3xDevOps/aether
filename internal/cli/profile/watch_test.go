@@ -44,15 +44,15 @@ func TestManualPushPathIndependentOfWatcher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	params, err := BuildPushParams(nil, "claude", files, nil, "sess_1")
+	params, err := BuildPushParams(nil, "claude", files, nil, "ws_1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if params.Harness != "claude" || len(params.Paths) != 1 || len(params.Blobs) != 1 {
 		t.Fatalf("manual push params = %+v", params)
 	}
-	if params.SessionID != "sess_1" {
-		t.Errorf("session_id = %q", params.SessionID)
+	if params.WorkspaceID != "ws_1" {
+		t.Errorf("workspace_id = %q", params.WorkspaceID)
 	}
 }
 func TestDefaultPushOneUploadsEmptySnapshot(t *testing.T) {

@@ -64,7 +64,7 @@ aether workspace bootstrap <workspace> --command omp
 Installing an executable is separate from making it launchable. For a name
 outside the shipped registry, a launch definition must exist before
 `aether run ... --agent omp` works: `aether agent add omp` performs the
-install, the login, and the member-scoped registration in one session
+install, the login, and the member-scoped registration in one shell
 (recommended), or an administrator pins a server-wide definition. The
 definition supplies argv templates and explicit profile and credential
 paths. It does not install OMP or infer secret paths from its name. See
@@ -153,8 +153,8 @@ resuming it:
 aether workspace bootstrap <workspace> --reset
 ```
 
-The server also removes abandoned staging trees that have no pending session
-under its bounded cleanup policy. A server restart does not turn a shell into a
+The server also removes abandoned staging trees that have no pending
+bootstrap shell under its bounded cleanup policy. A server restart does not turn a shell into a
 host process or leave a container intentionally running. Active snapshots and
 snapshots pinned by running work remain available; cleanup must not remove
 those references. Keep the server database and its toolenv data directory in

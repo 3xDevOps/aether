@@ -17,12 +17,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/timeline"
 )
 
-// TestHandoffAndSessionTimeline drives the acceptance path of  the
+// TestHandoffAndWorkspaceTimeline drives the acceptance path of  the
 // way a user does: an owner hands a live run to a teammate, ownership and
-// attribution follow without the agent being touched, and the session
+// attribution follow without the agent being touched, and the workspace
 // timeline shows the whole history, filters per member, and exports as
 // JSONL that parses back into the same events.
-func TestHandoffAndSessionTimeline(t *testing.T) {
+func TestHandoffAndWorkspaceTimeline(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	log, err := events.OpenSQLiteLog(filepath.Join(dir, "events.db"))
@@ -45,7 +45,7 @@ func TestHandoffAndSessionTimeline(t *testing.T) {
 	publish := func(actor domain.MemberID, payload events.Payload) {
 		t.Helper()
 		if _, perr := bus.Publish(ctx, events.Event{
-			SessionID: e.sess.ID, RunID: e.run.ID, ActorID: actor, Payload: payload,
+			WorkspaceID: e.ws.ID, RunID: e.run.ID, ActorID: actor, Payload: payload,
 		}); perr != nil {
 			t.Fatalf("publish %s: %v", payload.EventType(), perr)
 		}
@@ -102,8 +102,8 @@ func TestHandoffAndSessionTimeline(t *testing.T) {
 	// Grace steers the run she now owns.
 	publish(grace.ID, events.TimelinePayload{Kind: events.TimelineSteer, Message: "keep going"})
 
-	all := readTimeline(t, ada, protocol.SessionTimelineParams{SessionID: string(e.sess.ID)})
-	if types := eventTypes(all); !slices.Equal(types, []string{"run.status", "session.timeline", "session.timeline"}) {
+	all := readTimeline(t, ada, protocol.WorkspaceTimelineParams{WorkspaceID: string(e.ws.ID)})
+	if types := eventTypes(all); !slices.Equal(types, []string{"run.status", "workspace.timeline", "workspace.timeline"}) {
 		t.Fatalf("timeline types = %v, want the status change, the handoff, and the steer", types)
 	}
 	handoff := all[1]
@@ -118,8 +118,8 @@ func TestHandoffAndSessionTimeline(t *testing.T) {
 	}
 
 	// Filtered per member: only what Grace did.
-	byGrace := readTimeline(t, ada, protocol.SessionTimelineParams{
-		SessionID: string(e.sess.ID), MemberID: string(grace.ID),
+	byGrace := readTimeline(t, ada, protocol.WorkspaceTimelineParams{
+		WorkspaceID: string(e.ws.ID), MemberID: string(grace.ID),
 	})
 	if len(byGrace) != 1 || byGrace[0].Seq != all[2].Seq {
 		t.Fatalf("timeline for Grace = %v, want only her steer", eventTypes(byGrace))
@@ -127,16 +127,16 @@ func TestHandoffAndSessionTimeline(t *testing.T) {
 
 	// Filtered per type, including the detail stream the feed hides by
 	// default.
-	diffs := readTimeline(t, ada, protocol.SessionTimelineParams{
-		SessionID: string(e.sess.ID), Types: []string{string(events.TypeRunDiff)},
+	diffs := readTimeline(t, ada, protocol.WorkspaceTimelineParams{
+		WorkspaceID: string(e.ws.ID), Types: []string{string(events.TypeRunDiff)},
 	})
 	if len(diffs) != 1 {
 		t.Fatalf("run.diff filter returned %d events, want 1", len(diffs))
 	}
 
-	// One entry at a time reads back the same history, so a long session
+	// One entry at a time reads back the same history, so a long workspace
 	// pages instead of loading whole.
-	paged := readTimeline(t, ada, protocol.SessionTimelineParams{SessionID: string(e.sess.ID), Limit: 1})
+	paged := readTimeline(t, ada, protocol.WorkspaceTimelineParams{WorkspaceID: string(e.ws.ID), Limit: 1})
 	if !slices.Equal(eventSeqs(paged), eventSeqs(all)) {
 		t.Fatalf("paged timeline = %v, want %v", eventSeqs(paged), eventSeqs(all))
 	}
@@ -176,14 +176,14 @@ func TestHandoffAndSessionTimeline(t *testing.T) {
 	}
 }
 
-// readTimeline pages session.timeline to exhaustion, the way the CLI does.
-func readTimeline(t *testing.T, c *protocol.Client, params protocol.SessionTimelineParams) []protocol.Event {
+// readTimeline pages workspace.timeline to exhaustion, the way the CLI does.
+func readTimeline(t *testing.T, c *protocol.Client, params protocol.WorkspaceTimelineParams) []protocol.Event {
 	t.Helper()
 	var out []protocol.Event
 	for {
-		var res protocol.SessionTimelineResult
-		if err := c.Call(protocol.MethodSessionTimeline, params, &res); err != nil {
-			t.Fatalf("session.timeline: %v", err)
+		var res protocol.WorkspaceTimelineResult
+		if err := c.Call(protocol.MethodWorkspaceTimeline, params, &res); err != nil {
+			t.Fatalf("workspace.timeline: %v", err)
 		}
 		out = append(out, res.Events...)
 		if !res.More || res.NextSeq <= params.AfterSeq {
@@ -218,14 +218,14 @@ func eventSeqs(evs []protocol.Event) []string {
 	return out
 }
 
-// TestSessionTimelineUnavailableWithoutReader proves the seam degrades
+// TestWorkspaceTimelineUnavailableWithoutReader proves the seam degrades
 // like the others rather than panicking when no history is wired.
-func TestSessionTimelineUnavailableWithoutReader(t *testing.T) {
+func TestWorkspaceTimelineUnavailableWithoutReader(t *testing.T) {
 	e := newTestEnv(t, nil)
-	err := controlClient(t, e).Call(protocol.MethodSessionTimeline,
-		protocol.SessionTimelineParams{SessionID: string(e.sess.ID)}, nil)
+	err := controlClient(t, e).Call(protocol.MethodWorkspaceTimeline,
+		protocol.WorkspaceTimelineParams{WorkspaceID: string(e.ws.ID)}, nil)
 	var pe *protocol.Error
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeUnavailable {
-		t.Fatalf("session.timeline without a reader = %v, want CodeUnavailable", err)
+		t.Fatalf("workspace.timeline without a reader = %v, want CodeUnavailable", err)
 	}
 }

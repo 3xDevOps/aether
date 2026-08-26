@@ -11,21 +11,21 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// Template is a named, parameterized run definition stored on a session:
+// Template is a named, parameterized run definition stored on a workspace:
 // the agent, the task prompt, the launch mode, and the parameter defaults
-// substituted into the prompt. Name is unique within its session.
+// substituted into the prompt. Name is unique within its workspace.
 type Template struct {
-	ID        string
-	SessionID domain.SessionID
-	Name      string
-	Task      string
-	Harness   string
-	Mode      domain.LaunchMode
+	ID          string
+	WorkspaceID domain.WorkspaceID
+	Name        string
+	Task        string
+	Harness     string
+	Mode        domain.LaunchMode
 	// Params are the task prompt's parameter defaults, keyed by the name
 	// used in its {{placeholders}}.
 	Params map[string]string
 	// BudgetUSD is an advisory per-run cost hint carried with the
-	// template. Nothing enforces it; session budgets do the enforcing.
+	// template. Nothing enforces it; workspace budgets do the enforcing.
 	BudgetUSD float64
 	CreatedAt time.Time
 }
@@ -35,12 +35,12 @@ type Template struct {
 // every fire is attributed to them and re-checked against their current
 // role, so a demotion stops the schedule.
 //
-// SessionID and Template are read from the owning template on every read
+// WorkspaceID and Template are read from the owning template on every read
 // and ignored on write.
 type Schedule struct {
 	ID          string
 	TemplateID  string
-	SessionID   domain.SessionID
+	WorkspaceID domain.WorkspaceID
 	Template    string
 	Cron        string
 	MemberID    domain.MemberID
@@ -50,32 +50,32 @@ type Schedule struct {
 
 // TemplateStore is the task-template and schedule persistence surface.
 type TemplateStore interface {
-	// SaveTemplate creates or replaces the template with t's session and
+	// SaveTemplate creates or replaces the template with t's workspace and
 	// name, filling in t.ID and t.CreatedAt. A replaced template keeps
 	// its ID and creation time.
 	SaveTemplate(ctx context.Context, t *Template) error
-	GetTemplate(ctx context.Context, session domain.SessionID, name string) (*Template, error)
-	ListTemplates(ctx context.Context, session domain.SessionID) ([]*Template, error)
+	GetTemplate(ctx context.Context, workspace domain.WorkspaceID, name string) (*Template, error)
+	ListTemplates(ctx context.Context, workspace domain.WorkspaceID) ([]*Template, error)
 	// DeleteTemplate removes a template and its schedule.
-	DeleteTemplate(ctx context.Context, session domain.SessionID, name string) error
+	DeleteTemplate(ctx context.Context, workspace domain.WorkspaceID, name string) error
 
 	// SaveSchedule creates or replaces the schedule of s.TemplateID,
 	// filling in s.ID and s.CreatedAt. Replacing clears the last-fired
 	// stamp: a redefined rule starts fresh.
 	SaveSchedule(ctx context.Context, s *Schedule) error
-	// ListSchedules returns a session's schedules, or every schedule when
-	// session is empty.
-	ListSchedules(ctx context.Context, session domain.SessionID) ([]*Schedule, error)
+	// ListSchedules returns a workspace's schedules, or every schedule when
+	// workspace is empty.
+	ListSchedules(ctx context.Context, workspace domain.WorkspaceID) ([]*Schedule, error)
 	DeleteSchedule(ctx context.Context, templateID string) error
 	// MarkScheduleFired records the instant a fire was attempted.
 	MarkScheduleFired(ctx context.Context, id string, at time.Time) error
 }
 
-const templateCols = `id, session_id, name, task, harness, mode, params, budget_usd, created_at`
+const templateCols = `id, workspace_id, name, task, harness, mode, params, budget_usd, created_at`
 
 func (d *DB) SaveTemplate(ctx context.Context, t *Template) error {
-	if t.SessionID == "" || t.Name == "" || t.Task == "" || t.Harness == "" {
-		return errors.New("store: save template: session_id, name, task, and harness are required")
+	if t.WorkspaceID == "" || t.Name == "" || t.Task == "" || t.Harness == "" {
+		return errors.New("store: save template: workspace_id, name, task, and harness are required")
 	}
 	id, ts, err := prepareCreate(t.CreatedAt)
 	if err != nil {
@@ -96,11 +96,11 @@ func (d *DB) SaveTemplate(ctx context.Context, t *Template) error {
 	err = d.db.QueryRowContext(ctx,
 		`INSERT INTO templates (`+templateCols+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT (session_id, name) DO UPDATE SET
+		 ON CONFLICT (workspace_id, name) DO UPDATE SET
 		   task = excluded.task, harness = excluded.harness, mode = excluded.mode,
 		   params = excluded.params, budget_usd = excluded.budget_usd
 		 RETURNING id, created_at`,
-		id, t.SessionID, t.Name, t.Task, t.Harness, t.Mode, string(params), t.BudgetUSD, createdAt,
+		id, t.WorkspaceID, t.Name, t.Task, t.Harness, t.Mode, string(params), t.BudgetUSD, createdAt,
 	).Scan(&gotID, &gotCreated)
 	if err != nil {
 		return fmt.Errorf("store: save template: %w", mapConstraint(err, ErrNotFound))
@@ -109,9 +109,9 @@ func (d *DB) SaveTemplate(ctx context.Context, t *Template) error {
 	return nil
 }
 
-func (d *DB) GetTemplate(ctx context.Context, session domain.SessionID, name string) (*Template, error) {
+func (d *DB) GetTemplate(ctx context.Context, workspace domain.WorkspaceID, name string) (*Template, error) {
 	t, err := scanTemplate(d.db.QueryRowContext(ctx,
-		`SELECT `+templateCols+` FROM templates WHERE session_id = ? AND name = ?`, session, name))
+		`SELECT `+templateCols+` FROM templates WHERE workspace_id = ? AND name = ?`, workspace, name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -121,18 +121,18 @@ func (d *DB) GetTemplate(ctx context.Context, session domain.SessionID, name str
 	return t, nil
 }
 
-func (d *DB) ListTemplates(ctx context.Context, session domain.SessionID) ([]*Template, error) {
+func (d *DB) ListTemplates(ctx context.Context, workspace domain.WorkspaceID) ([]*Template, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+templateCols+` FROM templates WHERE session_id = ? ORDER BY name`, session)
+		`SELECT `+templateCols+` FROM templates WHERE workspace_id = ? ORDER BY name`, workspace)
 	if err != nil {
 		return nil, fmt.Errorf("store: list templates: %w", err)
 	}
 	return collect(rows, scanTemplate)
 }
 
-func (d *DB) DeleteTemplate(ctx context.Context, session domain.SessionID, name string) error {
+func (d *DB) DeleteTemplate(ctx context.Context, workspace domain.WorkspaceID, name string) error {
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`DELETE FROM templates WHERE session_id = ? AND name = ?`, session, name))
+		`DELETE FROM templates WHERE workspace_id = ? AND name = ?`, workspace, name))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("store: delete template: %w", mapConstraint(err, ErrInUse))
 	}
@@ -140,8 +140,8 @@ func (d *DB) DeleteTemplate(ctx context.Context, session domain.SessionID, name 
 }
 
 // Schedules are always read joined to their template, which is where the
-// session and template name come from.
-const scheduleCols = `s.id, s.template_id, t.session_id, t.name, s.cron, s.member_id, s.created_at, s.last_fired_at`
+// workspace and template name come from.
+const scheduleCols = `s.id, s.template_id, t.workspace_id, t.name, s.cron, s.member_id, s.created_at, s.last_fired_at`
 
 func (d *DB) SaveSchedule(ctx context.Context, s *Schedule) error {
 	if s.TemplateID == "" || s.Cron == "" || s.MemberID == "" {
@@ -174,12 +174,12 @@ func (d *DB) SaveSchedule(ctx context.Context, s *Schedule) error {
 	return nil
 }
 
-func (d *DB) ListSchedules(ctx context.Context, session domain.SessionID) ([]*Schedule, error) {
+func (d *DB) ListSchedules(ctx context.Context, workspace domain.WorkspaceID) ([]*Schedule, error) {
 	query := `SELECT ` + scheduleCols + ` FROM schedules s JOIN templates t ON t.id = s.template_id`
 	args := []any{}
-	if session != "" {
-		query += ` WHERE t.session_id = ?`
-		args = append(args, session)
+	if workspace != "" {
+		query += ` WHERE t.workspace_id = ?`
+		args = append(args, workspace)
 	}
 	rows, err := d.db.QueryContext(ctx, query+` ORDER BY t.name`, args...)
 	if err != nil {
@@ -219,7 +219,7 @@ func scanTemplate(row interface{ Scan(...any) error }) (*Template, error) {
 		params    string
 		createdAt int64
 	)
-	if err := row.Scan(&t.ID, &t.SessionID, &t.Name, &t.Task, &t.Harness, &t.Mode,
+	if err := row.Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Task, &t.Harness, &t.Mode,
 		&params, &t.BudgetUSD, &createdAt); err != nil {
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func scanSchedule(row interface{ Scan(...any) error }) (*Schedule, error) {
 		createdAt int64
 		lastFired *int64
 	)
-	if err := row.Scan(&s.ID, &s.TemplateID, &s.SessionID, &s.Template, &s.Cron,
+	if err := row.Scan(&s.ID, &s.TemplateID, &s.WorkspaceID, &s.Template, &s.Cron,
 		&s.MemberID, &createdAt, &lastFired); err != nil {
 		return nil, err
 	}

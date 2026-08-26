@@ -13,15 +13,11 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -160,7 +156,7 @@ func TestIntegrationEventStreamOverRealSSH(t *testing.T) {
 	}
 
 	if _, err := e.bus.Publish(context.Background(), events.Event{
-		SessionID: e.sess.ID, RunID: e.run.ID,
+		WorkspaceID: e.ws.ID, RunID: e.run.ID,
 		Payload: events.RunStatusPayload{To: "running"},
 	}); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -195,62 +191,7 @@ func TestIntegrationGitLsRemoteReachesTransport(t *testing.T) {
 	}
 }
 
-func TestIntegrationPortForwardOverRealSSH(t *testing.T) {
-	sshBin := requireBinary(t, "ssh")
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, "dash")
-	}))
-	defer backend.Close()
-	dashPort, err := strconv.Atoi(strings.TrimPrefix(backend.URL, "http://127.0.0.1:"))
-	if err != nil {
-		t.Fatalf("backend url %q: %v", backend.URL, err)
-	}
-
-	e, keyPath := newIntegrationEnv(t, func(c *Config) { c.DashboardPort = dashPort })
-
-	localPort := freePort(t)
-	args := append([]string{
-		"-N",
-		"-L", fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", localPort, dashPort),
-	}, sshArgs(keyPath, e.port())...)
-	cmd := exec.Command(sshBin, args...)
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start ssh -L: %v", err)
-	}
-	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
-	}()
-
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", localPort))
-		if err == nil {
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if string(body) != "dash" {
-				t.Errorf("forwarded body = %q", body)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("forward never came up: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
 func (e *testEnv) port() string {
 	_, port, _ := net.SplitHostPort(e.addr)
 	return port
-}
-
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
 }

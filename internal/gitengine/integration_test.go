@@ -227,7 +227,7 @@ func TestCheckoutLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
-	if branch != "aether/run-run1-fix-the-auth-bug" {
+	if branch != "aether/run-fix-the-auth-bug-run1" {
 		t.Errorf("branch = %q", branch)
 	}
 	if want := filepath.Join(e.cfg.CheckoutsDir, "run1"); checkout != want {
@@ -300,6 +300,93 @@ func TestCheckoutLifecycle(t *testing.T) {
 	}
 }
 
+// Branch names lead with the task and carry only a short tail of the run
+// ID, so two runs of the same task can land on the same name. The name is
+// reserved at checkout rather than at publish, so the second run falls
+// back to the full ID even while the first is still unpublished. Without
+// the reservation both would take the short name and publication, which
+// force-updates the ref, would silently overwrite the first run's branch.
+func TestRunBranchFallsBackToTheFullIDOnCollision(t *testing.T) {
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	const first = "01m0h6tym4y65102a721nq0jf3"
+	const colliding = "01m0aaaaaaaaaaaaaaaaanq0jf3" // same last six characters
+	_, firstBranch, err := e.CreateRunCheckout(ctx, "ws1", first, "main", "Fix the Auth bug!")
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if firstBranch != "aether/run-fix-the-auth-bug-nq0jf3" {
+		t.Fatalf("first branch = %q, want the short-id form", firstBranch)
+	}
+
+	_, branch, err := e.CreateRunCheckout(ctx, "ws1", colliding, "main", "Fix the Auth bug!")
+	if err != nil {
+		t.Fatalf("colliding run: %v", err)
+	}
+	if want := "aether/run-fix-the-auth-bug-" + colliding; branch != want {
+		t.Errorf("colliding branch = %q, want %q", branch, want)
+	}
+
+	// Both runs publish independently: the reservation kept them on
+	// separate refs, so neither overwrites the other.
+	firstTip, err := e.PublishRunBranch(ctx, first)
+	if err != nil {
+		t.Fatalf("publish first run: %v", err)
+	}
+	if _, err := e.PublishRunBranch(ctx, colliding); err != nil {
+		t.Fatalf("publish colliding run: %v", err)
+	}
+	if got := bareRevParse(t, e, "ws1", "refs/heads/"+firstBranch); got != firstTip {
+		t.Errorf("first run's branch tip = %s after the second published, want %s", got, firstTip)
+	}
+}
+
+// A launch that fails after the branch name is reserved must give the name
+// back, or the next run of that task is pushed onto the full-ID form for
+// good.
+func TestFailedCheckoutReleasesItsBranchName(t *testing.T) {
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	const run = "01m0h6tym4y65102a721nq0jf3"
+	const short = "aether/run-fix-the-auth-bug-nq0jf3"
+
+	// Fail the run-meta write, which happens after the branch is reserved.
+	// The sidecar lives at <CheckoutsDir>/<run>.json, so a directory
+	// already sitting on that exact path lets the clone and the branch
+	// reservation succeed and then stops the sidecar from being written.
+	sidecar := filepath.Join(e.cfg.CheckoutsDir, string(run)+".json")
+	if err := os.MkdirAll(sidecar, 0o700); err != nil {
+		t.Fatalf("occupy the sidecar path: %v", err)
+	}
+	_, _, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "Fix the Auth bug!")
+	if err == nil {
+		t.Fatal("checkout with an unwritable sidecar path succeeded, want a failure")
+	}
+	if err := os.RemoveAll(sidecar); err != nil {
+		t.Fatalf("free the sidecar path: %v", err)
+	}
+
+	if exists, existsErr := e.WorkspaceBranchExists(ctx, "ws1", short); existsErr != nil {
+		t.Fatalf("WorkspaceBranchExists: %v", existsErr)
+	} else if exists {
+		t.Fatal("a failed checkout left its branch name reserved")
+	}
+	// The name is free, so a retry gets the readable form back.
+	_, branch, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "Fix the Auth bug!")
+	if err != nil {
+		t.Fatalf("retry after failure: %v", err)
+	}
+	if branch != short {
+		t.Errorf("retry branch = %q, want %q", branch, short)
+	}
+}
+
 // TestAgentCannotRedirectPublish is the SBP-001 attack: the run checkout is
 // bind-mounted into the container, so the agent owns its .git/config. It
 // rewrites aether.branch/aether.workspace to point at another workspace's
@@ -357,7 +444,7 @@ func TestAgentCannotRedirectPublish(t *testing.T) {
 	if _, err := e.PublishRunBranch(ctx, "run1"); err == nil {
 		t.Fatal("PublishRunBranch accepted a checkout with no identity record")
 	}
-	if err := e.StartDiffWatch(ctx, "sess1", "run1"); err == nil {
+	if err := e.StartDiffWatch(ctx, "ws1", "run1"); err == nil {
 		e.StopDiffWatch("run1")
 		t.Fatal("StartDiffWatch accepted a checkout with no identity record")
 	}
@@ -405,7 +492,7 @@ func TestConcurrentRunsOneWorkspace(t *testing.T) {
 		t.Error(err)
 	}
 	for i := range n {
-		branch := fmt.Sprintf("refs/heads/aether/run-run%d-task-%d", i, i)
+		branch := fmt.Sprintf("refs/heads/aether/run-task-%d-run%d", i, i)
 		if got := bareRevParse(t, e, "ws1", branch); len(got) != 40 {
 			t.Errorf("branch %s missing after concurrent runs", branch)
 		}
@@ -450,10 +537,10 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	}
 	diffs := subscribeTypes(t, bus, events.TypeRunDiff)
 	branches := subscribeTypes(t, bus, events.TypeGitBranch)
-	if err := e.StartDiffWatch(ctx, "sess1", "run1"); err != nil {
+	if err := e.StartDiffWatch(ctx, "ws1", "run1"); err != nil {
 		t.Fatalf("StartDiffWatch: %v", err)
 	}
-	if err := e.StartDiffWatch(ctx, "sess1", "run1"); err != nil {
+	if err := e.StartDiffWatch(ctx, "ws1", "run1"); err != nil {
 		t.Fatalf("StartDiffWatch twice: %v", err)
 	}
 
@@ -465,8 +552,8 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	if !ok {
 		t.Fatal("no run.diff event after write")
 	}
-	if ev.SessionID != "sess1" || ev.RunID != "run1" {
-		t.Fatalf("event scope = %s/%s", ev.SessionID, ev.RunID)
+	if ev.WorkspaceID != "ws1" || ev.RunID != "run1" {
+		t.Fatalf("event scope = %s/%s", ev.WorkspaceID, ev.RunID)
 	}
 	files := ev.Payload.(events.RunDiffPayload).Files
 	if len(files) != 1 || files[0] != (events.FileDiffStat{Path: "notes.txt", Additions: 2}) {
@@ -541,8 +628,8 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	if pl.WorkspaceID != "ws1" || pl.Branch != branch || pl.Commit != head {
 		t.Fatalf("git.branch payload = %+v, want ws1/%s/%s", pl, branch, head)
 	}
-	if bev.SessionID != "sess1" || bev.RunID != "run1" {
-		t.Fatalf("git.branch scope = %s/%s", bev.SessionID, bev.RunID)
+	if bev.WorkspaceID != "ws1" || bev.RunID != "run1" {
+		t.Fatalf("git.branch scope = %s/%s", bev.WorkspaceID, bev.RunID)
 	}
 	if got := bareRevParse(t, e, "ws1", "refs/heads/"+branch); got != head {
 		t.Fatalf("bare branch tip = %s, want %s", got, head)
@@ -628,7 +715,7 @@ func TestReceivePackDeniesBranchDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	branch := "aether/run-run1-artifact"
+	branch := "aether/run-artifact-run1"
 
 	dst := t.TempDir()
 	gitc(t, dst, "clone", url("ws1"), "c")
@@ -735,7 +822,7 @@ func TestReceivePackPublishesGitBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.StartDiffWatch(ctx, "sess1", "run1"); err != nil {
+	if err := e.StartDiffWatch(ctx, "ws1", "run1"); err != nil {
 		t.Fatal(err)
 	}
 	e.StopDiffWatch("run1") // registry survives; git.branch stays scoped
@@ -762,8 +849,8 @@ func TestReceivePackPublishesGitBranch(t *testing.T) {
 	if pl.Branch != branch || pl.Commit != want || pl.WorkspaceID != "ws1" {
 		t.Fatalf("git.branch payload = %+v, want %s@%s", pl, branch, want)
 	}
-	if ev.SessionID != "sess1" || ev.RunID != "run1" {
-		t.Fatalf("git.branch scope = %s/%s", ev.SessionID, ev.RunID)
+	if ev.WorkspaceID != "ws1" || ev.RunID != "run1" {
+		t.Fatalf("git.branch scope = %s/%s", ev.WorkspaceID, ev.RunID)
 	}
 
 	// A push to a non-run branch publishes nothing.

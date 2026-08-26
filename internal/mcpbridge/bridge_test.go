@@ -73,11 +73,11 @@ func decodeStructured(t *testing.T, res *mcp.CallToolResult, out any) {
 	}
 }
 
-// TestBridgeSpeaksGoldenWireV1 drives a real MCP client through all three
+// TestBridgeSpeaksGoldenWireV2 drives a real MCP client through all three
 // tools against a coordination socket that answers with nothing but
-// the pinned wire-v1 bytes: the round trip a bridge staged against v1
+// the pinned wire-v2 bytes: the round trip a bridge staged against v2
 // makes when the server it dials has moved on.
-func TestBridgeSpeaksGoldenWireV1(t *testing.T) {
+func TestBridgeSpeaksGoldenWireV2(t *testing.T) {
 	success, errorResponses := golden(t, "success.ndjson"), golden(t, "errors.ndjson")
 	requests := goldenRequests(t)
 

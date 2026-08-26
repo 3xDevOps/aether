@@ -55,45 +55,6 @@ func TestAdminRPCDeniedForNonAdmin(t *testing.T) {
 	if err := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(e.member.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("collaborator member.remove = %v, want CodeDenied", err)
 	}
-
-	var created protocol.SessionNewResult
-	if err := c.Call(protocol.MethodSessionNew, protocol.SessionNewParams{
-		WorkspaceID: string(e.ws.ID), Name: "effort-2",
-	}, &created); err != nil {
-		t.Fatalf("collaborator session.new: %v", err)
-	}
-	if created.Session.BaseBranch != "main" {
-		t.Errorf("base_branch = %q, want main", created.Session.BaseBranch)
-	}
-}
-
-// Creating a session is a collaborator action: a viewer is refused, a
-// collaborator is not.
-func TestSessionNewDeniedForViewer(t *testing.T) {
-	e := newTestEnv(t, nil)
-	viewer, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
-	wantDenied(t, controlAs(t, e, viewer).Call(protocol.MethodSessionNew, protocol.SessionNewParams{
-		WorkspaceID: string(e.ws.ID), Name: "viewer-effort",
-	}, nil), "viewer session.new")
-
-	sessions, err := e.store.ListSessionsByWorkspace(context.Background(), e.ws.ID)
-	if err != nil {
-		t.Fatalf("list sessions: %v", err)
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("viewer session.new created a session: %d rows", len(sessions))
-	}
-
-	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)
-	var created protocol.SessionNewResult
-	if err := controlAs(t, e, collab).Call(protocol.MethodSessionNew, protocol.SessionNewParams{
-		WorkspaceID: string(e.ws.ID), Name: "collab-effort",
-	}, &created); err != nil {
-		t.Fatalf("collaborator session.new: %v", err)
-	}
-	if created.Session.ID == "" {
-		t.Errorf("session = %+v, want a created session", created.Session)
-	}
 }
 
 func TestPendingDeniedExceptServerInfo(t *testing.T) {
@@ -116,8 +77,8 @@ func TestPendingDeniedExceptServerInfo(t *testing.T) {
 	if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{Name: "x", Environment: protocol.WorkspaceEnvironment{CustomImage: "img"}}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("pending workspace.add = %v, want CodeDenied", err)
 	}
-	if err := c.Call(protocol.MethodSessionNew, protocol.SessionNewParams{WorkspaceID: string(e.ws.ID), Name: "n"}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("pending session.new = %v, want CodeDenied", err)
+	if err := c.Call(protocol.MethodWorkspaceGet, protocol.WorkspaceGetParams{WorkspaceID: string(e.ws.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+		t.Fatalf("pending workspace.get = %v, want CodeDenied", err)
 	}
 }
 
@@ -132,6 +93,22 @@ func TestAdminWorkspaceAddAndInvite(t *testing.T) {
 	}
 	if ws.Workspace.Name != "other" || ws.Workspace.ID == "" {
 		t.Errorf("workspace = %+v", ws.Workspace)
+	}
+	// An omitted base_branch takes the server default rather than landing
+	// empty: every run branches off it.
+	if ws.Workspace.BaseBranch != domain.DefaultBaseBranch {
+		t.Errorf("base_branch = %q, want %q", ws.Workspace.BaseBranch, domain.DefaultBaseBranch)
+	}
+
+	var pinned protocol.WorkspaceAddResult
+	if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{
+		Name: "pinned", BaseBranch: "trunk",
+		Environment: protocol.WorkspaceEnvironment{CustomImage: "alpine"},
+	}, &pinned); err != nil {
+		t.Fatalf("workspace.add with base_branch: %v", err)
+	}
+	if pinned.Workspace.BaseBranch != "trunk" {
+		t.Errorf("base_branch = %q, want trunk", pinned.Workspace.BaseBranch)
 	}
 
 	var inv protocol.MemberInviteResult

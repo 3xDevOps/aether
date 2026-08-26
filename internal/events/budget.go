@@ -1,12 +1,12 @@
 package events
 
-// TypeBudget reports a session budget's state: spend crossing the warning
+// TypeBudget reports a workspace budget's state: spend crossing the warning
 // threshold, spend reaching the cap, a new run refused at the cap, and an
 // admin changing the budget. It never means a run was stopped - budgets
 // gate admission only.
-const TypeBudget Type = "session.budget"
+const TypeBudget Type = "workspace.budget"
 
-// BudgetState is where a session's spend sits relative to its budget.
+// BudgetState is where a workspace's spend sits relative to its budget.
 type BudgetState string
 
 const (
@@ -19,9 +19,9 @@ const (
 	BudgetExceeded BudgetState = "exceeded"
 )
 
-// BudgetPayload reports a session budget's state and the spend behind it.
+// BudgetPayload reports a workspace budget's state and the spend behind it.
 //
-// UnmeteredRuns counts the session's runs whose usage was never metered
+// UnmeteredRuns counts the workspace's runs whose usage was never metered
 // (no harness adapter). While it is non-zero SpendUSD is a floor, not the
 // true spend, and the budget is advisory: consumers must say so rather
 // than present the number as exact.

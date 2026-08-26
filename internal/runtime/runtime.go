@@ -71,7 +71,7 @@ type Spec struct {
 	// once per container: restarting a container whose setup already
 	// succeeded skips it. Requirements and caveats: the image must provide
 	// /bin/sh and a sleep utility, and the script is persisted in container
-	// metadata — like Env it is visible to anyone who can inspect the
+	// metadata - like Env it is visible to anyone who can inspect the
 	// container, so it must not embed secrets.
 	SetupScript string
 	// CPULimit caps CPU usage in (possibly fractional) cores; 0 means
@@ -176,7 +176,7 @@ type Attachment interface {
 	// attachment supplies no more input; the process's stdin stays open so
 	// a later Attach can continue writing, which also means the process is
 	// not sent EOF. Engines may end this attachment's output streams when
-	// stdin is closed (Docker does) — re-attach to keep reading.
+	// stdin is closed (Docker does) - re-attach to keep reading.
 	Stdin() io.WriteCloser
 	// Stdout streams the process's stdout; with Spec.TTY set it carries
 	// the merged terminal output. Stdout and Stderr are buffered

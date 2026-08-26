@@ -89,9 +89,9 @@ func startManager(t *testing.T, bus events.Bus, runs RunLookup, tap OutputTap) {
 func publishRunning(t *testing.T, bus events.Bus, run domain.RunID) {
 	t.Helper()
 	_, err := bus.Publish(t.Context(), events.Event{
-		SessionID: "sess_1",
-		RunID:     run,
-		Payload:   events.RunStatusPayload{From: domain.RunProvisioning, To: domain.RunRunning},
+		WorkspaceID: "ws_1",
+		RunID:       run,
+		Payload:     events.RunStatusPayload{From: domain.RunProvisioning, To: domain.RunRunning},
 	})
 	if err != nil {
 		t.Fatalf("publish run status: %v", err)
@@ -119,20 +119,20 @@ func collect(t *testing.T, sub events.Subscription, want int, deadline time.Dura
 
 // TestManagerEndToEnd feeds the TTY-mangled fixture bytes through
 // manager -> normalizer -> adapter -> bus and asserts the published
-// envelopes: the full typed event sequence, scoped to the run's session
-// and run IDs.
+// envelopes: the full typed event sequence, scoped to the run's
+// workspace and run IDs.
 func TestManagerEndToEnd(t *testing.T) {
 	data, err := os.ReadFile("testdata/claude_tty.jsonl")
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
 	const (
-		session = domain.SessionID("sess_1")
-		run     = domain.RunID("run_1")
+		workspace = domain.WorkspaceID("ws_1")
+		run       = domain.RunID("run_1")
 	)
 	bus := newTestBus(t)
 	runs := &fakeRuns{runs: map[domain.RunID]*domain.Run{
-		run: {ID: run, SessionID: session, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
+		run: {ID: run, WorkspaceID: workspace, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
 	}}
 	tap := &fakeTap{output: map[domain.RunID][]byte{run: data}}
 
@@ -150,8 +150,8 @@ func TestManagerEndToEnd(t *testing.T) {
 	want := fixturePayloads()
 	got := collect(t, sub, len(want), 5*time.Second)
 	for i, e := range got {
-		if e.SessionID != session || e.RunID != run {
-			t.Errorf("event %d scoped to %s/%s, want %s/%s", i, e.SessionID, e.RunID, session, run)
+		if e.WorkspaceID != workspace || e.RunID != run {
+			t.Errorf("event %d scoped to %s/%s, want %s/%s", i, e.WorkspaceID, e.RunID, workspace, run)
 		}
 	}
 	var payloads []events.Payload
@@ -165,11 +165,11 @@ func TestManagerEndToEnd(t *testing.T) {
 // harness) and non-headless runs produce zero adapter events and are
 // never tapped.
 func TestManagerGracefulDegradation(t *testing.T) {
-	const session = domain.SessionID("sess_1")
+	const workspace = domain.WorkspaceID("ws_1")
 	bus := newTestBus(t)
 	runs := &fakeRuns{runs: map[domain.RunID]*domain.Run{
-		"run_codex": {ID: "run_codex", SessionID: session, Harness: "codex", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
-		"run_tui":   {ID: "run_tui", SessionID: session, Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning},
+		"run_codex": {ID: "run_codex", WorkspaceID: workspace, Harness: "codex", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
+		"run_tui":   {ID: "run_tui", WorkspaceID: workspace, Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning},
 	}}
 	tap := &fakeTap{output: map[domain.RunID][]byte{}}
 
@@ -200,12 +200,12 @@ func TestManagerGracefulDegradation(t *testing.T) {
 // reuse the original tap while its pump is live.
 func TestManagerAttachesOnce(t *testing.T) {
 	const (
-		session = domain.SessionID("sess_1")
-		run     = domain.RunID("run_1")
+		workspace = domain.WorkspaceID("ws_1")
+		run       = domain.RunID("run_1")
 	)
 	bus := newTestBus(t)
 	runs := &fakeRuns{runs: map[domain.RunID]*domain.Run{
-		run: {ID: run, SessionID: session, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
+		run: {ID: run, WorkspaceID: workspace, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
 	}}
 	// A tap that never ends: the pump stays live across transitions.
 	pr, pw := io.Pipe()
@@ -232,14 +232,14 @@ func TestManagerStartupScan(t *testing.T) {
 		t.Fatalf("read fixture: %v", err)
 	}
 	const (
-		session = domain.SessionID("sess_1")
-		run     = domain.RunID("run_1")
+		workspace = domain.WorkspaceID("ws_1")
+		run       = domain.RunID("run_1")
 	)
 	bus := newTestBus(t)
 	runs := &fakeRuns{runs: map[domain.RunID]*domain.Run{
-		run:        {ID: run, SessionID: session, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
-		"run_prov": {ID: "run_prov", SessionID: session, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunProvisioning},
-		"run_done": {ID: "run_done", SessionID: session, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunFailed},
+		run:        {ID: run, WorkspaceID: workspace, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
+		"run_prov": {ID: "run_prov", WorkspaceID: workspace, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunProvisioning},
+		"run_done": {ID: "run_done", WorkspaceID: workspace, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunFailed},
 	}}
 	tap := &fakeTap{output: map[domain.RunID][]byte{run: data}}
 

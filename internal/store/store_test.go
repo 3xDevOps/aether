@@ -71,15 +71,6 @@ func mustCreateWorkspace(t *testing.T, db *DB) *domain.Workspace {
 	return w
 }
 
-func mustCreateSession(t *testing.T, db *DB, wid domain.WorkspaceID) *domain.Session {
-	t.Helper()
-	s := &domain.Session{WorkspaceID: wid, Name: "auth-fix", BaseBranch: "main"}
-	if err := db.CreateSession(context.Background(), s); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	return s
-}
-
 func mustCreateMember(t *testing.T, db *DB) *domain.Member {
 	t.Helper()
 	m := &domain.Member{
@@ -94,15 +85,15 @@ func mustCreateMember(t *testing.T, db *DB) *domain.Member {
 	return m
 }
 
-func mustCreateRun(t *testing.T, db *DB, sid domain.SessionID, mid domain.MemberID, status domain.RunStatus) *domain.Run {
+func mustCreateRun(t *testing.T, db *DB, wid domain.WorkspaceID, mid domain.MemberID, status domain.RunStatus) *domain.Run {
 	t.Helper()
 	r := &domain.Run{
-		SessionID: sid,
-		MemberID:  mid,
-		Task:      "fix the auth bug",
-		Harness:   "claude",
-		Mode:      domain.LaunchTUI,
-		Status:    status,
+		WorkspaceID: wid,
+		MemberID:    mid,
+		Task:        "fix the auth bug",
+		Harness:     "claude",
+		Mode:        domain.LaunchTUI,
+		Status:      status,
 	}
 	if err := db.CreateRun(context.Background(), r); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -278,66 +269,6 @@ func TestWorkspaceEnvironmentMarshalUsesCanonicalBoolean(t *testing.T) {
 	}
 	if got := string(fields["neutral_image"]); got != "true" {
 		t.Fatalf("neutral_image JSON = %s, want true", got)
-	}
-}
-
-func TestSessionCRUDAndQueries(t *testing.T) {
-	db := openTestDB(t)
-	ctx := context.Background()
-
-	w1 := mustCreateWorkspace(t, db)
-	w2 := mustCreateWorkspace(t, db)
-	s1 := mustCreateSession(t, db, w1.ID)
-	s2 := mustCreateSession(t, db, w1.ID)
-	mustCreateSession(t, db, w2.ID)
-
-	got, err := db.GetSession(ctx, s1.ID)
-	if err != nil {
-		t.Fatalf("GetSession: %v", err)
-	}
-	if *got != *s1 {
-		t.Fatalf("session round-trip: got %+v, want %+v", got, s1)
-	}
-
-	s1.Name = "renamed"
-	s1.BaseBranch = "develop"
-	if uerr := db.UpdateSession(ctx, s1); uerr != nil {
-		t.Fatalf("UpdateSession: %v", uerr)
-	}
-	got, err = db.GetSession(ctx, s1.ID)
-	if err != nil {
-		t.Fatalf("GetSession after update: %v", err)
-	}
-	if *got != *s1 {
-		t.Fatalf("session update round-trip: got %+v, want %+v", got, s1)
-	}
-
-	all, err := db.ListSessions(ctx)
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	if len(all) != 3 {
-		t.Fatalf("ListSessions len = %d, want 3", len(all))
-	}
-
-	byWS, err := db.ListSessionsByWorkspace(ctx, w1.ID)
-	if err != nil {
-		t.Fatalf("ListSessionsByWorkspace: %v", err)
-	}
-	if len(byWS) != 2 {
-		t.Fatalf("ListSessionsByWorkspace len = %d, want 2", len(byWS))
-	}
-	for _, s := range byWS {
-		if s.WorkspaceID != w1.ID {
-			t.Fatalf("session %s has workspace %s, want %s", s.ID, s.WorkspaceID, w1.ID)
-		}
-	}
-
-	if err := db.DeleteSession(ctx, s2.ID); err != nil {
-		t.Fatalf("DeleteSession: %v", err)
-	}
-	if _, err := db.GetSession(ctx, s2.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetSession after delete: %v, want ErrNotFound", err)
 	}
 }
 
@@ -539,9 +470,11 @@ func TestMemberTailnetIdentity(t *testing.T) {
 
 func TestMemberTailnetMigrationPreservesRows(t *testing.T) {
 	// Build a genuine v1 database (only migration 1 applied, old members
-	// schema with the inline UNIQUE public_key), seed a member and a run
-	// referencing it, then Open: v2 must rebuild the members table
-	// without losing rows or breaking runs.member_id references.
+	// schema with the inline UNIQUE public_key, runs still hanging off a
+	// session), seed a member and a run referencing it, then Open: v2 must
+	// rebuild the members table without losing rows or breaking
+	// runs.member_id references, and v12 must rehome the run onto the
+	// workspace.
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {
@@ -598,6 +531,9 @@ func TestMemberTailnetMigrationPreservesRows(t *testing.T) {
 	if r.MemberID != "m1" {
 		t.Fatalf("run.member_id = %s, want m1", r.MemberID)
 	}
+	if r.WorkspaceID != "w1" {
+		t.Fatalf("run.workspace_id = %s, want w1", r.WorkspaceID)
+	}
 	// The rebuilt table accepts key-less tailnet members.
 	tm := &domain.Member{DisplayName: "Bob", TailnetLogin: "bob@ts.net", Color: "#3cb44b", Role: domain.RoleViewer}
 	if err := db.CreateMember(ctx, tm); err != nil {
@@ -610,10 +546,9 @@ func TestRunCRUDRoundTripsEveryField(t *testing.T) {
 	ctx := context.Background()
 
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
 
-	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunQueued)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunQueued)
 	if r.ID == "" {
 		t.Fatal("CreateRun did not assign an ID")
 	}
@@ -666,23 +601,22 @@ func TestRunQueries(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	w := mustCreateWorkspace(t, db)
-	s1 := mustCreateSession(t, db, w.ID)
-	s2 := mustCreateSession(t, db, w.ID)
+	w1 := mustCreateWorkspace(t, db)
+	w2 := mustCreateWorkspace(t, db)
 	ada := mustCreateMember(t, db)
 	bob := mustCreateMember(t, db)
 
-	r1 := mustCreateRun(t, db, s1.ID, ada.ID, domain.RunRunning)
-	r2 := mustCreateRun(t, db, s1.ID, bob.ID, domain.RunNeedsAttention)
-	r3 := mustCreateRun(t, db, s2.ID, ada.ID, domain.RunMerged)
-	mustCreateRun(t, db, s2.ID, bob.ID, domain.RunFailed)
+	r1 := mustCreateRun(t, db, w1.ID, ada.ID, domain.RunRunning)
+	r2 := mustCreateRun(t, db, w1.ID, bob.ID, domain.RunNeedsAttention)
+	r3 := mustCreateRun(t, db, w2.ID, ada.ID, domain.RunMerged)
+	mustCreateRun(t, db, w2.ID, bob.ID, domain.RunFailed)
 
-	bySession, err := db.ListRunsBySession(ctx, s1.ID)
+	byWorkspace, err := db.ListRunsByWorkspace(ctx, w1.ID)
 	if err != nil {
-		t.Fatalf("ListRunsBySession: %v", err)
+		t.Fatalf("ListRunsByWorkspace: %v", err)
 	}
-	if len(bySession) != 2 {
-		t.Fatalf("ListRunsBySession len = %d, want 2", len(bySession))
+	if len(byWorkspace) != 2 {
+		t.Fatalf("ListRunsByWorkspace len = %d, want 2", len(byWorkspace))
 	}
 
 	byMember, err := db.ListRunsByMember(ctx, ada.ID)
@@ -722,19 +656,18 @@ func TestRunInvalidStatusAndModeRejected(t *testing.T) {
 	ctx := context.Background()
 
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
 
-	bad := &domain.Run{SessionID: s.ID, MemberID: m.ID, Mode: domain.LaunchTUI, Status: "exploded"}
+	bad := &domain.Run{WorkspaceID: w.ID, MemberID: m.ID, Mode: domain.LaunchTUI, Status: "exploded"}
 	if err := db.CreateRun(ctx, bad); err == nil {
 		t.Fatal("CreateRun accepted invalid status")
 	}
-	bad = &domain.Run{SessionID: s.ID, MemberID: m.ID, Mode: "vr", Status: domain.RunQueued}
+	bad = &domain.Run{WorkspaceID: w.ID, MemberID: m.ID, Mode: "vr", Status: domain.RunQueued}
 	if err := db.CreateRun(ctx, bad); err == nil {
 		t.Fatal("CreateRun accepted invalid launch mode")
 	}
 
-	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunQueued)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunQueued)
 	r.Status = "warp-drive"
 	if err := db.UpdateRun(ctx, r); err == nil {
 		t.Fatal("UpdateRun accepted invalid status")
@@ -745,30 +678,21 @@ func TestForeignKeyEnforcement(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	s := &domain.Session{WorkspaceID: "no-such-workspace", Name: "x", BaseBranch: "main"}
-	if err := db.CreateSession(ctx, s); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("CreateSession with missing workspace FK: %v, want ErrNotFound", err)
-	}
-
 	w := mustCreateWorkspace(t, db)
-	sess := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
 
-	r := &domain.Run{SessionID: "no-such-session", MemberID: m.ID, Mode: domain.LaunchTUI, Status: domain.RunQueued}
+	r := &domain.Run{WorkspaceID: "no-such-workspace", MemberID: m.ID, Mode: domain.LaunchTUI, Status: domain.RunQueued}
 	if err := db.CreateRun(ctx, r); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("CreateRun with missing session FK: %v, want ErrNotFound", err)
+		t.Fatalf("CreateRun with missing workspace FK: %v, want ErrNotFound", err)
 	}
-	r = &domain.Run{SessionID: sess.ID, MemberID: "no-such-member", Mode: domain.LaunchTUI, Status: domain.RunQueued}
+	r = &domain.Run{WorkspaceID: w.ID, MemberID: "no-such-member", Mode: domain.LaunchTUI, Status: domain.RunQueued}
 	if err := db.CreateRun(ctx, r); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("CreateRun with missing member FK: %v, want ErrNotFound", err)
 	}
 
-	mustCreateRun(t, db, sess.ID, m.ID, domain.RunQueued)
+	mustCreateRun(t, db, w.ID, m.ID, domain.RunQueued)
 	if err := db.DeleteWorkspace(ctx, w.ID); !errors.Is(err, ErrInUse) {
-		t.Fatalf("DeleteWorkspace with dependent sessions: %v, want ErrInUse", err)
-	}
-	if err := db.DeleteSession(ctx, sess.ID); !errors.Is(err, ErrInUse) {
-		t.Fatalf("DeleteSession with dependent runs: %v, want ErrInUse", err)
+		t.Fatalf("DeleteWorkspace with dependent runs: %v, want ErrInUse", err)
 	}
 	if err := db.DeleteMember(ctx, m.ID); !errors.Is(err, ErrInUse) {
 		t.Fatalf("DeleteMember with dependent runs: %v, want ErrInUse", err)
@@ -829,9 +753,8 @@ func TestUpdateRunStatus(t *testing.T) {
 	ctx := context.Background()
 
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
-	r := mustCreateRun(t, db, s.ID, m.ID, domain.RunQueued)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunQueued)
 
 	started := time.Date(2026, 8, 9, 10, 30, 0, 0, time.UTC)
 	if err := db.UpdateRunStatus(ctx, r.ID, domain.RunRunning, "container started", &started, nil); err != nil {
@@ -879,10 +802,9 @@ func TestTransferRun(t *testing.T) {
 	ctx := context.Background()
 
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	ada := mustCreateMember(t, db)
 	bob := mustCreateMember(t, db)
-	r := mustCreateRun(t, db, s.ID, ada.ID, domain.RunRunning)
+	r := mustCreateRun(t, db, w.ID, ada.ID, domain.RunRunning)
 
 	if err := db.TransferRun(ctx, r.ID, bob.ID); err != nil {
 		t.Fatalf("TransferRun: %v", err)
@@ -911,17 +833,16 @@ func TestZeroTimeRejected(t *testing.T) {
 	ctx := context.Background()
 
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
 
 	zero := time.Time{}
-	r := &domain.Run{SessionID: s.ID, MemberID: m.ID, Mode: domain.LaunchTUI,
+	r := &domain.Run{WorkspaceID: w.ID, MemberID: m.ID, Mode: domain.LaunchTUI,
 		Status: domain.RunQueued, StartedAt: &zero}
 	if err := db.CreateRun(ctx, r); err == nil {
 		t.Fatal("CreateRun accepted a zero StartedAt")
 	}
 
-	ok := mustCreateRun(t, db, s.ID, m.ID, domain.RunQueued)
+	ok := mustCreateRun(t, db, w.ID, m.ID, domain.RunQueued)
 	ok.FinishedAt = &zero
 	if err := db.UpdateRun(ctx, ok); err == nil {
 		t.Fatal("UpdateRun accepted a zero FinishedAt")
@@ -997,7 +918,7 @@ func assertWorkspaceEqual(t *testing.T, want, got *domain.Workspace) {
 
 func assertRunEqual(t *testing.T, want, got *domain.Run) {
 	t.Helper()
-	if got.ID != want.ID || got.SessionID != want.SessionID || got.MemberID != want.MemberID ||
+	if got.ID != want.ID || got.WorkspaceID != want.WorkspaceID || got.MemberID != want.MemberID ||
 		got.Task != want.Task || got.Harness != want.Harness || got.Mode != want.Mode ||
 		got.Status != want.Status || got.Branch != want.Branch || got.Worktree != want.Worktree ||
 		got.ProfileSnapshotID != want.ProfileSnapshotID || got.ToolSnapshotID != want.ToolSnapshotID ||
@@ -1095,7 +1016,6 @@ func TestDeleteToolSnapshotProtectsLiveRunReferences(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	m := mustCreateMember(t, db)
 
 	for i, status := range []domain.RunStatus{
@@ -1114,7 +1034,7 @@ func TestDeleteToolSnapshotProtectsLiveRunReferences(t *testing.T) {
 			t.Fatalf("CreateToolSnapshot(%s): %v", status, err)
 		}
 		run := &domain.Run{
-			SessionID:      s.ID,
+			WorkspaceID:    w.ID,
 			MemberID:       m.ID,
 			Task:           "task",
 			Harness:        "claude",
@@ -1141,10 +1061,9 @@ func TestSetRunToolSnapshotPreservesHandoffFields(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
-	s := mustCreateSession(t, db, w.ID)
 	owner := mustCreateMember(t, db)
 	handoff := mustCreateMember(t, db)
-	run := mustCreateRun(t, db, s.ID, owner.ID, domain.RunQueued)
+	run := mustCreateRun(t, db, w.ID, owner.ID, domain.RunQueued)
 	run.Branch = "handoff-branch"
 	if err := db.UpdateRun(ctx, run); err != nil {
 		t.Fatalf("set branch: %v", err)

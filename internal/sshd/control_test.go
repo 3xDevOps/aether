@@ -24,7 +24,7 @@ func controlClient(t *testing.T, e *testEnv) *protocol.Client {
 }
 
 func TestAuthKnownKeyAndServerInfo(t *testing.T) {
-	e := newTestEnv(t, func(c *Config) { c.DashboardPort = 8333 })
+	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 	var info protocol.ServerInfoResult
 	if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
@@ -32,9 +32,6 @@ func TestAuthKnownKeyAndServerInfo(t *testing.T) {
 	}
 	if info.ProtocolVersion != protocol.Version {
 		t.Errorf("protocol_version = %q, want %q", info.ProtocolVersion, protocol.Version)
-	}
-	if info.DashboardPort != 8333 {
-		t.Errorf("dashboard_port = %d, want 8333", info.DashboardPort)
 	}
 	if info.Member.ID != string(e.member.ID) {
 		t.Errorf("member.id = %q, want %q (the caller)", info.Member.ID, e.member.ID)
@@ -69,20 +66,12 @@ func TestControlListsAndGets(t *testing.T) {
 		t.Errorf("workspace.list = %+v, want the one workspace", wl.Workspaces)
 	}
 
-	var sl protocol.SessionListResult
-	if err := c.Call(protocol.MethodSessionList, protocol.SessionListParams{WorkspaceID: string(e.ws.ID)}, &sl); err != nil {
-		t.Fatalf("session.list: %v", err)
+	var wg protocol.WorkspaceGetResult
+	if err := c.Call(protocol.MethodWorkspaceGet, protocol.WorkspaceGetParams{WorkspaceID: string(e.ws.ID)}, &wg); err != nil {
+		t.Fatalf("workspace.get: %v", err)
 	}
-	if len(sl.Sessions) != 1 || sl.Sessions[0].ID != string(e.sess.ID) {
-		t.Errorf("session.list = %+v, want the one session", sl.Sessions)
-	}
-
-	var sg protocol.SessionGetResult
-	if err := c.Call(protocol.MethodSessionGet, protocol.SessionGetParams{SessionID: string(e.sess.ID)}, &sg); err != nil {
-		t.Fatalf("session.get: %v", err)
-	}
-	if sg.Session.BaseBranch != "main" {
-		t.Errorf("session.base_branch = %q, want main", sg.Session.BaseBranch)
+	if wg.Workspace.ID != string(e.ws.ID) || wg.Workspace.BaseBranch != "main" {
+		t.Errorf("workspace.get = %+v, want the one workspace on main", wg.Workspace)
 	}
 
 	var ml protocol.MemberListResult
@@ -137,7 +126,7 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 
 	var lr protocol.RunResult
 	err := c.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(e.sess.ID), Task: "build it", Harness: "claude",
+		WorkspaceID: string(e.ws.ID), Task: "build it", Harness: "claude",
 	}, &lr)
 	if err != nil {
 		t.Fatalf("run.launch: %v", err)
@@ -167,7 +156,7 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 	}
 
 	want := []string{
-		"launch:" + string(e.sess.ID) + ":" + string(e.member.ID) + ":build it:claude:tui",
+		"launch:" + string(e.ws.ID) + ":" + string(e.member.ID) + ":build it:claude:tui",
 		"kill:" + string(e.run.ID) + ":" + string(e.member.ID),
 		"pause:" + string(e.run.ID) + ":" + string(e.member.ID),
 		"resume:" + string(e.run.ID) + ":" + string(e.member.ID),

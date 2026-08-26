@@ -39,7 +39,7 @@ Claude Code and degrades to the advisory overlap notice for the rest. See
 The **Resume** column is what a relaunch uses when a server reboot
 interrupted the run: the flag rides directly behind the executable and asks
 the harness to continue the conversation it last had in the working
-directory. It names no session. Every run mounts its checkout at the same
+directory. It names no conversation. Every run mounts its checkout at the same
 container path and shares one credential home per member, so what is resumed
 is that member's *most recent* conversation at that path - which is not
 necessarily the interrupted run's own, and not necessarily one from the same
@@ -94,15 +94,15 @@ For an unshipped name the command asks for the interactive and headless
 launch templates first (`<name> {task}` and `<name> -p {task}` by default;
 Enter accepts, or pass `--tui` / `--headless`). `{task}` is replaced as one
 argv value, never through a shell. Aether discovers where the login flow
-wrote its state by comparing your credential home before and after the
-session, so the registered definition mounts exactly those paths into later
+wrote its state by comparing your credential home before and after the setup
+shell, so the registered definition mounts exactly those paths into later
 runs.
 
 The individual steps remain available when you need only one of them:
 
 - `aether workspace bootstrap <workspace>` re-installs tools without
   touching login state (`--resume` / `--reset` manage a disconnected
-  session's pending staging).
+  shell's pending staging).
 - `aether setup <harness> --workspace <workspace>` re-runs a login without
   reinstalling. The active tool snapshot is mounted read-only at `~/.local`;
   the harness credential home is mounted per its definition.
@@ -211,7 +211,7 @@ that argv starts with that executable, and that profile, credential, and
 deny-name policies are safe. An invalid administrator definition rejects
 server startup; an invalid member registration is refused at the RPC. Tool
 installation, login state, profile sync, and launch definitions remain
-separate concerns even when `aether agent add` drives them in one session:
+separate concerns even when `aether agent add` drives them in one shell:
 bootstrap installs the executable, login writes credential state, profile
 push syncs only the declared profile, and the launch definition only
 resolves argv. All shell modes use the `aether-workspace-shell` subsystem.
@@ -241,8 +241,9 @@ The local daemon (`aether daemon run`) does the push automatically on change;
   per-harness credential denylist (`.credentials.json`, `auth.json`,
   `.claude.json`, ...) and a client-side content scan that blocks any push
   containing key material, naming the file and the match. `--allow-secret
-  <file>` overrides a false positive and records the override on the session
-  timeline (it requires `--session`, so the override is always attributable).
+  <file>` overrides a false positive and records the override on the workspace
+  timeline. It requires `--workspace` outright - no single-workspace default -
+  so the override always names the timeline it is attributable on.
 
 ## Adding a harness
 

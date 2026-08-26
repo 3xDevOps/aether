@@ -43,7 +43,7 @@ tailscale: tailnet hostname my-server.tailnet-name.ts.net
 That hostname is what you hand teammates. Start the server as usual:
 
 ```sh
-aether-server serve --data-dir /var/lib/aether --addr :2222 --dashboard-port 8080
+aether-server serve --data-dir /var/lib/aether --addr :2222
 ```
 
 The server checks for the tailscaled socket **at startup**. If it is there,
@@ -191,18 +191,14 @@ out invites to someone connecting from outside the tailnet.
 
 ## The dashboard
 
-The dashboard is loopback-only by default and reached through the SSH forward
-`aether dash` opens, so it inherits the SSH boundary and needs no extra
-network exposure. That is the recommended shape.
+The dashboard is not a server-side listener at all. `aether gui` serves it
+from your own machine, bound to `127.0.0.1`, and reaches the server over the
+same SSH connection the CLI uses. There is no dashboard port to open, no
+forward to hold, and no exposure flag - the server's only listener is SSH.
 
-`--dashboard-addr <host:port>` additionally exposes it directly. That listener
-is **plain HTTP** - Aether ships no certificate handling. Put it on a tailnet
-address, or terminate TLS in front of it. Requests still need a bearer token
-minted over SSH; see [dashboard-api.md](dashboard-api.md) and
-[security.md](security.md).
-
-`--dashboard-port 0` (the default) means no dashboard at all: `aether dash`
-reports that the server forwards no dashboard port.
+That also means nothing about the dashboard changes the server's network
+shape: whatever reachability you arranged for `--addr` is the whole story.
+See [local-gateway.md](local-gateway.md) and [security.md](security.md).
 
 ---
 

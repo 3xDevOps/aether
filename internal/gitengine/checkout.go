@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 
@@ -117,7 +118,21 @@ func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 	}
 	cleanup := func() { _ = os.RemoveAll(checkoutPath) }
 
-	branch = runBranch(run, task)
+	branch, err = e.uniqueRunBranch(ctx, repo, base, run, task)
+	if err != nil {
+		cleanup()
+		return "", "", err
+	}
+	// The name is reserved in the bare repo from here on, so every later
+	// failure has to give it back. Leaving it claimed would push the next
+	// run of the same task onto the full-ID form forever.
+	cleanup = func() {
+		_ = os.RemoveAll(checkoutPath)
+		if _, delErr := e.git(ctx, repo, "update-ref", "-d", "refs/heads/"+branch, base); delErr != nil {
+			slog.Warn("gitengine: release reserved run branch",
+				"run", run, "branch", branch, "error", delErr)
+		}
+	}
 	if _, err := e.git(ctx, checkoutPath, "checkout", "-b", branch, base); err != nil {
 		cleanup()
 		return "", "", err
@@ -139,14 +154,62 @@ func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 	return checkoutPath, branch, nil
 }
 
-// WorkspaceBranchExists reports whether the workspace bare repository
-// contains the exact branch ref.
-func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceID, branch string) (bool, error) {
-	repo, err := e.existingRepoPath(ws)
+// uniqueRunBranch picks and reserves the run's branch name: the readable
+// short form (aether/run-<slug>-<short-id>) unless that name is already
+// claimed in the workspace, in which case the full run ID disambiguates
+// it. Two runs of the same task can only collide on the short ID, and the
+// full ID is unique by construction, so this terminates after one retry.
+//
+// The reservation is a ref write in the workspace bare repo rather than a
+// read-then-use check. Publication is a forced fetch, so two runs that
+// both saw the name free would not fail: the later one would silently
+// overwrite the earlier one's branch, and the branch is the artifact.
+// git update-ref --create-reflog with an all-zero old value fails when
+// the ref already exists, which makes the claim atomic across concurrent
+// provisioning.
+func (e *Engine) uniqueRunBranch(ctx context.Context, repo, base string, run domain.RunID, task string) (string, error) {
+	short := runBranch(run, task, shortID(run))
+	claimed, err := e.claimBranch(ctx, repo, short, base)
 	if err != nil {
+		return "", err
+	}
+	if claimed {
+		return short, nil
+	}
+	full := runBranch(run, task, string(run))
+	claimed, err = e.claimBranch(ctx, repo, full, base)
+	if err != nil {
+		return "", err
+	}
+	if !claimed {
+		return "", fmt.Errorf("gitengine: branch %s already exists for run %s", full, run)
+	}
+	return full, nil
+}
+
+// claimBranch creates refs/heads/<branch> at base, reporting false when
+// the ref already exists. The all-zero old value makes this a create-only
+// update: git rejects it rather than moving an existing ref.
+func (e *Engine) claimBranch(ctx context.Context, repo, branch, base string) (bool, error) {
+	const zero = "0000000000000000000000000000000000000000"
+	_, err := e.git(ctx, repo, "update-ref", "refs/heads/"+branch, base, zero)
+	if err == nil {
+		return true, nil
+	}
+	exists, existsErr := e.branchExists(ctx, repo, branch)
+	if existsErr != nil {
 		return false, err
 	}
-	_, err = e.git(ctx, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	if exists {
+		return false, nil
+	}
+	return false, err
+}
+
+// branchExists reports whether repo holds the exact branch ref. git
+// rev-parse exits 1 for an unknown ref, which is an answer, not a failure.
+func (e *Engine) branchExists(ctx context.Context, repo, branch string) (bool, error) {
+	_, err := e.git(ctx, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if err == nil {
 		return true, nil
 	}
@@ -155,6 +218,16 @@ func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceI
 		return false, nil
 	}
 	return false, err
+}
+
+// WorkspaceBranchExists reports whether the workspace bare repository
+// contains the exact branch ref.
+func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceID, branch string) (bool, error) {
+	repo, err := e.existingRepoPath(ws)
+	if err != nil {
+		return false, err
+	}
+	return e.branchExists(ctx, repo, branch)
 }
 
 // CommitAll stages and commits everything in the run's checkout with the
@@ -184,8 +257,8 @@ func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string
 
 // PublishRunBranch fetches the run's branch from its checkout into the
 // workspace bare repo, making it fetchable by clients. Returns the branch
-// tip sha. Publishes git.branch when the ref moved and the run's session is
-// known from the watch registry.
+// tip sha. Publishes git.branch when the ref moved and the run's workspace
+// is known from the watch registry.
 func (e *Engine) PublishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error) {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {

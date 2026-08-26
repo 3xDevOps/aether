@@ -611,7 +611,7 @@ func TestSyncCapsConcurrentChannelsPerMember(t *testing.T) {
 }
 
 // Finding 7: the conflict payload is client-supplied and reaches every
-// subscriber of the run's session, so it must be bounded to what a
+// subscriber of the run's workspace, so it must be bounded to what a
 // conflict report can be. Paths that escape the sync root, or carry
 // terminal control sequences, are not conflict reports.
 func TestSyncConflictRejectsHostilePayloads(t *testing.T) {
@@ -657,16 +657,16 @@ func TestSyncConflictRejectsHostilePayloads(t *testing.T) {
 // Finding 7, delivery half: the typed sync.conflict event only reaches a
 // client that asked for its type, and the one client known to be watching
 // a synced run (`aether sync`) subscribes to run.status. Without a second
-// notice on the session timeline the run owner never learns their
+// notice on the workspace timeline the run owner never learns their
 // worktree is half-synced.
 func TestSyncConflictNotifiesAffectedMembersOnTimeline(t *testing.T) {
 	e, _ := syncEnv(t)
 	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 
-	// The run owner, watching the session the way every other privileged
+	// The run owner, watching the workspace the way every other privileged
 	// act on someone else's run is surfaced.
 	sub, err := e.bus.Subscribe(context.Background(), events.SubscribeOptions{
-		Filter: events.Filter{Session: e.sess.ID, Types: []events.Type{events.TypeTimeline}},
+		Filter: events.Filter{Workspace: e.ws.ID, Types: []events.Type{events.TypeTimeline}},
 	})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
@@ -692,7 +692,7 @@ func TestSyncConflictNotifiesAffectedMembersOnTimeline(t *testing.T) {
 		if !strings.Contains(p.Message, "overlay paused") {
 			t.Fatalf("timeline message = %q, want the paused-overlay notice", p.Message)
 		}
-		// The timeline is session-wide, so it carries the fact of the
+		// The timeline is workspace-wide, so it carries the fact of the
 		// conflict but not the conflicted paths.
 		if strings.Contains(p.Message, "src/main.go") {
 			t.Fatalf("timeline message leaks worktree paths: %q", p.Message)

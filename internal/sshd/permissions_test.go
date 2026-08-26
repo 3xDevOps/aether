@@ -97,7 +97,7 @@ func TestCollaboratorKillsOthersRunViewerDenied(t *testing.T) {
 	vc := controlAs(t, e, viewer)
 	wantDenied(t, vc.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "viewer run.kill")
 	wantDenied(t, vc.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: string(e.sess.ID), Task: "t", Harness: "claude",
+		WorkspaceID: string(e.ws.ID), Task: "t", Harness: "claude",
 	}, nil), "viewer run.launch")
 	wantDenied(t, vc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "hi"}, nil), "viewer run.inject")
 }
@@ -142,7 +142,7 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 	ctx := context.Background()
 	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 
-	// Admin flips the session setting; the change lands in the store and
+	// Admin flips the workspace setting; the change lands in the store and
 	// on the timeline.
 	sub, err := e.bus.Subscribe(ctx, events.SubscribeOptions{
 		Filter: events.Filter{Types: []events.Type{events.TypeTimeline}},
@@ -153,14 +153,14 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 	defer sub.Close() //nolint:errcheck
 
 	admin := controlClient(t, e)
-	var sr protocol.SessionSettingsResult
-	if err := admin.Call(protocol.MethodSessionSettings, protocol.SessionSettingsParams{
-		SessionID: string(e.sess.ID), SteerOthers: domain.SteerOthersAdminsOnly,
+	var sr protocol.WorkspaceSettingsResult
+	if err := admin.Call(protocol.MethodWorkspaceSettings, protocol.WorkspaceSettingsParams{
+		WorkspaceID: string(e.ws.ID), SteerOthers: domain.SteerOthersAdminsOnly,
 	}, &sr); err != nil {
-		t.Fatalf("session.settings: %v", err)
+		t.Fatalf("workspace.settings: %v", err)
 	}
-	if sr.Session.SteerOthers != domain.SteerOthersAdminsOnly {
-		t.Fatalf("session.settings result steer_others = %q", sr.Session.SteerOthers)
+	if sr.Workspace.SteerOthers != domain.SteerOthersAdminsOnly {
+		t.Fatalf("workspace.settings result steer_others = %q", sr.Workspace.SteerOthers)
 	}
 	select {
 	case ev := <-sub.Events():
@@ -169,7 +169,7 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 			t.Errorf("settings timeline event = %+v actor %s", ev.Payload, ev.ActorID)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("no timeline event for session.settings")
+		t.Fatal("no timeline event for workspace.settings")
 	}
 
 	cc := controlAs(t, e, collab)
@@ -178,7 +178,7 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 
 	// Own runs stay steerable under admins_only.
 	own := &domain.Run{
-		SessionID: e.sess.ID, MemberID: cm.ID, Task: "mine",
+		WorkspaceID: e.ws.ID, MemberID: cm.ID, Task: "mine",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 	}
 	if cerr := e.store.CreateRun(ctx, own); cerr != nil {
@@ -188,10 +188,10 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 		t.Fatalf("admins_only steer of own run: %v", err)
 	}
 
-	// session.settings itself is admin-only.
-	wantDenied(t, cc.Call(protocol.MethodSessionSettings, protocol.SessionSettingsParams{
-		SessionID: string(e.sess.ID), SteerOthers: "",
-	}, nil), "collaborator session.settings")
+	// workspace.settings itself is admin-only.
+	wantDenied(t, cc.Call(protocol.MethodWorkspaceSettings, protocol.WorkspaceSettingsParams{
+		WorkspaceID: string(e.ws.ID), SteerOthers: "",
+	}, nil), "collaborator workspace.settings")
 }
 
 // Handoff is owner-or-admin: a non-owner collaborator is denied, the
@@ -211,7 +211,7 @@ func TestHandoffOwnerOrAdminOnly(t *testing.T) {
 
 	// The owner hands off their own run.
 	own := &domain.Run{
-		SessionID: e.sess.ID, MemberID: cm.ID, Task: "mine",
+		WorkspaceID: e.ws.ID, MemberID: cm.ID, Task: "mine",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 	}
 	if cerr := e.store.CreateRun(ctx, own); cerr != nil {
@@ -290,15 +290,15 @@ func TestRunProtectPublishesAttributedNote(t *testing.T) {
 }
 
 // Wire round trip: protected and steer_others appear on run.get and
-// session.get results.
+// workspace.get results.
 func TestPermissionFieldsOnWire(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	if err := e.store.SetRunProtected(ctx, e.run.ID, true); err != nil {
 		t.Fatalf("SetRunProtected: %v", err)
 	}
-	if err := e.store.SetSessionSteerOthers(ctx, e.sess.ID, domain.SteerOthersAdminsOnly); err != nil {
-		t.Fatalf("SetSessionSteerOthers: %v", err)
+	if err := e.store.SetWorkspaceSteerOthers(ctx, e.ws.ID, domain.SteerOthersAdminsOnly); err != nil {
+		t.Fatalf("SetWorkspaceSteerOthers: %v", err)
 	}
 	c := controlClient(t, e)
 	var rr protocol.RunResult
@@ -308,12 +308,12 @@ func TestPermissionFieldsOnWire(t *testing.T) {
 	if !rr.Run.Protected {
 		t.Error("run.get did not carry protected")
 	}
-	var sr protocol.SessionGetResult
-	if err := c.Call(protocol.MethodSessionGet, protocol.SessionGetParams{SessionID: string(e.sess.ID)}, &sr); err != nil {
-		t.Fatalf("session.get: %v", err)
+	var wg protocol.WorkspaceGetResult
+	if err := c.Call(protocol.MethodWorkspaceGet, protocol.WorkspaceGetParams{WorkspaceID: string(e.ws.ID)}, &wg); err != nil {
+		t.Fatalf("workspace.get: %v", err)
 	}
-	if sr.Session.SteerOthers != domain.SteerOthersAdminsOnly {
-		t.Errorf("session.get steer_others = %q", sr.Session.SteerOthers)
+	if wg.Workspace.SteerOthers != domain.SteerOthersAdminsOnly {
+		t.Errorf("workspace.get steer_others = %q", wg.Workspace.SteerOthers)
 	}
 }
 

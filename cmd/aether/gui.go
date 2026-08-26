@@ -6,7 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
+	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localgw"
@@ -80,4 +84,27 @@ func runGUI(args []string) error {
 	}
 	waitForExit()
 	return nil
+}
+
+// waitForExit blocks until the process is told to stop. SIGTERM belongs
+// here with Ctrl-C: without it a `kill` or a systemd stop skips the
+// deferred gateway shutdown and leaves the listener live. SIGHUP covers
+// a closed terminal window the same way.
+func waitForExit() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, append([]os.Signal{syscall.SIGHUP}, terminationSignals...)...)
+	<-ch
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
 }

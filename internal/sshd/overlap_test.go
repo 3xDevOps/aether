@@ -52,7 +52,7 @@ func TestConflictRadarFlagsBothRunsAndClears(t *testing.T) {
 		t.Fatalf("create member: %v", err)
 	}
 	other := &domain.Run{
-		SessionID: e.sess.ID, MemberID: grace.ID, Task: "also do things",
+		WorkspaceID: e.ws.ID, MemberID: grace.ID, Task: "also do things",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 		Branch: "aether/run-y-also-do-things",
 	}
@@ -67,7 +67,7 @@ func TestConflictRadarFlagsBothRunsAndClears(t *testing.T) {
 			files = append(files, events.FileDiffStat{Path: p, Additions: 1})
 		}
 		if _, perr := bus.Publish(ctx, events.Event{
-			SessionID: e.sess.ID, RunID: run, Payload: events.RunDiffPayload{Files: files},
+			WorkspaceID: e.ws.ID, RunID: run, Payload: events.RunDiffPayload{Files: files},
 		}); perr != nil {
 			t.Fatalf("publish diff: %v", perr)
 		}
@@ -125,7 +125,7 @@ func TestConflictRadarFlagsBothRunsAndClears(t *testing.T) {
 		t.Fatalf("finish run: %v", err)
 	}
 	if _, err = bus.Publish(ctx, events.Event{
-		SessionID: e.sess.ID, RunID: other.ID,
+		WorkspaceID: e.ws.ID, RunID: other.ID,
 		Payload: events.RunStatusPayload{From: domain.RunRunning, To: domain.RunMerged},
 	}); err != nil {
 		t.Fatalf("publish status: %v", err)

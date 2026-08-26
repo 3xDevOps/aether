@@ -1,7 +1,6 @@
-// Package webgate holds the transport-independent web-gateway pieces
-// shared by the remote dashboard (internal/dashboard) and the local
-// gateway (internal/localgw): the HTTP error envelope, the wire-code to
-// HTTP-status mapping, and the SPA static handler.
+// Package webgate holds the transport-independent web-gateway pieces the
+// local gateway (internal/localgw) builds on: the HTTP error envelope,
+// the wire-code to HTTP-status mapping, and the SPA static handler.
 package webgate
 
 import (

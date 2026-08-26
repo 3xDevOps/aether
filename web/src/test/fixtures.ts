@@ -7,7 +7,6 @@ import type {
   Run,
   Schedule,
   ServerInfo,
-  Session,
   Template,
   ToolSnapshot,
   Workspace,
@@ -27,26 +26,24 @@ export const bob: Member = {
   role: 'collaborator',
 }
 
-export const session: Session = {
-  id: 'ses_1',
-  workspace_id: 'wsp_1',
-  name: 'checkout rewrite',
+export const workspace: Workspace = {
+  id: 'wsp_1',
+  name: 'main-repo',
   base_branch: 'main',
-  created_at: '2026-08-14T10:00:00Z',
+  created_at: '2026-08-14T08:00:00Z',
 }
 
-export const otherSession: Session = {
-  id: 'ses_2',
-  workspace_id: 'wsp_1',
-  name: 'flaky tests',
+export const otherWorkspace: Workspace = {
+  id: 'wsp_2',
+  name: 'docs-site',
   base_branch: 'main',
-  created_at: '2026-08-14T09:00:00Z',
+  created_at: '2026-08-14T07:00:00Z',
 }
 
 export function run(over: Partial<Run> = {}): Run {
   return {
     id: 'run_1',
-    session_id: session.id,
+    workspace_id: workspace.id,
     member_id: alice.id,
     task: 'rewrite the checkout flow',
     harness: 'claude',
@@ -64,7 +61,6 @@ export const serverInfo: ServerInfo = {
   server_version: '1.2.3',
   protocol_version: '1',
   time: '2026-08-14T10:05:00Z',
-  dashboard_port: 8080,
   member: alice,
   disk: {
     used_bytes: 512 * 1024 * 1024,
@@ -79,7 +75,7 @@ export const serverInfo: ServerInfo = {
 export function approval(over: Partial<Approval> = {}): Approval {
   return {
     id: 'apr_1',
-    session_id: session.id,
+    workspace_id: workspace.id,
     run_id: 'run_1',
     action: 'write src/checkout.ts',
     detail: 'the agent wants to edit a file outside its allowlist',
@@ -91,7 +87,7 @@ export function approval(over: Partial<Approval> = {}): Approval {
 
 export const template: Template = {
   id: 'tpl_1',
-  session_id: session.id,
+  workspace_id: workspace.id,
   name: 'nightly triage',
   task: 'triage the flaky tests',
   harness: 'claude',
@@ -99,16 +95,10 @@ export const template: Template = {
   created_at: '2026-08-14T09:00:00Z',
 }
 
-export const workspace: Workspace = {
-  id: 'wsp_1',
-  name: 'main-repo',
-  created_at: '2026-08-14T08:00:00Z',
-}
-
 export function schedule(over: Partial<Schedule> = {}): Schedule {
   return {
     id: 'sch_1',
-    session_id: session.id,
+    workspace_id: workspace.id,
     template: template.name,
     cron: '0 3 * * *',
     member_id: alice.id,
@@ -136,11 +126,11 @@ export function agentInfo(over: Partial<AgentInfo> = {}): AgentInfo {
 }
 
 export function budget(
-  sessionID: string,
+  workspaceID: string,
   over: Partial<BudgetReport> = {},
 ): BudgetReport {
   return {
-    session_id: sessionID,
+    workspace_id: workspaceID,
     state: 'ok',
     spend: {
       runs: 1,
@@ -158,7 +148,7 @@ export function budget(
 export function fakeApi(over: Partial<Api> = {}): Api {
   return {
     serverInfo: vi.fn(async () => serverInfo),
-    sessionList: vi.fn(async () => [session, otherSession]),
+    workspaceGet: vi.fn(async () => workspace),
     memberList: vi.fn(async () => [alice, bob]),
     runList: vi.fn(async () => [run()]),
     runGet: vi.fn(async () => run()),
@@ -173,13 +163,17 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     approvalDecide: vi.fn(async () => approval()),
     presenceRoster: vi.fn(async () => []),
     presenceHeartbeat: vi.fn(async () => 90),
-    budgetGet: vi.fn(async (sessionID: string) => budget(sessionID)),
+    budgetGet: vi.fn(async (workspaceID: string) => budget(workspaceID)),
     templateList: vi.fn(async () => [template]),
     templateLaunch: vi.fn(async () => ({
       run: run({ id: 'run_tpl' }),
       base_branch: 'main',
     })),
-    sessionTimeline: vi.fn(async () => ({ events: [], next_seq: 0, more: false })),
+    workspaceTimeline: vi.fn(async () => ({
+      events: [],
+      next_seq: 0,
+      more: false,
+    })),
     runOverlaps: vi.fn(async () => []),
     runPatch: vi.fn(async (runID: string) => ({
       run_id: runID,
@@ -211,14 +205,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     memberRemove: vi.fn(async () => ({})),
     memberColor: vi.fn(async () => alice),
     workspaceAdd: vi.fn(async () => workspace),
-    workspaceListFull: vi.fn(async () => [workspace]),
-    sessionNew: vi.fn(async () => session),
-    sessionSettings: vi.fn(async () => session),
+    workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
+    workspaceSettings: vi.fn(async () => workspace),
     toolsList: vi.fn(async () => [toolSnapshot()]),
     toolsVerify: vi.fn(async () => ({ verified: true })),
     toolsRollback: vi.fn(async () => ({})),
     toolsReset: vi.fn(async () => ({ reset: true })),
-    budgetSet: vi.fn(async () => budget(session.id)),
+    budgetSet: vi.fn(async () => budget(workspace.id)),
     templateSave: vi.fn(async () => template),
     templateDelete: vi.fn(async () => ({})),
     scheduleList: vi.fn(async () => [schedule()]),

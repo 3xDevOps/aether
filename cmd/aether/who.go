@@ -23,24 +23,24 @@ func init() {
 
 func runWho(args []string) error {
 	fs := flag.NewFlagSet("who", flag.ExitOnError)
-	session := fs.String("session", "", "session ID or name (default: the only session)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	run := fs.String("run", "", "only members watching this run")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		sessID, err := resolveSession(c, *session)
+		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
 		// Asking who is here also announces that you are.
-		if err := c.Call(protocol.MethodPresenceHeartbeat, protocol.PresenceHeartbeatParams{SessionID: sessID}, nil); err != nil {
+		if err := c.Call(protocol.MethodPresenceHeartbeat, protocol.PresenceHeartbeatParams{WorkspaceID: wsID}, nil); err != nil {
 			return err
 		}
 		var roster protocol.PresenceRosterResult
 		if err := c.Call(protocol.MethodPresenceRoster, protocol.PresenceRosterParams{
-			SessionID: sessID,
-			RunID:     *run,
+			WorkspaceID: wsID,
+			RunID:       *run,
 		}, &roster); err != nil {
 			return err
 		}

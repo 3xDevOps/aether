@@ -12,11 +12,11 @@ import (
 // Presence is one member's live presence: online since their last
 // heartbeat, watching when they hold an attach on at least one run.
 type Presence struct {
-	Member   domain.MemberID
-	Session  domain.SessionID
-	State    events.PresenceState
-	Watching []domain.RunID
-	LastSeen time.Time
+	Member    domain.MemberID
+	Workspace domain.WorkspaceID
+	State     events.PresenceState
+	Watching  []domain.RunID
+	LastSeen  time.Time
 }
 
 // roster is the in-memory presence table. Members enter it by heartbeat
@@ -24,8 +24,8 @@ type Presence struct {
 // they still hold an attach, which is itself proof of a live connection
 // (the SSH server publishes the closing presence event when it drops).
 //
-// Presence is per session: the same member can be attached in two
-// sessions at once, so each (member, session) pair carries its own row.
+// Presence is per workspace: the same member can be attached in two
+// workspaces at once, so each (member, workspace) pair carries its own row.
 type roster struct {
 	mu      sync.Mutex
 	ttl     time.Duration
@@ -34,8 +34,8 @@ type roster struct {
 }
 
 type rosterKey struct {
-	member  domain.MemberID
-	session domain.SessionID
+	member    domain.MemberID
+	workspace domain.WorkspaceID
 }
 
 // rosterEntry counts attaches per run rather than holding a set: one
@@ -50,9 +50,9 @@ func newRoster(ttl time.Duration, now func() time.Time) *roster {
 	return &roster{ttl: ttl, now: now, members: map[rosterKey]*rosterEntry{}}
 }
 
-// entry returns the member's row in session, creating it. Callers hold mu.
-func (r *roster) entry(member domain.MemberID, session domain.SessionID) (*rosterEntry, bool) {
-	k := rosterKey{member: member, session: session}
+// entry returns the member's row in workspace, creating it. Callers hold mu.
+func (r *roster) entry(member domain.MemberID, workspace domain.WorkspaceID) (*rosterEntry, bool) {
+	k := rosterKey{member: member, workspace: workspace}
 	e, ok := r.members[k]
 	if !ok {
 		e = &rosterEntry{watching: map[domain.RunID]int{}}
@@ -64,27 +64,27 @@ func (r *roster) entry(member domain.MemberID, session domain.SessionID) (*roste
 
 // beat refreshes a member's heartbeat, reporting whether they were absent
 // (a transition to online worth publishing).
-func (r *roster) beat(member domain.MemberID, session domain.SessionID) bool {
+func (r *roster) beat(member domain.MemberID, workspace domain.WorkspaceID) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, fresh := r.entry(member, session)
+	_, fresh := r.entry(member, workspace)
 	return fresh
 }
 
 // watch records member as watching run, which also counts as a heartbeat.
-func (r *roster) watch(member domain.MemberID, session domain.SessionID, run domain.RunID) {
+func (r *roster) watch(member domain.MemberID, workspace domain.WorkspaceID, run domain.RunID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	e, _ := r.entry(member, session)
+	e, _ := r.entry(member, workspace)
 	e.watching[run]++
 }
 
 // unwatch releases one attach on run, keeping the member online. The run
 // stays watched while any of their other attaches on it is still live.
-func (r *roster) unwatch(member domain.MemberID, session domain.SessionID, run domain.RunID) {
+func (r *roster) unwatch(member domain.MemberID, workspace domain.WorkspaceID, run domain.RunID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	e, _ := r.entry(member, session)
+	e, _ := r.entry(member, workspace)
 	if e.watching[run] <= 1 {
 		delete(e.watching, run)
 		return
@@ -104,7 +104,7 @@ func (r *roster) expire() []Presence {
 			continue
 		}
 		gone = append(gone, Presence{
-			Member: k.member, Session: k.session,
+			Member: k.member, Workspace: k.workspace,
 			State: events.PresenceOffline, LastSeen: e.lastSeen,
 		})
 		delete(r.members, k)
@@ -117,17 +117,17 @@ func less(a, b Presence) bool {
 	if a.Member != b.Member {
 		return a.Member < b.Member
 	}
-	return a.Session < b.Session
+	return a.Workspace < b.Workspace
 }
 
-// snapshot lists present members, narrowed to a session and to watchers
+// snapshot lists present members, narrowed to a workspace and to watchers
 // of one run when either is set.
-func (r *roster) snapshot(session domain.SessionID, run domain.RunID) []Presence {
+func (r *roster) snapshot(workspace domain.WorkspaceID, run domain.RunID) []Presence {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]Presence, 0, len(r.members))
 	for k, e := range r.members {
-		if session != "" && k.session != session {
+		if workspace != "" && k.workspace != workspace {
 			continue
 		}
 		if run != "" {
@@ -136,7 +136,7 @@ func (r *roster) snapshot(session domain.SessionID, run domain.RunID) []Presence
 			}
 		}
 		p := Presence{
-			Member: k.member, Session: k.session,
+			Member: k.member, Workspace: k.workspace,
 			State: events.PresenceOnline, LastSeen: e.lastSeen,
 		}
 		for w := range e.watching {

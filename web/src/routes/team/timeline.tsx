@@ -12,9 +12,9 @@ import { useStore } from '@/store'
 const types = [
   ['', 'Everything'],
   ['run.status', 'Run status'],
-  ['session.timeline', 'Steering'],
-  ['session.approval', 'Approvals'],
-  ['session.presence', 'Presence'],
+  ['workspace.timeline', 'Steering'],
+  ['workspace.approval', 'Approvals'],
+  ['workspace.presence', 'Presence'],
   ['run.cost', 'Cost'],
   ['run.overlap', 'Conflicts'],
   ['git.branch', 'Branches'],
@@ -27,7 +27,7 @@ export function TimelineStatus() {
     <button
       type="button"
       onClick={() => navigate('timeline')}
-      title="Session activity"
+      title="Workspace activity"
       className="flex items-center gap-1 rounded px-1 hover:text-foreground"
     >
       <History className="size-3.5" aria-hidden />
@@ -37,12 +37,18 @@ export function TimelineStatus() {
 }
 
 /**
- * One session's history, newest first, filterable by run, member and type.
+ * One workspace's history, newest first, filterable by run, member and type.
  * The reader pages forward from a cursor, so the view opens on a window at
  * the end of the log and "load older" walks that window back.
+ *
+ * This keeps a workspace picker where the other scoped surfaces dropped
+ * theirs: comparing what happened in one workspace against another is the
+ * whole point of an activity log, so the sidebar's choice is only the
+ * default here.
  */
 export function TimelineFeed({ params, client = api }: RouteProps & { client?: Api }) {
-  const sessions = useStore((s) => s.sessions)
+  const workspaces = useStore((s) => s.workspaces)
+  const activeWorkspace = useStore((s) => s.activeWorkspace)
   const runs = useStore((s) => s.runs)
   const members = useStore((s) => s.members)
   const filters = useStore((s) => s.feedFilters)
@@ -54,13 +60,20 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
   const truncated = useStore((s) => s.feedTruncated)
   const lastSeq = useStore((s) => s.lastSeq)
 
-  // The feed is session-scoped: fall back to the session the caller named,
-  // then to any session we know.
+  // The feed is workspace-scoped: prefer the workspace the caller named, then
+  // the active one, then any we know.
   useEffect(() => {
-    if (filters.sessionID) return
-    const first = params.sessionId ?? Object.keys(sessions)[0]
-    if (first) setFilters({ sessionID: first })
-  }, [filters.sessionID, params.sessionId, sessions, setFilters])
+    if (filters.workspaceID) return
+    const first =
+      params.workspaceId || activeWorkspace || Object.keys(workspaces)[0]
+    if (first) setFilters({ workspaceID: first })
+  }, [
+    filters.workspaceID,
+    params.workspaceId,
+    activeWorkspace,
+    workspaces,
+    setFilters,
+  ])
 
   useEffect(() => {
     void openFeed(useStore, client)
@@ -72,30 +85,30 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
     if (!useStore.getState().feedLoading) void drain(useStore, client)
   }, [lastSeq, client])
 
-  const sessionRuns = Object.values(runs).filter(
-    (r) => r.session_id === filters.sessionID,
+  const workspaceRuns = Object.values(runs).filter(
+    (r) => r.workspace_id === filters.workspaceID,
   )
 
   return (
     <div className="flex h-full flex-col">
       <ViewHeader
-        title="Session activity"
+        title="Workspace activity"
         subtitle={`${feed.length} ${feed.length === 1 ? 'entry' : 'entries'}`}
       />
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs">
         <Select
-          label="Session"
-          value={filters.sessionID}
-          // A run belongs to one session, so a kept run filter would query
-          // the new session for a run it does not have and render nothing.
-          onChange={(sessionID) => setFilters({ sessionID, runID: '' })}
-          options={Object.values(sessions).map((s) => [s.id, s.name])}
+          label="Workspace"
+          value={filters.workspaceID}
+          // A run belongs to one workspace, so a kept run filter would query
+          // the new workspace for a run it does not have and render nothing.
+          onChange={(workspaceID) => setFilters({ workspaceID, runID: '' })}
+          options={Object.values(workspaces).map((w) => [w.id, w.name])}
         />
         <Select
           label="Run"
           value={filters.runID}
           onChange={(runID) => setFilters({ runID })}
-          options={[['', 'Every run'], ...sessionRuns.map((r) => [r.id, r.task])]}
+          options={[['', 'Every run'], ...workspaceRuns.map((r) => [r.id, r.task])]}
         />
         <Select
           label="Member"

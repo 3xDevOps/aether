@@ -148,7 +148,6 @@ type credentialUserReservation struct {
 // supervised is the in-memory state of one run with a live container.
 type supervised struct {
 	runID       domain.RunID
-	sessionID   domain.SessionID
 	workspaceID domain.WorkspaceID
 	containerID runtime.ID
 	task        string
@@ -435,7 +434,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env := make(map[string]string, len(plan.Env)+7)
 	maps.Copy(env, plan.Env)
 	env["AETHER_RUN_ID"] = string(run.ID)
-	env["AETHER_SESSION_ID"] = string(run.SessionID)
+	env["AETHER_WORKSPACE_ID"] = string(run.WorkspaceID)
 	env["GIT_AUTHOR_NAME"] = member.DisplayName
 	env["GIT_COMMITTER_NAME"] = member.DisplayName
 	env["GIT_AUTHOR_EMAIL"] = string(member.ID) + "@aether.local"

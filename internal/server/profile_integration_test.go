@@ -73,16 +73,16 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 		Color:       "#4363d8",
 		Role:        domain.RoleAdmin,
 	}
-	ws := &domain.Workspace{Name: "prof", Environment: domain.WorkspaceEnvironment{CustomImage: image}}
+	ws := &domain.Workspace{
+		Name:        "prof",
+		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		BaseBranch:  domain.DefaultBaseBranch,
+	}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
 	if err = srv.Store().CreateWorkspace(ctx, ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
-	}
-	sess := &domain.Session{WorkspaceID: ws.ID, Name: "profiles", BaseBranch: "main"}
-	if err = srv.Store().CreateSession(ctx, sess); err != nil {
-		t.Fatalf("seed session: %v", err)
 	}
 
 	sub, err := srv.Bus().Subscribe(ctx, events.SubscribeOptions{Buffer: 4096})
@@ -152,7 +152,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	// the pushed skill; the denylisted names appear only as the empty
 	// mount points Docker creates for the login-home overlays, never with
 	// content from a push.
-	run1 := launchRun(t, ctrl, string(sess.ID), "wait", "claude")
+	run1 := launchRun(t, ctrl, string(ws.ID), "wait", "claude")
 	att1 := openAttach(t, client, run1.ID)
 	att1.waitOutput(t, "agent-ready")
 	materialized := filepath.Join(dataDir, "profiles", "runs", run1.ID)
@@ -166,7 +166,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	// A mid-run push: the next run picks it up, the running one must not.
 	pushProfile(t, ctrl, "skill-v2\n")
 
-	run2 := launchRun(t, ctrl, string(sess.ID), "now", "claude")
+	run2 := launchRun(t, ctrl, string(ws.ID), "now", "claude")
 	if run2.ProfileSnapshotID == run1.ProfileSnapshotID || run2.ProfileSnapshotID == "" {
 		t.Fatalf("run 2 pinned snapshot %q, want a fresh pin distinct from run 1's %q",
 			run2.ProfileSnapshotID, run1.ProfileSnapshotID)
@@ -226,11 +226,11 @@ func pushProfile(t *testing.T, ctrl *protocol.Client, skill string) {
 
 // launchRun launches a run over the control channel and checks it came up
 // running.
-func launchRun(t *testing.T, ctrl *protocol.Client, session, task, harnessName string) protocol.Run {
+func launchRun(t *testing.T, ctrl *protocol.Client, workspace, task, harnessName string) protocol.Run {
 	t.Helper()
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		SessionID: session, Task: task, Harness: harnessName,
+		WorkspaceID: workspace, Task: task, Harness: harnessName,
 	}, &launched); err != nil {
 		t.Fatalf("run.launch %q: %v", task, err)
 	}

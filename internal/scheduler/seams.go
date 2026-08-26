@@ -15,7 +15,7 @@ type GitEngine interface {
 	CommitAll(ctx context.Context, run domain.RunID, message string) (commit string, err error)
 	PublishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error)
 	RemoveRunCheckout(ctx context.Context, run domain.RunID) error
-	StartDiffWatch(ctx context.Context, session domain.SessionID, run domain.RunID) error
+	StartDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error
 	StopDiffWatch(run domain.RunID)
 	LastFileChange(run domain.RunID) (time.Time, bool)
 }

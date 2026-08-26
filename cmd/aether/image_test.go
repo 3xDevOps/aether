@@ -15,7 +15,7 @@ func TestWorkspaceInitRequiresName(t *testing.T) {
 	if err == nil {
 		t.Fatal("workspace init without a name succeeded")
 	}
-	if got := err.Error(); got != "usage: aether workspace init <name> [--image <image>]" {
+	if got := err.Error(); got != "usage: aether workspace init <name> [--image <image>] [--base <branch>]" {
 		t.Fatalf("workspace init usage = %q", got)
 	}
 }

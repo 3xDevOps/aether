@@ -13,3 +13,10 @@ if (!window.matchMedia) {
       dispatchEvent: () => false,
     }) as MediaQueryList
 }
+
+// The store persists view preferences under one localStorage key, and
+// `activeWorkspace` is now one of them: without this, the workspace a test
+// hydrated into would still be the scope of the next test's fresh store.
+beforeEach(() => {
+  window.localStorage.clear()
+})

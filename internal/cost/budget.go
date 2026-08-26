@@ -8,13 +8,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// ErrBudgetExceeded is why a new run was refused: the session is at its
-// cap and carries no admin override. Refusals wrap it together with
+// ErrBudgetExceeded is why a new run was refused: the workspace is at
+// its cap and carries no admin override. Refusals wrap it together with
 // permissions.ErrDenied, which is what maps the refusal to a denial on
 // the wire - a cap is policy, not an internal failure.
-var ErrBudgetExceeded = errors.New("session budget exceeded")
+var ErrBudgetExceeded = errors.New("workspace budget exceeded")
 
-// Change is an admin's edit to a session budget. LimitUSD of zero or less
+// Change is an admin's edit to a workspace budget. LimitUSD of zero or less
 // clears the budget entirely; WarnUSD of zero means no warning threshold.
 type Change struct {
 	LimitUSD float64
@@ -22,21 +22,21 @@ type Change struct {
 	Override bool
 }
 
-// Status is a session's budget and where its spend currently sits.
-// Budget is nil when the session has no budget, in which case State is
+// Status is a workspace's budget and where its spend currently sits.
+// Budget is nil when the workspace has no budget, in which case State is
 // always BudgetOK.
 type Status struct {
-	Session domain.SessionID
-	Budget  *store.SessionBudget
-	State   events.BudgetState
-	Spend   Rollup
+	Workspace domain.WorkspaceID
+	Budget    *store.WorkspaceBudget
+	State     events.BudgetState
+	Spend     Rollup
 }
 
-// Evaluate places spend against a budget. A session with no budget, or a
-// non-positive limit, is always ok. Only metered spend counts: unmetered
+// Evaluate places spend against a budget. A workspace with no budget, or
+// a non-positive limit, is always ok. Only metered spend counts: unmetered
 // runs contribute nothing to Rollup.CostUSD, so the state is a floor and
 // Spend.Advisory reports when that matters.
-func Evaluate(b *store.SessionBudget, spend Rollup) events.BudgetState {
+func Evaluate(b *store.WorkspaceBudget, spend Rollup) events.BudgetState {
 	if b == nil || b.LimitUSD <= 0 {
 		return events.BudgetOK
 	}

@@ -2,7 +2,7 @@ package protocol
 
 // Wave 4 approval-inbox and presence methods.
 const (
-	// MethodApprovalList lists a session's approval inbox.
+	// MethodApprovalList lists a workspace's approval inbox.
 	MethodApprovalList = "approval.list"
 	// MethodApprovalDecide approves or denies one request (Steer on the
 	// request's run).
@@ -17,22 +17,22 @@ const (
 // "requested" until somebody decides it, then "approved" or "denied" with
 // DecidedBy naming them.
 type Approval struct {
-	ID        string  `json:"id"`
-	SessionID string  `json:"session_id"`
-	RunID     string  `json:"run_id"`
-	Action    string  `json:"action"`
-	Detail    string  `json:"detail,omitempty"`
-	Decision  string  `json:"decision"`
-	DecidedBy string  `json:"decided_by,omitempty"`
-	CreatedAt string  `json:"created_at"`
-	DecidedAt *string `json:"decided_at,omitempty"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	RunID       string  `json:"run_id"`
+	Action      string  `json:"action"`
+	Detail      string  `json:"detail,omitempty"`
+	Decision    string  `json:"decision"`
+	DecidedBy   string  `json:"decided_by,omitempty"`
+	CreatedAt   string  `json:"created_at"`
+	DecidedAt   *string `json:"decided_at,omitempty"`
 }
 
-// ApprovalListParams selects one session's inbox; All includes already
+// ApprovalListParams selects one workspace's inbox; All includes already
 // decided requests.
 type ApprovalListParams struct {
-	SessionID string `json:"session_id"`
-	All       bool   `json:"all,omitempty"`
+	WorkspaceID string `json:"workspace_id"`
+	All         bool   `json:"all,omitempty"`
 }
 
 // ApprovalListResult is the inbox, oldest request first.
@@ -53,9 +53,9 @@ type ApprovalDecideResult struct {
 	Approval Approval `json:"approval"`
 }
 
-// PresenceHeartbeatParams refreshes the caller's presence in a session.
+// PresenceHeartbeatParams refreshes the caller's presence in a workspace.
 type PresenceHeartbeatParams struct {
-	SessionID string `json:"session_id"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // PresenceHeartbeatResult reports how long presence survives without a
@@ -64,11 +64,11 @@ type PresenceHeartbeatResult struct {
 	TTLSeconds int `json:"ttl_seconds"`
 }
 
-// PresenceRosterParams narrows the roster to a session, or to the
+// PresenceRosterParams narrows the roster to a workspace, or to the
 // watchers of one run.
 type PresenceRosterParams struct {
-	SessionID string `json:"session_id,omitempty"`
-	RunID     string `json:"run_id,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	RunID       string `json:"run_id,omitempty"`
 }
 
 // PresenceEntry is one present member. State is "watching" when Watching

@@ -1,13 +1,14 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { Sidebar } from '@/components/shell/sidebar'
 import { useStore } from '@/store'
+import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
-import { approval, fakeApi, session } from '@/test/fixtures'
+import { approval, fakeApi, otherWorkspace, run, workspace } from '@/test/fixtures'
 
 beforeEach(async () => {
   useStore.setState({
     sidebarCollapsed: false,
-    collapsedSessions: [],
+    activeWorkspace: '',
     groupBy: 'status',
     route: { name: 'overview', params: {} },
   })
@@ -15,11 +16,11 @@ beforeEach(async () => {
 })
 
 describe('Sidebar', () => {
-  it('shows hydrated sessions with their runs nested', () => {
+  it('shows the active workspace and its runs', () => {
     render(<Sidebar />)
 
-    expect(screen.getByText('checkout rewrite')).toBeDefined()
     expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
+    expect(useStore.getState().activeWorkspace).toBe(workspace.id)
   })
 
   it('routes to a run when its row is clicked', () => {
@@ -33,12 +34,41 @@ describe('Sidebar', () => {
     })
   })
 
-  it('collapses a session, hiding its runs', () => {
+  it('switches workspace, rescoping the run list', () => {
+    // Two workspaces means a picker; one run apiece, so the list is proof
+    // that the switch is what scopes the tree.
+    const elsewhere = run({
+      id: 'run_docs',
+      task: 'refresh the install guide',
+      workspace_id: otherWorkspace.id,
+    })
+    act(() =>
+      useStore.setState((s) => ({
+        runs: { ...s.runs, [elsewhere.id]: toRecord(elsewhere) },
+      })),
+    )
     render(<Sidebar />)
 
-    fireEvent.click(screen.getAllByLabelText('Collapse session')[0])
+    expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
+    expect(screen.queryByText('refresh the install guide')).toBeNull()
 
+    const picker = screen.getByLabelText('Workspace')
+    fireEvent.change(picker, { target: { value: otherWorkspace.id } })
+
+    expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
+    expect(screen.getByText('refresh the install guide')).toBeDefined()
     expect(screen.queryByText('rewrite the checkout flow')).toBeNull()
+  })
+
+  it('names the sole workspace instead of offering a picker', () => {
+    act(() =>
+      useStore.setState({ workspaces: { [workspace.id]: workspace } }),
+    )
+    render(<Sidebar />)
+
+    expect(screen.queryByLabelText('Workspace')).toBeNull()
+    expect(screen.getByText(workspace.name)).toBeDefined()
+    expect(screen.getByText(workspace.base_branch)).toBeDefined()
   })
 
   it('follows a live status change', () => {
@@ -86,10 +116,10 @@ describe('Sidebar', () => {
     expect(screen.queryByTitle('Needs you')).toBeNull()
 
     // The run still reads `running`; the pending inbox entry is the signal.
-    act(() => useStore.getState().setInbox(session.id, [approval()]))
+    act(() => useStore.getState().setInbox(workspace.id, [approval()]))
 
     expect(screen.getAllByTitle('Needs you').length).toBeGreaterThan(0)
-    // The session groups under Needs you, so the attention sort surfaces it.
+    // The run groups under Needs you, so the attention sort surfaces it.
     expect(screen.getByRole('heading', { name: 'Needs you' })).toBeDefined()
   })
 

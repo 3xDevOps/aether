@@ -44,9 +44,8 @@ type Config struct {
 
 // runInfo is a watch-registry entry. Entries are created by StartDiffWatch
 // and survive StopDiffWatch for the engine's lifetime: they carry the
-// session scope git.branch events are published under.
+// workspace scope git.branch events are published under.
 type runInfo struct {
-	session   domain.SessionID
 	workspace domain.WorkspaceID
 	branch    string
 }
@@ -321,8 +320,8 @@ func gitEnv() []string {
 }
 
 // publishBranch emits git.branch for a run whose branch tip moved, scoped
-// to the session recorded in the watch registry. Silently skipped when the
-// session is unknown or the engine has no bus.
+// to the workspace recorded in the watch registry. Silently skipped when
+// the run is unknown or the engine has no bus.
 func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, commit string) {
 	if e.cfg.Bus == nil {
 		return
@@ -334,8 +333,8 @@ func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, commit str
 		return
 	}
 	_, _ = e.cfg.Bus.Publish(ctx, events.Event{
-		SessionID: info.session,
-		RunID:     run,
+		WorkspaceID: info.workspace,
+		RunID:       run,
 		Payload: events.GitBranchPayload{
 			WorkspaceID: info.workspace,
 			Branch:      info.branch,

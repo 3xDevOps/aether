@@ -14,7 +14,7 @@ import (
 
 func TestRunWireIncludesProfileSnapshotID(t *testing.T) {
 	r := &domain.Run{
-		ID: "run_1", SessionID: "sess_1", MemberID: "m_1", Task: "t",
+		ID: "run_1", WorkspaceID: "ws_1", MemberID: "m_1", Task: "t",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 		CreatedAt: time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
 	}

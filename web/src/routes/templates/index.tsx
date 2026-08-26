@@ -1,6 +1,7 @@
-// Templates: a session's saved tasks, their cron schedules, and the session
-// admin verbs (budget, steering settings) that live on the same header.
-// Deletion asks first; launching goes straight to the new run.
+// Templates: the active workspace's saved tasks and their cron schedules.
+// Deletion asks first; launching goes straight to the new run. The workspace
+// is chosen in the sidebar switcher, not here - this route acts on whatever
+// that names, like every other scoped surface.
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -17,11 +18,11 @@ import {
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Schedule, Template } from '@/lib/types'
-import { BudgetDialog, SessionSettingsDialog } from '@/routes/admin-dialogs'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { ScheduleEditor } from '@/routes/templates/schedule-editor'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
+import { soleWorkspace } from '@/store/workspaces'
 
 const harnesses = ['claude', 'codex', 'aider', 'opencode', 'custom']
 
@@ -29,39 +30,44 @@ const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) {
-  const sessions = useStore((s) => s.sessions)
+  const workspaces = useStore((s) => s.workspaces)
+  const active = useStore((s) => s.activeWorkspace)
   const navigate = useStore((s) => s.navigate)
   const caps = useCapability()
-  const [sessionID, setSessionID] = useState(Object.keys(sessions)[0] ?? '')
   const [templates, setTemplates] = useState<Template[]>([])
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [editing, setEditing] = useState<Template | null>(null)
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<Template | null>(null)
-  const [dialog, setDialog] = useState<'budget' | 'settings' | null>(null)
+
+  // Templates are per workspace on the wire, so unlike the run list this has
+  // no "all" reading: before hydration names one, the sole workspace is the
+  // only unambiguous answer.
+  const workspaceID = active || soleWorkspace(workspaces)
+  const workspace = workspaces[workspaceID]
 
   const refetch = useCallback(async () => {
-    if (!sessionID) return
-    setTemplates(await client.templateList(sessionID))
+    if (!workspaceID) return
+    setTemplates(await client.templateList(workspaceID))
     if (caps.hasMethod('schedule.list')) {
-      setSchedules(await client.scheduleList(sessionID))
+      setSchedules(await client.scheduleList(workspaceID))
     }
-  }, [client, sessionID, caps])
+  }, [client, workspaceID, caps])
 
   // Schedules are optional on legacy gateways; the templates themselves are
   // not, so their failures split: templates report, schedules stay empty.
   useEffect(() => {
-    if (!sessionID) return
+    if (!workspaceID) return
     let cancelled = false
     client
-      .templateList(sessionID)
+      .templateList(workspaceID)
       .then((list) => {
         if (!cancelled) setTemplates(list)
       })
       .catch((err) => toast.error(message(err)))
     if (caps.hasMethod('schedule.list')) {
       client
-        .scheduleList(sessionID)
+        .scheduleList(workspaceID)
         .then((list) => {
           if (!cancelled) setSchedules(list)
         })
@@ -70,11 +76,11 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
     return () => {
       cancelled = true
     }
-  }, [client, sessionID, caps])
+  }, [client, workspaceID, caps])
 
   const launch = async (template: Template) => {
     try {
-      const result = await client.templateLaunch(sessionID, template.name)
+      const result = await client.templateLaunch(workspaceID, template.name)
       navigate('run', { runId: result.run.id })
       toast.success('Run launched')
     } catch (err) {
@@ -82,36 +88,12 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
     }
   }
 
-  const session = sessions[sessionID]
-
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title="Templates" subtitle={session?.name} />
+      <ViewHeader title="Templates" subtitle={workspace?.name} />
       <div className="flex items-center gap-2 border-b px-4 py-2">
-        <select
-          aria-label="Session"
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-          value={sessionID}
-          onChange={(e) => setSessionID(e.target.value)}
-        >
-          {Object.values(sessions).map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
         <span className="flex-1" />
-        {caps.hasMethod('budget.set') && sessionID && (
-          <Button size="sm" variant="outline" onClick={() => setDialog('budget')}>
-            Budget
-          </Button>
-        )}
-        {caps.hasMethod('session.settings') && sessionID && (
-          <Button size="sm" variant="outline" onClick={() => setDialog('settings')}>
-            Session settings
-          </Button>
-        )}
-        {caps.hasMethod('template.save') && sessionID && (
+        {caps.hasMethod('template.save') && workspaceID && (
           <Button size="sm" onClick={() => setCreating(true)}>
             New template
           </Button>
@@ -148,7 +130,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
               </p>
               {caps.hasMethod('schedule.save') && (
                 <ScheduleEditor
-                  sessionID={sessionID}
+                  workspaceID={workspaceID}
                   template={template.name}
                   schedule={schedules.find((s) => s.template === template.name)}
                   client={client}
@@ -160,14 +142,14 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
         </ul>
         {templates.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            No templates in this session yet.
+            No templates in this workspace yet.
           </p>
         )}
       </div>
 
       {(creating || editing) && (
         <TemplateForm
-          sessionID={sessionID}
+          workspaceID={workspaceID}
           template={editing ?? undefined}
           client={client}
           onClose={() => {
@@ -179,21 +161,11 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
       )}
       {deleting && (
         <DeleteDialog
-          sessionID={sessionID}
+          workspaceID={workspaceID}
           template={deleting}
           client={client}
           onClose={() => setDeleting(null)}
           onDeleted={() => void refetch()}
-        />
-      )}
-      {dialog === 'budget' && (
-        <BudgetDialog sessionID={sessionID} client={client} onClose={() => setDialog(null)} />
-      )}
-      {dialog === 'settings' && (
-        <SessionSettingsDialog
-          sessionID={sessionID}
-          client={client}
-          onClose={() => setDialog(null)}
         />
       )}
     </div>
@@ -201,13 +173,13 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
 }
 
 function TemplateForm({
-  sessionID,
+  workspaceID,
   template,
   client,
   onClose,
   onSaved,
 }: {
-  sessionID: string
+  workspaceID: string
   template?: Template
   client: Api
   onClose: () => void
@@ -225,7 +197,7 @@ function TemplateForm({
     setError(null)
     try {
       await client.templateSave({
-        session_id: sessionID,
+        workspace_id: workspaceID,
         name: name.trim(),
         task: task.trim(),
         harness,
@@ -324,13 +296,13 @@ function TemplateForm({
 }
 
 function DeleteDialog({
-  sessionID,
+  workspaceID,
   template,
   client,
   onClose,
   onDeleted,
 }: {
-  sessionID: string
+  workspaceID: string
   template: Template
   client: Api
   onClose: () => void
@@ -343,7 +315,7 @@ function DeleteDialog({
     setBusy(true)
     setError(null)
     try {
-      await client.templateDelete(sessionID, template.name)
+      await client.templateDelete(workspaceID, template.name)
       onDeleted()
       onClose()
       toast.success('Template deleted')

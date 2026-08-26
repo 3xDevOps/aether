@@ -2,7 +2,7 @@
 // Aether (run status, diffs, presence, approvals, costs, timeline entries)
 // is published here and all features are consumers. The Bus interface is a
 // deliberate seam - in-process today, externalizable if a control plane ever
-// splits out. Session-scoped events are additionally persisted append-only
+// splits out. Workspace-scoped events are additionally persisted append-only
 // to an EventLog so late subscribers can replay from a cursor.
 package events
 
@@ -29,13 +29,13 @@ const (
 	TypeRunCost Type = "run.cost"
 	// TypePresence signals a member coming online, going offline, or
 	// watching a run.
-	TypePresence Type = "session.presence"
+	TypePresence Type = "workspace.presence"
 	// TypeApproval carries approval-inbox activity: a permission request
 	// surfacing or a member deciding it.
-	TypeApproval Type = "session.approval"
-	// TypeTimeline carries session timeline entries, including steering
+	TypeApproval Type = "workspace.approval"
+	// TypeTimeline carries workspace timeline entries, including steering
 	// acts (inject, pause, kill, handoff) and free-form notes.
-	TypeTimeline Type = "session.timeline"
+	TypeTimeline Type = "workspace.timeline"
 	// TypeGitBranch signals that a branch in a workspace's bare repo moved.
 	// Wave 1 publishes it for run branches only; the envelope's RunID names
 	// the run whose branch moved.
@@ -48,8 +48,8 @@ const (
 	// may hard-require these events.
 	TypeAgentEvent Type = "run.agent"
 	// TypeProfile records a member+harness profile snapshot change
-	// (put, rollback, or pin). Publishing still requires a SessionID;
-	// callers without one skip the bus rather than inventing a session.
+	// (put, rollback, or pin). Publishing still requires a WorkspaceID;
+	// callers without one skip the bus rather than inventing a workspace.
 	TypeProfile Type = "profile.change"
 	// TypeSyncConflict signals a paused live file overlay: concurrent
 	// local and run-worktree edits to the same paths. The overlay writes
@@ -67,20 +67,20 @@ type Payload interface {
 //
 // Seq is the global, monotonically increasing sequence cursor assigned by
 // the bus at publish time; it orders all events and is the cursor replay
-// resumes from. SessionID is required — publishing without it fails with
-// ErrNoSession — so with an EventLog attached every event is persisted and
-// sequence cursors remain valid across restarts. (Without a log nothing is
-// persisted, replay is unavailable, and cursors are process-local.) RunID
-// and ActorID are set where relevant and empty otherwise.
+// resumes from. WorkspaceID is required - publishing without it fails with
+// ErrNoWorkspace - so with an EventLog attached every event is persisted
+// and sequence cursors remain valid across restarts. (Without a log nothing
+// is persisted, replay is unavailable, and cursors are process-local.)
+// RunID and ActorID are set where relevant and empty otherwise.
 type Event struct {
-	ID        string
-	Seq       uint64
-	Time      time.Time
-	SessionID domain.SessionID
-	RunID     domain.RunID
-	ActorID   domain.MemberID
-	Type      Type
-	Payload   Payload
+	ID          string
+	Seq         uint64
+	Time        time.Time
+	WorkspaceID domain.WorkspaceID
+	RunID       domain.RunID
+	ActorID     domain.MemberID
+	Type        Type
+	Payload     Payload
 }
 
 // RunStatusPayload reports a run lifecycle transition.
@@ -119,7 +119,7 @@ type RunCostPayload struct {
 
 func (RunCostPayload) EventType() Type { return TypeRunCost }
 
-// PresenceState is a member's presence status within a session.
+// PresenceState is a member's presence status within a workspace.
 type PresenceState string
 
 const (
@@ -155,7 +155,7 @@ type ApprovalPayload struct {
 
 func (ApprovalPayload) EventType() Type { return TypeApproval }
 
-// TimelineKind classifies a session timeline entry.
+// TimelineKind classifies a workspace timeline entry.
 type TimelineKind string
 
 const (
@@ -167,7 +167,7 @@ const (
 	TimelineNote    TimelineKind = "note"
 )
 
-// TimelinePayload is a session timeline / steering entry: a privileged or
+// TimelinePayload is a workspace timeline / steering entry: a privileged or
 // noteworthy act stamped into the audit stream, attributed via the
 // envelope's ActorID.
 type TimelinePayload struct {
@@ -238,8 +238,8 @@ const (
 )
 
 // ProfilePayload records a profile snapshot mutation. The bus still
-// requires SessionID on the envelope; the profile service skips publish
-// when it has no session rather than inventing one.
+// requires WorkspaceID on the envelope; the profile service skips publish
+// when it has no workspace rather than inventing one.
 type ProfilePayload struct {
 	Member     domain.MemberID          `json:"member"`
 	Harness    string                   `json:"harness"`
