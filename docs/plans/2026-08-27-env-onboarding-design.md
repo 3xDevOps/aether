@@ -49,10 +49,10 @@ New per-workspace record in the server store, the single source of truth
 for the workspace environment:
 
 - Dockerfile text.
-- Manifest: a list of items, each with name, version, reason, and the
-  Dockerfile lines it maps to. This is what the dashboard renders as the
-  human-readable environment summary, and what post-build verification
-  checks.
+- Manifest: a list of items, each with name, version, reason, the
+  Dockerfile lines it maps to, and a check command whose output must
+  contain the version. The dashboard renders this as the human-readable
+  environment summary; post-build verification runs the check commands.
 - Provenance: which path produced it (mirror, repo, standard, manual),
   which harness wrote it, when.
 - Version counter. Previous versions are retained for rollback.
@@ -69,6 +69,10 @@ containers. No registry, no push.
   treats these tags as local-only and never contacts a registry for them.
 - Retention: keep the current and last-good tags per workspace; older
   version tags are removed.
+- The build context is the Dockerfile alone. COPY and ADD are rejected
+  by validation, so no local or server files can enter the image.
+- One build runs at a time per workspace, guarded by a lock following the
+  agent-setup lock pattern.
 - Builds run with no secrets and no access to server data beyond the
   build context. A Dockerfile build is arbitrary code on the server's
   docker daemon; that is why every build-triggering call is admin-guarded.
@@ -82,7 +86,13 @@ failure detail is fed back for one automatic repair round through
 whichever agent flow produced the definition (the local inventory run
 during onboarding, the server-side edit agent later), then surfaced to
 the user. Definitions with no agent behind them (standard, manual) skip
-repair and surface the mismatch directly. Only a verified image becomes the workspace
+repair and surface the mismatch directly.
+
+For the mirror path the local gateway stays subscribed to the build until
+verification completes while the desktop app is running, so the repair
+round can run locally. If the app is gone by then, the failure is
+recorded, the workspace keeps its previous image, and the Environment
+page is where the admin retries or repairs. Only a verified image becomes the workspace
 image.
 
 ### Wire protocol
@@ -106,10 +116,15 @@ harness. The gateway:
   dashboard and enforcing a timeout.
 - Validates the output contract: the agent must write exactly a
   `Dockerfile` (ubuntu 24.04 base, pinned versions, no secrets, no
-  host-specific paths, layers ordered for cache-friendly rebuilds) and a
-  `manifest.json`. Malformed output gets one automatic retry with the
-  validation error appended, then a clean failure that offers the standard
-  image instead.
+  host-specific paths, no COPY or ADD, layers ordered for cache-friendly
+  rebuilds) and a `manifest.json` with a check command per item.
+  Malformed output gets one automatic retry with the validation error
+  appended, then a clean failure that offers the standard image instead.
+
+The prompt instructs the agent to translate findings into ubuntu
+equivalents rather than copy them literally, so an inventory taken on
+macOS (homebrew packages, darwin binaries) still produces a correct Linux
+image.
 
 The from-repo path uses the same verb and contract with a prompt aimed at
 the repository contents and any devcontainer config instead of the machine.
@@ -129,8 +144,11 @@ Repository:
    definition to the server.
 5. Build starts in the background; the wizard continues to Repository and
    First run on the neutral image and the workspace hot-swaps to the built
-   image once verified. Every step offers "skip, use the standard
-   environment" so onboarding never dead-ends.
+   image once verified. Until then the First-run step and the run view
+   show a "your environment is still building, using the starter image
+   for now" banner so a missing toolchain reads as expected, not broken.
+   Every step offers "skip, use the standard environment" so onboarding
+   never dead-ends.
 
 ### Environment page and edit agent
 
@@ -139,8 +157,11 @@ readable list, current version, build history, rollback. An admin submits
 a change request in plain language; the server launches the workspace's
 registered harness in a container (reusing the existing launch machinery)
 with the current definition and the request, under the same output
-contract. The dashboard shows a Dockerfile diff plus the updated summary;
-approval triggers build, verification, and swap.
+contract. This requires that harness to be registered on the server via
+`aether agent add`; the page says so and names the command when none of
+the four setup harnesses are registered. The dashboard shows a Dockerfile
+diff plus the updated summary; approval triggers build, verification, and
+swap.
 
 ### Standard image
 
