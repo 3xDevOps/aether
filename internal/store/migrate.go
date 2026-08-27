@@ -561,6 +561,25 @@ DROP TABLE schedules_migrate;
 DROP TABLE run_messages_migrate;
 DROP TABLE events_migrate;
 `,
+	// v13: versioned workspace environment definitions. The definition
+	// column is the JSON-encoded domain.EnvironmentDefinition; the version,
+	// status, failure_detail, and timestamp columns are authoritative for
+	// the fields they mirror. The partial unique index enforces the
+	// one-active-version-per-workspace invariant in the schema itself.
+	`
+CREATE TABLE environment_definitions (
+	workspace_id   TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	version        INTEGER NOT NULL,
+	definition     TEXT NOT NULL,
+	status         TEXT NOT NULL,
+	failure_detail TEXT NOT NULL DEFAULT '',
+	created_at     INTEGER NOT NULL,
+	updated_at     INTEGER NOT NULL,
+	PRIMARY KEY (workspace_id, version)
+);
+CREATE UNIQUE INDEX idx_environment_definitions_active
+	ON environment_definitions(workspace_id) WHERE status = 'active';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

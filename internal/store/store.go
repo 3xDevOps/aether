@@ -125,6 +125,7 @@ type Store interface {
 	ApprovalStore
 	TemplateStore
 	CostStore
+	EnvironmentStore
 
 	Close() error
 }
