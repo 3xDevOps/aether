@@ -232,6 +232,17 @@ Use `aether workspace init <name>` for the neutral default, or
 dependencies that the neutral image does not provide. Workspace image
 references are administrator-owned configuration, not input to a shell session.
 
+Workspaces can also carry a server-built environment image: an admin-saved
+Dockerfile the server builds, verifies, and swaps in (see
+[bootstrap.md](bootstrap.md)). These images live only in the server's Docker
+daemon as `aether/ws-<workspace-id>:<version>` tags and are never pushed to
+or pulled from a registry. Retention keeps two tags per workspace - the
+active version and the most recent previously active one - and removes older
+tags after a successful swap. `aether env rollback` re-activates the
+previous version, rebuilding its image from the stored Dockerfile if
+retention already removed the tag, so disk usage stays bounded at roughly
+two images per workspace.
+
 To prepare a normal Dockerfile and optional standard Dev Container metadata for
 review and later image publication:
 
