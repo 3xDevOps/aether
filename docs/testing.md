@@ -33,7 +33,7 @@ container surfaces from the test process. Scenarios:
 | Test | Scenario |
 | --- | --- |
 | `TestIntegrationEndToEnd` (`integration_test.go`) | Solo lifecycle, the acceptance gate: seed over git push -> launch -> attach -> detach -> reattach -> steer -> finish -> pull, with the bus traffic checked against the Wave 1 contract |
-| `TestIntegrationDashboard` (`dashboard_integration_test.go`) | Dashboard lifecycle on the  gateway's own HTTP/WS wire: token mint over SSH, launch, board hydrate, live terminal over `/ws/attach`, steer from the card, kill from the card, diff patch, disk gauge |
+| Gateway (`internal/localgw`) | The `aether gui` HTTP/WS surface, covered by unit tests against a stub backend rather than a server E2E: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror, steer, and shell channels (`ws_test.go`) |
 | `TestIntegrationMultiMember` (`multimember_integration_test.go`) | Three clients: tailnet bootstrap/pending/approve and invite-code key joins, WhoIs-down fallback with banner, remote administration, steering another member's run, presence roster, handoff, approval inbox, budget cap and override, agent crash -> `failed` + `wip:` commit |
 | `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Profile sync and harness logins: a login in the setup shell persists into two runs, push -> next run sees it, mid-run push never touches a running agent, denylisted credential names refused from pushes (Docker only - it needs a real shell) |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
@@ -92,7 +92,7 @@ layer that owns them.
 | Laptop offline | `internal/syncd` daemon tests (refs-only catch-up) |
 | SSH drop mid-attach | Solo E2E detach/reattach; `FuzzAttachDropMidInput`, the post-unwind straggler test and the reattach-leak test in `internal/ptyhost` |
 | Live overlay conflict | `internal/sshd` sync overlay tests |
-| Disk pressure | Disk chaos E2E (TTL GC under load with the branches surviving, the gauge's breakdown, the free-space floor refusing launch and relaunch); checkout GC in `internal/scheduler`; disk gauge endpoint in the dashboard E2E |
+| Disk pressure | Disk chaos E2E (TTL GC under load with the branches surviving, the gauge's breakdown, the free-space floor refusing launch and relaunch); checkout GC in `internal/scheduler`; disk gauge proxy in `internal/localgw` (`TestDiskProxies`) |
 | Profile push fails / stale | Profile E2E (runs pin the last good snapshot; bad pushes refused) |
 | Harness login expired | Profile E2E's login-home persistence (re-login writes persist the same way) |
 | Budget cap hit | Multi-member E2E (refusal, running run untouched, override); full matrix in `internal/sshd` cost tests |

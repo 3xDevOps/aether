@@ -235,9 +235,10 @@ absent buttons.
 Every request goes through `src/lib/api.ts` - the only module that knows route
 shapes, the bearer token, and error decoding. It carries exactly the methods
 the views call; the team-feature methods arrive with the tickets that use them.
-Every call is a `POST /api/v1/<method>` bar two `GET`s - the diff tab's patch
-text and the status bar's disk number - because those are reads of a working
-tree and a filesystem rather than RPC methods.
+Every call is a `POST /api/v1/<method>` bar three `GET`s - the diff tab's
+patch text, the status bar's disk number, and the capabilities probe -
+because those read a working tree, a filesystem, and the gateway descriptor
+rather than RPC methods.
 The token arrives as `?token=` in the URL `aether gui` opens (or prints with
 `--url`), moves into session storage, and is sent as
 `Authorization: Bearer` on HTTP and as `?token=` on WebSockets. It is minted

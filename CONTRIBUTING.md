@@ -55,17 +55,59 @@ bun run typecheck
 bun run test
 ```
 
-The desktop shell builds from `desktop/`:
+### Desktop shell
+
+The optional Electron shell in `desktop/` wraps `aether gui` in a window. The
+dashboard SPA itself is embedded in the `aether` CLI (`web/embed.go`), so this
+package is just a sidecar launcher; see
+[docs/install.md](docs/install.md#desktop-app) for running it.
 
 ```sh
+cd desktop
 npm install
-npm run dist   # installers for this OS into desktop/dist/
+npm run dist   # installer for this OS into desktop/dist/
 ```
 
-`npm run dist` packages only the current platform's targets. See
-[docs/install.md](docs/install.md#building-for-all-three-operating-systems)
-for building Linux, Windows, and macOS artifacts from one machine, and for
-the two cases (`.dmg` and code signing) that require the real OS.
+`npm run dist` packages only the current platform's targets. Installers for
+every platform need one machine per platform (a CI matrix) or the cross-build
+routes below.
+
+| Artifact | On Linux | On macOS | On Windows |
+| --- | --- | --- | --- |
+| Linux `.AppImage`, `.deb` | `npm run dist -- --linux` | Docker image | Docker image |
+| Windows `.exe` (NSIS) | Docker image | native tooling | `npm run dist -- --win` |
+| macOS `.zip` | `npm run dist -- --mac zip` | `npm run dist -- --mac` | Docker image |
+| macOS `.dmg` | macOS only | `npm run dist -- --mac` | macOS only |
+
+The Docker image is electron-builder's own Wine image, so a Linux box can
+produce Linux and Windows installers plus an unsigned macOS zip:
+
+```sh
+npm run dist -- --linux --mac zip   # AppImage, deb, macOS zip
+
+mkdir -p ~/.cache/aether-desktop-build
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/home/builder \
+  -v "$PWD:/project" \
+  -v "$HOME/.cache/aether-desktop-build:/home/builder" \
+  electronuserland/builder:wine \
+  npx electron-builder --win --publish never   # NSIS .exe
+```
+
+Run the container as your own user with a writable `HOME` on a cache directory:
+as root it writes root-owned files into `dist/` and the electron-builder
+download cache, breaking later builds. The cache mount also avoids
+re-downloading the ~100 MB Electron runtime each time.
+
+Two limits are not worked around. A `.dmg` needs macOS (its `dmg-license`
+module is macOS-only), so other hosts produce only the macOS `.zip` - both
+install the same `Aether.app`. And signing needs the target OS plus a
+certificate: cross-built Windows and macOS artifacts are unsigned, trip
+SmartScreen and Gatekeeper, and auto-update refuses them. Ship signed builds
+from real runners; treat cross-builds as test artifacts.
+
+The app icon is generated from `web/public/aether-mark.png` into
+`desktop/build/`; regenerate with `python3 desktop/build/make-icons.py` after
+the mark changes.
 
 ## Development deploy
 
