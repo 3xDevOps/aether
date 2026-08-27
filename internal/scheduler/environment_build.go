@@ -165,7 +165,7 @@ func (s *Scheduler) activateEnvironment(ctx context.Context, def *domain.Environ
 	case !errors.Is(err, store.ErrNotFound):
 		return fmt.Errorf("scheduler: load previously active environment: %w", err)
 	}
-	if err := s.cfg.Store.SetEnvironmentStatus(ctx, def.WorkspaceID, def.Version, domain.EnvironmentActive, ""); err != nil {
+	if err = s.cfg.Store.SetEnvironmentStatus(ctx, def.WorkspaceID, def.Version, domain.EnvironmentActive, ""); err != nil {
 		return fmt.Errorf("scheduler: activate environment version %d: %w", def.Version, err)
 	}
 	workspace, err := s.cfg.Store.GetWorkspace(ctx, def.WorkspaceID)
@@ -237,7 +237,7 @@ func (s *Scheduler) verifyEnvironmentImage(ctx context.Context, def *domain.Envi
 		_, _ = io.Copy(&out, att.Stdout())
 	}()
 	go func() { _, _ = io.Copy(io.Discard, att.Stderr()) }()
-	if err := s.cfg.Runtime.Start(ctx, id); err != nil {
+	if err = s.cfg.Runtime.Start(ctx, id); err != nil {
 		return fmt.Errorf("scheduler: start verification container: %w", err)
 	}
 	status, err := s.cfg.Runtime.Wait(ctx, id)

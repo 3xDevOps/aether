@@ -1,9 +1,8 @@
 # Environment Foundation Implementation Plan (Phase 1)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** implement this plan task-by-task, one worker per
+> task with review between tasks. Steps use checkbox (`- [ ]`) syntax for
+> tracking.
 
 **Goal:** The server can store a workspace environment definition
 (Dockerfile + manifest), build it into a verified local image, swap the

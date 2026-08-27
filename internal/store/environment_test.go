@@ -133,7 +133,7 @@ func TestEnvironmentDefinitionActivationDemotesPrevious(t *testing.T) {
 		t.Fatalf("active = %+v (err %v), want version 1", active, err)
 	}
 
-	if err := db.SetEnvironmentStatus(ctx, w.ID, v2.Version, domain.EnvironmentActive, ""); err != nil {
+	if err = db.SetEnvironmentStatus(ctx, w.ID, v2.Version, domain.EnvironmentActive, ""); err != nil {
 		t.Fatalf("activate v2: %v", err)
 	}
 	active, err = db.GetActiveEnvironmentDefinition(ctx, w.ID)
@@ -152,14 +152,14 @@ func TestEnvironmentDefinitionActivationDemotesPrevious(t *testing.T) {
 	}
 
 	// A failure carries its detail; a later transition clears it.
-	if err := db.SetEnvironmentStatus(ctx, w.ID, 1, domain.EnvironmentFailed, "ripgrep: want 14.1.0, got 13.0.0"); err != nil {
+	if err = db.SetEnvironmentStatus(ctx, w.ID, 1, domain.EnvironmentFailed, "ripgrep: want 14.1.0, got 13.0.0"); err != nil {
 		t.Fatalf("fail v1: %v", err)
 	}
 	failed, err := db.GetEnvironmentDefinition(ctx, w.ID, 1)
 	if err != nil || failed.Status != domain.EnvironmentFailed || failed.FailureDetail == "" {
 		t.Fatalf("failed row = %+v (err %v), want failed status with detail", failed, err)
 	}
-	if err := db.SetEnvironmentStatus(ctx, w.ID, 1, domain.EnvironmentBuilding, ""); err != nil {
+	if err = db.SetEnvironmentStatus(ctx, w.ID, 1, domain.EnvironmentBuilding, ""); err != nil {
 		t.Fatalf("rebuild v1: %v", err)
 	}
 	rebuilt, err := db.GetEnvironmentDefinition(ctx, w.ID, 1)
@@ -168,10 +168,10 @@ func TestEnvironmentDefinitionActivationDemotesPrevious(t *testing.T) {
 	}
 
 	// Guard rails: unknown status and missing version are rejected.
-	if err := db.SetEnvironmentStatus(ctx, w.ID, 2, "exploded", ""); err == nil {
+	if err = db.SetEnvironmentStatus(ctx, w.ID, 2, "exploded", ""); err == nil {
 		t.Fatal("unknown status accepted, want error")
 	}
-	if err := db.SetEnvironmentStatus(ctx, w.ID, 99, domain.EnvironmentActive, ""); !errors.Is(err, ErrNotFound) {
+	if err = db.SetEnvironmentStatus(ctx, w.ID, 99, domain.EnvironmentActive, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("transition of missing version = %v, want ErrNotFound", err)
 	}
 	// The failed activation must not have demoted the active version.

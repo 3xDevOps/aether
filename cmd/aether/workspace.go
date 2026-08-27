@@ -164,7 +164,7 @@ func workspaceEnvironment(image string) protocol.WorkspaceEnvironment {
 }
 func withResolvedWorkspace(input string, fn func(protocol.WorkspaceSelector) error) error {
 	return withControl(func(c *protocol.Client) error {
-		selector, err := resolveWorkspaceSelector(c, input, false)
+		selector, err := resolveWorkspaceSelector(c, input)
 		if err != nil {
 			return err
 		}
@@ -172,21 +172,19 @@ func withResolvedWorkspace(input string, fn func(protocol.WorkspaceSelector) err
 	})
 }
 
-func resolveWorkspaceSelector(c *protocol.Client, input string, allowSingle bool) (protocol.WorkspaceSelector, error) {
+func resolveWorkspaceSelector(c *protocol.Client, input string) (protocol.WorkspaceSelector, error) {
 	var list protocol.WorkspaceListResult
 	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
 		return protocol.WorkspaceSelector{}, err
 	}
 	if input == "" {
-		if !allowSingle {
-			switch len(list.Workspaces) {
-			case 0:
-				return protocol.WorkspaceSelector{}, fmt.Errorf("no workspaces available; specify --workspace")
-			case 1:
-				return protocol.WorkspaceSelector{ID: list.Workspaces[0].ID}, nil
-			default:
-				return protocol.WorkspaceSelector{}, fmt.Errorf("multiple workspaces available; specify --workspace")
-			}
+		switch len(list.Workspaces) {
+		case 0:
+			return protocol.WorkspaceSelector{}, fmt.Errorf("no workspaces available; specify --workspace")
+		case 1:
+			return protocol.WorkspaceSelector{ID: list.Workspaces[0].ID}, nil
+		default:
+			return protocol.WorkspaceSelector{}, fmt.Errorf("multiple workspaces available; specify --workspace")
 		}
 	}
 	for _, workspace := range list.Workspaces {

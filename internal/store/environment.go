@@ -119,7 +119,7 @@ func (d *DB) SetEnvironmentStatus(ctx context.Context, workspace domain.Workspac
 	// Demote before activating so the unique active index never sees two
 	// active rows; the rollback on any later error undoes the demotion.
 	if status == domain.EnvironmentActive {
-		if _, err := tx.ExecContext(ctx,
+		if _, err = tx.ExecContext(ctx,
 			`UPDATE environment_definitions
 			 SET status = ?, failure_detail = '', updated_at = ?
 			 WHERE workspace_id = ? AND status = ? AND version <> ?`,

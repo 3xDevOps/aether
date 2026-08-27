@@ -175,7 +175,7 @@ func (s *Server) envRollback(ctx context.Context, _ domain.MemberID, params json
 	}
 	// Nothing active means nothing to roll back from: an invalid state,
 	// not an internal failure.
-	if _, err := s.cfg.Store.GetActiveEnvironmentDefinition(ctx, ws.ID); err != nil {
+	if _, err = s.cfg.Store.GetActiveEnvironmentDefinition(ctx, ws.ID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "workspace has no active environment version to roll back from"}
 		}

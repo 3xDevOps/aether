@@ -16,14 +16,14 @@ const envTestDockerfile = "FROM ubuntu:24.04\nRUN apt-get update && apt-get inst
 
 // saveEnvDefinition stores one valid single-item definition and returns it
 // with its assigned version.
-func saveEnvDefinition(t *testing.T, e *testEnv, itemVersion string) *domain.EnvironmentDefinition {
+func saveEnvDefinition(t *testing.T, e *testEnv) *domain.EnvironmentDefinition {
 	t.Helper()
 	def := &domain.EnvironmentDefinition{
 		WorkspaceID: e.ws.ID,
 		Dockerfile:  envTestDockerfile,
 		Manifest: []domain.ManifestItem{{
 			Name:         "node",
-			Version:      itemVersion,
+			Version:      "20.0",
 			StartLine:    2,
 			EndLine:      2,
 			CheckCommand: "node --version",
@@ -72,7 +72,7 @@ func workspaceImage(t *testing.T, e *testEnv) domain.WorkspaceEnvironment {
 
 func TestBuildEnvironmentActivatesAndSwapsImage(t *testing.T) {
 	e := newTestEnv(t, nil)
-	def := saveEnvDefinition(t, e, "20.0")
+	def := saveEnvDefinition(t, e)
 	driveVerification(e, "v20.0.1")
 	sub := e.subscribe(t)
 
@@ -132,7 +132,7 @@ func TestBuildEnvironmentActivatesAndSwapsImage(t *testing.T) {
 
 func TestBuildEnvironmentBuildFailurePreservesImage(t *testing.T) {
 	e := newTestEnv(t, nil)
-	def := saveEnvDefinition(t, e, "20.0")
+	def := saveEnvDefinition(t, e)
 	e.rt.buildErr = errors.New("daemon build failed: apt exited 100")
 
 	err := e.sched.BuildEnvironment(t.Context(), e.ws.ID, def.Version)
@@ -157,7 +157,7 @@ func TestBuildEnvironmentBuildFailurePreservesImage(t *testing.T) {
 
 func TestBuildEnvironmentVerificationMismatchNamesItem(t *testing.T) {
 	e := newTestEnv(t, nil)
-	def := saveEnvDefinition(t, e, "20.0")
+	def := saveEnvDefinition(t, e)
 	driveVerification(e, "v18.3.0")
 
 	err := e.sched.BuildEnvironment(t.Context(), e.ws.ID, def.Version)
@@ -179,8 +179,8 @@ func TestBuildEnvironmentVerificationMismatchNamesItem(t *testing.T) {
 
 func TestBuildEnvironmentSerializesPerWorkspace(t *testing.T) {
 	e := newTestEnv(t, nil)
-	v1 := saveEnvDefinition(t, e, "20.0")
-	v2 := saveEnvDefinition(t, e, "20.0")
+	v1 := saveEnvDefinition(t, e)
+	v2 := saveEnvDefinition(t, e)
 	driveVerification(e, "v20.0.1")
 
 	entered := make(chan string, 2)
@@ -221,7 +221,7 @@ func TestRetentionPrunesBeyondActiveAndPrevious(t *testing.T) {
 	driveVerification(e, "v20.0.1")
 	var defs []*domain.EnvironmentDefinition
 	for i := 0; i < 3; i++ {
-		d := saveEnvDefinition(t, e, "20.0")
+		d := saveEnvDefinition(t, e)
 		if err := e.sched.BuildEnvironment(t.Context(), e.ws.ID, d.Version); err != nil {
 			t.Fatalf("BuildEnvironment %d: %v", d.Version, err)
 		}
@@ -242,11 +242,11 @@ func TestRetentionPrunesBeyondActiveAndPrevious(t *testing.T) {
 func TestRollbackReactivatesPreviousVersion(t *testing.T) {
 	e := newTestEnv(t, nil)
 	driveVerification(e, "v20.0.1")
-	v1 := saveEnvDefinition(t, e, "20.0")
+	v1 := saveEnvDefinition(t, e)
 	if err := e.sched.BuildEnvironment(t.Context(), e.ws.ID, v1.Version); err != nil {
 		t.Fatalf("BuildEnvironment 1: %v", err)
 	}
-	v2 := saveEnvDefinition(t, e, "20.0")
+	v2 := saveEnvDefinition(t, e)
 	if err := e.sched.BuildEnvironment(t.Context(), e.ws.ID, v2.Version); err != nil {
 		t.Fatalf("BuildEnvironment 2: %v", err)
 	}
@@ -277,11 +277,11 @@ func TestRollbackReactivatesPreviousVersion(t *testing.T) {
 func TestRollbackRebuildsWhenTagIsGone(t *testing.T) {
 	e := newTestEnv(t, nil)
 	driveVerification(e, "v20.0.1")
-	v1 := saveEnvDefinition(t, e, "20.0")
+	v1 := saveEnvDefinition(t, e)
 	if err := e.sched.BuildEnvironment(t.Context(), e.ws.ID, v1.Version); err != nil {
 		t.Fatalf("BuildEnvironment 1: %v", err)
 	}
-	v2 := saveEnvDefinition(t, e, "20.0")
+	v2 := saveEnvDefinition(t, e)
 	if err := e.sched.BuildEnvironment(t.Context(), e.ws.ID, v2.Version); err != nil {
 		t.Fatalf("BuildEnvironment 2: %v", err)
 	}

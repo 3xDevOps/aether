@@ -57,7 +57,7 @@ func envShow(args []string) error {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		selector, err := resolveWorkspaceSelector(c, workspace, false)
+		selector, err := resolveWorkspaceSelector(c, workspace)
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func envRebuild(args []string) error {
 		return err
 	}
 	defer func() { _ = c.Close() }()
-	selector, err := resolveWorkspaceSelector(c, opts.workspace, false)
+	selector, err := resolveWorkspaceSelector(c, opts.workspace)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func envRollback(args []string) error {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		selector, err := resolveWorkspaceSelector(c, workspace, false)
+		selector, err := resolveWorkspaceSelector(c, workspace)
 		if err != nil {
 			return err
 		}
