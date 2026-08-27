@@ -263,10 +263,7 @@ func (m *Manager) Promote(ctx context.Context, member, workspace, staging string
 			if verifyErr := verify(executable); verifyErr != nil {
 				return nil, verifyErr
 			}
-		} else if info, statErr := os.Stat(executable); statErr != nil || info.Mode().Perm()&0o111 == 0 {
-			if statErr == nil {
-				statErr = fmt.Errorf("toolenv: executable is not executable")
-			}
+		} else if statErr := StatExecutable(staging, manifest.Executable); statErr != nil {
 			return nil, statErr
 		}
 	}
@@ -317,6 +314,26 @@ func (m *Manager) Promote(ctx context.Context, member, workspace, staging string
 		return snapshot, headErr
 	}
 	return snapshot, nil
+}
+
+// StatExecutable requires bin/<name> in a tool tree (staging or snapshot) to
+// be an executable regular file, resolving any symlink chain confined to the
+// tree (os.Root): a link escaping the tree fails instead of statting host
+// files.
+func StatExecutable(tree, name string) error {
+	root, err := os.OpenRoot(tree)
+	if err != nil {
+		return fmt.Errorf("toolenv: open tool tree: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	info, err := root.Stat(filepath.Join("bin", name))
+	if err != nil {
+		return fmt.Errorf("toolenv: executable bin/%s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("toolenv: bin/%s is not an executable file", name)
+	}
+	return nil
 }
 
 func (m *Manager) ActivePath(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) (string, error) {

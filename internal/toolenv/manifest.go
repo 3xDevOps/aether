@@ -17,6 +17,9 @@ type FileEntry struct {
 	Path string
 	Mode uint32
 	Size int64
+	// Target is a symlink's literal target string; empty for everything
+	// else. Targets are digested, never followed.
+	Target string
 }
 
 // Manifest describes a tree in deterministic lexical order.
@@ -24,8 +27,11 @@ type Manifest struct {
 	Files []FileEntry
 }
 
-// DigestTree hashes relative names, file modes, and file bytes. Symlinks are
-// refused because following one would make a server-owned snapshot escape.
+// DigestTree hashes relative names, file modes, and file bytes. Symlinks
+// contribute their literal target string and are never followed, so a
+// server-owned snapshot cannot be made to escape through one: every
+// host-side consumer of these trees resolves links with confined (os.Root)
+// or link-preserving (Lchown, rename) operations only.
 func DigestTree(root string) (string, Manifest, error) {
 	root = filepath.Clean(root)
 	info, err := os.Lstat(root)
@@ -47,9 +53,6 @@ func DigestTree(root string) (string, Manifest, error) {
 		if path == root {
 			return nil
 		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return ErrSymlink
-		}
 		info, infoErr := d.Info()
 		if infoErr != nil {
 			return infoErr
@@ -60,6 +63,19 @@ func DigestTree(root string) (string, Manifest, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		mode := uint32(info.Mode().Perm())
+		if d.Type()&os.ModeSymlink != 0 {
+			target, linkErr := os.Readlink(path)
+			if linkErr != nil {
+				return linkErr
+			}
+			entries = append(entries, FileEntry{Path: rel, Mode: mode, Target: target})
+			// The "L" tag keeps a symlink from ever colliding with a
+			// regular file's digest input.
+			if _, formatErr := fmt.Fprintf(h, "%s\x00L%o\x00%s\x00", rel, mode, target); formatErr != nil {
+				return formatErr
+			}
+			return nil
+		}
 		entries = append(entries, FileEntry{Path: rel, Mode: mode, Size: info.Size()})
 		if _, formatErr := fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, mode, info.Size()); formatErr != nil {
 			return formatErr

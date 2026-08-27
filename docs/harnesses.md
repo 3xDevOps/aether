@@ -89,12 +89,22 @@ aether agent add <name> --workspace <workspace>
 
 This opens the unified workspace shell in agent-setup mode: tool staging is
 mounted writable at `~/.local` and your per-harness credential home is
-mounted writable at `$HOME`. Install the executable into `~/.local/bin` with
-the vendor's documented procedure, run the vendor's login flow, then `exit`
-cleanly. Aether verifies the executable, snapshots the tools, persists the
-login state, and - for a name outside the shipped table - registers a
-launch definition under your membership. `aether agent list` shows shipped
-and member-registered agents.
+mounted writable at `$HOME`. For a shipped name the vendor's documented
+install command runs first (claude and opencode use the official curl
+installers; codex uses npm with `--prefix ~/.local` when the image has npm) -
+these are the vendors' own commands and vendors move them, so a failed
+install leaves you in the shell to install into `~/.local/bin` manually. For
+other names, install the executable into `~/.local/bin` with the vendor's
+documented procedure yourself. Then run the vendor's login flow and `exit`
+cleanly. Aether verifies the executable, snapshots the tools (vendor
+installers that symlink `~/.local/bin` entries to absolute paths are
+normalized to relative links), persists the login state, and - for a name
+outside the shipped table - registers a launch definition under your
+membership. `aether agent list` shows shipped and member-registered agents.
+
+Launching a shipped or member-registered agent on a neutral-image workspace
+before this setup exists is refused up front with the `aether agent add`
+command to run, instead of failing inside the run container.
 
 For an unshipped name the command asks for the interactive and headless
 launch templates first (`<name> {task}` and `<name> -p {task}` by default;

@@ -13,6 +13,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/toolenv"
 )
 
 // imageUserResolver is the optional runtime capability used to learn the
@@ -201,6 +203,38 @@ func (s *Scheduler) checkFreeSpace() error {
 		ErrDiskFull, free, s.cfg.MinFreeBytes)
 }
 
+// checkAgentInstalled refuses a launch that could only fail inside runc:
+// on a neutral-image workspace the harness executable can come from nowhere
+// but the member's active tool snapshot, so a missing snapshot means the run
+// dies with "executable file not found" after a container is built and torn
+// down. Refusing up front leaves no failed run row and tells the member the
+// one command that fixes it. Deployment-supplied harness specs (fake,
+// custom) and custom images may carry their executable in the image or the
+// environment, so both skip the check.
+func (s *Scheduler) checkAgentInstalled(ctx context.Context, member domain.MemberID, ws *domain.Workspace, harnessName, executable string) error {
+	if _, deployment := s.harnesses[harnessName]; deployment {
+		return nil
+	}
+	if !ws.Environment.NeutralImage || s.cfg.Store == nil || s.cfg.Toolenv == nil {
+		return nil
+	}
+	notInstalled := func() error {
+		return fmt.Errorf("scheduler: agent %q is not set up for workspace %q: %q is not in this workspace's installed tools; run: aether agent add %s --workspace %s",
+			harnessName, ws.Name, executable, harnessName, ws.Name)
+	}
+	active, err := s.cfg.Toolenv.ActivePath(ctx, member, ws.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return notInstalled()
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: resolve active tool snapshot: %w", err)
+	}
+	if statErr := toolenv.StatExecutable(active, executable); statErr != nil {
+		return notInstalled()
+	}
+	return nil
+}
+
 // Launch creates a new run and provisions it synchronously: checkout and
 // branch via the git seam, container via the runtime, agent PTY via the
 // PTY seam. It returns the run in running state, or an error with the run
@@ -222,6 +256,9 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, workspace)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkAgentInstalled(ctx, member, ws, harness, argv[0]); err != nil {
 		return nil, err
 	}
 	run := &domain.Run{

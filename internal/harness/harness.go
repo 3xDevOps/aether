@@ -233,6 +233,15 @@ type Profile struct {
 	// means it has no MCP registration and conflict coordination degrades
 	// to the overlap notice alone.
 	MCPConfigFlag string
+	// InstallScript is the vendor's documented install command, run
+	// automatically inside an agent-setup shell before the member gets the
+	// prompt, so a shipped agent sets itself up without hand-typed installer
+	// commands. It must install into ~/.local/bin (the snapshotted tree).
+	// Best-effort: a failed install leaves the member in the shell to install
+	// manually, exactly as if the script were empty. These are the vendors'
+	// own commands and vendors move them; when one breaks, the manual shell
+	// still works and the registry gets updated.
+	InstallScript string
 }
 
 // profiles is the shipped registry. "custom" is the escape hatch: its
@@ -250,6 +259,7 @@ var profiles = map[string]Profile{
 		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},
 		ResumeFlag:      "--continue",
 		MCPConfigFlag:   "--mcp-config",
+		InstallScript:   "curl -fsSL https://claude.ai/install.sh | bash",
 	},
 	"codex": {
 		Name:            "codex",
@@ -259,6 +269,10 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".codex"},
 		LocalRoot:       ".codex",
 		DenyNames:       []string{"auth.json", "keychain", "token.json"},
+		// Codex ships via npm; --prefix keeps the install inside the
+		// snapshotted tree. Without npm in the image the member installs
+		// manually, as before.
+		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @openai/codex",
 	},
 	"opencode": {
 		Name:            "opencode",
@@ -268,6 +282,7 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".local/share/opencode"},
 		LocalRoot:       ".local/share/opencode",
 		DenyNames:       []string{"auth.json", "token.json", "tokens.json"},
+		InstallScript:   "curl -fsSL https://opencode.ai/install | bash",
 	},
 	"custom": {Name: "custom"},
 }

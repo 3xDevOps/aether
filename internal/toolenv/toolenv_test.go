@@ -99,6 +99,76 @@ func TestManagerStagingPromotionAndActiveHead(t *testing.T) {
 	}
 }
 
+// TestManagerPromotesVendorSymlinkLayout covers the layout every official
+// installer produces: the binary under share/, and bin/<name> a symlink to
+// it. Promotion must accept the in-tree link and refuse one that escapes.
+func TestManagerPromotesVendorSymlinkLayout(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	w := &domain.Workspace{Name: "w", Environment: domain.WorkspaceEnvironment{NeutralImage: true}}
+	if err = db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	m := &domain.Member{DisplayName: "m", TailnetLogin: "m@example.com", Role: domain.RoleCollaborator}
+	if err = db.CreateMember(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := NewManager(filepath.Join(t.TempDir(), "tools"), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging, err := mgr.CreateStaging(string(m.ID), string(w.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions := filepath.Join(staging, "share", "claude", "versions")
+	if err = os.MkdirAll(versions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(versions, "1.0"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(staging, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(filepath.Join("..", "share", "claude", "versions", "1.0"), filepath.Join(staging, "bin", "claude")); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := mgr.Promote(ctx, string(m.ID), string(w.ID), staging, domain.ToolManifest{Executable: "claude"}, nil)
+	if err != nil {
+		t.Fatalf("promote vendor layout: %v", err)
+	}
+	path, err := mgr.ActivePath(ctx, m.ID, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = StatExecutable(path, "claude"); err != nil {
+		t.Fatalf("promoted executable: %v", err)
+	}
+	if snap.Digest == "" {
+		t.Fatal("empty digest")
+	}
+
+	// A bin symlink escaping the tree must fail promotion, not stat host files.
+	escapeStaging, err := mgr.CreateStaging(string(m.ID), string(w.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(escapeStaging, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink("../../../../../../bin/sh", filepath.Join(escapeStaging, "bin", "evil")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = mgr.Promote(ctx, string(m.ID), string(w.ID), escapeStaging, domain.ToolManifest{Executable: "evil"}, nil); err == nil {
+		t.Fatal("promotion accepted an escaping bin symlink")
+	}
+}
+
 func TestManagerRejectsTraversalAndSymlinkEscapeAndCleansStaging(t *testing.T) {
 	mgr, err := NewManager(t.TempDir())
 	if err != nil {
@@ -118,8 +188,24 @@ func TestManagerRejectsTraversalAndSymlinkEscapeAndCleansStaging(t *testing.T) {
 	if err = os.Symlink(escape, filepath.Join(staging, "link")); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = DigestTree(staging); !errors.Is(err, ErrSymlink) {
-		t.Fatalf("symlink error = %v", err)
+	// Symlinks are digested by their literal target, never followed: the
+	// digest input records the link and the escape target's bytes stay out.
+	digest, manifest, err := DigestTree(staging)
+	if err != nil {
+		t.Fatalf("digest with symlink: %v", err)
+	}
+	if len(manifest.Files) != 1 || manifest.Files[0].Target != escape {
+		t.Fatalf("manifest = %+v, want one symlink entry targeting %q", manifest.Files, escape)
+	}
+	if err = os.WriteFile(escape, []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	redigest, _, err := DigestTree(staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redigest != digest {
+		t.Fatal("digest followed a symlink: changing the escape target changed the digest")
 	}
 	if err = mgr.CleanupStaging(staging); err != nil {
 		t.Fatal(err)
