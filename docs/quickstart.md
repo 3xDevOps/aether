@@ -1,86 +1,58 @@
 # Quickstart
 
-Zero to a finished agent run in about ten minutes, solo. Everything below was
-run against a real server; nothing is aspirational.
+Zero to a finished agent run in about ten minutes, solo.
 
 Two machines are involved, though they can be the same one:
 
-- **the server box** - a Linux machine with Docker. This is where agents run.
-- **your machine** - laptop or desktop, Linux, macOS, or Windows. This is
-  where you type.
+- **the server box** - a Linux machine with Docker and git. Agents run here.
+- **your machine** - Linux, macOS, or Windows. Where you type.
 
-You need on the server box: Linux, Docker (running, and your user able to talk
-to it), and git. On your machine: git, and an SSH key unless both machines are
-on a tailnet (see [step 3](#3-link-from-your-machine)). Aether reads
-`~/.ssh/id_ed25519` and your ssh-agent; a **passphrase-protected key only works
-through the agent**, so `ssh-add` it first.
-
-On Windows the equivalents are `%USERPROFILE%\.ssh\id_ed25519` and the Windows
-OpenSSH agent, which the client finds through its named pipe. That agent is a
-service and does not run by default, so check it before you need it:
-
-```powershell
-Get-Service ssh-agent                       # Status should be Running
-Start-Service ssh-agent                     # needs an elevated prompt
-Set-Service ssh-agent -StartupType Automatic
-ssh-add $env:USERPROFILE\.ssh\id_ed25519
-```
+Your machine needs git and, unless both machines are on a tailnet
+(see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
+`~/.ssh/id_ed25519` and your ssh-agent, so `ssh-add` a passphrase-protected
+key first. Windows paths and the OpenSSH agent service are in
+[install.md](install.md#the-windows-client).
 
 ---
 
 ## 1. Install
 
-The server box is Linux, so it always uses the script. Your machine uses the
-script too unless it runs Windows.
-
-**Linux and macOS:**
+On the server box and on a Linux or macOS machine:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
 ```
 
 On Linux that installs `aether` and `aether-server`; on macOS just `aether`
-(the server is Linux-only). Upgrading later is one command: `aether update`.
+(the server is Linux-only). Later, `aether update` upgrades both.
 
-**Windows** (client only): the install script is POSIX shell and there is no
-Windows installer, so this is a manual download. Grab
-`aether-windows-amd64.exe` (or `-arm64`) from the
-[latest release](https://github.com/3xDevOps/Aether/releases/latest), check
-its hash against `checksums.txt`, rename it `aether.exe`, and put it on your
-`PATH`. The three PowerShell commands are in
-[install.md](install.md#manual-install). Upgrading means repeating that with
-the newer release; `aether update` does not run on Windows.
-
-Details, pinning a version, the systemd unit, and everything Windows-specific
-are in [install.md](install.md).
+On **Windows** the client is a manual download - three PowerShell commands in
+[install.md](install.md#manual-install). Everything else there is optional:
+pinning a version, the data layout, the desktop app.
 
 ## 2. Start the server
 
-On the server box. Both commands are Linux-side; `aether init` refuses to run
-on Windows and tells you to run it here.
+On the server box, one command writes the systemd unit and config and prints
+how to start it:
 
 ```sh
-sudo aether init --data-dir /var/lib/aether
+sudo aether-server setup
 ```
 
-`init` creates the data directory, tells you whether Tailscale was detected
-and what the server's tailnet hostname is, and prints the two commands that
-come next. It does not start anything.
+It asks for the listen address, data directory, and tailnet policy (Enter
+accepts each default), then prints:
 
 ```sh
-sudo aether-server serve --data-dir /var/lib/aether --addr :2222
+systemctl daemon-reload && systemctl enable --now aether-server
 ```
 
-(`sudo` because `/var/lib` is root-owned and the server needs the Docker
-socket. To try it without root, point `--data-dir` at a directory in your home
-and make sure your user is in the `docker` group.)
+Run that and the server is live on `:2222`. The SSH host key is generated on
+first start and nothing is exposed to the network except the SSH port. Change
+any option later with `aether-server config set <key> <value>`, then restart.
 
-That runs in the foreground until Ctrl-C, which is what you want the first
-time. To make it permanent, install the systemd unit from
-[install.md](install.md#run-it-under-systemd).
-
-The SSH host key is generated into `<data-dir>/ssh/` on first start; there is
-nothing to configure. Nothing is exposed to the network except the SSH port.
+To try it in the foreground first, `sudo aether-server serve` runs until
+Ctrl-C. [install.md](install.md) covers unattended installs, running
+unprivileged, and every serve option.
 
 ## 3. Link from your machine
 
@@ -117,28 +89,19 @@ On first contact `aether` records the server's host key in `~/.ssh/known_hosts`
 (`%USERPROFILE%\.ssh\known_hosts` on Windows) and prints its fingerprint.
 Compare that against what the server printed if you care to.
 
-## 4. Initialize a workspace and push your repo
+## 4. Create a workspace and push your repo
 
-A **workspace** is a repo plus a server-owned environment plan. With no image
-option, the server selects its neutral bootstrap image. Workspace creation is
-an administrator operation:
+A **workspace** is a repo plus a server-owned environment. Creating one is an
+admin operation; with no `--image` the server uses its neutral bootstrap
+image:
 
 ```sh
 aether workspace init myproject
 ```
 
-Use a custom, administrator-approved image only when the project needs system
-packages that the neutral image does not provide:
-
-```sh
-aether workspace init myproject --image registry.example.invalid/team/base:version
-```
-
-The custom image is workspace configuration. A member cannot replace it from a
-bootstrap or login shell. See [install.md](install.md) for image policy.
-
-Every run's worktree is cut from the workspace's base branch, `main` unless
-`--base <branch>` names another one at creation time.
+Pass `--image <ref>` for an administrator-approved image when the project
+needs system packages the neutral one lacks, and `--base <branch>` to cut run
+worktrees from something other than `main`.
 
 Now point your local clone at it and seed the repo:
 
@@ -148,12 +111,9 @@ cd ~/code/myproject
 git push -u aether main
 ```
 
-Re-running `link` with `--repo` adds an `aether` git remote to that clone.
-With multiple workspaces, pass `--workspace <name-or-id>`;
-`aether workspace list` shows what exists.
-(Linking before any workspace existed skipped that step and said so; this is
-the re-run it asked for.) The remote is a normal git remote over the same SSH
-port - no separate credentials.
+`link --repo` adds an `aether` git remote - a normal git remote over the same
+SSH port, no separate credentials. With multiple workspaces, add
+`--workspace <name-or-id>` (`aether workspace list` shows them).
 
 ## 5. Set up your agent
 
@@ -164,28 +124,19 @@ aether agent add omp --workspace myproject
 ```
 
 For a name Aether does not ship (anything but claude, codex, aider, or
-opencode) it first asks how to launch the agent, with defaults you accept by
-pressing Enter (`omp {task}` and `omp -p {task}`), or take from `--tui` /
-`--headless` flags. It then opens a shell **inside a server-created
-container**. Install the agent executable into `~/.local/bin` using its
-vendor documentation, run the vendor's login flow (use a device-code or
-headless option; the container has no browser), and `exit` cleanly.
+opencode) it first asks how to launch the agent, Enter accepting the defaults
+(`omp {task}` and `omp -p {task}`). It then opens a shell **inside a
+server-created container**: install the executable into `~/.local/bin` per the
+vendor's docs, run the vendor's login flow (pick a device-code or headless
+option, the container has no browser), and `exit` cleanly.
 
-On exit Aether verifies the executable, snapshots `~/.local` as an immutable
-tool snapshot, persists whatever the login wrote in your home as your
-credential home, and registers the agent under your membership. Shipped
-names skip the questions and the registration; their launch profiles are
-built in. `aether agent list` shows what is available.
+On exit Aether snapshots `~/.local`, persists the login state, and registers
+the agent under your membership. Shipped agents skip the questions and the
+registration. Only `~/.local` and login state persist across containers.
 
-System packages and other container filesystem changes do not persist; only
-`~/.local` and the login state do. If the SSH client disconnects before you
-exit, resume with `aether workspace bootstrap myproject --resume` or discard
-with `--reset`.
-
-The pieces remain individually addressable when you need them: `aether
-workspace bootstrap` re-installs tools without touching login state,
-`aether setup <agent>` re-runs a login without reinstalling, and
-`aether workspace tools list/verify/rollback` manage snapshots. See
+If the connection drops before you exit, resume with
+`aether workspace bootstrap myproject --resume`. The individual steps
+(re-install tools, re-run a login, manage snapshots) are in
 [bootstrap.md](bootstrap.md) and [harnesses.md](harnesses.md).
 
 ## 6. Launch a run
@@ -202,12 +153,9 @@ one.
 run 01m04mhf114eap4k85n2mgcped running
 ```
 
-A **workspace** is the shared context runs live in: its repository, its
-members, its feed, its budget, its templates, and the base branch new runs
-fork from. A **run** is one agent execution with its own container, its own
-git worktree, and its own branch. `aether runs` lists them. Scoped commands
-take `--workspace`, and default to it when there is exactly one, which is why
-nothing above had to name it.
+A **run** is one agent execution with its own container, git worktree, and
+branch; `aether runs` lists them. Scoped commands default to the only
+workspace when there is exactly one, which is why nothing above named it.
 
 ## 7. Watch it
 

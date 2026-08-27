@@ -55,14 +55,12 @@ identity, so every command the CLI can run works from the page. The desktop
 app is the same thing with the window supplied. Nothing is exposed to your
 network, and there is no separate login.
 
-Inside: a workspace switcher over that workspace's runs, member-colored and
-groupable; a run board bucketed by what needs attention; a live terminal mirror
-of any run, read-only unless you hold the steer capability; a per-run diff
-timeline; the workspace event feed; the shared approval inbox; presence and
-watcher indicators; the member roster, read-only unless you are an admin; a
+Inside: a workspace switcher, a run board bucketed by what needs attention, a
+live read-only terminal mirror of any run, per-run diff timelines, the event
+feed, the shared approval inbox, presence indicators, the member roster, and a
 disk gauge. Launch, inject, pause, kill, close, relaunch and handoff all call
-the same methods the CLI does, with the same permission checks and the same
-timeline attribution.
+the same methods the CLI does, with the same permission checks and timeline
+attribution.
 
 For the raw thing, `aether attach <run>` is a byte-for-byte PTY passthrough -
 every native keybind, theme and mouse mode of the agent's own TUI, over SSH.

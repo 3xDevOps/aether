@@ -40,11 +40,8 @@ tailscale: socket /var/run/tailscale/tailscaled.sock detected
 tailscale: tailnet hostname my-server.tailnet-name.ts.net
 ```
 
-That hostname is what you hand teammates. Start the server as usual:
-
-```sh
-aether-server serve --data-dir /var/lib/aether --addr :2222
-```
+That hostname is what you hand teammates. Then install the server as usual
+(`sudo aether-server setup`; see [install.md](install.md#first-boot)).
 
 The server checks for the tailscaled socket **at startup**. If it is there,
 tailnet identity is on; if not, the server is key-only. Start Tailscale before

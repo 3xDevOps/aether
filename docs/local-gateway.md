@@ -15,10 +15,11 @@ it is in [dashboard-frontend.md](dashboard-frontend.md).
 ## Running it
 
 ```sh
-aether gui             # bind an ephemeral loopback port, print the URL, open a browser
-aether gui --port 8090 # bind a fixed loopback port
-aether gui --url       # print the URL instead of opening a browser
-aether gui --json      # print one JSON line, then keep serving
+aether gui               # bind an ephemeral loopback port, print the URL, open a browser
+aether gui --port 8090   # bind a fixed loopback port
+aether gui --url         # print the URL instead of opening a browser
+aether gui --json        # print one JSON line, then keep serving
+aether gui --server prod # serve a named link profile (aether link --name)
 ```
 
 The gateway binds `127.0.0.1` only - there is no exposure flag - and mints
@@ -124,7 +125,7 @@ the same capability checks the SSH transport applies.
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","shell"],
  "local":["daemon.install","daemon.status","image.scaffold","link.repo",
-          "link.status","pull","sync.start","sync.status","sync.stop"]}
+          "link.status","link.switch","pull","sync.start","sync.status","sync.stop"]}
 ```
 
 `methods` is `["*"]` because this gateway forwards every control-channel
@@ -229,7 +230,8 @@ authority.
 
 | Verb | Request | Response |
 | --- | --- | --- |
-| `link.status` | `{}` | `{"linked":bool,"addr":"...","user":"...","repo":"..."}` |
+| `link.status` | `{}` | `{"linked":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"..."}],"active":"..."}` (`links`/`active` present only with named profiles) |
+| `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
@@ -287,10 +289,12 @@ lost its socket resumes without gaps.
    ```
 
 Reconnect contract: track the highest `seq` you have seen and resubscribe
-with `"replay":true,"after_seq":<last seq>`. If the per-client buffer
-overflows the socket closes with code **4000** (`event backlog dropped`) -
-that close is the signal to resubscribe from your last `seq`, not an error
-to surface.
+with `"replay":true,"after_seq":<last seq>`. When the SSH event stream ends
+for any reason - a dropped connection, a server restart, or a per-client
+buffer overflow - the socket closes with code **1012** (service restart),
+reason `event stream ended; resubscribe with after_seq`. That close is the
+signal to resubscribe from your last `seq`, not an error to surface; the
+replay recovers anything dropped.
 
 ### `GET /ws/attach/<run_id>`
 

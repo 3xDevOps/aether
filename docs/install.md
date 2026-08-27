@@ -157,108 +157,36 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rest of the toolchain.
 ## Desktop app
 
 Optional, in `desktop/`: an Electron shell that launches `aether gui` for you
-and shows the dashboard in its own window, with desktop notifications and a
-badge when a run parks needs-attention, plus `aether://run/<id>` deep links.
-It is the same SPA with the same full SSH authority - just without a browser
-tab to lose.
+and shows the dashboard in its own frameless window, with desktop
+notifications, a needs-attention badge, and `aether://run/<id>` deep links. It
+is the same SPA with the same full SSH authority, just without a browser tab to
+lose. No release publishes it - build it yourself (needs Node 22+):
 
-The window is frameless: there is no OS title bar and no File/Edit/View menu,
-because the dashboard draws its own title bar with the window buttons in it.
-macOS is the exception and keeps its native traffic lights and system menu
-bar.
+```sh
+cd desktop
+npm install
+npm run dist    # installer for this OS into desktop/dist/
+npm run start   # or run it unpackaged during development
+```
 
-No release publishes it: there is no installer to download for any platform,
-Windows included. Build it yourself, below.
+It requires the `aether` CLI installed and linked first; the app does not
+bundle the binary. It looks for `aether` in `AETHER_BIN`, then `PATH`, then the
+installer defaults (`/usr/local/bin`, `~/.local/bin`). If launch fails with
+"aether CLI not found", set `AETHER_BIN` to the binary's full path.
 
-It requires the `aether` CLI installed and linked first. The app does not
-bundle the binary; it looks for `aether` (`aether.exe` on Windows) in
-`AETHER_BIN`, then on your `PATH`, then in the installer's default locations
-(`/usr/local/bin`, `~/.local/bin`), which do not exist on Windows. If
-launching fails with "aether CLI not found", set `AETHER_BIN` to the binary's
-full path.
-
-**The dashboard ships inside the CLI, not inside this app.** The Electron
-package is a window and a sidecar launcher: roughly four JavaScript files. The
-SPA - every view, style, font, and the Aether mark - is embedded in the
-`aether` binary (`web/embed.go`) and served by `aether gui`. So a dashboard
-change reaches the window only when the CLI is rebuilt and reinstalled:
+**The dashboard ships inside the CLI, not inside this app.** The SPA is
+embedded in the `aether` binary (`web/embed.go`) and served by `aether gui`, so
+a dashboard change reaches the window only when the CLI is rebuilt and
+reinstalled - not when the desktop package is rebuilt:
 
 ```sh
 make build && sudo install -m 0755 dist/aether /usr/local/bin/aether
 ```
 
-Rebuilding the desktop package will not do it, and neither will deleting and
-reinstalling the app. If the window renders an older dashboard than the
-checkout, an older `aether` is on your `PATH`; `aether version` prints the
-commit it was built from.
-
-Build the app from source (needs Node 22+):
-
-```sh
-cd desktop
-npm install
-npm run dist  # installers for this OS into desktop/dist/
-```
-
-`npm run start` runs it unpackaged during development.
-
-The app icon is the Aether mark on the dashboard's dark background, generated
-from `web/public/aether-mark.png` into `desktop/build/`: an `icons/` set from
-16px to 1024px, plus a multi-size `icon.ico` for Windows. Linux installs the
-whole set, macOS converts it to `.icns`. Regenerate with
-`python3 desktop/build/make-icons.py` after the mark changes.
-
-Security posture: the sidecar `aether gui` process owns the SSH identity and
-every credential; the window is just a browser locked to the tokened loopback
-gateway it prints. Context isolation is on, the renderer is sandboxed, and no
-Node API is exposed to the page - a compromised dashboard page gets exactly
-what a browser tab would get, nothing more. Links to anything other than the
-gateway open in your real browser.
-
-### Building for all three operating systems
-
-`npm run dist` only builds the targets electron-builder configures for the
-machine you run it on. Installers for every platform need either one machine
-per platform (what a CI matrix does) or the cross-build routes below.
-
-| Artifact | On Linux | On macOS | On Windows |
-| --- | --- | --- | --- |
-| Linux `.AppImage`, `.deb` | `npm run dist -- --linux` | Docker image | Docker image |
-| Windows `.exe` (NSIS) | Docker image | native tooling | `npm run dist -- --win` |
-| macOS `.zip` | `npm run dist -- --mac zip` | `npm run dist -- --mac` | Docker image |
-| macOS `.dmg` | macOS only | `npm run dist -- --mac` | macOS only |
-
-The Docker image is electron-builder's own Wine image, so a Linux box can
-produce Linux and Windows installers plus an unsigned macOS zip:
-
-```sh
-cd desktop
-npm install
-npm run dist -- --linux --mac zip   # AppImage, deb, macOS zip
-
-mkdir -p ~/.cache/aether-desktop-build
-docker run --rm --user "$(id -u):$(id -g)" -e HOME=/home/builder \
-  -v "$PWD:/project" \
-  -v "$HOME/.cache/aether-desktop-build:/home/builder" \
-  electronuserland/builder:wine \
-  npx electron-builder --win --publish never   # NSIS .exe
-```
-
-Run the container as your own user, with a writable `HOME` on a cache
-directory: as root it writes root-owned files into `dist/` and into the
-electron-builder download cache, which then breaks later builds. That cache
-mount is also what keeps the container from re-downloading the ~100 MB
-Electron runtime every time.
-
-Two limits are not worked around:
-
-- **`.dmg` requires macOS.** The `dmg-license` module it needs is a macOS-only
-  optional dependency, so a Linux or Windows host can only produce the macOS
-  `.zip`. Both install the same `Aether.app`.
-- **Signing requires the target OS and a certificate.** Cross-built Windows
-  and macOS artifacts are unsigned, so they trip SmartScreen and Gatekeeper,
-  and auto-update refuses them. Ship signed builds from real macOS and Windows
-  runners; treat cross-builds as test artifacts.
+If the window renders an older dashboard than your checkout, an older `aether`
+is on your `PATH`; `aether version` prints the commit it was built from.
+Packaging installers for other platforms and code signing are in
+[CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 
 ## Server prerequisites
 
@@ -319,19 +247,47 @@ preserved unless `--force` is supplied.
 
 ## First boot
 
+`aether-server setup` walks you through the install: it asks for the listen
+address, data directory, and tailnet policy (Enter accepts each default),
+writes the systemd unit and the config file, and prints the command that
+starts the service.
+
 ```sh
-aether init --data-dir /var/lib/aether
+sudo aether-server setup
 ```
 
-`init` creates the directory (mode 0700), reports whether Tailscale is present
-and what the tailnet hostname is, and prints the serve and link commands. It
-starts nothing and writes no configuration - there is no config file.
+For an unattended install, `aether-server install` writes the same files from
+flags instead of questions - any serve option below is accepted, and options
+you leave off keep tracking the binary's defaults across upgrades:
+
+```sh
+sudo aether-server install --addr :2222 --tailnet-auto-join
+```
+
+Neither command starts anything; both print the activation line so an install
+never restarts a live server behind your back:
+
+```sh
+systemctl daemon-reload && systemctl enable --now aether-server
+systemctl status aether-server
+journalctl -u aether-server -f
+```
+
+The unit runs the server as root and creates `/var/lib/aether` through
+`StateDirectory=`. Root is deliberate: Docker socket access is already
+root-equivalent on the host, and workspace images with a non-root user make the
+server chown run checkouts to that UID, which needs `CAP_CHOWN`. The header
+comment in the unit spells out how to run unprivileged instead, and what you
+give up.
+
+To run the server in the foreground instead - handy the first time - skip
+setup and serve directly:
 
 ```sh
 aether-server serve --data-dir /var/lib/aether --addr :2222
 ```
 
-Serve flags:
+Serve options, which are also the config-file keys:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -349,35 +305,14 @@ Serve flags:
 Three things happen on the first start and never need attention again:
 
 1. **The SSH host key** is generated into `<data-dir>/ssh/host_ed25519_key`.
-   Clients record its fingerprint on first link and print it.
+   Clients record its fingerprint on first link and print it. Do not delete it:
+   clients that already trust it refuse to connect until you clear the entry
+   from their `known_hosts`.
 2. **The first identity to link becomes the admin** - the SSH key, or the
    tailnet login, of whoever runs `aether link` first. There is no other
    account creation step.
 3. **The SQLite store and the git repo root** are created under the data
    directory.
-
-Do not delete the host key: clients that already trust it will refuse to
-connect until you clear the entry from their `known_hosts`.
-
-## Run it under systemd
-
-A ready unit lives at
-[`packaging/systemd/aether-server.service`](../packaging/systemd/aether-server.service).
-
-```sh
-sudo cp packaging/systemd/aether-server.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now aether-server
-sudo systemctl status aether-server
-journalctl -u aether-server -f
-```
-
-The unit runs the server as root and creates `/var/lib/aether` through
-`StateDirectory=`. Root is deliberate: Docker socket access is already
-root-equivalent on the host, and workspace images with a non-root user make the
-server chown run checkouts to that UID, which needs `CAP_CHOWN`. The header
-comment in the unit spells out how to run unprivileged instead, and what you
-give up.
 
 Options live in `/etc/aether/server.conf`, not in `ExecStart`. The file is
 operator-owned, so binary updates and unit reinstalls never rewrite it. Change

@@ -97,7 +97,7 @@ Most adapter output is `events.AgentEventPayload`:
 | `Kind` | Meaning | Fields that matter |
 | --- | --- | --- |
 | `AgentToolCall` | The agent invoked a tool | `Tool`, `ToolUseID`, `Detail` |
-| `AgentToolResult` | A tool invocation finished | `ToolUseID`, `IsError`, `Detail` |
+| `AgentToolResult` | A tool invocation finished | `ToolUseID`, `IsError` |
 | `AgentSubagent` | The agent spawned a subagent | `Tool`, `ToolUseID`, `Detail` |
 | `AgentPause` | The agent is waiting on plan review or approval | `Detail` |
 | `AgentSession` | The harness's own session ID, surfaced on the timeline | `HarnessSessionID` |
