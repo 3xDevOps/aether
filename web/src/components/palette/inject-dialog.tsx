@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
+import { runLabel } from '@/lib/status'
 import { useStore } from '@/store'
 
 export function InjectDialog() {
@@ -39,7 +40,7 @@ export function InjectDialog() {
         <DialogHeader>
           <DialogTitle>Inject a message</DialogTitle>
           <DialogDescription>
-            {run ? run.task : 'The message lands in the run transcript, attributed to you.'}
+            {run ? runLabel(run) : 'The message lands in the run transcript, attributed to you.'}
           </DialogDescription>
         </DialogHeader>
         <form

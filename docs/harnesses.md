@@ -23,7 +23,6 @@ Two rules shape everything below:
 | --- | --- | --- | --- | --- | --- | --- |
 | `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | yes (`--mcp-config`) | yes (`--continue`) |
 | `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | no | no |
-| `aider` | Aider | `~/.aider` | `~/.aider` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | no |
 | `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | no |
 | `fake` | a script you name | - | - | - | no | no |
 | `custom` | deployment-supplied | - | - | - | no | no |
@@ -61,12 +60,18 @@ machine-readable mode. Full-permission flags are applied by default in both -
 the agent is in a container, and the container is the boundary
 ([security.md](security.md)).
 
+The task prompt is optional in tui mode: launch without one and you land in
+the agent's bare interactive TUI, exactly as if you had started the CLI
+yourself, and type the first prompt there. Every argv token that carries the
+prompt is then dropped, so `opencode --prompt={task}` leaves whole rather than
+dangling an empty flag. Headless mode has no interactive surface, so it still
+requires a task.
+
 | Harness | tui | headless |
 | --- | --- | --- |
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |
-| `aider` | `aider --yes-always --message {task}` | `aider --yes-always --no-pretty --no-stream --message {task}` |
-| `opencode` | `opencode --prompt {task}` | `opencode run {task}` |
+| `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
 
 These are the vendors' own flags, and vendors rename them. If a launch fails
 with an unknown-flag error, the installed CLI has drifted from the registry.
@@ -145,13 +150,6 @@ directory Aether persists and the file profile sync refuses to upload.
 Inside `aether setup opencode`, run `opencode auth login` and pick your
 provider. Credentials are written to
 `~/.local/share/opencode/auth.json`, the directory Aether persists per member.
-
-### Aider
-
-Aider is API-key driven; there is no interactive login to complete. Put
-`ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the server environment and they are
-injected into aider runs. `~/.aider` is still persisted per member for anything
-the tool caches there.
 
 ### `fake`
 

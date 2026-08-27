@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { StateDot } from '@/components/state-dot'
 import { timeAgo } from '@/lib/format'
-import { stateLabel } from '@/lib/status'
+import { runLabel, stateLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
 import { MemberAvatar } from '@/routes/board/member-avatar'
@@ -43,7 +43,7 @@ export function RunCard({ card }: { card: BoardCard }) {
           <span
             className={cn('min-w-0 flex-1 text-sm break-words', unseen && 'font-medium')}
           >
-            <span className="line-clamp-2">{run.task}</span>
+            <span className="line-clamp-2">{runLabel(run)}</span>
           </span>
           {paused && (
             <span
@@ -92,7 +92,7 @@ export function RunCard({ card }: { card: BoardCard }) {
 
       <button
         type="button"
-        aria-label={run.task}
+        aria-label={runLabel(run)}
         onClick={() => navigate('run', { runId: run.id })}
         className="absolute inset-0 z-10 rounded-md focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
       />

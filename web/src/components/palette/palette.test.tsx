@@ -120,20 +120,29 @@ describe('command palette', () => {
     expect(target.textContent).toContain(workspace.name)
     expect(target.textContent).toContain(workspace.base_branch)
 
-    const task = screen.getByPlaceholderText('What should the agent do?')
-    fireEvent.change(task, { target: { value: 'fix the flaky test' } })
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
       expect(api.runLaunch).toHaveBeenCalledWith({
         workspace_id: workspace.id,
-        task: 'fix the flaky test',
         harness: 'claude',
-        mode: 'tui',
       }),
     )
-    // A launch reveals what it launched.
-    await waitFor(() => expect(useStore.getState().route.name).toBe('run'))
+    // A launch drops the user straight into the agent terminal.
+    await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))
+  })
+
+  it('offers member-registered agents in the launch harness dropdown', async () => {
+    open()
+
+    fireEvent.click(await screen.findByText('Launch a run...'))
+    // agent.list is the source of truth for who this server can run, so a
+    // member's registered harness must be selectable here, not just the
+    // shipped names.
+    await screen.findByRole('option', { name: 'myagent' })
+    expect(api.agentList).toHaveBeenCalled()
+    // The deployment escape hatch stays reachable alongside the roster.
+    expect(screen.getByRole('option', { name: 'custom' })).toBeTruthy()
   })
 
   it('launches a templated run into the active workspace', async () => {

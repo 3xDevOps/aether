@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
+import { runLabel } from '@/lib/status'
 import type { PullResult } from '@/lib/types'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
@@ -119,8 +120,8 @@ export function LandControls({ run }: { run: RunRecord }) {
               <DialogTitle>Close as {closing}?</DialogTitle>
               <DialogDescription>
                 {closing === 'merged'
-                  ? `The run for "${run.task}" is recorded as merged and leaves the board.`
-                  : `The run for "${run.task}" is recorded as abandoned and leaves the board.`}
+                  ? `The run for "${runLabel(run)}" is recorded as merged and leaves the board.`
+                  : `The run for "${runLabel(run)}" is recorded as abandoned and leaves the board.`}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>

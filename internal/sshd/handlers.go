@@ -98,8 +98,8 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if perr != nil {
 		return nil, perr
 	}
-	if p.WorkspaceID == "" || p.Task == "" || p.Harness == "" {
-		return nil, invalidParams("workspace_id, task, and harness are required")
+	if p.WorkspaceID == "" || p.Harness == "" {
+		return nil, invalidParams("workspace_id and harness are required")
 	}
 	mode := domain.LaunchMode(p.Mode)
 	if p.Mode == "" {
@@ -107,6 +107,12 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	}
 	if !mode.Valid() {
 		return nil, invalidParams("invalid mode: " + p.Mode)
+	}
+	// A taskless launch drops the member into the agent's interactive TUI with
+	// no seeded prompt. Headless has no interactive surface, so it still needs
+	// a task to have anything to do.
+	if p.Task == "" && mode == domain.LaunchHeadless {
+		return nil, invalidParams("task is required in headless mode")
 	}
 	run, err := s.cfg.Runs.Launch(ctx, domain.WorkspaceID(p.WorkspaceID), member, p.Task, p.Harness, mode)
 	if err != nil {

@@ -67,7 +67,7 @@ every native keybind, theme and mouse mode of the agent's own TUI, over SSH.
 
 ## Supported agents
 
-Claude Code, Codex, Aider, and opencode ship in the harness registry, plus a
+Claude Code, Codex, and opencode ship in the harness registry, plus a
 deterministic `fake` harness for testing the whole lifecycle without a vendor
 account. Adding another is one map entry:
 [docs/adapters.md](docs/adapters.md).

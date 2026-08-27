@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
+import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import type { Approval } from '@/lib/types'
 import type { RouteProps } from '@/routes/registry'
@@ -188,7 +189,7 @@ function Row({
             onClick={() => navigate('run', { runId: run.id })}
             className="max-w-60 truncate hover:text-foreground hover:underline"
           >
-            {run.task}
+            {runLabel(run)}
           </button>
         )}
         <time className="ml-auto">{timeAgo(approval.created_at)}</time>

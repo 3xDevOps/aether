@@ -139,7 +139,7 @@ export const api = {
     call<{ run: Run }>('run.get', { run_id: runID }).then((r) => r.run),
   runLaunch: (params: {
     workspace_id: string
-    task: string
+    task?: string
     harness: string
     mode?: string
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),

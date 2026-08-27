@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-func TestRegistryShipsFiveProfiles(t *testing.T) {
-	want := []string{"aider", "claude", "codex", "custom", "opencode"}
+func TestRegistryShipsFourProfiles(t *testing.T) {
+	want := []string{"claude", "codex", "custom", "opencode"}
 	var got []string
 	for _, p := range Profiles() {
 		got = append(got, p.Name)
@@ -26,7 +26,6 @@ func TestProfileDefaults(t *testing.T) {
 	autoFlags := map[string]string{
 		"claude":   "--dangerously-skip-permissions",
 		"codex":    "--dangerously-bypass-approvals-and-sandbox",
-		"aider":    "--yes-always",
 		"opencode": "", // opencode has no permission prompt flag to bypass
 	}
 	for name, flag := range autoFlags {
@@ -45,7 +44,9 @@ func TestProfileDefaults(t *testing.T) {
 			if flag != "" && !slices.Contains(argv, flag) {
 				t.Errorf("%s %s argv %v missing auto flag %q", name, mode, argv, flag)
 			}
-			if !slices.Contains(argv, TaskPlaceholder) {
+			if !slices.ContainsFunc(argv, func(a string) bool {
+				return strings.Contains(a, TaskPlaceholder)
+			}) {
 				t.Errorf("%s %s argv %v missing task placeholder", name, mode, argv)
 			}
 		}
@@ -76,7 +77,6 @@ func TestLocalRootAndDenyNames(t *testing.T) {
 	wantRoot := map[string]string{
 		"claude":   ".claude",
 		"codex":    ".codex",
-		"aider":    ".aider",
 		"opencode": ".local/share/opencode",
 		"custom":   "",
 	}
@@ -109,6 +109,25 @@ func TestArgv(t *testing.T) {
 	}
 	if template[2] != TaskPlaceholder {
 		t.Fatal("Argv mutated the template")
+	}
+}
+
+// A taskless launch (empty task) drops every placeholder-bearing token so the
+// agent starts its bare interactive TUI: claude's trailing positional simply
+// disappears, and opencode's "--prompt={task}" leaves whole rather than
+// dangling with an empty value the CLI would reject.
+func TestArgvTaskless(t *testing.T) {
+	claude, _ := Lookup("claude")
+	if got, want := Argv(claude.TUIArgs, ""), []string{"claude", "--dangerously-skip-permissions"}; !slices.Equal(got, want) {
+		t.Fatalf("claude taskless argv = %v, want %v", got, want)
+	}
+	opencode, _ := Lookup("opencode")
+	if got, want := Argv(opencode.TUIArgs, ""), []string{"opencode"}; !slices.Equal(got, want) {
+		t.Fatalf("opencode taskless argv = %v, want %v", got, want)
+	}
+	// A non-empty task still couples opencode's prompt into one token.
+	if got, want := Argv(opencode.TUIArgs, "do it"), []string{"opencode", "--prompt=do it"}; !slices.Equal(got, want) {
+		t.Fatalf("opencode argv = %v, want %v", got, want)
 	}
 }
 

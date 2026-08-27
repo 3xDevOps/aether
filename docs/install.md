@@ -402,6 +402,103 @@ Three consequences worth knowing:
 If you run agents you do not trust, put the data directory on a filesystem
 mounted `nosuid,nodev` - the reasoning is in [security.md](security.md).
 
+## Uninstalling
+
+Nothing here is automated: there is no uninstall script and no `make uninstall`,
+because removing a server means deleting agent logins and git history that no
+script should decide to throw away. The order below is the order that avoids
+surprises, and it is also the way to get a clean slate for testing a fresh
+install end to end.
+
+### Server
+
+```sh
+# 1. Stop the service.
+sudo systemctl disable --now aether-server
+sudo rm -f /etc/systemd/system/aether-server.service
+sudo systemctl daemon-reload
+
+# 2. Containers. Stopping the server does NOT remove them.
+sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)
+sudo docker rmi ghcr.io/3xdevops/aether-bootstrap:latest
+
+# 3. State, config, binary.
+sudo rm -rf /var/lib/aether /etc/aether
+sudo rm -f /usr/local/bin/aether-server
+sudo rm -rf /tmp/aether-patch-*
+```
+
+Step 2 is the one people miss. The scheduler deliberately leaves run containers
+alive across a server restart so it can reattach to them, so they outlive the
+unit. Every container the server creates carries `aether.managed=true` and is
+named `aether-run-<id>`, so either the label filter or
+`--filter name=^/aether-run-` finds them. Use `docker ps -a`, not `docker ps`:
+a crashed run leaves an exited container behind.
+
+The server writes no log files. Its output goes to the journal, so
+`sudo journalctl --rotate && sudo journalctl --vacuum-time=1s` is what clears
+the history if you want a silent baseline.
+
+`/etc/aether` only exists if you used `aether-server install`, `config set`, or
+`config edit`, or if you created `aether-server.env` by hand for API-key
+harnesses. No system user or group is ever created, so there is nothing to
+`userdel`.
+
+### Client
+
+```sh
+rm -rf ~/.config/aether ~/.config/aether-desktop
+ssh-keygen -R '[<server-host>]:2222'
+sudo rm -f /usr/local/bin/aether        # or ~/.local/bin/aether
+```
+
+On macOS the desktop state is `~/Library/Application Support/aether-desktop`;
+on Windows it is `%APPDATA%\aether-desktop`, and the client binary is wherever
+you put `aether.exe` on PATH.
+
+The `ssh-keygen -R` line matters more than it looks. A reinstalled server
+generates a new host key, so a stale `known_hosts` entry makes the next
+`aether link` fail with a host key mismatch that reads like a bug. Clear the
+entry for every address you linked through, including a tailnet name and a raw
+IP for the same host.
+
+The client never generates an SSH key of its own. It uses your existing
+`~/.ssh/id_ed25519` unless `link --key` pointed it elsewhere, so leave your
+keys alone.
+
+If you installed the sync daemon, remove it before the binary:
+
+```sh
+systemctl --user disable --now aether-daemon
+rm -f ~/.config/systemd/user/aether-daemon.service
+systemctl --user daemon-reload
+```
+
+macOS: `launchctl unload -w ~/Library/LaunchAgents/com.aether.daemon.plist`
+then delete the plist. Windows: `schtasks /Delete /TN aether-daemon` then
+delete `%USERPROFILE%\aether-daemon.xml`.
+
+### Linked repositories
+
+Each repo you linked has an `aether` git remote and one local branch per run
+you pulled. Repoint the base branch **before** removing the remote:
+
+```sh
+cd ~/code/myproject
+git branch --set-upstream-to=origin/main main   # link may have set this to aether
+git branch -D $(git branch --list 'aether/run-*')
+git remote remove aether
+```
+
+`aether link` sets `branch.<base>.remote` to `aether`. Drop the remote without
+repointing and a plain `git push` on that branch starts failing for a reason
+that is not obvious. Removing the remote cleans up its remote-tracking refs and
+per-branch merge config on its own.
+
+Run `aether sync` and left it interrupted? Look for `*.aether-conflict` files
+next to your originals: those are your local edits, preserved when a sync
+paused. Delete them once you have salvaged what you want.
+
 ## Releases
 
 Pushing a `vX.Y.Z` tag runs

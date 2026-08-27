@@ -4,6 +4,7 @@ import { FeedEntry } from '@/components/feed-entry'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
+import { runLabel } from '@/lib/status'
 import type { RouteProps } from '@/routes/registry'
 import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
 import { useStore } from '@/store'
@@ -108,7 +109,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
           label="Run"
           value={filters.runID}
           onChange={(runID) => setFilters({ runID })}
-          options={[['', 'Every run'], ...workspaceRuns.map((r) => [r.id, r.task])]}
+          options={[['', 'Every run'], ...workspaceRuns.map((r) => [r.id, runLabel(r)])]}
         />
         <Select
           label="Member"

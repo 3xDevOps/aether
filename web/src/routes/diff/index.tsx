@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
+import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { parsePatch } from '@/routes/diff/parse'
@@ -45,7 +46,7 @@ function DiffView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title={run.task} subtitle={run.branch} />
+      <ViewHeader title={runLabel(run)} subtitle={run.branch} />
       <RunTabs runID={runID} active="diff" />
 
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground">

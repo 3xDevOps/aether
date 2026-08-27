@@ -14,6 +14,7 @@ import { StateDot } from '@/components/state-dot'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayed } from '@/lib/hooks'
+import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { isUnseen } from '@/store/board'
@@ -298,7 +299,7 @@ function RunRow({ entry }: { entry: SidebarRun }) {
       )}
     >
       <StateDot state={entry.state} />
-      <span className="truncate">{entry.run.task}</span>
+      <span className="truncate">{runLabel(entry.run)}</span>
       <span className="ml-auto shrink-0 text-muted-foreground">
         {entry.run.harness}
       </span>

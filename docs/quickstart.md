@@ -123,12 +123,13 @@ One command installs the agent, logs it in, and registers it:
 aether agent add omp --workspace myproject
 ```
 
-For a name Aether does not ship (anything but claude, codex, aider, or
-opencode) it first asks how to launch the agent, Enter accepting the defaults
-(`omp {task}` and `omp -p {task}`). It then opens a shell **inside a
-server-created container**: install the executable into `~/.local/bin` per the
-vendor's docs, run the vendor's login flow (pick a device-code or headless
-option, the container has no browser), and `exit` cleanly.
+For a name Aether does not ship (anything but claude, codex, or opencode) it
+first asks how to launch the agent, Enter accepting the defaults (`omp {task}`
+and `omp -p {task}`) and `--tui` / `--headless` flags skipping the questions.
+It then opens a shell **inside a server-created container**: install the
+executable into `~/.local/bin` per the vendor's docs, run the vendor's login
+flow (pick a device-code or headless option, the container has no browser),
+and `exit` cleanly.
 
 On exit Aether snapshots `~/.local`, persists the login state, and registers
 the agent under your membership. Shipped agents skip the questions and the
@@ -169,6 +170,28 @@ the CLI can do works from the page, plus local verbs like pulling a run
 branch into your clone. Leave it running; Ctrl-C stops the gateway and the
 token dies with it. `aether gui --url` prints the URL instead of opening a
 browser. See [local-gateway.md](local-gateway.md).
+
+### Prefer a native window?
+
+`aether gui` in a browser tab is the whole dashboard. If you would rather it
+lived in its own window - with desktop notifications and a dock badge when a
+run parks in `needs-attention`, plus `aether://run/<id>` deep links - there is
+an optional Electron shell in `desktop/`. It is a thin wrapper: it launches
+`aether gui` for you and points a window at the same tokened loopback gateway.
+
+Two things to know before you reach for it:
+
+- **There is no download.** No release publishes an installer - no AppImage,
+  `.dmg`, or `.exe`, on any platform. You build it from source. The steps
+  (Node 22+, `npm run dist`) and the cross-platform build matrix are in
+  [install.md](install.md#desktop-app).
+- **It is not a standalone client.** The app does not bundle `aether`, and the
+  dashboard itself lives inside the CLI binary (`aether gui` serves it), not
+  inside the app. So you still need the CLI installed ([step 1](#1-install))
+  and linked ([step 3](#3-link-from-your-machine)) first; the app finds
+  `aether` on your `PATH`. A built AppImage on its own does nothing. When you
+  rebuild the CLI, the window picks up the new dashboard; rebuilding the app
+  does not.
 
 In the dashboard: a workspace switcher over the runs in scope, a board
 bucketed by what needs attention, a live terminal mirror per run, the diff
@@ -287,6 +310,7 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`%AppData%\aether\config.json` on Windows) on this machine yet. |
 | `no Aether member for this key` | The server already has an admin, so you are not bootstrapping. Get an invite: [teams.md](teams.md). |
 | `unable to authenticate, attempted methods [none]` | The CLI found no usable key: none at `~/.ssh/id_ed25519`, no ssh-agent, or a passphrase-protected key with no agent to unlock it. Run `ssh-add`, or generate an unencrypted key. On Windows, check `Get-Service ssh-agent` and look for the key at `%USERPROFILE%\.ssh\id_ed25519`. |
+| `host key mismatch` / `REMOTE HOST IDENTIFICATION HAS CHANGED` on `aether link` | The server was reinstalled and generated a new host key, but your `known_hosts` still trusts the old one. Clear it: `ssh-keygen -R '[<server-host>]:2222'`. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
 | `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |
@@ -295,6 +319,15 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | Run reaches `failed` immediately | The agent started and exited. `aether timeline --run <run-id>` shows the exit code; `aether attach` only works while a run is alive. |
 | `aether init prepares a Linux server data directory` | You ran `aether init` on Windows. It belongs on the server box; the Windows binary is the client. |
 | `self-update is not supported on Windows` | Expected. Re-download the release binary: [install.md](install.md#manual-install). |
+
+## Starting over
+
+Testing the whole path from a clean slate, or handing the box to someone else?
+[install.md](install.md#uninstalling) has the full removal order for the
+server, the client, and your linked repos. Two things bite people: run
+containers outlive the server unit and must be removed separately, and a
+reinstalled server gets a new host key, so stale `known_hosts` entries have to
+go or the next `aether link` fails.
 
 ## Next
 

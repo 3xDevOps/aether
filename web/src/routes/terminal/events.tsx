@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { runLabel } from '@/lib/status'
 import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
@@ -58,7 +59,7 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title={run.task} subtitle={run.branch} />
+      <ViewHeader title={runLabel(run)} subtitle={run.branch} />
       <RunTabs runID={runID} active="events" />
       <div className="flex-1 overflow-y-auto p-3">
         {error && <p className="mb-2 text-xs text-state-failed">{error}</p>}
