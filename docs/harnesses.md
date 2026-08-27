@@ -55,8 +55,9 @@ transcript plus the diff timeline, which is always enough. Adding an adapter is
 ## How Aether launches them
 
 `--mode tui` (the default) runs the agent's native interactive TUI in a
-persistent server-side PTY you can attach to. `--mode headless` runs its
-machine-readable mode. Full-permission flags are applied by default in both -
+persistent server-side PTY: `aether attach <run>` puts you in it from the
+CLI, and the dashboard navigates there automatically on launch. `--mode
+headless` runs its machine-readable mode. Full-permission flags are applied by default in both -
 the agent is in a container, and the container is the boundary
 ([security.md](security.md)).
 
@@ -159,8 +160,11 @@ launch time, so it runs whatever you name - typically a script committed to the
 repo, since the run's checkout is mounted at `/workspace`.
 
 ```sh
-AETHER_FAKE_AGENT="sh /workspace/agent.sh" aether-server serve --data-dir /var/lib/aether
+AETHER_FAKE_AGENT="sh /workspace/agent.sh {task}" aether-server serve --data-dir /var/lib/aether
 ```
+
+The `{task}` placeholder expands to the run's task text; omit it if the
+script does not need it.
 
 This is how the [quickstart](quickstart.md#prove-the-plumbing-without-an-agent-subscription)
 proves the whole lifecycle without any vendor account, and it is the harness
