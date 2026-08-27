@@ -29,6 +29,9 @@ type fakeRuntime struct {
 	waitErr    error
 	createHook func() // runs at the top of Create; set before any Create call
 	attaches   int
+	// images maps built tags to their Dockerfile text, lazily allocated
+	// by BuildImage.
+	images map[string]string
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -230,6 +233,26 @@ func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.
 		}
 	}
 	return "", fmt.Errorf("fake runtime: creation key %q: %w", key, runtime.ErrNotFound)
+}
+
+// BuildImage records the tag as built, keyed to its Dockerfile.
+func (r *fakeRuntime) BuildImage(_ context.Context, dockerfile, tag string, _ io.Writer) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.images == nil {
+		r.images = make(map[string]string)
+	}
+	r.images[tag] = dockerfile
+	return nil
+}
+
+// RemoveImage forgets a built tag; a missing tag is not an error,
+// matching the Docker implementation.
+func (r *fakeRuntime) RemoveImage(_ context.Context, tag string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.images, tag)
+	return nil
 }
 
 func (r *fakeRuntime) attachCount() int {
