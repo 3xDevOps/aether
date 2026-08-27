@@ -16,7 +16,7 @@ it is in [dashboard-frontend.md](dashboard-frontend.md).
 
 ```sh
 aether gui               # bind an ephemeral loopback port, print the URL, open a browser
-aether gui --port 8090   # bind a fixed loopback port
+aether gui --port 8080   # bind a fixed loopback port (the SPA dev proxy expects 8080)
 aether gui --url         # print the URL instead of opening a browser
 aether gui --json        # print one JSON line, then keep serving
 aether gui --server prod # serve a named link profile (aether link --name)

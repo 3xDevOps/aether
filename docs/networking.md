@@ -30,18 +30,14 @@ On the server box:
 ```sh
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up
-aether init --data-dir /var/lib/aether
+tailscale status --self
 ```
 
-`aether init` reports what it found:
-
-```
-tailscale: socket /var/run/tailscale/tailscaled.sock detected
-tailscale: tailnet hostname my-server.tailnet-name.ts.net
-```
-
-That hostname is what you hand teammates. Then install the server as usual
-(`sudo aether-server setup`; see [install.md](install.md#first-boot)).
+`tailscale status --self` prints the machine's tailnet hostname
+(`my-server.tailnet-name.ts.net`); that is what you hand teammates. Then
+install the server as usual (`sudo aether-server setup`; see
+[install.md](install.md#first-boot)) - it detects the tailscaled socket and
+reports the tailnet hostname itself.
 
 The server checks for the tailscaled socket **at startup**. If it is there,
 tailnet identity is on; if not, the server is key-only. Start Tailscale before

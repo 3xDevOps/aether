@@ -171,10 +171,34 @@ the artifact. Every other branch behaves like a normal git remote.
 | `aether pause` / `resume` / `kill <run>` | Suspend, thaw, terminate. Worktree and transcript survive a kill. |
 | `aether handoff <run> <member>` | Transfer ownership, notification routing, and cost attribution. Overnight relay work. Refused for a viewer or a pending member, since neither can own a run. |
 | `aether close <run> --outcome merged\|abandoned` | Clear a finished run off the attention board. |
-| `aether inbox` | The shared approval queue; any steer-holder can decide. |
-| `aether timeline` | The workspace's whole history; `--jsonl` exports it. |
+| `aether inbox` | The shared approval queue; `aether inbox approve\|deny <request-id>` decides, and any steer-holder can. `--all` includes decided requests. |
+| `aether timeline` | The workspace's whole history; filter with `--run`, `--member`, `--type`, `--limit`, export with `--jsonl`. |
 | `aether cost --runs` | Token spend per member and per run. |
 | `aether budget` | The workspace's spend cap and what has been used. |
+| `aether sync --live <local-dir> <run>` | Live-overlay a local directory onto a run's worktree. Local edits that collide are preserved as `*.aether-conflict` files. |
+
+### Task templates and schedules
+
+A template is a saved launch: agent, task, mode, and parameters. Save one,
+launch it by name, or put it on a cron schedule:
+
+```sh
+aether template save nightly-triage --agent claude --task "triage new issues" \
+  [--mode headless] [--param key=value] [--budget <tokens>]
+aether template list
+aether run --template nightly-triage [--param key=value]
+aether template delete nightly-triage
+```
+
+```sh
+aether schedule list
+aether schedule set nightly-triage "0 6 * * *"
+aether schedule delete nightly-triage
+```
+
+Cron expressions are standard five-field syntax or an `@descriptor`, in UTC.
+A schedule that was due while the server was down does not catch up; it waits
+for the next occurrence.
 
 ### Attribution
 
@@ -217,8 +241,9 @@ so explicitly, and the totals are a floor rather than the real spend.
 
 ## Agent setup is per person
 
-Logins never move between people. Each member runs `aether setup <harness>`
-once, completes the vendor's own login flow in the container Aether hands them,
+Logins never move between people. Each member runs `aether agent add <name>`
+once (`aether setup <harness>` re-runs just the login later),
+completes the vendor's own login flow in the container Aether hands them,
 and their login state lives in a per-member server-side home mounted into
 their runs. All of one member's runs share one login; nobody else's do. See
 [harnesses.md](harnesses.md).

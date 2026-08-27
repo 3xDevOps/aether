@@ -262,7 +262,9 @@ No vendor login yet? Aether ships a deterministic `fake` harness for exactly
 this: it runs a script from your repo instead of an agent, so you can drive the
 whole lifecycle end to end and see a real branch come back.
 
-Start the server with the fake agent's command in its environment:
+Start the server with the fake agent's command in its environment. If the
+systemd unit from step 2 is already running, stop it first
+(`sudo systemctl stop aether-server`) - two servers cannot share `:2222`:
 
 ```sh
 AETHER_FAKE_AGENT="sh /workspace/agent.sh" \
@@ -285,13 +287,13 @@ echo "# demo" > README.md
 git add -A && git commit -m seed
 ```
 
-Then run steps 3, 4, 6, 7 and 8 above with `busybox` as the workspace image
+Then run steps 3, 4, 6 and 8 above with `busybox` as the workspace image
 and `--agent fake` instead of `--agent omp`. Skip step 5: the fake harness has
-no agent login.
+no agent login. Step 7 (`aether gui`) works too if you want to watch.
 
 ```sh
 aether link <server-host>:2222
-aether workspace add demo --image busybox
+aether workspace init demo --image busybox
 aether link <server-host>:2222 --repo "$PWD"
 git push -u aether main
 aether run "write a result file" --agent fake
@@ -314,10 +316,9 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
 | `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |
-| `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether setup`, or select one explicitly for bootstrap and tools commands. |
+| `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether agent add`, or select one explicitly for bootstrap and tools commands. |
 | `workspace tools verify` reports failure | The active snapshot does not contain the requested executable, or it is not executable. Bootstrap again with `--command <executable>`. |
 | Run reaches `failed` immediately | The agent started and exited. `aether timeline --run <run-id>` shows the exit code; `aether attach` only works while a run is alive. |
-| `aether init prepares a Linux server data directory` | You ran `aether init` on Windows. It belongs on the server box; the Windows binary is the client. |
 | `self-update is not supported on Windows` | Expected. Re-download the release binary: [install.md](install.md#manual-install). |
 
 ## Starting over

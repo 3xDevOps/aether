@@ -301,6 +301,7 @@ Serve options, which are also the config-file keys:
 | `--poll-interval` | `30s` | How often stalls are checked. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept. Negative disables the GC. |
 | `--min-free-disk` | `1GiB` | Free bytes below which new runs are refused. Negative disables the floor. |
+| `--harness-definitions` | none | Path to a custom harness registry file; see [harnesses.md](harnesses.md). |
 
 Three things happen on the first start and never need attention again:
 
@@ -315,10 +316,12 @@ Three things happen on the first start and never need attention again:
    directory.
 
 Options live in `/etc/aether/server.conf`, not in `ExecStart`. The file is
-operator-owned, so binary updates and unit reinstalls never rewrite it. Change
-it with `aether-server config set <key> <value>` (or `config edit`), then
-restart. `aether-server config show` prints every option with the value that
-would be used and where it came from.
+operator-owned, so binary updates and unit reinstalls never rewrite it, and
+re-running `aether-server setup` or `install` keeps an existing config and
+unit unless you pass `--force`. Change the config with
+`aether-server config set <key> <value>` (or `config edit`), then restart.
+`aether-server config show` prints every option with the value that would be
+used and where it came from; `config path` prints the file's location.
 
 An option removed in a later release does not stop the server: it logs one
 warning naming the key and the file, and boots on the remaining settings.
@@ -333,7 +336,8 @@ those values through your deployment's secret manager; do not commit them or
 paste them into public configuration examples.
 
 Subscription logins do **not** go there. They live in the per-member,
-per-harness server-side home that `aether setup` writes. See
+per-harness server-side home that `aether agent add` (or `aether setup`)
+writes. See
 [harnesses.md](harnesses.md).
 
 ## The client-side sync daemon
@@ -420,7 +424,7 @@ sudo systemctl daemon-reload
 
 # 2. Containers. Stopping the server does NOT remove them.
 sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)
-sudo docker rmi ghcr.io/3xdevops/aether-bootstrap:latest
+sudo docker rmi $(sudo docker images -q ghcr.io/3xdevops/aether-bootstrap)
 
 # 3. State, config, binary.
 sudo rm -rf /var/lib/aether /etc/aether
@@ -439,9 +443,9 @@ The server writes no log files. Its output goes to the journal, so
 `sudo journalctl --rotate && sudo journalctl --vacuum-time=1s` is what clears
 the history if you want a silent baseline.
 
-`/etc/aether` only exists if you used `aether-server install`, `config set`, or
-`config edit`, or if you created `aether-server.env` by hand for API-key
-harnesses. No system user or group is ever created, so there is nothing to
+`/etc/aether` only exists if you used `aether-server setup`, `install`,
+`config set`, or `config edit`, or if you created `aether-server.env` by hand
+for API-key harnesses. No system user or group is ever created, so there is nothing to
 `userdel`.
 
 ### Client
@@ -463,8 +467,8 @@ entry for every address you linked through, including a tailnet name and a raw
 IP for the same host.
 
 The client never generates an SSH key of its own. It uses your existing
-`~/.ssh/id_ed25519` unless `link --key` pointed it elsewhere, so leave your
-keys alone.
+`~/.ssh/id_ed25519` or whatever your ssh-agent holds, so leave your keys
+alone.
 
 If you installed the sync daemon, remove it before the binary:
 
@@ -495,7 +499,7 @@ repointing and a plain `git push` on that branch starts failing for a reason
 that is not obvious. Removing the remote cleans up its remote-tracking refs and
 per-branch merge config on its own.
 
-Run `aether sync` and left it interrupted? Look for `*.aether-conflict` files
+Run `aether sync --live` and left it interrupted? Look for `*.aether-conflict` files
 next to your originals: those are your local edits, preserved when a sync
 paused. Delete them once you have salvaged what you want.
 

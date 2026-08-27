@@ -8,7 +8,9 @@ aether link my-server
 aether run "fix the flaky auth test" --agent claude
 ```
 
-The install script covers Linux and macOS; Windows clients download the
+That is the shape of it, not the full setup - a workspace, a repo push, and
+an agent login come first. The [quickstart](docs/quickstart.md) is the real
+path. The install script covers Linux and macOS; Windows clients download the
 release binary ([install.md](docs/install.md#manual-install)).
 
 **Status:** pre-alpha, under active development.
