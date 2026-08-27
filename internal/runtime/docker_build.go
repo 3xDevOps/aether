@@ -102,6 +102,20 @@ func streamBuildProgress(body io.Reader, progress io.Writer) error {
 	}
 }
 
+// ImageExists reports whether the daemon holds ref locally, without ever
+// pulling. The scheduler's rollback path uses it to decide whether a
+// retained definition's tag must be rebuilt from its stored Dockerfile.
+func (d *Docker) ImageExists(ctx context.Context, ref string) (bool, error) {
+	_, err := d.cli.ImageInspect(ctx, ref)
+	if cerrdefs.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("runtime: inspect image %s: %w", ref, err)
+	}
+	return true, nil
+}
+
 // RemoveImage implements Runtime. Removing a tag the daemon does not
 // know is not an error, so retention passes are idempotent.
 func (d *Docker) RemoveImage(ctx context.Context, tag string) error {

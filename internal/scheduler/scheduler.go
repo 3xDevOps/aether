@@ -128,6 +128,10 @@ type Scheduler struct {
 	// exit-time pair of writes (tool promotion, definition upsert) must
 	// not interleave between two sessions.
 	agentSetups map[string]struct{}
+	// envBuildLocks serializes environment builds (and rollbacks) per
+	// workspace: one build at a time per workspace, later callers wait.
+	// Entries are created on first use and kept for the scheduler's life.
+	envBuildLocks map[domain.WorkspaceID]*sync.Mutex
 	// coordination is the attached conflict-coordination service and the
 	// staged-bridge directory (UseCoordination); nil means new containers
 	// get no coordination assets.

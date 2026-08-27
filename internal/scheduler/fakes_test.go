@@ -27,8 +27,15 @@ type fakeRuntime struct {
 	createErr  error
 	startErr   error
 	waitErr    error
+	buildErr   error
 	createHook func() // runs at the top of Create; set before any Create call
-	attaches   int
+	// buildHook runs at the top of BuildImage; set before any build starts.
+	buildHook func(tag string)
+	// startHook runs in its own goroutine once a container starts; tests
+	// use it to script the container's output and exit.
+	startHook func(c *fakeContainer)
+	attaches  int
+	builds    int
 	// images maps built tags to their Dockerfile text, lazily allocated
 	// by BuildImage.
 	images map[string]string
@@ -136,6 +143,9 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 	}
 	c.state = "running"
 	c.startedWithAttach = len(c.atts) > 0
+	if r.startHook != nil {
+		go r.startHook(c)
+	}
 	return nil
 }
 
@@ -235,15 +245,49 @@ func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.
 	return "", fmt.Errorf("fake runtime: creation key %q: %w", key, runtime.ErrNotFound)
 }
 
-// BuildImage records the tag as built, keyed to its Dockerfile.
-func (r *fakeRuntime) BuildImage(_ context.Context, dockerfile, tag string, _ io.Writer) error {
+// BuildImage records the tag as built, keyed to its Dockerfile, and emits
+// one engine progress line like the Docker daemon does.
+func (r *fakeRuntime) BuildImage(_ context.Context, dockerfile, tag string, progress io.Writer) error {
+	if r.buildHook != nil {
+		r.buildHook(tag)
+	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r.buildErr != nil {
+		r.mu.Unlock()
+		return r.buildErr
+	}
 	if r.images == nil {
 		r.images = make(map[string]string)
 	}
 	r.images[tag] = dockerfile
+	r.builds++
+	r.mu.Unlock()
+	if progress != nil {
+		_, _ = fmt.Fprintf(progress, "Step 1/1 : building %s\n", tag)
+	}
 	return nil
+}
+
+// ImageExists mirrors the Docker capability probe the scheduler asserts
+// for rollback: a tag exists once built and disappears on RemoveImage.
+func (r *fakeRuntime) ImageExists(_ context.Context, tag string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.images[tag]
+	return ok, nil
+}
+
+func (r *fakeRuntime) hasImage(tag string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.images[tag]
+	return ok
+}
+
+func (r *fakeRuntime) buildCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.builds
 }
 
 // RemoveImage forgets a built tag; a missing tag is not an error,

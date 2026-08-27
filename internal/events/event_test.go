@@ -24,6 +24,7 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		OverlapPayload{With: []OverlapPeer{{RunID: "r2", Files: []string{"main.go"}}}},
 		BudgetPayload{State: BudgetExceeded, SpendUSD: 12.5, LimitUSD: 10, WarnUSD: 8,
 			UnmeteredRuns: 2, Reason: "new run refused"},
+		EnvironmentBuildPayload{Version: 2, Status: domain.EnvironmentBuilding, Line: "Step 1/4 : FROM ubuntu:24.04"},
 	}
 	seen := map[Type]bool{}
 	for _, p := range payloads {
