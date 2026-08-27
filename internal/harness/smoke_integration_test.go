@@ -18,7 +18,7 @@ import (
 // need images with the real agent CLIs installed (and login state for
 // subscription harnesses), so each is gated on an env var naming its
 // image: AETHER_SMOKE_IMAGE_CLAUDE, AETHER_SMOKE_IMAGE_CODEX,
-// AETHER_SMOKE_IMAGE_AIDER, AETHER_SMOKE_IMAGE_OPENCODE. Unset = skipped,
+// AETHER_SMOKE_IMAGE_OPENCODE. Unset = skipped,
 // so plain `make test-integration` on a Docker-only host still passes;
 // CI provides the images.
 
@@ -174,11 +174,6 @@ func passthroughEnv(p Profile) map[string]string {
 func TestSmokeClaude(t *testing.T) {
 	p, _ := Lookup("claude")
 	smokeBothModes(t, "claude", passthroughEnv(p))
-}
-
-func TestSmokeAider(t *testing.T) {
-	p, _ := Lookup("aider")
-	smokeBothModes(t, "aider", passthroughEnv(p))
 }
 
 func TestSmokeOpencode(t *testing.T) {

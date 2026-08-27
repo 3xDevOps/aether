@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { terminalFontFamily, whenTerminalFontReady } from '@/lib/term-font'
+import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { type Attachment, connectAttach } from '@/routes/terminal/attach'
@@ -145,7 +146,7 @@ function TerminalView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title={run.task} subtitle={run.branch} />
+      <ViewHeader title={runLabel(run)} subtitle={run.branch} />
       <RunTabs runID={runID} active="terminal" />
       <div className="flex items-center gap-3 border-b px-4 py-1.5 text-xs">
         <span

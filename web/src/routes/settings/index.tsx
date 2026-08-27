@@ -10,6 +10,7 @@ import { message } from '@/components/palette/palette'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
+import { runLabel } from '@/lib/status'
 import type {
   DaemonInstallResult,
   DaemonStatusResult,
@@ -388,7 +389,7 @@ function OverlayCard({ client }: { client: Api }) {
             <option value="">Pick a run</option>
             {live.map((r) => (
               <option key={r.id} value={r.id}>
-                {r.task}
+                {runLabel(r)}
               </option>
             ))}
           </select>

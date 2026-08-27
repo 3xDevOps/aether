@@ -32,7 +32,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command'
 import { api } from '@/lib/api'
-import { stateLabel } from '@/lib/status'
+import { runLabel, stateLabel } from '@/lib/status'
 import { useStore } from '@/store'
 import { useAttentionRuns, useCapability } from '@/store/hooks'
 
@@ -98,7 +98,7 @@ export function PaletteBody({
 
         {focused && (
           <>
-            <CommandGroup heading={focused.run.task}>
+            <CommandGroup heading={runLabel(focused.run)}>
               {!finished && (
                 <>
                   {paused === true && (
@@ -265,7 +265,7 @@ export function PaletteBody({
               onSelect={() => go('run', { runId: run.id })}
             >
               <StateDot state={state} />
-              <span className="truncate">{run.task}</span>
+              <span className="truncate">{runLabel(run)}</span>
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">
                 {stateLabel[state]}
               </span>

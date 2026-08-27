@@ -35,7 +35,7 @@ When a run or shell resolves a harness name for a member:
 
 1. Server-wide spec from `--harness-definitions` (admin pin, unchanged).
 2. The member's own stored definition.
-3. The shipped registry (claude, codex, aider, opencode, custom, fake).
+3. The shipped registry (claude, codex, opencode, custom, fake).
 
 Member definitions carry the same fields as the existing generic definition
 and pass the same validation (`harness.Definition.Validate`). They produce

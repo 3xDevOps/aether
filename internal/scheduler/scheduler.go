@@ -72,7 +72,7 @@ type Config struct {
 	// DefaultMinFreeBytes; negative disables the floor.
 	MinFreeBytes int64
 	// Harnesses overrides or extends the shipped harness registry
-	// (internal/harness: claude, codex, aider, opencode, custom); "fake"
+	// (internal/harness: claude, codex, opencode, custom); "fake"
 	// (the deterministic e2e agent) is registered here by default. An
 	// override replaces the registry argv but keeps the registry
 	// profile's credential paths, env passthrough, and user mapping -

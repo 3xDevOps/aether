@@ -260,18 +260,9 @@ var profiles = map[string]Profile{
 		LocalRoot:       ".codex",
 		DenyNames:       []string{"auth.json", "keychain", "token.json"},
 	},
-	"aider": {
-		Name:            "aider",
-		TUIArgs:         []string{"aider", "--yes-always", "--message", TaskPlaceholder},
-		HeadlessArgs:    []string{"aider", "--yes-always", "--no-pretty", "--no-stream", "--message", TaskPlaceholder},
-		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
-		CredentialPaths: []string{".aider"},
-		LocalRoot:       ".aider",
-		DenyNames:       []string{".env", "api_key", "api_keys"},
-	},
 	"opencode": {
 		Name:            "opencode",
-		TUIArgs:         []string{"opencode", "--prompt", TaskPlaceholder},
+		TUIArgs:         []string{"opencode", "--prompt=" + TaskPlaceholder},
 		HeadlessArgs:    []string{"opencode", "run", TaskPlaceholder},
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths: []string{".local/share/opencode"},
@@ -297,11 +288,19 @@ func Profiles() []Profile {
 	return out
 }
 
-// Argv instantiates an argv template with the run's task.
+// Argv instantiates an argv template with the run's task. An empty task is a
+// taskless launch (drop the user straight into the agent's interactive TUI
+// with no seeded prompt): every argv token that carries the placeholder is
+// dropped whole, so a flag whose only purpose is to deliver the prompt
+// (opencode's "--prompt={task}") leaves with it rather than dangling with an
+// empty value. A non-empty task substitutes in place as before.
 func Argv(template []string, task string) []string {
-	out := make([]string, len(template))
-	for i, a := range template {
-		out[i] = strings.ReplaceAll(a, TaskPlaceholder, task)
+	out := make([]string, 0, len(template))
+	for _, a := range template {
+		if task == "" && strings.Contains(a, TaskPlaceholder) {
+			continue
+		}
+		out = append(out, strings.ReplaceAll(a, TaskPlaceholder, task))
 	}
 	return out
 }
