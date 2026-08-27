@@ -10,6 +10,18 @@ Project documentation lives in `docs/`. Read the guides affected by a change
 before editing code, and update those guides when behavior or commands change.
 The repository does not contain private planning, tracker, or deployment data.
 
+Docs carry no fluff. Every sentence earns its place; cut filler, marketing
+prose, and repetition.
+
+## Audience
+
+Put a big focus on everything we ship being user-facing and intuitive. Our
+core target audience is new users who slowly get more and more used to the
+program. When developing, think in the shoes of a new user who has little
+experience and ensure everything is intuitive. Keep this audience in mind
+when writing updates to both the docs and the AGENTS.md documentation
+instructions.
+
 ## Before changing code
 
 1. Read the relevant public documentation and source package.
