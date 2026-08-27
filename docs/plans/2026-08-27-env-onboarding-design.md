@@ -65,7 +65,8 @@ containers. No registry, no push.
 - New runtime verb on the `Runtime` interface for building an image from a
   Dockerfile context, streaming build output.
 - Built images are tagged locally per workspace and definition version
-  (for example `aether/ws-<name>:<version>`). The runtime's pull step
+  (`aether/ws-<workspace-id>:<version>`; the ID, not the name, since
+  names can change). The runtime's pull step
   treats these tags as local-only and never contacts a registry for them.
 - Retention: keep the current and last-good tags per workspace; older
   version tags are removed.
