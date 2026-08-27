@@ -73,8 +73,13 @@ func publicRunStatusReason(reason string) string {
 			}
 		}
 	}
-	if len([]rune(reason)) > maxPublicRunStatusReason {
-		reason = string([]rune(reason)[:maxPublicRunStatusReason])
+	if runes := []rune(reason); len(runes) > maxPublicRunStatusReason {
+		// Wrapped errors put the root cause last ("... exec: \"claude\":
+		// executable file not found"); elide the middle so both the failing
+		// step and the cause survive the cap.
+		head := maxPublicRunStatusReason * 2 / 5
+		tail := maxPublicRunStatusReason - head - 5
+		reason = string(runes[:head]) + " ... " + string(runes[len(runes)-tail:])
 	}
 	return reason
 }

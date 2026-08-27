@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -131,9 +130,13 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 	// Provisioning can include an image pull; tell the member the session
 	// is alive before the potentially slow container creation.
 	_, _ = io.WriteString(conn, "aether: provisioning workspace shell container...\r\n")
+	shellCommand := []string{"/bin/sh", "-i"}
+	if req.Mode == domain.WorkspaceShellAgentSetup {
+		shellCommand = agentSetupCommand(req.Harness, profile.InstallScript, stagedExecutable(req, profile))
+	}
 	spec := runtime.Spec{
 		Name: "workspace-shell-" + string(member) + "-" + string(ws.ID), Image: plan.Image,
-		Command: []string{"/bin/sh", "-i"}, TTY: true, Mounts: plan.Mounts, User: plan.User,
+		Command: shellCommand, TTY: true, Mounts: plan.Mounts, User: plan.User,
 		Env: plan.Env, SetupScript: plan.SetupScript, WorkingDir: plan.Home,
 		CreationKey: fmt.Sprintf("workspace-shell-%s-%s-%d", member, ws.ID, time.Now().UnixNano()),
 	}
@@ -289,22 +292,18 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 		manifest := domain.ToolManifest{}
 		verify := req.VerificationExecutable
 		if req.Mode == domain.WorkspaceShellAgentSetup {
-			// Verify what the profile actually launches: for an admin or
-			// shipped definition the executable can differ from the name.
-			verify = req.Harness
-			if len(profile.TUIArgs) > 0 && profile.TUIArgs[0] != "" {
-				verify = profile.TUIArgs[0]
-			}
+			verify = stagedExecutable(req, profile)
+		}
+		// Vendor installers symlink ~/.local/bin entries to absolute paths
+		// inside the container home; rewrite those relative so the tree
+		// verifies on the host and survives a run user with the other home.
+		if normalizeErr := normalizeStagedSymlinks(staging); normalizeErr != nil {
+			return fmt.Errorf("scheduler: normalize staged tools: %w", normalizeErr)
 		}
 		if verify != "" {
-			executable := filepath.Join(staging, "bin", verify)
-			info, statErr := os.Stat(executable)
-			if statErr != nil || info.Mode().Perm()&0o111 == 0 {
-				if statErr == nil {
-					statErr = errors.New("executable is not executable")
-				}
-				slog.Warn("workspace shell verification failed", "mode", string(req.Mode))
-				return fmt.Errorf("scheduler: verify bootstrap executable %q: %w", verify, statErr)
+			if verifyErr := verifyStagedExecutable(staging, verify); verifyErr != nil {
+				slog.Warn("workspace shell verification failed", "mode", string(req.Mode), "executable", verify, "error", verifyErr)
+				return fmt.Errorf("scheduler: verify bootstrap executable %q: %w", verify, verifyErr)
 			}
 			manifest.Executable = verify
 		}

@@ -120,16 +120,19 @@ SSH port, no separate credentials. With multiple workspaces, add
 One command installs the agent, logs it in, and registers it:
 
 ```sh
-aether agent add omp --workspace myproject
+aether agent add claude --workspace myproject
 ```
 
-For a name Aether does not ship (anything but claude, codex, or opencode) it
-first asks how to launch the agent, Enter accepting the defaults (`omp {task}`
-and `omp -p {task}`) and `--tui` / `--headless` flags skipping the questions.
-It then opens a shell **inside a server-created container**: install the
-executable into `~/.local/bin` per the vendor's docs, run the vendor's login
-flow (pick a device-code or headless option, the container has no browser),
-and `exit` cleanly.
+For a shipped agent (claude, codex, opencode) the vendor's installer runs
+automatically, then you land in a shell **inside a server-created container**
+with the agent on PATH: run its login flow (pick a device-code or headless
+option, the container has no browser) and `exit` cleanly.
+
+For a name Aether does not ship it first asks how to launch the agent, Enter
+accepting the defaults (`omp {task}` and `omp -p {task}`) and `--tui` /
+`--headless` flags skipping the questions. The shell opens without an
+installer: install the executable into `~/.local/bin` per the vendor's docs,
+then log in and exit as above.
 
 On exit Aether snapshots `~/.local`, persists the login state, and registers
 the agent under your membership. Shipped agents skip the questions and the
@@ -143,7 +146,7 @@ If the connection drops before you exit, resume with
 ## 6. Launch a run
 
 ```sh
-aether run "add a health check endpoint" --agent omp
+aether run "add a health check endpoint" --agent claude
 ```
 
 The run pins the complete environment plan, including the active tool
@@ -288,7 +291,7 @@ git add -A && git commit -m seed
 ```
 
 Then run steps 3, 4, 6 and 8 above with `busybox` as the workspace image
-and `--agent fake` instead of `--agent omp`. Skip step 5: the fake harness has
+and `--agent fake` instead of `--agent claude`. Skip step 5: the fake harness has
 no agent login. Step 7 (`aether gui`) works too if you want to watch.
 
 ```sh

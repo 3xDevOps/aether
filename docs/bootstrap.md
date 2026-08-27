@@ -1,8 +1,10 @@
 # Workspace bootstrap and tool snapshots
 
 This guide covers the persistent workspace environment used by bootstrap shells,
-harness login, and agent runs. It is intentionally agent agnostic. Aether does
-not contain vendor installer logic.
+harness login, and agent runs. It is agent agnostic: the only vendor installer
+logic Aether carries is the per-shipped-agent install command `aether agent add`
+runs for claude, codex, and opencode (see [harnesses.md](harnesses.md)); a
+failed install falls back to the manual shell below.
 
 ## Vocabulary
 
