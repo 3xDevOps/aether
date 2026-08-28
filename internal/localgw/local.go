@@ -375,11 +375,31 @@ func (g *Gateway) localDaemonStatus(*http.Request, []byte) (any, *protocol.Error
 }
 
 // localEnvHarnesses reports which setup-capable harnesses are installed
-// on this machine, for the onboarding wizard's harness picker.
+// on this machine, for the onboarding wizard's harness picker, plus the
+// one repository folder the saved link config knows (when exactly one
+// is known) so the wizard can prefill the from-repo folder input.
 func (g *Gateway) localEnvHarnesses(*http.Request, []byte) (any, *protocol.Error) {
 	return struct {
 		Harnesses []localops.HarnessStatus `json:"harnesses"`
-	}{Harnesses: localops.DetectHarnesses()}, nil
+		RepoPath  string                   `json:"repo_path,omitempty"`
+	}{Harnesses: localops.DetectHarnesses(), RepoPath: suggestedRepo(g.local.snapshot())}, nil
+}
+
+// suggestedRepo returns the single repository folder the link config
+// carries, across the default link and every named profile. Several
+// distinct folders mean there is no safe guess, so nothing is suggested.
+func suggestedRepo(cfg cli.Config) string {
+	repo := cfg.Repo
+	for _, l := range cfg.Links {
+		switch {
+		case l.Repo == "" || l.Repo == repo:
+		case repo == "":
+			repo = l.Repo
+		default:
+			return ""
+		}
+	}
+	return repo
 }
 
 func (g *Gateway) localImageScaffold(_ *http.Request, body []byte) (any, *protocol.Error) {

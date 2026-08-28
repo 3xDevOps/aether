@@ -27,11 +27,16 @@ const (
 // validating, retrying).
 const envScanStatusDetecting = "detecting"
 
-// envScanRequest is the client's start frame: which harness to run and,
-// for a refine run, the previous pair and the user's feedback.
+// envScanRequest is the client's start frame: which harness to run, the
+// repository folder for a repo-mode scan, and, for a refine run, the
+// previous pair and the user's feedback.
 type envScanRequest struct {
-	Harness              string `json:"harness"`
-	Mode                 string `json:"mode"`
+	Harness string `json:"harness"`
+	Mode    string `json:"mode"`
+	// RepoPath is the repository folder a repo scan reads. Required when
+	// mode is repo; the engine validates it and an invalid folder answers
+	// an error frame naming the problem.
+	RepoPath             string `json:"repo_path"`
 	PreviousDockerfile   string `json:"previous_dockerfile"`
 	PreviousManifestJSON string `json:"previous_manifest_json"`
 	Feedback             string `json:"feedback"`
@@ -143,6 +148,7 @@ func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
 	result, err := localops.RunScan(ctx, localops.ScanOptions{
 		Harness:              req.Harness,
 		Mode:                 req.Mode,
+		RepoPath:             req.RepoPath,
 		PreviousDockerfile:   req.PreviousDockerfile,
 		PreviousManifestJSON: req.PreviousManifestJSON,
 		Feedback:             req.Feedback,

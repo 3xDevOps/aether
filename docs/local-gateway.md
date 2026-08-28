@@ -81,7 +81,7 @@ and prefix as a `POST /api/v1` error.
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/shell` | interactive workspace shell (WebSocket) |
-| `GET` | `/ws/envscan` | environment inventory scan on this machine (WebSocket) |
+| `GET` | `/ws/envscan` | environment scan on this machine (WebSocket) |
 | `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
 
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
@@ -242,7 +242,7 @@ authority.
 | `daemon.install` | `{"server":"host:port","repo":"..."}` (`repo` defaults to the linked one) | `{"unit_path":"...","note":"..."}` |
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
 | `image.scaffold` | `{"repo":"...","kind":"dockerfile"\|"devcontainer"}` (`repo` defaults to the linked one) | `{"written":["..."]}` |
-| `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...]}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH` |
+| `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`; `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
   must carry (the onboarding wizard sends the one just picked). Without
@@ -356,20 +356,32 @@ always honored.
 
 ### `GET /ws/envscan`
 
-Runs one environment inventory on this machine: the chosen coding agent
-inspects the local toolchains headless in a scratch directory and writes
-the Dockerfile and manifest pair the onboarding wizard reviews. Every
-frame is JSON text.
+Runs one environment scan on this machine: the chosen coding agent
+inspects the local toolchains (or, in repo mode, a repository's own
+files) headless and writes the Dockerfile and manifest pair the
+onboarding wizard reviews into a scratch directory. Every frame is JSON
+text.
 
 1. Client sends one **text** start frame within 10 seconds. `mode` is
-   `inventory` for a first scan; `refine` reruns the agent over a previous
-   pair with the user's feedback and carries the three extra fields:
+   `inventory` for a first scan; `repo` derives the environment from a
+   repository's own files instead of the machine and requires
+   `repo_path`, the repository folder on this machine; `refine` reruns
+   the agent over a previous pair with the user's feedback and carries
+   the three extra fields (plus `repo_path` when that pair came from a
+   repo scan):
 
    ```json
    {"harness":"claude","mode":"inventory"}
+   {"harness":"claude","mode":"repo","repo_path":"/path/to/clone"}
    {"harness":"claude","mode":"refine","previous_dockerfile":"FROM ...",
     "previous_manifest_json":"[...]","feedback":"drop jq, add ripgrep"}
    ```
+
+   A `repo_path` that is missing, not a folder, or not a git repository
+   answers one `error` frame naming the problem, then a **1000** close.
+   A repo scan runs with the repository as its working directory but
+   writes only to its scratch directory; the scan fails if the
+   repository changed during the run.
 
 2. Server streams progress frames while the agent runs:
 

@@ -2,9 +2,11 @@ package localgw
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,6 +37,30 @@ func writeScanStub(t *testing.T, body string) []string {
 		t.Fatal(err)
 	}
 	return []string{"/bin/sh", script, harness.TaskPlaceholder}
+}
+
+// scanRepoStubOutputs is the shell fragment a repo-mode stub runs: it
+// finds the scratch directory the prompt names and writes the valid pair
+// there, mirroring the localops repo-mode tests.
+const scanRepoStubOutputs = `out=$(printf '%%s\n' "$1" | grep -o '/[^[:space:]:]*aether-envscan-[^[:space:]:]*' | head -n 1)
+cat > "$out/Dockerfile" <<'DOCKEREOF'
+%sDOCKEREOF
+cat > "$out/manifest.json" <<'MANIFESTEOF'
+%s
+MANIFESTEOF
+`
+
+// initScanGitRepo creates a real git repository for repo-mode tests.
+func initScanGitRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "init", "--quiet", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	return dir
 }
 
 // scanFrame decodes any frame the envscan socket sends.
@@ -107,6 +133,70 @@ func TestLocalEnvHarnesses(t *testing.T) {
 	}
 }
 
+// TestLocalEnvHarnessesRepoSuggestion: the verb suggests the one
+// repository folder the saved link config knows, so the wizard can
+// prefill the from-repo folder input; several distinct folders or none
+// mean no safe guess and the key is omitted.
+func TestLocalEnvHarnessesRepoSuggestion(t *testing.T) {
+	cases := map[string]struct {
+		cfg  cli.Config
+		want string
+	}{
+		"linked repo": {
+			cfg:  cli.Config{Repo: "/src/repo"},
+			want: "/src/repo",
+		},
+		"same repo across profiles": {
+			cfg: cli.Config{Repo: "/src/repo", Links: []cli.NamedLink{
+				{Name: "prod", Repo: "/src/repo"},
+				{Name: "staging"},
+			}},
+			want: "/src/repo",
+		},
+		"profile-only repo": {
+			cfg: cli.Config{Links: []cli.NamedLink{
+				{Name: "prod", Repo: "/src/repo"},
+			}},
+			want: "/src/repo",
+		},
+		"no repo known": {
+			cfg:  cli.Config{},
+			want: "",
+		},
+		"distinct repos": {
+			cfg: cli.Config{Repo: "/src/one", Links: []cli.NamedLink{
+				{Name: "prod", Repo: "/src/two"},
+			}},
+			want: "",
+		},
+	}
+	for name, tc := range cases {
+		g := newVerbGateway(t, &verbStubBackend{}, tc.cfg)
+		rec := do(g, http.MethodPost, "/local/v1/env.harnesses", "{}", true)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: env.harnesses = %d: %s", name, rec.Code, rec.Body)
+		}
+		var got map[string]json.RawMessage
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		raw, present := got["repo_path"]
+		if tc.want == "" {
+			if present {
+				t.Errorf("%s: repo_path = %s, want the key omitted", name, raw)
+			}
+			continue
+		}
+		var path string
+		if err := json.Unmarshal(raw, &path); err != nil {
+			t.Fatalf("%s: repo_path = %s: %v", name, raw, err)
+		}
+		if path != tc.want {
+			t.Errorf("%s: repo_path = %q, want %q", name, path, tc.want)
+		}
+	}
+}
+
 // TestEnvScanStreamsStubScan covers the happy path end to end: start
 // frame, status and output frames in order, and one result frame carrying
 // the validated pair.
@@ -174,6 +264,86 @@ func TestEnvScanFailureSendsErrorFrame(t *testing.T) {
 		t.Errorf("output tail = %q, want the agent's output", terminal.OutputTail)
 	}
 	expectClose(t, conn, websocket.StatusNormalClosure)
+}
+
+// TestEnvScanRepoModeStreamsStubScan: a repo-mode start frame carries the
+// repository folder, the stub runs inside it while writing to the scratch
+// directory, and the socket streams to one result frame.
+func TestEnvScanRepoModeStreamsStubScan(t *testing.T) {
+	repo := initScanGitRepo(t)
+	cwdLog := filepath.Join(t.TempDir(), "cwd.log")
+	argv := writeScanStub(t, fmt.Sprintf("pwd >> %q\n"+scanRepoStubOutputs,
+		cwdLog, envScanTestDockerfile, envScanTestManifest))
+
+	g, base := newWSGateway(t, &wsStubBackend{})
+	g.local.setScanArgv(argv)
+	conn := wsDial(t, base, "/ws/envscan", g.Token())
+
+	writeWSJSON(t, conn, map[string]string{
+		"harness":   "claude",
+		"mode":      localops.ScanModeRepo,
+		"repo_path": repo,
+	})
+	terminal, statuses, _ := readUntilTerminal(t, conn)
+	if terminal.Type != "result" {
+		t.Fatalf("terminal frame = %+v, want result", terminal)
+	}
+	if terminal.Dockerfile != envScanTestDockerfile {
+		t.Errorf("dockerfile = %q, want %q", terminal.Dockerfile, envScanTestDockerfile)
+	}
+	wantStatuses := []string{"detecting", "running", "validating"}
+	if fmt.Sprint(statuses) != fmt.Sprint(wantStatuses) {
+		t.Errorf("statuses = %v, want %v", statuses, wantStatuses)
+	}
+	cwd, err := os.ReadFile(cwdLog)
+	if err != nil {
+		t.Fatalf("read cwd log: %v", err)
+	}
+	got, gotErr := filepath.EvalSymlinks(strings.TrimSpace(string(cwd)))
+	want, wantErr := filepath.EvalSymlinks(repo)
+	if gotErr != nil || wantErr != nil {
+		t.Fatalf("resolve paths: %v, %v", gotErr, wantErr)
+	}
+	if got != want {
+		t.Errorf("harness ran in %s, want the repository %s", got, want)
+	}
+	// The repository must hold no scan output: the pair went to scratch.
+	for _, name := range []string{"Dockerfile", "manifest.json"} {
+		if _, statErr := os.Stat(filepath.Join(repo, name)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("%s was written into the repository (stat err: %v)", name, statErr)
+		}
+	}
+	expectClose(t, conn, websocket.StatusNormalClosure)
+}
+
+// TestEnvScanRepoPathErrorFrame: a repo-mode start frame with a missing
+// or invalid repository folder answers one error frame naming the
+// problem and closes cleanly instead of dropping the socket.
+func TestEnvScanRepoPathErrorFrame(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	cases := map[string]struct{ path, want string }{
+		"missing repo_path": {"", "needs the repository's folder"},
+		"folder not there":  {missing, "does not exist"},
+	}
+	for name, tc := range cases {
+		g, base := newWSGateway(t, &wsStubBackend{})
+		g.local.setScanArgv(writeScanStub(t, "exit 0\n"))
+		conn := wsDial(t, base, "/ws/envscan", g.Token())
+
+		writeWSJSON(t, conn, map[string]string{
+			"harness":   "claude",
+			"mode":      localops.ScanModeRepo,
+			"repo_path": tc.path,
+		})
+		terminal, _, _ := readUntilTerminal(t, conn)
+		if terminal.Type != "error" {
+			t.Fatalf("%s: terminal frame = %+v, want error", name, terminal)
+		}
+		if !strings.Contains(terminal.Detail, tc.want) {
+			t.Errorf("%s: detail = %q, want it to say %q", name, terminal.Detail, tc.want)
+		}
+		expectClose(t, conn, websocket.StatusNormalClosure)
+	}
 }
 
 // TestEnvScanEarlyCloseCancels: closing the socket kills the running
