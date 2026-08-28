@@ -36,16 +36,20 @@ const envTestManifest = `[
   }
 ]`
 
-// fakeEnvService records environment build and rollback calls.
+// fakeEnvService records environment build, rollback, and edit calls.
 type envCall struct {
 	verb      string
 	workspace domain.WorkspaceID
 	version   int
+	member    domain.MemberID
+	harness   string
+	request   string
 }
 
 type fakeEnvService struct {
 	calls           chan envCall
 	rollbackVersion int
+	editVersion     int
 	err             error
 }
 
@@ -64,6 +68,14 @@ func (f *fakeEnvService) RollbackEnvironment(_ context.Context, workspace domain
 		return 0, f.err
 	}
 	return f.rollbackVersion, nil
+}
+
+func (f *fakeEnvService) EditEnvironment(_ context.Context, workspace domain.WorkspaceID, member domain.MemberID, harness, request string) (int, error) {
+	f.calls <- envCall{verb: "edit", workspace: workspace, member: member, harness: harness, request: request}
+	if f.err != nil {
+		return 0, f.err
+	}
+	return f.editVersion, nil
 }
 
 func envSaveParams(e *testEnv) protocol.EnvSaveParams {
@@ -86,6 +98,8 @@ func TestEnvMethodsDeniedForNonAdmin(t *testing.T) {
 	wantDenied(t, cc.Call(protocol.MethodEnvBuild, protocol.EnvBuildParams{Workspace: ws}, nil), "collaborator env.build")
 	wantDenied(t, cc.Call(protocol.MethodEnvStatus, protocol.EnvStatusParams{Workspace: ws}, nil), "collaborator env.status")
 	wantDenied(t, cc.Call(protocol.MethodEnvRollback, protocol.EnvRollbackParams{Workspace: ws}, nil), "collaborator env.rollback")
+	wantDenied(t, cc.Call(protocol.MethodEnvEdit, protocol.EnvEditParams{Workspace: ws, Harness: "claude", Request: "add go"}, nil), "collaborator env.edit")
+	wantDenied(t, cc.Call(protocol.MethodEnvGet, protocol.EnvGetParams{Workspace: ws, Version: 1}, nil), "collaborator env.get")
 }
 
 func TestEnvSaveRejectsInvalidDefinitionWithDetail(t *testing.T) {
@@ -260,6 +274,191 @@ func TestEnvRollbackWithoutActiveVersionIsInvalidState(t *testing.T) {
 	var pe *protocol.Error
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState {
 		t.Fatalf("env.rollback without an active version = %v, want CodeInvalidState", err)
+	}
+}
+
+func TestEnvEditRejectsUnknownHarnessBeforeSpawning(t *testing.T) {
+	svc := newFakeEnvService()
+	e := newTestEnv(t, func(c *Config) { c.Services.Environments = svc })
+	cc := controlClient(t, e)
+
+	err := cc.Call(protocol.MethodEnvEdit, protocol.EnvEditParams{
+		Workspace: protocol.WorkspaceSelector{ID: string(e.ws.ID)},
+		Harness:   "opencode",
+		Request:   "add go",
+	}, nil)
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
+		t.Fatalf("env.edit with unknown harness = %v, want CodeInvalidParams", err)
+	}
+	if !strings.Contains(pe.Message, "claude") {
+		t.Fatalf("env.edit error %q does not name the supported agents", pe.Message)
+	}
+	select {
+	case call := <-svc.calls:
+		t.Fatalf("env.edit spawned %+v despite the rejected harness", call)
+	default:
+	}
+}
+
+func TestEnvEditRejectsEmptyRequest(t *testing.T) {
+	svc := newFakeEnvService()
+	e := newTestEnv(t, func(c *Config) { c.Services.Environments = svc })
+	cc := controlClient(t, e)
+
+	err := cc.Call(protocol.MethodEnvEdit, protocol.EnvEditParams{
+		Workspace: protocol.WorkspaceSelector{ID: string(e.ws.ID)},
+		Harness:   "claude",
+		Request:   "   ",
+	}, nil)
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
+		t.Fatalf("env.edit with an empty request = %v, want CodeInvalidParams", err)
+	}
+	select {
+	case call := <-svc.calls:
+		t.Fatalf("env.edit spawned %+v despite the empty request", call)
+	default:
+	}
+}
+
+func TestEnvEditLaunchesAsynchronously(t *testing.T) {
+	svc := newFakeEnvService()
+	e := newTestEnv(t, func(c *Config) { c.Services.Environments = svc })
+	cc := controlClient(t, e)
+
+	var res protocol.EnvEditResult
+	if err := cc.Call(protocol.MethodEnvEdit, protocol.EnvEditParams{
+		Workspace: protocol.WorkspaceSelector{ID: string(e.ws.ID)},
+		Harness:   "claude",
+		Request:   "add go 1.22",
+	}, &res); err != nil {
+		t.Fatalf("env.edit: %v", err)
+	}
+	if !res.Accepted {
+		t.Fatalf("env.edit result = %+v, want accepted", res)
+	}
+	select {
+	case call := <-svc.calls:
+		if call.verb != "edit" || call.workspace != e.ws.ID || call.member != e.member.ID ||
+			call.harness != "claude" || call.request != "add go 1.22" {
+			t.Fatalf("edit call = %+v, want the submitted harness and request for the caller", call)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("env.edit never reached the environment service")
+	}
+}
+
+func TestEnvEditUnavailableWithoutService(t *testing.T) {
+	e := newTestEnv(t, nil)
+	cc := controlClient(t, e)
+
+	err := cc.Call(protocol.MethodEnvEdit, protocol.EnvEditParams{
+		Workspace: protocol.WorkspaceSelector{ID: string(e.ws.ID)},
+		Harness:   "claude",
+		Request:   "add go",
+	}, nil)
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeUnavailable {
+		t.Fatalf("env.edit without a service = %v, want CodeUnavailable", err)
+	}
+}
+
+func TestEnvGetRoundTripsStoredVersion(t *testing.T) {
+	e := newTestEnv(t, nil)
+	cc := controlClient(t, e)
+
+	if err := cc.Call(protocol.MethodEnvSave, envSaveParams(e), nil); err != nil {
+		t.Fatalf("env.save: %v", err)
+	}
+	var got protocol.EnvGetResult
+	if err := cc.Call(protocol.MethodEnvGet, protocol.EnvGetParams{
+		Workspace: protocol.WorkspaceSelector{ID: string(e.ws.ID)},
+		Version:   1,
+	}, &got); err != nil {
+		t.Fatalf("env.get: %v", err)
+	}
+	if got.Version != 1 || got.Dockerfile != envTestDockerfile {
+		t.Fatalf("env.get = %+v, want version 1 with the saved Dockerfile", got)
+	}
+	if len(got.Manifest) != 2 || got.Manifest[0].Name != "go" || got.Manifest[1].Name != "jq" {
+		t.Fatalf("env.get manifest = %+v, want the saved items", got.Manifest)
+	}
+	if got.Source != domain.EnvironmentSourceManual || got.Status != domain.EnvironmentSaved {
+		t.Fatalf("env.get provenance = %q/%q, want manual/saved", got.Source, got.Status)
+	}
+	if got.Diff != "" {
+		t.Fatalf("env.get diff = %q, want none without diff_against", got.Diff)
+	}
+}
+
+func TestEnvGetMissingVersion(t *testing.T) {
+	e := newTestEnv(t, nil)
+	cc := controlClient(t, e)
+
+	err := cc.Call(protocol.MethodEnvGet, protocol.EnvGetParams{
+		Workspace: protocol.WorkspaceSelector{ID: string(e.ws.ID)},
+		Version:   3,
+	}, nil)
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("env.get of a missing version = %v, want CodeNotFound", err)
+	}
+
+	err = cc.Call(protocol.MethodEnvGet, protocol.EnvGetParams{
+		Workspace: protocol.WorkspaceSelector{ID: string(e.ws.ID)},
+	}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
+		t.Fatalf("env.get without a version = %v, want CodeInvalidParams", err)
+	}
+}
+
+func TestEnvGetDiffReflectsChange(t *testing.T) {
+	e := newTestEnv(t, nil)
+	cc := controlClient(t, e)
+
+	if err := cc.Call(protocol.MethodEnvSave, envSaveParams(e), nil); err != nil {
+		t.Fatalf("env.save version 1: %v", err)
+	}
+	edited := envSaveParams(e)
+	edited.Dockerfile = strings.Replace(envTestDockerfile, "install -y jq", "install -y jq ripgrep", 1)
+	if err := cc.Call(protocol.MethodEnvSave, edited, nil); err != nil {
+		t.Fatalf("env.save version 2: %v", err)
+	}
+
+	var got protocol.EnvGetResult
+	if err := cc.Call(protocol.MethodEnvGet, protocol.EnvGetParams{
+		Workspace:   protocol.WorkspaceSelector{ID: string(e.ws.ID)},
+		Version:     2,
+		DiffAgainst: 1,
+	}, &got); err != nil {
+		t.Fatalf("env.get with diff_against: %v", err)
+	}
+	// The exact header shape matters: the dashboard's parsePatch keys on
+	// `diff --git ` and the `+++ b/` marker to name the file.
+	for _, want := range []string{
+		"diff --git a/Dockerfile b/Dockerfile",
+		"--- a/Dockerfile",
+		"+++ b/Dockerfile",
+		"@@",
+		"-RUN apt-get install -y jq",
+		"+RUN apt-get install -y jq ripgrep",
+	} {
+		if !strings.Contains(got.Diff, want) {
+			t.Fatalf("env.get diff missing %q:\n%s", want, got.Diff)
+		}
+	}
+
+	var same protocol.EnvGetResult
+	if err := cc.Call(protocol.MethodEnvGet, protocol.EnvGetParams{
+		Workspace:   protocol.WorkspaceSelector{ID: string(e.ws.ID)},
+		Version:     1,
+		DiffAgainst: 1,
+	}, &same); err != nil {
+		t.Fatalf("env.get self diff: %v", err)
+	}
+	if same.Diff != "" {
+		t.Fatalf("env.get self diff = %q, want empty", same.Diff)
 	}
 }
 

@@ -20,6 +20,15 @@ const (
 	MethodEnvStatus = "env.status"
 	// MethodEnvRollback re-activates the previous environment version.
 	MethodEnvRollback = "env.rollback"
+	// MethodEnvEdit asks an agent harness to revise the workspace's
+	// environment from a plain-language request. The call returns as soon
+	// as the edit run is launched; progress, the proposed version, and any
+	// failure arrive as environment.edit events.
+	MethodEnvEdit = "env.edit"
+	// MethodEnvGet reads one stored definition version in full - the
+	// Dockerfile the status surface deliberately omits - optionally with a
+	// unified diff of the Dockerfile against another version.
+	MethodEnvGet = "env.get"
 )
 
 // EnvSaveParams are the params of env.save. Manifest is the manifest JSON
@@ -108,4 +117,41 @@ type EnvRollbackParams struct {
 // active again.
 type EnvRollbackResult struct {
 	Version int `json:"version"`
+}
+
+// EnvEditParams are the params of env.edit: which agent harness runs the
+// edit and the admin's change request in plain language.
+type EnvEditParams struct {
+	Workspace WorkspaceSelector `json:"workspace"`
+	Harness   string            `json:"harness"`
+	Request   string            `json:"request"`
+}
+
+// EnvEditResult is the result of env.edit: the edit run is launched and
+// everything after that - agent output, the proposed version, failure -
+// rides the environment.edit event stream.
+type EnvEditResult struct {
+	Accepted bool `json:"accepted"`
+}
+
+// EnvGetParams are the params of env.get. Version names the stored
+// definition to fetch; DiffAgainst optionally names another version to
+// diff this version's Dockerfile against.
+type EnvGetParams struct {
+	Workspace   WorkspaceSelector `json:"workspace"`
+	Version     int               `json:"version"`
+	DiffAgainst int               `json:"diff_against,omitempty"`
+}
+
+// EnvGetResult is the result of env.get: one version's full content.
+// Diff is a git unified diff of the Dockerfile from the DiffAgainst
+// version to this one, present only when requested and the files differ.
+type EnvGetResult struct {
+	Version    int                      `json:"version"`
+	Dockerfile string                   `json:"dockerfile"`
+	Manifest   []domain.ManifestItem    `json:"manifest"`
+	Source     domain.EnvironmentSource `json:"source"`
+	Harness    string                   `json:"harness,omitempty"`
+	Status     domain.EnvironmentStatus `json:"status"`
+	Diff       string                   `json:"diff,omitempty"`
 }

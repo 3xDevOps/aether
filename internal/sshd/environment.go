@@ -1,14 +1,21 @@
 package sshd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/envdef"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -24,6 +31,12 @@ type EnvironmentService interface {
 	// rebuilding its image first if retention removed the tag, and
 	// returns the version that is active again.
 	RollbackEnvironment(ctx context.Context, workspace domain.WorkspaceID) (int, error)
+	// EditEnvironment runs the chosen harness headless in a throwaway
+	// container against the current definition and the admin's change
+	// request, storing the validated result as a new saved version - the
+	// proposal env.build later approves. Progress and the terminal state
+	// ride environment.edit events.
+	EditEnvironment(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, harness, request string) (int, error)
 }
 
 // Every environment method is workspace administration: a stored
@@ -34,6 +47,8 @@ func init() {
 	registerGuarded(protocol.MethodEnvBuild, permissions.WorkspaceAdmin, nil, (*Server).envBuild)
 	registerGuarded(protocol.MethodEnvStatus, permissions.WorkspaceAdmin, nil, (*Server).envStatus)
 	registerGuarded(protocol.MethodEnvRollback, permissions.WorkspaceAdmin, nil, (*Server).envRollback)
+	registerGuarded(protocol.MethodEnvEdit, permissions.WorkspaceAdmin, nil, (*Server).envEdit)
+	registerGuarded(protocol.MethodEnvGet, permissions.WorkspaceAdmin, nil, (*Server).envGet)
 }
 
 func (s *Server) environments() (EnvironmentService, *protocol.Error) {
@@ -186,4 +201,134 @@ func (s *Server) envRollback(ctx context.Context, _ domain.MemberID, params json
 		return nil, rpcError(err)
 	}
 	return protocol.EnvRollbackResult{Version: version}, nil
+}
+
+// envEdit launches the edit-agent run asynchronously for the calling
+// admin; agent output, the proposed version, and any failure ride the
+// environment.edit event stream.
+func (s *Server) envEdit(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	svc, perr := s.environments()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.EnvEditParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	ws, err := s.resolveWorkspaceSelector(ctx, p.Workspace)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if perr := checkEnvEditHarness(p.Harness); perr != nil {
+		return nil, perr
+	}
+	if strings.TrimSpace(p.Request) == "" {
+		return nil, invalidParams("describe the change you want in the request field")
+	}
+	// The edit outlives this request, like env.build: it runs against the
+	// server's lifetime context and reports through the store and the
+	// event feed; the log line is for the operator tailing the server.
+	editCtx := s.authCtx()
+	s.spawn(func() {
+		if _, err := svc.EditEnvironment(editCtx, ws.ID, member, p.Harness, p.Request); err != nil {
+			slog.Warn("sshd: environment edit failed", "workspace", ws.ID, "harness", p.Harness, "error", err)
+		}
+	})
+	return protocol.EnvEditResult{Accepted: true}, nil
+}
+
+// checkEnvEditHarness rejects an agent that could never run an edit, so
+// the mistake surfaces in the reply instead of the event stream. Deeper
+// preflight - login state on this server - stays with the scheduler,
+// which reports it as a failed event naming the aether agent add fix.
+// The fake harness stays allowed: demos and tests drive the full flow
+// with it and it never launches a vendor CLI.
+func checkEnvEditHarness(name string) *protocol.Error {
+	if name == "fake" {
+		return nil
+	}
+	for _, p := range harness.SetupHarnesses() {
+		if p.Name == name {
+			return nil
+		}
+	}
+	return invalidParams(strconv.Quote(name) + " cannot edit environments; pick claude, codex, pi, or amp")
+}
+
+// envGet returns one stored version in full - including the Dockerfile
+// that env.status deliberately omits - plus, when diff_against names
+// another version, a unified diff between the two Dockerfiles.
+func (s *Server) envGet(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.EnvGetParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	ws, err := s.resolveWorkspaceSelector(ctx, p.Workspace)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if p.Version <= 0 {
+		return nil, invalidParams("name the environment version to fetch")
+	}
+	def, err := s.cfg.Store.GetEnvironmentDefinition(ctx, ws.ID, p.Version)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	result := protocol.EnvGetResult{
+		Version:    def.Version,
+		Dockerfile: def.Dockerfile,
+		Manifest:   def.Manifest,
+		Source:     def.Source,
+		Harness:    def.Harness,
+		Status:     def.Status,
+	}
+	if p.DiffAgainst != 0 {
+		base, err := s.cfg.Store.GetEnvironmentDefinition(ctx, ws.ID, p.DiffAgainst)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		diff, err := dockerfileDiff(ctx, base.Dockerfile, def.Dockerfile)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		result.Diff = diff
+	}
+	return result, nil
+}
+
+// dockerfileDiff renders a git unified diff from one Dockerfile text to
+// another. git diff --no-index compares files, so both texts land in a
+// throwaway directory laid out as a/Dockerfile and b/Dockerfile;
+// --no-prefix then yields exactly the `diff --git a/Dockerfile
+// b/Dockerfile` header shape the dashboard's patch parser reads. An
+// empty result means the texts match.
+func dockerfileDiff(ctx context.Context, before, after string) (string, error) {
+	dir, err := os.MkdirTemp("", "aether-env-diff-")
+	if err != nil {
+		return "", fmt.Errorf("sshd: create the diff scratch directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	for side, text := range map[string]string{"a": before, "b": after} {
+		if err := os.Mkdir(filepath.Join(dir, side), 0o700); err != nil {
+			return "", fmt.Errorf("sshd: lay out the diff scratch directory: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, side, "Dockerfile"), []byte(text), 0o600); err != nil {
+			return "", fmt.Errorf("sshd: write the Dockerfile pair for diffing: %w", err)
+		}
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "diff", "--no-index", "--no-prefix", "--no-color", "a/Dockerfile", "b/Dockerfile")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err = cmd.Run()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		// Exit 0: the files are identical.
+		return "", nil
+	case errors.As(err, &exit) && exit.ExitCode() == 1:
+		// Exit 1 is git's "the files differ", not a failure.
+		return stdout.String(), nil
+	default:
+		return "", fmt.Errorf("sshd: git diff over the Dockerfile pair: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
 }
