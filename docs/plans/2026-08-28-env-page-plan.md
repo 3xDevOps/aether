@@ -180,10 +180,10 @@ reuses `parsePatch` and `FilePatch` unchanged.
   failure detail on failed rows, and a rollback button with a confirm
   that names the version it returns to. Empty state (no definitions:
   the workspace uses its creation-time image) is one calm sentence.
-- [ ] Tests first: renders manifest and history from a fixture status;
+- [x] Tests first: renders manifest and history from a fixture status;
   rollback calls the api and refetches; empty state; the panel is
   absent without the capability.
-- [ ] Implement, run `bun run typecheck` and `bun run test`, commit.
+- [x] Implement, run `bun run typecheck` and `bun run test`, commit.
 
 ### Task 5: web - the edit flow
 
