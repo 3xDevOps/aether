@@ -111,6 +111,13 @@ builds in the background while you finish onboarding - until it is ready,
 runs use the image the workspace was created with and the dashboard shows a
 banner saying so.
 
+To change the environment later, open the workspace page in the dashboard.
+Its Environment panel shows what is installed, keeps every previous version
+for rollback, and takes a plain-language change request: a coding agent
+registered on the server proposes the change, you review the Dockerfile
+diff and the updated tool list, and approving rebuilds the image.
+Environment changes are admin actions.
+
 Without `--standard` the server uses its minimal neutral image. Pass
 `--image <ref>` instead for an administrator-approved image when the project
 needs something the standard one lacks, and `--base <branch>` to cut run

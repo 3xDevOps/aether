@@ -35,7 +35,10 @@ or `/home/aether` for a non-root image user).
 The **Env setup** column marks the harnesses that can set up a workspace
 environment for you (for example, building an image that mirrors your own
 machine during onboarding). Exactly claude, codex, pi, and amp qualify;
-everything else stays launchable for runs but is never offered there.
+everything else stays launchable for runs but is never offered there. The
+same four power later environment edits from the workspace page's
+Environment panel; those run on the server, so the chosen agent must be
+registered there with `aether agent add`.
 
 Only harnesses with an **MCP** column of `yes` can be pointed at the in-container
 coordination bridge, so conflict coordination between overlapping runs works for

@@ -56,6 +56,7 @@ function seed(extra: Partial<RootState> = {}) {
     members: { [alice.id]: alice },
     runs: {},
     envBuilds: {},
+    envEdits: {},
     capabilities: { gateway: 'remote', methods: ['*'], ws: ['events'] },
     route: { name: 'workspace', params: { workspaceId: workspace.id } },
     ...extra,
@@ -144,6 +145,158 @@ describe('environment panel', () => {
     )
     expect(
       await screen.findByRole('region', { name: 'Environment' }),
+    ).toBeDefined()
+  })
+})
+
+describe('environment edit flow', () => {
+  it('sends the request with the chosen agent', async () => {
+    const client = fakeApi({ envStatus: vi.fn(async () => history) })
+    seed()
+    render(<EnvironmentPanel workspaceID={workspace.id} client={client} />)
+
+    // The select defaults to the active version's agent.
+    const select = (await screen.findByLabelText(
+      'Coding agent',
+    )) as HTMLSelectElement
+    expect(select.value).toBe('claude')
+
+    fireEvent.change(select, { target: { value: 'codex' } })
+    fireEvent.change(screen.getByLabelText('What should change?'), {
+      target: { value: 'add go 1.24' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to the agent' }))
+
+    expect(client.envEdit).toHaveBeenCalledWith(
+      { id: workspace.id },
+      'codex',
+      'add go 1.24',
+    )
+    // The slice is primed before the call answers, so the in-flight state
+    // is up before the first event frame can land.
+    expect(useStore.getState().envEdits[workspace.id]?.status).toBe('running')
+  })
+
+  it('streams agent output into the expander while running', async () => {
+    const client = fakeApi()
+    seed({
+      envEdits: {
+        [workspace.id]: {
+          harness: 'claude',
+          status: 'running',
+          lines: ['reading the Dockerfile', 'adding go'],
+        },
+      },
+    })
+    render(<EnvironmentPanel workspaceID={workspace.id} client={client} />)
+
+    expect(
+      await screen.findByText('The agent is working on your request...'),
+    ).toBeDefined()
+    expect(screen.getByText('View process')).toBeDefined()
+    expect(screen.getByText(/reading the Dockerfile/)).toBeDefined()
+    // The form waits until the run ends.
+    expect(
+      screen.queryByRole('button', { name: 'Send to the agent' }),
+    ).toBeNull()
+  })
+
+  it('fetches the diff on proposed and renders review and summary', async () => {
+    const client = fakeApi()
+    seed({
+      envEdits: {
+        [workspace.id]: {
+          harness: 'claude',
+          status: 'proposed',
+          lines: [],
+          version: 2,
+        },
+      },
+    })
+    render(<EnvironmentPanel workspaceID={workspace.id} client={client} />)
+
+    // Diffed against the active version, which the default status names as 1.
+    await waitFor(() =>
+      expect(client.envGet).toHaveBeenCalledWith({ id: workspace.id }, 2, 1),
+    )
+    // The Dockerfile diff through the patch view...
+    expect(await screen.findByText('Dockerfile')).toBeDefined()
+    expect(screen.getAllByText(/golang-go/).length).toBeGreaterThan(0)
+    // ...and the updated manifest summary.
+    expect(screen.getByText('requested by the admin')).toBeDefined()
+  })
+
+  it('approve builds the proposed version and clears the review', async () => {
+    const client = fakeApi()
+    seed({
+      envEdits: {
+        [workspace.id]: {
+          harness: 'claude',
+          status: 'proposed',
+          lines: [],
+          version: 2,
+        },
+      },
+    })
+    render(<EnvironmentPanel workspaceID={workspace.id} client={client} />)
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Approve and build' }),
+    )
+    await waitFor(() =>
+      expect(client.envBuild).toHaveBeenCalledWith({ id: workspace.id }, 2),
+    )
+    await waitFor(() =>
+      expect(useStore.getState().envEdits[workspace.id]).toBeUndefined(),
+    )
+    // The build banner's slice took over.
+    expect(useStore.getState().envBuilds[workspace.id]?.version).toBe(2)
+  })
+
+  it('dismiss clears the review without building', async () => {
+    const client = fakeApi()
+    seed({
+      envEdits: {
+        [workspace.id]: {
+          harness: 'claude',
+          status: 'proposed',
+          lines: [],
+          version: 2,
+        },
+      },
+    })
+    render(<EnvironmentPanel workspaceID={workspace.id} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
+    expect(client.envBuild).not.toHaveBeenCalled()
+    expect(useStore.getState().envEdits[workspace.id]).toBeUndefined()
+    // The form returns; the proposed version stays in the history.
+    expect(
+      await screen.findByRole('button', { name: 'Send to the agent' }),
+    ).toBeDefined()
+  })
+
+  it('shows the failure detail verbatim with a way back', async () => {
+    const client = fakeApi()
+    const detail =
+      'claude has no login on this server; register it with: aether agent add claude --workspace main-repo'
+    seed({
+      envEdits: {
+        [workspace.id]: {
+          harness: 'claude',
+          status: 'failed',
+          lines: ['last output line'],
+          detail,
+        },
+      },
+    })
+    render(<EnvironmentPanel workspaceID={workspace.id} client={client} />)
+
+    expect(await screen.findByText(detail)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(useStore.getState().envEdits[workspace.id]).toBeUndefined()
+    expect(
+      await screen.findByRole('button', { name: 'Send to the agent' }),
     ).toBeDefined()
   })
 })
