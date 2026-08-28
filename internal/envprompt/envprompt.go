@@ -9,6 +9,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -18,7 +19,7 @@ import (
 // Version identifies the embedded template. Bump it on any change to
 // prompt.tmpl; the package test pins the template's hash to this number,
 // so an edit without a bump fails the build gate.
-const Version = 1
+const Version = 2
 
 //go:embed prompt.tmpl
 var templateText string
@@ -31,6 +32,17 @@ type InventoryParams struct {
 	BaseImage string
 }
 
+// RepoParams parameterizes a from-repo run: the agent reads the
+// repository it is started in and writes the pair into OutputDir.
+type RepoParams struct {
+	// BaseImage is the image the generated Dockerfile must build from.
+	BaseImage string
+	// OutputDir is the absolute path of the scratch directory the two
+	// output files must land in; the agent runs inside the repository,
+	// so a relative path would point into it.
+	OutputDir string
+}
+
 // RefineParams parameterizes a follow-up run: the pair a previous run
 // produced plus the feedback to apply, all embedded verbatim.
 type RefineParams struct {
@@ -39,9 +51,10 @@ type RefineParams struct {
 	Feedback     string
 }
 
-// templateData is the single shape both templates render from.
+// templateData is the single shape all templates render from.
 type templateData struct {
 	BaseImage    string
+	OutputDir    string
 	Dockerfile   string
 	ManifestJSON string
 	Feedback     string
@@ -53,6 +66,22 @@ func RenderInventory(params InventoryParams) (string, error) {
 		return "", errors.New("envprompt: inventory prompt needs a base image")
 	}
 	return render("inventory", templateData{BaseImage: params.BaseImage})
+}
+
+// RenderRepo returns the full prompt for a from-repo run.
+func RenderRepo(params RepoParams) (string, error) {
+	switch {
+	case strings.TrimSpace(params.BaseImage) == "":
+		return "", errors.New("envprompt: repo prompt needs a base image")
+	case strings.TrimSpace(params.OutputDir) == "":
+		return "", errors.New("envprompt: repo prompt needs an output directory")
+	case !filepath.IsAbs(params.OutputDir):
+		return "", fmt.Errorf("envprompt: repo prompt output directory must be absolute, got %q", params.OutputDir)
+	}
+	return render("repo", templateData{
+		BaseImage: params.BaseImage,
+		OutputDir: params.OutputDir,
+	})
 }
 
 // RenderRefine returns the full prompt for a refine run. The contract

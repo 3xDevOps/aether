@@ -12,6 +12,7 @@ import (
 // recording the new hash fails here too.
 var templateHashes = map[int]string{
 	1: "443382544fa970566cf85f1312f29fa40ffe75e4f71ab599e8fd4cd444ae98be",
+	2: "039d12aac2cbecca59ae17e43b7a4453c913e754c01cc8237ff31a5ef13e18fa",
 }
 
 func TestVersionPinsTemplate(t *testing.T) {
@@ -108,6 +109,70 @@ func TestRenderRefine(t *testing.T) {
 	assertClausesInOrder(t, prompt)
 	if strings.Contains(prompt, "{{") || strings.Contains(prompt, "}}") {
 		t.Errorf("prompt has unrendered template markers:\n%s", prompt)
+	}
+}
+
+// repoClauses are distinctive phrases, one per repo-prompt clause, in
+// the order the template must state them: derive from the repository's
+// files, devcontainer as strongest intent, never touch repo files,
+// write into the named output directory, then the shared file contract.
+var repoClauses = []string{
+	"from the repository's own files",
+	"manifests, lockfiles, toolchain version files, and CI configs",
+	"not the machine running this scan",
+	".devcontainer/devcontainer.json",
+	"strongest statement of intent",
+	"Never modify, create, or delete repository files",
+	"exactly two files, Dockerfile and manifest.json, into",
+	"single build stage FROM ubuntu:24.04",
+	"pinned",
+	"no COPY or ADD",
+	"no secrets",
+	"stable-first",
+	"manifest.json",
+	"\"name\"",
+	"\"version\"",
+	"\"reason\"",
+	"\"start_line\"",
+	"\"end_line\"",
+	"\"check_command\"",
+	"output must contain the version",
+	"only what the project actually needs",
+}
+
+func TestRenderRepo(t *testing.T) {
+	const outputDir = "/tmp/aether-env-scan-1234"
+	prompt, err := RenderRepo(RepoParams{BaseImage: "ubuntu:24.04", OutputDir: outputDir})
+	if err != nil {
+		t.Fatalf("RenderRepo: %v", err)
+	}
+	if !strings.Contains(prompt, outputDir) {
+		t.Errorf("repo prompt does not name the output directory %q verbatim", outputDir)
+	}
+	flat := strings.Join(strings.Fields(prompt), " ")
+	pos := 0
+	for _, clause := range repoClauses {
+		at := strings.Index(flat[pos:], clause)
+		if at < 0 {
+			t.Errorf("repo prompt is missing the clause %q after position %d", clause, pos)
+			continue
+		}
+		pos += at
+	}
+	if strings.Contains(prompt, "{{") || strings.Contains(prompt, "}}") {
+		t.Errorf("prompt has unrendered template markers:\n%s", prompt)
+	}
+}
+
+func TestRenderRepoRequiresParams(t *testing.T) {
+	for name, params := range map[string]RepoParams{
+		"base image":                {OutputDir: "/tmp/out"},
+		"output directory":          {BaseImage: "ubuntu:24.04"},
+		"absolute output directory": {BaseImage: "ubuntu:24.04", OutputDir: "relative/out"},
+	} {
+		if _, err := RenderRepo(params); err == nil {
+			t.Errorf("RenderRepo accepted a missing %s", name)
+		}
 	}
 }
 
