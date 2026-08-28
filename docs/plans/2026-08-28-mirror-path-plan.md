@@ -120,12 +120,12 @@ before committing, and the values below are the starting point.
   name, version, reason, dockerfile_lines span, check_command whose
   output must contain the version); keep the item count honest - only
   what the machine actually uses.
-- [ ] Tests first: rendered inventory prompt contains each contract
+- [x] Tests first: rendered inventory prompt contains each contract
   clause (assert on distinctive phrases, not the whole string); refine
   prompt embeds the previous pair and feedback verbatim; `Version`
   changes are caught by a golden assertion so a template edit without a
   bump fails.
-- [ ] Implement, run `go test ./internal/envprompt/`, commit.
+- [x] Implement, run `go test ./internal/envprompt/`, commit.
 
 ### Task 3: envscan - the local inventory engine
 
