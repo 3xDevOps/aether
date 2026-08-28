@@ -131,6 +131,13 @@ type ServerInfoResult struct {
 	// TailnetIdentityAuth reports whether the server resolves tailnet
 	// identities (WhoIs) for keyless auth.
 	TailnetIdentityAuth bool `json:"tailnet_identity_auth,omitempty"`
+	// NeutralImage is the server-owned image used for workspaces whose
+	// environment selects the neutral base.
+	NeutralImage string `json:"neutral_image,omitempty"`
+	// StandardImage is the published standard environment image the
+	// server recommends for new workspaces; clients pin it as the
+	// workspace's custom image. Absent on servers predating it.
+	StandardImage string `json:"standard_image,omitempty"`
 }
 
 // WorkspaceListResult is the result of workspace.list.
