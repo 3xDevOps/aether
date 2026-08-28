@@ -270,6 +270,6 @@ before committing, and the values below are the starting point.
 
 ### Task 8: full check sweep
 
-- [ ] Run `make fmt-check`, `make vet`, `make lint`, `make test`,
+- [x] Run `make fmt-check`, `make vet`, `make lint`, `make test`,
   `make public-audit`, and from `web/`: `bun run typecheck`,
   `bun run test`; fix anything surfaced and commit the fixes.
