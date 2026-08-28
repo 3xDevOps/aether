@@ -19,6 +19,7 @@ import type {
   LinkStatus,
   Workspace,
 } from '@/lib/types'
+import { EnvironmentBanner } from '@/routes/onboarding/environment-step'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
@@ -381,6 +382,10 @@ export function FirstRunStep({
   return (
     <section aria-label="First run" className="space-y-3">
       <h2 className="text-sm font-medium">Launch your first run</h2>
+      {/* A mirror build approved two steps back may still be running; the
+          banner says the starter image is in use so a missing toolchain
+          reads as expected, not broken. */}
+      <EnvironmentBanner client={client} workspaceId={workspace?.id} />
       <p className="text-sm text-muted-foreground">
         The run forks from{' '}
         <span className="font-mono">{workspace?.base_branch ?? 'the base branch'}</span>{' '}

@@ -55,7 +55,7 @@ screen with a reveal path, and every surface routes through the same call.
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
 one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `palette`, `approvals`, `presence`, `cost`, `timeline`, `diff`, `shell`,
-`local`, `ui`). A new feature adds a slice file and one spread in
+`local`, `environment`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
 collapse state, `activeWorkspace`, grouping) are persisted; server data is
@@ -205,6 +205,8 @@ run's wire `paused` field, skipping runs that do not carry it.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
+  An `environment.build` event lands in the `environment` slice, which feeds
+  the build banner (see the onboarding wizard section).
 
 **The capabilities descriptor is the transport seam.** The store holds the
 `GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, `local`), and
@@ -565,6 +567,31 @@ again" or "keep the standard environment", so the wizard never dead-ends.
 Non-admin members see only the keep path, because saving an environment is
 an administrator method.
 
+The review gate (`EnvironmentReview`, same file) renders the manifest as a
+readable list - name, version, reason - with a per-item remove toggle
+backed by `removeManifestItem` (dropping an item drops its Dockerfile lines
+and shifts later spans; the last remaining item cannot be removed). A
+free-text change request reopens the scan in refine mode with the current
+pair and the note; approve calls `env.save` (source `mirror`, the chosen
+harness) then `env.build` and advances the wizard immediately - the build
+runs in the background.
+
+Build state lives in the `environment` slice: approve primes it before the
+build call so no event frame can beat it, and `environment.build` events
+applied by `sync.ts` drive it from there, ignoring frames about older
+versions. The slice keeps the approved pair because `env.status` never
+returns the Dockerfile: a verification failure can seed its repair scan
+only from what this session holds. `EnvironmentBanner` (same file, rendered
+by the First-run step and the run Overview view) reads the slice: while the
+latest build for the workspace is pending it says the environment is still
+building on the starter image; on `active` it clears; on `failed` it shows
+the detail and offers "ask the agent to fix it" - a refine scan seeded with
+the failure detail, feeding the same review gate - plus "keep the standard
+environment", which just forgets the build, since the workspace image
+already is the fallback. Nothing in the slice persists: after a reload the
+banner is simply gone, and `aether env show` is where the build's outcome
+can still be read.
+
 ## Styleguide
 
 - **Tokens only.** Colours live in `src/index.css`: the shadcn neutral base
@@ -631,7 +658,12 @@ five steps against the stub API, and the environment step is exercised on
 both the walk and its scan flow - mirror preselected, the no-harness
 fallback, streamed output behind the expander, cancel, failure landing on
 the fallback offers, the scan result reaching the review boundary, and the
-non-admin keep-only path - through a stubbed scan session. The diff tab covers the parser on the
+non-admin keep-only path - through a stubbed scan session. The review gate
+and the build banner ride the same stubs: a removal shrinking the approved
+payload, approve saving then building and priming the slice, a change
+request reopening the scan in refine mode, the banner appearing on building
+and clearing on active in both the First-run step and the run view, and a
+verification failure offering the repair scan and the dismissal. The diff tab covers the parser on the
 shapes that would break it - a deletion, a new file, a removed line that reads
 exactly like a file marker - then the fetch, the truncation notice, a snapshot
 refetching and narrowing the patch, and a conflict chip naming its member and

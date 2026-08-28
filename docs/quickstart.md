@@ -101,7 +101,13 @@ aether workspace init myproject --standard
 ```
 
 The dashboard's create-workspace form offers the same choice with the
-standard environment preselected.
+standard environment preselected. Its onboarding wizard then adds an
+Environment step: keep the standard environment, or have a coding agent on
+your machine mirror your local toolchains into the workspace image. The
+agent proposes a list of tools, you review and approve it, and the image
+builds in the background while you finish onboarding - until it is ready,
+runs use the image the workspace was created with and the dashboard shows a
+banner saying so.
 
 Without `--standard` the server uses its minimal neutral image. Pass
 `--image <ref>` instead for an administrator-approved image when the project

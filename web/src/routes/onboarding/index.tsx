@@ -9,7 +9,11 @@ import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
-import { EnvironmentStep } from '@/routes/onboarding/environment-step'
+import {
+  EnvironmentReview,
+  EnvironmentStep,
+  type EnvScanReview,
+} from '@/routes/onboarding/environment-step'
 import {
   FirstRunStep,
   LinkStep,
@@ -25,6 +29,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const caps = useCapability()
   const [step, setStep] = useState(0)
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
+  const [review, setReview] = useState<EnvScanReview | null>(null)
 
   if (!caps.hasLocal('link.status')) {
     return (
@@ -72,14 +77,20 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             }}
           />
         )}
-        {step === 2 && (
+        {step === 2 && review === null && (
           <EnvironmentStep
             client={client}
             onNext={() => setStep(3)}
-            // The review gate mounts behind this callback next; until it
-            // lands, a finished scan moves on and the workspace keeps the
-            // environment it was created with. Nothing builds unreviewed.
-            onReview={() => setStep(3)}
+            onReview={setReview}
+          />
+        )}
+        {step === 2 && review !== null && (
+          <EnvironmentReview
+            client={client}
+            workspaceId={workspace?.id}
+            review={review}
+            onDone={() => setStep(3)}
+            onKeep={() => setStep(3)}
           />
         )}
         {step === 3 && (
@@ -91,7 +102,15 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           <button
             type="button"
             className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-            onClick={() => setStep(step - 1)}
+            onClick={() => {
+              // Backing out of the review returns to the choice cards
+              // rather than leaving the step.
+              if (step === 2 && review !== null) {
+                setReview(null)
+                return
+              }
+              setStep(step - 1)
+            }}
           >
             Back
           </button>

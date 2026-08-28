@@ -1,19 +1,24 @@
-// The onboarding Environment step. An admin chooses between mirroring this
-// machine into the workspace image and keeping the standard environment the
-// workspace was created with. Mirror runs the chosen coding agent headless
-// through the local gateway's /ws/envscan socket and hands the validated
-// Dockerfile and manifest pair to the review gate through onReview; nothing
-// builds without that review. Every failure path offers the keep card, so
-// the wizard never dead-ends here. Non-admin members see only the keep
-// path: saving an environment is an administrator method.
+// The onboarding Environment step and what follows it. An admin chooses
+// between mirroring this machine into the workspace image and keeping the
+// standard environment the workspace was created with. Mirror runs the
+// chosen coding agent headless through the local gateway's /ws/envscan
+// socket and hands the validated Dockerfile and manifest pair to the
+// review gate (EnvironmentReview) through onReview; approve there saves
+// the definition and starts the background build, and EnvironmentBanner
+// follows that build wherever later steps and the run view render it.
+// Nothing builds without the review. Every failure path offers the keep
+// card, so the wizard never dead-ends here. Non-admin members see only
+// the keep path: saving an environment is an administrator method.
 
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { message } from '@/components/palette/palette'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { Api, EnvScanSession } from '@/lib/api'
+import { api, type Api, type EnvScanSession } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
+import { removeManifestItem } from '@/lib/manifest'
 import type { EnvScanStatus, HarnessStatus, ManifestItem } from '@/lib/types'
+import { useStore } from '@/store'
 import { useIsAdmin } from '@/store/hooks'
 
 const field =
@@ -284,5 +289,375 @@ export function EnvironmentStep({
         </Button>
       )}
     </section>
+  )
+}
+
+type ReviewPhase =
+  | { name: 'review' }
+  | { name: 'refining'; status: EnvScanStatus }
+  | { name: 'refine-failed'; detail: string; outputTail?: string }
+
+/**
+ * The review gate: the scanned manifest as a readable list with per-item
+ * remove toggles, a free-text change request that re-runs the agent in
+ * refine mode, and the approve action - env.save then env.build - that
+ * starts the background build and advances the wizard. Nothing builds
+ * without this approval. `repair` mounts the gate mid-refine, seeded with
+ * a build failure's detail: that is how "ask the agent to fix it" feeds
+ * back into the same gate.
+ */
+export function EnvironmentReview({
+  client,
+  workspaceId,
+  review,
+  repair,
+  onDone,
+  onKeep,
+}: {
+  client: Api
+  workspaceId?: string
+  review: EnvScanReview
+  /** A build failure's detail; when set, a refine run starts on mount. */
+  repair?: string
+  /** Called once approve has saved the definition and started the build. */
+  onDone: () => void
+  /** Keeps the standard environment instead; always reachable. */
+  onKeep: () => void
+}) {
+  const startEnvBuild = useStore((s) => s.startEnvBuild)
+  const clearEnvBuild = useStore((s) => s.clearEnvBuild)
+  const [pair, setPair] = useState(review)
+  const [removed, setRemoved] = useState<string[]>([])
+  const [feedback, setFeedback] = useState('')
+  const [phase, setPhase] = useState<ReviewPhase>({ name: 'review' })
+  const [lines, setLines] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const session = useRef<EnvScanSession | null>(null)
+
+  useEffect(() => () => session.current?.close(), [])
+
+  // The pair with the removed rows' Dockerfile lines dropped and later
+  // spans shifted: what approve ships and what a refine run starts from.
+  const edited = useMemo(() => {
+    let dockerfile = pair.dockerfile
+    let items = pair.manifest
+    for (const name of removed) {
+      const next = removeManifestItem(dockerfile, items, name)
+      if (next === null) break
+      dockerfile = next.dockerfile
+      items = next.items
+    }
+    return { dockerfile, items }
+  }, [pair, removed])
+
+  const refine = useCallback(
+    (note: string) => {
+      setLines([])
+      setPhase({ name: 'refining', status: 'detecting' })
+      session.current = client.openEnvScan(
+        {
+          harness: pair.harness,
+          mode: 'refine',
+          previous_dockerfile: edited.dockerfile,
+          previous_manifest_json: JSON.stringify(edited.items),
+          feedback: note,
+        },
+        {
+          onOutput: (line) => setLines((prev) => [...prev, line]),
+          onStatus: (status) => setPhase({ name: 'refining', status }),
+          onResult: (result) => {
+            session.current = null
+            setPair({
+              harness: pair.harness,
+              dockerfile: result.dockerfile,
+              manifest: result.manifest,
+            })
+            setRemoved([])
+            setFeedback('')
+            setPhase({ name: 'review' })
+          },
+          onError: (detail, outputTail) => {
+            session.current = null
+            setPhase({ name: 'refine-failed', detail, outputTail })
+          },
+        },
+      )
+    },
+    [client, pair.harness, edited],
+  )
+
+  // A repair mount goes straight into the refine run with the failure
+  // detail; the result lands in the same review below.
+  const startedRepair = useRef(false)
+  useEffect(() => {
+    if (!repair || startedRepair.current) return
+    startedRepair.current = true
+    refine(repair)
+  }, [repair, refine])
+
+  const approve = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      if (!workspaceId) throw new Error('no workspace selected; go back a step')
+      const ws = { id: workspaceId }
+      const version = await client.envSave({
+        workspace: ws,
+        dockerfile: edited.dockerfile,
+        manifest: edited.items,
+        source: 'mirror',
+        harness: pair.harness,
+      })
+      // The events socket is live app-wide already; priming the slice
+      // before the build call means no frame can beat the banner. The
+      // pair rides along so a verification failure can seed its repair.
+      startEnvBuild(workspaceId, {
+        version,
+        status: 'building',
+        harness: pair.harness,
+        dockerfile: edited.dockerfile,
+        manifest: edited.items,
+      })
+      try {
+        await client.envBuild(ws, version)
+      } catch (err) {
+        clearEnvBuild(workspaceId)
+        throw err
+      }
+      onDone()
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const toggle = (name: string) =>
+    setRemoved((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+    )
+
+  if (phase.name === 'refining') {
+    return (
+      <section aria-label="Environment review" className="space-y-3">
+        <h2 className="text-sm font-medium">Updating the proposal</h2>
+        <p className="text-sm" role="status">
+          {statusLine[phase.status]}
+        </p>
+        <details className="rounded-md border bg-card">
+          <summary className="cursor-pointer px-3 py-2 text-sm">
+            View process
+          </summary>
+          <pre className={pane}>{lines.join('\n')}</pre>
+        </details>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            session.current?.close()
+            session.current = null
+            setPhase({ name: 'review' })
+          }}
+        >
+          Cancel
+        </Button>
+      </section>
+    )
+  }
+
+  if (phase.name === 'refine-failed') {
+    return (
+      <section aria-label="Environment review" className="space-y-3">
+        <h2 className="text-sm font-medium">The update did not finish</h2>
+        <p className="text-xs text-state-failed">{phase.detail}</p>
+        {phase.outputTail && (
+          <details className="rounded-md border bg-card">
+            <summary className="cursor-pointer px-3 py-2 text-sm">
+              Last output
+            </summary>
+            <pre className={pane}>{phase.outputTail}</pre>
+          </details>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => setPhase({ name: 'review' })}>
+            Back to the review
+          </Button>
+          <Button size="sm" variant="outline" onClick={onKeep}>
+            Keep the standard environment
+          </Button>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section aria-label="Environment review" className="space-y-3">
+      <h2 className="text-sm font-medium">Review the proposed environment</h2>
+      <p className="text-sm text-muted-foreground">
+        The agent found these tools. Remove anything you do not want, then
+        approve to build the remote environment.
+      </p>
+      <ul className="divide-y rounded-md border">
+        {pair.manifest.map((item) => {
+          const isRemoved = removed.includes(item.name)
+          return (
+            <li
+              key={item.name}
+              className="flex items-start gap-3 px-3 py-2 text-sm"
+            >
+              <span
+                className={`min-w-0 flex-1 space-y-0.5 ${isRemoved ? 'opacity-50' : ''}`}
+              >
+                <span className="flex items-baseline gap-2">
+                  <span
+                    className={`font-medium ${isRemoved ? 'line-through' : ''}`}
+                  >
+                    {item.name}
+                  </span>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {item.version}
+                  </span>
+                </span>
+                {item.reason && (
+                  <span className="block text-xs text-muted-foreground">
+                    {item.reason}
+                  </span>
+                )}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label={`${isRemoved ? 'Put back' : 'Remove'} ${item.name}`}
+                disabled={!isRemoved && edited.items.length === 1}
+                onClick={() => toggle(item.name)}
+              >
+                {isRemoved ? 'Put back' : 'Remove'}
+              </Button>
+            </li>
+          )
+        })}
+      </ul>
+      <label className="block space-y-1 text-sm">
+        Request changes
+        <textarea
+          className={`${field} min-h-16`}
+          value={feedback}
+          placeholder="use node 20 instead of 22"
+          onChange={(e) => setFeedback(e.target.value)}
+        />
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" disabled={busy} onClick={() => void approve()}>
+          Approve and build
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy || feedback.trim() === ''}
+          onClick={() => refine(feedback.trim())}
+        >
+          Send to the agent
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={onKeep}>
+          Keep the standard environment
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        The build runs in the background; you keep going while it finishes.
+      </p>
+      {error && <p className="text-xs text-state-failed">{error}</p>}
+    </section>
+  )
+}
+
+/** The statuses during which the workspace still runs on its creation
+ * image. `active` and a cleared entry both mean no banner. */
+const buildPending: Record<string, true> = {
+  saved: true,
+  building: true,
+  verifying: true,
+}
+
+/**
+ * The environment build banner the First-run step and the run view share.
+ * Renders nothing until this session has a build to report. While the
+ * latest build for the workspace is pending it says the starter image is
+ * in use; a verification failure offers the repair scan (when this
+ * session still holds the approved pair) and the standard fallback, which
+ * simply forgets the build - the workspace image already is the fallback.
+ */
+export function EnvironmentBanner({
+  workspaceId,
+  client = api,
+}: {
+  workspaceId?: string
+  client?: Api
+}) {
+  const build = useStore((s) =>
+    workspaceId ? s.envBuilds[workspaceId] : undefined,
+  )
+  const clearEnvBuild = useStore((s) => s.clearEnvBuild)
+  const [repairing, setRepairing] = useState(false)
+
+  if (!workspaceId || !build) return null
+
+  if (buildPending[build.status]) {
+    return (
+      <p
+        role="status"
+        className="rounded-md border bg-card px-3 py-2 text-sm text-muted-foreground"
+      >
+        Your environment is still building, using the starter image for now.
+      </p>
+    )
+  }
+  if (build.status !== 'failed') return null
+
+  const detail = build.detail || 'the built environment did not pass its checks'
+
+  if (repairing && build.harness && build.dockerfile && build.manifest) {
+    return (
+      <div className="rounded-md border bg-card p-3">
+        <EnvironmentReview
+          client={client}
+          workspaceId={workspaceId}
+          review={{
+            harness: build.harness,
+            dockerfile: build.dockerfile,
+            manifest: build.manifest,
+          }}
+          repair={detail}
+          onDone={() => setRepairing(false)}
+          onKeep={() => {
+            setRepairing(false)
+            clearEnvBuild(workspaceId)
+          }}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-card p-3 text-sm">
+      <p>
+        The environment build did not succeed, so runs use the starter image.
+      </p>
+      <p className="text-xs text-state-failed">{detail}</p>
+      <div className="flex flex-wrap gap-2">
+        {build.harness && build.dockerfile && build.manifest && (
+          <Button size="sm" onClick={() => setRepairing(true)}>
+            Ask the agent to fix it
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => clearEnvBuild(workspaceId)}
+        >
+          Keep the standard environment
+        </Button>
+      </div>
+    </div>
   )
 }

@@ -4,6 +4,7 @@
 import { api, ApiError, type Api } from '@/lib/api'
 import { backoff, connectEvents } from '@/lib/stream'
 import type {
+  EnvironmentBuildPayload,
   Event,
   OverlapPayload,
   RunDiffPayload,
@@ -187,6 +188,14 @@ export async function applyEvent(
           return false
         }
       }
+      break
+    }
+    case 'environment.build': {
+      // One moment of a workspace image build. The slice keeps only the
+      // latest coarse state; the banner on the First-run step and the run
+      // view is its reader.
+      const p = ev.payload as EnvironmentBuildPayload
+      if (ev.workspace_id) store.getState().applyEnvBuild(ev.workspace_id, p)
       break
     }
   }

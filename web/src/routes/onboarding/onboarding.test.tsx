@@ -1,6 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Api, EnvScanHandlers, EnvScanSession } from '@/lib/api'
-import type { EnvScanRequest, GatewayCapabilities } from '@/lib/types'
+import type {
+  EnvScanRequest,
+  EnvScanResult,
+  GatewayCapabilities,
+} from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { EnvironmentStep } from '@/routes/onboarding/environment-step'
 import { useStore, type RootState } from '@/store'
@@ -8,6 +12,7 @@ import {
   alice,
   bob,
   fakeApi,
+  manifestItem,
   scanResult,
   serverInfo,
   workspace,
@@ -32,6 +37,7 @@ function seed(extra: Partial<RootState> = {}) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
+    envBuilds: {},
     ...extra,
   })
 }
@@ -412,5 +418,243 @@ describe('environment step scan flow', () => {
     expect(screen.queryByLabelText('Coding agent')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(onNext).toHaveBeenCalled()
+  })
+})
+
+/** A scan session that resolves with the given pair on the next tick. */
+function scanWith(result: EnvScanResult) {
+  return vi.fn((_req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession => {
+    queueMicrotask(() => h.onResult(result))
+    return { close: vi.fn() }
+  })
+}
+
+/** A two-item pair, so one item can go while the other's span shifts. */
+function twoItemScan(): EnvScanResult {
+  return {
+    dockerfile:
+      'FROM ubuntu:24.04\n' +
+      '\n' +
+      'RUN apt-get update \\\n' +
+      '    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 \\\n' +
+      '    && rm -rf /var/lib/apt/lists/*\n' +
+      'RUN install-go 1.22.1\n',
+    manifest: [
+      manifestItem(),
+      manifestItem({
+        name: 'go',
+        version: '1.22.1',
+        reason: 'the repository is a Go module',
+        start_line: 6,
+        end_line: 6,
+        check_command: 'go version',
+      }),
+    ],
+  }
+}
+
+describe('environment review gate', () => {
+  async function toReviewGate(client: Api) {
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toEnvironmentStep()
+    fireEvent.click(await screen.findByRole('button', { name: 'Start scan' }))
+    await screen.findByRole('button', { name: 'Approve and build' })
+  }
+
+  it('lists the manifest and a removal shrinks the approved payload', async () => {
+    const client = fakeApi({ openEnvScan: scanWith(twoItemScan()) })
+    await toReviewGate(client)
+
+    // The summary is a readable list: name, version, reason per row.
+    expect(screen.getByText('jq')).toBeDefined()
+    expect(screen.getByText('go')).toBeDefined()
+    expect(screen.getByText('used by the project scripts')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove jq' }))
+    // The last remaining item cannot be removed: the keep card is the
+    // fallback, never an empty Dockerfile.
+    expect(screen.getByRole('button', { name: 'Remove go' })).toHaveProperty(
+      'disabled',
+      true,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Approve and build' }))
+
+    // The removed item's lines are gone and the later span has shifted.
+    await waitFor(() => {
+      expect(client.envSave).toHaveBeenCalledWith({
+        workspace: { id: workspace.id },
+        dockerfile: 'FROM ubuntu:24.04\n\nRUN install-go 1.22.1\n',
+        manifest: [
+          manifestItem({
+            name: 'go',
+            version: '1.22.1',
+            reason: 'the repository is a Go module',
+            start_line: 3,
+            end_line: 3,
+            check_command: 'go version',
+          }),
+        ],
+        source: 'mirror',
+        harness: 'claude',
+      })
+    })
+  })
+
+  it('approve saves then builds, primes the build slice, and advances', async () => {
+    const client = fakeApi()
+    await toReviewGate(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve and build' }))
+
+    // The wizard moves on immediately; the build continues behind it.
+    expect(
+      await screen.findByRole('region', { name: 'Repository' }),
+    ).toBeDefined()
+    expect(client.envSave).toHaveBeenCalled()
+    expect(client.envBuild).toHaveBeenCalledWith({ id: workspace.id }, 2)
+    expect(
+      vi.mocked(client.envSave).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(client.envBuild).mock.invocationCallOrder[0])
+    // The slice is primed before the build call, so no event frame can
+    // beat the banner; it carries the pair for a later repair scan.
+    expect(useStore.getState().envBuilds[workspace.id]).toMatchObject({
+      version: 2,
+      status: 'building',
+      harness: 'claude',
+      dockerfile: scanResult().dockerfile,
+    })
+  })
+
+  it('request changes reopens the scan in refine mode with the note', async () => {
+    const client = fakeApi()
+    await toReviewGate(client)
+
+    fireEvent.change(screen.getByLabelText('Request changes'), {
+      target: { value: 'use node 20' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to the agent' }))
+
+    await waitFor(() => {
+      expect(client.openEnvScan).toHaveBeenLastCalledWith(
+        {
+          harness: 'claude',
+          mode: 'refine',
+          previous_dockerfile: scanResult().dockerfile,
+          previous_manifest_json: JSON.stringify(scanResult().manifest),
+          feedback: 'use node 20',
+        },
+        expect.anything(),
+      )
+    })
+    // The refine result lands back in the same review gate.
+    expect(
+      await screen.findByRole('button', { name: 'Approve and build' }),
+    ).toBeDefined()
+  })
+})
+
+describe('environment build banner', () => {
+  it('appears on the First-run step while building and clears when active', async () => {
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    act(() =>
+      useStore
+        .getState()
+        .startEnvBuild(workspace.id, { version: 2, status: 'building' }),
+    )
+    expect(
+      await screen.findByText(/environment is still building/),
+    ).toBeDefined()
+
+    act(() =>
+      useStore
+        .getState()
+        .applyEnvBuild(workspace.id, { version: 2, status: 'active' }),
+    )
+    await waitFor(() =>
+      expect(screen.queryByText(/environment is still building/)).toBeNull(),
+    )
+  })
+
+  it('offers repair and the standard fallback when verification fails', async () => {
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    const pair = scanResult()
+    act(() => {
+      useStore.getState().startEnvBuild(workspace.id, {
+        version: 2,
+        status: 'building',
+        harness: 'claude',
+        dockerfile: pair.dockerfile,
+        manifest: pair.manifest,
+      })
+      useStore.getState().applyEnvBuild(workspace.id, {
+        version: 2,
+        status: 'failed',
+        detail: 'jq reported 1.6, the manifest claims 1.7.1',
+      })
+    })
+
+    expect(await screen.findByText(/jq reported 1\.6/)).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'Keep the standard environment' }),
+    ).toBeDefined()
+
+    // The repair is a refine scan seeded with the failure detail.
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Ask the agent to fix it' }),
+    )
+    await waitFor(() => {
+      expect(client.openEnvScan).toHaveBeenCalledWith(
+        {
+          harness: 'claude',
+          mode: 'refine',
+          previous_dockerfile: pair.dockerfile,
+          previous_manifest_json: JSON.stringify(pair.manifest),
+          feedback: 'jq reported 1.6, the manifest claims 1.7.1',
+        },
+        expect.anything(),
+      )
+    })
+    // ...feeding back into the same review gate.
+    expect(
+      await screen.findByRole('button', { name: 'Approve and build' }),
+    ).toBeDefined()
+  })
+
+  it('keeping the standard environment dismisses a failed build', async () => {
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    act(() => {
+      useStore.getState().startEnvBuild(workspace.id, {
+        version: 2,
+        status: 'building',
+      })
+      useStore.getState().applyEnvBuild(workspace.id, {
+        version: 2,
+        status: 'failed',
+        detail: 'the build ran out of disk',
+      })
+    })
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Keep the standard environment',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.queryByText(/ran out of disk/)).toBeNull(),
+    )
+    expect(useStore.getState().envBuilds[workspace.id]).toBeUndefined()
   })
 })
