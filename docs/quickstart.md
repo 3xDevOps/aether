@@ -134,7 +134,7 @@ One command installs the agent, logs it in, and registers it:
 aether agent add claude --workspace myproject
 ```
 
-For a shipped agent (claude, codex, opencode) the vendor's installer runs
+For a shipped agent (claude, codex, pi, amp, opencode) the vendor's installer runs
 automatically, then you land in a shell **inside a server-created container**
 with the agent on PATH: run its login flow (pick a device-code or headless
 option, the container has no browser) and `exit` cleanly.
