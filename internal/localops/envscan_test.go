@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +26,14 @@ const validScanManifest = `[{"name":"jq","version":"1.7.1","reason":"test","star
 
 // writeStub writes an executable shell script and returns the argv
 // override that runs it with the rendered prompt as its first argument.
+// The stubs are POSIX shell scripts, so every test that runs one skips
+// on Windows; the engine itself execs harness argv directly and stays
+// covered there by the portable fake-harness and validation tests.
 func writeStub(t *testing.T, body string) []string {
 	t.Helper()
+	if goruntime.GOOS == "windows" {
+		t.Skip("stub harnesses are POSIX shell scripts")
+	}
 	script := filepath.Join(t.TempDir(), "stub.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
 		t.Fatal(err)
@@ -110,6 +117,11 @@ MANIFESTEOF
 func TestDetectHarnesses(t *testing.T) {
 	bin := t.TempDir()
 	for _, name := range []string{"claude", "pi"} {
+		// Windows PATH lookup only finds files with an executable
+		// extension, so the stub carries one there.
+		if goruntime.GOOS == "windows" {
+			name += ".exe"
+		}
 		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}

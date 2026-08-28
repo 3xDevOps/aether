@@ -3,6 +3,7 @@ package envprompt
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -142,7 +143,9 @@ var repoClauses = []string{
 }
 
 func TestRenderRepo(t *testing.T) {
-	const outputDir = "/tmp/aether-env-scan-1234"
+	// filepath.Join over t.TempDir() keeps the path absolute on every
+	// platform; a bare /tmp literal is not absolute on Windows.
+	outputDir := filepath.Join(t.TempDir(), "aether-env-scan-1234")
 	prompt, err := RenderRepo(RepoParams{BaseImage: "ubuntu:24.04", OutputDir: outputDir})
 	if err != nil {
 		t.Fatalf("RenderRepo: %v", err)
@@ -166,8 +169,9 @@ func TestRenderRepo(t *testing.T) {
 }
 
 func TestRenderRepoRequiresParams(t *testing.T) {
+	absOut := filepath.Join(t.TempDir(), "out")
 	for name, params := range map[string]RepoParams{
-		"base image":                {OutputDir: "/tmp/out"},
+		"base image":                {OutputDir: absOut},
 		"output directory":          {BaseImage: "ubuntu:24.04"},
 		"absolute output directory": {BaseImage: "ubuntu:24.04", OutputDir: "relative/out"},
 	} {
@@ -182,7 +186,7 @@ func TestRenderRepoRequiresParams(t *testing.T) {
 // directory and forbid touching repository files, and must never point
 // the agent at the current directory (the repository).
 func TestRenderRefineWithOutputDir(t *testing.T) {
-	const outputDir = "/tmp/aether-envscan-refine-1234"
+	outputDir := filepath.Join(t.TempDir(), "aether-envscan-refine-1234")
 	prompt, err := RenderRefine(RefineParams{
 		Dockerfile:   "FROM ubuntu:24.04\nRUN apt-get install -y jq=1.7*\n",
 		ManifestJSON: `[{"name":"jq","version":"1.7","start_line":2,"end_line":2,"check_command":"jq --version"}]`,

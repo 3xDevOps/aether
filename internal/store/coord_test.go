@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -271,6 +272,11 @@ func TestDeliverRunMessagesSurvivesConcurrentCommits(t *testing.T) {
 			// this test is about.
 			_ = writer.AppendRunMessage(ctx,
 				&RunMessage{WorkspaceID: w.ID, FromRun: from.ID, ToRun: noise.ID, Body: "noise"}, 1<<20)
+			// Yield between commits: the regression under test is the
+			// BUSY_SNAPSHOT lock upgrade, which any interleaved commit
+			// triggers. An unthrottled loop instead starves the reader
+			// past its busy timeout on slow CI runners.
+			time.Sleep(time.Millisecond)
 		}
 	}()
 	defer func() {
