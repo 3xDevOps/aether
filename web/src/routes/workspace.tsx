@@ -2,11 +2,13 @@ import { useMemo, useState } from 'react'
 import { RunList } from '@/components/run-list'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
+import { api, type Api } from '@/lib/api'
 import {
   BudgetDialog,
   WorkspaceSettingsDialog,
 } from '@/routes/admin-dialogs'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { EnvironmentPanel } from '@/routes/workspaces/environment'
 import { useStore } from '@/store'
 import { useCapability, usePendingApprovalRuns } from '@/store/hooks'
 import { sidebarRuns } from '@/store/selectors'
@@ -16,7 +18,10 @@ import { sidebarRuns } from '@/store/selectors'
  * to hide in the Templates header. The spend cap and the steering policy
  * belong beside the thing they govern.
  */
-function WorkspaceView({ params }: RouteProps) {
+export function WorkspaceView({
+  params,
+  client = api,
+}: RouteProps & { client?: Api }) {
   const workspaceID = params.workspaceId
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const allRuns = useStore((s) => s.runs)
@@ -62,6 +67,11 @@ function WorkspaceView({ params }: RouteProps) {
         )}
       </div>
       <div className="flex-1 overflow-y-auto">
+        {caps.hasMethod('env.status') && (
+          <div className="border-b px-4 py-3">
+            <EnvironmentPanel workspaceID={workspaceID} client={client} />
+          </div>
+        )}
         <RunList runs={runs} empty="No runs in this workspace yet." />
       </div>
       {dialog === 'budget' && (

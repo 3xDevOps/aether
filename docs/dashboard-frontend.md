@@ -541,6 +541,17 @@ routes (`approvals`, `timeline`).
   branch without offering to change it: runs have already forked from it, so
   editing it there would only make the displayed branch disagree with the
   branches on disk.
+- **The Environment panel sits above the run list.**
+  `routes/workspaces/environment.tsx` renders in the workspace view's
+  scrolling body wherever the gateway serves `env.status`: the active
+  version's manifest as a plain list (name, version, reason), one sentence
+  saying which path made it and with which agent, a compact version history
+  with the failure detail on failed rows, and rollback behind a confirm that
+  names the version it returns to - the newest good version below the active
+  one, the same pick the server makes. A workspace with no definitions gets
+  one sentence: it uses the image it was created with. The panel re-reads
+  `env.status` whenever this session's build state moves, so an approved
+  build's outcome lands in the history without a reload.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored

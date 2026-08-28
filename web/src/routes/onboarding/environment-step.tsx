@@ -32,8 +32,9 @@ const card =
 const pane =
   'max-h-64 overflow-x-auto overflow-y-auto border-t px-3 py-2 font-mono text-xs whitespace-pre-wrap'
 
-/** The setup-capable CLIs by the names people know them under. */
-const friendly: Record<string, string> = {
+/** The setup-capable CLIs by the names people know them under; the
+ * workspace Environment panel reads it too. */
+export const friendly: Record<string, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
   pi: 'pi',
