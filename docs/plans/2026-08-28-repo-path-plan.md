@@ -95,12 +95,15 @@ engine so CLI-less surfaces get the same errors.
   the scan fails stating the repository was modified. The fake harness
   gains a canned repo pair (distinct from the mirror one) so the flow is
   demoable.
-- [ ] Tests first: a stub harness observing its working directory
+- [x] Tests first: a stub harness observing its working directory
   proves it runs inside the repo and writes to the scratch dir; each
   path-validation failure; the modified-repo guard trips when the stub
   touches a repo file; refine inherits the repo path; the fake harness
   returns the canned repo pair.
-- [ ] Implement, run `go test ./internal/localops/`, commit.
+- [x] Implement, run `go test ./internal/localops/`, commit.
+  (Adaptation: repo-anchored refines needed the refine prompt to name
+  the scratch output directory, so `RefineParams` gained an optional
+  `OutputDir` and the template version rose to 3.)
 
 ### Task 3: local gateway - repo_path on the scan socket
 
