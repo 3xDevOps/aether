@@ -454,11 +454,22 @@ export interface HarnessStatus {
   installed: boolean
 }
 
-/** The first frame the client sends on /ws/envscan. A refine run carries
- * the pair it starts from and the user's feedback; inventory omits them. */
+/** The env.harnesses verb result: the setup-capable harnesses plus, when
+ * the saved link config knows exactly one repository folder, a prefill
+ * suggestion for the wizard's from-repo input. */
+export interface EnvHarnessesResult {
+  harnesses: HarnessStatus[]
+  repo_path?: string
+}
+
+/** The first frame the client sends on /ws/envscan. A repo scan names the
+ * repository folder to read; a refine run carries the pair it starts from
+ * and the user's feedback, plus the repo folder when that pair came from
+ * a repo scan. Inventory omits them all. */
 export interface EnvScanRequest {
   harness: string
-  mode: 'inventory' | 'refine'
+  mode: 'inventory' | 'repo' | 'refine'
+  repo_path?: string
   previous_dockerfile?: string
   previous_manifest_json?: string
   feedback?: string

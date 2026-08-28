@@ -11,6 +11,7 @@ import type {
   DaemonInstallResult,
   DaemonStatusResult,
   DiskUsage,
+  EnvHarnessesResult,
   EnvScanFrame,
   EnvScanRequest,
   EnvScanResult,
@@ -18,7 +19,6 @@ import type {
   EnvStatusResult,
   EnvironmentSource,
   GatewayCapabilities,
-  HarnessStatus,
   ImageScaffoldResult,
   LinkRepoResult,
   LinkStatus,
@@ -192,6 +192,7 @@ function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
         harness: req.harness,
         mode: req.mode,
       }
+      if (req.repo_path) start.repo_path = req.repo_path
       if (req.previous_dockerfile) start.previous_dockerfile = req.previous_dockerfile
       if (req.previous_manifest_json) {
         start.previous_manifest_json = req.previous_manifest_json
@@ -458,11 +459,9 @@ export const api = {
       workspace: ws,
       ...(version ? { version } : {}),
     }).then((r) => r.version),
-  /** Which setup-capable harnesses this machine has on PATH. */
-  envHarnesses: () =>
-    local<{ harnesses: HarnessStatus[] }>('env.harnesses').then(
-      (r) => r.harnesses,
-    ),
+  /** Which setup-capable harnesses this machine has on PATH, plus the
+   * linked repository folder when the gateway knows exactly one. */
+  envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
   openEnvScan,
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>

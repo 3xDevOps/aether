@@ -279,11 +279,17 @@ describe('onboarding wizard', () => {
     const current = steps.querySelector('[aria-current="step"]')
     expect(current?.textContent).toContain('Environment')
 
-    // Mirror is the recommended, preselected card; the picker lists only
-    // the harnesses detected on this machine, by friendly name.
+    // Mirror is the recommended, preselected card of the three; the picker
+    // lists only the harnesses detected on this machine, by friendly name.
     expect(
       screen.getByRole('radio', { name: 'Mirror my machine' }),
     ).toHaveProperty('checked', true)
+    expect(
+      screen.getByRole('radio', { name: 'From the repository' }),
+    ).toHaveProperty('checked', false)
+    expect(
+      screen.getByRole('radio', { name: 'Keep the standard environment' }),
+    ).toHaveProperty('checked', false)
     const picker = await screen.findByLabelText('Coding agent')
     expect(picker.textContent).toContain('Claude Code')
     expect(picker.textContent).not.toContain('Codex')
@@ -292,12 +298,14 @@ describe('onboarding wizard', () => {
 
   it('explains when no supported agent is installed and keeps the way on', async () => {
     const client = fakeApi({
-      envHarnesses: vi.fn(async () => [
-        { name: 'claude', installed: false },
-        { name: 'codex', installed: false },
-        { name: 'pi', installed: false },
-        { name: 'amp', installed: false },
-      ]),
+      envHarnesses: vi.fn(async () => ({
+        harnesses: [
+          { name: 'claude', installed: false },
+          { name: 'codex', installed: false },
+          { name: 'pi', installed: false },
+          { name: 'amp', installed: false },
+        ],
+      })),
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
@@ -338,6 +346,7 @@ describe('environment step scan flow', () => {
     await waitFor(() => {
       expect(onReview).toHaveBeenCalledWith({
         harness: 'claude',
+        source: 'mirror',
         dockerfile: scanResult().dockerfile,
         manifest: scanResult().manifest,
       })
@@ -418,6 +427,121 @@ describe('environment step scan flow', () => {
     expect(screen.queryByLabelText('Coding agent')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(onNext).toHaveBeenCalled()
+  })
+
+  it('shows a listing failure with a retry, without claiming no agent exists', async () => {
+    const envHarnesses = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('the gateway is restarting'))
+      .mockResolvedValue({
+        harnesses: [{ name: 'claude', installed: true }],
+      })
+    const client = fakeApi({ envHarnesses })
+    renderStep(client)
+
+    // The verb failed: say so and offer a retry. The no-agent notice would
+    // be a guess, so it stays away.
+    expect(await screen.findByText('the gateway is restarting')).toBeDefined()
+    expect(
+      screen.queryByText(/No supported coding agent was found/),
+    ).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Start scan' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByLabelText('Coding agent')).toBeDefined()
+    expect(screen.queryByText('the gateway is restarting')).toBeNull()
+  })
+})
+
+describe('environment step repo card', () => {
+  function renderStep(client: Api) {
+    seed()
+    const onNext = vi.fn()
+    const onReview = vi.fn()
+    render(<EnvironmentStep client={client} onNext={onNext} onReview={onReview} />)
+    return { onNext, onReview }
+  }
+
+  it('reveals the folder input prefilled from the verb suggestion', async () => {
+    const client = fakeApi()
+    renderStep(client)
+
+    // Nothing repo-specific shows until the card is picked.
+    expect(screen.queryByLabelText('Repository folder')).toBeNull()
+    fireEvent.click(
+      await screen.findByRole('radio', { name: 'From the repository' }),
+    )
+
+    const folder =
+      await screen.findByLabelText<HTMLInputElement>('Repository folder')
+    expect(folder.value).toBe('/src/repo')
+  })
+
+  it('starts the scan with mode repo and the edited path', async () => {
+    const client = fakeApi()
+    const { onReview } = renderStep(client)
+
+    fireEvent.click(
+      await screen.findByRole('radio', { name: 'From the repository' }),
+    )
+    fireEvent.change(await screen.findByLabelText('Repository folder'), {
+      target: { value: '/home/alice/code/myproject' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Start scan' }))
+
+    expect(client.openEnvScan).toHaveBeenCalledWith(
+      {
+        harness: 'claude',
+        mode: 'repo',
+        repo_path: '/home/alice/code/myproject',
+      },
+      expect.anything(),
+    )
+    // The review payload says where the pair came from, so approval can
+    // save with source repo and refine runs can reuse the folder.
+    await waitFor(() => {
+      expect(onReview).toHaveBeenCalledWith({
+        harness: 'claude',
+        source: 'repo',
+        repoPath: '/home/alice/code/myproject',
+        dockerfile: scanResult().dockerfile,
+        manifest: scanResult().manifest,
+      })
+    })
+  })
+
+  it('surfaces an engine path refusal inline and keeps the input editable', async () => {
+    const openEnvScan = vi.fn(
+      (_req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession => {
+        // The engine refuses before launching the agent: no status beyond
+        // the gateway's own detecting frame, then the error.
+        queueMicrotask(() => {
+          h.onStatus('detecting')
+          h.onError('/nope is not a folder on this machine')
+        })
+        return { close: vi.fn() }
+      },
+    )
+    const client = fakeApi({ openEnvScan })
+    renderStep(client)
+
+    fireEvent.click(
+      await screen.findByRole('radio', { name: 'From the repository' }),
+    )
+    fireEvent.change(await screen.findByLabelText('Repository folder'), {
+      target: { value: '/nope' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Start scan' }))
+
+    // Back on the cards with the refusal next to the input, not on the
+    // failure screen.
+    expect(
+      await screen.findByText('/nope is not a folder on this machine'),
+    ).toBeDefined()
+    const folder = screen.getByLabelText<HTMLInputElement>('Repository folder')
+    expect(folder.value).toBe('/nope')
+    expect(screen.queryByText('The scan did not finish')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Start scan' })).toBeDefined()
   })
 })
 
@@ -551,6 +675,77 @@ describe('environment review gate', () => {
     expect(
       await screen.findByRole('button', { name: 'Approve and build' }),
     ).toBeDefined()
+  })
+
+  /** Walks to the review gate through the repo card instead of mirror. */
+  async function toRepoReviewGate(client: Api) {
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toEnvironmentStep()
+    fireEvent.click(
+      await screen.findByRole('radio', { name: 'From the repository' }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Start scan' }))
+    await screen.findByRole('button', { name: 'Approve and build' })
+  }
+
+  it('approving a repo scan saves with source repo', async () => {
+    const client = fakeApi()
+    await toRepoReviewGate(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve and build' }))
+
+    await waitFor(() => {
+      expect(client.envSave).toHaveBeenCalledWith({
+        workspace: { id: workspace.id },
+        dockerfile: scanResult().dockerfile,
+        manifest: scanResult().manifest,
+        source: 'repo',
+        harness: 'claude',
+      })
+    })
+  })
+
+  it('refining a repo-sourced pair reuses the repository folder', async () => {
+    const client = fakeApi()
+    await toRepoReviewGate(client)
+
+    fireEvent.change(screen.getByLabelText('Request changes'), {
+      target: { value: 'use node 20' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to the agent' }))
+
+    await waitFor(() => {
+      expect(client.openEnvScan).toHaveBeenLastCalledWith(
+        {
+          harness: 'claude',
+          mode: 'refine',
+          repo_path: '/src/repo',
+          previous_dockerfile: scanResult().dockerfile,
+          previous_manifest_json: JSON.stringify(scanResult().manifest),
+          feedback: 'use node 20',
+        },
+        expect.anything(),
+      )
+    })
+  })
+
+  it('Back after approving returns to the choice cards, not the review', async () => {
+    const client = fakeApi()
+    await toReviewGate(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve and build' }))
+    expect(
+      await screen.findByRole('region', { name: 'Repository' }),
+    ).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(
+      await screen.findByRole('radio', { name: 'Mirror my machine' }),
+    ).toBeDefined()
+    expect(
+      screen.queryByRole('button', { name: 'Approve and build' }),
+    ).toBeNull()
   })
 })
 

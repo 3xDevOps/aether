@@ -1,14 +1,16 @@
 // The onboarding Environment step and what follows it. An admin chooses
-// between mirroring this machine into the workspace image and keeping the
-// standard environment the workspace was created with. Mirror runs the
-// chosen coding agent headless through the local gateway's /ws/envscan
-// socket and hands the validated Dockerfile and manifest pair to the
-// review gate (EnvironmentReview) through onReview; approve there saves
-// the definition and starts the background build, and EnvironmentBanner
-// follows that build wherever later steps and the run view render it.
-// Nothing builds without the review. Every failure path offers the keep
-// card, so the wizard never dead-ends here. Non-admin members see only
-// the keep path: saving an environment is an administrator method.
+// between mirroring this machine into the workspace image, letting the
+// agent read the repository and build what the project needs, and keeping
+// the standard environment the workspace was created with. The two agent
+// paths run the chosen coding agent headless through the local gateway's
+// /ws/envscan socket and hand the validated Dockerfile and manifest pair
+// to the review gate (EnvironmentReview) through onReview; approve there
+// saves the definition and starts the background build, and
+// EnvironmentBanner follows that build wherever later steps and the run
+// view render it. Nothing builds without the review. Every failure path
+// offers the keep card, so the wizard never dead-ends here. Non-admin
+// members see only the keep path: saving an environment is an
+// administrator method.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { message } from '@/components/palette/palette'
@@ -46,18 +48,26 @@ const statusLine: Record<EnvScanStatus, string> = {
   retrying: 'Fixing a problem with the result and trying once more...',
 }
 
-/** What a finished scan hands onward: the validated pair plus the harness
- * that wrote it. The review gate consumes exactly this payload. */
+/** What a finished scan hands onward: the validated pair, the harness
+ * that wrote it, and where it came from. The review gate consumes exactly
+ * this payload: approval saves with the source, and refine runs for a
+ * repo-sourced pair reuse the repository folder. */
 export interface EnvScanReview {
   harness: string
+  source: 'mirror' | 'repo'
+  /** The repository folder a repo scan read; absent for mirror. */
+  repoPath?: string
   dockerfile: string
   manifest: ManifestItem[]
 }
 
+/** The two scan starts: mirror reads this machine, repo reads a folder. */
+type ScanMode = 'inventory' | 'repo'
+
 type Phase =
   | { name: 'choose' }
-  | { name: 'scanning'; status: EnvScanStatus }
-  | { name: 'failed'; detail: string; outputTail?: string }
+  | { name: 'scanning'; mode: ScanMode; status: EnvScanStatus }
+  | { name: 'failed'; mode: ScanMode; detail: string; outputTail?: string }
 
 export function EnvironmentStep({
   client,
@@ -72,58 +82,82 @@ export function EnvironmentStep({
   onReview: (review: EnvScanReview) => void
 }) {
   const isAdmin = useIsAdmin()
-  const [choice, setChoice] = useState<'mirror' | 'keep'>('mirror')
+  const [choice, setChoice] = useState<'mirror' | 'repo' | 'keep'>('mirror')
   const [harnesses, setHarnesses] = useState<HarnessStatus[] | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [harness, setHarness] = useState('')
+  const [repoPath, setRepoPath] = useState('')
+  const [repoError, setRepoError] = useState<string | null>(null)
   const [phase, setPhase] = useState<Phase>({ name: 'choose' })
   const [lines, setLines] = useState<string[]>([])
   const session = useRef<EnvScanSession | null>(null)
   const group = useId()
 
-  useEffect(() => {
-    if (!isAdmin) return
+  const load = useCallback(() => {
+    // A failed listing keeps harnesses null: unknown is not "none found",
+    // so the render shows the error with a retry, and the keep card stays
+    // the way on.
+    setListError(null)
     client
       .envHarnesses()
-      .then((list) => {
-        setHarnesses(list)
-        const first = list.find((h) => h.installed)
+      .then((result) => {
+        setHarnesses(result.harnesses)
+        const first = result.harnesses.find((h) => h.installed)
         if (first) setHarness((prev) => prev || first.name)
+        const suggested = result.repo_path
+        if (suggested) setRepoPath((prev) => prev || suggested)
       })
-      .catch((err) => {
-        // The detection verb failing leaves the keep card as the way on.
-        setHarnesses([])
-        setListError(message(err))
-      })
-  }, [client, isAdmin])
+      .catch((err) => setListError(message(err)))
+  }, [client])
+
+  useEffect(() => {
+    if (isAdmin) load()
+  }, [isAdmin, load])
 
   // Leaving the step closes the socket, which cancels the scan and its
   // process on the gateway.
   useEffect(() => () => session.current?.close(), [])
 
   const listLoading = useDelayed(
-    isAdmin && choice === 'mirror' && harnesses === null && listError === null,
+    isAdmin && choice !== 'keep' && harnesses === null && listError === null,
   )
 
-  const start = () => {
+  const start = (mode: ScanMode) => {
+    const path = repoPath.trim()
     setLines([])
-    setPhase({ name: 'scanning', status: 'detecting' })
+    setRepoError(null)
+    setPhase({ name: 'scanning', mode, status: 'detecting' })
+    // The engine checks the repo folder before launching the agent, so an
+    // error that arrives before any post-launch status is a refusal of
+    // the folder: it belongs inline next to the input, not on the
+    // failure screen.
+    let launched = false
     session.current = client.openEnvScan(
-      { harness, mode: 'inventory' },
+      { harness, mode, ...(mode === 'repo' ? { repo_path: path } : {}) },
       {
         onOutput: (line) => setLines((prev) => [...prev, line]),
-        onStatus: (status) => setPhase({ name: 'scanning', status }),
+        onStatus: (status) => {
+          if (status !== 'detecting') launched = true
+          setPhase({ name: 'scanning', mode, status })
+        },
         onResult: (result) => {
           session.current = null
           onReview({
             harness,
+            source: mode === 'repo' ? 'repo' : 'mirror',
+            ...(mode === 'repo' ? { repoPath: path } : {}),
             dockerfile: result.dockerfile,
             manifest: result.manifest,
           })
         },
         onError: (detail, outputTail) => {
           session.current = null
-          setPhase({ name: 'failed', detail, outputTail })
+          if (mode === 'repo' && !launched) {
+            setRepoError(detail)
+            setPhase({ name: 'choose' })
+            return
+          }
+          setPhase({ name: 'failed', mode, detail, outputTail })
         },
       },
     )
@@ -151,11 +185,20 @@ export function EnvironmentStep({
   }
 
   if (phase.name === 'scanning') {
+    // The repo scan reads the project, not this machine; the copy says so.
+    const line =
+      phase.mode === 'repo' && phase.status === 'running'
+        ? 'Reading the project files...'
+        : statusLine[phase.status]
     return (
       <section aria-label="Environment" className="space-y-3">
-        <h2 className="text-sm font-medium">Scanning this machine</h2>
+        <h2 className="text-sm font-medium">
+          {phase.mode === 'repo'
+            ? 'Reading the repository'
+            : 'Scanning this machine'}
+        </h2>
         <p className="text-sm" role="status">
-          {statusLine[phase.status]}
+          {line}
         </p>
         <details className="rounded-md border bg-card">
           <summary className="cursor-pointer px-3 py-2 text-sm">
@@ -184,7 +227,7 @@ export function EnvironmentStep({
           </details>
         )}
         <div className="flex gap-2">
-          <Button size="sm" onClick={start}>
+          <Button size="sm" onClick={() => start(phase.mode)}>
             Try again
           </Button>
           <Button size="sm" variant="outline" onClick={onNext}>
@@ -201,8 +244,8 @@ export function EnvironmentStep({
     <section aria-label="Environment" className="space-y-3">
       <h2 className="text-sm font-medium">Set up the workspace environment</h2>
       <p className="text-sm text-muted-foreground">
-        Agents run in a remote environment. Mirror this machine so it has the
-        same tools you use here, or keep the ready-made one.
+        Agents run in a remote environment. Mirror this machine, build it
+        from the repository, or keep the ready-made one.
       </p>
       <fieldset className="space-y-2">
         <legend className="sr-only">Environment path</legend>
@@ -234,6 +277,23 @@ export function EnvironmentStep({
             type="radio"
             name={group}
             className="mt-0.5"
+            checked={choice === 'repo'}
+            onChange={() => setChoice('repo')}
+            aria-label="From the repository"
+          />
+          <span className="min-w-0 flex-1 space-y-0.5">
+            <span className="block font-medium">From the repository</span>
+            <span className="block text-xs text-muted-foreground">
+              The agent reads the project's own files and builds what it
+              needs.
+            </span>
+          </span>
+        </label>
+        <label className={card}>
+          <input
+            type="radio"
+            name={group}
+            className="mt-0.5"
             checked={choice === 'keep'}
             onChange={() => setChoice('keep')}
             aria-label="Keep the standard environment"
@@ -249,10 +309,17 @@ export function EnvironmentStep({
           </span>
         </label>
       </fieldset>
-      {choice === 'mirror' && (
+      {choice !== 'keep' && (
         <>
           {listLoading && <Skeleton className="h-8 w-full" />}
-          {listError && <p className="text-xs text-state-failed">{listError}</p>}
+          {listError && (
+            <div className="space-y-2">
+              <p className="text-xs text-state-failed">{listError}</p>
+              <Button size="sm" variant="outline" onClick={load}>
+                Retry
+              </Button>
+            </div>
+          )}
           {harnesses !== null && installed.length === 0 && (
             <p className="text-sm text-muted-foreground">
               No supported coding agent was found on this machine. Install
@@ -276,7 +343,32 @@ export function EnvironmentStep({
                   ))}
                 </select>
               </label>
-              <Button size="sm" disabled={!harness} onClick={start}>
+              {choice === 'repo' && (
+                <>
+                  <label className="block space-y-1 text-sm">
+                    Repository folder
+                    <input
+                      className={field}
+                      value={repoPath}
+                      placeholder="/path/to/your/project"
+                      onChange={(e) => {
+                        setRepoPath(e.target.value)
+                        setRepoError(null)
+                      }}
+                    />
+                  </label>
+                  {repoError && (
+                    <p className="text-xs text-state-failed">{repoError}</p>
+                  )}
+                </>
+              )}
+              <Button
+                size="sm"
+                disabled={
+                  !harness || (choice === 'repo' && repoPath.trim() === '')
+                }
+                onClick={() => start(choice === 'repo' ? 'repo' : 'inventory')}
+              >
                 Start scan
               </Button>
             </>
@@ -359,6 +451,9 @@ export function EnvironmentReview({
         {
           harness: pair.harness,
           mode: 'refine',
+          // A repo-sourced pair keeps its anchor: the refine run reads
+          // the same repository the original scan did.
+          ...(pair.repoPath ? { repo_path: pair.repoPath } : {}),
           previous_dockerfile: edited.dockerfile,
           previous_manifest_json: JSON.stringify(edited.items),
           feedback: note,
@@ -369,7 +464,7 @@ export function EnvironmentReview({
           onResult: (result) => {
             session.current = null
             setPair({
-              harness: pair.harness,
+              ...pair,
               dockerfile: result.dockerfile,
               manifest: result.manifest,
             })
@@ -384,7 +479,7 @@ export function EnvironmentReview({
         },
       )
     },
-    [client, pair.harness, edited],
+    [client, pair, edited],
   )
 
   // A repair mount goes straight into the refine run with the failure
@@ -406,7 +501,7 @@ export function EnvironmentReview({
         workspace: ws,
         dockerfile: edited.dockerfile,
         manifest: edited.items,
-        source: 'mirror',
+        source: pair.source,
         harness: pair.harness,
       })
       // The events socket is live app-wide already; priming the slice
@@ -415,6 +510,8 @@ export function EnvironmentReview({
       startEnvBuild(workspaceId, {
         version,
         status: 'building',
+        source: pair.source,
+        repoPath: pair.repoPath,
         harness: pair.harness,
         dockerfile: edited.dockerfile,
         manifest: edited.items,
@@ -624,6 +721,10 @@ export function EnvironmentBanner({
           workspaceId={workspaceId}
           review={{
             harness: build.harness,
+            // Builds seen only through events carry no source; mirror is
+            // the safe default for their repair saves.
+            source: build.source ?? 'mirror',
+            repoPath: build.repoPath,
             dockerfile: build.dockerfile,
             manifest: build.manifest,
           }}

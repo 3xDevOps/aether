@@ -342,12 +342,17 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     envSave: vi.fn(async () => 2),
     envBuild: vi.fn(async () => 2),
-    envHarnesses: vi.fn(async () => [
-      { name: 'claude', installed: true },
-      { name: 'codex', installed: false },
-      { name: 'pi', installed: false },
-      { name: 'amp', installed: false },
-    ]),
+    // The gateway knows one linked repo, so the verb suggests its folder
+    // for the wizard's from-repo input.
+    envHarnesses: vi.fn(async () => ({
+      harnesses: [
+        { name: 'claude', installed: true },
+        { name: 'codex', installed: false },
+        { name: 'pi', installed: false },
+        { name: 'amp', installed: false },
+      ],
+      repo_path: '/src/repo',
+    })),
     // A scan that succeeds with the canned pair on the next tick, like the
     // gateway's fake harness; tests drive other outcomes by overriding.
     openEnvScan: vi.fn(

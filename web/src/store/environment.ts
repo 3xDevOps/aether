@@ -18,6 +18,11 @@ export interface EnvBuild {
   harness?: string
   dockerfile?: string
   manifest?: ManifestItem[]
+  /** Which scan path produced the pair, so a repair approval saves with
+   * the same source; the repository folder rides along for repo pairs so
+   * the repair's refine run reads the same repository. */
+  source?: 'mirror' | 'repo'
+  repoPath?: string
 }
 
 export interface EnvironmentSlice {

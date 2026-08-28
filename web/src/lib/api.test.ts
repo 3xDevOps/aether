@@ -115,13 +115,17 @@ describe('environment methods', () => {
   it('reads the detected harnesses over the local gateway', async () => {
     const fetchSpy = fakeFetch({
       harnesses: [{ name: 'claude', installed: true }],
+      repo_path: '/src/repo',
     })
     vi.stubGlobal('fetch', fetchSpy)
 
-    const harnesses = await api.envHarnesses()
+    const detected = await api.envHarnesses()
 
     expect(fetchSpy.mock.calls[0][0]).toBe('/local/v1/env.harnesses')
-    expect(harnesses).toEqual([{ name: 'claude', installed: true }])
+    expect(detected).toEqual({
+      harnesses: [{ name: 'claude', installed: true }],
+      repo_path: '/src/repo',
+    })
   })
 
   it('is covered end to end by the fixture fakes', async () => {
@@ -142,8 +146,14 @@ describe('environment methods', () => {
     ).resolves.toBeGreaterThan(0)
     await expect(fake.envBuild({ id: 'wsp_1' })).resolves.toBeGreaterThan(0)
 
-    const harnesses = await fake.envHarnesses()
-    expect(harnesses.map((h) => h.name)).toEqual(['claude', 'codex', 'pi', 'amp'])
+    const detected = await fake.envHarnesses()
+    expect(detected.harnesses.map((h) => h.name)).toEqual([
+      'claude',
+      'codex',
+      'pi',
+      'amp',
+    ])
+    expect(detected.repo_path).toBe('/src/repo')
 
     const results: EnvScanResult[] = []
     fake.openEnvScan(

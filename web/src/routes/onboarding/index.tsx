@@ -89,8 +89,16 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             client={client}
             workspaceId={workspace?.id}
             review={review}
-            onDone={() => setStep(3)}
-            onKeep={() => setStep(3)}
+            // Advancing clears the review, so Back from Repository lands
+            // on the choice cards rather than a stale review gate.
+            onDone={() => {
+              setReview(null)
+              setStep(3)
+            }}
+            onKeep={() => {
+              setReview(null)
+              setStep(3)
+            }}
           />
         )}
         {step === 3 && (

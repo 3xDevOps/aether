@@ -52,6 +52,22 @@ describe('openEnvScan', () => {
     s.close()
   })
 
+  it('carries the repository folder on a repo scan', () => {
+    const s = open({
+      harness: 'claude',
+      mode: 'repo',
+      repo_path: '/home/alice/code/myproject',
+    })
+    StubSocket.last().onopen?.()
+
+    expect(StubSocket.last().frames()[0]).toEqual({
+      harness: 'claude',
+      mode: 'repo',
+      repo_path: '/home/alice/code/myproject',
+    })
+    s.close()
+  })
+
   it('carries the previous pair and feedback on a refine scan', () => {
     const s = open({
       harness: 'codex',
