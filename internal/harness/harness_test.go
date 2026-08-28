@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-func TestRegistryShipsFourProfiles(t *testing.T) {
-	want := []string{"claude", "codex", "custom", "opencode"}
+func TestRegistryShipsSixProfiles(t *testing.T) {
+	want := []string{"amp", "claude", "codex", "custom", "opencode", "pi"}
 	var got []string
 	for _, p := range Profiles() {
 		got = append(got, p.Name)
@@ -27,6 +27,8 @@ func TestProfileDefaults(t *testing.T) {
 		"claude":   "--dangerously-skip-permissions",
 		"codex":    "--dangerously-bypass-approvals-and-sandbox",
 		"opencode": "", // opencode has no permission prompt flag to bypass
+		"pi":       "", // pi has no permission prompt flag to bypass
+		"amp":      "--dangerously-allow-all",
 	}
 	for name, flag := range autoFlags {
 		p, ok := Lookup(name)
@@ -78,6 +80,8 @@ func TestLocalRootAndDenyNames(t *testing.T) {
 		"claude":   ".claude",
 		"codex":    ".codex",
 		"opencode": ".local/share/opencode",
+		"pi":       ".pi",
+		"amp":      ".config/amp",
 		"custom":   "",
 	}
 	for name, root := range wantRoot {
@@ -96,6 +100,85 @@ func TestLocalRootAndDenyNames(t *testing.T) {
 		}
 		if p.ContainerLocalRoot("") != path.Join("/root", root) {
 			t.Errorf("%s ContainerLocalRoot(root) = %q", name, p.ContainerLocalRoot(""))
+		}
+	}
+}
+
+// TestSetupHarnesses pins the environment-setup subset: exactly claude,
+// codex, pi, amp, in that order. Later tasks and the dashboard treat this
+// list as the authority on which harnesses may drive environment setup;
+// opencode, custom, and fake stay launchable for runs but are never offered
+// here.
+func TestSetupHarnesses(t *testing.T) {
+	want := []string{"claude", "codex", "pi", "amp"}
+	var got []string
+	for _, p := range SetupHarnesses() {
+		got = append(got, p.Name)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("SetupHarnesses() names = %v, want %v", got, want)
+	}
+	for _, excluded := range []string{"opencode", "custom", "fake"} {
+		if slices.Contains(got, excluded) {
+			t.Errorf("SetupHarnesses() must not offer %q", excluded)
+		}
+	}
+	// Each entry is the full registry profile, not a name-only stub.
+	for _, p := range SetupHarnesses() {
+		registered, ok := Lookup(p.Name)
+		if !ok {
+			t.Fatalf("setup harness %q is not in the registry", p.Name)
+		}
+		if !slices.Equal(p.HeadlessArgs, registered.HeadlessArgs) {
+			t.Errorf("%s: setup profile headless argv %v differs from registry %v", p.Name, p.HeadlessArgs, registered.HeadlessArgs)
+		}
+	}
+}
+
+// The new setup-capable profiles must carry the same invariants the rest of
+// the registry holds: home-relative credential paths, a deny list covering
+// their token files, and an install script that stays inside ~/.local.
+func TestPiAndAmpProfiles(t *testing.T) {
+	pi, ok := Lookup("pi")
+	if !ok {
+		t.Fatal("pi profile missing")
+	}
+	if !slices.Equal(pi.EnvPassthrough, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}) {
+		t.Errorf("pi env passthrough = %v", pi.EnvPassthrough)
+	}
+	// pi stores OAuth tokens and API keys under ~/.pi/agent/.
+	for _, denied := range []string{"auth.json", "oauth.json"} {
+		if !slices.Contains(pi.DenyNames, denied) {
+			t.Errorf("pi deny names %v missing %q", pi.DenyNames, denied)
+		}
+	}
+	if pi.ResumeFlag != "--continue" {
+		t.Errorf("pi resume flag = %q, want --continue", pi.ResumeFlag)
+	}
+	if !strings.Contains(pi.InstallScript, "--ignore-scripts") {
+		t.Errorf("pi install script %q must pass --ignore-scripts per the vendor's instruction", pi.InstallScript)
+	}
+
+	amp, ok := Lookup("amp")
+	if !ok {
+		t.Fatal("amp profile missing")
+	}
+	if !slices.Equal(amp.EnvPassthrough, []string{"AMP_API_KEY"}) {
+		t.Errorf("amp env passthrough = %v", amp.EnvPassthrough)
+	}
+	// amp keeps settings under ~/.config/amp and XDG data (secrets.json,
+	// state.json) under ~/.local/share/amp; both must persist per member.
+	if !slices.Equal(amp.CredentialPaths, []string{".config/amp", ".local/share/amp"}) {
+		t.Errorf("amp credential paths = %v", amp.CredentialPaths)
+	}
+	for _, denied := range []string{"secrets.json", "state.json"} {
+		if !slices.Contains(amp.DenyNames, denied) {
+			t.Errorf("amp deny names %v missing %q", amp.DenyNames, denied)
+		}
+	}
+	for _, p := range []Profile{pi, amp} {
+		if !strings.Contains(p.InstallScript, "--prefix \"$HOME/.local\"") {
+			t.Errorf("%s install script %q must install into ~/.local", p.Name, p.InstallScript)
 		}
 	}
 }
