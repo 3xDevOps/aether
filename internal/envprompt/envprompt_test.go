@@ -13,6 +13,7 @@ import (
 var templateHashes = map[int]string{
 	1: "443382544fa970566cf85f1312f29fa40ffe75e4f71ab599e8fd4cd444ae98be",
 	2: "039d12aac2cbecca59ae17e43b7a4453c913e754c01cc8237ff31a5ef13e18fa",
+	3: "1fac34339b6c0a016a64f153b37d44b028fd3d907bdbbbd09fa2bd28fee82799",
 }
 
 func TestVersionPinsTemplate(t *testing.T) {
@@ -173,6 +174,47 @@ func TestRenderRepoRequiresParams(t *testing.T) {
 		if _, err := RenderRepo(params); err == nil {
 			t.Errorf("RenderRepo accepted a missing %s", name)
 		}
+	}
+}
+
+// TestRenderRefineWithOutputDir covers refine runs anchored in a
+// repository: the prompt must send both files to the named scratch
+// directory and forbid touching repository files, and must never point
+// the agent at the current directory (the repository).
+func TestRenderRefineWithOutputDir(t *testing.T) {
+	const outputDir = "/tmp/aether-envscan-refine-1234"
+	prompt, err := RenderRefine(RefineParams{
+		Dockerfile:   "FROM ubuntu:24.04\nRUN apt-get install -y jq=1.7*\n",
+		ManifestJSON: `[{"name":"jq","version":"1.7","start_line":2,"end_line":2,"check_command":"jq --version"}]`,
+		Feedback:     "drop jq, I never use it",
+		OutputDir:    outputDir,
+	})
+	if err != nil {
+		t.Fatalf("RenderRefine: %v", err)
+	}
+	if !strings.Contains(prompt, outputDir) {
+		t.Errorf("repo-anchored refine prompt does not name the output directory %q", outputDir)
+	}
+	if strings.Contains(prompt, "the current directory") {
+		t.Errorf("repo-anchored refine prompt still points at the current directory:\n%s", prompt)
+	}
+	flat := strings.Join(strings.Fields(prompt), " ")
+	if !strings.Contains(flat, "never modify, create, or delete") {
+		t.Errorf("repo-anchored refine prompt does not forbid touching repository files:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "{{") || strings.Contains(prompt, "}}") {
+		t.Errorf("prompt has unrendered template markers:\n%s", prompt)
+	}
+}
+
+func TestRenderRefineOutputDirMustBeAbsolute(t *testing.T) {
+	if _, err := RenderRefine(RefineParams{
+		Dockerfile:   "FROM ubuntu:24.04",
+		ManifestJSON: "[]",
+		Feedback:     "note",
+		OutputDir:    "relative/out",
+	}); err == nil {
+		t.Fatal("RenderRefine accepted a relative output directory")
 	}
 }
 

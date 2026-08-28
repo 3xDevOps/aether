@@ -19,7 +19,7 @@ import (
 // Version identifies the embedded template. Bump it on any change to
 // prompt.tmpl; the package test pins the template's hash to this number,
 // so an edit without a bump fails the build gate.
-const Version = 2
+const Version = 3
 
 //go:embed prompt.tmpl
 var templateText string
@@ -49,6 +49,12 @@ type RefineParams struct {
 	Dockerfile   string
 	ManifestJSON string
 	Feedback     string
+	// OutputDir, when set, anchors the refine run in a repository: the
+	// agent runs with the repository as its working directory, may read
+	// its files but never change them, and writes the revised pair into
+	// this absolute scratch path instead of the current directory. Empty
+	// for machine-mirror refines.
+	OutputDir string
 }
 
 // templateData is the single shape all templates render from.
@@ -94,12 +100,15 @@ func RenderRefine(params RefineParams) (string, error) {
 		return "", errors.New("envprompt: refine prompt needs the previous manifest JSON")
 	case strings.TrimSpace(params.Feedback) == "":
 		return "", errors.New("envprompt: refine prompt needs feedback text")
+	case params.OutputDir != "" && !filepath.IsAbs(params.OutputDir):
+		return "", fmt.Errorf("envprompt: refine prompt output directory must be absolute, got %q", params.OutputDir)
 	}
 	return render("refine", templateData{
 		BaseImage:    envdef.BaseImage,
 		Dockerfile:   params.Dockerfile,
 		ManifestJSON: params.ManifestJSON,
 		Feedback:     params.Feedback,
+		OutputDir:    params.OutputDir,
 	})
 }
 

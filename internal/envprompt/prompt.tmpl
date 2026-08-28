@@ -21,7 +21,7 @@ Translate every finding to its {{.BaseImage}} equivalent instead of
 copying it. Homebrew packages and darwin binaries must become apt
 packages or the tool's official Linux installer.
 
-Write exactly two files into the current directory:
+Write exactly two files into {{if .OutputDir}}{{.OutputDir}}{{else}}the current directory{{end}}:
 
 {{template "filespec" .}}
 
@@ -61,11 +61,19 @@ needs, not every tool it might ever touch.
 {{- end}}
 
 {{define "refine" -}}
+{{if .OutputDir -}}
+You are revising a Linux container image definition for the project in
+this repository. Apply the feedback below to the previous Dockerfile
+and manifest, then write the revised pair into {{.OutputDir}} under the
+same contract. Read repository files when you need to check a detail,
+but never modify, create, or delete them.
+{{- else -}}
 You are revising a Linux container image definition that mirrors this
 machine's development toolchains. Apply the feedback below to the
 previous Dockerfile and manifest, then write the revised pair into the
 current directory under the same contract. Do not install anything on
 this machine and do not change any file outside the current directory.
+{{- end}}
 
 Previous Dockerfile:
 <<<DOCKERFILE
