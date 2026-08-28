@@ -115,11 +115,11 @@ engine so CLI-less surfaces get the same errors.
   gateway's linked-repo knowledge when exactly one is known),
   gateway tests, `docs/local-gateway.md` (frame table and verb result).
 - Consumes: Task 2's `RepoPath` option.
-- [ ] Tests first: a repo-mode scan streams end to end against a stub;
+- [x] Tests first: a repo-mode scan streams end to end against a stub;
   a missing or invalid repo_path yields an error frame and a clean
   close; the harness verb carries the suggestion when the gateway knows
   a linked repo and omits it otherwise.
-- [ ] Implement, run `go test ./internal/localgw/`, commit.
+- [x] Implement, run `go test ./internal/localgw/`, commit.
 
 ### Task 4: wizard - the third card
 
