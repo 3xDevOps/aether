@@ -219,6 +219,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		ProfilesDir:  profDir,
 		Profiles:     prof,
 		Toolenv:      tools,
+		EnvEditDir:   filepath.Join(cfg.DataDir, "env-edits"),
 		NeutralImage: cfg.NeutralImage,
 		Harnesses:    cfg.Harnesses,
 
