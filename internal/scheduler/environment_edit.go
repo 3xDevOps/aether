@@ -70,7 +70,7 @@ func (s *Scheduler) editEnvironment(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return 0, fmt.Errorf("scheduler: load member for environment edit: %w", err)
 	}
-	if err := s.checkEnvironmentEditAgent(ctx, member, ws, harnessName); err != nil {
+	if err = s.checkEnvironmentEditAgent(ctx, member, ws, harnessName); err != nil {
 		return 0, err
 	}
 	// The build lock serializes edits against builds and rollbacks: the

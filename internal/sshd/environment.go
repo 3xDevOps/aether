@@ -309,10 +309,10 @@ func dockerfileDiff(ctx context.Context, before, after string) (string, error) {
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	for side, text := range map[string]string{"a": before, "b": after} {
-		if err := os.Mkdir(filepath.Join(dir, side), 0o700); err != nil {
+		if err = os.Mkdir(filepath.Join(dir, side), 0o700); err != nil {
 			return "", fmt.Errorf("sshd: lay out the diff scratch directory: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, side, "Dockerfile"), []byte(text), 0o600); err != nil {
+		if err = os.WriteFile(filepath.Join(dir, side, "Dockerfile"), []byte(text), 0o600); err != nil {
 			return "", fmt.Errorf("sshd: write the Dockerfile pair for diffing: %w", err)
 		}
 	}
