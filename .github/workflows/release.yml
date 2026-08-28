@@ -69,6 +69,43 @@ jobs:
       - name: Verify the published image is pullable
         run: docker pull ghcr.io/3xdevops/aether-bootstrap:${{ github.ref_name }}
 
+      - name: Generate standard image tags
+        id: standard-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/3xdevops/aether-standard
+          tags: |
+            type=raw,value=${{ github.ref_name }}
+            type=raw,value=${{ github.sha }}
+            type=raw,value=latest
+            type=sha,prefix=sha-
+      - name: Publish standard environment image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/standard/Dockerfile
+          push: true
+          tags: ${{ steps.standard-meta.outputs.tags }}
+          labels: ${{ steps.standard-meta.outputs.labels }}
+      - name: Verify the published standard image is pullable
+        run: docker pull ghcr.io/3xdevops/aether-standard:${{ github.ref_name }}
+      # A release whose default environment ships a broken toolchain is
+      # worse than a failed release, so every tool must prove it runs.
+      - name: Smoke-check the standard image toolchains
+        run: |
+          img=ghcr.io/3xdevops/aether-standard:${{ github.ref_name }}
+          set -x
+          docker run --rm "$img" go version
+          docker run --rm "$img" node --version
+          docker run --rm "$img" npm --version
+          docker run --rm "$img" python3 --version
+          docker run --rm "$img" uv --version
+          docker run --rm "$img" rustc --version
+          docker run --rm "$img" cargo --version
+          docker run --rm "$img" rg --version
+          docker run --rm "$img" jq --version
+          docker run --rm "$img" git --version
+
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -222,6 +222,20 @@ install an executable into `~/.local` with
 `aether workspace bootstrap <name> --command <executable>`. Those files are
 captured in a per-member, per-workspace immutable tool snapshot.
 
+A release also publishes a prebuilt standard environment image:
+
+```
+ghcr.io/3xdevops/aether-standard:<release-tag>
+```
+
+It extends the neutral image with build tools (build-essential, pkg-config,
+unzip), ripgrep, jq, and pinned toolchains usable by every container user: Go,
+Node LTS via fnm, Python 3 with uv, and Rust via rustup. The versions are
+pinned in `images/standard/Dockerfile` and change only with a release; a
+workspace created with this image keeps its exact ref until an explicit image
+change. Both images are tagged with the release tag, the commit hash, and
+`latest`.
+
 User-installed tools under `~/.local` persist across containers. System packages
 installed into `/usr` or `/etc`, edits elsewhere in the container filesystem,
 and container process state do not persist. Put required system dependencies in
