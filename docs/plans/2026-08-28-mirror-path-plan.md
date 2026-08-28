@@ -227,12 +227,12 @@ before committing, and the values below are the starting point.
   environment". A non-admin member sees the keep card only, mirroring
   the existing workspace-step gate. Copy is plain language throughout -
   no registry refs, no jargon on cards.
-- [ ] Tests first (fake scan socket in fixtures): step order and
+- [x] Tests first (fake scan socket in fixtures): step order and
   breadcrumb; preselection; no-harness degradation; scan success hands
   the pair to the review gate (Task 7's component boundary - assert the
   callback payload); cancel and error paths land on the fallback
   offer; non-admin sees only the keep card.
-- [ ] Implement, run `bun run typecheck` and `bun run test`, commit.
+- [x] Implement, run `bun run typecheck` and `bun run test`, commit.
 
 ### Task 7: wizard - review gate, background build, banners
 
