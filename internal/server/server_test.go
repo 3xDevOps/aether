@@ -23,7 +23,36 @@ func TestDefaultNeutralImageIsValidDockerReference(t *testing.T) {
 	}
 }
 
-func TestNeutralImageTag(t *testing.T) {
+// TestDefaultStandardImageIsValidDockerReference guards the standard image
+// default the same way: lowercase repository, explicit tag.
+func TestDefaultStandardImageIsValidDockerReference(t *testing.T) {
+	if _, err := reference.ParseNormalizedNamed(DefaultStandardImage); err != nil {
+		t.Fatalf("DefaultStandardImage %q is not a valid Docker reference: %v", DefaultStandardImage, err)
+	}
+	repo, _, ok := strings.Cut(DefaultStandardImage, ":")
+	if !ok {
+		t.Fatalf("DefaultStandardImage %q has no explicit tag", DefaultStandardImage)
+	}
+	if repo != strings.ToLower(repo) {
+		t.Fatalf("DefaultStandardImage repository %q must be lowercase", repo)
+	}
+}
+
+// The neutral and standard defaults come from one tag-derivation helper, so
+// a release pins both images from the same tag and a dev build tracks
+// latest for both.
+func TestDefaultImagesShareTheBuildTag(t *testing.T) {
+	_, neutralTag, _ := strings.Cut(DefaultNeutralImage, ":")
+	_, standardTag, _ := strings.Cut(DefaultStandardImage, ":")
+	if neutralTag != standardTag {
+		t.Fatalf("neutral tag %q != standard tag %q", neutralTag, standardTag)
+	}
+	if !strings.HasPrefix(DefaultStandardImage, standardImageRepo+":") {
+		t.Fatalf("DefaultStandardImage %q not in repo %q", DefaultStandardImage, standardImageRepo)
+	}
+}
+
+func TestReleaseImageTag(t *testing.T) {
 	cases := []struct {
 		version, want string
 	}{
@@ -39,8 +68,8 @@ func TestNeutralImageTag(t *testing.T) {
 		{"", "latest"},
 	}
 	for _, tc := range cases {
-		if got := neutralImageTag(tc.version); got != tc.want {
-			t.Errorf("neutralImageTag(%q) = %q, want %q", tc.version, got, tc.want)
+		if got := releaseImageTag(tc.version); got != tc.want {
+			t.Errorf("releaseImageTag(%q) = %q, want %q", tc.version, got, tc.want)
 		}
 	}
 }

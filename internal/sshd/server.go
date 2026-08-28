@@ -89,6 +89,13 @@ type Config struct {
 	// on a tailnet. Reported verbatim by server.info.
 	TailnetHostname string
 
+	// NeutralImage and StandardImage are the server's neutral bootstrap
+	// and recommended standard environment image refs, reported verbatim
+	// by server.info so clients can offer them at workspace creation.
+	// Empty values stay off the wire.
+	NeutralImage  string
+	StandardImage string
+
 	// InvitesDir holds one-time invite files (<data>/invites). Empty
 	// disables member.invite and invite-code joins.
 	InvitesDir string
