@@ -20,4 +20,6 @@ type Services struct {
 	Patch RunPatcher
 	// Disk reads the data directory's disk usage ().
 	Disk DiskReader
+	// Environments builds and rolls back workspace environment images ().
+	Environments EnvironmentService
 }

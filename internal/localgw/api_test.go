@@ -266,8 +266,8 @@ func TestCapabilities(t *testing.T) {
 	if !reflect.DeepEqual(caps.Methods, []string{"*"}) {
 		t.Errorf("methods = %v, want [*]", caps.Methods)
 	}
-	if !reflect.DeepEqual(caps.WS, []string{"events", "attach", "shell"}) {
-		t.Errorf("ws = %v, want [events attach shell]", caps.WS)
+	if !reflect.DeepEqual(caps.WS, []string{"events", "attach", "shell", "envscan"}) {
+		t.Errorf("ws = %v, want [events attach shell envscan]", caps.WS)
 	}
 	if !reflect.DeepEqual(caps.Local, localVerbs) {
 		t.Errorf("local = %v, want %v", caps.Local, localVerbs)

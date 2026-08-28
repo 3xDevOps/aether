@@ -92,15 +92,35 @@ Compare that against what the server printed if you care to.
 ## 4. Create a workspace and push your repo
 
 A **workspace** is a repo plus a server-owned environment. Creating one is an
-admin operation; with no `--image` the server uses its neutral bootstrap
-image:
+admin operation. Start with the standard environment - a prebuilt image
+published with each release that carries git, go, node, python with uv, rust,
+and common build tools, so most projects work with zero setup:
 
 ```sh
-aether workspace init myproject
+aether workspace init myproject --standard
 ```
 
-Pass `--image <ref>` for an administrator-approved image when the project
-needs system packages the neutral one lacks, and `--base <branch>` to cut run
+The dashboard's create-workspace form offers the same choice with the
+standard environment preselected. Its onboarding wizard then adds an
+Environment step: keep the standard environment, have a coding agent on
+your machine mirror your local toolchains into the workspace image, or
+have it read the repository's own files - devcontainer config included -
+and build what the project needs. The
+agent proposes a list of tools, you review and approve it, and the image
+builds in the background while you finish onboarding - until it is ready,
+runs use the image the workspace was created with and the dashboard shows a
+banner saying so.
+
+To change the environment later, open the workspace page in the dashboard.
+Its Environment panel shows what is installed, keeps every previous version
+for rollback, and takes a plain-language change request: a coding agent
+registered on the server proposes the change, you review the Dockerfile
+diff and the updated tool list, and approving rebuilds the image.
+Environment changes are admin actions.
+
+Without `--standard` the server uses its minimal neutral image. Pass
+`--image <ref>` instead for an administrator-approved image when the project
+needs something the standard one lacks, and `--base <branch>` to cut run
 worktrees from something other than `main`.
 
 Now point your local clone at it and seed the repo:
@@ -123,7 +143,7 @@ One command installs the agent, logs it in, and registers it:
 aether agent add claude --workspace myproject
 ```
 
-For a shipped agent (claude, codex, opencode) the vendor's installer runs
+For a shipped agent (claude, codex, pi, amp, opencode) the vendor's installer runs
 automatically, then you land in a shell **inside a server-created container**
 with the agent on PATH: run its login flow (pick a device-code or headless
 option, the container has no browser) and `exit` cleanly.
@@ -336,7 +356,8 @@ go or the next `aether link` fails.
 ## Next
 
 - [install.md](install.md) - systemd, upgrades, data layout
-- [bootstrap.md](bootstrap.md) - bootstrap shells, snapshots, recovery, and images
+- [environments.md](environments.md) - agent-built workspace images, verification, rollback
+- [bootstrap.md](bootstrap.md) - bootstrap shells, snapshots, and recovery
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
 - [teams.md](teams.md) - joining, roles, workspaces
 - [harnesses.md](harnesses.md) - login, profile sync, tool snapshots, and launch definitions

@@ -1,0 +1,94 @@
+{{define "filespec" -}}
+1. Dockerfile: a single build stage FROM {{.BaseImage}}, every version
+   pinned, no COPY or ADD instructions, no secrets, layers ordered
+   stable-first so rebuilds stay cache-friendly: system packages first,
+   then language toolchains, then fast-moving tools.
+2. manifest.json: a JSON array with one item per installed tool. Each
+   item has "name", "version", "reason" (plain language: why it is
+   needed), "start_line" and "end_line" (the 1-based inclusive span of
+   Dockerfile lines that install it), and "check_command" (a shell
+   command whose output must contain the version).
+{{- end}}
+
+{{define "contract" -}}
+Scope: toolchains only. Record language runtimes with their exact
+versions, version managers, developer CLIs, and the system libraries the
+stack needs. Never record dotfiles, shell theming, credentials, or
+personal files, and never read credential stores such as keychains,
+.netrc, .ssh, .aws, or browser profiles.
+
+Translate every finding to its {{.BaseImage}} equivalent instead of
+copying it. Homebrew packages and darwin binaries must become apt
+packages or the tool's official Linux installer.
+
+Write exactly two files into {{if .OutputDir}}{{.OutputDir}}{{else}}the current directory{{end}}:
+
+{{template "filespec" .}}
+
+Keep the item count honest: include only what this machine actually
+uses, not everything it has ever installed.
+{{- end}}
+
+{{define "inventory" -}}
+You are preparing a Linux container image that mirrors this machine's
+development toolchains. Inspect the machine, then write the two files
+described below into the current directory. Do not install anything on
+this machine and do not change any file outside the current directory.
+
+{{template "contract" .}}
+{{- end}}
+
+{{define "repo" -}}
+You are preparing a Linux container image for the project in this
+repository. Derive what the project needs from the repository's own
+files: manifests, lockfiles, toolchain version files, and CI configs.
+The repository defines the target, not the machine running this scan;
+ignore what happens to be installed here.
+
+If .devcontainer/devcontainer.json exists, treat it as the strongest
+statement of intent: translate its image choice and features into
+Dockerfile instructions.
+
+Never modify, create, or delete repository files. Read them only.
+
+Write exactly two files, Dockerfile and manifest.json, into
+{{.OutputDir}}:
+
+{{template "filespec" .}}
+
+Keep the item count honest: include only what the project actually
+needs, not every tool it might ever touch.
+{{- end}}
+
+{{define "refine" -}}
+{{if .OutputDir -}}
+You are revising a Linux container image definition for the project in
+this repository. Apply the feedback below to the previous Dockerfile
+and manifest, then write the revised pair into {{.OutputDir}} under the
+same contract. Read repository files when you need to check a detail,
+but never modify, create, or delete them.
+{{- else -}}
+You are revising a Linux container image definition that mirrors this
+machine's development toolchains. Apply the feedback below to the
+previous Dockerfile and manifest, then write the revised pair into the
+current directory under the same contract. Do not install anything on
+this machine and do not change any file outside the current directory.
+{{- end}}
+
+Previous Dockerfile:
+<<<DOCKERFILE
+{{.Dockerfile}}
+DOCKERFILE
+
+Previous manifest.json:
+<<<MANIFEST
+{{.ManifestJSON}}
+MANIFEST
+
+Feedback:
+<<<FEEDBACK
+{{.Feedback}}
+FEEDBACK
+
+{{template "contract" .}}
+{{- end}}

@@ -33,16 +33,20 @@ import (
 const (
 	DefaultDataDir = "/var/lib/aether"
 	DefaultAddr    = ":2222"
-	// neutralImageRepo is the published neutral bootstrap image repository.
-	// Docker requires repository names to be lowercase.
-	neutralImageRepo = "ghcr.io/3xdevops/aether-bootstrap"
+	// neutralImageRepo and standardImageRepo are the published image
+	// repositories. Docker requires repository names to be lowercase.
+	neutralImageRepo  = "ghcr.io/3xdevops/aether-bootstrap"
+	standardImageRepo = "ghcr.io/3xdevops/aether-standard"
 )
 
-// DefaultNeutralImage is the neutral bootstrap image matching this build.
-// Release builds pin the image published from the same tag, git-describe
-// builds pin the nearest release tag, and untagged builds track the latest
-// published image.
-var DefaultNeutralImage = neutralImageRepo + ":" + neutralImageTag(version.Version)
+// DefaultNeutralImage and DefaultStandardImage are the published images
+// matching this build. Release builds pin the images published from the
+// same tag, git-describe builds pin the nearest release tag, and untagged
+// builds track the latest published images.
+var (
+	DefaultNeutralImage  = neutralImageRepo + ":" + releaseImageTag(version.Version)
+	DefaultStandardImage = standardImageRepo + ":" + releaseImageTag(version.Version)
+)
 
 var (
 	describeSuffixPattern = regexp.MustCompile(`-\d+-g[0-9a-f]+(?:-dirty)?$`)
@@ -52,10 +56,10 @@ var (
 	releaseTagPattern = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
 )
 
-// neutralImageTag reduces a build version to a published image tag. The
-// release workflow tags the bootstrap image with the release ref name, so a
-// release version is its own image tag.
-func neutralImageTag(buildVersion string) string {
+// releaseImageTag reduces a build version to a published image tag. The
+// release workflow tags every published image with the release ref name, so
+// a release version is its own image tag.
+func releaseImageTag(buildVersion string) string {
 	tag := describeSuffixPattern.ReplaceAllString(buildVersion, "")
 	tag = strings.TrimSuffix(tag, "-dirty")
 	if releaseTagPattern.MatchString(tag) {
@@ -76,6 +80,10 @@ type Config struct {
 	// environment selects the neutral base. Empty uses DefaultNeutralImage.
 	// Workspace shell requests cannot override this value.
 	NeutralImage string
+	// StandardImage is the published standard environment image clients
+	// offer as the recommended default at workspace creation, reported by
+	// server.info. Empty uses DefaultStandardImage.
+	StandardImage string
 	// Runtime overrides the container runtime; nil means the local Docker
 	// daemon.
 	Runtime runtime.Runtime
@@ -145,6 +153,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if cfg.NeutralImage == "" {
 		cfg.NeutralImage = DefaultNeutralImage
 	}
+	if cfg.StandardImage == "" {
+		cfg.StandardImage = DefaultStandardImage
+	}
 
 	s := &Server{}
 	defer func() {
@@ -208,6 +219,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		ProfilesDir:  profDir,
 		Profiles:     prof,
 		Toolenv:      tools,
+		EnvEditDir:   filepath.Join(cfg.DataDir, "env-edits"),
 		NeutralImage: cfg.NeutralImage,
 		Harnesses:    cfg.Harnesses,
 
@@ -244,6 +256,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		TailnetAutoJoin:   cfg.TailnetAutoJoin,
 		TailnetRequireKey: cfg.TailnetRequireKey,
 		TailnetHostname:   tailnetHostname,
+		NeutralImage:      cfg.NeutralImage,
+		StandardImage:     cfg.StandardImage,
 		InvitesDir:        filepath.Join(cfg.DataDir, "invites"),
 		Profiles:          prof,
 	}

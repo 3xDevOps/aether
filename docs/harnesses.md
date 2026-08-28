@@ -19,16 +19,26 @@ Two rules shape everything below:
 
 ## Shipped harnesses
 
-| `--agent` | CLI | Login state | Profile sync root | API key env | MCP | Resume |
-| --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | yes (`--mcp-config`) | yes (`--continue`) |
-| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | no | no |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | no |
-| `fake` | a script you name | - | - | - | no | no |
-| `custom` | deployment-supplied | - | - | - | no | no |
+| `--agent` | CLI | Login state | Profile sync root | API key env | MCP | Resume | Env setup |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | yes (`--mcp-config`) | yes (`--continue`) | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | no | no | yes |
+| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | yes (`--continue`) | yes |
+| `amp` | Amp | `~/.config/amp`, `~/.local/share/amp` | `~/.config/amp` | `AMP_API_KEY` | no | no | yes |
+| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | no | no |
+| `fake` | a script you name | - | - | - | no | no | no |
+| `custom` | deployment-supplied | - | - | - | no | no | no |
 
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user).
+
+The **Env setup** column marks the harnesses that can set up a workspace
+environment for you (for example, building an image that mirrors your own
+machine during onboarding). Exactly claude, codex, pi, and amp qualify;
+everything else stays launchable for runs but is never offered there. The
+same four power later environment edits from the workspace page's
+Environment panel; those run on the server, so the chosen agent must be
+registered there with `aether agent add`.
 
 Only harnesses with an **MCP** column of `yes` can be pointed at the in-container
 coordination bridge, so conflict coordination between overlapping runs works for
@@ -72,6 +82,8 @@ requires a task.
 | --- | --- | --- |
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |
+| `pi` | `pi {task}` | `pi -p {task}` |
+| `amp` | `amp --dangerously-allow-all {task}` | `amp --dangerously-allow-all -x {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
 
 These are the vendors' own flags, and vendors rename them. If a launch fails
@@ -91,7 +103,8 @@ This opens the unified workspace shell in agent-setup mode: tool staging is
 mounted writable at `~/.local` and your per-harness credential home is
 mounted writable at `$HOME`. For a shipped name the vendor's documented
 install command runs first (claude and opencode use the official curl
-installers; codex uses npm with `--prefix ~/.local` when the image has npm) -
+installers; codex, pi, and amp use npm with `--prefix ~/.local` when the
+image has npm) -
 these are the vendors' own commands and vendors move them, so a failed
 install leaves you in the shell to install into `~/.local/bin` manually. For
 other names, install the executable into `~/.local/bin` with the vendor's
@@ -155,6 +168,23 @@ writes `auth.json` under `~/.codex` (its `CODEX_HOME`), which is exactly the
 directory Aether persists and the file profile sync refuses to upload.
 
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
+
+### pi
+
+Inside `aether setup pi`, start the CLI and use its `/login` command to pick
+a provider - the OAuth options print a URL and a code you complete in your
+own browser. Tokens land in `~/.pi/agent/auth.json` under the directory
+Aether persists per member, and the token files are excluded from profile
+sync. `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the server environment is
+the API-key alternative.
+
+### Amp
+
+Inside `aether setup amp`, run `amp login`, which prints a URL to open in
+your own browser. Settings live under `~/.config/amp` and secrets under
+`~/.local/share/amp`; Aether persists both per member and profile sync
+refuses the secret files. `AMP_API_KEY` in the server environment is the
+API-key alternative.
 
 ### opencode
 

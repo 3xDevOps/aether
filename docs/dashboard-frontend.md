@@ -55,7 +55,7 @@ screen with a reveal path, and every surface routes through the same call.
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
 one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `palette`, `approvals`, `presence`, `cost`, `timeline`, `diff`, `shell`,
-`local`, `ui`). A new feature adds a slice file and one spread in
+`local`, `environment`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
 collapse state, `activeWorkspace`, grouping) are persisted; server data is
@@ -205,6 +205,8 @@ run's wire `paused` field, skipping runs that do not carry it.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
+  An `environment.build` event lands in the `environment` slice, which feeds
+  the build banner (see the onboarding wizard section).
 
 **The capabilities descriptor is the transport seam.** The store holds the
 `GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, `local`), and
@@ -539,10 +541,67 @@ routes (`approvals`, `timeline`).
   branch without offering to change it: runs have already forked from it, so
   editing it there would only make the displayed branch disagree with the
   branches on disk.
+- **The Environment panel sits above the run list.**
+  `routes/workspaces/environment.tsx` renders in the workspace view's
+  scrolling body wherever the gateway serves `env.status`: the active
+  version's manifest as a plain list (name, version, reason), one sentence
+  saying which path made it and with which agent, a compact version history
+  with the failure detail on failed rows, and rollback behind a confirm that
+  names the version it returns to - the newest good version below the active
+  one, the same pick the server makes. A workspace with no definitions gets
+  one sentence: it uses the image it was created with. The panel re-reads
+  `env.status` whenever this session's build state moves, so an approved
+  build's outcome lands in the history without a reload.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored
   `server.info`, which is what fills the status bar's disk gauge.
+
+## Onboarding wizard
+
+`src/routes/onboarding/` is the guided first-run path, five steps: Link,
+Workspace, Environment, Repository, First run. It renders only where the
+gateway serves the client-machine verbs (the capability descriptor lists
+`link.status`); a remote monitor gets an explanatory empty state instead of
+a broken wizard. The first four steps' components live in `steps.tsx`; the
+Environment step is `environment-step.tsx`.
+
+The Environment step offers two cards: mirror this machine (recommended,
+preselected) and keep the standard environment the workspace was created
+with. Mirror lists the setup-capable harnesses found on this machine
+(`env.harnesses`) by friendly name, runs the chosen one headless over
+`/ws/envscan` behind a one-line status with a collapsed "View process"
+expander streaming the raw agent output, and hands the validated Dockerfile
+and manifest pair to the review gate; when no supported CLI is installed the
+card says so and names the four. Cancel and every scan failure land on "try
+again" or "keep the standard environment", so the wizard never dead-ends.
+Non-admin members see only the keep path, because saving an environment is
+an administrator method.
+
+The review gate (`EnvironmentReview`, same file) renders the manifest as a
+readable list - name, version, reason - with a per-item remove toggle
+backed by `removeManifestItem` (dropping an item drops its Dockerfile lines
+and shifts later spans; the last remaining item cannot be removed). A
+free-text change request reopens the scan in refine mode with the current
+pair and the note; approve calls `env.save` (source `mirror`, the chosen
+harness) then `env.build` and advances the wizard immediately - the build
+runs in the background.
+
+Build state lives in the `environment` slice: approve primes it before the
+build call so no event frame can beat it, and `environment.build` events
+applied by `sync.ts` drive it from there, ignoring frames about older
+versions. The slice keeps the approved pair because `env.status` never
+returns the Dockerfile: a verification failure can seed its repair scan
+only from what this session holds. `EnvironmentBanner` (same file, rendered
+by the First-run step and the run Overview view) reads the slice: while the
+latest build for the workspace is pending it says the environment is still
+building on the starter image; on `active` it clears; on `failed` it shows
+the detail and offers "ask the agent to fix it" - a refine scan seeded with
+the failure detail, feeding the same review gate - plus "keep the standard
+environment", which just forgets the build, since the workspace image
+already is the fallback. Nothing in the slice persists: after a reload the
+banner is simply gone, and `aether env show` is where the build's outcome
+can still be read.
 
 ## Styleguide
 
@@ -605,7 +664,17 @@ denied, the confirmation an admin must clear before giving up their own admin
 role, and a non-admin getting the same roster as read-only text with no admin
 verbs - which the sidebar and the palette match by keeping Members reachable
 behind the narrow remote allowlist while every other admin entry stays
-hidden. The diff tab covers the parser on the
+hidden. The onboarding wizard walks all
+five steps against the stub API, and the environment step is exercised on
+both the walk and its scan flow - mirror preselected, the no-harness
+fallback, streamed output behind the expander, cancel, failure landing on
+the fallback offers, the scan result reaching the review boundary, and the
+non-admin keep-only path - through a stubbed scan session. The review gate
+and the build banner ride the same stubs: a removal shrinking the approved
+payload, approve saving then building and priming the slice, a change
+request reopening the scan in refine mode, the banner appearing on building
+and clearing on active in both the First-run step and the run view, and a
+verification failure offering the repair scan and the dismissal. The diff tab covers the parser on the
 shapes that would break it - a deletion, a new file, a removed line that reads
 exactly like a file marker - then the fetch, the truncation notice, a snapshot
 refetching and narrowing the patch, and a conflict chip naming its member and

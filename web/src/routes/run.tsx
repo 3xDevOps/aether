@@ -2,11 +2,12 @@ import { StateDot } from '@/components/state-dot'
 import { timeAgo } from '@/lib/format'
 import { pendingApprovalRuns, runLabel, runState, stateLabel } from '@/lib/status'
 import { ViewHeader } from '@/components/view-header'
+import { EnvironmentBanner } from '@/routes/onboarding/environment-step'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 
-function RunView({ params }: RouteProps) {
+export function RunView({ params }: RouteProps) {
   const run = useStore((s) => s.runs[params.runId])
   const owner = useStore((s) => (run ? s.members[run.member_id] : undefined))
   const pendingApproval = useStore((s) =>
@@ -22,6 +23,12 @@ function RunView({ params }: RouteProps) {
     <div className="flex h-full flex-col">
       <ViewHeader title={runLabel(run)} subtitle={run.branch} />
       <RunTabs runID={run.id} active="run" />
+      {/* Nothing renders here until this session started an environment
+          build for the run's workspace; hidden when the banner is null so
+          the padding leaves no phantom gap. */}
+      <div className="px-4 pt-4 empty:hidden">
+        <EnvironmentBanner workspaceId={run.workspace_id} />
+      </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 p-4 text-sm">
         <dt className="text-muted-foreground">State</dt>
         <dd className="flex items-center gap-2">

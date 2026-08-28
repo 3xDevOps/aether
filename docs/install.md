@@ -207,7 +207,8 @@ Packaging installers for other platforms and code signing are in
 An image is a read-only package used to create containers. A container is one
 runtime instance of that image and is discarded after a run or shell session.
 The server opens shells only inside containers, never on the host. Aether never
-mounts the Docker socket into a workspace container.
+mounts the Docker socket into a workspace container. How workspace images are
+chosen and built is covered in [environments.md](environments.md).
 
 When a workspace has no custom image, the server selects the neutral bootstrap
 image:
@@ -222,6 +223,20 @@ install an executable into `~/.local` with
 `aether workspace bootstrap <name> --command <executable>`. Those files are
 captured in a per-member, per-workspace immutable tool snapshot.
 
+A release also publishes a prebuilt standard environment image:
+
+```
+ghcr.io/3xdevops/aether-standard:<release-tag>
+```
+
+It extends the neutral image with build tools (build-essential, pkg-config,
+unzip), ripgrep, jq, and pinned toolchains usable by every container user: Go,
+Node LTS via fnm, Python 3 with uv, and Rust via rustup. The versions are
+pinned in `images/standard/Dockerfile` and change only with a release; a
+workspace created with this image keeps its exact ref until an explicit image
+change. Both images are tagged with the release tag, the commit hash, and
+`latest`.
+
 User-installed tools under `~/.local` persist across containers. System packages
 installed into `/usr` or `/etc`, edits elsewhere in the container filesystem,
 and container process state do not persist. Put required system dependencies in
@@ -231,6 +246,17 @@ Use `aether workspace init <name>` for the neutral default, or
 `aether workspace init <name> --image <image>` when the project needs system
 dependencies that the neutral image does not provide. Workspace image
 references are administrator-owned configuration, not input to a shell session.
+
+Workspaces can also carry a server-built environment image: an admin-saved
+Dockerfile the server builds, verifies, and swaps in (see
+[bootstrap.md](bootstrap.md)). These images live only in the server's Docker
+daemon as `aether/ws-<workspace-id>:<version>` tags and are never pushed to
+or pulled from a registry. Retention keeps two tags per workspace - the
+active version and the most recent previously active one - and removes older
+tags after a successful swap. `aether env rollback` re-activates the
+previous version, rebuilding its image from the stored Dockerfile if
+retention already removed the tag, so disk usage stays bounded at roughly
+two images per workspace.
 
 To prepare a normal Dockerfile and optional standard Dev Container metadata for
 review and later image publication:
@@ -294,6 +320,7 @@ Serve options, which are also the config-file keys:
 | `--data-dir` | `/var/lib/aether` | Everything the server owns. |
 | `--addr` | `:2222` | The SSH listener. This is the only port that must be reachable. |
 | `--neutral-image` | `ghcr.io/3xdevops/aether-bootstrap:<build-version>` | Server-owned image selected for workspaces without a custom image. A release build defaults to the image published with that release; a dev build tracks `latest`. Set this to a pinned deployment-approved image to override it. |
+| `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard environment image that clients recommend at workspace creation; `server.info` reports it alongside the neutral image. Same tagging rules as `--neutral-image`. |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
@@ -376,6 +403,7 @@ turns that half off.
 | `toolenv/snapshots/` | Immutable per-member, per-workspace tool snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run conflict-coordination sockets, recreated each run. |
+| `env-edits/` | Per-edit scratch output of environment edit agents, removed when each edit ends. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. |
 
 Tool snapshots and pending staging are server-owned state. Back up the database

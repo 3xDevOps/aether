@@ -23,7 +23,7 @@ func (s *Server) workspaceToolsList(ctx context.Context, member domain.MemberID,
 	if err != nil {
 		return nil, err
 	}
-	ws, serr := s.resolveToolWorkspace(ctx, p.Workspace)
+	ws, serr := s.resolveWorkspaceSelector(ctx, p.Workspace)
 	if serr != nil {
 		return nil, rpcError(serr)
 	}
@@ -56,7 +56,7 @@ func (s *Server) workspaceToolsVerify(ctx context.Context, member domain.MemberI
 	if e := s.requireToolLaunch(ctx, member); e != nil {
 		return nil, e
 	}
-	ws, serr := s.resolveToolWorkspace(ctx, p.Workspace)
+	ws, serr := s.resolveWorkspaceSelector(ctx, p.Workspace)
 	if serr != nil {
 		return nil, rpcError(serr)
 	}
@@ -84,7 +84,7 @@ func (s *Server) workspaceToolsRollback(ctx context.Context, member domain.Membe
 	if e := s.requireToolLaunch(ctx, member); e != nil {
 		return nil, e
 	}
-	ws, serr := s.resolveToolWorkspace(ctx, p.Workspace)
+	ws, serr := s.resolveWorkspaceSelector(ctx, p.Workspace)
 	if serr != nil {
 		return nil, rpcError(serr)
 	}
@@ -115,7 +115,7 @@ func (s *Server) workspaceToolsReset(ctx context.Context, member domain.MemberID
 	if e := s.requireToolLaunch(ctx, member); e != nil {
 		return nil, e
 	}
-	ws, serr := s.resolveToolWorkspace(ctx, p.Workspace)
+	ws, serr := s.resolveWorkspaceSelector(ctx, p.Workspace)
 	if serr != nil {
 		return nil, rpcError(serr)
 	}
@@ -141,7 +141,7 @@ func (s *Server) requireToolLaunch(ctx context.Context, member domain.MemberID) 
 	return nil
 }
 
-func (s *Server) resolveToolWorkspace(ctx context.Context, selector protocol.WorkspaceSelector) (*domain.Workspace, error) {
+func (s *Server) resolveWorkspaceSelector(ctx context.Context, selector protocol.WorkspaceSelector) (*domain.Workspace, error) {
 	if (selector.ID == "") == (selector.Name == "") {
 		return nil, errors.New("workspace selector must contain exactly one ID or name")
 	}

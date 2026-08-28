@@ -1,13 +1,19 @@
 // The onboarding wizard: the quickstart's most error-prone stretch - link,
-// workspace, repo remote, first run - as four steps. It exists only where the
-// gateway has this machine's SSH identity and filesystem, so the whole route
-// gates on the link.status local verb; a remote gateway gets an empty state,
-// not a broken wizard. Nothing persists: every mount re-checks link status.
+// workspace, environment, repo remote, first run - as five steps. It exists
+// only where the gateway has this machine's SSH identity and filesystem, so
+// the whole route gates on the link.status local verb; a remote gateway gets
+// an empty state, not a broken wizard. Nothing persists: every mount
+// re-checks link status.
 
 import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
+import {
+  EnvironmentReview,
+  EnvironmentStep,
+  type EnvScanReview,
+} from '@/routes/onboarding/environment-step'
 import {
   FirstRunStep,
   LinkStep,
@@ -17,12 +23,13 @@ import {
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useCapability } from '@/store/hooks'
 
-const steps = ['Link', 'Workspace', 'Repository', 'First run'] as const
+const steps = ['Link', 'Workspace', 'Environment', 'Repository', 'First run'] as const
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const [step, setStep] = useState(0)
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
+  const [review, setReview] = useState<EnvScanReview | null>(null)
 
   if (!caps.hasLocal('link.status')) {
     return (
@@ -70,16 +77,48 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             }}
           />
         )}
-        {step === 2 && (
-          <RepoStep client={client} workspace={workspace} onNext={() => setStep(3)} />
+        {step === 2 && review === null && (
+          <EnvironmentStep
+            client={client}
+            onNext={() => setStep(3)}
+            onReview={setReview}
+          />
         )}
-        {step === 3 && <FirstRunStep client={client} workspace={workspace} />}
+        {step === 2 && review !== null && (
+          <EnvironmentReview
+            client={client}
+            workspaceId={workspace?.id}
+            review={review}
+            // Advancing clears the review, so Back from Repository lands
+            // on the choice cards rather than a stale review gate.
+            onDone={() => {
+              setReview(null)
+              setStep(3)
+            }}
+            onKeep={() => {
+              setReview(null)
+              setStep(3)
+            }}
+          />
+        )}
+        {step === 3 && (
+          <RepoStep client={client} workspace={workspace} onNext={() => setStep(4)} />
+        )}
+        {step === 4 && <FirstRunStep client={client} workspace={workspace} />}
 
         {step > 0 && (
           <button
             type="button"
             className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-            onClick={() => setStep(step - 1)}
+            onClick={() => {
+              // Backing out of the review returns to the choice cards
+              // rather than leaving the step.
+              if (step === 2 && review !== null) {
+                setReview(null)
+                return
+              }
+              setStep(step - 1)
+            }}
           >
             Back
           </button>

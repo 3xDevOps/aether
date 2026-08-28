@@ -1,8 +1,13 @@
-import type { Api } from '@/lib/api'
+import type { Api, EnvScanHandlers, EnvScanSession } from '@/lib/api'
 import type {
   AgentInfo,
   Approval,
   BudgetReport,
+  EnvGetResult,
+  EnvScanRequest,
+  EnvScanResult,
+  EnvironmentVersion,
+  ManifestItem,
   Member,
   Run,
   Schedule,
@@ -69,6 +74,8 @@ export const serverInfo: ServerInfo = {
   protocol_version: '1',
   time: '2026-08-14T10:05:00Z',
   member: alice,
+  neutral_image: 'ghcr.io/3xdevops/aether-bootstrap:1.2.3',
+  standard_image: 'ghcr.io/3xdevops/aether-standard:1.2.3',
   disk: {
     used_bytes: 512 * 1024 * 1024,
     total_bytes: 2 * 1024 * 1024 * 1024,
@@ -147,6 +154,88 @@ export function budget(
       output_tokens: 200,
       cost_usd: 0.5,
     },
+    ...over,
+  }
+}
+
+export function manifestItem(over: Partial<ManifestItem> = {}): ManifestItem {
+  return {
+    name: 'jq',
+    version: '1.7.1',
+    reason: 'used by the project scripts',
+    start_line: 3,
+    end_line: 5,
+    check_command: 'jq --version',
+    ...over,
+  }
+}
+
+/** The pair the fake scan produces; mirrors localops' canned inventory. */
+export function scanResult(over: Partial<EnvScanResult> = {}): EnvScanResult {
+  return {
+    dockerfile:
+      'FROM ubuntu:24.04\n' +
+      '\n' +
+      'RUN apt-get update \\\n' +
+      '    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 \\\n' +
+      '    && rm -rf /var/lib/apt/lists/*\n',
+    manifest: [manifestItem()],
+    ...over,
+  }
+}
+
+export function envVersion(
+  over: Partial<EnvironmentVersion> = {},
+): EnvironmentVersion {
+  return {
+    version: 1,
+    source: 'mirror',
+    harness: 'claude',
+    status: 'active',
+    active: true,
+    manifest: [manifestItem()],
+    created_at: '2026-08-14T09:00:00Z',
+    updated_at: '2026-08-14T09:10:00Z',
+    ...over,
+  }
+}
+
+/** One stored version as env.get returns it: the proposed pair plus a
+ * Dockerfile diff shaped like real `git diff --no-index` output, so the
+ * review's parsePatch path is exercised by fixtures. */
+export function envGetResult(over: Partial<EnvGetResult> = {}): EnvGetResult {
+  return {
+    version: 2,
+    dockerfile:
+      'FROM ubuntu:24.04\n' +
+      '\n' +
+      'RUN apt-get update \\\n' +
+      '    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 golang-go=2:1.24~1 \\\n' +
+      '    && rm -rf /var/lib/apt/lists/*\n',
+    manifest: [
+      manifestItem(),
+      manifestItem({
+        name: 'go',
+        version: '1.24',
+        reason: 'requested by the admin',
+        check_command: 'go version',
+      }),
+    ],
+    source: 'mirror',
+    harness: 'claude',
+    status: 'saved',
+    diff:
+      'diff --git a/Dockerfile b/Dockerfile\n' +
+      'index 5716ca5..7601807 100644\n' +
+      '--- a/Dockerfile\n' +
+      '+++ b/Dockerfile\n' +
+      '@@ -1,5 +1,5 @@\n' +
+      ' FROM ubuntu:24.04\n' +
+      ' \n' +
+      ' RUN apt-get update \\\n' +
+      '-    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 \\\n' +
+      '+    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 golang-go=2:1.24~1 \\\n' +
+      '     && rm -rf /var/lib/apt/lists/*\n',
     ...over,
   }
 }
@@ -288,6 +377,45 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       unit_path: '',
     })),
     localImageScaffold: vi.fn(async () => ({ written: ['Dockerfile'] })),
+    envStatus: vi.fn(async () => ({
+      versions: [envVersion()],
+      active_version: 1,
+    })),
+    envSave: vi.fn(async () => 2),
+    envBuild: vi.fn(async () => 2),
+    envRollback: vi.fn(async () => 1),
+    envEdit: vi.fn(async () => ({ accepted: true })),
+    envGet: vi.fn(async () => envGetResult()),
+    // The gateway knows one linked repo, so the verb suggests its folder
+    // for the wizard's from-repo input.
+    envHarnesses: vi.fn(async () => ({
+      harnesses: [
+        { name: 'claude', installed: true },
+        { name: 'codex', installed: false },
+        { name: 'pi', installed: false },
+        { name: 'amp', installed: false },
+      ],
+      repo_path: '/src/repo',
+    })),
+    // A scan that succeeds with the canned pair on the next tick, like the
+    // gateway's fake harness; tests drive other outcomes by overriding.
+    openEnvScan: vi.fn(
+      (_req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession => {
+        let closed = false
+        queueMicrotask(() => {
+          if (closed) return
+          h.onStatus('running')
+          h.onOutput('fake harness: returning the canned inventory')
+          h.onStatus('validating')
+          h.onResult(scanResult())
+        })
+        return {
+          close: () => {
+            closed = true
+          },
+        }
+      },
+    ),
     ...over,
   }
 }

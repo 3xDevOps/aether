@@ -22,6 +22,7 @@ import (
 var localVerbs = []string{
 	"daemon.install",
 	"daemon.status",
+	"env.harnesses",
 	"image.scaffold",
 	"link.repo",
 	"link.status",
@@ -32,13 +33,18 @@ var localVerbs = []string{
 	"sync.stop",
 }
 
-// localState is the mutable client-machine state behind /local/v1: the
-// saved link config (link.repo updates it) and the background sync
-// sessions.
+// localState is the mutable client-machine state behind /local/v1 and
+// /ws/envscan: the saved link config (link.repo updates it), the
+// background sync sessions, and the single environment-scan slot.
 type localState struct {
 	mu   sync.Mutex
 	cfg  cli.Config
 	sync *localops.SyncManager
+	// scanActive claims the one-scan-at-a-time slot for /ws/envscan.
+	scanActive bool
+	// scanArgv overrides the scan's harness command; tests set it to run
+	// stub executables.
+	scanArgv []string
 }
 
 // newLocalState seeds the verb state from the gateway config. It never
@@ -73,6 +79,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 	handler, ok := map[string]func(*Gateway, *http.Request, []byte) (any, *protocol.Error){
 		"daemon.install": (*Gateway).localDaemonInstall,
 		"daemon.status":  (*Gateway).localDaemonStatus,
+		"env.harnesses":  (*Gateway).localEnvHarnesses,
 		"image.scaffold": (*Gateway).localImageScaffold,
 		"link.repo":      (*Gateway).localLinkRepo,
 		"link.switch":    (*Gateway).localLinkSwitch,
@@ -365,6 +372,34 @@ func (g *Gateway) localDaemonStatus(*http.Request, []byte) (any, *protocol.Error
 		Installed bool   `json:"installed"`
 		UnitPath  string `json:"unit_path"`
 	}{Installed: installed, UnitPath: unitPath}, nil
+}
+
+// localEnvHarnesses reports which setup-capable harnesses are installed
+// on this machine, for the onboarding wizard's harness picker, plus the
+// one repository folder the saved link config knows (when exactly one
+// is known) so the wizard can prefill the from-repo folder input.
+func (g *Gateway) localEnvHarnesses(*http.Request, []byte) (any, *protocol.Error) {
+	return struct {
+		Harnesses []localops.HarnessStatus `json:"harnesses"`
+		RepoPath  string                   `json:"repo_path,omitempty"`
+	}{Harnesses: localops.DetectHarnesses(), RepoPath: suggestedRepo(g.local.snapshot())}, nil
+}
+
+// suggestedRepo returns the single repository folder the link config
+// carries, across the default link and every named profile. Several
+// distinct folders mean there is no safe guess, so nothing is suggested.
+func suggestedRepo(cfg cli.Config) string {
+	repo := cfg.Repo
+	for _, l := range cfg.Links {
+		switch {
+		case l.Repo == "" || l.Repo == repo:
+		case repo == "":
+			repo = l.Repo
+		default:
+			return ""
+		}
+	}
+	return repo
 }
 
 func (g *Gateway) localImageScaffold(_ *http.Request, body []byte) (any, *protocol.Error) {

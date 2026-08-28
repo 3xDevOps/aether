@@ -9,8 +9,10 @@ failed install falls back to the manual shell below.
 ## Vocabulary
 
 - **Image**: a read-only container filesystem selected by the administrator.
-  A workspace uses the server's neutral image unless its administrator sets a
-  custom image.
+  A workspace uses the server's minimal neutral image unless its
+  administrator picks the release-published standard image
+  (`workspace init --standard`, the recommended default with common
+  toolchains preinstalled) or any other custom image.
 - **Container**: one runtime instance of an image. Bootstrap shells, login
   shells, and runs are separate containers and are destroyed when their work is
   complete.
@@ -113,25 +115,18 @@ containers; system packages installed under `/usr` or `/etc`, edits elsewhere
 in the container filesystem, and a container's process state do not persist.
 Put required system dependencies in an administrator-approved custom image.
 
-## Image escape hatch
+## Custom workspace images
 
 The neutral image contains universal shell/runtime dependencies, not a vendor
 agent. A custom image is useful when a project needs system packages,
 non-standard users, or a prebuilt base. Only an administrator chooses the
 workspace image. Members cannot replace it through a shell request.
 
-To prepare ordinary artifacts for administrator review and image publication:
-
-```sh
-aether image init
-aether image init --devcontainer
-```
-
-These commands create a normal `Dockerfile`, `.dockerignore`, and optionally a
-standard `.devcontainer/devcontainer.json`. They do not build an image, log in
-to a registry, or add a vendor-specific installer. A deployment may pin the
-approved image with the server's `--neutral-image` setting. Aether does not
-silently execute arbitrary project container metadata on the server.
+Where images come from - the standard image, agent-built environment
+definitions, verification, rollback, the `aether env` commands, and the
+`aether image init` escape hatch - is covered in
+[environments.md](environments.md). A deployment may pin the approved
+neutral image with the server's `--neutral-image` setting.
 
 ## Isolation and recovery boundaries
 

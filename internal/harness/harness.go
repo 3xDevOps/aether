@@ -274,6 +274,39 @@ var profiles = map[string]Profile{
 		// manually, as before.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @openai/codex",
 	},
+	"pi": {
+		Name:         "pi",
+		TUIArgs:      []string{"pi", TaskPlaceholder},
+		HeadlessArgs: []string{"pi", "-p", TaskPlaceholder},
+		// pi has no permission prompt, so there is no bypass flag to apply.
+		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		CredentialPaths: []string{".pi"},
+		LocalRoot:       ".pi",
+		// pi stores provider keys and OAuth tokens under ~/.pi/agent/.
+		DenyNames: []string{"auth.json", "oauth.json"},
+		// pi -c continues the most recent session; sessions are organized
+		// by working directory, matching the claude resume semantics.
+		ResumeFlag: "--continue",
+		// The vendor's install instruction adds --ignore-scripts.
+		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
+	},
+	"amp": {
+		Name: "amp",
+		// amp takes the message as a trailing positional in interactive
+		// mode and refuses a seeded prompt that collides with one of its
+		// subcommand names; real task prompts contain spaces and never do.
+		TUIArgs:        []string{"amp", "--dangerously-allow-all", TaskPlaceholder},
+		HeadlessArgs:   []string{"amp", "--dangerously-allow-all", "-x", TaskPlaceholder},
+		EnvPassthrough: []string{"AMP_API_KEY"},
+		// Settings live under ~/.config/amp; XDG data (secrets.json,
+		// state.json) under ~/.local/share/amp. The data path sits under
+		// the tool mount, which registry profiles may do (the opencode
+		// precedent).
+		CredentialPaths: []string{".config/amp", ".local/share/amp"},
+		LocalRoot:       ".config/amp",
+		DenyNames:       []string{"secrets.json", "state.json"},
+		InstallScript:   "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @ampcode/cli",
+	},
 	"opencode": {
 		Name:            "opencode",
 		TUIArgs:         []string{"opencode", "--prompt=" + TaskPlaceholder},
@@ -300,6 +333,24 @@ func Profiles() []Profile {
 		out = append(out, p)
 	}
 	slices.SortFunc(out, func(a, b Profile) int { return strings.Compare(a.Name, b.Name) })
+	return out
+}
+
+// SetupHarnesses lists the harnesses that may drive environment setup, in
+// the order setup surfaces present them. This list is the single authority:
+// the wizard, the local inventory engine, and the docs all follow it.
+// opencode and custom stay launchable for runs but are never offered here,
+// and the deterministic fake harness is a scheduler registration, not a
+// registry profile.
+func SetupHarnesses() []Profile {
+	out := make([]Profile, 0, 4)
+	for _, name := range []string{"claude", "codex", "pi", "amp"} {
+		p, ok := profiles[name]
+		if !ok {
+			panic(fmt.Sprintf("harness: setup harness %q missing from the registry", name))
+		}
+		out = append(out, p)
+	}
 	return out
 }
 
