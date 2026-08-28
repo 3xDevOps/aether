@@ -54,6 +54,11 @@ export interface ServerInfo {
   member: Member
   tailnet_hostname?: string
   tailnet_identity_auth?: boolean
+  /** The server-owned image behind `neutral_image: true` environments. */
+  neutral_image?: string
+  /** The published standard environment image the server recommends for
+   * new workspaces; absent on servers predating it. */
+  standard_image?: string
   /** Data-directory usage, when the gateway reports it. */
   disk?: DiskUsage
 }

@@ -101,8 +101,9 @@ describe('onboarding wizard', () => {
   })
 
   // Every run in a workspace forks from its base branch, so creation settles
-  // it once here rather than asking again per run.
-  it('creates the first workspace with a base branch', async () => {
+  // it once here rather than asking again per run. The environment rides the
+  // shared choice component, standard by default.
+  it('creates the first workspace on the standard environment by default', async () => {
     const client = fakeApi({ workspaceListFull: vi.fn(async () => []) })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
@@ -110,6 +111,10 @@ describe('onboarding wizard', () => {
 
     const branch = await screen.findByLabelText('Base branch')
     expect(branch).toHaveProperty('value', 'main')
+    // The shared environment cards render here, standard preselected.
+    expect(
+      screen.getByRole('radio', { name: /Standard environment/ }),
+    ).toHaveProperty('checked', true)
     fireEvent.change(screen.getByLabelText(/^Name/), {
       target: { value: 'myproject' },
     })
@@ -120,6 +125,32 @@ describe('onboarding wizard', () => {
       expect(client.workspaceAdd).toHaveBeenCalledWith({
         name: 'myproject',
         base_branch: 'trunk',
+        environment: { custom_image: serverInfo.standard_image },
+      })
+    })
+  })
+
+  // A server predating server.info image refs cannot pin the standard
+  // image, so the wizard falls back to today's behavior: the starter.
+  it('defaults to the minimal starter when the server reports no standard image', async () => {
+    const client = fakeApi({ workspaceListFull: vi.fn(async () => []) })
+    seed({ info: { ...serverInfo, standard_image: undefined } })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toWorkspaceStep()
+
+    await screen.findByLabelText('Base branch')
+    expect(
+      screen.queryByRole('radio', { name: /Standard environment/ }),
+    ).toBeNull()
+    fireEvent.change(screen.getByLabelText(/^Name/), {
+      target: { value: 'myproject' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }))
+
+    await waitFor(() => {
+      expect(client.workspaceAdd).toHaveBeenCalledWith({
+        name: 'myproject',
+        base_branch: 'main',
         environment: { neutral_image: true },
       })
     })

@@ -42,7 +42,31 @@ function seed(extra: Partial<RootState> = {}) {
 // so these tests advertise every method; a desktop gateway narrows this
 // via /capabilities.
 describe('workspaces view', () => {
-  it('submits the add form with a base branch and a custom image environment', async () => {
+  // The add form rides the shared environment choice: standard preselected,
+  // no environment shaping of its own.
+  it('submits the standard environment by default', async () => {
+    const client = fakeApi({
+      workspaceListFull: vi.fn(async () => []),
+      workspaceAdd: vi.fn(async () => workspace),
+    })
+    seed()
+    render(<WorkspacesRoute params={{}} client={client} />)
+
+    const form = within(await screen.findByRole('form', { name: 'Add workspace' }))
+    expect(
+      form.getByRole('radio', { name: /Standard environment/ }),
+    ).toHaveProperty('checked', true)
+    fireEvent.change(form.getByLabelText(/^Name/), { target: { value: 'bare' } })
+    fireEvent.click(form.getByRole('button', { name: 'Add' }))
+
+    expect(client.workspaceAdd).toHaveBeenCalledWith({
+      name: 'bare',
+      base_branch: 'main',
+      environment: { custom_image: serverInfo.standard_image },
+    })
+  })
+
+  it('submits a custom image environment from the custom card', async () => {
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => [workspace]),
       workspaceAdd: vi.fn(async () => workspace),
@@ -56,7 +80,14 @@ describe('workspaces view', () => {
     fireEvent.change(form.getByLabelText('Base branch'), {
       target: { value: 'trunk' },
     })
-    fireEvent.change(form.getByLabelText(/Custom image/), {
+    fireEvent.click(form.getByRole('radio', { name: /Custom image/ }))
+    // The image input exists only once its card is chosen, and an empty one
+    // keeps the submit disabled.
+    expect(form.getByRole('button', { name: 'Add' })).toHaveProperty(
+      'disabled',
+      true,
+    )
+    fireEvent.change(form.getByLabelText('Image reference'), {
       target: { value: 'ubuntu:24.04' },
     })
     fireEvent.click(form.getByRole('button', { name: 'Add' }))
@@ -68,7 +99,7 @@ describe('workspaces view', () => {
     })
   })
 
-  it('sends the neutral image when the image field is empty', async () => {
+  it('sends the neutral image from the minimal starter card', async () => {
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => []),
       workspaceAdd: vi.fn(async () => workspace),
@@ -78,6 +109,7 @@ describe('workspaces view', () => {
 
     const form = within(await screen.findByRole('form', { name: 'Add workspace' }))
     fireEvent.change(form.getByLabelText(/^Name/), { target: { value: 'bare' } })
+    fireEvent.click(form.getByRole('radio', { name: /Minimal starter/ }))
     fireEvent.click(form.getByRole('button', { name: 'Add' }))
 
     expect(client.workspaceAdd).toHaveBeenCalledWith({

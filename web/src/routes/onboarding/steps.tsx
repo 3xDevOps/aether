@@ -4,6 +4,10 @@
 // and every server refusal is rendered verbatim.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  EnvironmentChoice,
+  type EnvironmentValue,
+} from '@/components/environment-choice'
 import { message } from '@/components/palette/palette'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -90,9 +94,10 @@ export function LinkStep({ client, onNext }: { client: Api; onNext: () => void }
 /**
  * Step 2: pick the workspace runs will live in. With none on the server and
  * the add capability present, creation is inline; the form mirrors
- * protocol.WorkspaceAddParams - custom image, or the server's neutral image
- * when the field is left empty. The base branch is the ref every run in the
- * workspace forks from, so it is settled here rather than per run.
+ * protocol.WorkspaceAddParams, with the environment settled by the shared
+ * EnvironmentChoice cards (standard image by default). The base branch is
+ * the ref every run in the workspace forks from, so it is settled here
+ * rather than per run.
  */
 export function WorkspaceStep({
   client,
@@ -107,7 +112,7 @@ export function WorkspaceStep({
   const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [baseBranch, setBaseBranch] = useState('main')
-  const [image, setImage] = useState('')
+  const [environment, setEnvironment] = useState<EnvironmentValue | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -123,9 +128,7 @@ export function WorkspaceStep({
     setBusy(true)
     setError(null)
     try {
-      const environment = image.trim()
-        ? { custom_image: image.trim() }
-        : { neutral_image: true }
+      if (!environment) throw new Error('choose an environment first')
       onNext(
         await client.workspaceAdd({
           name: name.trim(),
@@ -196,19 +199,11 @@ export function WorkspaceStep({
                 onChange={(e) => setBaseBranch(e.target.value)}
               />
             </label>
-            <label className="block space-y-1 text-sm">
-              Custom image (optional)
-              <input
-                className={field}
-                value={image}
-                placeholder="neutral image when empty"
-                onChange={(e) => setImage(e.target.value)}
-              />
-            </label>
+            <EnvironmentChoice onChange={setEnvironment} />
             <Button
               type="submit"
               size="sm"
-              disabled={busy || !name.trim() || !baseBranch.trim()}
+              disabled={busy || !name.trim() || !baseBranch.trim() || !environment}
             >
               Create workspace
             </Button>

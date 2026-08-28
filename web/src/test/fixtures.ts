@@ -69,6 +69,8 @@ export const serverInfo: ServerInfo = {
   protocol_version: '1',
   time: '2026-08-14T10:05:00Z',
   member: alice,
+  neutral_image: 'ghcr.io/3xdevops/aether-bootstrap:1.2.3',
+  standard_image: 'ghcr.io/3xdevops/aether-standard:1.2.3',
   disk: {
     used_bytes: 512 * 1024 * 1024,
     total_bytes: 2 * 1024 * 1024 * 1024,

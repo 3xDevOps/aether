@@ -1,9 +1,13 @@
 // The workspace admin surface: what exists, adding one, and each
-// workspace's tool history. The add form maps to protocol.WorkspaceAddParams:
-// a custom image string, or the server neutral image when left empty.
+// workspace's tool history. The add form maps to protocol.WorkspaceAddParams,
+// with the environment settled by the shared EnvironmentChoice cards.
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import {
+  EnvironmentChoice,
+  type EnvironmentValue,
+} from '@/components/environment-choice'
 import { message } from '@/components/palette/palette'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -112,24 +116,23 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
 function AddForm({ client, onAdded }: { client: Api; onAdded: () => void }) {
   const [name, setName] = useState('')
   const [baseBranch, setBaseBranch] = useState('main')
-  const [image, setImage] = useState('')
+  const [environment, setEnvironment] = useState<EnvironmentValue | null>(null)
   const [busy, setBusy] = useState(false)
+  // Bumped after a successful add to remount the environment cards back to
+  // their default selection, the way the old image field was cleared.
+  const [epoch, setEpoch] = useState(0)
 
   const add = async () => {
     setBusy(true)
     try {
-      // WorkspaceEnvironment demands exactly one of custom_image or
-      // neutral_image; an empty image field means the neutral one.
-      const environment = image.trim()
-        ? { custom_image: image.trim() }
-        : { neutral_image: true }
+      if (!environment) throw new Error('choose an environment first')
       await client.workspaceAdd({
         name: name.trim(),
         base_branch: baseBranch.trim(),
         environment,
       })
       setName('')
-      setImage('')
+      setEpoch((e) => e + 1)
       onAdded()
       toast.success('Workspace added')
     } catch (err) {
@@ -141,40 +144,37 @@ function AddForm({ client, onAdded }: { client: Api; onAdded: () => void }) {
 
   return (
     <form
-      className="flex items-end gap-3"
+      className="space-y-3"
       aria-label="Add workspace"
       onSubmit={(e) => {
         e.preventDefault()
         void add()
       }}
     >
-      <label className="flex-1 space-y-1 text-sm">
-        Name
-        <input
-          className={field}
-          value={name}
-          placeholder="team"
-          onChange={(e) => setName(e.target.value)}
-        />
-      </label>
-      <label className="flex-1 space-y-1 text-sm">
-        Base branch
-        <input
-          className={field}
-          value={baseBranch}
-          onChange={(e) => setBaseBranch(e.target.value)}
-        />
-      </label>
-      <label className="flex-1 space-y-1 text-sm">
-        Custom image (optional)
-        <input
-          className={field}
-          value={image}
-          placeholder="neutral image when empty"
-          onChange={(e) => setImage(e.target.value)}
-        />
-      </label>
-      <Button type="submit" disabled={busy || !name.trim() || !baseBranch.trim()}>
+      <div className="flex items-end gap-3">
+        <label className="flex-1 space-y-1 text-sm">
+          Name
+          <input
+            className={field}
+            value={name}
+            placeholder="team"
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+        <label className="flex-1 space-y-1 text-sm">
+          Base branch
+          <input
+            className={field}
+            value={baseBranch}
+            onChange={(e) => setBaseBranch(e.target.value)}
+          />
+        </label>
+      </div>
+      <EnvironmentChoice key={epoch} onChange={setEnvironment} />
+      <Button
+        type="submit"
+        disabled={busy || !name.trim() || !baseBranch.trim() || !environment}
+      >
         Add
       </Button>
     </form>
