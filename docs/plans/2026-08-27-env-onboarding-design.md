@@ -171,6 +171,15 @@ existing bootstrap image: fnm with node LTS, go, python with uv, rust,
 build-essential, git, ripgrep, jq. Versioned with releases. It is the
 zero-wait option and the universal fallback.
 
+The standard environment is chosen at workspace creation: the Workspace
+step offers it as the recommended default and the workspace is created
+pointing at the pinned release ref, so no post-creation image change is
+needed. The environment step's standard card and every "skip, use the
+standard environment" fallback simply keep that creation-time image -
+the fallback is the default state, not an action that can fail. A
+workspace stays on the ref it was created with across server upgrades;
+moving to a newer standard image is an explicit environment change.
+
 ### Harness registry
 
 Add pi and amp profiles to the shipped registry (argv templates, env
