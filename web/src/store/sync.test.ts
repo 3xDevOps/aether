@@ -446,6 +446,42 @@ describe('applyEvent', () => {
       detail: 'jq missing',
     })
   })
+
+  it('routes environment.edit events into the edit slice', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const editEvent = (over: Partial<Event> = {}): Event => ({
+      id: 'evt_edit',
+      seq: 6,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: '',
+      actor_id: '',
+      type: 'environment.edit',
+      payload: { harness: 'claude', status: 'running', line: 'inspecting' },
+      ...over,
+    })
+
+    expect(await applyEvent(store, editEvent(), fakeApi())).toBe(true)
+    expect(store.getState().envEdits[workspace.id]).toMatchObject({
+      harness: 'claude',
+      status: 'running',
+      lines: ['inspecting'],
+    })
+
+    await applyEvent(
+      store,
+      editEvent({
+        seq: 7,
+        payload: { harness: 'claude', status: 'proposed', version: 2 },
+      }),
+      fakeApi(),
+    )
+    expect(store.getState().envEdits[workspace.id]).toMatchObject({
+      status: 'proposed',
+      version: 2,
+    })
+  })
 })
 
 describe('connect', () => {

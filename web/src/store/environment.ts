@@ -1,4 +1,9 @@
-import type { EnvironmentStatus, ManifestItem } from '@/lib/types'
+import type {
+  EnvironmentEditPayload,
+  EnvironmentEditStatus,
+  EnvironmentStatus,
+  ManifestItem,
+} from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /**
@@ -25,6 +30,30 @@ export interface EnvBuild {
   repoPath?: string
 }
 
+/** How many output lines an edit keeps for the "view process" expander;
+ * older lines fall off the front. */
+export const ENV_EDIT_LINE_CAP = 200
+
+/**
+ * One workspace's latest environment edit run: primed by the panel's
+ * submit and then driven by the environment.edit event stream.
+ */
+export interface EnvEdit {
+  harness: string
+  status: EnvironmentEditStatus
+  /** The newest agent output, capped at ENV_EDIT_LINE_CAP. */
+  lines: string[]
+  /** The proposed definition version, set on `proposed`. */
+  version?: number
+  /** Explains a failed status, from the event frame. */
+  detail?: string
+}
+
+/** `proposed` and `failed` end a run; anything after them is a new one. */
+function editDone(status: EnvironmentEditStatus): boolean {
+  return status === 'proposed' || status === 'failed'
+}
+
 export interface EnvironmentSlice {
   /** The latest known build per workspace id. Session-scoped: nothing
    * here persists, a reload simply shows no banner. */
@@ -42,6 +71,18 @@ export interface EnvironmentSlice {
   /** Forgets a workspace's build - the "keep the standard environment"
    * dismissal. The workspace image already is the fallback. */
   clearEnvBuild: (workspaceID: string) => void
+  /** The latest known edit run per workspace id. Session-scoped, like
+   * envBuilds. */
+  envEdits: Record<string, EnvEdit>
+  /** Records a submitted edit before env.edit is called, so the in-flight
+   * state is up before the first event frame can land. */
+  startEnvEdit: (workspaceID: string, harness: string) => void
+  /** Applies one environment.edit event frame. A non-terminal frame after
+   * a finished run starts a fresh entry - someone began another edit. */
+  applyEnvEdit: (workspaceID: string, frame: EnvironmentEditPayload) => void
+  /** Forgets a workspace's edit - the review's dismiss. The proposed
+   * version, when one exists, stays in the server's history. */
+  clearEnvEdit: (workspaceID: string) => void
 }
 
 export const createEnvironmentSlice: SliceCreator<EnvironmentSlice> = (
@@ -71,5 +112,41 @@ export const createEnvironmentSlice: SliceCreator<EnvironmentSlice> = (
       const next = { ...s.envBuilds }
       delete next[workspaceID]
       return { envBuilds: next }
+    }),
+  envEdits: {},
+  startEnvEdit: (workspaceID, harness) =>
+    set((s) => ({
+      envEdits: {
+        ...s.envEdits,
+        [workspaceID]: { harness, status: 'running', lines: [] },
+      },
+    })),
+  applyEnvEdit: (workspaceID, frame) =>
+    set((s) => {
+      const current = s.envEdits[workspaceID]
+      // A frame past a finished run belongs to a new one: drop the old
+      // window and terminal fields rather than mixing two runs.
+      const base =
+        current && !(editDone(current.status) && !editDone(frame.status))
+          ? current
+          : { harness: frame.harness, status: frame.status, lines: [] }
+      const lines = frame.line
+        ? [...base.lines, frame.line].slice(-ENV_EDIT_LINE_CAP)
+        : base.lines
+      const next: EnvEdit = {
+        ...base,
+        harness: frame.harness || base.harness,
+        status: frame.status,
+        lines,
+      }
+      if (frame.version !== undefined) next.version = frame.version
+      if (frame.detail !== undefined) next.detail = frame.detail
+      return { envEdits: { ...s.envEdits, [workspaceID]: next } }
+    }),
+  clearEnvEdit: (workspaceID) =>
+    set((s) => {
+      const next = { ...s.envEdits }
+      delete next[workspaceID]
+      return { envEdits: next }
     }),
 })

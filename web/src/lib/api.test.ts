@@ -112,6 +112,63 @@ describe('environment methods', () => {
     expect(fetchSpy.mock.calls[1][0]).toBe('/api/v1/env.status')
   })
 
+  it('posts env.edit with the harness and request', async () => {
+    const fetchSpy = fakeFetch({ accepted: true })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const result = await api.envEdit(
+      { id: 'wsp_1' },
+      'claude',
+      'add go 1.24',
+    )
+
+    expect(result.accepted).toBe(true)
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/env.edit')
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({
+      workspace: { id: 'wsp_1' },
+      harness: 'claude',
+      request: 'add go 1.24',
+    })
+  })
+
+  it('posts env.get with the version and only sends diff_against when set', async () => {
+    const fetchSpy = fakeFetch({
+      version: 2,
+      dockerfile: 'FROM ubuntu:24.04\n',
+      manifest: [manifestItem()],
+      source: 'mirror',
+      status: 'saved',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await api.envGet({ id: 'wsp_1' }, 2, 1)
+    await api.envGet({ id: 'wsp_1' }, 2)
+
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/env.get')
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({
+      workspace: { id: 'wsp_1' },
+      version: 2,
+      diff_against: 1,
+    })
+    expect(JSON.parse(fetchSpy.mock.calls[1][1]?.body as string)).toEqual({
+      workspace: { id: 'wsp_1' },
+      version: 2,
+    })
+  })
+
+  it('posts env.rollback and unwraps the version that is active again', async () => {
+    const fetchSpy = fakeFetch({ version: 1 })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const version = await api.envRollback({ id: 'wsp_1' })
+
+    expect(version).toBe(1)
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/env.rollback')
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({
+      workspace: { id: 'wsp_1' },
+    })
+  })
+
   it('reads the detected harnesses over the local gateway', async () => {
     const fetchSpy = fakeFetch({
       harnesses: [{ name: 'claude', installed: true }],
@@ -145,6 +202,15 @@ describe('environment methods', () => {
       }),
     ).resolves.toBeGreaterThan(0)
     await expect(fake.envBuild({ id: 'wsp_1' })).resolves.toBeGreaterThan(0)
+    await expect(fake.envRollback({ id: 'wsp_1' })).resolves.toBeGreaterThan(0)
+    await expect(
+      fake.envEdit({ id: 'wsp_1' }, 'claude', 'add go 1.24'),
+    ).resolves.toEqual({ accepted: true })
+
+    const got = await fake.envGet({ id: 'wsp_1' }, 2, 1)
+    expect(got.dockerfile).toContain('FROM ubuntu:24.04')
+    expect(got.manifest.length).toBeGreaterThan(0)
+    expect(got.diff).toContain('diff --git')
 
     const detected = await fake.envHarnesses()
     expect(detected.harnesses.map((h) => h.name)).toEqual([

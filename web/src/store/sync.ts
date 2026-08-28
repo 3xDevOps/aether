@@ -5,6 +5,7 @@ import { api, ApiError, type Api } from '@/lib/api'
 import { backoff, connectEvents } from '@/lib/stream'
 import type {
   EnvironmentBuildPayload,
+  EnvironmentEditPayload,
   Event,
   OverlapPayload,
   RunDiffPayload,
@@ -196,6 +197,13 @@ export async function applyEvent(
       // view is its reader.
       const p = ev.payload as EnvironmentBuildPayload
       if (ev.workspace_id) store.getState().applyEnvBuild(ev.workspace_id, p)
+      break
+    }
+    case 'environment.edit': {
+      // One moment of a server-side edit run. The slice keeps the coarse
+      // state plus a line window; the Environment panel is its reader.
+      const p = ev.payload as EnvironmentEditPayload
+      if (ev.workspace_id) store.getState().applyEnvEdit(ev.workspace_id, p)
       break
     }
   }

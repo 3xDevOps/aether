@@ -11,6 +11,7 @@ import type {
   DaemonInstallResult,
   DaemonStatusResult,
   DiskUsage,
+  EnvGetResult,
   EnvHarnessesResult,
   EnvScanFrame,
   EnvScanRequest,
@@ -459,6 +460,29 @@ export const api = {
       workspace: ws,
       ...(version ? { version } : {}),
     }).then((r) => r.version),
+  /** Returns to the most recent previously good version; the server picks
+   * the target and answers with the version that is active again. */
+  envRollback: (ws: WorkspaceSelector) =>
+    call<{ version: number }>('env.rollback', { workspace: ws }).then(
+      (r) => r.version,
+    ),
+  /** Asks the given harness to revise the environment from a plain-language
+   * request. The run is asynchronous: agent output, the proposed version,
+   * and failure all ride the environment.edit event stream. */
+  envEdit: (ws: WorkspaceSelector, harness: string, request: string) =>
+    call<{ accepted: boolean }>('env.edit', {
+      workspace: ws,
+      harness,
+      request,
+    }),
+  /** Reads one stored version in full; diffAgainst names another version
+   * to diff this version's Dockerfile against. */
+  envGet: (ws: WorkspaceSelector, version: number, diffAgainst?: number) =>
+    call<EnvGetResult>('env.get', {
+      workspace: ws,
+      version,
+      ...(diffAgainst ? { diff_against: diffAgainst } : {}),
+    }),
   /** Which setup-capable harnesses this machine has on PATH, plus the
    * linked repository folder when the gateway knows exactly one. */
   envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),

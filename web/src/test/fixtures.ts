@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
+  EnvGetResult,
   EnvScanRequest,
   EnvScanResult,
   EnvironmentVersion,
@@ -199,6 +200,46 @@ export function envVersion(
   }
 }
 
+/** One stored version as env.get returns it: the proposed pair plus a
+ * Dockerfile diff shaped like real `git diff --no-index` output, so the
+ * review's parsePatch path is exercised by fixtures. */
+export function envGetResult(over: Partial<EnvGetResult> = {}): EnvGetResult {
+  return {
+    version: 2,
+    dockerfile:
+      'FROM ubuntu:24.04\n' +
+      '\n' +
+      'RUN apt-get update \\\n' +
+      '    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 golang-go=2:1.24~1 \\\n' +
+      '    && rm -rf /var/lib/apt/lists/*\n',
+    manifest: [
+      manifestItem(),
+      manifestItem({
+        name: 'go',
+        version: '1.24',
+        reason: 'requested by the admin',
+        check_command: 'go version',
+      }),
+    ],
+    source: 'mirror',
+    harness: 'claude',
+    status: 'saved',
+    diff:
+      'diff --git a/Dockerfile b/Dockerfile\n' +
+      'index 5716ca5..7601807 100644\n' +
+      '--- a/Dockerfile\n' +
+      '+++ b/Dockerfile\n' +
+      '@@ -1,5 +1,5 @@\n' +
+      ' FROM ubuntu:24.04\n' +
+      ' \n' +
+      ' RUN apt-get update \\\n' +
+      '-    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 \\\n' +
+      '+    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 golang-go=2:1.24~1 \\\n' +
+      '     && rm -rf /var/lib/apt/lists/*\n',
+    ...over,
+  }
+}
+
 /** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
   return {
@@ -342,6 +383,9 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     envSave: vi.fn(async () => 2),
     envBuild: vi.fn(async () => 2),
+    envRollback: vi.fn(async () => 1),
+    envEdit: vi.fn(async () => ({ accepted: true })),
+    envGet: vi.fn(async () => envGetResult()),
     // The gateway knows one linked repo, so the verb suggests its folder
     // for the wizard's from-repo input.
     envHarnesses: vi.fn(async () => ({

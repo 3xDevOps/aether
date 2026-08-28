@@ -448,6 +448,39 @@ export interface EnvironmentBuildPayload {
   detail?: string
 }
 
+/** env.get: one stored version in full. `diff` is a git unified diff of
+ * the Dockerfile from the diff_against version to this one, present only
+ * when requested and the files differ. */
+export interface EnvGetResult {
+  version: number
+  dockerfile: string
+  manifest: ManifestItem[]
+  source: EnvironmentSource
+  harness?: string
+  status: EnvironmentStatus
+  diff?: string
+}
+
+/** Coarse state of a server-side environment edit run; `proposed` and
+ * `failed` are terminal. */
+export type EnvironmentEditStatus =
+  | 'running'
+  | 'validating'
+  | 'retrying'
+  | 'proposed'
+  | 'failed'
+
+/** The `environment.edit` event payload: one moment of an edit run.
+ * `line` carries agent output while running; `detail` explains a failure;
+ * `version` names the proposed definition version, set on `proposed`. */
+export interface EnvironmentEditPayload {
+  harness: string
+  status: EnvironmentEditStatus
+  line?: string
+  detail?: string
+  version?: number
+}
+
 /** env.harnesses: one setup-capable harness's local availability. */
 export interface HarnessStatus {
   name: string
