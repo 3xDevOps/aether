@@ -75,10 +75,10 @@ engine so CLI-less surfaces get the same errors.
   contract clauses the inventory prompt carries (ubuntu 24.04 single
   stage, pinned versions, no COPY or ADD, no secrets, per-item
   check_command, honest item count).
-- [ ] Tests first: repo prompt contains each new clause plus the shared
+- [x] Tests first: repo prompt contains each new clause plus the shared
   contract clauses; the output directory appears verbatim; the golden
   version assertion catches the template change.
-- [ ] Implement, run `go test ./internal/envprompt/`, commit.
+- [x] Implement, run `go test ./internal/envprompt/`, commit.
 
 ### Task 2: envscan - the repo mode
 
