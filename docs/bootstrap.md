@@ -9,8 +9,10 @@ failed install falls back to the manual shell below.
 ## Vocabulary
 
 - **Image**: a read-only container filesystem selected by the administrator.
-  A workspace uses the server's neutral image unless its administrator sets a
-  custom image.
+  A workspace uses the server's minimal neutral image unless its
+  administrator picks the release-published standard image
+  (`workspace init --standard`, the recommended default with common
+  toolchains preinstalled) or any other custom image.
 - **Container**: one runtime instance of an image. Bootstrap shells, login
   shells, and runs are separate containers and are destroyed when their work is
   complete.
