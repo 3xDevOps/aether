@@ -132,14 +132,15 @@ reuses `parsePatch` and `FilePatch` unchanged.
 - Consumes: Task 1's `EditEnvironment`.
 - Produces: the wire surface Task 3 mirrors; `env.get`'s diff text is
   `diff --git`-shaped so the dashboard's `parsePatch` accepts it.
-- [ ] Tests first: non-admin denied; env.edit rejects an unknown
+- [x] Tests first: non-admin denied; env.edit rejects an unknown
   harness before spawning; env.get round-trips dockerfile and manifest
   for a stored version, returns not-found for a missing one, and its
   diff output parses as a unified diff and reflects a known change;
   docs: `docs/local-gateway.md` untouched (control-channel only) but
   the method list in any protocol doc that enumerates env methods is
-  extended.
-- [ ] Implement, run `go test ./internal/protocol/ ./internal/sshd/`,
+  extended (no public doc enumerates the env method list today, so no
+  doc needed the extension).
+- [x] Implement, run `go test ./internal/protocol/ ./internal/sshd/`,
   commit.
 
 ### Task 3: web - client surface and edit state
