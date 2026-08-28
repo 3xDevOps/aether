@@ -131,7 +131,7 @@ func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer cancel()
 		for {
-			if _, _, err := conn.Read(ctx); err != nil {
+			if _, _, readErr := conn.Read(ctx); readErr != nil {
 				return
 			}
 		}

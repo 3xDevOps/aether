@@ -202,7 +202,7 @@ func scanAttempt(ctx context.Context, argvTemplate []string, prompt string, time
 	if err != nil {
 		return nil, "", fmt.Errorf("localops: create scan scratch directory: %w", err), false
 	}
-	defer os.RemoveAll(scratch)
+	defer func() { _ = os.RemoveAll(scratch) }()
 
 	tail, err = runScanCommand(ctx, argvTemplate, prompt, scratch, timeout, emit)
 	if err != nil {
