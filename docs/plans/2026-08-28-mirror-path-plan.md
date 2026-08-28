@@ -175,12 +175,12 @@ before committing, and the values below are the starting point.
   (detecting, running, validating, retrying), and one terminal frame -
   `result` with the Dockerfile and manifest, or `error` with detail and
   output tail. Closing the socket cancels the scan and its process.
-- [ ] Tests first: verb returns the detection list; the endpoint
+- [x] Tests first: verb returns the detection list; the endpoint
   streams a stub scan end to end (reuse Task 3's stub-executable
   pattern through the argv override); early close cancels; a second
   concurrent scan on the same gateway is refused with a clear error
   (one scan at a time is plenty for onboarding).
-- [ ] Implement, run `go test ./internal/localgw/`, commit.
+- [x] Implement, run `go test ./internal/localgw/`, commit.
 
 ### Task 5: web - api surface and the manifest editing helper
 

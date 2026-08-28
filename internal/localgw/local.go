@@ -22,6 +22,7 @@ import (
 var localVerbs = []string{
 	"daemon.install",
 	"daemon.status",
+	"env.harnesses",
 	"image.scaffold",
 	"link.repo",
 	"link.status",
@@ -32,13 +33,18 @@ var localVerbs = []string{
 	"sync.stop",
 }
 
-// localState is the mutable client-machine state behind /local/v1: the
-// saved link config (link.repo updates it) and the background sync
-// sessions.
+// localState is the mutable client-machine state behind /local/v1 and
+// /ws/envscan: the saved link config (link.repo updates it), the
+// background sync sessions, and the single environment-scan slot.
 type localState struct {
 	mu   sync.Mutex
 	cfg  cli.Config
 	sync *localops.SyncManager
+	// scanActive claims the one-scan-at-a-time slot for /ws/envscan.
+	scanActive bool
+	// scanArgv overrides the scan's harness command; tests set it to run
+	// stub executables.
+	scanArgv []string
 }
 
 // newLocalState seeds the verb state from the gateway config. It never
@@ -73,6 +79,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 	handler, ok := map[string]func(*Gateway, *http.Request, []byte) (any, *protocol.Error){
 		"daemon.install": (*Gateway).localDaemonInstall,
 		"daemon.status":  (*Gateway).localDaemonStatus,
+		"env.harnesses":  (*Gateway).localEnvHarnesses,
 		"image.scaffold": (*Gateway).localImageScaffold,
 		"link.repo":      (*Gateway).localLinkRepo,
 		"link.switch":    (*Gateway).localLinkSwitch,
@@ -365,6 +372,14 @@ func (g *Gateway) localDaemonStatus(*http.Request, []byte) (any, *protocol.Error
 		Installed bool   `json:"installed"`
 		UnitPath  string `json:"unit_path"`
 	}{Installed: installed, UnitPath: unitPath}, nil
+}
+
+// localEnvHarnesses reports which setup-capable harnesses are installed
+// on this machine, for the onboarding wizard's harness picker.
+func (g *Gateway) localEnvHarnesses(*http.Request, []byte) (any, *protocol.Error) {
+	return struct {
+		Harnesses []localops.HarnessStatus `json:"harnesses"`
+	}{Harnesses: localops.DetectHarnesses()}, nil
 }
 
 func (g *Gateway) localImageScaffold(_ *http.Request, body []byte) (any, *protocol.Error) {

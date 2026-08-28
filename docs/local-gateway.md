@@ -81,6 +81,7 @@ and prefix as a `POST /api/v1` error.
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/shell` | interactive workspace shell (WebSocket) |
+| `GET` | `/ws/envscan` | environment inventory scan on this machine (WebSocket) |
 | `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
 
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
@@ -123,9 +124,10 @@ the same capability checks the SSH transport applies.
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","shell"],
- "local":["daemon.install","daemon.status","image.scaffold","link.repo",
-          "link.status","link.switch","pull","sync.start","sync.status","sync.stop"]}
+{"gateway":"local","methods":["*"],"ws":["events","attach","shell","envscan"],
+ "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
+          "link.repo","link.status","link.switch","pull","sync.start",
+          "sync.status","sync.stop"]}
 ```
 
 `methods` is `["*"]` because this gateway forwards every control-channel
@@ -240,6 +242,7 @@ authority.
 | `daemon.install` | `{"server":"host:port","repo":"..."}` (`repo` defaults to the linked one) | `{"unit_path":"...","note":"..."}` |
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
 | `image.scaffold` | `{"repo":"...","kind":"dockerfile"\|"devcontainer"}` (`repo` defaults to the linked one) | `{"written":["..."]}` |
+| `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...]}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH` |
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
   must carry (the onboarding wizard sends the one just picked). Without
@@ -350,3 +353,52 @@ always honored.
 4. The shell exiting cleanly closes the socket with **1000**; a nonzero
    remote exit status closes with **4001** and the error text as the
    reason, so the SPA can tell a dirty exit from a clean one.
+
+### `GET /ws/envscan`
+
+Runs one environment inventory on this machine: the chosen coding agent
+inspects the local toolchains headless in a scratch directory and writes
+the Dockerfile and manifest pair the onboarding wizard reviews. Every
+frame is JSON text.
+
+1. Client sends one **text** start frame within 10 seconds. `mode` is
+   `inventory` for a first scan; `refine` reruns the agent over a previous
+   pair with the user's feedback and carries the three extra fields:
+
+   ```json
+   {"harness":"claude","mode":"inventory"}
+   {"harness":"claude","mode":"refine","previous_dockerfile":"FROM ...",
+    "previous_manifest_json":"[...]","feedback":"drop jq, add ripgrep"}
+   ```
+
+2. Server streams progress frames while the agent runs:
+
+   ```json
+   {"type":"status","status":"running"}
+   {"type":"output","line":"one raw line of agent output"}
+   ```
+
+   Statuses arrive in order: `detecting`, `running`, `validating`, and
+   `retrying` when the agent's output failed validation and the one
+   automatic retry starts.
+
+3. Exactly one terminal frame ends the scan, then the socket closes with
+   **1000**. Success carries the validated pair - `manifest` is the parsed
+   item list (`internal/domain.ManifestItem` shape), `manifest_json` the
+   raw text the agent wrote:
+
+   ```json
+   {"type":"result","dockerfile":"FROM ubuntu:24.04\n...",
+    "manifest_json":"[...]","manifest":[{"name":"go","version":"1.24.1",...}]}
+   ```
+
+   Failure carries the reason and the last agent output for diagnosis:
+
+   ```json
+   {"type":"error","detail":"the scan timed out after 10m0s","output_tail":"..."}
+   ```
+
+One scan runs at a time per gateway; a second start frame while one runs
+answers an `error` frame (`detail` says a scan is already running) and a
+**1008** close. Closing the socket cancels the scan and kills the agent
+process; the scratch directory is removed in every outcome.

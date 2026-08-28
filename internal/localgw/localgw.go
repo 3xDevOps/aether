@@ -103,6 +103,7 @@ func New(cfg Config) (*Gateway, error) {
 	g.mux.HandleFunc("GET /ws/events", g.handleEvents)
 	g.mux.HandleFunc("GET /ws/attach/{run}", g.handleAttach)
 	g.mux.HandleFunc("GET /ws/shell", g.handleShell)
+	g.mux.HandleFunc("GET /ws/envscan", g.handleEnvScan)
 	g.mux.HandleFunc("POST /local/v1/{verb}", g.handleLocal)
 	static := webgate.StaticHandler(cfg.Static)
 	g.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
