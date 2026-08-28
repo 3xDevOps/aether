@@ -1,8 +1,17 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { GatewayCapabilities } from '@/lib/types'
+import type { Api, EnvScanHandlers, EnvScanSession } from '@/lib/api'
+import type { EnvScanRequest, GatewayCapabilities } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
+import { EnvironmentStep } from '@/routes/onboarding/environment-step'
 import { useStore, type RootState } from '@/store'
-import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
+import {
+  alice,
+  bob,
+  fakeApi,
+  scanResult,
+  serverInfo,
+  workspace,
+} from '@/test/fixtures'
 
 // The local gateway's descriptor: full method map, shell socket, and the
 // client-machine verbs the wizard rides on.
@@ -32,12 +41,21 @@ async function toWorkspaceStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 }
 
-/** Walks on to the repo step by picking the fixture workspace. */
-async function toRepoStep() {
+/** Walks on to the environment step by picking the fixture workspace. */
+async function toEnvironmentStep() {
   await toWorkspaceStep()
   fireEvent.click(
     await screen.findByRole('button', { name: `Use ${workspace.name}` }),
   )
+}
+
+/** Walks on to the repo step by keeping the standard environment. */
+async function toRepoStep() {
+  await toEnvironmentStep()
+  fireEvent.click(
+    await screen.findByRole('radio', { name: 'Keep the standard environment' }),
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 }
 
 /** Walks all the way to the first-run step, through a repo link. */
@@ -241,5 +259,158 @@ describe('onboarding wizard', () => {
         harness: 'claude',
       })
     })
+  })
+
+  it('places Environment between Workspace and Repository, mirror preselected', async () => {
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toEnvironmentStep()
+
+    // The breadcrumb names the step in position 3 and marks it current.
+    const steps = screen.getByLabelText('Steps')
+    expect(steps.textContent).toContain('3. Environment')
+    const current = steps.querySelector('[aria-current="step"]')
+    expect(current?.textContent).toContain('Environment')
+
+    // Mirror is the recommended, preselected card; the picker lists only
+    // the harnesses detected on this machine, by friendly name.
+    expect(
+      screen.getByRole('radio', { name: 'Mirror my machine' }),
+    ).toHaveProperty('checked', true)
+    const picker = await screen.findByLabelText('Coding agent')
+    expect(picker.textContent).toContain('Claude Code')
+    expect(picker.textContent).not.toContain('Codex')
+    expect(client.envHarnesses).toHaveBeenCalled()
+  })
+
+  it('explains when no supported agent is installed and keeps the way on', async () => {
+    const client = fakeApi({
+      envHarnesses: vi.fn(async () => [
+        { name: 'claude', installed: false },
+        { name: 'codex', installed: false },
+        { name: 'pi', installed: false },
+        { name: 'amp', installed: false },
+      ]),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toEnvironmentStep()
+
+    expect(
+      await screen.findByText(/No supported coding agent was found/),
+    ).toBeDefined()
+    expect(screen.getByText(/Claude Code, Codex, pi, or Amp/)).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Start scan' })).toBeNull()
+
+    // The keep card is the way forward.
+    fireEvent.click(
+      screen.getByRole('radio', { name: 'Keep the standard environment' }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(
+      await screen.findByRole('region', { name: 'Repository' }),
+    ).toBeDefined()
+  })
+})
+
+describe('environment step scan flow', () => {
+  function renderStep(client: Api) {
+    seed()
+    const onNext = vi.fn()
+    const onReview = vi.fn()
+    render(<EnvironmentStep client={client} onNext={onNext} onReview={onReview} />)
+    return { onNext, onReview }
+  }
+
+  it('hands the validated pair to the review gate on success', async () => {
+    const client = fakeApi()
+    const { onReview, onNext } = renderStep(client)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Start scan' }))
+
+    await waitFor(() => {
+      expect(onReview).toHaveBeenCalledWith({
+        harness: 'claude',
+        dockerfile: scanResult().dockerfile,
+        manifest: scanResult().manifest,
+      })
+    })
+    expect(client.openEnvScan).toHaveBeenCalledWith(
+      { harness: 'claude', mode: 'inventory' },
+      expect.anything(),
+    )
+    // Advancing is the review gate's decision, not the scan's.
+    expect(onNext).not.toHaveBeenCalled()
+  })
+
+  it('streams output behind View process and cancels back to the choice', async () => {
+    const close = vi.fn()
+    const client = fakeApi({
+      openEnvScan: vi.fn((_req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession => {
+        queueMicrotask(() => {
+          h.onStatus('running')
+          h.onOutput('inspecting go toolchain')
+        })
+        return { close }
+      }),
+    })
+    renderStep(client)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Start scan' }))
+    expect(await screen.findByRole('status')).toBeDefined()
+
+    // The raw agent output streams into the collapsed expander.
+    expect(screen.getByText('View process')).toBeDefined()
+    expect(await screen.findByText('inspecting go toolchain')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(close).toHaveBeenCalled()
+    expect(
+      screen.getByRole('radio', { name: 'Mirror my machine' }),
+    ).toBeDefined()
+  })
+
+  it('offers try again and the standard fallback when the scan fails', async () => {
+    const openEnvScan = vi.fn(
+      (_req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession => {
+        queueMicrotask(() =>
+          h.onError('the agent exited with status 1', 'last line'),
+        )
+        return { close: vi.fn() }
+      },
+    )
+    const client = fakeApi({ openEnvScan })
+    const { onNext } = renderStep(client)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Start scan' }))
+    expect(
+      await screen.findByText('the agent exited with status 1'),
+    ).toBeDefined()
+
+    // Try again reopens the scan socket.
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(openEnvScan).toHaveBeenCalledTimes(2))
+
+    // And the fallback simply advances the wizard.
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Keep the standard environment',
+      }),
+    )
+    expect(onNext).toHaveBeenCalled()
+  })
+
+  it('shows a non-admin only the keep path', async () => {
+    seed({ info: { ...serverInfo, member: bob } })
+    const onNext = vi.fn()
+    render(
+      <EnvironmentStep client={fakeApi()} onNext={onNext} onReview={vi.fn()} />,
+    )
+
+    expect(screen.queryByRole('radio', { name: 'Mirror my machine' })).toBeNull()
+    expect(screen.queryByLabelText('Coding agent')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(onNext).toHaveBeenCalled()
   })
 })

@@ -1,13 +1,15 @@
 // The onboarding wizard: the quickstart's most error-prone stretch - link,
-// workspace, repo remote, first run - as four steps. It exists only where the
-// gateway has this machine's SSH identity and filesystem, so the whole route
-// gates on the link.status local verb; a remote gateway gets an empty state,
-// not a broken wizard. Nothing persists: every mount re-checks link status.
+// workspace, environment, repo remote, first run - as five steps. It exists
+// only where the gateway has this machine's SSH identity and filesystem, so
+// the whole route gates on the link.status local verb; a remote gateway gets
+// an empty state, not a broken wizard. Nothing persists: every mount
+// re-checks link status.
 
 import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
+import { EnvironmentStep } from '@/routes/onboarding/environment-step'
 import {
   FirstRunStep,
   LinkStep,
@@ -17,7 +19,7 @@ import {
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useCapability } from '@/store/hooks'
 
-const steps = ['Link', 'Workspace', 'Repository', 'First run'] as const
+const steps = ['Link', 'Workspace', 'Environment', 'Repository', 'First run'] as const
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
@@ -71,9 +73,19 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           />
         )}
         {step === 2 && (
-          <RepoStep client={client} workspace={workspace} onNext={() => setStep(3)} />
+          <EnvironmentStep
+            client={client}
+            onNext={() => setStep(3)}
+            // The review gate mounts behind this callback next; until it
+            // lands, a finished scan moves on and the workspace keeps the
+            // environment it was created with. Nothing builds unreviewed.
+            onReview={() => setStep(3)}
+          />
         )}
-        {step === 3 && <FirstRunStep client={client} workspace={workspace} />}
+        {step === 3 && (
+          <RepoStep client={client} workspace={workspace} onNext={() => setStep(4)} />
+        )}
+        {step === 4 && <FirstRunStep client={client} workspace={workspace} />}
 
         {step > 0 && (
           <button

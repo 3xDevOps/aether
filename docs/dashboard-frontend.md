@@ -544,6 +544,27 @@ routes (`approvals`, `timeline`).
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored
   `server.info`, which is what fills the status bar's disk gauge.
 
+## Onboarding wizard
+
+`src/routes/onboarding/` is the guided first-run path, five steps: Link,
+Workspace, Environment, Repository, First run. It renders only where the
+gateway serves the client-machine verbs (the capability descriptor lists
+`link.status`); a remote monitor gets an explanatory empty state instead of
+a broken wizard. The first four steps' components live in `steps.tsx`; the
+Environment step is `environment-step.tsx`.
+
+The Environment step offers two cards: mirror this machine (recommended,
+preselected) and keep the standard environment the workspace was created
+with. Mirror lists the setup-capable harnesses found on this machine
+(`env.harnesses`) by friendly name, runs the chosen one headless over
+`/ws/envscan` behind a one-line status with a collapsed "View process"
+expander streaming the raw agent output, and hands the validated Dockerfile
+and manifest pair to the review gate; when no supported CLI is installed the
+card says so and names the four. Cancel and every scan failure land on "try
+again" or "keep the standard environment", so the wizard never dead-ends.
+Non-admin members see only the keep path, because saving an environment is
+an administrator method.
+
 ## Styleguide
 
 - **Tokens only.** Colours live in `src/index.css`: the shadcn neutral base
@@ -605,7 +626,12 @@ denied, the confirmation an admin must clear before giving up their own admin
 role, and a non-admin getting the same roster as read-only text with no admin
 verbs - which the sidebar and the palette match by keeping Members reachable
 behind the narrow remote allowlist while every other admin entry stays
-hidden. The diff tab covers the parser on the
+hidden. The onboarding wizard walks all
+five steps against the stub API, and the environment step is exercised on
+both the walk and its scan flow - mirror preselected, the no-harness
+fallback, streamed output behind the expander, cancel, failure landing on
+the fallback offers, the scan result reaching the review boundary, and the
+non-admin keep-only path - through a stubbed scan session. The diff tab covers the parser on the
 shapes that would break it - a deletion, a new file, a removed line that reads
 exactly like a file marker - then the fetch, the truncation notice, a snapshot
 refetching and narrowing the patch, and a conflict chip naming its member and
