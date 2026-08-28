@@ -3,6 +3,7 @@ package localops
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,10 +18,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 )
 
-// Scan modes. Inventory is a first run against the machine; refine reruns
+// Scan modes. Inventory is a first run against the machine; repo derives
+// the environment from a repository's own files instead; refine reruns
 // the agent over a previous Dockerfile and manifest pair with feedback.
 const (
 	ScanModeInventory = "inventory"
+	ScanModeRepo      = "repo"
 	ScanModeRefine    = "refine"
 )
 
@@ -70,11 +73,18 @@ type ScanEvent struct {
 
 // ScanOptions parameterizes one RunScan call.
 type ScanOptions struct {
-	// Harness names the setup-capable harness to run, or "fake" for the
-	// canned inventory that exercises the flow without a vendor CLI.
+	// Harness names the setup-capable harness to run, or "fake" for a
+	// canned pair that exercises the flow without a vendor CLI.
 	Harness string
-	// Mode is ScanModeInventory or ScanModeRefine.
+	// Mode is ScanModeInventory, ScanModeRepo, or ScanModeRefine.
 	Mode string
+	// RepoPath is the repository folder a repo scan reads. Required when
+	// Mode is ScanModeRepo; set on a refine run when the pair being
+	// refined came from a repo scan, so the agent can read the repository
+	// again. The agent runs with the repository as its working directory
+	// but writes its output into the scratch directory, and the scan
+	// fails if the repository's git status changes during the run.
+	RepoPath string
 	// PreviousDockerfile, PreviousManifestJSON, and Feedback seed a refine
 	// run; ignored for inventory.
 	PreviousDockerfile   string
@@ -117,14 +127,17 @@ func (f *ScanFailure) Unwrap() error { return f.Err }
 // are returned as *ScanFailure carrying the last output lines.
 func RunScan(ctx context.Context, opts ScanOptions, progress func(ScanEvent)) (*ScanResult, error) {
 	emit := serialEmitter(progress)
-	if opts.Harness == "fake" {
-		return fakeScan(emit)
-	}
-	argv, err := scanArgvTemplate(opts)
+	repoPath, err := scanRepoPath(opts)
 	if err != nil {
 		return nil, err
 	}
-	prompt, err := renderScanPrompt(opts)
+	if opts.Harness == "fake" {
+		if opts.Mode == ScanModeRepo {
+			return fakeScan(fakeRepoDockerfile, fakeRepoManifestJSON, "fake harness: returning the canned repo pair", emit)
+		}
+		return fakeScan(fakeScanDockerfile, fakeScanManifestJSON, "fake harness: returning the canned inventory", emit)
+	}
+	argv, err := scanArgvTemplate(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -138,9 +151,21 @@ func RunScan(ctx context.Context, opts ScanOptions, progress func(ScanEvent)) (*
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
 			emit(ScanEvent{Status: ScanStatusRetrying})
+		}
+		scratch, mkErr := os.MkdirTemp("", "aether-envscan-")
+		if mkErr != nil {
+			return nil, fmt.Errorf("localops: create scan scratch directory: %w", mkErr)
+		}
+		prompt, promptErr := renderScanPrompt(opts, scratch)
+		if promptErr != nil {
+			_ = os.RemoveAll(scratch)
+			return nil, promptErr
+		}
+		if lastErr != nil {
 			prompt = retryPrompt(prompt, lastErr)
 		}
-		result, tail, attemptErr, retryable := scanAttempt(ctx, argv, prompt, timeout, emit)
+		result, tail, attemptErr, retryable := scanAttempt(ctx, argv, prompt, scratch, repoPath, timeout, emit)
+		_ = os.RemoveAll(scratch)
 		if attemptErr == nil {
 			return result, nil
 		}
@@ -153,6 +178,58 @@ func RunScan(ctx context.Context, opts ScanOptions, progress func(ScanEvent)) (*
 		Err:        fmt.Errorf("the agent's output failed validation twice: %w", lastErr),
 		OutputTail: lastTail,
 	}
+}
+
+// scanRepoPath returns the repository a run is anchored in: required and
+// validated for repo mode, honored on refine runs whose pair came from a
+// repo scan, empty otherwise.
+func scanRepoPath(opts ScanOptions) (string, error) {
+	switch {
+	case opts.Mode == ScanModeRepo,
+		opts.Mode == ScanModeRefine && opts.RepoPath != "":
+		if err := validateRepoPath(opts.RepoPath); err != nil {
+			return "", err
+		}
+		return opts.RepoPath, nil
+	default:
+		return "", nil
+	}
+}
+
+// validateRepoPath checks the folder a repo-anchored run reads before
+// anything launches. Each failure names the path so surfaces can show the
+// message next to the folder input.
+func validateRepoPath(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("localops: a repo scan needs the repository's folder")
+	}
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("localops: the folder %s does not exist", path)
+	case err != nil:
+		return fmt.Errorf("localops: check the folder %s: %w", path, err)
+	case !info.IsDir():
+		return fmt.Errorf("localops: %s is not a folder", path)
+	}
+	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
+		return fmt.Errorf("localops: %s is not a git repository (it has no .git entry)", path)
+	}
+	return nil
+}
+
+// repoStatus captures the repository's git status so the engine can prove
+// a scan left the repository untouched.
+func repoStatus(ctx context.Context, repo string) (string, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "status", "--porcelain").Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			return "", fmt.Errorf("localops: git status in %s: %w: %s", repo, err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", fmt.Errorf("localops: git status in %s: %w", repo, err)
+	}
+	return string(out), nil
 }
 
 // scanArgvTemplate resolves the argv template a scan instantiates: the
@@ -170,18 +247,26 @@ func scanArgvTemplate(opts ScanOptions) ([]string, error) {
 }
 
 // renderScanPrompt renders the versioned prompt for the scan's mode.
-func renderScanPrompt(opts ScanOptions) (string, error) {
+// Repo-anchored runs name scratch as the output directory, since their
+// working directory is the repository the agent must never write into.
+func renderScanPrompt(opts ScanOptions, scratch string) (string, error) {
 	switch opts.Mode {
 	case ScanModeInventory:
 		return envprompt.RenderInventory(envprompt.InventoryParams{BaseImage: envdef.BaseImage})
+	case ScanModeRepo:
+		return envprompt.RenderRepo(envprompt.RepoParams{BaseImage: envdef.BaseImage, OutputDir: scratch})
 	case ScanModeRefine:
-		return envprompt.RenderRefine(envprompt.RefineParams{
+		params := envprompt.RefineParams{
 			Dockerfile:   opts.PreviousDockerfile,
 			ManifestJSON: opts.PreviousManifestJSON,
 			Feedback:     opts.Feedback,
-		})
+		}
+		if opts.RepoPath != "" {
+			params.OutputDir = scratch
+		}
+		return envprompt.RenderRefine(params)
 	default:
-		return "", fmt.Errorf("localops: unknown scan mode %q (want %s or %s)", opts.Mode, ScanModeInventory, ScanModeRefine)
+		return "", fmt.Errorf("localops: unknown scan mode %q (want %s, %s, or %s)", opts.Mode, ScanModeInventory, ScanModeRepo, ScanModeRefine)
 	}
 }
 
@@ -193,20 +278,36 @@ func retryPrompt(prompt string, validationErr error) string {
 		"\n\nCorrect these problems and write both files again."
 }
 
-// scanAttempt runs the harness once in a fresh scratch directory and
-// validates what it wrote. retryable marks contract violations (missing
-// or invalid output files) that earn the one retry; execution failures
-// (timeout, crash, unrunnable command) do not.
-func scanAttempt(ctx context.Context, argvTemplate []string, prompt string, timeout time.Duration, emit func(ScanEvent)) (result *ScanResult, tail string, err error, retryable bool) {
-	scratch, err := os.MkdirTemp("", "aether-envscan-")
-	if err != nil {
-		return nil, "", fmt.Errorf("localops: create scan scratch directory: %w", err), false
+// scanAttempt runs the harness once and validates what it wrote into
+// scratch. The caller owns scratch. repoPath, when set, becomes the
+// working directory and its git status must survive the run unchanged.
+// retryable marks contract violations (missing or invalid output files)
+// that earn the one retry; execution failures (timeout, crash, unrunnable
+// command) and a modified repository do not.
+func scanAttempt(ctx context.Context, argvTemplate []string, prompt, scratch, repoPath string, timeout time.Duration, emit func(ScanEvent)) (result *ScanResult, tail string, err error, retryable bool) {
+	workDir := scratch
+	var statusBefore string
+	if repoPath != "" {
+		workDir = repoPath
+		statusBefore, err = repoStatus(ctx, repoPath)
+		if err != nil {
+			return nil, "", err, false
+		}
 	}
-	defer func() { _ = os.RemoveAll(scratch) }()
 
-	tail, err = runScanCommand(ctx, argvTemplate, prompt, scratch, timeout, emit)
+	tail, err = runScanCommand(ctx, argvTemplate, prompt, workDir, timeout, emit)
 	if err != nil {
 		return nil, tail, err, false
+	}
+
+	if repoPath != "" {
+		statusAfter, statusErr := repoStatus(ctx, repoPath)
+		if statusErr != nil {
+			return nil, tail, statusErr, false
+		}
+		if statusAfter != statusBefore {
+			return nil, tail, fmt.Errorf("localops: the scan modified the repository at %s, so its output was discarded", repoPath), false
+		}
 	}
 
 	emit(ScanEvent{Status: ScanStatusValidating})
@@ -217,9 +318,9 @@ func scanAttempt(ctx context.Context, argvTemplate []string, prompt string, time
 	return result, tail, nil, false
 }
 
-// runScanCommand executes one harness invocation in scratch, streaming
+// runScanCommand executes one harness invocation in workDir, streaming
 // combined output lines through emit and returning the output tail.
-func runScanCommand(ctx context.Context, argvTemplate []string, prompt, scratch string, timeout time.Duration, emit func(ScanEvent)) (string, error) {
+func runScanCommand(ctx context.Context, argvTemplate []string, prompt, workDir string, timeout time.Duration, emit func(ScanEvent)) (string, error) {
 	argv := harness.Argv(argvTemplate, prompt)
 	if len(argv) == 0 {
 		return "", fmt.Errorf("localops: scan argv is empty")
@@ -233,7 +334,7 @@ func runScanCommand(ctx context.Context, argvTemplate []string, prompt, scratch 
 		emit(ScanEvent{Line: line})
 	}}
 	cmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
-	cmd.Dir = scratch
+	cmd.Dir = workDir
 	cmd.Stdout = output
 	cmd.Stderr = output
 	// A harness may leave children holding the output pipe; do not let
@@ -366,22 +467,44 @@ const fakeScanManifestJSON = `[
 ]
 `
 
-// fakeScan returns the canned pair through the same validation path a
-// real scan uses, so the fake can never drift from the contract.
-func fakeScan(emit func(ScanEvent)) (*ScanResult, error) {
+// Canned pair for a fake repo scan, distinct from the mirror pair so the
+// from-repo flow is demoable end to end. It must always satisfy the
+// envdef contract.
+const fakeRepoDockerfile = `FROM ubuntu:24.04
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ripgrep=14.1.0-1 \
+    && rm -rf /var/lib/apt/lists/*
+`
+
+const fakeRepoManifestJSON = `[
+  {
+    "name": "ripgrep",
+    "version": "14.1.0",
+    "reason": "canned repo item for demos and tests",
+    "start_line": 3,
+    "end_line": 5,
+    "check_command": "rg --version"
+  }
+]
+`
+
+// fakeScan returns a canned pair through the same validation path a real
+// scan uses, so the fakes can never drift from the contract.
+func fakeScan(dockerfile, manifestJSON, line string, emit func(ScanEvent)) (*ScanResult, error) {
 	emit(ScanEvent{Status: ScanStatusRunning})
-	emit(ScanEvent{Line: "fake harness: returning the canned inventory"})
+	emit(ScanEvent{Line: line})
 	emit(ScanEvent{Status: ScanStatusValidating})
-	items, err := envdef.ParseManifest([]byte(fakeScanManifestJSON))
+	items, err := envdef.ParseManifest([]byte(manifestJSON))
 	if err != nil {
 		return nil, fmt.Errorf("localops: canned fake manifest: %w", err)
 	}
-	if err := envdef.ValidateDockerfile(fakeScanDockerfile, items); err != nil {
+	if err := envdef.ValidateDockerfile(dockerfile, items); err != nil {
 		return nil, fmt.Errorf("localops: canned fake Dockerfile: %w", err)
 	}
 	return &ScanResult{
-		Dockerfile:   fakeScanDockerfile,
-		ManifestJSON: fakeScanManifestJSON,
+		Dockerfile:   dockerfile,
+		ManifestJSON: manifestJSON,
 		Manifest:     items,
 	}, nil
 }

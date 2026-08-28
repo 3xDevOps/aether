@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,6 +72,40 @@ func readScratch(t *testing.T, log string) []string {
 	}
 	return strings.Fields(string(data))
 }
+
+// initGitRepo creates a real git repository for repo-mode tests.
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "init", "--quiet", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	return dir
+}
+
+// resolvePath follows symlinks so a stub's pwd output compares equal to
+// the path the test created (temp dirs are symlinked on some systems).
+func resolvePath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", path, err)
+	}
+	return resolved
+}
+
+// repoStubOutputs is the shell fragment repo-mode stubs share: it finds
+// the scratch directory the prompt names and writes the valid pair there.
+const repoStubOutputs = `out=$(printf '%%s\n' "$1" | grep -o '/[^[:space:]:]*aether-envscan-[^[:space:]:]*' | head -n 1)
+cat > "$out/Dockerfile" <<'DOCKEREOF'
+%sDOCKEREOF
+cat > "$out/manifest.json" <<'MANIFESTEOF'
+%s
+MANIFESTEOF
+`
 
 func TestDetectHarnesses(t *testing.T) {
 	bin := t.TempDir()
@@ -320,5 +355,164 @@ func TestRunScanRejectsUnknownHarness(t *testing.T) {
 		Mode:    ScanModeInventory,
 	}, nil); err == nil {
 		t.Fatal("RunScan accepted a harness outside the setup-capable set")
+	}
+}
+
+func TestRunScanRepoModeRunsInRepoAndWritesToScratch(t *testing.T) {
+	repo := initGitRepo(t)
+	cwdLog := filepath.Join(t.TempDir(), "cwd.log")
+	argv := writeStub(t, fmt.Sprintf("pwd >> %q\n"+repoStubOutputs,
+		cwdLog, validScanDockerfile, validScanManifest))
+
+	result, err := RunScan(context.Background(), ScanOptions{
+		Harness:  "claude",
+		Mode:     ScanModeRepo,
+		RepoPath: repo,
+		Argv:     argv,
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunScan: %v", err)
+	}
+	if result.Dockerfile != validScanDockerfile {
+		t.Errorf("Dockerfile = %q, want %q", result.Dockerfile, validScanDockerfile)
+	}
+	cwds := readScratch(t, cwdLog)
+	if len(cwds) != 1 {
+		t.Fatalf("stub ran %d times, want 1", len(cwds))
+	}
+	if got, want := resolvePath(t, cwds[0]), resolvePath(t, repo); got != want {
+		t.Errorf("harness ran in %s, want the repository %s", got, want)
+	}
+	// The repository must hold no scan output: the pair went to scratch.
+	for _, name := range []string{"Dockerfile", "manifest.json"} {
+		if _, err := os.Stat(filepath.Join(repo, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s was written into the repository (stat err: %v)", name, err)
+		}
+	}
+}
+
+func TestRunScanRepoPathValidation(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	noGit := filepath.Join(dir, "plain")
+	if err := os.MkdirAll(noGit, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "missing")
+
+	cases := map[string]struct{ path, want string }{
+		"empty path":    {"", "needs the repository's folder"},
+		"missing":       {missing, "does not exist"},
+		"not a folder":  {file, "is not a folder"},
+		"no .git entry": {noGit, "is not a git repository"},
+	}
+	for name, tc := range cases {
+		_, err := RunScan(context.Background(), ScanOptions{
+			Harness:  "fake",
+			Mode:     ScanModeRepo,
+			RepoPath: tc.path,
+		}, nil)
+		if err == nil {
+			t.Errorf("%s: RunScan accepted repo path %q", name, tc.path)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error %q does not say %q", name, err, tc.want)
+		}
+		if tc.path != "" && !strings.Contains(err.Error(), tc.path) {
+			t.Errorf("%s: error %q does not name the path %q", name, err, tc.path)
+		}
+	}
+}
+
+func TestRunScanRepoModifiedGuard(t *testing.T) {
+	repo := initGitRepo(t)
+	countLog := filepath.Join(t.TempDir(), "count.log")
+	argv := writeStub(t, fmt.Sprintf("echo ran >> %q\ntouch tampered.txt\n"+repoStubOutputs,
+		countLog, validScanDockerfile, validScanManifest))
+
+	_, err := RunScan(context.Background(), ScanOptions{
+		Harness:  "claude",
+		Mode:     ScanModeRepo,
+		RepoPath: repo,
+		Argv:     argv,
+	}, nil)
+	if err == nil {
+		t.Fatal("RunScan accepted a run that modified the repository")
+	}
+	if !strings.Contains(err.Error(), "modified the repository") {
+		t.Errorf("error %q does not state the repository was modified", err)
+	}
+	count, readErr := os.ReadFile(countLog)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if runs := strings.Count(string(count), "ran"); runs != 1 {
+		t.Errorf("repo-modifying agent ran %d times, want 1 (no retry)", runs)
+	}
+}
+
+func TestRunScanRefineInheritsRepoPath(t *testing.T) {
+	repo := initGitRepo(t)
+	dir := t.TempDir()
+	cwdLog := filepath.Join(dir, "cwd.log")
+	promptLog := filepath.Join(dir, "prompt.log")
+	argv := writeStub(t, fmt.Sprintf("pwd >> %q\nprintf '%%s' \"$1\" > %q\n"+repoStubOutputs,
+		cwdLog, promptLog, validScanDockerfile, validScanManifest))
+
+	result, err := RunScan(context.Background(), ScanOptions{
+		Harness:              "claude",
+		Mode:                 ScanModeRefine,
+		PreviousDockerfile:   validScanDockerfile,
+		PreviousManifestJSON: validScanManifest,
+		Feedback:             "add ripgrep",
+		RepoPath:             repo,
+		Argv:                 argv,
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunScan: %v", err)
+	}
+	if result.Dockerfile != validScanDockerfile {
+		t.Errorf("Dockerfile = %q, want %q", result.Dockerfile, validScanDockerfile)
+	}
+	cwds := readScratch(t, cwdLog)
+	if len(cwds) != 1 {
+		t.Fatalf("stub ran %d times, want 1", len(cwds))
+	}
+	if got, want := resolvePath(t, cwds[0]), resolvePath(t, repo); got != want {
+		t.Errorf("refine ran in %s, want the repository %s", got, want)
+	}
+	prompt, readErr := os.ReadFile(promptLog)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	for _, want := range []string{"add ripgrep", "aether-envscan-", "never modify, create, or delete"} {
+		if !strings.Contains(string(prompt), want) {
+			t.Errorf("repo-anchored refine prompt missing %q", want)
+		}
+	}
+}
+
+func TestRunScanFakeHarnessRepoMode(t *testing.T) {
+	repo := initGitRepo(t)
+	result, err := RunScan(context.Background(), ScanOptions{
+		Harness:  "fake",
+		Mode:     ScanModeRepo,
+		RepoPath: repo,
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunScan(fake, repo): %v", err)
+	}
+	if len(result.Manifest) != 1 {
+		t.Fatalf("canned repo manifest has %d items, want 1", len(result.Manifest))
+	}
+	if result.Manifest[0].Name == "jq" {
+		t.Errorf("canned repo pair matches the mirror pair; want a distinct one, got %+v", result.Manifest)
+	}
+	if err := envdef.ValidateDockerfile(result.Dockerfile, result.Manifest); err != nil {
+		t.Errorf("canned repo pair fails its own contract: %v", err)
 	}
 }
