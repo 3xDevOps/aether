@@ -141,12 +141,12 @@ engine so CLI-less surfaces get the same errors.
   the review state so Back returns to the choice cards, and a failure
   of the harness-listing verb shows the error with a retry instead of
   also claiming no agent was found.
-- [ ] Tests first: card rendering and preselection unchanged for
+- [x] Tests first: card rendering and preselection unchanged for
   mirror; repo card reveals and prefills the input; scan start carries
   mode and path; inline validation error path; approve sends source
   `repo`; Back after advancing lands on the cards; the listing-failure
   state shows the error and retry only.
-- [ ] Implement, run `bun run typecheck` and `bun run test` from
+- [x] Implement, run `bun run typecheck` and `bun run test` from
   `web/`, commit.
 
 ### Task 5: full check sweep
