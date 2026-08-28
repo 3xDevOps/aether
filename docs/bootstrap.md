@@ -122,47 +122,11 @@ agent. A custom image is useful when a project needs system packages,
 non-standard users, or a prebuilt base. Only an administrator chooses the
 workspace image. Members cannot replace it through a shell request.
 
-The built-in path is a per-workspace environment definition: a Dockerfile
-plus a manifest listing each installed item with its version and a check
-command. The server builds the definition with its own Docker daemon,
-verifies every manifest item's version in a throwaway container, and only a
-verified image becomes the workspace image. Definitions are versioned;
-previous versions stay available for rollback.
-
-Built images are tagged `aether/ws-<workspace-id>:<version>` and are
-local-only: the server never pulls them from a registry, and if the local
-tag is missing it rebuilds from the stored Dockerfile. The build context is
-the Dockerfile alone - `COPY` and `ADD` are rejected at validation, so no
-server or local files can enter the image. A build is arbitrary code on the
-server's Docker daemon, which is why every call that saves or builds a
-definition is admin-guarded.
-
-Administrators drive it from the CLI:
-
-```sh
-aether env show       # active manifest, version history, statuses
-aether env rebuild    # build the active (or --version <n>) definition
-aether env rollback   # re-activate the previous good version
-```
-
-`aether env rebuild` follows the build to its terminal status and exits
-nonzero when the build or verification fails; the workspace keeps its
-previous image on failure.
-
-Alternatively, `workspace init --image` accepts a prebuilt registry
-reference. To prepare ordinary artifacts for administrator review and image
-publication:
-
-```sh
-aether image init
-aether image init --devcontainer
-```
-
-These commands create a normal `Dockerfile`, `.dockerignore`, and optionally a
-standard `.devcontainer/devcontainer.json`. They do not build an image, log in
-to a registry, or add a vendor-specific installer. A deployment may pin the
-approved image with the server's `--neutral-image` setting. Aether does not
-silently execute arbitrary project container metadata on the server.
+Where images come from - the standard image, agent-built environment
+definitions, verification, rollback, the `aether env` commands, and the
+`aether image init` escape hatch - is covered in
+[environments.md](environments.md). A deployment may pin the approved
+neutral image with the server's `--neutral-image` setting.
 
 ## Isolation and recovery boundaries
 

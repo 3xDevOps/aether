@@ -207,7 +207,8 @@ Packaging installers for other platforms and code signing are in
 An image is a read-only package used to create containers. A container is one
 runtime instance of that image and is discarded after a run or shell session.
 The server opens shells only inside containers, never on the host. Aether never
-mounts the Docker socket into a workspace container.
+mounts the Docker socket into a workspace container. How workspace images are
+chosen and built is covered in [environments.md](environments.md).
 
 When a workspace has no custom image, the server selects the neutral bootstrap
 image:

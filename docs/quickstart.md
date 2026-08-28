@@ -356,7 +356,8 @@ go or the next `aether link` fails.
 ## Next
 
 - [install.md](install.md) - systemd, upgrades, data layout
-- [bootstrap.md](bootstrap.md) - bootstrap shells, snapshots, recovery, and images
+- [environments.md](environments.md) - agent-built workspace images, verification, rollback
+- [bootstrap.md](bootstrap.md) - bootstrap shells, snapshots, and recovery
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
 - [teams.md](teams.md) - joining, roles, workspaces
 - [harnesses.md](harnesses.md) - login, profile sync, tool snapshots, and launch definitions
