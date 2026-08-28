@@ -155,11 +155,11 @@ reuses `parsePatch` and `FilePatch` unchanged.
 - Consumes: Task 2's wire shapes and Task 1's event payload.
 - Produces: the typed surface and store selectors Tasks 4 and 5 render
   from.
-- [ ] Tests first: sync routes `environment.edit` events into the
+- [x] Tests first: sync routes `environment.edit` events into the
   slice; the line window caps and keeps the newest; `proposed` and
   `failed` set their fields; the three new api functions are exercised
   through fixtures.
-- [ ] Implement, run `bun run typecheck` and `bun run test` from
+- [x] Implement, run `bun run typecheck` and `bun run test` from
   `web/`, commit.
 
 ### Task 4: web - the Environment panel, read side
