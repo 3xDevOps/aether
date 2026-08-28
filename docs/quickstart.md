@@ -92,15 +92,20 @@ Compare that against what the server printed if you care to.
 ## 4. Create a workspace and push your repo
 
 A **workspace** is a repo plus a server-owned environment. Creating one is an
-admin operation; with no `--image` the server uses its neutral bootstrap
-image:
+admin operation. Start with the standard environment - a prebuilt image
+published with each release that carries git, go, node, python with uv, rust,
+and common build tools, so most projects work with zero setup:
 
 ```sh
-aether workspace init myproject
+aether workspace init myproject --standard
 ```
 
-Pass `--image <ref>` for an administrator-approved image when the project
-needs system packages the neutral one lacks, and `--base <branch>` to cut run
+The dashboard's create-workspace form offers the same choice with the
+standard environment preselected.
+
+Without `--standard` the server uses its minimal neutral image. Pass
+`--image <ref>` instead for an administrator-approved image when the project
+needs something the standard one lacks, and `--base <branch>` to cut run
 worktrees from something other than `main`.
 
 Now point your local clone at it and seed the repo:
