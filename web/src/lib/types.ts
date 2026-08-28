@@ -387,3 +387,97 @@ export interface DaemonStatusResult {
 export interface ImageScaffoldResult {
   written: string[]
 }
+
+// Workspace environments: internal/protocol/environment.go and
+// internal/domain/environment.go on the wire, plus the local gateway's
+// env.harnesses verb and /ws/envscan frames.
+
+/** Which path produced an environment definition. */
+export type EnvironmentSource = 'mirror' | 'repo' | 'standard' | 'manual'
+
+/** Definition lifecycle: saved -> building -> verifying -> active | failed. */
+export type EnvironmentStatus =
+  | 'saved'
+  | 'building'
+  | 'verifying'
+  | 'active'
+  | 'failed'
+
+/**
+ * One environment claim: what is installed, at which version, why, which
+ * Dockerfile lines install it (1-based, inclusive - removing the item
+ * removes those lines), and the command whose output must contain the
+ * version during post-build verification.
+ */
+export interface ManifestItem {
+  name: string
+  version: string
+  reason?: string
+  start_line: number
+  end_line: number
+  check_command: string
+}
+
+/** One definition version in an env.status result. The manifest doubles
+ * as the human-readable environment summary. */
+export interface EnvironmentVersion {
+  version: number
+  source: EnvironmentSource
+  harness?: string
+  status: EnvironmentStatus
+  failure_detail?: string
+  active?: boolean
+  manifest: ManifestItem[]
+  created_at: string
+  updated_at: string
+}
+
+/** env.status: every version newest first; active_version is absent while
+ * no version is active. */
+export interface EnvStatusResult {
+  versions: EnvironmentVersion[]
+  active_version?: number
+}
+
+/** The `environment.build` event payload: one moment of a build. `line`
+ * carries engine output while building; `detail` explains a failure. */
+export interface EnvironmentBuildPayload {
+  version: number
+  status: EnvironmentStatus
+  line?: string
+  detail?: string
+}
+
+/** env.harnesses: one setup-capable harness's local availability. */
+export interface HarnessStatus {
+  name: string
+  installed: boolean
+}
+
+/** The first frame the client sends on /ws/envscan. A refine run carries
+ * the pair it starts from and the user's feedback; inventory omits them. */
+export interface EnvScanRequest {
+  harness: string
+  mode: 'inventory' | 'refine'
+  previous_dockerfile?: string
+  previous_manifest_json?: string
+  feedback?: string
+}
+
+/** Coarse scan progress, in the order a run moves through them; a retry
+ * re-enters running after retrying. */
+export type EnvScanStatus = 'detecting' | 'running' | 'validating' | 'retrying'
+
+/** The validated pair a successful scan produces. */
+export interface EnvScanResult {
+  dockerfile: string
+  manifest: ManifestItem[]
+}
+
+/** One frame from the gateway on /ws/envscan. `result` and `error` are
+ * terminal; closing the socket cancels the scan. */
+export type EnvScanFrame =
+  | { type: 'output'; line: string }
+  | { type: 'status'; status: EnvScanStatus }
+  | { type: 'result'; dockerfile: string; manifest: ManifestItem[] }
+  | { type: 'error'; detail: string; output_tail?: string }

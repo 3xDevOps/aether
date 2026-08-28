@@ -1,8 +1,12 @@
-import type { Api } from '@/lib/api'
+import type { Api, EnvScanHandlers, EnvScanSession } from '@/lib/api'
 import type {
   AgentInfo,
   Approval,
   BudgetReport,
+  EnvScanRequest,
+  EnvScanResult,
+  EnvironmentVersion,
+  ManifestItem,
   Member,
   Run,
   Schedule,
@@ -153,6 +157,48 @@ export function budget(
   }
 }
 
+export function manifestItem(over: Partial<ManifestItem> = {}): ManifestItem {
+  return {
+    name: 'jq',
+    version: '1.7.1',
+    reason: 'used by the project scripts',
+    start_line: 3,
+    end_line: 5,
+    check_command: 'jq --version',
+    ...over,
+  }
+}
+
+/** The pair the fake scan produces; mirrors localops' canned inventory. */
+export function scanResult(over: Partial<EnvScanResult> = {}): EnvScanResult {
+  return {
+    dockerfile:
+      'FROM ubuntu:24.04\n' +
+      '\n' +
+      'RUN apt-get update \\\n' +
+      '    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 \\\n' +
+      '    && rm -rf /var/lib/apt/lists/*\n',
+    manifest: [manifestItem()],
+    ...over,
+  }
+}
+
+export function envVersion(
+  over: Partial<EnvironmentVersion> = {},
+): EnvironmentVersion {
+  return {
+    version: 1,
+    source: 'mirror',
+    harness: 'claude',
+    status: 'active',
+    active: true,
+    manifest: [manifestItem()],
+    created_at: '2026-08-14T09:00:00Z',
+    updated_at: '2026-08-14T09:10:00Z',
+    ...over,
+  }
+}
+
 /** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
   return {
@@ -290,6 +336,37 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       unit_path: '',
     })),
     localImageScaffold: vi.fn(async () => ({ written: ['Dockerfile'] })),
+    envStatus: vi.fn(async () => ({
+      versions: [envVersion()],
+      active_version: 1,
+    })),
+    envSave: vi.fn(async () => 2),
+    envBuild: vi.fn(async () => 2),
+    envHarnesses: vi.fn(async () => [
+      { name: 'claude', installed: true },
+      { name: 'codex', installed: false },
+      { name: 'pi', installed: false },
+      { name: 'amp', installed: false },
+    ]),
+    // A scan that succeeds with the canned pair on the next tick, like the
+    // gateway's fake harness; tests drive other outcomes by overriding.
+    openEnvScan: vi.fn(
+      (_req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession => {
+        let closed = false
+        queueMicrotask(() => {
+          if (closed) return
+          h.onStatus('running')
+          h.onOutput('fake harness: returning the canned inventory')
+          h.onStatus('validating')
+          h.onResult(scanResult())
+        })
+        return {
+          close: () => {
+            closed = true
+          },
+        }
+      },
+    ),
     ...over,
   }
 }

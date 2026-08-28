@@ -3,11 +3,13 @@
 // bar - the one place it would otherwise sit in history and screenshots.
 
 import { api, socketURL } from '@/lib/api'
+import type { EnvScanResult } from '@/lib/types'
+import { fakeApi, manifestItem } from '@/test/fixtures'
 
-function fakeFetch() {
+function fakeFetch(result: unknown = {}) {
   return vi.fn(async (_input: unknown, _init?: RequestInit) => ({
     ok: true,
-    json: async () => ({}),
+    json: async () => result,
   }))
 }
 
@@ -61,5 +63,101 @@ describe('token bootstrap', () => {
     expect(fetchSpy.mock.calls[0][1]?.body).toBe(
       JSON.stringify({ run_id: 'run_1', force: true }),
     )
+  })
+})
+
+describe('environment methods', () => {
+  beforeEach(() => {
+    window.sessionStorage.setItem('aether.token', 'tok_stored')
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    window.sessionStorage.clear()
+  })
+
+  it('posts env.save with the manifest inline and unwraps the version', async () => {
+    const fetchSpy = fakeFetch({ version: 2 })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const version = await api.envSave({
+      workspace: { id: 'wsp_1' },
+      dockerfile: 'FROM ubuntu:24.04\n',
+      manifest: [manifestItem()],
+      source: 'mirror',
+      harness: 'claude',
+    })
+
+    expect(version).toBe(2)
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/env.save')
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({
+      workspace: { id: 'wsp_1' },
+      dockerfile: 'FROM ubuntu:24.04\n',
+      manifest: [manifestItem()],
+      source: 'mirror',
+      harness: 'claude',
+    })
+  })
+
+  it('posts env.build and env.status against the workspace', async () => {
+    const fetchSpy = fakeFetch({ version: 2, versions: [] })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await api.envBuild({ id: 'wsp_1' })
+    await api.envStatus({ id: 'wsp_1' })
+
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/env.build')
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({
+      workspace: { id: 'wsp_1' },
+    })
+    expect(fetchSpy.mock.calls[1][0]).toBe('/api/v1/env.status')
+  })
+
+  it('reads the detected harnesses over the local gateway', async () => {
+    const fetchSpy = fakeFetch({
+      harnesses: [{ name: 'claude', installed: true }],
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const harnesses = await api.envHarnesses()
+
+    expect(fetchSpy.mock.calls[0][0]).toBe('/local/v1/env.harnesses')
+    expect(harnesses).toEqual([{ name: 'claude', installed: true }])
+  })
+
+  it('is covered end to end by the fixture fakes', async () => {
+    const fake = fakeApi()
+
+    const status = await fake.envStatus({ id: 'wsp_1' })
+    expect(status.active_version).toBe(status.versions[0].version)
+    expect(status.versions[0].manifest.length).toBeGreaterThan(0)
+
+    await expect(
+      fake.envSave({
+        workspace: { id: 'wsp_1' },
+        dockerfile: 'FROM ubuntu:24.04\n',
+        manifest: [manifestItem()],
+        source: 'mirror',
+        harness: 'claude',
+      }),
+    ).resolves.toBeGreaterThan(0)
+    await expect(fake.envBuild({ id: 'wsp_1' })).resolves.toBeGreaterThan(0)
+
+    const harnesses = await fake.envHarnesses()
+    expect(harnesses.map((h) => h.name)).toEqual(['claude', 'codex', 'pi', 'amp'])
+
+    const results: EnvScanResult[] = []
+    fake.openEnvScan(
+      { harness: 'fake', mode: 'inventory' },
+      {
+        onOutput: () => {},
+        onStatus: () => {},
+        onResult: (r) => results.push(r),
+        onError: () => {},
+      },
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(results).toHaveLength(1)
+    expect(results[0].dockerfile).toContain('FROM ubuntu:24.04')
+    expect(results[0].manifest[0].check_command).toBeTruthy()
   })
 })

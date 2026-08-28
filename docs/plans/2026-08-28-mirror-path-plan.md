@@ -197,12 +197,12 @@ before committing, and the values below are the starting point.
   semantics exactly (1-indexed, inclusive).
 - Produces: the typed client surface Tasks 6 and 7 consume; names above
   are the contract.
-- [ ] Tests first: removeManifestItem drops the item's lines and shifts
+- [x] Tests first: removeManifestItem drops the item's lines and shifts
   later spans correctly across adjacent and non-adjacent items;
   removing the last remaining item is refused (the review gate offers
   the standard fallback instead of an empty Dockerfile); api additions
   are exercised through the fixture fakes.
-- [ ] Implement, run `bun run typecheck` and `bun run test` from
+- [x] Implement, run `bun run typecheck` and `bun run test` from
   `web/`, commit.
 
 ### Task 6: wizard - the Environment step and the scan flow
