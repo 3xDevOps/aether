@@ -104,7 +104,7 @@ reuses `parsePatch` and `FilePatch` unchanged.
   always removed. The fake harness short-circuits to a canned edited
   pair (through the same validation) so the flow is demoable and
   testable without vendors.
-- [ ] Tests first (fake runtime and store, as `environment_build_test.go`
+- [x] Tests first (fake runtime and store, as `environment_build_test.go`
   does): preflight failures for a non-setup harness and for missing
   login state, each naming the agent-add command; the happy path runs
   the container with credential and tool mounts, the scratch mount, and
@@ -113,7 +113,7 @@ reuses `parsePatch` and `FilePatch` unchanged.
   validation failure retries once then emits `failed` with detail; the
   build lock serializes an edit against a build; scratch is removed in
   every outcome; the fake harness path works end to end.
-- [ ] Implement, run `go test ./internal/scheduler/ ./internal/events/`,
+- [x] Implement, run `go test ./internal/scheduler/ ./internal/events/`,
   commit.
 
 ### Task 2: wire - env.edit and env.get
