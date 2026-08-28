@@ -206,11 +206,11 @@ reuses `parsePatch` and `FilePatch` unchanged.
   the edit state; the version remains in history). On `failed`, show
   the detail with retry; when the failure is the missing-login
   preflight, surface the server's agent-add message verbatim.
-- [ ] Tests first: submit wires harness and request; in-flight state
+- [x] Tests first: submit wires harness and request; in-flight state
   streams lines into the expander; proposed fetches the diff and
   renders both views; approve triggers the build on the right version;
   dismiss clears; failure and preflight messages render.
-- [ ] Implement, run `bun run typecheck` and `bun run test`, commit.
+- [x] Implement, run `bun run typecheck` and `bun run test`, commit.
 
 ### Task 6: full check sweep
 
