@@ -11,10 +11,18 @@ import type {
   DaemonInstallResult,
   DaemonStatusResult,
   DiskUsage,
+  EnvScanFrame,
+  EnvScanRequest,
+  EnvScanResult,
+  EnvScanStatus,
+  EnvStatusResult,
+  EnvironmentSource,
   GatewayCapabilities,
+  HarnessStatus,
   ImageScaffoldResult,
   LinkRepoResult,
   LinkStatus,
+  ManifestItem,
   Member,
   Overlap,
   PresenceEntry,
@@ -125,6 +133,116 @@ export function socketURL(path: string): string {
   const token = bearer()
   if (token) url.searchParams.set('token', token)
   return url.toString()
+}
+
+/** What each /ws/envscan frame lands on. Output and status stream while
+ * the scan runs; exactly one of result or error ends it. */
+export interface EnvScanHandlers {
+  /** One raw line of agent output, in arrival order. */
+  onOutput: (line: string) => void
+  /** A coarse status change: detecting, running, validating, retrying. */
+  onStatus: (status: EnvScanStatus) => void
+  /** The scan produced a validated Dockerfile and manifest pair. */
+  onResult: (result: EnvScanResult) => void
+  /** The scan failed for good, with the last output lines for diagnosis.
+   * An unexpected close lands here too. */
+  onError: (detail: string, outputTail?: string) => void
+}
+
+export interface EnvScanSession {
+  /** Cancels the scan and its process; no handler fires afterward. */
+  close: () => void
+}
+
+/**
+ * openEnvScan runs one environment inventory on this machine through the
+ * local gateway's /ws/envscan socket: one JSON start frame out, then
+ * output and status frames in until a terminal result or error frame.
+ * Framing mirrors the shell client (routes/shell/client.ts): a session
+ * settles exactly once, and a close the caller asked for is not an
+ * outcome.
+ */
+function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
+  let socket: WebSocket | null = null
+  let disposed = false
+  let settled = false
+
+  const settle = (deliver: () => void) => {
+    if (disposed || settled) return
+    settled = true
+    deliver()
+  }
+
+  try {
+    socket = new WebSocket(socketURL('/ws/envscan'))
+  } catch {
+    settled = true
+    // After the caller has its session handle; a constructor failure is a
+    // dead connection.
+    queueMicrotask(() => {
+      if (!disposed) h.onError('connection failed')
+    })
+  }
+
+  if (socket) {
+    const ws = socket
+    ws.onopen = () => {
+      // EnvScanRequest with omitempty mirrored: absent keys, not empties.
+      const start: Record<string, unknown> = {
+        harness: req.harness,
+        mode: req.mode,
+      }
+      if (req.previous_dockerfile) start.previous_dockerfile = req.previous_dockerfile
+      if (req.previous_manifest_json) {
+        start.previous_manifest_json = req.previous_manifest_json
+      }
+      if (req.feedback) start.feedback = req.feedback
+      ws.send(JSON.stringify(start))
+    }
+    ws.onmessage = (msg) => {
+      if (settled || typeof msg.data !== 'string') return
+      let frame: EnvScanFrame
+      try {
+        frame = JSON.parse(msg.data) as EnvScanFrame
+      } catch {
+        return
+      }
+      switch (frame.type) {
+        case 'output':
+          h.onOutput(frame.line)
+          break
+        case 'status':
+          h.onStatus(frame.status)
+          break
+        case 'result':
+          settle(() =>
+            h.onResult({ dockerfile: frame.dockerfile, manifest: frame.manifest }),
+          )
+          break
+        case 'error':
+          settle(() => h.onError(frame.detail, frame.output_tail))
+          break
+      }
+    }
+    ws.onerror = () => ws.close()
+    ws.onclose = (ev) => {
+      socket = null
+      settle(() => h.onError(ev.reason || `connection closed (${ev.code})`))
+    }
+  }
+
+  return {
+    // Detach the handlers first: a close we asked for is not an outcome,
+    // and the gateway cancels the scan when the socket goes.
+    close: () => {
+      disposed = true
+      const ws = socket
+      socket = null
+      if (!ws) return
+      ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null
+      ws.close()
+    },
+  }
 }
 
 // Only what the SPA actually calls; the team-feature methods land with the
@@ -314,6 +432,38 @@ export const api = {
   localDaemonStatus: () => local<DaemonStatusResult>('daemon.status'),
   localImageScaffold: (repo: string, kind: 'dockerfile' | 'devcontainer') =>
     local<ImageScaffoldResult>('image.scaffold', { repo, kind }),
+  // Workspace environments: definitions live on the server (admin-guarded
+  // wire methods), the inventory scan runs on this machine through the
+  // local gateway.
+  envStatus: (ws: WorkspaceSelector) =>
+    call<EnvStatusResult>('env.status', { workspace: ws }),
+  envSave: (params: {
+    workspace: WorkspaceSelector
+    dockerfile: string
+    manifest: ManifestItem[]
+    source: EnvironmentSource
+    harness?: string
+  }) =>
+    call<{ version: number }>('env.save', {
+      workspace: params.workspace,
+      dockerfile: params.dockerfile,
+      manifest: params.manifest,
+      source: params.source,
+      ...(params.harness ? { harness: params.harness } : {}),
+    }).then((r) => r.version),
+  /** Builds the given version, or the active/newest one when omitted;
+   * progress rides the environment.build event stream. */
+  envBuild: (ws: WorkspaceSelector, version?: number) =>
+    call<{ version: number }>('env.build', {
+      workspace: ws,
+      ...(version ? { version } : {}),
+    }).then((r) => r.version),
+  /** Which setup-capable harnesses this machine has on PATH. */
+  envHarnesses: () =>
+    local<{ harnesses: HarnessStatus[] }>('env.harnesses').then(
+      (r) => r.harnesses,
+    ),
+  openEnvScan,
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),
