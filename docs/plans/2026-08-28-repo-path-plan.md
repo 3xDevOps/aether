@@ -151,6 +151,11 @@ engine so CLI-less surfaces get the same errors.
 
 ### Task 5: full check sweep
 
-- [ ] Run `make fmt-check`, `make vet`, `make lint`, `make test`,
+- [x] Run `make fmt-check`, `make vet`, `make lint`, `make test`,
   `make public-audit`, and from `web/`: `bun run typecheck`,
   `bun run test`; fix anything surfaced and commit the fixes.
+  (All checks passed with no code changes needed. `make lint` only runs
+  with `GOTOOLCHAIN=go1.25.13 GOFLAGS=-buildvcs=false` on this machine:
+  the locally installed Go is an experimental 1.27 build whose export
+  data golangci-lint v2.4.0 cannot read, and VCS stamping fails inside
+  the sandboxed worktree. Both are environment quirks, not repo issues.)
