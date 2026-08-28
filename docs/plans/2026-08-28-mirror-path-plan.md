@@ -260,13 +260,13 @@ before committing, and the values below are the starting point.
   banner) offers "ask the agent to fix it" - a refine scan seeded with
   the failure detail, feeding back into the same review gate - plus
   "keep the standard environment".
-- [ ] Tests first: per-item removal updates the summary and the payload
+- [x] Tests first: per-item removal updates the summary and the payload
   sent to envSave; request-changes reopens the socket in refine mode
   with the note; approve issues save then build and advances while
   status events drive the slice; the banner appears on building and
   clears on active; verification failure surfaces both offers and the
   repair path reopens the scan with the failure detail.
-- [ ] Implement, run `bun run typecheck` and `bun run test`, commit.
+- [x] Implement, run `bun run typecheck` and `bun run test`, commit.
 
 ### Task 8: full check sweep
 
