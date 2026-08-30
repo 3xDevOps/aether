@@ -137,6 +137,11 @@ func (f *fakeCoord) readUntilAcked(t *testing.T, cs *mcp.ClientSession, token st
 		if time.Now().After(deadline) {
 			t.Fatalf("no inbox read acknowledged %q after %d calls", token, len(inboxes))
 		}
+		// Yield between reads: the acknowledgement is promoted on the
+		// bridge's write path in another goroutine, and an unthrottled
+		// retry loop can starve that goroutine past the deadline on a
+		// loaded CI runner.
+		time.Sleep(time.Millisecond)
 		callTool(t, cs, toolInbox, nil, out)
 	}
 }
@@ -160,6 +165,8 @@ func readUntilEmpty(t *testing.T, cs *mcp.ClientSession, out *inboxOutput) {
 		if time.Now().After(deadline) {
 			t.Fatalf("inbox never drained; still holding %+v", out.Messages)
 		}
+		// Same yield as readUntilAcked, for the same starvation reason.
+		time.Sleep(time.Millisecond)
 	}
 }
 
