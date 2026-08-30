@@ -14,8 +14,9 @@
 
 [Quickstart](docs/quickstart.md) · [Install](docs/install.md) · [Docs](docs/) · [Contributing](CONTRIBUTING.md)
 
-<!-- docs/media/demo.gif does not exist yet. Shot list and recording recipe: docs/media/README.md. -->
+<!-- Goes live once docs/media/demo.gif exists. Shot list and recording recipe: docs/media/README.md.
 ![Aether demo](docs/media/demo.gif)
+-->
 
 </div>
 
