@@ -67,10 +67,28 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 	// input is dropped rather than refused, and its resizes are ignored.
 	err = pumpTerminal(ctx, cancel, conn, term, req.Write, req.Write)
 	if err != nil {
-		_ = conn.Close(websocket.StatusInternalError, "attach ended")
+		_ = conn.Close(attachEndClose(err))
 		return
 	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
+// attachEndClose maps a terminal read error to the close frame the
+// terminal view reads. The server ends a live attach with a distinct exit
+// status when its authorization re-check fails; relayed as 1008 with the
+// gate's name, the view downgrades to a mirror or stops reconnecting,
+// exactly as it would for a refusal at attach time.
+func attachEndClose(err error) (websocket.StatusCode, string) {
+	var exit *cli.RemoteExitError
+	if errors.As(err, &exit) {
+		switch exit.Status {
+		case protocol.AttachExitSteerRevoked:
+			return websocket.StatusPolicyViolation, "steer permission withdrawn"
+		case protocol.AttachExitMembershipRevoked:
+			return websocket.StatusPolicyViolation, "membership withdrawn"
+		}
+	}
+	return websocket.StatusInternalError, "attach ended"
 }
 
 // pumpTerminal bridges a WebSocket and a remote terminal: terminal output

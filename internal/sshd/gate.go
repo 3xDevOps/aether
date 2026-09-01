@@ -16,16 +16,24 @@ import (
 // read access. Wired into ptyhost.Config.Gate by the server assembly.
 func NewWriteGate(st store.Store) ptyhost.WriteGate {
 	return func(ctx context.Context, member domain.MemberID, run domain.RunID) error {
-		actor, err := resolveActor(ctx, st, member)
-		if err != nil {
-			return err
-		}
-		target, err := resolveRunTarget(ctx, st, run)
-		if err != nil {
-			return err
-		}
-		return permissions.Check(permissions.Steer, actor, target)
+		return checkSteer(ctx, st, member, run)
 	}
+}
+
+// checkSteer is the Steer check against the member's current role and the
+// run's current owner, protection, and workspace policy. The write gate,
+// the sync bridge's re-validation, and the live attach re-check all call
+// it, so the three revoke on exactly the same conditions.
+func checkSteer(ctx context.Context, st store.Store, member domain.MemberID, run domain.RunID) error {
+	actor, err := resolveActor(ctx, st, member)
+	if err != nil {
+		return err
+	}
+	target, err := resolveRunTarget(ctx, st, run)
+	if err != nil {
+		return err
+	}
+	return permissions.Check(permissions.Steer, actor, target)
 }
 
 // checkPush authorizes git receive-pack: pushing writes to the workspace

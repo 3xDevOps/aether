@@ -331,6 +331,13 @@ needs.
    attaches affect the shared terminal geometry. Client frames are capped at
    64 KiB; the SPA splits larger input (a paste) across several ordered
    `input` frames.
+5. The server re-checks the attach's authorization every few seconds. A
+   write attach whose member loses **steer** (role change, handoff, run
+   protection, workspace policy) closes with **1008**, reason
+   `steer permission withdrawn`; the SPA reconnects as a read-only mirror.
+   A member removed or set back to pending closes with **1008**, reason
+   `membership withdrawn`, and the SPA stops reconnecting. The run's
+   terminal session ending closes with **1000**; any other end with **1011**.
 
 Closing the socket detaches; the run is unaffected.
 

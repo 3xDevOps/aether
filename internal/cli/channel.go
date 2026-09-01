@@ -100,6 +100,15 @@ func (c *Conn) openSubsystem(name string, pty *ptyGeometry) (*sessionStream, err
 	}, nil
 }
 
+// RemoteExitError is a subsystem channel ending with a nonzero exit
+// status. The attach subsystem uses the protocol.AttachExit* statuses to
+// say why the server dropped a live attach.
+type RemoteExitError struct{ Status int }
+
+func (e *RemoteExitError) Error() string {
+	return fmt.Sprintf("cli: remote exited with status %d", e.Status)
+}
+
 // awaitExitStatus consumes session requests until the channel closes.
 // Exit status 0, or a close without any status, is a clean end; a
 // nonzero status carries the remote failure.
@@ -108,7 +117,7 @@ func awaitExitStatus(reqs <-chan *ssh.Request) error {
 	for req := range reqs {
 		if req.Type == "exit-status" && len(req.Payload) >= 4 {
 			if status := binary.BigEndian.Uint32(req.Payload); status != 0 {
-				res = fmt.Errorf("cli: remote exited with status %d", status)
+				res = &RemoteExitError{Status: int(status)}
 			}
 		}
 		if req.WantReply {
