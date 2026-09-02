@@ -64,10 +64,12 @@ the server exposes, and the browser surface inherits its boundary.
   and `/local/` is gated.
 - **Live sockets carry no separate re-authorization clock.** The server
   re-runs its own capability checks on every proxied call and on each
-  subsystem channel, and the token cannot be revoked out from under a
-  socket because it lives and dies with the process serving it. A write
-  attach that loses the steer capability is refused by the server the same
-  way a CLI attach would be.
+  subsystem channel, and re-checks live attach and sync channels every few
+  seconds; the token cannot be revoked out from under a socket because it
+  lives and dies with the process serving it. A write attach that loses the
+  steer capability is dropped by the server exactly as a CLI attach would
+  be - the terminal view falls back to a mirror - and a removed member
+  loses every open channel.
 
 ## Conflict coordination
 

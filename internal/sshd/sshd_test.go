@@ -119,35 +119,37 @@ func (p *fakePTY) Attach(ctx context.Context, run domain.RunID, member domain.Me
 			return nil
 		}
 	}
-	done := make(chan struct{})
-	defer close(done)
+	readDone := make(chan struct{})
 	go func() {
+		defer close(readDone)
+		buf := make([]byte, 1024)
 		for {
-			select {
-			case sz := <-resize:
+			n, err := conn.Read(buf)
+			if n > 0 {
 				p.mu.Lock()
-				p.resizes = append(p.resizes, sz)
+				p.input.Write(buf[:n])
 				p.mu.Unlock()
-			case <-done:
-				return
-			case <-ctx.Done():
+				if _, werr := conn.Write(append([]byte("echo:"), buf[:n]...)); werr != nil {
+					return
+				}
+			}
+			if err != nil {
 				return
 			}
 		}
 	}()
-	buf := make([]byte, 1024)
 	for {
-		n, err := conn.Read(buf)
-		if n > 0 {
+		select {
+		case sz := <-resize:
 			p.mu.Lock()
-			p.input.Write(buf[:n])
+			p.resizes = append(p.resizes, sz)
 			p.mu.Unlock()
-			if _, werr := conn.Write(append([]byte("echo:"), buf[:n]...)); werr != nil {
-				return nil
-			}
-		}
-		if err != nil {
+		case <-readDone:
 			return nil
+		case <-ctx.Done():
+			// Mirror ptyhost.Host.Attach: a canceled context ends the
+			// attach with the context's error.
+			return ctx.Err()
 		}
 	}
 }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 func init() {
@@ -20,8 +23,12 @@ func init() {
 }
 
 func runAttach(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: aether attach <run>")
+	fs := flag.NewFlagSet("attach", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	readOnly := fs.Bool("read-only", false, "watch the terminal without being able to type into it")
+	runID, err := parseLeadingArg(fs, args)
+	if err != nil || runID == "" {
+		return fmt.Errorf("usage: aether attach [--read-only] <run>")
 	}
 	cfg, err := cli.Load()
 	if err != nil {
@@ -33,12 +40,49 @@ func runAttach(args []string) error {
 	}
 	defer func() { _ = conn.Close() }()
 	cols, rows := termSize()
-	stream, err := conn.Attach(args[0], cols, rows)
+	stream, err := openAttach(conn, runID, cols, rows, *readOnly)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = stream.Close() }()
-	return copyRaw(stream)
+	return describeAttachEnd(copyRaw(stream))
+}
+
+// openAttach asks to steer unless told otherwise, and drops to a read-only
+// mirror when the server refuses steer, as the dashboard's terminal does:
+// a viewer's attach has to show them the terminal, not an error.
+func openAttach(conn *cli.Conn, runID string, cols, rows uint, readOnly bool) (io.ReadWriteCloser, error) {
+	req := protocol.AttachRequest{RunID: runID, Cols: cols, Rows: rows, ReadOnly: readOnly}
+	stream, ack, err := conn.AttachStream(req)
+	if err == nil {
+		return stream, nil
+	}
+	if readOnly || ack.OK || ack.Code != protocol.CodeDenied {
+		return nil, err
+	}
+	req.ReadOnly = true
+	stream, _, err = conn.AttachStream(req)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintln(os.Stderr, "aether: you cannot steer this run; attached read-only, keystrokes are ignored")
+	return stream, nil
+}
+
+// describeAttachEnd turns the server dropping a live attach into the
+// reason, instead of a bare exit status. Every other end passes through.
+func describeAttachEnd(err error) error {
+	var exit *cli.RemoteExitError
+	if !errors.As(err, &exit) {
+		return err
+	}
+	switch exit.Status {
+	case protocol.AttachExitSteerRevoked:
+		return errors.New("detached: you can no longer steer this run (its owner, protection, the workspace policy, or your role changed); aether attach --read-only still shows it")
+	case protocol.AttachExitMembershipRevoked:
+		return errors.New("detached: your membership was removed or is pending approval again")
+	}
+	return err
 }
 
 // termSizeOf is a seam so the handle probe order can be tested; under `go test`

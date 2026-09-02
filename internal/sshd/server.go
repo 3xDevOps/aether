@@ -117,10 +117,10 @@ type Config struct {
 	// syncHandshakeTimeout bounds the aether-sync setup handshake; zero
 	// means defaultSyncHandshakeTimeout. Unexported test knob.
 	syncHandshakeTimeout time.Duration
-	// syncRevalidateInterval is how often a live sync bridge re-checks
-	// its authorization; zero means defaultSyncRevalidateInterval.
+	// revalidateInterval is how often a live sync bridge or PTY attach
+	// re-checks its authorization; zero means defaultRevalidateInterval.
 	// Unexported test knob.
-	syncRevalidateInterval time.Duration
+	revalidateInterval time.Duration
 }
 
 // Server is the embedded SSH server.
@@ -170,8 +170,8 @@ func New(cfg Config) (*Server, error) {
 	if cfg.syncHandshakeTimeout <= 0 {
 		cfg.syncHandshakeTimeout = defaultSyncHandshakeTimeout
 	}
-	if cfg.syncRevalidateInterval <= 0 {
-		cfg.syncRevalidateInterval = defaultSyncRevalidateInterval
+	if cfg.revalidateInterval <= 0 {
+		cfg.revalidateInterval = defaultRevalidateInterval
 	}
 	signer, err := LoadOrCreateHostKey(cfg.HostKeyPath)
 	if err != nil {

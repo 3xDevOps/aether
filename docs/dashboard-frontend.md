@@ -367,9 +367,9 @@ routes on the same `runId`.
   denial outlives the socket that produced it: leaving the tab and coming back
   would show a live terminal beside a stale error, with steering greyed out
   even after `run.handoff` granted it.
-- **A 1008 close is read, not guessed at.** The gateway closes a live attach
-  with 1008 when its authorization watch fires, and the close reason names
-  which gate fell: `steer permission withdrawn` just downgrades - the client
+- **A 1008 close is read, not guessed at.** The server re-checks a live
+  attach's authorization every few seconds, the gateway relays a loss as a
+  1008 close, and the close reason names which gate fell: `steer permission withdrawn` just downgrades - the client
   reconnects immediately as a read-only mirror - while a dead token or
   `membership withdrawn` would refuse every reconnect, so those stop the loop
   and surface the reason. A refusal frame arrives with its own 1008 close,

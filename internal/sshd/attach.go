@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -17,6 +18,14 @@ import (
 // attachAckGrace is how long serveAttach waits for the PTY host to either
 // fail fast or produce output before acknowledging the attach anyway.
 const attachAckGrace = 200 * time.Millisecond
+
+// The two reasons the re-validation drops a live attach. Each maps to its
+// own exit status so the client can tell the member why they were
+// detached, and whether a read-only attach would still work.
+var (
+	errAttachSteerRevoked      = errors.New("sshd: steer permission withdrawn")
+	errAttachMembershipRevoked = errors.New("sshd: membership withdrawn")
+)
 
 // serveAttach wires an aether-attach subsystem channel to the PTY host:
 // one header line in, an ack, then a raw byte pipe. Geometry precedence is
@@ -60,10 +69,14 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	}
 	readOnly := req.ReadOnly || !hasPTY
 
+	// The attach gets its own cancel so the re-validation below can end it
+	// with a cause; the cause picks the exit status once Attach returns.
+	attachCtx, revoke := context.WithCancelCause(ctx)
+	defer revoke(nil)
 	conn := newAttachConn(ch, r, protocol.AttachResponse{OK: true, Cols: cols, Rows: rows})
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.cfg.PTY.Attach(ctx, run.ID, member, cols, rows, readOnly, conn, st.resize)
+		errCh <- s.cfg.PTY.Attach(attachCtx, run.ID, member, cols, rows, readOnly, conn, st.resize)
 	}()
 
 	var attachErr error
@@ -94,18 +107,65 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 
 	s.publishPresence(run, member, events.PresenceWatching)
 	if !returned {
+		s.spawn(func() { s.revokeAttachOnPolicyChange(attachCtx, revoke, member, run.ID, readOnly) })
 		attachErr = <-errCh
 	}
 	s.publishPresence(run, member, events.PresenceOnline)
-	if attachErr == nil {
+	switch cause := context.Cause(attachCtx); {
+	case errors.Is(cause, errAttachSteerRevoked):
+		sendExitStatus(ch, protocol.AttachExitSteerRevoked)
+	case errors.Is(cause, errAttachMembershipRevoked):
+		sendExitStatus(ch, protocol.AttachExitMembershipRevoked)
+	case attachErr == nil:
 		// Session end: server closes with exit-status 0.
 		sendExitStatus(ch, 0)
-	} else {
+	default:
 		// Attach failed after the ack was already on the wire; a nonzero
 		// exit-status is the remaining signal that distinguishes the
 		// failure from a clean session end.
 		sendExitStatus(ch, 1)
 	}
+}
+
+// revokeAttachOnPolicyChange re-runs the attach's authorization for as
+// long as it is served, the way revokeSyncOnPolicyChange does for the sync
+// bridge. The gate consulted at attach time is a snapshot: without this, a
+// member demoted, removed, or handed off mid-attach - or whose run was
+// protected or whose workspace went admins-only - keeps typing into the
+// agent's terminal until they choose to disconnect, the one surface with
+// the most direct access to a running agent. Steer loss ends a write
+// attach; a read-only attach ends only when the membership itself goes.
+// Store reads only, every few seconds per live attach.
+func (s *Server) revokeAttachOnPolicyChange(ctx context.Context, revoke context.CancelCauseFunc, member domain.MemberID, run domain.RunID, readOnly bool) {
+	ticker := time.NewTicker(s.cfg.revalidateInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if cause := s.attachRevocation(ctx, member, run, readOnly); cause != nil {
+				revoke(cause)
+				return
+			}
+		}
+	}
+}
+
+// attachRevocation reports why a live attach has to end, or nil while it
+// is still authorized. Like the sync bridge it fails closed: a store error
+// counts as a loss.
+func (s *Server) attachRevocation(ctx context.Context, member domain.MemberID, run domain.RunID, readOnly bool) error {
+	if s.checkMember(ctx, member) != nil {
+		return errAttachMembershipRevoked
+	}
+	if readOnly {
+		return nil
+	}
+	if checkSteer(ctx, s.cfg.Store, member, run) != nil {
+		return errAttachSteerRevoked
+	}
+	return nil
 }
 
 func (s *Server) publishPresence(run *domain.Run, member domain.MemberID, state events.PresenceState) {
