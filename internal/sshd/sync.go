@@ -55,9 +55,10 @@ const (
 	// an authenticated member can hold channels open indefinitely by
 	// drip-feeding the setup.
 	defaultSyncHandshakeTimeout = 20 * time.Second
-	// defaultSyncRevalidateInterval is how often an authorized,
-	// already-serving bridge re-checks that it is still authorized.
-	defaultSyncRevalidateInterval = 3 * time.Second
+	// defaultRevalidateInterval is how often an authorized,
+	// already-serving sync bridge or PTY attach re-checks that it is
+	// still authorized.
+	defaultRevalidateInterval = 3 * time.Second
 )
 
 var (
@@ -429,7 +430,7 @@ func (s *rootPinningStream) pin(req *remote.InitializeSynchronizationRequest) {
 // watcher in `aether sync` is a courtesy, not a control - a hostile
 // client simply omits it.
 func (s *Server) revokeSyncOnPolicyChange(ctx context.Context, member domain.MemberID, run domain.RunID, worktree string, stream *rootPinningStream) {
-	ticker := time.NewTicker(s.cfg.syncRevalidateInterval)
+	ticker := time.NewTicker(s.cfg.revalidateInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -456,15 +457,7 @@ func (s *Server) syncStillAuthorized(ctx context.Context, member domain.MemberID
 	if err != nil || run.Status.Terminal() || run.Worktree != worktree {
 		return false
 	}
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
-	if err != nil {
-		return false
-	}
-	target, err := resolveRunTarget(ctx, s.cfg.Store, id)
-	if err != nil {
-		return false
-	}
-	return permissions.Check(permissions.Steer, actor, target) == nil
+	return checkSteer(ctx, s.cfg.Store, member, id) == nil
 }
 
 // claimSyncChannel reserves one of the member's concurrent aether-sync

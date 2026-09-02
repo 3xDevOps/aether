@@ -99,8 +99,10 @@ last admin can neither be removed nor demoted** - `refusing to delete the last
 admin` and `refusing to demote the last admin` - because a server with no admin
 has no way back. **A role change lands on connections that are already open**,
 not at next login: the role is re-read from the store on every request, so a
-demotion takes effect mid-session and a live write attach closes the moment
-steer goes away.
+demotion takes effect mid-session. A live write attach is re-checked every few
+seconds and dropped when steer goes away - `detached: you can no longer steer
+this run` - and `aether attach --read-only` still shows the terminal
+afterwards. Removing a member ends every attach and live sync of theirs.
 
 Setting someone to the role they already hold is a harmless no-op, and a
 pending member's role can be changed before they are approved - approval and
@@ -133,10 +135,20 @@ Two settings belong to the workspace rather than to any run in it:
   sets it at creation; it defaults to `main`.
 - **The steering policy** decides whether collaborators may steer and kill
   each other's runs. It is permissive by default; an admin restricts it to
-  owners and admins over the `workspace.settings` method, or in the dashboard's
-  Workspace settings dialog. A member refused by it reads
+  owners and admins:
+
+  ```sh
+  aether workspace settings                              # show
+  aether workspace settings --steer-others admins-only
+  aether workspace settings --steer-others everyone      # back to the default
+  ```
+
+  The dashboard's Workspace settings dialog has the same switch. A member
+  refused by it reads
   `workspace restricts steer of others' runs to their owner and admins`.
-  Marking a single run protected does the same for that run alone.
+  `aether protect <run>` does the same for one run alone, whatever the
+  policy; `aether unprotect <run>` lifts it. Both are for the run's owner or
+  an admin, and both land on anyone already attached.
 
 Scoped commands - `run`, `budget`, `cost`, `inbox`, `who`, `timeline`,
 `template`, `schedule` - take `--workspace <name-or-id>` and default to the
@@ -166,9 +178,10 @@ the artifact. Every other branch behaves like a normal git remote.
 | --- | --- |
 | `aether runs` | Every run you can see, colored by owner, with conflict warnings. Prints a notice when any run is waiting on a human; `--attention` lists only those. |
 | `aether who` | Who is online and which runs they are watching. |
-| `aether attach <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer. |
+| `aether attach [--read-only] <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer, and without it the attach falls back to read-only by itself. |
 | `aether inject <run> "..."` | Push an instruction into a running agent. Renders as a banner in your member color. |
 | `aether pause` / `resume` / `kill <run>` | Suspend, thaw, terminate. Worktree and transcript survive a kill. |
+| `aether protect` / `unprotect <run>` | Limit steering and killing one run to its owner and admins, whatever the workspace policy says. |
 | `aether handoff <run> <member>` | Transfer ownership, notification routing, and cost attribution. Overnight relay work. Refused for a viewer or a pending member, since neither can own a run. |
 | `aether close <run> --outcome merged\|abandoned` | Clear a finished run off the attention board. |
 | `aether inbox` | The shared approval queue; `aether inbox approve\|deny <request-id>` decides, and any steer-holder can. `--all` includes decided requests. |

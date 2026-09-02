@@ -395,7 +395,7 @@ func TestSyncPinOverwritesEverySecurityRelevantField(t *testing.T) {
 // a non-owner collaborator.
 func TestSyncRevokesStreamWhenAuthorizationIsLost(t *testing.T) {
 	mutagenDataDir(t)
-	e := newTestEnv(t, func(c *Config) { c.syncRevalidateInterval = 50 * time.Millisecond })
+	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 50 * time.Millisecond })
 	worktree := t.TempDir()
 	e.run.Worktree = worktree
 	e.run.Status = domain.RunNeedsAttention
@@ -458,7 +458,7 @@ func TestSyncRevokesStreamWhenAuthorizationIsLost(t *testing.T) {
 // flip: the same re-validation covers membership.
 func TestSyncRevokesStreamWhenMemberIsRemoved(t *testing.T) {
 	mutagenDataDir(t)
-	e := newTestEnv(t, func(c *Config) { c.syncRevalidateInterval = 50 * time.Millisecond })
+	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 50 * time.Millisecond })
 	worktree := t.TempDir()
 	e.run.Worktree = worktree
 	e.run.Status = domain.RunNeedsAttention

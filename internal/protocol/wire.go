@@ -303,6 +303,21 @@ type AttachResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// Exit statuses of the attach subsystem. 0 is the run's terminal session
+// ending and 1 an attach that failed after its ack; these two name the
+// server dropping a live attach because its authorization re-check
+// failed, so a client can say why it was detached instead of only that
+// it was.
+const (
+	// AttachExitSteerRevoked: a write attach lost the steer capability
+	// (role change, handoff, run protection, or the workspace's steering
+	// policy). A read-only attach of the same run is still allowed.
+	AttachExitSteerRevoked = 3
+	// AttachExitMembershipRevoked: the member was removed or set back to
+	// pending. Every attach of theirs ends, read-only ones included.
+	AttachExitMembershipRevoked = 4
+)
+
 // WorkspaceSelector addresses a workspace by exactly one of ID or Name.
 type WorkspaceSelector struct {
 	ID   string `json:"id,omitempty"`

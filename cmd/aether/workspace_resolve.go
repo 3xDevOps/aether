@@ -16,17 +16,23 @@ func resolveWorkspace(c *protocol.Client, idOrName string) (string, error) {
 	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &wl); err != nil {
 		return "", err
 	}
+	return pickWorkspace(wl.Workspaces, idOrName)
+}
+
+// pickWorkspace is resolveWorkspace over an already-fetched list, for
+// commands that also need the workspace itself and not only its ID.
+func pickWorkspace(list []protocol.Workspace, idOrName string) (string, error) {
 	if idOrName == "" {
-		switch len(wl.Workspaces) {
+		switch len(list) {
 		case 0:
 			return "", fmt.Errorf("no workspaces; create one with aether workspace init")
 		case 1:
-			return wl.Workspaces[0].ID, nil
+			return list[0].ID, nil
 		default:
 			return "", fmt.Errorf("--workspace is required when more than one workspace exists")
 		}
 	}
-	return workspaceIDIn(wl.Workspaces, idOrName)
+	return workspaceIDIn(list, idOrName)
 }
 
 // workspaceIDIn maps a workspace name or ID to the ID. Git remote URLs and
