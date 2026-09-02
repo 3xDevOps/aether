@@ -20,6 +20,15 @@ files:
   - preload.js
   - package.json
 
+# aether://run/<id> deep links (main.js handleDeepLink). macOS reads the
+# scheme from the bundle's Info.plist, so a runtime
+# setAsDefaultProtocolClient alone is not enough there; Linux gets an
+# x-scheme-handler MIME entry in the .desktop file.
+protocols:
+  - name: Aether
+    schemes:
+      - aether
+
 mac:
   target:
     - dmg

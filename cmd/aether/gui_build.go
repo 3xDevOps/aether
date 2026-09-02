@@ -1,0 +1,72 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"runtime"
+
+	"github.com/3xDevOps/Aether/desktop"
+	"github.com/3xDevOps/Aether/internal/localops"
+)
+
+// guiBuild packages the embedded Electron shell for this machine and
+// installs it where the desktop lists applications, so the dashboard opens
+// as a native window without a source checkout.
+func guiBuild(args []string) error {
+	fs := flag.NewFlagSet("gui build", flag.ExitOnError)
+	buildDir := fs.String("build-dir", "", "where to unpack the shell sources and run npm (default: the user cache directory)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	if *buildDir == "" {
+		dir, err := localops.DesktopBuildDir()
+		if err != nil {
+			return err
+		}
+		*buildDir = dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	// The app finds the CLI the same way the shell does at launch. Refuse
+	// early rather than install a window that only shows "aether CLI not
+	// found".
+	if !localops.DesktopFindsCLI(home) {
+		return errors.New("aether is not installed where the desktop app looks (PATH, /usr/local/bin, ~/.local/bin); install the CLI there first (see docs/install.md)")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)
+	defer stop()
+
+	fmt.Printf("building the desktop app in %s\n", *buildDir)
+	built, err := localops.BuildDesktop(ctx, desktop.Source, *buildDir, os.Stdout, os.Stderr)
+	if err != nil {
+		return err
+	}
+	icon, err := desktop.Source.ReadFile("build/icons/256x256.png")
+	if err != nil {
+		return err
+	}
+	app, err := localops.InstallDesktop(runtime.GOOS, home, built, icon)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("installed %s\n", app.App)
+	switch runtime.GOOS {
+	case "darwin":
+		fmt.Println("open it from Launchpad or Spotlight as Aether")
+	case "windows":
+		fmt.Println("open it from the Start Menu as Aether")
+	default:
+		fmt.Printf("launcher %s\nopen it from your application menu as Aether\n", app.Launcher)
+	}
+	return nil
+}

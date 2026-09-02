@@ -59,8 +59,14 @@ bun run test
 
 The optional Electron shell in `desktop/` wraps `aether gui` in a window. The
 dashboard SPA itself is embedded in the `aether` CLI (`web/embed.go`), so this
-package is just a sidecar launcher; see
-[docs/install.md](docs/install.md#desktop-app) for running it.
+package is just a sidecar launcher. Users build and install it with
+`aether gui build`, which unpacks the sources embedded by `desktop/embed.go`
+and runs electron-builder's unpacked target; see
+[docs/install.md](docs/install.md#desktop-app). A new file in `desktop/` that
+the shell needs at runtime must be added to both `desktop/embed.go` and the
+`files` list in `electron-builder.yml`.
+
+Installers come from a checkout:
 
 ```sh
 cd desktop
