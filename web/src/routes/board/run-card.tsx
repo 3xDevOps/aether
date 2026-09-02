@@ -37,7 +37,7 @@ export function RunCard({ card }: { card: BoardCard }) {
         unseen ? 'border-foreground/25' : 'opacity-90',
       )}
     >
-      <div className="space-y-2 p-2">
+      <div className="space-y-3 p-3">
         <div className="flex items-start gap-2">
           <StateDot state={state} className="mt-1" />
           <span
@@ -94,7 +94,7 @@ export function RunCard({ card }: { card: BoardCard }) {
         type="button"
         aria-label={runLabel(run)}
         onClick={() => navigate('run', { runId: run.id })}
-        className="absolute inset-0 z-10 rounded-md focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        className="absolute inset-0 z-10 rounded-md focus-visible:ring-[2px] focus-visible:ring-ring/50 focus-visible:outline-none"
       />
     </article>
   )

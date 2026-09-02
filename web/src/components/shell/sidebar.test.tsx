@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { Sidebar } from '@/components/shell/sidebar'
+import { ViewHeader } from '@/components/view-header'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
@@ -121,6 +122,19 @@ describe('Sidebar', () => {
     expect(screen.getAllByTitle('Needs you').length).toBeGreaterThan(0)
     // The run groups under Needs you, so the attention sort surfaces it.
     expect(screen.getByRole('heading', { name: 'Needs you' })).toBeDefined()
+  })
+
+  it('keeps the explorer and main top bars the same height', () => {
+    render(
+      <>
+        <Sidebar />
+        <ViewHeader title="All runs" />
+      </>,
+    )
+
+    const sidebar = screen.getByRole('complementary', { name: 'Runs' })
+    expect(sidebar.firstElementChild?.className).toContain('h-9')
+    expect(screen.getByRole('banner').className).toContain('h-9')
   })
 
   it('shows the admin and desktop surfaces the gateway can serve', () => {

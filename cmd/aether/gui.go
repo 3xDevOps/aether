@@ -19,12 +19,15 @@ import (
 func init() {
 	register(command{
 		name:  "gui",
-		short: "serve the dashboard locally with full SSH authority",
+		short: "serve the dashboard locally with full SSH authority; `gui build` installs the desktop app",
 		run:   runGUI,
 	})
 }
 
 func runGUI(args []string) error {
+	if len(args) > 0 && args[0] == "build" {
+		return guiBuild(args[1:])
+	}
 	fs := flag.NewFlagSet("gui", flag.ExitOnError)
 	port := fs.Int("port", 0, "loopback port to bind (0 picks an ephemeral one)")
 	urlOnly := fs.Bool("url", false, "print the gateway URL instead of opening a browser")

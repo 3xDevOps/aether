@@ -15,7 +15,7 @@ import type { Template } from '@/lib/types'
 import { useStore } from '@/store'
 
 const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
+  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 /** Launches a saved task template into the active workspace. */
 export function TemplateDialog({ onClose }: { onClose: () => void }) {

@@ -53,7 +53,7 @@ export function InjectDialog() {
           <textarea
             autoFocus
             rows={4}
-            className="w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
             placeholder="Steer the agent..."
             value={text}
             onChange={(e) => setText(e.target.value)}

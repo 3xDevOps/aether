@@ -172,12 +172,12 @@ function Select({
   options: (string[] | [string, string])[]
 }) {
   return (
-    <label className="flex items-center gap-1 text-muted-foreground">
+    <label className="flex items-center gap-2 text-muted-foreground">
       {label}
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="max-w-44 truncate rounded-md border bg-background px-1.5 py-1 text-foreground"
+        className="max-w-44 truncate rounded-md border bg-background px-2 py-1 text-foreground"
       >
         {options.map(([id, name]) => (
           <option key={id} value={id}>

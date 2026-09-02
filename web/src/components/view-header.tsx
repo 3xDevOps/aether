@@ -6,7 +6,7 @@ export function ViewHeader({
   subtitle?: string
 }) {
   return (
-    <header className="flex items-baseline gap-2 border-b px-4 py-2">
+    <header className="flex h-9 items-center gap-2 border-b px-4">
       <h1 className="truncate text-sm font-medium">{title}</h1>
       {subtitle && (
         <span className="shrink-0 text-xs text-muted-foreground">{subtitle}</span>

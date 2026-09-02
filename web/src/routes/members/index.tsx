@@ -39,7 +39,7 @@ const presetColors = [
 // The house field style, duplicated per file rather than shared; see the
 // admin dialogs for the other copies.
 const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
+  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
 

@@ -69,21 +69,28 @@ jobs:
         run: bun run test
         working-directory: web
 
+  # The desktop shell is built the way users build it: `aether gui build`
+  # unpacks the sources embedded in the CLI and runs electron-builder.
   desktop:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # No lockfile is committed (the repo toolchain is Bun, which cannot
-      # write an npm lockfile), so this is `npm install`, not `npm ci`.
-      - name: Install dependencies
-        run: npm install
-        working-directory: desktop
-      - name: Package (unpacked, no publish)
-        run: npx electron-builder --dir --publish never
-        working-directory: desktop
+      - name: Install desktop validation tools
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y desktop-file-utils
+      - name: Build the CLI
+        run: mkdir -p web/dist && go build -o "$HOME/.local/bin/aether" ./cmd/aether
+      - name: aether gui build
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          aether gui build
+          desktop-file-validate ~/.local/share/applications/aether-desktop.desktop
+          test -x ~/.local/share/aether/desktop/aether-desktop
 
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by

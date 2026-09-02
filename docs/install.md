@@ -156,28 +156,60 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rest of the toolchain.
 
 ## Desktop app
 
-Optional, in `desktop/`: an Electron shell that launches `aether gui` for you
-and shows the dashboard in its own frameless window, with desktop
-notifications, a needs-attention badge, and `aether://run/<id>` deep links. It
-is the same SPA with the same full SSH authority, just without a browser tab to
-lose. No release publishes it - build it yourself (needs Node 22+):
+Optional: an Electron shell that launches `aether gui` for you and shows the
+dashboard in its own frameless window, with desktop notifications, a
+needs-attention badge, and `aether://run/<id>` deep links. It is the same SPA
+with the same full SSH authority, just without a browser tab to lose. No
+release publishes it; the CLI builds it for you (needs Node.js 22+ with `npm`
+on PATH):
 
 ```sh
-cd desktop
-npm install
-npm run dist    # installer for this OS into desktop/dist/
-npm run start   # or run it unpackaged during development
+aether gui build
 ```
 
-It requires the `aether` CLI installed and linked first; the app does not
-bundle the binary. It looks for `aether` in `AETHER_BIN`, then `PATH`, then the
-installer defaults (`/usr/local/bin`, `~/.local/bin`). If launch fails with
-"aether CLI not found", set `AETHER_BIN` to the binary's full path.
+The CLI carries the shell sources, unpacks them into your cache directory
+(`~/.cache/aether/desktop-build` on Linux,
+`~/Library/Caches/aether/desktop-build` on macOS,
+`%LOCALAPPDATA%\aether\desktop-build` on Windows; `--build-dir` overrides), runs
+`npm install` and electron-builder there, and installs the result where your
+desktop lists applications:
+
+| OS | App | Launcher |
+| --- | --- | --- |
+| Linux | `~/.local/share/aether/desktop/` | `~/.local/share/applications/aether-desktop.desktop` |
+| macOS | `~/Applications/Aether.app` | Launchpad and Spotlight |
+| Windows | `%LOCALAPPDATA%\Programs\Aether\` | Start Menu > Aether |
+
+The first build downloads the Electron runtime (about 100 MB) into
+electron-builder's own cache (`~/.cache/electron` and
+`~/.cache/electron-builder` on Linux, `~/Library/Caches/electron` and
+`~/Library/Caches/electron-builder` on macOS, `%LOCALAPPDATA%\electron\Cache`
+and `%LOCALAPPDATA%\electron-builder` on Windows), so rebuilding is quick.
+Run `aether gui build` again to replace an installed app; close the Aether
+window first. To remove everything, delete the two paths in the table, the
+build directory, and those caches.
+
+The app requires the `aether` CLI installed first; it does not bundle the
+binary and `aether gui build` refuses to run if the shell would not find it.
+It looks for `aether` in `AETHER_BIN`, then `PATH`, then the installer
+defaults (`/usr/local/bin`, `~/.local/bin`). The application menu launches the
+app with your desktop session's `PATH`, not your terminal's, so a CLI that is
+only reachable through a shell profile entry (a Go bin directory, a version
+manager shim) may work in the terminal and still fail from the menu;
+`aether gui build` warns when it finds `aether` that way. If launch fails with
+"aether CLI not found", install the CLI into `/usr/local/bin` or
+`~/.local/bin`, or set `AETHER_BIN` to the binary's full path.
+
+On Linux the launcher passes `--no-sandbox`, the same default electron-builder
+gives its AppImages: an unpacked Electron cannot use its SUID sandbox helper
+without root, and Ubuntu 24.04+ denies the namespace sandbox to unconfined
+binaries. The renderer still runs with context isolation and no Node access,
+locked to the loopback gateway.
 
 **The dashboard ships inside the CLI, not inside this app.** The SPA is
 embedded in the `aether` binary (`web/embed.go`) and served by `aether gui`, so
 a dashboard change reaches the window only when the CLI is rebuilt and
-reinstalled - not when the desktop package is rebuilt:
+reinstalled - not when the desktop app is rebuilt:
 
 ```sh
 make build && sudo install -m 0755 dist/aether /usr/local/bin/aether
@@ -185,8 +217,8 @@ make build && sudo install -m 0755 dist/aether /usr/local/bin/aether
 
 If the window renders an older dashboard than your checkout, an older `aether`
 is on your `PATH`; `aether version` prints the commit it was built from.
-Packaging installers for other platforms and code signing are in
-[CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
+Building installers (`.dmg`, `.exe`, AppImage) from a checkout and code signing
+are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 
 ## Server prerequisites
 
@@ -482,11 +514,19 @@ for API-key harnesses. No system user or group is ever created, so there is noth
 rm -rf ~/.config/aether ~/.config/aether-desktop
 ssh-keygen -R '[<server-host>]:2222'
 sudo rm -f /usr/local/bin/aether        # or ~/.local/bin/aether
+# only if you ran `aether gui build`:
+rm -rf ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop
+rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder
 ```
 
-On macOS the desktop state is `~/Library/Application Support/aether-desktop`;
-on Windows it is `%APPDATA%\aether-desktop`, and the client binary is wherever
-you put `aether.exe` on PATH.
+On macOS the desktop state is `~/Library/Application Support/aether-desktop`,
+the app is `~/Applications/Aether.app`, and the build caches are
+`~/Library/Caches/aether`, `~/Library/Caches/electron`, and
+`~/Library/Caches/electron-builder`. On Windows the state is
+`%APPDATA%\aether-desktop`, the app is `%LOCALAPPDATA%\Programs\Aether` plus
+its Start Menu shortcut, the build caches are `%LOCALAPPDATA%\aether`,
+`%LOCALAPPDATA%\electron`, and `%LOCALAPPDATA%\electron-builder`, and the
+client binary is wherever you put `aether.exe` on PATH.
 
 The `ssh-keygen -R` line matters more than it looks. A reinstalled server
 generates a new host key, so a stale `known_hosts` entry makes the next

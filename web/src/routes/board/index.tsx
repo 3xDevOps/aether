@@ -25,7 +25,7 @@ export function Board() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2 border-b px-4 py-2">
+      <header className="flex h-9 items-center gap-2 border-b px-4">
         <h1 className="text-sm font-medium">Run board</h1>
         <span className="text-xs text-muted-foreground">
           {total} {total === 1 ? 'run' : 'runs'}

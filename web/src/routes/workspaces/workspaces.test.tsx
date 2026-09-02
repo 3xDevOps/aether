@@ -134,6 +134,18 @@ describe('workspaces view', () => {
     expect(screen.getByText('admins steer others')).toBeDefined()
   })
 
+  it('wraps workspace metadata and actions without crowding', async () => {
+    const client = fakeApi({
+      workspaceListFull: vi.fn(async () => [workspace]),
+      toolsList: vi.fn(async () => []),
+    })
+    seed()
+    render(<WorkspacesRoute params={{}} client={client} />)
+
+    const name = await screen.findByText(workspace.name)
+    expect(name.parentElement?.className).toContain('flex-wrap')
+  })
+
   it('opens a workspace by making it the active scope', async () => {
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => [workspace]),

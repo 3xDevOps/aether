@@ -198,23 +198,26 @@ browser. See [local-gateway.md](local-gateway.md).
 
 `aether gui` in a browser tab is the whole dashboard. If you would rather it
 lived in its own window - with desktop notifications and a dock badge when a
-run parks in `needs-attention`, plus `aether://run/<id>` deep links - there is
-an optional Electron shell in `desktop/`. It is a thin wrapper: it launches
-`aether gui` for you and points a window at the same tokened loopback gateway.
+run parks in `needs-attention`, plus `aether://run/<id>` deep links - build
+the desktop app. It needs Node.js 22+ and takes a minute:
 
-Two things to know before you reach for it:
+```sh
+aether gui build
+```
 
-- **There is no download.** No release publishes an installer - no AppImage,
-  `.dmg`, or `.exe`, on any platform. You build it from source. The steps
-  (Node 22+, `npm run dist`) and the cross-platform build matrix are in
-  [install.md](install.md#desktop-app).
-- **It is not a standalone client.** The app does not bundle `aether`, and the
-  dashboard itself lives inside the CLI binary (`aether gui` serves it), not
-  inside the app. So you still need the CLI installed ([step 1](#1-install))
-  and linked ([step 3](#3-link-from-your-machine)) first; the app finds
-  `aether` on your `PATH`. A built AppImage on its own does nothing. When you
-  rebuild the CLI, the window picks up the new dashboard; rebuilding the app
-  does not.
+That installs Aether into your application menu (Linux), `~/Applications`
+(macOS), or the Start Menu (Windows). Open it like any other app.
+
+Two things to know:
+
+- **There is no download.** No release publishes an installer. `aether gui
+  build` packages the Electron shell on your machine from sources carried in
+  the CLI. Details in [install.md](install.md#desktop-app).
+- **It is not a standalone client.** The app does not bundle `aether`; it
+  launches `aether gui` from your `PATH`, and the dashboard lives inside that
+  CLI binary. So install ([step 1](#1-install)) and link
+  ([step 3](#3-link-from-your-machine)) first. When you update the CLI, the
+  window picks up the new dashboard without rebuilding the app.
 
 In the dashboard: a workspace switcher over the runs in scope, a board
 bucketed by what needs attention, a live terminal mirror per run, the diff

@@ -20,7 +20,22 @@ files:
   - preload.js
   - package.json
 
+# aether://run/<id> deep links (main.js handleDeepLink). macOS reads the
+# scheme from the bundle's Info.plist, so a runtime
+# setAsDefaultProtocolClient alone is not enough there; Linux gets an
+# x-scheme-handler MIME entry in the .desktop file.
+protocols:
+  - name: Aether
+    schemes:
+      - aether
+
 mac:
+  # Ad-hoc signature: Apple Silicon refuses to launch an unsigned binary,
+  # and `aether gui build` runs without a certificate. Gatekeeper never
+  # sees a locally built app (no quarantine flag), so this is enough for a
+  # local install. A release build overrides identity with a real one.
+  identity: "-"
+  hardenedRuntime: false
   target:
     - dmg
     - zip

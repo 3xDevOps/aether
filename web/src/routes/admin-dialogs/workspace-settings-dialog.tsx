@@ -18,7 +18,7 @@ import { api, type Api } from '@/lib/api'
 import { useStore } from '@/store'
 
 const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
+  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 export function WorkspaceSettingsDialog({
   workspaceID,
