@@ -99,17 +99,29 @@ func TestDesktopLayoutRejectsUnknownOS(t *testing.T) {
 }
 
 func TestDesktopExecQuoteEscapesReservedCharacters(t *testing.T) {
-	got := desktopExecQuote(`/home/o"neil/$HOME/back\slash`)
-	want := `"/home/o\"neil/\$HOME/back\\slash"`
+	got := desktopExecQuote(`/home/o"neil/$HOME/50%off/back\slash`)
+	want := `"/home/o\"neil/\$HOME/50%%off/back\\slash"`
 	if got != want {
 		t.Fatalf("quote = %s, want %s", got, want)
 	}
 }
 
-func TestShortcutScriptEscapesQuotes(t *testing.T) {
-	got := shortcutScript(`C:\Users\o'neil\Aether.lnk`, `C:\Apps\Aether.exe`)
-	if !strings.Contains(got, `'C:\Users\o''neil\Aether.lnk'`) || !strings.Contains(got, `TargetPath = 'C:\Apps\Aether.exe'`) {
-		t.Fatalf("script = %s", got)
+func TestDesktopLayoutIgnoresRelativeXDGDataHome(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", ".")
+	app, err := desktopLayout("linux", "/home/u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join("/home/u", ".local", "share", "aether", "desktop"); app.App != want {
+		t.Fatalf("App = %q, want %q", app.App, want)
+	}
+}
+
+func TestDesktopLayoutWindowsRejectsRelativeAppData(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", "Programs")
+	t.Setenv("APPDATA", `C:\Users\u\AppData\Roaming`)
+	if _, err := desktopLayout("windows", `C:\Users\u`); err == nil {
+		t.Fatal("relative LOCALAPPDATA accepted")
 	}
 }
 

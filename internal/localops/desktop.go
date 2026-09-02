@@ -68,11 +68,11 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir string, stdout, stder
 		cmd.Dir = buildDir
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
-		// A local build never signs: there is no certificate to find, and
-		// a locally built app carries no quarantine flag for Gatekeeper to
-		// check. Skipping discovery keeps macOS builds quiet and
-		// deterministic.
-		cmd.Env = append(cmd.Environ(), "CSC_IDENTITY_AUTO_DISCOVERY=false")
+		// A local build never has a certificate to find; electron-builder.yml
+		// signs ad hoc instead. Skipping discovery keeps macOS builds quiet.
+		// npm's electron postinstall would download the runtime zip once
+		// more than electron-builder does for itself, so skip it.
+		cmd.Env = append(cmd.Environ(), "CSC_IDENTITY_AUTO_DISCOVERY=false", "ELECTRON_SKIP_BINARY_DOWNLOAD=1")
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("localops: %s %s: %w", filepath.Base(name), strings.Join(args, " "), err)
 		}
@@ -172,8 +172,9 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 		if err := os.MkdirAll(filepath.Dir(app.Launcher), 0o755); err != nil {
 			return DesktopApp{}, err
 		}
-		script := shortcutScript(app.Launcher, filepath.Join(app.App, "Aether.exe"))
-		out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
+		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", shortcutScript)
+		cmd.Env = append(cmd.Environ(), "AETHER_LNK="+app.Launcher, "AETHER_EXE="+filepath.Join(app.App, "Aether.exe"))
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return DesktopApp{}, fmt.Errorf("localops: create Start Menu shortcut: %w: %s", err, strings.TrimSpace(string(out)))
 		}
@@ -182,26 +183,36 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 }
 
 // DesktopFindsCLI reports whether the shell will locate the aether binary
-// at launch. It mirrors desktop/main.js: AETHER_BIN, then PATH, then the
-// install script's default locations.
-func DesktopFindsCLI(home string) bool {
+// at launch, mirroring desktop/main.js: AETHER_BIN, then PATH, then the
+// install script's default locations. The shell runs with the desktop
+// session's PATH, not this terminal's, so a binary found only through a
+// PATH entry outside the defaults is reported in shellOnly: it works from
+// here but may not from the application menu.
+func DesktopFindsCLI(home string) (found bool, shellOnly string) {
 	if explicit := os.Getenv("AETHER_BIN"); explicit != "" {
 		_, err := exec.LookPath(explicit)
-		return err == nil
-	}
-	if _, err := exec.LookPath("aether"); err == nil {
-		return true
+		return err == nil, ""
 	}
 	name := "aether"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	for _, dir := range []string{"/usr/local/bin", filepath.Join(home, ".local", "bin")} {
+	defaults := []string{"/usr/local/bin", filepath.Join(home, ".local", "bin")}
+	if path, err := exec.LookPath("aether"); err == nil {
+		dir := filepath.Dir(path)
+		for _, d := range append(defaults, "/usr/bin", "/opt/homebrew/bin") {
+			if dir == d {
+				return true, ""
+			}
+		}
+		return true, path
+	}
+	for _, dir := range defaults {
 		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() {
-			return true
+			return true, ""
 		}
 	}
-	return false
+	return false, ""
 }
 
 // desktopLayout is where the app and its launcher live for goos: the
@@ -209,8 +220,10 @@ func DesktopFindsCLI(home string) bool {
 func desktopLayout(goos, home string) (DesktopApp, error) {
 	switch goos {
 	case "linux":
+		// A relative XDG_DATA_HOME is invalid per the spec and treated as
+		// unset; honoring it would install into the working directory.
 		data := os.Getenv("XDG_DATA_HOME")
-		if data == "" {
+		if !filepath.IsAbs(data) {
 			data = filepath.Join(home, ".local", "share")
 		}
 		return DesktopApp{
@@ -222,8 +235,8 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 		return DesktopApp{App: app, Launcher: app}, nil
 	case "windows":
 		local, roaming := os.Getenv("LOCALAPPDATA"), os.Getenv("APPDATA")
-		if local == "" || roaming == "" {
-			return DesktopApp{}, errors.New("localops: LOCALAPPDATA and APPDATA must be set")
+		if !filepath.IsAbs(local) || !filepath.IsAbs(roaming) {
+			return DesktopApp{}, errors.New("localops: LOCALAPPDATA and APPDATA must be absolute paths")
 		}
 		return DesktopApp{
 			App:      filepath.Join(local, "Programs", "Aether"),
@@ -255,7 +268,8 @@ func desktopEntry(dir string) string {
 }
 
 // desktopExecQuote quotes one Exec argument per the Desktop Entry spec:
-// double quotes, with the reserved characters backslash-escaped.
+// double quotes with the reserved characters backslash-escaped, and a
+// literal % doubled so launchers do not read it as a field code.
 func desktopExecQuote(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
@@ -263,6 +277,8 @@ func desktopExecQuote(s string) string {
 		switch r {
 		case '"', '`', '$', '\\':
 			b.WriteByte('\\')
+		case '%':
+			b.WriteByte('%')
 		}
 		b.WriteRune(r)
 	}
@@ -270,13 +286,11 @@ func desktopExecQuote(s string) string {
 	return b.String()
 }
 
-// shortcutScript is the PowerShell that writes a Start Menu .lnk to exe.
-// Single-quoted PowerShell strings escape only the quote itself, by
-// doubling it.
-func shortcutScript(lnk, exe string) string {
-	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
-	return "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(" + q(lnk) + "); " +
-		"$s.TargetPath = " + q(exe) + "; " +
-		"$s.WorkingDirectory = " + q(filepath.Dir(exe)) + "; " +
-		"$s.Save()"
-}
+// shortcutScript is the PowerShell that writes the Start Menu .lnk named
+// by $env:AETHER_LNK pointing at $env:AETHER_EXE. The paths travel in the
+// environment, never in the script text, so no quoting rule (PowerShell
+// also treats typographic quotes as delimiters) can break on a user name.
+const shortcutScript = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:AETHER_LNK); " +
+	"$s.TargetPath = $env:AETHER_EXE; " +
+	"$s.WorkingDirectory = (Split-Path -Parent $env:AETHER_EXE); " +
+	"$s.Save()"

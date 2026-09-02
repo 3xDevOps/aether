@@ -39,8 +39,12 @@ func guiBuild(args []string) error {
 	// The app finds the CLI the same way the shell does at launch. Refuse
 	// early rather than install a window that only shows "aether CLI not
 	// found".
-	if !localops.DesktopFindsCLI(home) {
+	found, shellOnly := localops.DesktopFindsCLI(home)
+	if !found {
 		return errors.New("aether is not installed where the desktop app looks (PATH, /usr/local/bin, ~/.local/bin); install the CLI there first (see docs/install.md)")
+	}
+	if shellOnly != "" {
+		fmt.Fprintf(os.Stderr, "warning: aether was found at %s through this terminal's PATH; the application menu may not share it. If the window reports \"aether CLI not found\", install the CLI into /usr/local/bin or ~/.local/bin, or set AETHER_BIN.\n", shellOnly)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)

@@ -346,6 +346,10 @@ function main() {
 
   app.whenReady().then(() => {
     installMenu()
+    // Windows/Linux hand a cold-start aether:// link to the first
+    // instance's argv; handleDeepLink queues it until the gateway is up.
+    const link = process.argv.find((arg) => arg.startsWith('aether://'))
+    if (link) handleDeepLink(link)
     startSidecar()
   })
 

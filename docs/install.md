@@ -180,16 +180,25 @@ desktop lists applications:
 | macOS | `~/Applications/Aether.app` | Launchpad and Spotlight |
 | Windows | `%LOCALAPPDATA%\Programs\Aether\` | Start Menu > Aether |
 
-The first build downloads the Electron runtime (about 100 MB); the cache
-directory keeps it, so rebuilding is quick. Run `aether gui build` again to
-replace an installed app; close the Aether window first. To remove it, delete
-the two paths in the table and the cache directory.
+The first build downloads the Electron runtime (about 100 MB) into
+electron-builder's own cache (`~/.cache/electron` and
+`~/.cache/electron-builder` on Linux, `~/Library/Caches/electron` and
+`~/Library/Caches/electron-builder` on macOS, `%LOCALAPPDATA%\electron\Cache`
+and `%LOCALAPPDATA%\electron-builder` on Windows), so rebuilding is quick.
+Run `aether gui build` again to replace an installed app; close the Aether
+window first. To remove everything, delete the two paths in the table, the
+build directory, and those caches.
 
 The app requires the `aether` CLI installed first; it does not bundle the
 binary and `aether gui build` refuses to run if the shell would not find it.
 It looks for `aether` in `AETHER_BIN`, then `PATH`, then the installer
-defaults (`/usr/local/bin`, `~/.local/bin`). If launch fails with "aether CLI
-not found", set `AETHER_BIN` to the binary's full path.
+defaults (`/usr/local/bin`, `~/.local/bin`). The application menu launches the
+app with your desktop session's `PATH`, not your terminal's, so a CLI that is
+only reachable through a shell profile entry (a Go bin directory, a version
+manager shim) may work in the terminal and still fail from the menu;
+`aether gui build` warns when it finds `aether` that way. If launch fails with
+"aether CLI not found", install the CLI into `/usr/local/bin` or
+`~/.local/bin`, or set `AETHER_BIN` to the binary's full path.
 
 On Linux the launcher passes `--no-sandbox`, the same default electron-builder
 gives its AppImages: an unpacked Electron cannot use its SUID sandbox helper
@@ -506,15 +515,18 @@ rm -rf ~/.config/aether ~/.config/aether-desktop
 ssh-keygen -R '[<server-host>]:2222'
 sudo rm -f /usr/local/bin/aether        # or ~/.local/bin/aether
 # only if you ran `aether gui build`:
-rm -rf ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop ~/.cache/aether
+rm -rf ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop
+rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder
 ```
 
 On macOS the desktop state is `~/Library/Application Support/aether-desktop`,
-the app is `~/Applications/Aether.app`, and the build cache is
-`~/Library/Caches/aether`. On Windows the state is `%APPDATA%\aether-desktop`,
-the app is `%LOCALAPPDATA%\Programs\Aether` plus its Start Menu shortcut, the
-build cache is `%LOCALAPPDATA%\aether`, and the client binary is wherever you
-put `aether.exe` on PATH.
+the app is `~/Applications/Aether.app`, and the build caches are
+`~/Library/Caches/aether`, `~/Library/Caches/electron`, and
+`~/Library/Caches/electron-builder`. On Windows the state is
+`%APPDATA%\aether-desktop`, the app is `%LOCALAPPDATA%\Programs\Aether` plus
+its Start Menu shortcut, the build caches are `%LOCALAPPDATA%\aether`,
+`%LOCALAPPDATA%\electron`, and `%LOCALAPPDATA%\electron-builder`, and the
+client binary is wherever you put `aether.exe` on PATH.
 
 The `ssh-keygen -R` line matters more than it looks. A reinstalled server
 generates a new host key, so a stale `known_hosts` entry makes the next
