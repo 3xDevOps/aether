@@ -71,6 +71,9 @@ func TestInstallDesktopLinuxRegistersLauncher(t *testing.T) {
 }
 
 func TestDesktopLayoutHonorsXDGDataHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("/data is not an absolute path on windows")
+	}
 	t.Setenv("XDG_DATA_HOME", "/data")
 	app, err := desktopLayout("linux", "/home/u")
 	if err != nil {
