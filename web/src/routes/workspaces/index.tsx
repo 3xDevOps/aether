@@ -22,7 +22,7 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
 const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
+  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
@@ -61,7 +61,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
         <ul className="space-y-4">
           {(workspaces ?? []).map((workspace) => (
             <li key={workspace.id} className="space-y-3 rounded-md border bg-card p-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-3">
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">
                   {workspace.name}
                 </span>

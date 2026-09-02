@@ -90,7 +90,7 @@ function WorkspaceSwitcher({ onCollapse }: { onCollapse: () => void }) {
   const current = workspaces[active]
 
   return (
-    <div className="flex items-center gap-2 border-b px-2 py-1.5">
+    <div className="flex h-9 items-center gap-2 border-b px-2">
       <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
       {list.length > 1 ? (
         <select

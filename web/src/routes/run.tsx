@@ -29,7 +29,7 @@ export function RunView({ params }: RouteProps) {
       <div className="px-4 pt-4 empty:hidden">
         <EnvironmentBanner workspaceId={run.workspace_id} />
       </div>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 p-4 text-sm">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 p-4 text-sm">
         <dt className="text-muted-foreground">State</dt>
         <dd className="flex items-center gap-2">
           <StateDot state={state} />

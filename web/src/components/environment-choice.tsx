@@ -17,7 +17,7 @@ const card =
   'flex cursor-pointer items-start gap-3 rounded-md border bg-card p-3 text-sm has-checked:border-ring'
 
 const input =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
+  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 /**
  * Emits the chosen environment on mount and on every change, or null while
