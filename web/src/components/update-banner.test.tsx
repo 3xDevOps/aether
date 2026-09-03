@@ -3,6 +3,7 @@ import { UpdateBanners } from '@/components/update-banner'
 import type { AetherDesktop } from '@/components/shell/title-bar'
 import type { GatewayCapabilities, Member } from '@/lib/types'
 import { useStore } from '@/store'
+import type { UpdateKind } from '@/store/ui'
 import { alice, bob, fakeApi, serverInfo, updateStatus } from '@/test/fixtures'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -25,13 +26,13 @@ function seed(
   over: {
     self?: Member
     capabilities?: GatewayCapabilities
-    dismissedUpdates?: { cli: string; server: string }
+    dismissedUpdates?: Record<UpdateKind, string>
   } = {},
 ) {
   useStore.setState({
     info: { ...serverInfo, member: over.self ?? alice },
     capabilities: over.capabilities ?? caps(),
-    dismissedUpdates: over.dismissedUpdates ?? { cli: '', server: '' },
+    dismissedUpdates: over.dismissedUpdates ?? { cli: '', server: '', shell: '' },
     update: null,
     hydrated: true,
   })
@@ -60,11 +61,9 @@ test('shows the CLI banner to a collaborator when the CLI is behind', async () =
 
   expect(await screen.findByText('Aether v1.3.0 is available.')).toBeTruthy()
   expect(screen.getByText(/You are running v1\.2\.3/)).toBeTruthy()
-  expect(
-    screen.getByText(
-      'Updating replaces the aether binary on this machine and restarts the dashboard.',
-    ),
-  ).toBeTruthy()
+  // The copy names what the restart costs: the gateway holds the attach
+  // sockets and the sync sessions, and they go with it.
+  expect(screen.getByText(/Attached terminals and any running file sync stop/)).toBeTruthy()
   const notes = screen.getByRole('link', { name: 'Release notes' })
   expect(notes.getAttribute('href')).toBe(
     'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
@@ -101,6 +100,44 @@ test('the Update button applies and the banner says it is restarting', async () 
   expect(await screen.findByText(/Restarting the dashboard/)).toBeTruthy()
   expect(client.localUpdateApply).toHaveBeenCalledTimes(1)
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+})
+
+// A single-box install swaps aether-server beside the CLI, and that server
+// keeps running the old code until its unit is restarted. `aether update`
+// prints the command; the banner has to as well.
+test('the done state names the replaced binaries and the server restart', async () => {
+  const client = fakeApi({
+    localUpdateApply: vi.fn(async () => ({
+      updated: ['/usr/local/bin/aether', '/usr/local/bin/aether-server'],
+      version: 'v1.3.0',
+      restarting: false,
+      note: 'rerun aether gui to use the new binary',
+      restart_command: 'sudo systemctl restart aether-server',
+    })),
+  })
+  seed()
+  render(<UpdateBanners client={client} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
+
+  expect(await screen.findByText(/Updated to v1\.3\.0/)).toBeTruthy()
+  expect(
+    screen.getByText('/usr/local/bin/aether, /usr/local/bin/aether-server'),
+  ).toBeTruthy()
+  expect(screen.getByText('sudo systemctl restart aether-server')).toBeTruthy()
+})
+
+// A client machine has no server binary beside the CLI, so there is no
+// unit to restart and the banner must not invent one.
+test('the done state says nothing about a server that was not replaced', async () => {
+  const client = fakeApi()
+  seed()
+  render(<UpdateBanners client={client} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
+
+  await screen.findByText(/Restarting the dashboard/)
+  expect(screen.queryByText(/systemctl restart/)).toBeNull()
 })
 
 // The gateway names the directory and the exact sudo command; a friendlier
@@ -184,16 +221,42 @@ test('a dismissal hides that version and a newer release comes back', async () =
   expect(await screen.findByText('Aether v1.3.1 is available.')).toBeTruthy()
 })
 
-describe('the desktop app rebuild line', () => {
-  const line = /Rebuild the desktop app with/
+describe('the desktop app rebuild notice', () => {
+  const notice = 'The desktop app is out of date.'
 
   test('appears when the shell was built by a different CLI', async () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
     seed()
     render(<UpdateBanners client={fakeApi()} />)
 
-    expect(await screen.findByText('Aether v1.3.0 is available.')).toBeTruthy()
-    expect(screen.getByText(line)).toBeTruthy()
+    expect(await screen.findByText(notice)).toBeTruthy()
+    expect(screen.getByText(/aether gui build/)).toBeTruthy()
+  })
+
+  // The flow it exists for: the update already ran, the CLI is current, and
+  // the shell built by the old one is what is left behind. Keying this on
+  // update_available would hide it in exactly that moment.
+  test('appears with no update available, which is the flow it is for', async () => {
+    shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
+    const status = updateStatus()
+    const current = fakeApi({
+      localUpdateCheck: vi.fn(async () => ({
+        ...status,
+        cli: { ...status.cli, version: 'v1.3.0', update_available: false },
+      })),
+    })
+    seed({ capabilities: caps({ version: 'v1.3.0' }) })
+    render(<UpdateBanners client={current} />)
+
+    expect(await screen.findByText(notice)).toBeTruthy()
+    expect(screen.queryByText(/is available\./)).toBeNull()
+  })
+
+  // A browser tab has no shell at all, so there is nothing to rebuild.
+  test('stays away outside the desktop shell even with no check answer', async () => {
+    seed({ capabilities: caps({ local: ['link.status'] }) })
+    render(<UpdateBanners client={fakeApi()} />)
+    await waitFor(() => expect(screen.queryByText(notice)).toBeNull())
   })
 
   test('stays away when the shell matches the CLI serving the gateway', async () => {
@@ -202,14 +265,29 @@ describe('the desktop app rebuild line', () => {
     seed()
     const same = render(<UpdateBanners client={fakeApi()} />)
     await screen.findByText('Aether v1.3.0 is available.')
-    expect(screen.queryByText(line)).toBeNull()
+    expect(screen.queryByText(notice)).toBeNull()
     same.unmount()
 
-    // A dev-built shell reports no version, which is not a mismatch.
-    shellWindow.aetherDesktop = { platform: 'linux' }
-    seed()
+    // A gateway too old to report its version is not a mismatch either.
+    shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
+    seed({ capabilities: caps({ version: undefined }) })
     render(<UpdateBanners client={fakeApi()} />)
     await screen.findByText('Aether v1.3.0 is available.')
-    expect(screen.queryByText(line)).toBeNull()
+    expect(screen.queryByText(notice)).toBeNull()
+  })
+
+  test('dismissing it lasts only until the CLI moves again', async () => {
+    shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
+    seed({ dismissedUpdates: { cli: '', server: '', shell: 'v1.2.3' } })
+    const hidden = render(<UpdateBanners client={fakeApi()} />)
+    await waitFor(() => expect(screen.queryByText(notice)).toBeNull())
+    hidden.unmount()
+
+    seed({
+      capabilities: caps({ version: 'v1.3.0' }),
+      dismissedUpdates: { cli: '', server: '', shell: 'v1.2.3' },
+    })
+    render(<UpdateBanners client={fakeApi()} />)
+    expect(await screen.findByText(notice)).toBeTruthy()
   })
 })

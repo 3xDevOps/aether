@@ -2,8 +2,8 @@ import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type GroupBy = 'status' | 'member'
-/** The two things an update banner can be about. */
-export type UpdateKind = 'cli' | 'server'
+/** The three things an update banner can be about. */
+export type UpdateKind = 'cli' | 'server' | 'shell'
 
 /** Where the center view is pointed. Route names come from the registry. */
 export interface Route {
@@ -50,7 +50,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   activeWorkspace: '',
   groupBy: 'status',
   route: { name: 'board', params: {} },
-  dismissedUpdates: { cli: '', server: '' },
+  dismissedUpdates: { cli: '', server: '', shell: '' },
   setTheme: (theme) => set({ theme }),
   setSidebarWidth: (width) =>
     set({
@@ -82,5 +82,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   },
   dismissUpdate: (kind, version) =>
     set((s) => ({ dismissedUpdates: { ...s.dismissedUpdates, [kind]: version } })),
-  clearDismissedUpdates: () => set({ dismissedUpdates: { cli: '', server: '' } }),
+  clearDismissedUpdates: () =>
+    set({ dismissedUpdates: { cli: '', server: '', shell: '' } }),
 })

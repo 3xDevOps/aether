@@ -424,19 +424,31 @@ export interface UpdateCheck {
 /** update.check: the CLI answer plus how the server it talks to compares. */
 export interface UpdateStatus {
   cli: UpdateCheck
+  /** Empty when the server did not answer; server_error then says why. */
   server_version: string
   server_behind: boolean
+  /**
+   * Why the server half is unknown. The CLI half is about a binary on this
+   * machine, so it is answered in full even when the SSH hop is down.
+   */
+  server_error?: string
   /** The desktop shell spawned this gateway, so it can restart it. */
   supervised: boolean
 }
 
 /** update.apply: what the self-update replaced and what happens next. */
 export interface UpdateApplyResult {
+  /** Every binary path replaced, in order. */
   updated: string[]
   version: string
   /** True only under the desktop shell, which respawns the gateway. */
   restarting: boolean
   note?: string
+  /**
+   * Present when a co-located aether-server was replaced too: the running
+   * server keeps the old code until this command restarts its unit.
+   */
+  restart_command?: string
 }
 
 // Workspace environments: internal/protocol/environment.go and

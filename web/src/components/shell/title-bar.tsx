@@ -24,9 +24,11 @@ export type AetherDesktop = {
   controls?: DesktopControls
   /**
    * The CLI version that built this shell, without the leading "v" (for
-   * example "1.2.3"); absent on a shell a dev build produced. The update
-   * banner compares it with the CLI serving the gateway, because a newer
-   * CLI needs `aether gui build` run again.
+   * example "1.2.3"). A shell a dev CLI built keeps the manifest's own
+   * "0.1.0" rather than going absent, so it reads as stale against any
+   * release, which it is. Absent only in a browser tab, where the whole
+   * bridge is. The update banner compares it with the CLI serving the
+   * gateway, because a newer CLI needs `aether gui build` run again.
    */
   shellVersion?: string
 }

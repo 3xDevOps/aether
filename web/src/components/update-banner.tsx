@@ -11,7 +11,7 @@ import { desktopBridge } from '@/components/shell/title-bar'
 import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { UpdateStatus } from '@/lib/types'
+import type { UpdateApplyResult, UpdateStatus } from '@/lib/types'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { UpdateKind } from '@/store/ui'
@@ -26,8 +26,9 @@ function bare(version: string): string {
 
 /**
  * Whether the desktop app was built by a different CLI than the one serving
- * this gateway. Both sides have to be known: a browser tab has no shell, and
- * a dev-built shell reports no version, and neither is a mismatch.
+ * this gateway. Both sides have to be known: a browser tab has no shell at
+ * all, and a gateway that predates the capabilities field reports no
+ * version, and neither of those is a mismatch.
  */
 function shellIsStale(cliVersion: string | undefined): boolean {
   const shell = desktopBridge()?.shellVersion
@@ -77,20 +78,81 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
     }
   }, [serves, client, setUpdate])
 
-  if (!serves || !update) return null
   return (
     <>
-      <CliBanner update={update} client={client} />
-      <ServerBanner update={update} />
+      {/* Independent of the release check: the shell goes stale the moment
+          the CLI it was built by is replaced, which is the flow this
+          notice exists for and the one where no update is available any
+          more. */}
+      <ShellBanner />
+      {serves && update && <CliBanner update={update} client={client} />}
+      {serves && update && <ServerBanner update={update} />}
     </>
+  )
+}
+
+/**
+ * The desktop app was built by a different CLI than the one serving this
+ * gateway. Almost always because an update just replaced the CLI: the SPA
+ * ships inside it and is already new, the Electron shell around it is not.
+ * A browser tab has no shell and renders nothing.
+ */
+function ShellBanner() {
+  const cliVersion = useStore((s) => s.capabilities?.version)
+  const dismissed = useStore((s) => s.dismissedUpdates.shell)
+
+  if (!shellIsStale(cliVersion) || !cliVersion) return null
+  if (dismissed === cliVersion) return null
+
+  return (
+    <div role="status" className={banner}>
+      <div className="min-w-0 space-y-1">
+        <p>
+          <span className="font-medium">The desktop app is out of date.</span>{' '}
+          It was built by aether {desktopBridge()?.shellVersion}, and {cliVersion}{' '}
+          is serving it now.
+        </p>
+        <p className="text-muted-foreground">
+          The dashboard itself is current - it ships inside the CLI. Only the
+          window around it is old. Rebuild it in a terminal:
+        </p>
+        <CopyableCommand command="aether gui build" />
+      </div>
+      <Dismiss kind="shell" version={cliVersion} />
+    </div>
   )
 }
 
 type ApplyState =
   | { name: 'idle' }
   | { name: 'applying' }
-  | { name: 'done'; version: string; restarting: boolean; note?: string }
+  | { name: 'done'; result: UpdateApplyResult }
   | { name: 'failed'; detail: string }
+
+/**
+ * What the update replaced and what is left to do. The paths are named
+ * because a single-box install swaps `aether-server` beside the CLI, and
+ * that server keeps running the old code until its unit is restarted - so
+ * the command the gateway sends back is shown rather than left to the
+ * operator to remember.
+ */
+function Applied({ result }: { result: UpdateApplyResult }) {
+  return (
+    <div className="space-y-1 text-muted-foreground">
+      <p>
+        Updated to {result.version}.
+        {result.restarting ? ' Restarting the dashboard.' : result.note ? ` ${result.note}` : ''}
+      </p>
+      <p className="font-mono text-[11px]">{result.updated.join(', ')}</p>
+      {result.restart_command && (
+        <>
+          <p>The server binary beside it was replaced too. Restart the unit:</p>
+          <CopyableCommand command={result.restart_command} />
+        </>
+      )}
+    </div>
+  )
+}
 
 /**
  * The CLI is behind. Every member sees this: the binary is on their own
@@ -99,7 +161,6 @@ type ApplyState =
 function CliBanner({ update, client }: { update: UpdateStatus; client: Api }) {
   const latest = update.cli.latest ?? ''
   const dismissed = useStore((s) => s.dismissedUpdates.cli)
-  const cliVersion = useStore((s) => s.capabilities?.version)
   const [apply, setApply] = useState<ApplyState>({ name: 'idle' })
 
   if (!update.cli.update_available || !latest || dismissed === latest) return null
@@ -107,13 +168,7 @@ function CliBanner({ update, client }: { update: UpdateStatus; client: Api }) {
   const run = async () => {
     setApply({ name: 'applying' })
     try {
-      const result = await client.localUpdateApply()
-      setApply({
-        name: 'done',
-        version: result.version,
-        restarting: result.restarting,
-        note: result.note,
-      })
+      setApply({ name: 'done', result: await client.localUpdateApply() })
     } catch (err) {
       // The gateway's own message, verbatim: it names the directory and the
       // exact sudo command when the binary is not writable.
@@ -130,8 +185,9 @@ function CliBanner({ update, client }: { update: UpdateStatus; client: Api }) {
         </p>
         {update.cli.can_self_update ? (
           <p className="text-muted-foreground">
-            Updating replaces the aether binary on this machine and restarts the
-            dashboard.
+            Updating replaces the aether binary on this machine and restarts
+            the dashboard. Attached terminals and any running file sync stop
+            with it; the runs themselves keep going on the server.
           </p>
         ) : (
           <p className="text-muted-foreground">
@@ -139,22 +195,7 @@ function CliBanner({ update, client }: { update: UpdateStatus; client: Api }) {
             release page and replace the binary yourself.
           </p>
         )}
-        {shellIsStale(cliVersion) && (
-          <p className="text-muted-foreground">
-            Rebuild the desktop app with <code className="font-mono">aether gui build</code>{' '}
-            after updating.
-          </p>
-        )}
-        {apply.name === 'done' &&
-          (apply.restarting ? (
-            <p className="text-muted-foreground">
-              Updated to {apply.version}. Restarting the dashboard.
-            </p>
-          ) : (
-            <p className="text-muted-foreground">
-              Updated to {apply.version}.{apply.note ? ` ${apply.note}` : ''}
-            </p>
-          ))}
+        {apply.name === 'done' && <Applied result={apply.result} />}
         {apply.name === 'failed' && (
           <p className="font-mono text-xs text-state-failed">{apply.detail}</p>
         )}
