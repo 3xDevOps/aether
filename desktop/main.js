@@ -23,6 +23,10 @@ const notify = require('./notify')
 // from one built by the CLI now serving the gateway.
 const shellVersion = require('./package.json').version
 
+// The exit status `aether gui --json` uses to say it replaced this app on
+// disk: relaunch the shell, do not respawn the sidecar (localgw.ExitRelaunch).
+const RELAUNCH_EXIT = 75
+
 // --- single instance ----------------------------------------------------
 
 const locked = app.requestSingleInstanceLock()
@@ -167,6 +171,15 @@ function main() {
       child = null
       notify.stop()
       if (quitting) return
+      // The gateway rebuilt this app on disk (`update.apply`) and asked for
+      // a relaunch: respawning the sidecar would leave the user in the old
+      // shell around a new CLI. Everything else keeps the respawn path.
+      if (code === RELAUNCH_EXIT) {
+        quitting = true
+        app.relaunch()
+        app.exit(0)
+        return
+      }
       respawns += 1
       if (respawns > 3) {
         fatal(
