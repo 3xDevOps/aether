@@ -421,8 +421,10 @@ export interface ProfileRecommendation {
 // (internal/localgw/local.go). Only a gateway with the user's repository
 // and SSH key serves these; useCapability's hasLocal gates every caller.
 
-/** link.status: whether this gateway has a linked repository. */
+/** link.status: whether this gateway has a linked server and repository. */
 export interface LinkStatus {
+  /** A server address is configured, even when no repository is linked. */
+  server_configured: boolean
   linked: boolean
   addr: string
   user: string

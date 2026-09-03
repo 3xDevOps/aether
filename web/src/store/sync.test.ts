@@ -156,6 +156,30 @@ describe('hydrate', () => {
     expect(c.hasWS('events')).toBe(true)
     expect(c.hasLocal('worktree.open')).toBe(false)
   })
+  it('routes to onboarding only for an unboarded local gateway', async () => {
+    const cases = [
+      { onboarded: false, local: true, onboarding: true },
+      { onboarded: true, local: true, onboarding: false },
+      { onboarded: false, local: false, onboarding: false },
+    ]
+
+    for (const tc of cases) {
+      const store = createRootStore()
+      store.setState({ onboarded: tc.onboarded, route: { name: 'board', params: {} } })
+      const client = fakeApi({
+        capabilities: vi.fn(async () => ({
+          gateway: tc.local ? 'local' : 'remote',
+          methods: ['*'],
+          ws: ['events', 'attach'],
+          ...(tc.local ? { local: ['link.status'] } : {}),
+        })),
+      })
+
+      await hydrate(store, client)
+
+      expect(store.getState().route.name).toBe(tc.onboarding ? 'onboarding' : 'board')
+    }
+  })
 
   it('treats a missing capabilities endpoint as the legacy remote monitor', async () => {
     const store = createRootStore()

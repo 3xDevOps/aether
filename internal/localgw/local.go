@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -43,9 +45,10 @@ var localVerbs = []string{
 // /ws/envscan: the saved link config (link.repo updates it), the
 // background sync sessions, and the single environment-scan slot.
 type localState struct {
-	mu   sync.Mutex
-	cfg  cli.Config
-	sync *localops.SyncManager
+	mu    sync.Mutex
+	cfg   cli.Config
+	mtime time.Time
+	sync  *localops.SyncManager
 	// scanActive claims the one-scan-at-a-time slot for /ws/envscan.
 	scanActive bool
 	// scanArgv overrides the scan's harness command; tests set it to run
@@ -57,13 +60,35 @@ type localState struct {
 // fails: an unlinked (zero) cli.Config simply reports linked:false and
 // refuses the verbs that need a repo.
 func newLocalState(cfg Config) *localState {
-	return &localState{cfg: cfg.CLI, sync: localops.NewSyncManager()}
+	state := &localState{cfg: cfg.CLI, sync: localops.NewSyncManager()}
+	if path, err := cli.Path(); err == nil {
+		if info, err := os.Stat(path); err == nil {
+			state.mtime = info.ModTime()
+		}
+	}
+	return state
 }
 
-// snapshot returns the current link config under the lock.
+// snapshot returns the current link config under the lock. The CLI may update
+// its config while the gateway is running, so reload it when its mtime changes.
 func (s *localState) snapshot() cli.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	path, err := cli.Path()
+	if err == nil {
+		if info, statErr := os.Stat(path); statErr == nil && !info.ModTime().Equal(s.mtime) {
+			if cfg, loadErr := cli.Load(); loadErr == nil {
+				if s.cfg.Active != "" {
+					if named, ok := cfg.Named(s.cfg.Active); ok {
+						cfg = named
+					}
+				}
+				s.cfg = cfg
+				s.mtime = info.ModTime()
+			}
+		}
+	}
 	return s.cfg
 }
 
@@ -152,13 +177,14 @@ func namedLinks(cfg cli.Config) []linkRef {
 func (g *Gateway) localLinkStatus(*http.Request, []byte) (any, *protocol.Error) {
 	cfg := g.local.snapshot()
 	return struct {
-		Linked bool      `json:"linked"`
-		Addr   string    `json:"addr"`
-		User   string    `json:"user"`
-		Repo   string    `json:"repo"`
-		Links  []linkRef `json:"links,omitempty"`
-		Active string    `json:"active,omitempty"`
-	}{Linked: cfg.Repo != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
+		Linked           bool      `json:"linked"`
+		ServerConfigured bool      `json:"server_configured"`
+		Addr             string    `json:"addr"`
+		User             string    `json:"user"`
+		Repo             string    `json:"repo"`
+		Links            []linkRef `json:"links,omitempty"`
+		Active           string    `json:"active,omitempty"`
+	}{Linked: cfg.Repo != "", ServerConfigured: cfg.Addr != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
 		Links: namedLinks(cfg), Active: cfg.Active}, nil
 }
 

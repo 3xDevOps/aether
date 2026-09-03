@@ -69,6 +69,7 @@ describe('local slice', () => {
     expect(store.getState().linkStatus).toBeNull()
 
     store.getState().setLinkStatus({
+      server_configured: true,
       linked: true,
       addr: 'host:2222',
       user: 'alice',

@@ -444,6 +444,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runProtect: vi.fn(async () => ({})),
     runRelaunch: vi.fn(async () => run({ id: 'run_2' })),
     localLinkStatus: vi.fn(async () => ({
+      server_configured: true,
       linked: true,
       addr: 'host:2222',
       user: 'alice',

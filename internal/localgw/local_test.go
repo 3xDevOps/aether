@@ -117,11 +117,12 @@ func TestLocalLinkStatus(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
 	var got struct {
-		Linked bool   `json:"linked"`
-		Addr   string `json:"addr"`
-		User   string `json:"user"`
-		Repo   string `json:"repo"`
-		Links  []struct {
+		Linked           bool   `json:"linked"`
+		ServerConfigured bool   `json:"server_configured"`
+		Addr             string `json:"addr"`
+		User             string `json:"user"`
+		Repo             string `json:"repo"`
+		Links            []struct {
 			Name string `json:"name"`
 			Addr string `json:"addr"`
 		} `json:"links"`
@@ -130,7 +131,7 @@ func TestLocalLinkStatus(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Linked || got.Addr != "host:2222" || got.User != "alice" || got.Repo != "/src/repo" {
+	if !got.Linked || !got.ServerConfigured || got.Addr != "host:2222" || got.User != "alice" || got.Repo != "/src/repo" {
 		t.Fatalf("link.status = %+v", got)
 	}
 	if got.Active != "prod" {
@@ -151,8 +152,8 @@ func TestLocalLinkStatus(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Linked {
-		t.Fatalf("unlinked gateway reports linked: %+v", got)
+	if got.Linked || got.ServerConfigured {
+		t.Fatalf("unlinked gateway reports configured/linked: %+v", got)
 	}
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &keys); err != nil {
@@ -163,6 +164,64 @@ func TestLocalLinkStatus(t *testing.T) {
 	}
 	if _, ok := keys["active"]; ok {
 		t.Errorf("top-level link.status carries active: %s", rec.Body)
+	}
+}
+func TestLocalSnapshotRefreshesConfigAfterMtimeChange(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	initial := cli.Config{Addr: "host:2222", User: "alice"}
+	if err := cli.Save(initial); err != nil {
+		t.Fatalf("save initial config: %v", err)
+	}
+
+	state := newLocalState(Config{CLI: initial})
+	if got := state.snapshot(); got.Repo != "" {
+		t.Fatalf("initial repo = %q, want empty", got.Repo)
+	}
+
+	updated := cli.Config{
+		Addr: "host:2222",
+		User: "alice",
+		Repo: "/src/repo",
+	}
+	if err := cli.Save(updated); err != nil {
+		t.Fatalf("save updated config: %v", err)
+	}
+
+	if got := state.snapshot(); got.Repo != updated.Repo {
+		t.Fatalf("refreshed repo = %q, want %q", got.Repo, updated.Repo)
+	}
+}
+func TestLocalSnapshotRefreshesNamedOverlayAfterMtimeChange(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	initial := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/old"}},
+	}
+	if err := cli.Save(initial); err != nil {
+		t.Fatalf("save initial config: %v", err)
+	}
+	selected, ok := initial.Named("prod")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	state := newLocalState(Config{CLI: selected})
+	if got := state.snapshot(); got.Repo != "/old" {
+		t.Fatalf("initial named repo = %q, want /old", got.Repo)
+	}
+
+	updated := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/new"}},
+	}
+	if err := cli.Save(updated); err != nil {
+		t.Fatalf("save updated config: %v", err)
+	}
+
+	got := state.snapshot()
+	if got.Repo != "/new" || got.Active != "prod" {
+		t.Fatalf("refreshed named config = %+v", got)
 	}
 }
 

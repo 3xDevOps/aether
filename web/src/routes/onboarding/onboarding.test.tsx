@@ -43,7 +43,9 @@ function seed(extra: Partial<RootState> = {}) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
-    envBuilds: {},
+    onboarded: false,
+    onboardingStep: 0,
+    onboardingWorkspace: '',
     ...extra,
   })
 }
@@ -121,6 +123,7 @@ describe('onboarding wizard', () => {
   it('offers a retry with terminal instructions when not linked', async () => {
     const client = fakeApi({
       localLinkStatus: vi.fn(async () => ({
+        server_configured: false,
         linked: false,
         addr: '',
         user: '',
@@ -134,6 +137,56 @@ describe('onboarding wizard', () => {
     // terminal and re-checks on demand.
     expect(await screen.findByText(/aether link/)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(client.localLinkStatus).toHaveBeenCalledTimes(2)
+  })
+  it('shows a configured server without a repository and opens the repo prompt', async () => {
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => ({
+        server_configured: true,
+        linked: false,
+        addr: 'host:2222',
+        user: 'alice',
+        repo: '',
+      })),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    expect(await screen.findByText('host:2222')).toBeDefined()
+    expect(screen.getByText('alice')).toBeDefined()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue to repository' }),
+    )
+
+    expect(await screen.findByRole('region', { name: 'Repository' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Back to Workspace' })).toBeDefined()
+  })
+
+  it('rechecks link status when the window regains focus', async () => {
+    let status = {
+      server_configured: false,
+      linked: false,
+      addr: '',
+      user: '',
+      repo: '',
+    }
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => status),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    expect(await screen.findByText(/aether link/)).toBeDefined()
+
+    status = {
+      server_configured: true,
+      linked: true,
+      addr: 'host:2222',
+      user: 'alice',
+      repo: '/src/repo',
+    }
+    window.dispatchEvent(new Event('focus'))
+
+    expect(await screen.findByText('/src/repo')).toBeDefined()
     expect(client.localLinkStatus).toHaveBeenCalledTimes(2)
   })
 
@@ -349,6 +402,20 @@ describe('onboarding wizard', () => {
         name: 'run',
         params: { runId: 'run_1' },
       })
+    })
+  })
+  it('finishes onboarding by going to the board', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toFirstRunStep()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to board' }))
+
+    expect(useStore.getState()).toMatchObject({
+      onboarded: true,
+      onboardingStep: 0,
+      onboardingWorkspace: '',
+      route: { name: 'board', params: {} },
     })
   })
 

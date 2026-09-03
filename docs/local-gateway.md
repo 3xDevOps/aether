@@ -246,7 +246,7 @@ authority.
 
 | Verb | Request | Response |
 | --- | --- | --- |
-| `link.status` | `{}` | `{"linked":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"..."}],"active":"..."}` (`links`/`active` present only with named profiles) |
+| `link.status` | `{}` | `{"server_configured":bool,"linked":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"..."}],"active":"..."}` (`links`/`active` present only with named profiles; `server_configured` reports a configured server even when no repository is linked) |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
 | `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
