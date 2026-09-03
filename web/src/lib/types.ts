@@ -570,6 +570,87 @@ export interface UpdateBuildStatus {
   error?: string
 }
 
+// The server's own update, from internal/protocol/serverupdate.go and the
+// server.update event payload in internal/events/serverupdate.go. Calling
+// server.update is admin only; reading the status is not, so a member who
+// cannot press the button can still be told why the server is restarting.
+
+/** One update recorded and waiting for an idle server. */
+export interface PendingServerUpdate {
+  version: string
+  /** The member id that asked for it. */
+  requested_by: string
+  requested_at: string
+}
+
+/** What a pending update is still waiting for. Paused runs are reported
+ * but hold nothing back: a frozen container survives a restart. */
+export interface ServerUpdateWaiting {
+  runs: number
+  paused: number
+  shells: number
+}
+
+/** The outcome of the last update the server tried. */
+export interface ServerUpdateAttempt {
+  version: string
+  outcome: 'applied' | 'failed'
+  /** The real error behind a failed attempt. */
+  detail?: string
+  at: string
+}
+
+/**
+ * server.update_status: whether this server can replace its own binaries,
+ * and what update is in flight. `capable` is false on the documented
+ * unprivileged install - the binary directory is not writable by the
+ * service user - and `manual_commands` then carries what to run on the
+ * server host instead.
+ */
+export interface ServerUpdateStatus {
+  server_version: string
+  latest?: string
+  update_available: boolean
+  capable: boolean
+  /** Which reason the server cannot update itself. */
+  incapable?: string
+  pending?: PendingServerUpdate
+  waiting?: ServerUpdateWaiting
+  last?: ServerUpdateAttempt
+  manual_commands?: string[]
+}
+
+/** When an update applies: immediately, at the next idle moment, or never
+ * (which clears the pending one). */
+export type ServerUpdateWhen = 'now' | 'idle' | 'cancel'
+
+/** server.update: what the call recorded. The version fields are empty for
+ * a cancel. */
+export interface ServerUpdateResult {
+  status: 'applying' | 'scheduled' | 'cancelled'
+  version?: string
+  requested_by?: string
+  requested_at?: string
+}
+
+/** How far one update has got. `restarting` is the last frame the socket
+ * carries: the server re-executes there and every connection drops. */
+export type ServerUpdatePhase =
+  | 'scheduled'
+  | 'applying'
+  | 'restarting'
+  | 'failed'
+  | 'cancelled'
+
+/** The server.update event payload: one moment of a self-update. */
+export interface ServerUpdatePayload {
+  phase: ServerUpdatePhase
+  version?: string
+  actor_id?: string
+  /** The real error behind a failed phase. */
+  detail?: string
+}
+
 // Workspace environments: internal/protocol/environment.go and
 // internal/domain/environment.go on the wire, plus the local gateway's
 // env.harnesses verb and /ws/envscan frames.

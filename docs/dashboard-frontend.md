@@ -210,7 +210,8 @@ run's wire `paused` field, skipping runs that do not carry it.
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
   An `environment.build` event lands in the `environment` slice, which feeds
-  the build banner (see the onboarding wizard section).
+  the build banner (see the onboarding wizard section), and a `server.update`
+  event lands in the `server` slice, which feeds the update prompts.
 
 **The capabilities descriptor is the transport seam.** The store holds the
 `GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, `local`), and
@@ -728,13 +729,23 @@ can still be read.
 `src/components/update-banner.tsx` is where the dashboard says a binary is out
 of date. It is mounted by `AppShell` above everything else, because an
 out-of-date binary is about the whole app rather than the view that happens to
-be open, and it renders nothing at all unless the gateway serves
-`update.check` - a remote monitor cannot update anything on your machine.
+be open. The CLI and shell prompts need the gateway to serve `update.check` -
+a remote monitor cannot update anything on your machine - while the server
+prompt asks the server about itself and shows wherever the member is an admin.
 
-- **One fetch, two banners.** The host reads `update.check` once on mount
+- **Two reads.** The host reads `update.check` once on mount
   (`docs/local-gateway.md`; the gateway caches the release lookup, so this
   costs no request to GitHub) and puts the answer on the `local` slice, which
-  is also what the status bar reads.
+  is also what the status bar reads. It reads `server.update_status` as well -
+  any member may - and re-reads it on every reconnect and whenever
+  `server.info` names a different version. The reconnect is the one that
+  matters: a server that updates itself re-executes, so the socket drops and
+  comes back, and that fresh status is what ends the banner and the notice.
+  `connect()` re-hydrates on the same signal while an update is in flight,
+  even with a cursor to replay from, because only a fresh `server.info` says
+  the server came back on the new version. A read that fails is recorded, not
+  swallowed: the banner then says it could not read the status, with a
+  **Retry**, rather than claiming the server cannot update itself.
 - **The CLI banner is for everyone.** It names the new version and the running
   one, says what updating costs - it replaces the `aether` binary on this
   machine and restarts the dashboard, taking attached terminals and any
@@ -750,19 +761,50 @@ be open, and it renders nothing at all unless the gateway serves
   `sudo aether update` command to run - and the button becomes usable again.
   Where the platform has no self-update (Windows) the button is not offered at
   all and the banner links the release instead.
-- **The server banner is for admins.** Capability is half the gate and the
-  caller's role is the other half, the same rule the admin surfaces follow, so
-  it needs `useIsAdmin()` as well. It shows the server version and the latest
-  release side by side, says plainly that the dashboard cannot update the
-  server, and gives the two commands to run on the server host with a copy
-  button. A server that does not answer costs this banner only: `update.check`
-  still returns the CLI half with the failure in `server_error`, because the
-  CLI is a binary on this machine and a dead SSH hop is no reason to hide that
-  it is out of date.
+- **The server banner is for admins, and it acts.** Capability is half the
+  gate and the caller's role is the other half, the same rule the admin
+  surfaces follow, so it needs `useIsAdmin()` as well. It shows the server
+  version and the latest release side by side, and what it offers under that
+  comes from `server.update_status`:
+  - *capable*: **Update now** and **Update when idle**. Update now opens a
+    confirm dialog that counts the runs active in this member's own run list -
+    the server's definition of busy, so a paused run and one parked at
+    needs-attention are not counted - and says what the restart costs: the
+    runs keep going because the server reattaches to their containers, and
+    attached terminals reconnect on their own. It then calls `server.update`
+    with `when: "now"`. Update when idle sends `when: "idle"`, and the banner
+    becomes *Update to vX scheduled by <member>, applies when no run is
+    active* with a **Cancel** that sends `when: "cancel"`.
+  - *not capable*: the documented unprivileged install. No buttons: the
+    server's own reason, then the two commands to run on the server host with
+    a copy button, as before. A gateway that does not carry the method keeps
+    that banner from `update.check`'s `server_behind`, and says only what it
+    knows - "The dashboard cannot update the server."
+  - The scheduled state also names what the update is still waiting for
+    (`status.waiting`), because an open workspace shell holds it back the
+    same way a working run does.
+- **The phases come off the feed.** `server.update` events land on the
+  `server` slice through `applyEvent`, once per workspace and once more from
+  the RPC result, so the slice keeps the furthest phase rather than the last
+  one to arrive: *scheduled*, *applying*, *restarting* - the socket drops
+  there, the reconnect re-hydrates and re-reads the status, and a status
+  whose `server_version` is the version the phases were about clears the
+  progress and ends the banner - or *failed*, which shows the server's error
+  verbatim and falls back to the manual commands. Every phase is a row in
+  the activity feed too, filterable as *Server updates*.
+- **Everyone else gets one line.** A member who is not an admin sees
+  *server update scheduled, terminals will reconnect briefly* (or *applying*)
+  in the status bar while one is in flight, so a restart nobody explained
+  does not read as an outage. A server that does not answer costs the CLI
+  banner nothing: `update.check` still returns the CLI half with the failure
+  in `server_error`, because the CLI is a binary on this machine and a dead
+  SSH hop is no reason to hide that it is out of date.
 - **Dismissal is per version and it persists.** `dismissedUpdates` on the `ui`
   slice records which version was dismissed for each banner and rides the same
   persisted preferences as the theme and the sidebar, so a dismissal survives a
-  reload and the next release shows the banner again.
+  reload and the next release shows the banner again. It silences the offer,
+  not an update already moving: a scheduled or applying server comes back
+  regardless, because that banner is why the server is about to restart.
 - **The status bar carries the badge.** The `aether {version}` label gets a dot
   when either update is available, and clicking it clears the dismissals so the
   banner comes back - the label is the only always-visible surface, so it is

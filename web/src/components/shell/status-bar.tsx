@@ -51,6 +51,35 @@ function diskBreakdown(disk: DiskUsage): string {
 }
 
 /**
+ * What a member who cannot press the update buttons is told while the
+ * server updates itself. Both phases end in the same restart, and a
+ * restart nobody explained looks like an outage; an admin has the banner
+ * instead, which says the same thing with the controls attached.
+ */
+function ServerUpdateNotice() {
+  const isAdmin = useIsAdmin()
+  const progress = useStore((s) => s.serverUpdateProgress)
+  const pending = useStore((s) => s.serverUpdate?.pending)
+  const phase = progress?.phase ?? (pending ? 'scheduled' : undefined)
+  if (isAdmin) return null
+  const notice =
+    phase === 'scheduled'
+      ? 'server update scheduled, terminals will reconnect briefly'
+      : phase === 'applying' || phase === 'restarting'
+        ? 'server update applying, terminals will reconnect briefly'
+        : null
+  if (!notice) return null
+  return (
+    <span
+      role="status"
+      className="rounded-full bg-state-waiting/15 px-2 py-0.5 text-[11px] font-medium"
+    >
+      {notice}
+    </span>
+  )
+}
+
+/**
  * The desktop gateway's always-visible entry point: whether this machine
  * has a linked repository, jumping to onboarding until it does and to
  * settings after. Gated on the link.status verb, so the remote gateway
@@ -143,6 +172,7 @@ export function StatusBar() {
         />
       )}
       {info && <span>{info.member.display_name}</span>}
+      <ServerUpdateNotice />
       {disk && disk.total_bytes > 0 && (
         <span
           className="flex items-center gap-1.5"

@@ -10,10 +10,11 @@ import type {
   OverlapPayload,
   RunDiffPayload,
   RunStatusPayload,
+  ServerUpdatePayload,
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import { pausedFromTimeline } from '@/store/board'
-import type { UnreachableKind } from '@/store/server'
+import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 
 /**
  * Names the hop that failed. The local gateway reports a dead transport as
@@ -199,6 +200,14 @@ export async function applyEvent(
       if (ev.workspace_id) store.getState().applyEnvBuild(ev.workspace_id, p)
       break
     }
+    case 'server.update': {
+      // The server updating itself. It is published once per workspace,
+      // so the same phase lands several times; the slice keeps the
+      // furthest one. The banner and the status bar read it live, and
+      // `restarting` is the last frame before the socket drops.
+      store.getState().applyServerUpdate(ev.payload as ServerUpdatePayload)
+      break
+    }
     case 'environment.edit': {
       // One moment of a server-side edit run. The slice keeps the coarse
       // state plus a line window; the Environment panel is its reader.
@@ -289,8 +298,15 @@ export function connect(store: RootStore, client: Api = api): () => void {
       }
       if (state !== 'live') return
       // The subscription is installed. Hydrate behind it on the first connect,
-      // and again on a reconnect that has no cursor to replay from.
-      if (!subscribed || store.getState().lastSeq === 0) void load()
+      // and again on a reconnect that has no cursor to replay from - or one
+      // that came while the server was replacing its own binaries, because
+      // that is a server that may have just re-executed on a new version.
+      // Only a fresh server.info says it did, and the update banner and the
+      // notice in the status bar both end on that answer.
+      const s = store.getState()
+      if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress)) {
+        void load()
+      }
       subscribed = true
     },
     onUnreachable: (kind, detail) => {

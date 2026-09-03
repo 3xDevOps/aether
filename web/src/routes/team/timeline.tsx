@@ -19,6 +19,7 @@ const types = [
   ['run.cost', 'Cost'],
   ['run.overlap', 'Conflicts'],
   ['git.branch', 'Branches'],
+  ['server.update', 'Server updates'],
 ]
 
 /** The way into the feed, from the status bar. */

@@ -206,13 +206,24 @@ last attempt. `server update` is admin only; any member can read
 Runs keep going through the restart: the scheduler reattaches to their live
 containers when the server comes back. Attached terminals and live syncs do
 not - `aether attach` and `aether sync --live` drop and reconnect, the same
-as a client-side update. The dashboard grows the same button in a later
-change; today it is CLI-only.
+as a client-side update.
+
+**In the dashboard.** An admin does the same from the server banner:
+**Update now** asks to confirm, naming how many runs are active first, and
+**Update when idle** records the pending update and leaves a **Cancel**
+button in its place. The banner then follows the phases live - scheduled,
+applying, restarting - and disappears once the server reports the new
+version. A failure shows the server's own error and the two commands below.
+Every phase is in the workspace activity feed as well, and a member who is
+not an admin sees a one-line notice in the status bar while an update is
+scheduled or applying, so the restart does not look like an outage. See
+[dashboard-frontend.md](dashboard-frontend.md#update-prompts).
 
 On the documented unprivileged install (the server binary's directory not
 writable by the server process, see [First boot](#first-boot)), `--status`
 reports that the server cannot update itself and `server update` refuses.
-Run these on the server host instead:
+The dashboard banner offers no buttons there either: it names the same
+reason and these commands, with a copy button. Run them on the server host:
 
 ```sh
 sudo aether update
