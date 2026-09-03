@@ -241,8 +241,9 @@ browser. See [local-gateway.md](local-gateway.md).
 `aether gui` in a browser tab is the whole dashboard. If you would rather it
 lived in its own window - with desktop notifications and a dock badge when a
 run parks in `needs-attention`, plus `aether://run/<id>` deep links - build
-the desktop app. Answering **client** in step 1 already did this. It needs
-Node.js 22+ and takes a minute:
+the desktop app. Answering **client** in step 1 already did this. Nothing has
+to be installed first - the CLI fetches its own Node.js copy when the machine
+has none, which makes the first build longer:
 
 ```sh
 aether gui build
