@@ -230,6 +230,28 @@ test('a collaborator on another member run may steer it but not give it away', (
   expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()
 })
 
+// An admin is above both restrictions, so a protected run in a locked-down
+// workspace still offers everything - including the verbs that are otherwise
+// the owner's alone.
+test('an admin keeps every verb on a protected run in an admins-only workspace', () => {
+  render(
+    <RunActions
+      run={seed({
+        paused: false,
+        members: [bob, alice],
+        self: alice,
+        run: { member_id: bob.id, protected: true },
+        steerOthers: 'admins_only',
+      })}
+    />,
+  )
+
+  expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Unprotect' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Hand off' })).toBeTruthy()
+})
+
 // The two restrictions the policy adds on top of the role table.
 test('a protected run and an admins-only workspace close steering to others', () => {
   const { unmount } = render(
