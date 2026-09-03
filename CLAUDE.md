@@ -15,12 +15,19 @@ prose, and repetition.
 
 ## Audience
 
-Put a big focus on everything we ship being user-facing and intuitive. Our
-core target audience is new users who slowly get more and more used to the
-program. When developing, think in the shoes of a new user who has little
-experience and ensure everything is intuitive. Keep this audience in mind
-when writing updates to both the docs and the AGENTS.md documentation
-instructions.
+The reader is a software developer who is new to Aether. Assume working
+fluency with git, a shell, containers, and coding-agent CLIs such as Claude
+Code, Codex, and opencode. Do not assume any knowledge of Aether's own
+concepts - workspace, run, harness, tool snapshot - and introduce each one
+where it first appears.
+
+In practice, across docs, CLI output, and dashboard copy:
+
+- Give the exact command, and name the file or flag it touches.
+- Show the real error. Never hide it behind a friendlier message.
+- Keep the no-fluff rule above. Explain a concept once, then use it.
+- Make every surface obvious on first contact, never by taking away
+  developer control.
 
 ## Before changing code
 
