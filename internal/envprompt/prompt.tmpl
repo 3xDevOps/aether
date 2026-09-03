@@ -92,3 +92,58 @@ FEEDBACK
 
 {{template "contract" .}}
 {{- end}}
+
+{{define "profile" -}}
+You are deciding which of this machine's coding-agent configurations are
+worth importing into the server where those agents will run. Decide from
+the inventory below; it is the whole input.
+
+{{if .RepoPath -}}
+Your working directory is the git repository at {{.RepoPath}}. Read its
+files to see what the project is, and prefer configuration that matches
+it. Never modify, create, or delete repository files.
+{{- else -}}
+No repository was given. Reason from the inventories alone and do not go
+looking for one.
+{{- end}}
+
+The inventory names, for each harness that has a configuration directory
+on this machine, its root path, its file count and byte size, then the
+same per category with the paths in that category:
+
+<<<INVENTORY
+{{.Inventory}}
+INVENTORY
+
+Never open a profile file, and never read credential stores such as
+keychains, .netrc, .ssh, .aws, or browser profiles. The inventory carries
+no file contents, and it leaves out every credential file and every file a
+secret scanner flagged, so a path you cannot see is withheld on purpose,
+not missing by accident.
+
+Import a harness's configuration when it carries the user's own working
+setup - skills, custom commands, standing instructions - that agents on
+the server would otherwise lack. Skip it when the profile holds nothing
+but defaults, or when it belongs to a harness the user clearly does not
+use.
+
+Write exactly one file, profile.json, into {{.OutputDir}}:
+
+{"harnesses":[
+  {"harness":"claude","import":true,"categories":["skills","commands"],
+   "reason":"one sentence a developer can check against the file list"},
+  {"harness":"codex","import":false,"categories":[],"reason":"..."}
+]}
+
+The file must satisfy every rule below, or it is rejected:
+
+1. One entry per harness the inventory names, and no others: each appears
+   exactly once, whether or not you import it.
+2. "categories" holds only category names from that harness's own
+   inventory. It is non-empty when "import" is true and empty when
+   "import" is false.
+3. "reason" is one sentence on one line, under 300 characters, and states
+   something a developer can check against the file list rather than
+   summarizing it.
+4. No other keys, and no other files.
+{{- end}}
