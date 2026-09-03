@@ -201,7 +201,7 @@ func bootstrapNode(ctx context.Context, root, reason string, out io.Writer) (nod
 	if err = os.MkdirAll(root, 0o755); err != nil {
 		return nodeTools{}, fmt.Errorf("localops: create %s: %w", root, err)
 	}
-	// Free the disk the last pinned version and any interrupted download
+	// Free the disk an earlier pinned version and an abandoned download
 	// still hold before pulling another 50 MB down.
 	pruneNodeCache(root)
 
@@ -240,22 +240,36 @@ func bootstrapNode(ctx context.Context, root, reason string, out io.Writer) (nod
 	return tools, nil
 }
 
-// pruneNodeCache deletes everything in root except the pinned version's
-// tree: the copy an earlier nodeVersion left behind, which is around 200 MB
-// unpacked, and the staging file or directory a build interrupted mid
-// download could not clean up itself. Nothing else sweeps this directory,
-// and a failure here costs disk rather than the build, so it is not
-// reported.
+// staleNodeStaging is how long a staging file or directory must sit
+// untouched before this sweep treats it as abandoned. Another
+// `aether gui build` on the same machine downloads into the same cache,
+// and its half-written archive has to survive this one's sweep.
+const staleNodeStaging = time.Hour
+
+// pruneNodeCache frees what the cache no longer needs: the tree an earlier
+// nodeVersion left behind, around 200 MB unpacked, and the staging a build
+// interrupted mid download could not clean up itself. Nothing else sweeps
+// this directory, and a failure here costs disk rather than the build, so
+// it is not reported.
 func pruneNodeCache(root string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
-		if entry.Name() == "v"+nodeVersion {
+		name := entry.Name()
+		staging := strings.HasSuffix(name, ".download") || strings.HasSuffix(name, ".part")
+		switch {
+		case entry.IsDir() && strings.HasPrefix(name, "v") && name != "v"+nodeVersion:
+		case staging:
+			info, err := entry.Info()
+			if err != nil || time.Since(info.ModTime()) < staleNodeStaging {
+				continue
+			}
+		default:
 			continue
 		}
-		_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+		_ = os.RemoveAll(filepath.Join(root, name))
 	}
 }
 

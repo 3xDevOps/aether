@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The pinned version is the one thing in node.go that goes stale on its
@@ -82,8 +83,22 @@ func TestEnsureNodeDownloadsThenReusesTheCache(t *testing.T) {
 	if err := os.MkdirAll(stale, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	leftover := filepath.Join(root, ".node-123.download")
-	if err := os.WriteFile(leftover, []byte("partial"), 0o644); err != nil {
+	abandoned := filepath.Join(root, ".node-123.download")
+	if err := os.WriteFile(abandoned, []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(abandoned, old, old); err != nil {
+		t.Fatal(err)
+	}
+	// A second build downloading right now writes into the same cache, and
+	// its staging must not be swept out from under it.
+	inFlight := filepath.Join(root, ".node-456.download")
+	if err := os.WriteFile(inFlight, []byte("in flight"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inFlightPart := filepath.Join(root, ".v99.0.0.part")
+	if err := os.MkdirAll(inFlightPart, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,9 +107,14 @@ func TestEnsureNodeDownloadsThenReusesTheCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureNode: %v", err)
 	}
-	for _, gone := range []string{stale, leftover} {
+	for _, gone := range []string{stale, abandoned} {
 		if _, err := os.Stat(gone); !os.IsNotExist(err) {
 			t.Errorf("%s survived the bootstrap: %v", gone, err)
+		}
+	}
+	for _, kept := range []string{inFlight, inFlightPart} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s was swept while still in flight: %v", kept, err)
 		}
 	}
 	binDir := filepath.Join(root, "v"+nodeVersion, filepath.FromSlash(rel.bin))
