@@ -291,6 +291,8 @@ type AttachRequest struct {
 	ReadOnly bool   `json:"read_only,omitempty"`
 	Cols     uint   `json:"cols,omitempty"`
 	Rows     uint   `json:"rows,omitempty"`
+	// Shell names a shell tab inside the run container; write is required.
+	Shell string `json:"shell,omitempty"`
 }
 
 // AttachResponse acknowledges an AttachRequest with the effective

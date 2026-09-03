@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +31,7 @@ type rawAttachConn struct {
 	exit <-chan uint32
 }
 
-func rawAttach(t *testing.T, e *testEnv, signer ssh.Signer, run domain.RunID, withPTY bool) (rawAttachConn, protocol.AttachResponse) {
+func rawAttach(t *testing.T, e *testEnv, signer ssh.Signer, run domain.RunID, withPTY bool, shell ...string) (rawAttachConn, protocol.AttachResponse) {
 	t.Helper()
 	client, err := e.dialWith(signer, nil)
 	if err != nil {
@@ -75,7 +76,11 @@ func rawAttach(t *testing.T, e *testEnv, signer ssh.Signer, run domain.RunID, wi
 		t.Fatalf("subsystem: ok=%v err=%v", ok, rerr)
 	}
 	r := bufio.NewReader(ch)
-	if _, err := ch.Write([]byte(`{"run_id":"` + string(run) + `"}` + "\n")); err != nil {
+	header := `{"run_id":"` + string(run) + `"}`
+	if len(shell) > 0 {
+		header = `{"run_id":"` + string(run) + `","shell":"` + shell[0] + `"}`
+	}
+	if _, err := ch.Write([]byte(header + "\n")); err != nil {
 		t.Fatalf("write header: %v", err)
 	}
 	var ack protocol.AttachResponse
@@ -137,6 +142,40 @@ func (c rawAttachConn) expectOpen(t *testing.T, d time.Duration) {
 		t.Fatalf("attach ended (exit-status %d, sent %v), want it kept open", st, ok)
 	case <-time.After(d):
 	}
+}
+
+func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
+	t.Run("steer", func(t *testing.T) {
+		e := revocableEnv(t)
+		collab, _ := addMember(t, e, "Shell collaborator", domain.RoleCollaborator, false)
+		c, ack := rawAttach(t, e, collab, e.run.ID, true, "shell")
+		if !ack.OK {
+			t.Fatalf("ack = %+v, want ok", ack)
+		}
+		calls := e.runs.Calls()
+		if len(calls) == 0 || !strings.HasPrefix(calls[len(calls)-1], "run-shell:"+string(e.run.ID)+":shell:") {
+			t.Fatalf("RunController calls = %v, want run shell ensure", calls)
+		}
+		c.expectOpen(t, 4*e.srv.cfg.revalidateInterval)
+		e.run.Protected = true
+		if err := e.store.UpdateRun(context.Background(), e.run); err != nil {
+			t.Fatalf("protect run: %v", err)
+		}
+		c.expectExit(t, protocol.AttachExitSteerRevoked)
+	})
+
+	t.Run("membership", func(t *testing.T) {
+		e := revocableEnv(t)
+		collab, cm := addMember(t, e, "Shell viewer", domain.RoleCollaborator, false)
+		c, ack := rawAttach(t, e, collab, e.run.ID, true, "shell")
+		if !ack.OK {
+			t.Fatalf("ack = %+v, want ok", ack)
+		}
+		if err := e.store.DeleteMember(context.Background(), cm.ID); err != nil {
+			t.Fatalf("delete member: %v", err)
+		}
+		c.expectExit(t, protocol.AttachExitMembershipRevoked)
+	})
 }
 
 // A collaborator typing into a teammate's terminal is demoted to viewer

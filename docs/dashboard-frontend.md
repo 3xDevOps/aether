@@ -415,48 +415,61 @@ server would refuse.
 tab strip (`tabs.tsx`), so Overview, Terminal, Diff and Events are registry
 routes on the same `runId`.
 
+The Terminal view is a vertical split. The agent terminal keeps the flexible
+space above a `RunDock` below it. The dock has a persisted height
+(`UiSlice.runDockHeight`, default 240px), a collapse toggle, and a resizer.
+Its tab state and socket registry live in `src/store/terminal.ts`, so opening
+Overview, Diff, or Events does not discard run-shell tabs or their attachments.
+Only the selected shell tab mounts an xterm host; switching tabs remounts that
+host and relies on transcript replay to restore its content.
+
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
-  terminal and the event stream reconnect on the same jittered schedule, and
-  it splits large input (a paste) into several ordered frames under the
-  gateway's 64 KiB frame cap, never splitting a surrogate pair.
-- **Mirror by default.** The header frame carries no `write` key unless the
-  user asks to steer; the toggle reattaches rather than upgrading in place.
-  Whether the member may steer is the server's answer, never the client's
-  guess: a `-32001` refusal drops the request back to a mirror and disables the
-  toggle. Every other refusal (unknown run, no live terminal) stops the
-  reconnect loop and offers a retry.
-- **Every attach answers for itself.** The run's slice entry is reset when the
-  view mounts, and a successful attach clears the standing refusal. Otherwise a
-  denial outlives the socket that produced it: leaving the tab and coming back
-  would show a live terminal beside a stale error, with steering greyed out
-  even after `run.handoff` granted it.
+  terminal and event stream reconnect on the same jittered schedule, and it
+  splits large input (a paste) into several ordered frames under the gateway's
+  64 KiB frame cap, never splitting a surrogate pair.
+- **Mirror by default for the agent.** The agent header carries no `write` key
+  unless the user asks to steer; the toggle reattaches rather than upgrading
+  in place. Whether the member may steer is the server's answer, never the
+  client's guess: a `-32001` refusal drops the request back to a mirror and
+  disables the toggle. Every other refusal (unknown run, no live terminal)
+  stops the reconnect loop and offers a retry.
+- **Run-shell tabs always write.** The `+` control opens names `t1`, `t2`,
+  `t3`, and `t4`; four is the per-run limit and the disabled control says
+  `At most 4 tabs`. Each shell attach uses
+  `/ws/attach/<run>?shell=<tab>`, requires write/steer permission, and closes
+  its socket when the tab is closed. A `-32001` response does not reconnect;
+  the dock replaces the terminal with the sentence **You can view this run
+  but not open a shell in it**. A normal `1000` socket close removes the
+  finished tab.
+- **Every attach answers for itself.** The agent run slice is reset when the
+  view mounts, and a successful attach clears the standing refusal. Otherwise
+  a denial outlives the socket that produced it: leaving the tab and coming
+  back would show a live terminal beside a stale error, with steering greyed
+  out even after `run.handoff` granted it.
 - **A 1008 close is read, not guessed at.** The server re-checks a live
   attach's authorization every few seconds, the gateway relays a loss as a
-  1008 close, and the close reason names which gate fell: `steer permission withdrawn` just downgrades - the client
-  reconnects immediately as a read-only mirror - while a dead token or
-  `membership withdrawn` would refuse every reconnect, so those stop the loop
-  and surface the reason. A refusal frame arrives with its own 1008 close,
-  which is why the client reacts to the code only when no refusal preceded it -
-  and a refusal frame that itself names the dead token stops the loop like the
-  close reason would, rather than being read as a steer denial.
-- **Reconnect resumes.** The gateway replays the recent transcript to every
-  attach, so a reconnected pane is never blank; the client clears the buffer
-  first, which is what keeps a reconnect from stacking a second copy of the
-  scrollback under the first.
+  1008 close, and the close reason names which gate fell: `steer permission
+  withdrawn` just downgrades - the client reconnects immediately as a
+  read-only mirror - while a dead token or `membership withdrawn` would refuse
+  every reconnect, so those stop the loop and surface the reason. A refusal
+  frame arrives with its own 1008 close, which is why the client reacts to the
+  code only when no refusal preceded it.
+- **Reconnect resumes with full recent history.** The gateway replays the
+  recent transcript to every attach, and the client clears the buffer first,
+  which keeps a reconnect from stacking a second copy of the scrollback under
+  the first. The shared xterm host uses `scrollback: 50000`; the server replay
+  ring is 1 MiB and is seeded from the cast tail when a session is restarted,
+  so re-attach retains the full recent history rather than only 64 KiB.
 - **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
-  glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038),
-  garbling scrolled rows until a forced refresh; the DOM renderer never
-  desyncs. The terminals render in the shipped JetBrainsMono Nerd Font Mono
+  glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038), garbling
+  scrolled rows until a forced refresh; the DOM renderer never desyncs. The
+  terminals render in the shipped JetBrainsMono Nerd Font Mono
   (`src/lib/term-font.ts`, declared in `src/index.css`), so agent TUIs get
-  their powerline and devicon glyphs at the same advance as text - a
-  symbols-only overlay font renders them full-em wide and xterm's per-cell
-  letter-spacing slices the overhang off. The terminal opens only once
-  regular and bold faces are loaded, because xterm caches glyph metrics
-  synchronously at `open` and would otherwise bake fallback metrics in.
-  The workspace-shell pane (`routes/shell/pane.tsx`) uses the identical
-  renderer and font setup.
-- **Injections need no client work.**  writes the attributed
+  their powerline and devicon glyphs at the same advance as text. The terminal
+  opens only once regular and bold faces are loaded, because xterm caches glyph
+  metrics synchronously at `open` and would otherwise bake fallback metrics in.
+- **Injections need no client work.** The server writes the attributed
   member-coloured banner into the PTY stream itself, so it arrives as ANSI and
   xterm renders it like any other output.
 - Board cards get no live terminal previews in v1 (spec cut-line).

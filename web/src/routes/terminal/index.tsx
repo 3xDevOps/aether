@@ -8,6 +8,7 @@ import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { type Attachment, connectAttach } from '@/routes/terminal/attach'
+import { RunDock } from '@/routes/terminal/run-dock'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { initialTerminal } from '@/store/terminal'
@@ -121,7 +122,10 @@ function TerminalView({ params }: RouteProps) {
           </Button>
         )}
       </div>
-      <div ref={hostRef} className="min-h-0 flex-1 bg-background p-2 text-foreground" />
+      <div className="min-h-0 flex-1">
+        <div ref={hostRef} className="h-full min-h-0 bg-background p-2 text-foreground" />
+      </div>
+      <RunDock runID={runID} />
     </div>
   )
 }

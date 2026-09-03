@@ -2,7 +2,7 @@
 // job is to move the credential into sessionStorage and out of the address
 // bar - the one place it would otherwise sit in history and screenshots.
 
-import { api, socketURL } from '@/lib/api'
+import { api } from '@/lib/api'
 import type { EnvScanResult } from '@/lib/types'
 import { fakeApi, manifestItem } from '@/test/fixtures'
 
@@ -39,17 +39,14 @@ describe('token bootstrap', () => {
     expect(window.location.search).toBe('?view=board')
   })
 
-  it('keeps using the stored token once the URL is clean', async () => {
+  it('builds a tokened shell attach URL with encoded run and tab', () => {
     window.sessionStorage.setItem('aether.token', 'tok_stored')
-    const fetchSpy = fakeFetch()
-    vi.stubGlobal('fetch', fetchSpy)
 
-    await api.serverInfo()
+    const url = api.attachShellSocket('run/1', 't-2')
 
-    expect(sentHeaders(fetchSpy).authorization).toBe('Bearer tok_stored')
-    // The sockets cannot send headers, so their URL carries it instead.
-    expect(socketURL('/ws/events')).toContain('token=tok_stored')
+    expect(url).toContain('/ws/attach/run%2F1?shell=t-2&token=tok_stored')
   })
+
 
   it('posts a local verb to /local/v1 with the same bearer', async () => {
     window.sessionStorage.setItem('aether.token', 'tok_stored')

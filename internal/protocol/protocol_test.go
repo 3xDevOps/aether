@@ -12,6 +12,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
+func TestAttachRequestShellWire(t *testing.T) {
+	raw, err := json.Marshal(AttachRequest{RunID: "run-1", Shell: "tab-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"shell":"tab-1"`) {
+		t.Fatalf("attach request = %s, want shell field", raw)
+	}
+}
+
 func TestRunWireShape(t *testing.T) {
 	created := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	r := &domain.Run{

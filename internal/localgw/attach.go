@@ -43,12 +43,14 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 	if cols == 0 || rows == 0 {
 		cols, rows = defaultCols, defaultRows
 	}
-
+	shell := r.URL.Query().Get("shell")
+	allowWrite := req.Write || shell != ""
 	term, ack, err := g.cfg.Backend.Attach(protocol.AttachRequest{
 		RunID:    run,
-		ReadOnly: !req.Write,
+		ReadOnly: !allowWrite,
 		Cols:     cols,
 		Rows:     rows,
+		Shell:    shell,
 	})
 	if err != nil {
 		if !ack.OK && ack.Code == 0 {
@@ -65,7 +67,7 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 
 	// Mirror semantics match the remote dashboard: a read-only attach's
 	// input is dropped rather than refused, and its resizes are ignored.
-	err = pumpTerminal(ctx, cancel, conn, term, req.Write, req.Write)
+	err = pumpTerminal(ctx, cancel, conn, term, allowWrite, allowWrite)
 	if err != nil {
 		_ = conn.Close(attachEndClose(err))
 		return

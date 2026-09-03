@@ -128,6 +128,7 @@ type Scheduler struct {
 
 	mu              sync.Mutex
 	runs            map[domain.RunID]*supervised
+	runShellMu      sync.Mutex
 	credentialUsers map[*credentialUserReservation]struct{}
 	// agentSetups serializes agent-setup shells per member+harness: the
 	// exit-time pair of writes (tool promotion, definition upsert) must

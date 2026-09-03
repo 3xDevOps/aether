@@ -835,6 +835,63 @@ func TestStopSessionsWithPrefix(t *testing.T) {
 		t.Fatal("run session was stopped")
 	}
 }
+func TestRingBytesReturnsAllWhenUnwrapped(t *testing.T) {
+	r := newRing(8)
+	r.write([]byte("abc\n"))
+	if got := string(r.bytes()); got != "abc\n" {
+		t.Fatalf("unwrapped ring bytes = %q, want %q", got, "abc\n")
+	}
+}
+
+func TestRingBytesStartsAtLineBoundaryAfterWrap(t *testing.T) {
+	r := newRing(10)
+	r.write([]byte("12345\n6789x"))
+	if got := string(r.bytes()); got != "6789x" {
+		t.Fatalf("wrapped ring bytes = %q, want %q", got, "6789x")
+	}
+}
+
+func TestRingBytesReturnsAllWrappedBytesWithoutNewline(t *testing.T) {
+	r := newRing(5)
+	r.write([]byte("abcdef"))
+	if got := string(r.bytes()); got != "bcdef" {
+		t.Fatalf("wrapped ring without newline = %q, want %q", got, "bcdef")
+	}
+}
+
+func TestActiveSessionsFiltersPrefixAndStoppedSessions(t *testing.T) {
+	h, _ := newTestHost(t)
+	active := newFakeAtt()
+	stopped := newFakeAtt()
+	ended := newFakeAtt()
+	other := newFakeAtt()
+	if err := h.StartSession(context.Background(), RunShellSession("r1", "active"), active); err != nil {
+		t.Fatalf("start active: %v", err)
+	}
+	if err := h.StartSession(context.Background(), RunShellSession("r1", "stopped"), stopped); err != nil {
+		t.Fatalf("start stopped: %v", err)
+	}
+	if err := h.StartSession(context.Background(), RunShellSession("r1", "ended"), ended); err != nil {
+		t.Fatalf("start ended: %v", err)
+	}
+	if err := h.StartSession(context.Background(), RunShellSession("r2", "other"), other); err != nil {
+		t.Fatalf("start other: %v", err)
+	}
+	if err := h.StopSession(context.Background(), RunShellSession("r1", "stopped")); err != nil {
+		t.Fatalf("stop session: %v", err)
+	}
+	if err := ended.outW.Close(); err != nil {
+		t.Fatalf("close ended output: %v", err)
+	}
+	waitFor(t, "ended shell session", func() bool {
+		return !h.lookup(RunShellSession("r1", "ended")).isActive()
+	})
+
+	got := h.ActiveSessions("run-shell:r1:")
+	if len(got) != 1 || got[0] != RunShellSession("r1", "active") {
+		t.Fatalf("active sessions = %v, want [%q]", got, RunShellSession("r1", "active"))
+	}
+}
 
 func TestTranscriptPathReplacesSessionKeySeparators(t *testing.T) {
 	h, _ := newTestHost(t)

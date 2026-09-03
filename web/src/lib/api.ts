@@ -598,6 +598,10 @@ export const api = {
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),
+  attachShellSocket: (runID: string, tab: string) =>
+    socketURL(
+      `/ws/attach/${encodeURIComponent(runID)}?shell=${encodeURIComponent(tab)}`,
+    ),
   /** The unified workspace-shell socket; the header frame picks the mode. */
   shellSocket: () => socketURL('/ws/shell'),
 }

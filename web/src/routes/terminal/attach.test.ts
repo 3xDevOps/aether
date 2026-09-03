@@ -296,4 +296,28 @@ describe('connectAttach', () => {
     vi.advanceTimersByTime(60_000)
     expect(StubSocket.opened).toHaveLength(1)
   })
+  it('reports a normal shell exit without reconnecting', () => {
+    let exited = false
+    const a = connectAttach(() => '/ws/attach/run_1?shell=t1', {
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      onExit: () => {
+        exited = true
+      },
+      geometry: () => ({ cols: 120, rows: 40 }),
+      wantsWrite: () => true,
+    })
+
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack()
+    socket.onclose?.({ code: 1000 })
+    vi.advanceTimersByTime(60_000)
+
+    expect(exited).toBe(true)
+    expect(StubSocket.opened).toHaveLength(1)
+    a.close()
+  })
 })
