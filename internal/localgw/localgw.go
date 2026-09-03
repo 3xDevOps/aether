@@ -19,10 +19,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/webgate"
 	"github.com/3xDevOps/Aether/web"
 )
@@ -61,6 +63,13 @@ type Config struct {
 	// CLI is the saved link config (addr/user/repo/key/known_hosts) the
 	// /local/v1 verbs operate on.
 	CLI cli.Config
+	// Update answers the release check for the update verbs; nil installs
+	// selfupdate.DefaultChecker().
+	Update *selfupdate.Checker
+	// Supervised marks a gateway the desktop shell spawned (aether gui
+	// --json): update.apply exits the process because the shell restarts
+	// it.
+	Supervised bool
 }
 
 // Gateway is the local HTTP/WebSocket gateway server.
@@ -71,6 +80,10 @@ type Gateway struct {
 	mux   *http.ServeMux
 	srv   *http.Server
 	ln    net.Listener
+	// exit is closed once when a verb asks the process to stop; the
+	// command that owns the process waits on it beside its signals.
+	exit     chan struct{}
+	exitOnce sync.Once
 }
 
 // New builds the gateway and mints its per-process token. It binds
@@ -86,6 +99,9 @@ func New(cfg Config) (*Gateway, error) {
 		}
 		cfg.Static = sub
 	}
+	if cfg.Update == nil {
+		cfg.Update = selfupdate.DefaultChecker()
+	}
 	token, err := mintToken()
 	if err != nil {
 		return nil, fmt.Errorf("localgw: mint token: %w", err)
@@ -94,6 +110,7 @@ func New(cfg Config) (*Gateway, error) {
 		cfg:   cfg,
 		local: newLocalState(cfg),
 		token: token,
+		exit:  make(chan struct{}),
 	}
 	g.mux = http.NewServeMux()
 	g.mux.HandleFunc("POST /api/v1/{method}", g.handleAPI)
@@ -186,6 +203,15 @@ func (g *Gateway) Addr() string {
 
 // Token returns the per-process bearer token, valid from New.
 func (g *Gateway) Token() string { return g.token }
+
+// Exit is closed when a verb asks the process to stop, so far only
+// update.apply on a supervised gateway. It stays open otherwise.
+func (g *Gateway) Exit() <-chan struct{} { return g.exit }
+
+// requestExit closes Exit, at most once however many verbs ask.
+func (g *Gateway) requestExit() {
+	g.exitOnce.Do(func() { close(g.exit) })
+}
 
 // Close stops serving, draining in-flight requests briefly before cutting
 // them off. Safe before Start.

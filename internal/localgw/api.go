@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/version"
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
@@ -92,6 +93,8 @@ func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		Methods: []string{"*"},
 		WS:      []string{"events", "attach", "shell", "envscan"},
 		Local:   localVerbs,
+		Version: version.Version,
+		Commit:  version.Commit,
 	})
 }
 

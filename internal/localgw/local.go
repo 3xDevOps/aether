@@ -32,6 +32,8 @@ var localVerbs = []string{
 	"sync.start",
 	"sync.status",
 	"sync.stop",
+	"update.apply",
+	"update.check",
 }
 
 // localState is the mutable client-machine state behind /local/v1 and
@@ -90,6 +92,8 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 		"sync.start":     (*Gateway).localSyncStart,
 		"sync.status":    (*Gateway).localSyncStatus,
 		"sync.stop":      (*Gateway).localSyncStop,
+		"update.apply":   (*Gateway).localUpdateApply,
+		"update.check":   (*Gateway).localUpdateCheck,
 	}[verb]
 	if !ok {
 		webgate.WriteError(w, http.StatusNotFound, &protocol.Error{
