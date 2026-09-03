@@ -319,8 +319,8 @@ oldest pending request's action as the summary.
 wire (above), a reload shows the badge for a run paused earlier, and the
 palette offers the right one of pause/resume. Against a legacy gateway
 whose runs carry no `paused` field the state stays unknown until a live
-`workspace.timeline` pause or resume arrives, and the palette offers
-neither verb rather than the one the server would refuse.
+`workspace.timeline` pause or resume arrives, and neither surface offers a
+verb rather than offering the one the server would refuse.
 
 ## Commands: one list, two ways to reach it
 
@@ -345,27 +345,45 @@ Two surfaces render that one list, so a label or a gate can never drift:
   tab, since it keys on `route.params.runId` rather than on a route name.
   From the board there is none, so reveal a run first.
 - **Visible buttons**, so nothing important is reachable only by a shortcut:
-  New run in the sidebar header, in the board header and in the board's empty
-  state; All runs in the sidebar nav; and the run action bar
-  (`src/components/run-actions.tsx`) in the header of every run-detail tab,
-  which is where the run verbs live for a member who has not learned `⌘K`
-  yet.
+  New run in the sidebar header, in the board header and in the notice an
+  empty board carries above its columns; All runs in the sidebar nav; and the
+  run action bar (`src/components/run-actions.tsx`) in the header of every
+  run-detail tab, which is where the run verbs live for a member who has not
+  learned `⌘K` yet.
 
-The one thing the buttons add is a confirm step. A `Command` carrying a
-`confirm` field - kill and both closes - opens a dialog naming the run before
-it runs. The palette does not ask: a palette item is already several
-deliberate steps (open, type, select) away from an accident, where a button
-is one click.
+Two things the buttons add. A `Command` carrying a `confirm` field - kill and
+both closes - opens a dialog naming the run before it runs; the palette does
+not ask, because a palette item is already several deliberate steps (open,
+type, select) away from an accident, where a button is one click. And the bar
+locks while a verb is in flight, showing a spinner on the one running: a pull
+shells out to `git fetch` over SSH and takes seconds, and a second click would
+race the first for the same ref. Buttons also take the command's `short` label
+and keep the full sentence as their tooltip, because eight of them share one
+`h-9` header row.
+
+**Who may do what is asked twice.** `src/lib/permissions.ts` mirrors
+`internal/permissions`: the role table, plus the two restrictions on top of it
+(a protected run limits steer and kill to its owner and admins, and a
+workspace with `steer_others=admins_only` does the same for others' runs).
+The server is still the authority and checks every call again, but a button
+one click from a denial is worse than no button, so the command list asks the
+same questions first. A viewer sees nothing that mutates a run; hand off and
+protect need the run's owner or an admin. Before hydration the caller's own
+record has not arrived, and the mirror answers yes rather than making the
+shell's buttons appear a beat late. Pull is the exception that is not a
+question for this policy at all: it is the desktop gateway fetching into the
+repository on this machine, so it answers to `hasLocal('pull')` alone.
 
 ### The forms
 
 The three verbs that need prose open a dialog rather than calling straight
 through: launch, inject, and launch from a template. The launch and inject
-forms are a store dialog (`openPaletteDialog` on the `palette` slice), and
-`CommandPalette` hosts them; it rides the `statusbar` slot, so it is mounted
-app-wide and any surface opens a form by asking the store for it. The
-template form's open state lives with the host in `index.tsx` instead, because
-the store's dialog union knows only the other two. It lists the active
+forms are a store dialog (`openPaletteDialog` on the `palette` slice) hosted
+by `AppShell` through `components/palette/dialogs.tsx`, so a button on any
+surface opens one by asking the store, with no dependence on the palette or
+the status bar being on screen. The template form's open state lives with
+`CommandPalette` in `index.tsx` instead, because the store's dialog union
+knows only the other two. It lists the active
 workspace's templates over `template.list` and starts the run with
 `template.launch` (both on `lib/api.ts` like every other call), then reveals
 it.
@@ -385,7 +403,7 @@ Neither launch form asks which workspace to launch into: both take
 base branch. The switcher is the picker, so a second one inside the dialog
 would be a place for the two to disagree.
 
-Launching is gated on `run.launch` **and** on the member not being a viewer
+Launching is gated on `run.launch` **and** on the launch permission
 (`canLaunch`). The local gateway advertises every method regardless of who is
 behind it, so capability alone would put the button in front of someone the
 server would refuse.
@@ -489,12 +507,14 @@ both what it renders and the overlap set the conflict chips read.
   grammar - the core spec's cut-line, and why neither Monaco nor CodeMirror is
   a dependency. A truncated patch parses to a last file with fewer lines, and
   the view says the diff was cut short rather than failing.
-- **The verbs are not here.** The tab keeps what is only about reading the
-  diff - the refresh, the snapshot list, and the two copyable `git` commands
-  that review the run branch in the linked repository
-  (`review-commands.tsx`). Fetching the branch and closing the run are verbs,
-  so they sit in the run action bar in the header with every other verb rather
-  than a second time in the tab.
+- **The verbs are not here, the answers are.** The tab keeps what is only
+  about reading the diff - the refresh, the snapshot list, the two copyable
+  `git` commands that review the run branch in the linked repository, and the
+  output of the last pull (`review-commands.tsx`). Fetching the branch and
+  closing the run are verbs, so they sit in the run action bar in the header
+  with every other verb rather than a second time in the tab; the fetch output
+  is an answer rather than a verb, so the pull records it on the `local` slice
+  and the tab shows it where a member reviewing the branch will look.
 - **Conflict chips are advisory.** `conflict-chips.tsx` registers into
   `card:chips` and the Diff tab renders the same component in its header. It
   reads the overlap set the conflict radar reports (`run.overlaps` at
@@ -708,7 +728,16 @@ list; the board header opening the launch form and an empty workspace saying
 so once rather than three times; and the launch form refusing a headless run
 with no task while sending nothing the server already defaults. The sidebar
 also covers the switcher naming a sole workspace instead of offering a
-picker, a switch rescoping the run list, and the attention badge counting. The team surfaces are driven through the same stub
+picker, a switch rescoping the run list, and the attention badge counting.
+The permission mirror is exercised through the bar rather than on its own: a
+viewer is offered nothing that mutates a run, a collaborator may steer and
+kill another member's run but not give it away or protect it, and a protected
+run and an `admins_only` workspace both close steering to everyone but the
+owner. Two more cover the shared runner: a refused kill toasts the server's
+message verbatim, and a slow pull locks the whole bar, names the ref it
+fetched and leaves its git output on the store for the diff tab. The shell
+test clicks New run in the sidebar and finds the real form, which is what
+proves the host is the shell's rather than the palette's. The team surfaces are driven through the same stub
 API: the status bar reading roster, queue and budget and rendering all three,
 the approval badge and watcher avatars reaching a real run card, a decision
 going out as `approval.decide` and coming back attributed, a steer refusal

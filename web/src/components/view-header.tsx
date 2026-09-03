@@ -21,7 +21,11 @@ export function ViewHeader({
         <span className="shrink-0 text-xs text-muted-foreground">{subtitle}</span>
       )}
       {actions && (
-        <div className="ml-auto flex min-w-0 items-center gap-0.5 overflow-x-auto">
+        <div
+          role="toolbar"
+          aria-label={`${title} actions`}
+          className="ml-auto flex min-w-0 items-center gap-0.5 overflow-x-auto"
+        >
           {actions}
         </div>
       )}

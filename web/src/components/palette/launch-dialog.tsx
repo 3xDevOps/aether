@@ -158,7 +158,7 @@ export function LaunchDialog() {
             </label>
           </div>
           {needsTask && (
-            <p className="text-xs text-muted-foreground">
+            <p id="launch-needs-task" className="text-xs text-muted-foreground">
               A headless run has no terminal to type into, so it needs a task.
             </p>
           )}
@@ -170,6 +170,7 @@ export function LaunchDialog() {
           <Button
             type="submit"
             form="launch-run"
+            aria-describedby={needsTask ? 'launch-needs-task' : undefined}
             disabled={launching || !workspaceID || !harness || needsTask}
           >
             Launch
