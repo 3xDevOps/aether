@@ -23,16 +23,16 @@ On the server box and on a Linux or macOS machine:
 curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
 ```
 
-On Linux that downloads `aether` and `aether-server`; on macOS just `aether`
-(the server is Linux-only). Later, `aether update` upgrades both.
-
 The script asks what this machine is. Answer **server** on the server box and
 **client** on your own machine; Enter takes the sensible default.
 
-That answer picks the install directory: `/usr/local/bin` with `sudo` on a
-server, `~/.local/bin` without it on a client, so the desktop app can replace
-the CLI when it updates. If `~/.local/bin` is not on your `PATH`, the script
-prints the one line that adds it; the app finds it either way.
+That answer decides what you get. A server gets `aether` and `aether-server`
+in `/usr/local/bin`, with `sudo`. A client gets the `aether` CLI alone in
+`~/.local/bin`, without `sudo`, so the desktop app can replace it when it
+updates; if that directory is not on your `PATH`, the script prints the one
+line that adds it, and the app finds it either way. macOS is a client
+platform, so it only ever gets `aether`. Later, `aether update` upgrades
+whatever is installed.
 
 It then finishes that side's setup: [step 2](#2-start-the-server) on the
 server, the desktop app ([step 7](#prefer-a-native-window)) on a client. To

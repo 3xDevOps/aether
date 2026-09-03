@@ -13,19 +13,19 @@ does, how to run the server as a service, and what lives in the data directory.
 curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
 ```
 
-It detects your OS and CPU, downloads the matching binaries from the latest
-GitHub release, and verifies each one against the release's `checksums.txt`.
-On Linux it installs both binaries; on macOS only `aether`, because the server
-is Linux-only.
+It detects your OS and CPU, downloads the release assets it needs, and
+verifies each one against the release's `checksums.txt`. macOS only ever gets
+`aether`, because the server is Linux-only.
 
 It asks one question first: is this machine the server, or a client? The
-answer picks where the binaries go and what runs afterwards.
+answer picks which binaries are installed, where they go, and what runs
+afterwards.
 
-| Answer | Where the binaries go | What it runs next |
+| Answer | What is installed, and where | What it runs next |
 | --- | --- | --- |
-| `server` | `/usr/local/bin`, root-owned, using `sudo` when it has to; on a machine with no `sudo` at all it falls back to `~/.local/bin`. | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, then the systemd activation line. |
-| `client` | `~/.local/bin`, created if it is missing. No `sudo`, and the files stay yours. | `aether gui build` - packages and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
-| `none` | `/usr/local/bin`, the same as `server`. | Nothing further. The binaries are installed and the script stops. |
+| `server` | On Linux both `aether` and `aether-server`, into `/usr/local/bin`, root-owned, using `sudo` when it has to; on a machine with no `sudo` at all it falls back to `~/.local/bin`. | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, then the systemd activation line. |
+| `client` | `aether` alone, into `~/.local/bin`, created if it is missing. No `sudo`, and the files stay yours. | `aether gui build` - packages and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
+| `none` | The same as `server`, `sudo` fallback included. | Nothing further. The binaries are installed and the script stops. |
 
 A client gets `~/.local/bin` because the dashboard's **Update now** button
 replaces the CLI from the `aether gui` process, which runs as you. A
@@ -33,12 +33,20 @@ root-owned binary in `/usr/local/bin` leaves that button with nothing to do
 but print `sudo aether update`. `--bin-dir` overrides the choice for every
 role.
 
-If that directory is not on your `PATH`, the script prints the one line that
-adds it for your shell - bash, zsh, or fish - and never edits a profile for
-you. The desktop app looks in `~/.local/bin` itself, so it starts either way;
-a terminal needs the line. If an older `aether` is still in `/usr/local/bin`,
-the script names it and prints the `sudo rm -f` that removes it, because that
-copy comes first on most `PATH`s and would shadow the new one.
+A client gets the CLI alone for the same reason: `aether update` reads an
+`aether-server` next to the CLI as proof the machine is a server, so one
+sitting in `~/.local/bin` would make every update pull a server binary this
+machine never runs and make the dashboard ask for a
+`sudo systemctl restart aether-server` that no unit backs. `--client`,
+`--server` and `AETHER_COMPONENTS` still choose the components themselves.
+
+If the install directory is not on your `PATH`, the script prints the one line
+that adds it for your shell - bash, zsh, or fish, and a plain `export` when it
+cannot tell - and never edits a profile for you. The desktop app looks in
+`~/.local/bin` itself, so it starts either way; a terminal needs the line. If
+an older `aether` is still in `/usr/local/bin`, the script names it and prints
+the `sudo rm -f` that removes it, because that copy comes first on most
+`PATH`s and would shadow the new one.
 
 Enter takes the default: `server` on a Linux machine that got the server
 binary, `client` everywhere else. Answers are case-insensitive. Choosing the
@@ -673,6 +681,13 @@ rm -f ~/.local/bin/aether       # the client default
 rm -rf ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop
 rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder
 ```
+
+A client install writes one binary, so `aether` is the only name to remove.
+A machine that answered `server` has `aether-server` beside it and the server
+list above is the one to follow. An install that named its own components
+(`--server`, `AETHER_COMPONENTS`) put whatever it was told wherever
+`--bin-dir` pointed; `command -v aether` and `command -v aether-server` find
+what is actually there.
 
 The `aether` cache directory - `~/.cache/aether` above, and its macOS and
 Windows equivalents below - holds the desktop build directory and the private

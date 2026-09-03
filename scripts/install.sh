@@ -16,11 +16,11 @@
 #
 # The server binary is Linux-only by design. On macOS this installs the CLI.
 #
-# The script asks whether this machine is the server or a client, and the
-# answer also picks the install directory: a client gets ~/.local/bin, which
-# the desktop app can replace on update without sudo. It then finishes that
-# role's setup: `aether-server setup` on a server, `aether gui build` on a
-# client. Pass --role none to skip both.
+# The script asks whether this machine is the server or a client. The answer
+# picks what is installed and where: a client gets the CLI alone in
+# ~/.local/bin, which the desktop app can replace on update without sudo. It
+# then finishes that role's setup: `aether-server setup` on a server,
+# `aether gui build` on a client. Pass --role none to skip both.
 
 set -eu
 
@@ -96,8 +96,10 @@ usage: install.sh [--version <tag>] [--bin-dir <dir>] [--client | --server]
   --client    install the aether CLI only
   --server    install the aether-server binary only (Linux)
   --role      what this machine is, skipping the question:
-                server  /usr/local/bin, then `aether-server setup`
-                client  ~/.local/bin, then `aether gui build`
+                server  both binaries into /usr/local/bin, then
+                        `aether-server setup`
+                client  the CLI alone into ~/.local/bin, then
+                        `aether gui build`
                 none    install into /usr/local/bin and stop
 
 Without --role the script asks, and answers the question itself when there is
@@ -256,7 +258,23 @@ if [ -z "$ROLE" ]; then
 	done
 fi
 
+# The platform default asked for both binaries before the role was known. A
+# client answer makes aether-server irrelevant, and worse than useless next to
+# the CLI: `aether update` treats it as proof this box is a server, so every
+# update pulls a server binary this machine never runs and the dashboard asks
+# for a `systemctl restart aether-server` that no unit backs. An explicit
+# --client, --server or AETHER_COMPONENTS still decides for itself.
+if [ "$ROLE" = client ] && [ "$COMPONENTS_CHOSEN" = no ]; then
+	COMPONENTS="client"
+fi
+
 # --- destination -------------------------------------------------------
+
+# A trailing slash would make the PATH check miss and the shadow check below
+# compare the install directory against itself.
+while [ "$BIN_DIR" != "/" ] && [ "${BIN_DIR%/}" != "$BIN_DIR" ]; do
+	BIN_DIR="${BIN_DIR%/}"
+done
 
 sudo=""
 if [ -n "$BIN_DIR" ]; then
@@ -382,10 +400,15 @@ esac
 # --- PATH, and an older CLI that would shadow this one -----------------
 
 # The one line that adds BIN_DIR to PATH for the login shell in $SHELL.
-# Nothing here edits a profile; the user runs it.
+# Nothing here edits a profile; the user runs it. SHELL is unset in
+# containers, cron jobs and most CI runners - exactly the machines that take
+# this branch - so an unset or unrecognised shell gets the generic export
+# rather than a "parameter not set" error under `set -u`.
 path_line() {
-	case "${SHELL##*/}" in
-	fish) echo "fish_add_path ${BIN_DIR}" ;;
+	shell_name="${SHELL:-}"
+	shell_name="${shell_name##*/}"
+	case "$shell_name" in
+	fish) echo "fish_add_path ${BIN_DIR}   # run this one in fish" ;;
 	zsh) echo "echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ~/.zshrc" ;;
 	bash)
 		if [ "$os" = darwin ]; then
