@@ -824,10 +824,8 @@ prompt asks the server about itself and shows wherever the member is an admin.
 
 ## Styleguide
 
-- **Tokens only.** Colours live in `src/index.css`: the shadcn neutral base
-  plus `--state-*` tokens for the presentation states. Components use token
-  classes (`bg-state-working`, `text-muted-foreground`); no hex literals. The
-  exception is member attribution colour, which is data from the server and is
+- **Tokens only.** See [styles.md](styles.md) for the landing palette in dark, neutral in light, and `--state-*` tokens; components use token classes and no hex literals.
+  The exception is member attribution colour, which is data from the server and is
   applied inline.
 - **Dark, light, system.** The preference is stored, `system` follows
   `prefers-color-scheme` live.

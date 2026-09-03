@@ -51,7 +51,7 @@ export function Sidebar() {
 
   if (collapsed) {
     return (
-      <aside className="flex w-10 shrink-0 flex-col items-center border-r py-2">
+      <aside className="flex w-10 shrink-0 flex-col items-center border-r bg-sidebar py-2">
         <Button
           variant="ghost"
           size="icon"
@@ -66,7 +66,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className="relative flex shrink-0 flex-col border-r"
+      className="relative flex shrink-0 flex-col border-r bg-sidebar"
       style={{ width }}
       aria-label="Runs"
     >

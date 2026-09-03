@@ -28,7 +28,9 @@
 | `--sidebar` | Neutral | `#0b1120` |
 | `--muted` | Neutral | `#0b1120` |
 | `--secondary` | Neutral | `#0b1120` |
+| `--secondary-foreground` | Neutral | `#dce6f2` |
 | `--accent` | Neutral | `#0b1120` |
+| `--accent-foreground` | Neutral | `#dce6f2` |
 | `--muted-foreground` | Neutral | `rgb(220 230 242 / 0.62)` |
 | `--border` | Neutral | `rgb(74 111 165 / 0.28)` |
 | `--input` | Neutral | `rgb(74 111 165 / 0.36)` |
@@ -36,3 +38,5 @@
 | `--primary-foreground` | Neutral | `#05070f` |
 | `--ring` | `oklch(0.55 0.11 175)` | `#6ee7d6` |
 | State tokens | Unchanged | Unchanged |
+
+The mint 2px left border marks the active NAV item only; run rows keep the owner colour on that edge.
