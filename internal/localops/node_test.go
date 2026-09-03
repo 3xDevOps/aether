@@ -76,10 +76,26 @@ func TestEnsureNodeDownloadsThenReusesTheCache(t *testing.T) {
 	hidePathNode(t)
 	rel, dist := serveFakeNode(t, fakeNodeTree(), "")
 
+	// An earlier pinned version and a download a Ctrl-C interrupted are
+	// the two things that would otherwise sit in the cache forever.
+	stale := filepath.Join(root, "v20.11.1")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	leftover := filepath.Join(root, ".node-123.download")
+	if err := os.WriteFile(leftover, []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	var out bytes.Buffer
 	tools, err := ensureNode(t.Context(), root, &out)
 	if err != nil {
 		t.Fatalf("ensureNode: %v", err)
+	}
+	for _, gone := range []string{stale, leftover} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s survived the bootstrap: %v", gone, err)
+		}
 	}
 	binDir := filepath.Join(root, "v"+nodeVersion, filepath.FromSlash(rel.bin))
 	if tools.pathDir != binDir {
@@ -113,6 +129,32 @@ func TestEnsureNodeDownloadsThenReusesTheCache(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("a cache hit printed %q, want nothing", out.String())
+	}
+}
+
+// The machine's own Node is what a developer already trusts, and using it
+// is what keeps a build on a normal machine free of a 50 MB download.
+func TestEnsureNodeUsesAGoodNodeOnPath(t *testing.T) {
+	requireScriptableNode(t)
+	stubs := stubNodeOnPath(t, "v24.11.0")
+	_, dist := serveFakeNode(t, fakeNodeTree(), "")
+
+	var out bytes.Buffer
+	tools, err := ensureNode(t.Context(), t.TempDir(), &out)
+	if err != nil {
+		t.Fatalf("ensureNode: %v", err)
+	}
+	if tools.pathDir != "" {
+		t.Errorf("pathDir = %q, want empty: PATH is not to be rewritten for a usable Node", tools.pathDir)
+	}
+	if tools.npm != filepath.Join(stubs, "npm") || tools.npx != filepath.Join(stubs, "npx") {
+		t.Errorf("npm = %q, npx = %q, want the pair on PATH under %q", tools.npm, tools.npx, stubs)
+	}
+	if got := dist.downloads.Load(); got != 0 {
+		t.Errorf("downloaded Node %d times with a usable one on PATH", got)
+	}
+	if out.Len() != 0 {
+		t.Errorf("printed %q, want nothing: this build has nothing to wait for", out.String())
 	}
 }
 
@@ -160,17 +202,7 @@ func TestEnsureNodeIgnoresAnOldNodeOnPath(t *testing.T) {
 	root := t.TempDir()
 	// A node too old for electron-builder must not be used, and must not
 	// stop the build either.
-	stubs := t.TempDir()
-	for tool, body := range map[string]string{
-		"node": "#!/bin/sh\necho v18.20.0\n",
-		"npm":  "#!/bin/sh\n",
-		"npx":  "#!/bin/sh\n",
-	} {
-		if err := os.WriteFile(filepath.Join(stubs, tool), []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("PATH", stubs)
+	stubNodeOnPath(t, "v18.20.0")
 	rel, dist := serveFakeNode(t, fakeNodeTree(), "")
 
 	var out bytes.Buffer
@@ -327,6 +359,24 @@ func requireSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating a symlink needs a privilege windows does not grant by default")
 	}
+}
+
+// stubNodeOnPath puts a node reporting version, with npm and npx beside
+// it, on PATH as the only entry, and returns the directory holding them.
+func stubNodeOnPath(t *testing.T, version string) string {
+	t.Helper()
+	stubs := t.TempDir()
+	for tool, body := range map[string]string{
+		"node": "#!/bin/sh\necho " + version + "\n",
+		"npm":  "#!/bin/sh\n",
+		"npx":  "#!/bin/sh\n",
+	} {
+		if err := os.WriteFile(filepath.Join(stubs, tool), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", stubs)
+	return stubs
 }
 
 // hidePathNode empties PATH so the machine's own Node cannot answer.

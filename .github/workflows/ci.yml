@@ -112,17 +112,25 @@ jobs:
               for tool in "$dir"/*; do
                 name="${tool##*/}"
                 case "$name" in node | npm | npx | corepack | '*') continue ;; esac
-                [ -e "$shadow/$name" ] || ln -s "$tool" "$shadow/$name"
+                # -e is false for a dangling link, and two PATH directories
+                # can carry the same name, so a failed ln is expected and
+                # must not end the step. scripts/install-test.sh does the
+                # same for the same reason.
+                [ -e "$shadow/$name" ] || ln -s "$tool" "$shadow/$name" 2>/dev/null || true
               done
             else
               clean="${clean:+$clean:}$dir"
             fi
           done
-          export PATH="$HOME/.local/bin:$shadow:$clean"
+          # No empty PATH entry: that would put the checkout's own directory
+          # on PATH when every directory carried node.
+          export PATH="$HOME/.local/bin:$shadow${clean:+:$clean}"
           if command -v node; then echo "node is still on PATH" >&2; exit 1; fi
           aether gui build
-          find ~/.cache/aether/node -type f -name node -perm -u+x | grep -q . ||
+          test -d ~/.cache/aether/node ||
             { echo "no Node was downloaded into ~/.cache/aether/node" >&2; exit 1; }
+          find ~/.cache/aether/node -type f -name node -perm -u+x | grep -q . ||
+            { echo "the downloaded Node has no executable node" >&2; exit 1; }
           test -x ~/.local/share/aether/desktop/aether-desktop
 
   # The client ships for Windows, so it gets a real Windows runner. Only the

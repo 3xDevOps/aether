@@ -1,0 +1,1 @@
+echo "PATH=$PATH"; command -v sh yarn >/dev/null && echo "sh and yarn survived"; echo "shadow entries: $(ls "$shadow" 

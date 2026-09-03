@@ -26,7 +26,9 @@ import (
 
 // nodeVersion is the Node.js release `aether gui build` downloads when this
 // machine has no Node of its own. Bump it with the Node 22 LTS line;
-// https://nodejs.org/dist/index.json lists every published release.
+// https://nodejs.org/dist/index.json lists every published release. The
+// public docs name no version, so a bump changes this line only; the build
+// prints the version and URL it fetches.
 const nodeVersion = "22.23.2"
 
 // nodeMinMajor is the oldest Node the desktop build accepts from PATH.
@@ -190,6 +192,7 @@ func bootstrapNode(ctx context.Context, root, reason string, out io.Writer) (nod
 	binDir := filepath.Join(versionDir, filepath.FromSlash(rel.bin))
 	tools, err := nodeToolsIn(ctx, binDir)
 	if err == nil {
+		pruneNodeCache(root)
 		return tools, nil
 	}
 	if err = os.RemoveAll(versionDir); err != nil {
@@ -198,6 +201,9 @@ func bootstrapNode(ctx context.Context, root, reason string, out io.Writer) (nod
 	if err = os.MkdirAll(root, 0o755); err != nil {
 		return nodeTools{}, fmt.Errorf("localops: create %s: %w", root, err)
 	}
+	// Free the disk the last pinned version and any interrupted download
+	// still hold before pulling another 50 MB down.
+	pruneNodeCache(root)
 
 	url := nodeDistBase + "/v" + nodeVersion + "/" + rel.archive
 	_, _ = fmt.Fprintf(out, "Node.js: %s. Downloading a private copy for this build only.\n", reason)
@@ -232,6 +238,25 @@ func bootstrapNode(ctx context.Context, root, reason string, out io.Writer) (nod
 		return nodeTools{}, fmt.Errorf("localops: the Node.js downloaded from %s does not run: %w", url, err)
 	}
 	return tools, nil
+}
+
+// pruneNodeCache deletes everything in root except the pinned version's
+// tree: the copy an earlier nodeVersion left behind, which is around 200 MB
+// unpacked, and the staging file or directory a build interrupted mid
+// download could not clean up itself. Nothing else sweeps this directory,
+// and a failure here costs disk rather than the build, so it is not
+// reported.
+func pruneNodeCache(root string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.Name() == "v"+nodeVersion {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+	}
 }
 
 // nodeToolsIn reports the tools in binDir, and fails unless node there

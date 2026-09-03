@@ -265,16 +265,18 @@ so the app goes to `~/Applications` instead; the command prints where it put
 it.
 
 The build uses `node`, `npm` and `npx` from `PATH` when `node` is version 22
-or newer. Otherwise it downloads Node.js v22.23.2 for this OS and CPU (Linux,
-macOS and Windows, x64 and arm64) from <https://nodejs.org/dist/>, verifies it
-against that release's `SHASUMS256.txt`, and unpacks it next to the build
-directory (`~/.cache/aether/node/` on Linux, `~/Library/Caches/aether/node/`
-on macOS, `%LOCALAPPDATA%\aether\node\` on Windows). That copy is on `PATH`
-for this build's `npm install` and electron-builder only; nothing else on the
-machine changes and no shell profile is edited. So the first build needs
-network access, and later builds reuse the cached copy. A failed download or a
-checksum mismatch fails `aether gui build` with the error and the URL to fetch
-by hand; it never falls back to a system Node older than 22.
+or newer. Otherwise it downloads a pinned Node.js 22 release for this OS and
+CPU (Linux, macOS and Windows, x64 and arm64) from <https://nodejs.org/dist/>,
+verifies it against that release's `SHASUMS256.txt`, and unpacks it in a
+directory named for that version beside the build directory
+(`~/.cache/aether/node/` on Linux, `~/Library/Caches/aether/node/` on macOS,
+`%LOCALAPPDATA%\aether\node\` on Windows). That copy is on `PATH` for this
+build's `npm install` and electron-builder only; nothing else on the machine
+changes and no shell profile is edited. So the first build needs network
+access, and later builds reuse the cached copy; a build that fetches a newer
+pinned version deletes the old one. A failed download or a checksum mismatch
+fails `aether gui build` with the error and the URL to fetch by hand; it
+never falls back to a system Node older than 22.
 
 The first build downloads the Electron runtime (about 100 MB) into
 electron-builder's own cache (`~/.cache/electron` and
