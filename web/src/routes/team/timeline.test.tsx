@@ -117,6 +117,30 @@ describe('workspace activity feed', () => {
     expect(windowsAsked(client)).toEqual([head - window])
   })
 
+  // A server update is an admin act like any other, so it lands in the
+  // same feed: without its own case the row would render a bare type and
+  // say nothing about which phase it reached.
+  it('describes a server update phase', async () => {
+    const client = feedApi([
+      {
+        id: 'evt_srv',
+        seq: 4199,
+        time: '2026-08-14T10:04:00Z',
+        workspace_id: workspace.id,
+        run_id: '',
+        actor_id: alice.id,
+        type: 'server.update',
+        payload: { phase: 'failed', version: 'v1.3.0', detail: 'checksum mismatch' },
+      },
+    ])
+    seed()
+    render(<TimelineFeed params={{}} client={client} />)
+
+    expect(
+      await screen.findByText('failed - v1.3.0 - checksum mismatch'),
+    ).toBeDefined()
+  })
+
   // The sidebar names the scope everywhere else; here it is only the
   // default, because comparing workspaces is what an activity log is for.
   it('opens on the active workspace', async () => {
