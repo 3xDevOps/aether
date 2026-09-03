@@ -132,6 +132,88 @@ Only the renames at the end could leave `aether-server` updated and the
 the filesystem does; the recorded failure then names which binaries were
 already replaced. `aether server update --status` shows it.
 
+## Client self-update on macOS
+
+The dashboard's **Update now** button runs from `aether gui`, an
+unprivileged process. On macOS it can still replace a CLI in a directory
+the user cannot write, such as `/usr/local/bin`
+([install.md](install.md#upgrading),
+[local-gateway.md](local-gateway.md#localv1-verbs)). No Aether code runs as
+root; root is left exactly one thing to do.
+
+**When the dialog is offered.** Only when the directory is not writable by
+this user, only root can write the binary's directory or any directory
+above it, this is macOS, and the gateway is in a GUI session. Otherwise the
+banner shows `sudo aether update`. The full rule, and why the privileged
+command depends on it, is in
+[local-gateway.md](local-gateway.md#localv1-verbs).
+
+**What runs as root.** One `sh` command of system tools, addressed by
+absolute path so nothing is looked up on root's `PATH`, with the staged
+file, the destination and the release digest baked into its text
+(`internal/macinstall`). For `/usr/local/bin/aether` it is, verbatim:
+
+```sh
+set -e; t=$(/usr/bin/mktemp '/usr/local/bin/.aether.update.XXXXXX'); trap '/bin/rm -f "$t"' EXIT; /usr/bin/install -m 0600 '/Users/you/Library/Caches/aether/update/.aether.update-123456789' "$t"; h=$(/usr/bin/openssl dgst -sha256 "$t"); [ "${h##* }" = '<sha256 of the release asset>' ] || { /bin/echo 'copied binary does not match the release checksum' >&2; exit 65; }; /bin/chmod 0755 "$t"; /bin/mv -f "$t" '/usr/local/bin/aether'
+```
+
+Only the staged file's name and the digest vary. `/usr/bin/osascript -e
+'do shell script "<command>" with prompt "<text>" with administrator
+privileges'` runs it, with the environment
+`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `LANG=C`, and `HOME`, working
+directory `/`, and nothing else from the user's shell - no `TMPDIR`, no
+`DYLD_*`, no Homebrew `PATH`. The command is decided before the user is
+asked and cannot change after: what the dialog authorizes is that text.
+
+**Three checksum checks, in three places.** The gateway downloads the
+release as the user and compares it with `checksums.txt` before anything
+is staged. Root hashes its own copy and exits `65` on a mismatch, so a
+staged file swapped while the dialog is up installs nothing. The gateway
+then re-reads the installed file as the user - a regular file, mode
+`0755`, root-owned, the release digest - before it rebuilds the desktop
+app or exits; a mismatch there is reported as `installed
+/usr/local/bin/aether does not match the release checksum; do not run it`.
+
+**`0600` until verified.** Root copies into a temp file in the destination
+directory, which the user cannot write, and keeps it `0600` until the hash
+matches. A staged file replaced with a symlink to a root-only file would be
+copied, fail the hash, and be removed without ever having been readable.
+The final step is `mv -f` within one directory: atomic, and a running
+`aether` keeps its old inode.
+
+**The staging directory is private.** The download goes to
+`<user cache>/aether/update` (`~/Library/Caches/aether/update`), created
+`0700`, and refused when the path is a symlink, not a directory, or owned by
+another user, because root reads from it. `install` copies the staged file;
+root never executes or renames it.
+
+**No password passes through Aether.** The dialog is macOS's own; the
+password goes to the system's authorization service and is not read,
+stored, piped, or logged by any Aether process. macOS asks on every click:
+each click runs a new `osascript` process with a new command text (the
+staged file's name differs), and Apple's TN2065 says the authentication
+applies to that specific script text. Nothing is cached across clicks by
+Aether or by the system for this right - `system.privilege.admin` is not
+shared across processes.
+
+**Why the dialog says osascript.** The dialog is titled `osascript`
+because the app is built locally and unsigned. A dialog in Aether's own
+name needs a privileged helper installed through `SMJobBless` or
+`SMAppService`, and both require a Developer ID signed helper. Aether's
+prompt text sits beneath the title and says so, naming the file and the
+version being installed.
+
+**What a same-user process can still do.** A process running as the same
+user can write the staging directory and can kill or block the gateway.
+That lets it make the root step fail - a swapped staged file fails the
+hash - or stall it, by putting a FIFO where the staged file was so root's
+`install` blocks on the open. Both are denial of service against this
+user's own update, not escalation: nothing that process does can make
+root install bytes other than the ones whose digest is in the command text.
+That rests on the root-only path rule above: the directory root writes
+into, and every directory above it, is root's alone
+([local-gateway.md](local-gateway.md#localv1-verbs)).
+
 ## Dependency and toolchain vulnerability scanning
 
 `make vulncheck` runs `govulncheck` over the whole module. CI runs it on every

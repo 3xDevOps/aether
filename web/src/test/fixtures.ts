@@ -307,6 +307,8 @@ export function updateStatus(over: Partial<UpdateStatus> = {}): UpdateStatus {
     server_version: 'v1.3.0',
     server_behind: false,
     supervised: true,
+    cli_path: '/home/user/.local/bin/aether',
+    install_method: 'direct',
     ...over,
   }
 }
