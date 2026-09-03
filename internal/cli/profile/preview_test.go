@@ -653,3 +653,48 @@ func TestInventoryClaudeRuntimeFilesIgnored(t *testing.T) {
 		t.Errorf("files = %d, want only CLAUDE.md; categories %v", preview.Files, preview.CategoryNames())
 	}
 }
+
+// TestInventoryCodexSessionsIgnored covers codex's transcript archive,
+// which is the same thing claude keeps in projects/: a per-session log of
+// what the agent did, not configuration another machine wants. Left in,
+// it spent the snapshot budget and tripped the secret scanner on content
+// nobody wrote by hand, blocking the whole import.
+func TestInventoryCodexSessionsIgnored(t *testing.T) {
+	root := setupHarnessRoot(t, "codex")
+	mustWrite(t, filepath.Join(root, "config.toml"), "model = \"o3\"\n")
+	mustWrite(t, filepath.Join(root, "skills", "pdf", "SKILL.md"), "# pdf skill\n")
+	// The real shape: ~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl.
+	day := filepath.Join(root, "sessions", "2026", "02", "17")
+	mustWrite(t, filepath.Join(day, "rollout-2026-02-17T19-39-47.jsonl"), "{}\n")
+	mustWrite(t, filepath.Join(day, "rollout-2026-02-17T20-11-02.jsonl"), "{}\n")
+
+	preview, err := Inventory(t.Context(), "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Files != 2 {
+		t.Errorf("files = %d, want config.toml and the skill", preview.Files)
+	}
+	// One entry for the archive, not one per transcript inside it.
+	var ignored []Exclusion
+	for _, e := range preview.Excluded {
+		if e.Reason == ExcludeIgnored {
+			ignored = append(ignored, e)
+		}
+	}
+	if len(ignored) != 1 || ignored[0].Path != "sessions" {
+		t.Fatalf("ignored = %+v, want the sessions archive reported once", ignored)
+	}
+	if !strings.Contains(ignored[0].Detail, "skipped by default") {
+		t.Errorf("detail does not say the default is Aether's: %q", ignored[0].Detail)
+	}
+	// The user's own ignore file still has the last word.
+	mustWrite(t, filepath.Join(root, IgnoreFileName), "!sessions/\n")
+	preview, err = Inventory(t.Context(), "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Files != 4 {
+		t.Errorf("files = %d, want the two transcripts re-included", preview.Files)
+	}
+}

@@ -307,7 +307,7 @@ stopped.
   | Harness | Skipped by default |
   | --- | --- |
   | `claude` | `projects/`, `shell-snapshots/`, `statsig/`, `todos/`, `file-history/`, `history.jsonl`, `daemon/` |
-  | `codex` | `tmp/`, `.tmp/` |
+  | `codex` | `tmp/`, `.tmp/`, `sessions/` |
 
   A skipped directory is reported once, as the directory. These are applied
   before your `.aether-profile-ignore`, so that file has the last word: a

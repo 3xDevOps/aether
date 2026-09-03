@@ -56,10 +56,11 @@ var defaultIgnores = map[string][]string{
 		"file-history/", "history.jsonl", "daemon/",
 	},
 	// codex/tmp holds a per-run scratch directory whose apply_patch entry
-	// is a symlink out to the codex binary. plugins/cache is deliberately
-	// not here: it is real third-party content, not something codex wrote
-	// for itself.
-	"codex": {"tmp/", ".tmp/"},
+	// is a symlink out to the codex binary; sessions/ is codex's own
+	// transcript archive, the same thing claude keeps in projects/.
+	// plugins/cache is deliberately not here: it is real third-party
+	// content, not something codex wrote for itself.
+	"codex": {"tmp/", ".tmp/", "sessions/"},
 }
 
 // visited is one entry the walk classified. Reason is empty for a file
