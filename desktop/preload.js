@@ -7,6 +7,16 @@
 
 const { contextBridge, ipcRenderer } = require('electron')
 
+// Which CLI built this shell. `aether gui build` stamps its own version into
+// the shell's package.json and main.js appends it to the renderer's argv: a
+// sandboxed preload cannot read a file, and this is the documented way to
+// hand a small value down. The SPA compares it with the CLI serving the
+// gateway and says to rerun `aether gui build` once the two have drifted.
+const shellVersionFlag = '--aether-shell-version='
+const shellVersion = (process.argv || [])
+  .find((arg) => arg.startsWith(shellVersionFlag))
+  ?.slice(shellVersionFlag.length)
+
 // Absent on darwin: the native traffic lights are kept there, and their
 // absence is exactly how the SPA knows to reserve room for them instead of
 // drawing buttons of its own.
@@ -28,5 +38,6 @@ const controls =
 
 contextBridge.exposeInMainWorld('aetherDesktop', {
   platform: process.platform,
+  ...(shellVersion ? { shellVersion } : {}),
   ...(controls ? { controls } : {}),
 })

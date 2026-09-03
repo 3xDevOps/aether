@@ -17,6 +17,12 @@ const readline = require('node:readline')
 
 const notify = require('./notify')
 
+// The CLI version that built this shell, stamped into package.json by
+// `aether gui build`. It rides down to the renderer as an argv entry the
+// preload reads, so the dashboard can tell a shell built by an older CLI
+// from one built by the CLI now serving the gateway.
+const shellVersion = require('./package.json').version
+
 // --- single instance ----------------------------------------------------
 
 const locked = app.requestSingleInstanceLock()
@@ -254,6 +260,7 @@ function main() {
         nodeIntegration: false,
         sandbox: true,
         preload: path.join(__dirname, 'preload.js'),
+        additionalArguments: ['--aether-shell-version=' + shellVersion],
       },
     })
 
