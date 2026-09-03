@@ -63,13 +63,13 @@ func DesktopBuildDir() (string, error) {
 // and stderr. It returns the unpacked app: a directory on linux and
 // windows, the .app bundle on darwin.
 func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, stdout, stderr io.Writer) (string, error) {
-	npm, err := exec.LookPath("npm")
+	nodeRoot, err := nodeCacheDir()
 	if err != nil {
-		return "", errors.New("localops: npm not found; building the desktop app needs Node.js 22+ (https://nodejs.org)")
+		return "", err
 	}
-	npx, err := exec.LookPath("npx")
+	node, err := ensureNode(ctx, nodeRoot, stdout)
 	if err != nil {
-		return "", errors.New("localops: npx not found; building the desktop app needs Node.js 22+ (https://nodejs.org)")
+		return "", err
 	}
 	if err := writeTree(buildDir, src); err != nil {
 		return "", fmt.Errorf("localops: write shell sources: %w", err)
@@ -93,15 +93,22 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 		// npm's electron postinstall would download the runtime zip once
 		// more than electron-builder does for itself, so skip it.
 		cmd.Env = append(cmd.Environ(), "CSC_IDENTITY_AUTO_DISCOVERY=false", "ELECTRON_SKIP_BINARY_DOWNLOAD=1")
+		// npm and npx are scripts that look up node on PATH, and
+		// electron-builder spawns node again, so a downloaded Node has to
+		// lead this build's PATH. Only these two commands see it: nothing
+		// on the machine, and no shell profile, is changed.
+		if node.pathDir != "" {
+			cmd.Env = append(cmd.Env, "PATH="+node.pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("localops: %s %s: %w", filepath.Base(name), strings.Join(args, " "), err)
 		}
 		return nil
 	}
-	if err := run(npm, "install", "--no-audit", "--no-fund"); err != nil {
+	if err := run(node.npm, "install", "--no-audit", "--no-fund"); err != nil {
 		return "", err
 	}
-	if err := run(npx, "electron-builder", "--dir", "--publish", "never"); err != nil {
+	if err := run(node.npx, "electron-builder", "--dir", "--publish", "never"); err != nil {
 		return "", err
 	}
 	return builtDesktopApp(runtime.GOOS, dist)
