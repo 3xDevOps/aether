@@ -226,6 +226,27 @@ describe('run board', () => {
     expect(result.current).toBe(before)
   })
 
+  it('opens the launch form from the board header', () => {
+    seed([working])
+    render(<Board />)
+
+    fireEvent.click(screen.getByTitle('Launch a run'))
+
+    // The form is hosted app-wide; the board only asks for it.
+    expect(useStore.getState().paletteDialog).toBe('launch')
+  })
+
+  it('says an empty workspace is empty once, not three times', () => {
+    seed([])
+    render(<Board />)
+
+    const empty = screen.getByText('No runs yet.').closest('div') as HTMLElement
+    // The three buckets have nothing to sort, so they are not drawn at all,
+    // and the one thing left to do is offered where the member is looking.
+    expect(screen.queryByRole('region', { name: 'Working' })).toBeNull()
+    expect(within(empty).getByTitle('Launch a run')).toBeDefined()
+  })
+
   it('renders what another feature registered into a card slot', () => {
     registerSlot('card:chips', 'test-chip', ({ run: r }) => <span>chip:{r.id}</span>)
     seed([working])

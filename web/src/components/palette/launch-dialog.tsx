@@ -21,6 +21,9 @@ import { useStore } from '@/store'
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
+/** The two launch modes the server accepts; `tui` is its default. */
+type LaunchMode = 'tui' | 'headless'
+
 export function LaunchDialog() {
   const workspaceID = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
@@ -29,7 +32,14 @@ export function LaunchDialog() {
   const upsertRun = useStore((s) => s.upsertRun)
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [harness, setHarness] = useState('')
+  const [task, setTask] = useState('')
+  const [mode, setMode] = useState<LaunchMode>('tui')
   const [launching, setLaunching] = useState(false)
+  // The server's rule: a taskless launch lands the member in the agent's
+  // interactive TUI, but headless has no interactive surface, so it needs a
+  // task to have anything to do. Say so here rather than sending a request
+  // the gateway will refuse.
+  const needsTask = mode === 'headless' && task.trim() === ''
 
   useEffect(() => {
     // agent.list is the roster this server can run. A failed fetch still
@@ -55,7 +65,16 @@ export function LaunchDialog() {
   const launch = async () => {
     setLaunching(true)
     try {
-      const run = await api.runLaunch({ workspace_id: workspaceID, harness })
+      // Only what the member actually chose goes on the wire: an empty task
+      // and the default mode are the server's own defaults, and sending them
+      // back would only restate them.
+      const trimmed = task.trim()
+      const run = await api.runLaunch({
+        workspace_id: workspaceID,
+        harness,
+        ...(trimmed ? { task: trimmed } : {}),
+        ...(mode === 'tui' ? {} : { mode }),
+      })
       // Seed the store so the terminal view attaches without a refetch.
       upsertRun(run)
       close()
@@ -99,6 +118,17 @@ export function LaunchDialog() {
               </span>
             )}
           </p>
+          <label className="block space-y-1 text-sm">
+            {mode === 'headless' ? 'Task (required)' : 'Task (optional)'}
+            <textarea
+              autoFocus
+              rows={3}
+              className={field}
+              placeholder="What should the agent do?"
+              value={task}
+              onChange={(e) => setTask(e.target.value)}
+            />
+          </label>
           <div className="flex gap-3">
             <label className="flex-1 space-y-1 text-sm">
               Harness
@@ -115,7 +145,23 @@ export function LaunchDialog() {
                 <option value="custom">custom</option>
               </select>
             </label>
+            <label className="flex-1 space-y-1 text-sm">
+              Mode
+              <select
+                className={field}
+                value={mode}
+                onChange={(e) => setMode(e.target.value as LaunchMode)}
+              >
+                <option value="tui">Interactive (tui)</option>
+                <option value="headless">Headless</option>
+              </select>
+            </label>
           </div>
+          {needsTask && (
+            <p className="text-xs text-muted-foreground">
+              A headless run has no terminal to type into, so it needs a task.
+            </p>
+          )}
         </form>
         <DialogFooter>
           <Button variant="outline" onClick={close}>
@@ -124,7 +170,7 @@ export function LaunchDialog() {
           <Button
             type="submit"
             form="launch-run"
-            disabled={launching || !workspaceID || !harness}
+            disabled={launching || !workspaceID || !harness || needsTask}
           >
             Launch
           </Button>

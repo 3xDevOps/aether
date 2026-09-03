@@ -4,8 +4,10 @@ import {
   FileText,
   FolderGit2,
   LayoutGrid,
+  List,
   PanelLeftClose,
   PanelLeftOpen,
+  Rocket,
   Settings,
   Users,
 } from 'lucide-react'
@@ -13,12 +15,18 @@ import { useCallback } from 'react'
 import { StateDot } from '@/components/state-dot'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { canLaunch } from '@/lib/commands'
 import { useDelayed } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { isUnseen } from '@/store/board'
-import { useAttentionCount, useCapability, useSidebarGroups } from '@/store/hooks'
+import {
+  useAttentionCount,
+  useCapability,
+  useSelfRole,
+  useSidebarGroups,
+} from '@/store/hooks'
 import type { SidebarGroup, SidebarRun } from '@/store/selectors'
 
 export function Sidebar() {
@@ -133,6 +141,10 @@ function SidebarHeader() {
   const groupBy = useStore((s) => s.groupBy)
   const setGroupBy = useStore((s) => s.setGroupBy)
   const navigate = useStore((s) => s.navigate)
+  const openDialog = useStore((s) => s.openPaletteDialog)
+  // The launch form is hosted app-wide, so the sidebar only has to ask for
+  // it. A member who cannot start a run is not offered the way in.
+  const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
   return (
     <div className="flex items-center gap-1 border-b px-2 py-1.5">
       <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
@@ -140,6 +152,17 @@ function SidebarHeader() {
       </span>
       <AttentionBadge />
       <div className="ml-auto flex items-center gap-1">
+        {launchable && (
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Launch a run"
+            onClick={() => openDialog('launch')}
+          >
+            <Rocket />
+            New run
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -224,17 +247,21 @@ function RunTree() {
 }
 
 /**
- * Entry points for the admin and desktop surfaces. Every link is gated on
- * the capability that powers its view, so a gateway that cannot serve a
- * surface never shows the way in. Members is the exception that reads:
- * member.list is on the remote allowlist, the roster is worth seeing, and
- * the admin verbs inside it are gated one by one on role as well.
+ * Entry points for the views the tree above cannot reach. All runs is the
+ * flat every-run list, and it is always there: it needs no capability the
+ * sidebar itself does not already have. Every admin and desktop link below
+ * it is gated on the capability that powers its view, so a gateway that
+ * cannot serve a surface never shows the way in. Members is the exception
+ * that reads: member.list is on the remote allowlist, the roster is worth
+ * seeing, and the admin verbs inside it are gated one by one on role too.
  */
 function NavSection() {
   const cap = useCapability()
   const navigate = useStore((s) => s.navigate)
   const route = useStore((s) => s.route)
-  const links: { name: string; label: string; Icon: typeof Users }[] = []
+  const links: { name: string; label: string; Icon: typeof Users }[] = [
+    { name: 'overview', label: 'All runs', Icon: List },
+  ]
   if (cap.hasMethod('member.list'))
     links.push({ name: 'members', label: 'Members', Icon: Users })
   if (cap.hasMethod('workspace.add'))
@@ -247,7 +274,6 @@ function NavSection() {
     links.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass })
   if (cap.hasLocal('daemon.status'))
     links.push({ name: 'settings', label: 'Settings', Icon: Settings })
-  if (links.length === 0) return null
   return (
     <nav aria-label="Surfaces" className="shrink-0 border-t py-1">
       {links.map(({ name, label, Icon }) => (
