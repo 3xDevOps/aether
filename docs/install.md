@@ -19,6 +19,27 @@ installs them into `/usr/local/bin` (via `sudo` if needed, falling back to
 `~/.local/bin` when there is no sudo). On Linux it installs both binaries; on
 macOS only `aether`, because the server is Linux-only.
 
+Then it asks one question: is this machine the server, or a client?
+
+| Answer | What it runs next |
+| --- | --- |
+| `server` | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, then the systemd activation line. |
+| `client` | `aether gui build` - packages and installs the desktop app. That needs Node.js 22+ with `npm` on PATH; without it the installer prints the requirement and the command to run later, and still exits cleanly. |
+| `none` | Nothing further. The binaries are installed and the script stops. |
+
+Enter takes the default: `server` on a Linux machine that got the server
+binary, `client` everywhere else. `--client` and `--server` already answer the
+question, so it is not asked.
+
+The script normally arrives through a pipe, which means stdin is the script
+itself, so the question and the command it launches read your terminal
+(`/dev/tty`) instead. Where there is no terminal - CI, a Dockerfile, a
+provisioning script - nothing is asked and nothing extra runs, the same as
+`--role none`. It never blocks waiting for an answer that cannot come.
+
+Either way the script ends by naming the next command for the role you picked
+and linking the quickstart.
+
 The script is POSIX-only: it covers Linux and macOS. There is no Windows
 installer and no PowerShell equivalent. Windows clients install by hand, which
 is three steps: see [Manual install](#manual-install).
@@ -34,6 +55,7 @@ Options, as flags or environment variables:
 | `--bin-dir <dir>` | `AETHER_BIN_DIR` | Install somewhere else. |
 | `--client` | `AETHER_COMPONENTS=client` | CLI only. |
 | `--server` | `AETHER_COMPONENTS=server` | Server only. |
+| `--role <role>` | `AETHER_ROLE` | Answer the role question up front: `server`, `client`, or `none` to skip it. |
 | | `AETHER_REPO` | Pull from a fork. |
 | | `AETHER_BASE_URL` | Pull from a mirror of the release assets. |
 
@@ -41,6 +63,7 @@ Passing flags through a pipe needs `sh -s --`:
 
 ```sh
 curl -fsSL .../install.sh | sh -s -- --client --bin-dir ~/.local/bin
+curl -fsSL .../install.sh | sh -s -- --role server
 ```
 
 **Upgrading:** `aether update` replaces the running CLI with the latest
@@ -161,7 +184,8 @@ dashboard in its own frameless window, with desktop notifications, a
 needs-attention badge, and `aether://run/<id>` deep links. It is the same SPA
 with the same full SSH authority, just without a browser tab to lose. No
 release publishes it; the CLI builds it for you (needs Node.js 22+ with `npm`
-on PATH):
+on PATH). Answering `client` to the install script's question runs this for
+you; this is the same command by hand.
 
 ```sh
 aether gui build
@@ -313,7 +337,8 @@ preserved unless `--force` is supplied.
 `aether-server setup` walks you through the install: it asks for the listen
 address, data directory, and tailnet policy (Enter accepts each default),
 writes the systemd unit and the config file, and prints the command that
-starts the service.
+starts the service. Answering `server` to the install script's question runs
+it for you; this is the same command by hand.
 
 ```sh
 sudo aether-server setup
