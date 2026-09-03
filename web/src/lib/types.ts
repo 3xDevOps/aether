@@ -354,6 +354,13 @@ export interface PullResult {
   output: string
 }
 
+/** repo.push: the base branch seeded into the workspace. */
+export interface RepoPushResult {
+  branch: string
+  remote: string
+  output: string
+}
+
 /** sync.start / sync.stop: one run's overlay state after the verb. */
 export interface SyncSessionState {
   run_id: string

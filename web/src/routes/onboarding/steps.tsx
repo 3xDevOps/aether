@@ -4,6 +4,7 @@
 // and every server refusal is rendered verbatim.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import {
   EnvironmentChoice,
   type EnvironmentValue,
@@ -222,14 +223,18 @@ export function WorkspaceStep({
 
 /**
  * Step 3: point a local clone at the workspace. The gateway adds the
- * `aether` git remote; the push stays manual - history is the user's.
+ * `aether` git remote and, where the repo.push verb is served, runs the
+ * first push from here; without it the push stays a copy-paste command.
+ * Either way the history is the user's: nothing rewrites it.
  */
 export function RepoStep({
   client,
+  caps,
   workspace,
   onNext,
 }: {
   client: Api
+  caps: Capability
   workspace: Workspace | null
   onNext: () => void
 }) {
@@ -237,10 +242,18 @@ export function RepoStep({
   const [result, setResult] = useState<LinkRepoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The push runs on its own flag: a failed push must not disable the link
+  // form the user may want to correct, and the reverse.
+  const [pushing, setPushing] = useState(false)
+  const [pushError, setPushError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const cmdRef = useRef<HTMLInputElement>(null)
 
-  const pushCmd = 'git push -u aether main'
+  // Every run forks from the workspace's base branch, so that is the branch
+  // to seed - not always `main`.
+  const branch = workspace?.base_branch ?? 'main'
+  const pushCmd = `git push -u aether ${branch}`
+  const canPush = caps.hasLocal('repo.push')
   const absolute = repo.trim().startsWith('/')
 
   const link = async () => {
@@ -252,6 +265,22 @@ export function RepoStep({
       setError(message(err))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const push = async () => {
+    setPushing(true)
+    setPushError(null)
+    try {
+      const pushed = await client.localRepoPush(workspace?.id)
+      // The confirmation rides a toast: the step advances on success, so an
+      // inline note would vanish with it.
+      toast.success(`Pushed ${pushed.branch} to ${pushed.remote}.`)
+      onNext()
+    } catch (err) {
+      setPushError(message(err))
+    } finally {
+      setPushing(false)
     }
   }
 
@@ -270,8 +299,10 @@ export function RepoStep({
       <h2 className="text-sm font-medium">Connect your repository</h2>
       <p className="text-sm text-muted-foreground">
         The gateway adds an <span className="font-mono">aether</span> git
-        remote to a clone on this machine. Pushing stays manual - the history
-        is yours.
+        remote to a clone on this machine.{' '}
+        {canPush
+          ? 'Aether can then push your base branch for you - the history stays yours.'
+          : 'Pushing stays manual - the history is yours.'}
       </p>
       <form
         className="flex items-end gap-3"
@@ -305,8 +336,32 @@ export function RepoStep({
           <p className="text-sm">
             Remote <span className="font-mono">{result.remote}</span> added,
             pointing at <span className="font-mono">{result.url}</span>. Seed
-            the workspace from inside the repository:
+            the workspace with <span className="font-mono">{branch}</span>:
           </p>
+          {canPush && (
+            <>
+              <Button
+                size="sm"
+                disabled={pushing}
+                onClick={() => void push()}
+              >
+                {pushing ? 'Pushing...' : 'Push now'}
+              </Button>
+              {pushError && (
+                <div className="space-y-1">
+                  <p className="text-xs text-state-failed">
+                    The push failed. Git said:
+                  </p>
+                  <pre className="rounded-md border bg-card px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words">
+                    {pushError}
+                  </pre>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                or run it yourself:
+              </p>
+            </>
+          )}
           <div className="flex gap-2">
             <input
               ref={cmdRef}
@@ -320,7 +375,7 @@ export function RepoStep({
               {copied ? 'Copied' : 'Copy'}
             </Button>
           </div>
-          <Button size="sm" onClick={onNext}>
+          <Button size="sm" variant={canPush ? 'outline' : 'default'} onClick={onNext}>
             Continue
           </Button>
         </div>

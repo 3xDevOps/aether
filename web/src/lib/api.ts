@@ -29,6 +29,7 @@ import type {
   PresenceEntry,
   ProfileStatus,
   PullResult,
+  RepoPushResult,
   Run,
   RunPatch,
   Schedule,
@@ -424,6 +425,10 @@ export const api = {
   // process start, so it answers the restart instruction as an error.
   localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
   localPull: (runID: string) => local<PullResult>('pull', { run_id: runID }),
+  /** Pushes the workspace's base branch to the `aether` remote, seeding a
+   * fresh workspace without leaving the app. */
+  localRepoPush: (workspaceID?: string) =>
+    local<RepoPushResult>('repo.push', { workspace_id: workspaceID }),
   localSyncStart: (runID: string, force?: boolean) =>
     local<SyncSessionState>('sync.start', { run_id: runID, force }),
   localSyncStop: (runID: string) =>
