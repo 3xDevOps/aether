@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -10,6 +11,15 @@ import (
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/localops"
+)
+
+// The localops calls the rebuild makes, behind variables so a test can
+// stand in for an installed app and a real Electron build.
+var (
+	lookupRealUser      = localops.LookupRealUser
+	installedDesktopApp = localops.InstalledDesktopApp
+	rebuildAppArgv      = localops.RebuildAppArgv
+	desktopAppRunning   = localops.DesktopAppRunning
 )
 
 // rebuildDesktopApp rebuilds an installed desktop app with the CLI that
@@ -25,20 +35,34 @@ import (
 // also fetches Node.js and the Electron runtime, which can outlast any
 // timeout that suits a release download. Ctrl-C stops it.
 func rebuildDesktopApp(newBin string) error {
-	who, err := localops.LookupRealUser()
+	return rebuildDesktopAppTo(newBin, os.Stdout)
+}
+
+// rebuildDesktopAppTo is rebuildDesktopApp with its output stream
+// injected, so a test can read what the command told the user.
+func rebuildDesktopAppTo(newBin string, out io.Writer) error {
+	who, err := lookupRealUser()
 	if err != nil {
 		return err
 	}
-	app, ok := localops.InstalledDesktopApp(runtime.GOOS, who)
+	app, ok := installedDesktopApp(runtime.GOOS, who)
 	if !ok {
 		return nil
 	}
-	argv := localops.RebuildAppArgv(newBin, who, false)
-	fmt.Printf("rebuilding the desktop app at %s\n", app)
+	// Sampled before the build, not after: the install swap renames the
+	// running app's directory aside, so by the time the build returns the
+	// process no longer looks like it is running out of the app path.
+	wasRunning := desktopAppRunning(runtime.GOOS, app)
+	argv := rebuildAppArgv(newBin, who, false)
+	_, _ = fmt.Fprintf(out, "rebuilding the desktop app at %s\n", app)
 	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)
 	defer stop()
+	// Ctrl-C at a terminal signals the whole foreground process group, so
+	// it reaches the build either way. Killing this process alone under
+	// sudo stops the sudo wrapper only: sudo does not forward the signal,
+	// and the build runs on to completion.
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = out
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		// The CLI half already succeeded. Saying so is the difference
@@ -46,8 +70,8 @@ func rebuildDesktopApp(newBin string) error {
 		return fmt.Errorf("aether is updated, but the desktop app was not rebuilt: %w\nrerun it with: %s",
 			err, strings.Join(argv, " "))
 	}
-	if localops.DesktopAppRunning(runtime.GOOS, app) {
-		fmt.Println("restart the Aether app to use the new version")
+	if wasRunning {
+		_, _ = fmt.Fprintln(out, "restart the Aether app to use the new version")
 	}
 	return nil
 }
