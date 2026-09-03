@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/user"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -52,6 +53,11 @@ func TestRealUserReportsAnUnknownSudoUser(t *testing.T) {
 	}
 }
 
+// The unix layouts are the same wherever the question is asked, so these
+// are written as the literal paths a linux or macOS box would carry. They
+// held backslashes and dropped the XDG candidate when this test ran on the
+// Windows runner, which is the whole reason the function stopped joining
+// unix paths with the host's own separator.
 func TestDesktopAppPathsPerOS(t *testing.T) {
 	linux := desktopAppPaths("linux", "/home/u", "/data/xdg", "")
 	want := []string{"/data/xdg/aether/desktop", "/home/u/.local/share/aether/desktop"}
@@ -69,14 +75,16 @@ func TestDesktopAppPathsPerOS(t *testing.T) {
 	if len(mac) != 2 || mac[0] != "/Applications/Aether.app" || mac[1] != "/Users/u/Applications/Aether.app" {
 		t.Fatalf("darwin = %v", mac)
 	}
-	// filepath is host-flavored, so the windows case is written with a path
-	// this host reads as absolute; what matters is the Programs\Aether tail.
+	// The windows branch reads LOCALAPPDATA with the host's own filepath,
+	// so this case is written with a path the host calls absolute: a real
+	// C:\ one on the Windows runner that actually ships this client, and a
+	// stand-in elsewhere. What is asserted either way is the Programs\Aether
+	// tail and that a relative LOCALAPPDATA leaves nowhere to look.
 	local := filepath.Join(t.TempDir(), "AppData", "Local")
 	win := desktopAppPaths("windows", filepath.Join("home", "u"), "", local)
 	if len(win) != 1 || win[0] != filepath.Join(local, "Programs", "Aether") {
 		t.Fatalf("windows = %v", win)
 	}
-	// Without an absolute LOCALAPPDATA there is nowhere to look.
 	if got := desktopAppPaths("windows", "/home/u", "", "AppData"); got != nil {
 		t.Fatalf("windows with a relative LOCALAPPDATA = %v", got)
 	}
@@ -86,9 +94,13 @@ func TestDesktopAppPathsPerOS(t *testing.T) {
 }
 
 func TestInstalledDesktopAppFindsTheDefaultLinuxLocation(t *testing.T) {
-	home := t.TempDir()
+	// The linux layout is slash-joined whatever the host is, so a home in
+	// that form keeps the whole path uniform - which matters only on
+	// Windows, where the runner's temp directory is backslashed and this
+	// test asks for the linux layout anyway.
+	home := filepath.ToSlash(t.TempDir())
 	t.Setenv("XDG_DATA_HOME", "")
-	app := filepath.Join(home, ".local", "share", "aether", "desktop")
+	app := path.Join(home, ".local", "share", "aether", "desktop")
 	if _, ok := InstalledDesktopApp("linux", RealUser{Home: home}); ok {
 		t.Fatal("reported an app before one was installed")
 	}
@@ -104,13 +116,13 @@ func TestInstalledDesktopAppFindsTheDefaultLinuxLocation(t *testing.T) {
 // Under sudo the environment carries root's XDG_DATA_HOME, not the user's,
 // so detection has to ignore it and use the account's own home.
 func TestInstalledDesktopAppIgnoresXDGUnderSudo(t *testing.T) {
-	home := t.TempDir()
-	rootData := t.TempDir()
+	home := filepath.ToSlash(t.TempDir())
+	rootData := filepath.ToSlash(t.TempDir())
 	t.Setenv("XDG_DATA_HOME", rootData)
-	if err := os.MkdirAll(filepath.Join(rootData, "aether", "desktop"), 0o755); err != nil {
+	if err := os.MkdirAll(path.Join(rootData, "aether", "desktop"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	app := filepath.Join(home, ".local", "share", "aether", "desktop")
+	app := path.Join(home, ".local", "share", "aether", "desktop")
 	if err := os.MkdirAll(app, 0o755); err != nil {
 		t.Fatal(err)
 	}

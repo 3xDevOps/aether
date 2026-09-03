@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -61,9 +62,9 @@ func InstalledDesktopApp(goos string, ru RealUser) (string, bool) {
 	if ru.ViaSudo {
 		xdg = ""
 	}
-	for _, path := range desktopAppPaths(goos, ru.Home, xdg, os.Getenv("LOCALAPPDATA")) {
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			return path, true
+	for _, candidate := range desktopAppPaths(goos, ru.Home, xdg, os.Getenv("LOCALAPPDATA")) {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate, true
 		}
 	}
 	return "", false
@@ -72,18 +73,29 @@ func InstalledDesktopApp(goos string, ru RealUser) (string, bool) {
 // desktopAppPaths lists the candidate install locations for goos, most
 // likely first. It mirrors desktopLayout; an empty list means this OS has
 // no desktop app at all.
+//
+// The unix branches join with path and test for a leading slash
+// themselves, because path/filepath answers for the machine running the
+// code and this function is asked about a named OS. In production goos is
+// always runtime.GOOS and the two agree byte for byte, so nothing about an
+// install changes; what changes is that the linux and darwin layouts are
+// still the linux and darwin layouts when a Windows runner asks. The
+// windows branch keeps filepath, which is that OS's own rule on the only
+// machine where those paths can exist.
 func desktopAppPaths(goos, home, xdgData, localAppData string) []string {
 	switch goos {
 	case "linux":
 		var paths []string
-		if filepath.IsAbs(xdgData) {
-			paths = append(paths, filepath.Join(xdgData, "aether", "desktop"))
+		// A relative XDG_DATA_HOME is invalid per the spec and treated as
+		// unset, the same way desktopLayout treats it.
+		if strings.HasPrefix(xdgData, "/") {
+			paths = append(paths, path.Join(xdgData, "aether", "desktop"))
 		}
-		return append(paths, filepath.Join(home, ".local", "share", "aether", "desktop"))
+		return append(paths, path.Join(home, ".local", "share", "aether", "desktop"))
 	case "darwin":
 		return []string{
-			filepath.Join(macSystemApplications, "Aether.app"),
-			filepath.Join(home, "Applications", "Aether.app"),
+			path.Join(macSystemApplications, "Aether.app"),
+			path.Join(home, "Applications", "Aether.app"),
 		}
 	case "windows":
 		if !filepath.IsAbs(localAppData) {
