@@ -72,7 +72,7 @@ func Apply(ctx context.Context, baseURL, asset, dst string) error {
 	if err != nil {
 		return fmt.Errorf("download checksums.txt: %w", err)
 	}
-	want, err := checksumFor(sums, asset)
+	want, err := ChecksumFor(sums, asset)
 	if err != nil {
 		return err
 	}
@@ -132,9 +132,11 @@ func fetch(ctx context.Context, url string) ([]byte, error) {
 	return body, nil
 }
 
-// checksumFor finds asset's digest in sha256sum-format output, accepting the
-// binary-mode "*name" marker.
-func checksumFor(sums []byte, asset string) (string, error) {
+// ChecksumFor finds asset's digest in sha256sum-format output, accepting the
+// binary-mode "*name" marker. This project's checksums.txt and nodejs.org's
+// SHASUMS256.txt are both in that format, so localops verifies its Node.js
+// download with this too.
+func ChecksumFor(sums []byte, asset string) (string, error) {
 	sc := bufio.NewScanner(bytes.NewReader(sums))
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())

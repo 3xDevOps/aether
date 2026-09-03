@@ -24,7 +24,7 @@ Then it asks one question: is this machine the server, or a client?
 | Answer | What it runs next |
 | --- | --- |
 | `server` | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, then the systemd activation line. |
-| `client` | `aether gui build` - packages and installs the desktop app. That needs Node.js 22+ with `npm` on PATH; without it the installer prints the requirement and the command to run later, and still exits cleanly. |
+| `client` | `aether gui build` - packages and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
 | `none` | Nothing further. The binaries are installed and the script stops. |
 
 Enter takes the default: `server` on a Linux machine that got the server
@@ -239,9 +239,9 @@ Optional: an Electron shell that launches `aether gui` for you and shows the
 dashboard in its own frameless window, with desktop notifications, a
 needs-attention badge, and `aether://run/<id>` deep links. It is the same SPA
 with the same full SSH authority, just without a browser tab to lose. No
-release publishes it; the CLI builds it for you (needs Node.js 22+ with `npm`
-on PATH). Answering `client` to the install script's question runs this for
-you; this is the same command by hand.
+release publishes it; the CLI builds it for you, and needs nothing installed
+first. Answering `client` to the install script's question runs this for you;
+this is the same command by hand.
 
 ```sh
 aether gui build
@@ -264,6 +264,20 @@ A macOS account without administrator rights cannot write to `/Applications`,
 so the app goes to `~/Applications` instead; the command prints where it put
 it.
 
+The build uses `node`, `npm` and `npx` from `PATH` when `node` is version 22
+or newer. Otherwise it downloads a pinned Node.js 22 release for this OS and
+CPU (Linux, macOS and Windows, x64 and arm64) from <https://nodejs.org/dist/>,
+verifies it against that release's `SHASUMS256.txt`, and unpacks it in a
+directory named for that version beside the build directory
+(`~/.cache/aether/node/` on Linux, `~/Library/Caches/aether/node/` on macOS,
+`%LOCALAPPDATA%\aether\node\` on Windows). That copy is on `PATH` for this
+build's `npm install` and electron-builder only; nothing else on the machine
+changes and no shell profile is edited. So the first build needs network
+access, and later builds reuse the cached copy; a build that fetches a newer
+pinned version deletes the old one. A failed download or a checksum mismatch
+fails `aether gui build` with the error and the URL to fetch by hand; it
+never falls back to a system Node older than 22.
+
 The first build downloads the Electron runtime (about 100 MB) into
 electron-builder's own cache (`~/.cache/electron` and
 `~/.cache/electron-builder` on Linux, `~/Library/Caches/electron` and
@@ -271,8 +285,9 @@ electron-builder's own cache (`~/.cache/electron` and
 and `%LOCALAPPDATA%\electron-builder` on Windows), so rebuilding is quick.
 Run `aether gui build` again to replace an installed app; on macOS it also
 removes an older copy from the other Applications folder. On Windows, close
-the Aether window first. To remove everything, delete the two paths in the table, the
-build directory, and those caches.
+the Aether window first. To remove everything, delete the two paths in the
+table, the `aether` cache directory (the build directory and the private Node
+copy), and those caches.
 
 The app requires the `aether` CLI installed first; it does not bundle the
 binary and `aether gui build` refuses to run if the shell would not find it.
@@ -604,6 +619,10 @@ sudo rm -f /usr/local/bin/aether        # or ~/.local/bin/aether
 rm -rf ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop
 rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder
 ```
+
+The `aether` cache directory - `~/.cache/aether` above, and its macOS and
+Windows equivalents below - holds the desktop build directory and the private
+Node copy `aether gui build` downloads on a machine without Node 22+.
 
 On macOS the desktop state is `~/Library/Application Support/aether-desktop`,
 the app is `/Applications/Aether.app` (or `~/Applications/Aether.app` for a

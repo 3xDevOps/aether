@@ -121,10 +121,11 @@ done
 
 chmod 0755 "$bin"/* "$node"/* "$fixtures/aether" "$fixtures/aether-server"
 
-# A PATH with no npm and no npx anywhere on it, for the "Node is missing"
-# case. Dropping the directories that carry npm would also drop sh, awk and
-# mktemp, so those directories are mirrored into a shadow of symlinks with
-# npm and npx left out.
+# A PATH with no npm and no npx anywhere on it, for the case that proves the
+# client role builds the app on a machine without Node. Dropping the
+# directories that carry npm would also drop sh, awk and mktemp, so those
+# directories are mirrored into a shadow of symlinks with npm and npx left
+# out.
 shadow="$tmp/no-node"
 mkdir -p "$shadow"
 no_node_path=""
@@ -396,13 +397,18 @@ else
 	echo "install-test: a terminal is attached and setsid is missing; skipping the detached run" >&2
 fi
 
-# --- client with no Node: say what is missing, still exit 0 --------------
+# --- client with no Node: the CLI supplies its own, so the build runs ----
+#
+# The stub aether does not really build; this asserts the installer stopped
+# gating the build on npm, not that a build succeeded.
 
-reset "client without npm"
+reset "client without npm or npx on PATH"
 PATH="$no_node_path" sh "$script" --role client >"$out" 2>&1 || fail "installer exited non-zero"
-not_ran "aether gui build"
-printed "Node.js 22+"
-printed "aether gui build"
+ran "aether gui build"
+not_ran "aether-server setup"
+printed "This machine is a client"
+printed "aether link <server-host>:2222"
+not_printed "Node.js 22+"
 printed "$quickstart"
 
 # --- an unknown role is a usage error ------------------------------------
