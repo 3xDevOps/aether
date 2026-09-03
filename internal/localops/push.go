@@ -90,10 +90,12 @@ func usableBranch(branch string) bool {
 	return !strings.HasPrefix(branch, "-")
 }
 
-// AetherRemoteURL returns the URL repo's `aether` remote points at, or
-// "" when the repository has no such remote. The URL carries the
-// workspace ID, so a caller can tell which workspace this repository is
-// wired to before pushing to it.
+// AetherRemoteURL returns the URL a push to repo's `aether` remote would
+// land in, or "" when the repository has no such remote. The URL carries
+// the workspace ID, so a caller can tell which workspace this repository
+// is wired to before pushing to it. `--push` is what makes the answer
+// the push destination: a hand-set `remote.aether.pushurl` overrides the
+// fetch URL, and without it git reports the fetch URL anyway.
 func AetherRemoteURL(repo string) (string, error) {
 	names, err := remotes(repo)
 	if err != nil {
@@ -104,9 +106,9 @@ func AetherRemoteURL(repo string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", repo, "remote", "get-url", "aether").Output()
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "remote", "get-url", "--push", "aether").CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git remote get-url aether: %w", err)
+		return "", fmt.Errorf("git remote get-url --push aether: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -149,13 +151,15 @@ func missingBranchMessage(repo, branch string) string {
 	return msg + "; create it, or set the workspace base branch to the one you use"
 }
 
-// remotes lists the names of repo's git remotes.
+// remotes lists the names of repo's git remotes. A failure carries git's
+// own words - a moved or deleted repository folder is the common one, and
+// "fatal: not a git repository" says far more than an exit status.
 func remotes(repo string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", repo, "remote").Output()
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "remote").CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("git remote: %w", err)
+		return nil, fmt.Errorf("git remote: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	listed := strings.TrimSpace(string(out))
 	if listed == "" {

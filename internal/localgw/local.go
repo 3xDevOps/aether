@@ -300,7 +300,11 @@ func (g *Gateway) localRepoPush(r *http.Request, body []byte) (any, *protocol.Er
 func checkRemoteWorkspace(cfg cli.Config, ws protocol.Workspace) *protocol.Error {
 	url, err := localops.AetherRemoteURL(cfg.Repo)
 	if err != nil {
-		return &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+		// This check reads the repository before the push does, so a
+		// folder the user has since moved or deleted fails here first.
+		// Say nothing: Push's preflight names the path and the fix a
+		// moment later, in the user's own terms.
+		return nil
 	}
 	if want := cli.GitURL(cfg.User, cfg.Addr, ws.ID); url != "" && url != want {
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: "the aether remote in " + cfg.Repo +

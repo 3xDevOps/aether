@@ -203,3 +203,48 @@ func TestAetherRemoteURLReportsWhereTheRepoPoints(t *testing.T) {
 		t.Fatalf("AetherRemoteURL = %q, %v; want empty and no error", url, err)
 	}
 }
+
+// Git pushes to remote.aether.pushurl when it is set, so that is the URL
+// a caller must compare against - not the fetch URL.
+func TestAetherRemoteURLReportsThePushURL(t *testing.T) {
+	requireGit(t)
+	local, remote := seedRepos(t, "main")
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere.git")
+	git(t, local, "remote", "set-url", "--push", "aether", elsewhere)
+
+	url, err := AetherRemoteURL(local)
+	if err != nil {
+		t.Fatalf("AetherRemoteURL: %v", err)
+	}
+	if url == remote {
+		t.Fatal("AetherRemoteURL reported the fetch URL; a push would land elsewhere")
+	}
+	if url != elsewhere {
+		t.Fatalf("url = %q, want %q", url, elsewhere)
+	}
+}
+
+// A linked folder that is no longer a git repository is an ordinary
+// thing - the user moved it. Git's own words say so; an exit status
+// alone does not.
+func TestPushRefusesAFolderThatIsNotARepository(t *testing.T) {
+	requireGit(t)
+	gone := t.TempDir()
+
+	_, err := Push(gone, "main")
+	if !errors.Is(err, ErrPushPrecondition) {
+		t.Fatalf("err = %v, want a precondition refusal", err)
+	}
+	if !strings.Contains(err.Error(), gone) || !strings.Contains(err.Error(), "not a git repository") {
+		t.Fatalf("message = %q", err)
+	}
+
+	// The same failure reached through the remote read carries git's
+	// stderr rather than a bare exit status.
+	if _, err = AetherRemoteURL(gone); err == nil {
+		t.Fatal("AetherRemoteURL succeeded outside a repository")
+	}
+	if !strings.Contains(err.Error(), "not a git repository") {
+		t.Fatalf("error drops git's stderr: %v", err)
+	}
+}

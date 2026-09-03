@@ -659,3 +659,35 @@ func TestLocalRepoPushRefusesAWorkspaceTheRemoteDoesNotServe(t *testing.T) {
 		t.Fatalf("the refused push still wrote refs: %s", refs)
 	}
 }
+
+// The workspace check reads the repository before the push does, so a
+// linked folder the user has since moved must still answer with the
+// preflight's own words, not a bare git exit status from the check.
+func TestLocalRepoPushRefusesALinkedFolderThatIsNotARepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	gone := t.TempDir()
+	list, err := json.Marshal(protocol.WorkspaceListResult{
+		Workspaces: []protocol.Workspace{{ID: "wsp_1", Name: "myproject", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
+		results: map[string]json.RawMessage{protocol.MethodWorkspaceList: list},
+	}}
+	g := newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: gone})
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, "wsp_1"), true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState {
+		t.Fatalf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(perr.Message, gone) || !strings.Contains(perr.Message, "not a git repository") {
+		t.Fatalf("message = %q", perr.Message)
+	}
+}
