@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { App } from '@/App'
 import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
@@ -63,5 +63,21 @@ describe('App', () => {
     useStore.getState().navigate('run', { runId: 'run_1' })
 
     expect(await screen.findByText('aether/run-1-checkout')).toBeDefined()
+  })
+
+  // The launch form is hosted by the shell, not by the palette: a button on
+  // any surface opens the real dialog. Asserting the store alone would pass
+  // even if nothing were mounted to answer it.
+  it('opens the launch form from the sidebar, with no palette involved', async () => {
+    await mount()
+    await vi.waitFor(() =>
+      expect(sidebar().getByTitle('Launch a run')).toBeDefined(),
+    )
+
+    fireEvent.click(sidebar().getByTitle('Launch a run'))
+
+    expect(await screen.findByText('Launch a run')).toBeDefined()
+    expect(await screen.findByLabelText('Target workspace')).toBeDefined()
+    expect(useStore.getState().paletteOpen).toBe(false)
   })
 })

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { CommandPalette } from '@/components/palette'
+import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
@@ -44,7 +45,14 @@ beforeEach(() => {
 })
 
 function open() {
-  render(<CommandPalette />)
+  // The launch and inject forms are the shell's, not the palette's; render
+  // the host beside it the way AppShell does.
+  render(
+    <>
+      <CommandPalette />
+      <PaletteDialogs />
+    </>,
+  )
   fireEvent.keyDown(window, { key: 'k', metaKey: true })
 }
 
