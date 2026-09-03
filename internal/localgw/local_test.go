@@ -481,3 +481,122 @@ func TestLocalImageScaffold(t *testing.T) {
 		t.Fatalf("bad kind = %d", rec.Code)
 	}
 }
+
+// pushGateway wires a gateway whose linked repo is a fresh clone with one
+// commit on branch and an `aether` remote pointing at a bare repo, and
+// whose server reports one workspace with that base branch. It returns
+// the gateway and the bare remote.
+func pushGateway(t *testing.T, branch string) (*Gateway, string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	remote := filepath.Join(t.TempDir(), "wsp_1.git")
+	localGit(t, t.TempDir(), "init", "--bare", "-b", branch, remote)
+
+	local := t.TempDir()
+	localGit(t, local, "init", "-b", branch)
+	if err := os.WriteFile(filepath.Join(local, "README.md"), []byte("# demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	localGit(t, local, "add", "README.md")
+	localGit(t, local, "commit", "-m", "seed")
+	localGit(t, local, "remote", "add", "aether", remote)
+
+	list, err := json.Marshal(protocol.WorkspaceListResult{
+		Workspaces: []protocol.Workspace{{ID: "wsp_1", Name: "myproject", BaseBranch: branch}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
+		results: map[string]json.RawMessage{protocol.MethodWorkspaceList: list},
+	}}
+	return newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: local}), remote
+}
+
+// The seeding push runs the user's base branch, not a hardcoded main.
+func TestLocalRepoPush(t *testing.T) {
+	g, remote := pushGateway(t, "trunk")
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", `{"workspace_id":"wsp_1"}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("repo.push = %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Branch string `json:"branch"`
+		Remote string `json:"remote"`
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Branch != "trunk" || got.Remote != "aether" {
+		t.Fatalf("repo.push = %+v", got)
+	}
+	if !strings.Contains(got.Output, "trunk") {
+		t.Fatalf("output does not mention the branch: %q", got.Output)
+	}
+	if localGit(t, remote, "rev-parse", "trunk") == "" {
+		t.Fatal("remote has no trunk")
+	}
+}
+
+// A rejected push is the server's word, not the gateway's; the handler
+// answers with git's own text so branch protection reads as itself.
+func TestLocalRepoPushSurfacesGitRefusal(t *testing.T) {
+	g, remote := pushGateway(t, "main")
+	hook := filepath.Join(remote, "hooks", "pre-receive")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'main is protected' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", `{"workspace_id":"wsp_1"}`, true)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if perr := decodeError(t, rec.Body.Bytes()); !strings.Contains(perr.Message, "main is protected") {
+		t.Fatalf("message = %q", perr.Message)
+	}
+}
+
+// A repository the user has not committed in yet is theirs to fix, so it
+// answers invalid state with the next step rather than a git failure.
+func TestLocalRepoPushRefusesAnEmptyRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	local := t.TempDir()
+	localGit(t, local, "init", "-b", "main")
+	list, err := json.Marshal(protocol.WorkspaceListResult{
+		Workspaces: []protocol.Workspace{{ID: "wsp_1", Name: "myproject", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
+		results: map[string]json.RawMessage{protocol.MethodWorkspaceList: list},
+	}}
+	g := newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: local})
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", `{}`, true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, "no commits yet") {
+		t.Fatalf("error = %+v", perr)
+	}
+}
+
+func TestLocalRepoPushRequiresLinkedRepo(t *testing.T) {
+	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{Addr: "host:2222"})
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", `{}`, true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, "no linked repo") {
+		t.Fatalf("error = %+v", perr)
+	}
+}

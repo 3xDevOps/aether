@@ -28,6 +28,7 @@ var localVerbs = []string{
 	"link.status",
 	"link.switch",
 	"pull",
+	"repo.push",
 	"sync.start",
 	"sync.status",
 	"sync.stop",
@@ -85,6 +86,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 		"link.switch":    (*Gateway).localLinkSwitch,
 		"link.status":    (*Gateway).localLinkStatus,
 		"pull":           (*Gateway).localPull,
+		"repo.push":      (*Gateway).localRepoPush,
 		"sync.start":     (*Gateway).localSyncStart,
 		"sync.status":    (*Gateway).localSyncStatus,
 		"sync.stop":      (*Gateway).localSyncStop,
@@ -211,22 +213,78 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 // implicitly, none or several is an invalid state the user resolves
 // server-side first.
 func (g *Gateway) resolveWorkspace(r *http.Request) (string, *protocol.Error) {
-	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodWorkspaceList, nil)
+	ws, perr := g.pickWorkspace(r, "")
 	if perr != nil {
 		return "", perr
 	}
+	return ws.ID, nil
+}
+
+// pickWorkspace returns the workspace the caller named, or the sole one
+// on the server when it named none. Callers that only have a name to
+// show the user need the whole record, not just the ID.
+func (g *Gateway) pickWorkspace(r *http.Request, wsID string) (protocol.Workspace, *protocol.Error) {
+	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodWorkspaceList, nil)
+	if perr != nil {
+		return protocol.Workspace{}, perr
+	}
 	var wl protocol.WorkspaceListResult
 	if err := json.Unmarshal(result, &wl); err != nil {
-		return "", &protocol.Error{Code: protocol.CodeInternal, Message: "decode workspace list: " + err.Error()}
+		return protocol.Workspace{}, &protocol.Error{Code: protocol.CodeInternal, Message: "decode workspace list: " + err.Error()}
+	}
+	if wsID != "" {
+		for _, ws := range wl.Workspaces {
+			if ws.ID == wsID {
+				return ws, nil
+			}
+		}
+		return protocol.Workspace{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no workspace " + wsID + " on this server"}
 	}
 	switch len(wl.Workspaces) {
 	case 0:
-		return "", &protocol.Error{Code: protocol.CodeInvalidState, Message: "no workspace yet; add one before linking a repo"}
+		return protocol.Workspace{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no workspace yet; add one before linking a repo"}
 	case 1:
-		return wl.Workspaces[0].ID, nil
+		return wl.Workspaces[0], nil
 	default:
-		return "", &protocol.Error{Code: protocol.CodeInvalidState, Message: "multiple workspaces; link with `aether link --repo --workspace <name-or-id>`"}
+		return protocol.Workspace{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: "multiple workspaces; link with `aether link --repo --workspace <name-or-id>`"}
 	}
+}
+
+// localRepoPush seeds the workspace with the push the quickstart used to
+// ask the user to run in a terminal: one `git push -u aether <base>` in
+// the linked repository, never forced and never carrying a second ref.
+// The branch is the workspace's own base branch, so a workspace created
+// with `--base` seeds the branch its runs actually fork from.
+func (g *Gateway) localRepoPush(r *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	cfg := g.local.snapshot()
+	if cfg.Repo == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
+	}
+	ws, perr := g.pickWorkspace(r, params.WorkspaceID)
+	if perr != nil {
+		return nil, perr
+	}
+	if ws.BaseBranch == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "workspace " + ws.Name + " has no base branch"}
+	}
+	output, err := localops.Push(cfg.Repo, ws.BaseBranch)
+	switch {
+	case errors.Is(err, localops.ErrPushPrecondition):
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	case err != nil:
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	return struct {
+		Branch string `json:"branch"`
+		Remote string `json:"remote"`
+		Output string `json:"output"`
+	}{Branch: ws.BaseBranch, Remote: "aether", Output: output}, nil
 }
 
 func (g *Gateway) localPull(r *http.Request, body []byte) (any, *protocol.Error) {
