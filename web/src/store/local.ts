@@ -32,6 +32,14 @@ export interface LocalSlice {
    */
   update: UpdateStatus | null
   setUpdate: (update: UpdateStatus) => void
+  /**
+   * Set once an in-app update tells the gateway to exit and come back,
+   * whether that is the respawn itself or the desktop rebuild that
+   * precedes it. Never cleared: the page that reads it is on its way out
+   * regardless of how the reconnect goes.
+   */
+  gatewayRestarting: boolean
+  setGatewayRestarting: (gatewayRestarting: boolean) => void
 }
 
 export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
@@ -49,4 +57,6 @@ export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
     set((s) => ({ pulls: { ...s.pulls, [runID]: result } })),
   update: null,
   setUpdate: (update) => set({ update }),
+  gatewayRestarting: false,
+  setGatewayRestarting: (gatewayRestarting) => set({ gatewayRestarting }),
 })

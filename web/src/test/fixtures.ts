@@ -478,7 +478,9 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       updated: ['/usr/local/bin/aether'],
       version: 'v1.3.0',
       restarting: true,
+      rebuilding: false,
     })),
+    localUpdateStatus: vi.fn(async () => ({ phase: 'idle' as const })),
     envStatus: vi.fn(async () => ({
       versions: [envVersion()],
       active_version: 1,

@@ -524,6 +524,12 @@ export interface UpdateStatus {
   server_error?: string
   /** The desktop shell spawned this gateway, so it can restart it. */
   supervised: boolean
+  /**
+   * The error from the last desktop-app rebuild that failed, persisted by
+   * the gateway to a file. Absent when the last rebuild succeeded or none
+   * has run.
+   */
+  shell_build_error?: string
 }
 
 /** update.apply: what the self-update replaced and what happens next. */
@@ -539,6 +545,29 @@ export interface UpdateApplyResult {
    * server keeps the old code until this command restarts its unit.
    */
   restart_command?: string
+  /**
+   * True when the gateway started a desktop-app rebuild in the background
+   * after swapping the CLI binary.
+   */
+  rebuilding: boolean
+}
+
+/** update.status: progress of a desktop-app rebuild running in this gateway
+ * process. */
+export interface UpdateBuildStatus {
+  phase:
+    | 'idle'
+    | 'unpacking'
+    | 'fetching node'
+    | 'installing dependencies'
+    | 'packaging'
+    | 'installing'
+    | 'done'
+    | 'error'
+  /** Up to the last 20 lines of the build's own output. */
+  lines_tail?: string[]
+  /** The real build error; present only when phase is "error". */
+  error?: string
 }
 
 // Workspace environments: internal/protocol/environment.go and

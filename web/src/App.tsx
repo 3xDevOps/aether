@@ -12,6 +12,7 @@ export function App() {
   const streamDead = useStore((s) => s.streamDead)
   const unreachable = useStore((s) => s.unreachable)
   const hydrated = useStore((s) => s.hydrated)
+  const gatewayRestarting = useStore((s) => s.gatewayRestarting)
   const resetConnection = useStore((s) => s.resetConnection)
   const theme = useStore((s) => s.theme)
   // Bumping this remounts the connection effect, which is what a retry is:
@@ -22,8 +23,10 @@ export function App() {
   useEffect(() => connect(useStore), [attempt])
 
   // Nothing has loaded and the failure is total: the page below says what
-  // broke and how to fix it, and there is no shell left to toast over.
-  const blocked = !hydrated && hydrationError !== null
+  // broke and how to fix it, and there is no shell left to toast over. An
+  // in-app update makes the gateway exit and come back on purpose, so that
+  // is not this failure even when it briefly looks like one.
+  const blocked = !hydrated && hydrationError !== null && !gatewayRestarting
 
   useEffect(() => {
     if (!hydrationError || blocked) return
