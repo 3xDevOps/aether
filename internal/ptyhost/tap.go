@@ -16,7 +16,7 @@ import (
 // (its reader fails) rather than ever blocking the session pump. The
 // reader returns io.EOF when the session ends or is stopped.
 func (h *Host) TapOutput(run domain.RunID) (io.ReadCloser, error) {
-	s := h.lookup(run)
+	s := h.lookup(RunSession(run))
 	if s == nil {
 		return nil, ErrNoSession
 	}

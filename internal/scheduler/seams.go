@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -22,8 +23,9 @@ type GitEngine interface {
 
 // PTYHost is the scheduler's view of the PTY host (*ptyhost.Host).
 type PTYHost interface {
-	StartSession(ctx context.Context, run domain.RunID, att runtime.Attachment) error
-	StopSession(ctx context.Context, run domain.RunID) error
-	LastOutput(run domain.RunID) (time.Time, bool)
-	Inject(ctx context.Context, run domain.RunID, actorName, actorColor, message string) error
+	StartSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error
+	StopSession(ctx context.Context, key ptyhost.SessionKey) error
+	StopSessionsWithPrefix(ctx context.Context, prefix string)
+	LastOutput(key ptyhost.SessionKey) (time.Time, bool)
+	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error
 }

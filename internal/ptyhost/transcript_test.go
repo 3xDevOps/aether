@@ -173,29 +173,29 @@ func TestTranscriptPreservedAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 
 	att1 := newFakeAtt()
-	if err := h.StartSession(ctx, run, att1); err != nil {
+	if err := h.StartSession(ctx, RunSession(run), att1); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	att1.writeOutput(t, "first-life")
 	waitFor(t, "first output recorded", func() bool {
-		ts, ok := h.LastOutput(run)
+		ts, ok := h.LastOutput(RunSession(run))
 		return ok && !ts.IsZero()
 	})
-	if err := h.StopSession(ctx, run); err != nil {
+	if err := h.StopSession(ctx, RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
 
 	// Reboot-recovery restart of the same run must not wipe the transcript.
 	att2 := newFakeAtt()
-	if err := h.StartSession(ctx, run, att2); err != nil {
+	if err := h.StartSession(ctx, RunSession(run), att2); err != nil {
 		t.Fatalf("restart StartSession: %v", err)
 	}
 	att2.writeOutput(t, "second-life")
 	waitFor(t, "second output recorded", func() bool {
-		ts, ok := h.LastOutput(run)
+		ts, ok := h.LastOutput(RunSession(run))
 		return ok && !ts.IsZero()
 	})
-	if err := h.StopSession(ctx, run); err != nil {
+	if err := h.StopSession(ctx, RunSession(run)); err != nil {
 		t.Fatalf("second StopSession: %v", err)
 	}
 
@@ -225,7 +225,7 @@ func TestTranscriptWrittenIncrementally(t *testing.T) {
 	h, dir := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-flush")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	att.writeOutput(t, "live-data")

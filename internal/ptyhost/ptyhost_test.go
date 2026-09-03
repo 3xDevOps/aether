@@ -19,13 +19,13 @@ import (
 // (scheduler.PTYHost, sshd.PTYAttacher): Host must satisfy them exactly.
 type (
 	schedulerPTYHost interface {
-		StartSession(ctx context.Context, run domain.RunID, att runtime.Attachment) error
-		StopSession(ctx context.Context, run domain.RunID) error
-		LastOutput(run domain.RunID) (time.Time, bool)
-		Inject(ctx context.Context, run domain.RunID, actorName, actorColor, message string) error
+		StartSession(ctx context.Context, key SessionKey, att runtime.Attachment) error
+		StopSession(ctx context.Context, key SessionKey) error
+		LastOutput(key SessionKey) (time.Time, bool)
+		Inject(ctx context.Context, key SessionKey, actorName, actorColor, message string) error
 	}
 	sshdPTYAttacher interface {
-		Attach(ctx context.Context, run domain.RunID, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error
+		Attach(ctx context.Context, key SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error
 	}
 )
 
@@ -172,7 +172,7 @@ func startAttach(t *testing.T, h *Host, run domain.RunID, member domain.MemberID
 		errCh:  make(chan error, 1),
 	}
 	go func() {
-		hnd.errCh <- h.Attach(context.Background(), run, member, cols, rows, readOnly, &testConn{r: kr, w: hnd.out}, hnd.resize)
+		hnd.errCh <- h.Attach(context.Background(), RunSession(run), member, cols, rows, readOnly, &testConn{r: kr, w: hnd.out}, hnd.resize)
 	}()
 	t.Cleanup(func() {
 		_ = kw.Close()
@@ -203,7 +203,7 @@ func (hnd *attachHandle) wait(t *testing.T) error {
 
 func waitAttached(t *testing.T, h *Host, run domain.RunID, n int) {
 	t.Helper()
-	s := h.lookup(run)
+	s := h.lookup(RunSession(run))
 	if s == nil {
 		t.Fatalf("no session for %s", run)
 	}
@@ -219,7 +219,7 @@ func TestAttachPassthroughAndReattach(t *testing.T) {
 	att := newFakeAtt()
 	stdin := att.captureStdin()
 	run := domain.RunID("run-pass")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 
@@ -246,7 +246,7 @@ func TestAttachPassthroughAndReattach(t *testing.T) {
 	if got := stdin.String(); got != "ls\r" {
 		t.Fatalf("agent stdin disturbed by attach/detach: %q", got)
 	}
-	if err := h.StopSession(context.Background(), run); err != nil {
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
 	if err := b.wait(t); err != nil {
@@ -261,7 +261,7 @@ func TestGeometryClampAndRestore(t *testing.T) {
 	h, dir := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-geo")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	waitSizes := func(n int) {
@@ -318,7 +318,7 @@ func TestGeometryClampAndRestore(t *testing.T) {
 		}
 	}
 
-	if err := h.StopSession(context.Background(), run); err != nil {
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
 	_, events := parseCast(t, dir+"/"+string(run)+".cast")
@@ -345,7 +345,7 @@ func TestSlowClientDoesNotBlockAgent(t *testing.T) {
 	h, _ := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-slow")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 
@@ -355,7 +355,7 @@ func TestSlowClientDoesNotBlockAgent(t *testing.T) {
 	t.Cleanup(func() { _ = kw.Close(); _ = kr.Close() })
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- h.Attach(context.Background(), run, "m1", 120, 30, false, &testConn{r: kr, w: bw}, nil)
+		errCh <- h.Attach(context.Background(), RunSession(run), "m1", 120, 30, false, &testConn{r: kr, w: bw}, nil)
 	}()
 	waitAttached(t, h, run, 1)
 
@@ -389,7 +389,7 @@ func TestInjectAndTranscriptReplay(t *testing.T) {
 	att := newFakeAtt()
 	stdin := att.captureStdin()
 	run := domain.RunID("run-cast")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	a := startAttach(t, h, run, "m1", 120, 30, false)
@@ -400,7 +400,7 @@ func TestInjectAndTranscriptReplay(t *testing.T) {
 	waitFor(t, "output before inject", func() bool {
 		return strings.HasSuffix(a.out.String(), "llo ")
 	})
-	if err := h.Inject(context.Background(), run, "Ana", "#ff8800", "fix the tests"); err != nil {
+	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "fix the tests"); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
 	att.writeOutput(t, "after")
@@ -411,7 +411,7 @@ func TestInjectAndTranscriptReplay(t *testing.T) {
 	waitFor(t, "full live stream", func() bool { return a.out.String() == wantLive })
 	waitFor(t, "injected instruction on stdin", func() bool { return stdin.String() == "fix the tests\r" })
 
-	if err := h.StopSession(context.Background(), run); err != nil {
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
 	if err := a.wait(t); err != nil {
@@ -455,7 +455,7 @@ func TestInjectAndTranscriptReplay(t *testing.T) {
 func TestWriteGate(t *testing.T) {
 	gateErr := errors.New("not allowed")
 	h, _ := newTestHost(t, func(cfg *Config) {
-		cfg.Gate = func(_ context.Context, member domain.MemberID, _ domain.RunID) error {
+		cfg.Gate = func(_ context.Context, member domain.MemberID, _ SessionKey) error {
 			if member == "bad" {
 				return gateErr
 			}
@@ -464,11 +464,11 @@ func TestWriteGate(t *testing.T) {
 	})
 	att := newFakeAtt()
 	run := domain.RunID("run-gate")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 
-	err := h.Attach(context.Background(), run, "bad", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil)
+	err := h.Attach(context.Background(), RunSession(run), "bad", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil)
 	if !errors.Is(err, ErrWriteDenied) {
 		t.Fatalf("write attach = %v, want ErrWriteDenied", err)
 	}
@@ -491,34 +491,34 @@ func TestWriteGate(t *testing.T) {
 func TestLifecycleErrorsAndLastOutput(t *testing.T) {
 	h, _ := newTestHost(t)
 	ctx := context.Background()
-	if err := h.Attach(ctx, "nope", "m", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrNoSession) {
+	if err := h.Attach(ctx, SessionKey("nope"), "m", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("Attach unknown run = %v", err)
 	}
-	if err := h.Inject(ctx, "nope", "a", "", "hi"); !errors.Is(err, ErrNoSession) {
+	if err := h.Inject(ctx, SessionKey("nope"), "a", "", "hi"); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("Inject unknown run = %v", err)
 	}
-	if err := h.StopSession(ctx, "nope"); !errors.Is(err, ErrNoSession) {
+	if err := h.StopSession(ctx, SessionKey("nope")); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("StopSession unknown run = %v", err)
 	}
-	if _, ok := h.LastOutput("nope"); ok {
+	if _, ok := h.LastOutput(SessionKey("nope")); ok {
 		t.Fatal("LastOutput for unknown run reported a session")
 	}
 
 	att := newFakeAtt()
 	run := domain.RunID("run-life")
-	if err := h.StartSession(ctx, run, att); err != nil {
+	if err := h.StartSession(ctx, RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	if err := h.StartSession(ctx, run, newFakeAtt()); err == nil {
+	if err := h.StartSession(ctx, RunSession(run), newFakeAtt()); err == nil {
 		t.Fatal("duplicate StartSession succeeded")
 	}
-	if ts, ok := h.LastOutput(run); !ok || !ts.IsZero() {
+	if ts, ok := h.LastOutput(RunSession(run)); !ok || !ts.IsZero() {
 		t.Fatalf("LastOutput before output = %v, %v", ts, ok)
 	}
 	before := time.Now()
 	att.writeOutput(t, "hi")
 	waitFor(t, "last output updates", func() bool {
-		ts, ok := h.LastOutput(run)
+		ts, ok := h.LastOutput(RunSession(run))
 		return ok && !ts.Before(before)
 	})
 
@@ -535,26 +535,26 @@ func TestLifecycleErrorsAndLastOutput(t *testing.T) {
 		t.Fatalf("client output = %q", got)
 	}
 	waitFor(t, "session end", func() bool {
-		err := h.Inject(ctx, run, "a", "", "x")
+		err := h.Inject(ctx, RunSession(run), "a", "", "x")
 		return errors.Is(err, ErrSessionEnded)
 	})
-	if err := h.Attach(ctx, run, "m2", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrSessionEnded) {
+	if err := h.Attach(ctx, RunSession(run), "m2", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrSessionEnded) {
 		t.Fatalf("Attach after end = %v, want ErrSessionEnded", err)
 	}
-	if _, ok := h.LastOutput(run); !ok {
+	if _, ok := h.LastOutput(RunSession(run)); !ok {
 		t.Fatal("LastOutput false for ended-but-not-stopped session")
 	}
 
-	if err := h.StopSession(ctx, run); err != nil {
+	if err := h.StopSession(ctx, RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
-	if err := h.StopSession(ctx, run); err != nil {
+	if err := h.StopSession(ctx, RunSession(run)); err != nil {
 		t.Fatalf("StopSession is not idempotent: %v", err)
 	}
-	if _, ok := h.LastOutput(run); ok {
+	if _, ok := h.LastOutput(RunSession(run)); ok {
 		t.Fatal("LastOutput true after StopSession")
 	}
-	if err := h.Inject(ctx, run, "a", "", "x"); !errors.Is(err, ErrNoSession) {
+	if err := h.Inject(ctx, RunSession(run), "a", "", "x"); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("Inject after stop = %v, want ErrNoSession", err)
 	}
 }
@@ -563,7 +563,7 @@ func TestAttachContextCancel(t *testing.T) {
 	h, _ := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-ctx")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -571,7 +571,7 @@ func TestAttachContextCancel(t *testing.T) {
 	t.Cleanup(func() { _ = kw.Close(); _ = kr.Close() })
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- h.Attach(ctx, run, "m1", 80, 24, false, &testConn{r: kr, w: &sink{}}, nil)
+		errCh <- h.Attach(ctx, RunSession(run), "m1", 80, 24, false, &testConn{r: kr, w: &sink{}}, nil)
 	}()
 	waitAttached(t, h, run, 1)
 	cancel()
@@ -614,7 +614,7 @@ func TestBlockingResizeDoesNotStallSession(t *testing.T) {
 	defer release()
 	att.block <- struct{}{} // let the initial StartSession resize through
 	run := domain.RunID("run-hung-resize")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	<-att.entered
@@ -626,7 +626,7 @@ func TestBlockingResizeDoesNotStallSession(t *testing.T) {
 	// A write-attach reconciles geometry; the resize application hangs in
 	// the runtime, and must not stall anything else.
 	go func() {
-		_ = h.Attach(context.Background(), run, "mw", 100, 40, false,
+		_ = h.Attach(context.Background(), RunSession(run), "mw", 100, 40, false,
 			&testConn{r: strings.NewReader(""), w: &sink{}}, nil)
 	}()
 	<-att.entered // resize applier is now wedged inside att.Resize
@@ -634,11 +634,11 @@ func TestBlockingResizeDoesNotStallSession(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if _, ok := h.LastOutput(run); !ok {
+		if _, ok := h.LastOutput(RunSession(run)); !ok {
 			t.Error("LastOutput lost the session")
 		}
 		att.writeOutput(t, "still-flowing")
-		if err := h.Inject(context.Background(), run, "Ana", "", "hi"); err != nil {
+		if err := h.Inject(context.Background(), RunSession(run), "Ana", "", "hi"); err != nil {
 			t.Errorf("Inject: %v", err)
 		}
 	}()
@@ -652,7 +652,7 @@ func TestBlockingResizeDoesNotStallSession(t *testing.T) {
 		return strings.Contains(ro.out.String(), "still-flowing")
 	})
 	release()
-	if err := h.StopSession(context.Background(), run); err != nil {
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
 }
@@ -677,7 +677,7 @@ func TestAttachDrainHonorsContext(t *testing.T) {
 	h, _ := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-drain")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -688,13 +688,13 @@ func TestAttachDrainHonorsContext(t *testing.T) {
 	t.Cleanup(func() { close(sw.freed) })
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- h.Attach(ctx, run, "m1", 80, 24, false, &testConn{r: kr, w: sw}, nil)
+		errCh <- h.Attach(ctx, RunSession(run), "m1", 80, 24, false, &testConn{r: kr, w: sw}, nil)
 	}()
 	waitAttached(t, h, run, 1)
 	att.writeOutput(t, "wedge")
 	<-sw.stuck // write loop is parked in conn.Write
 	att.writeOutput(t, "buffered")
-	if err := h.StopSession(context.Background(), run); err != nil {
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
 	cancel()
@@ -718,7 +718,7 @@ func TestConcurrentDuplicateStartSessionPreservesTranscript(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i] = h.StartSession(context.Background(), run, atts[i])
+			results[i] = h.StartSession(context.Background(), RunSession(run), atts[i])
 		}()
 	}
 	wg.Wait()
@@ -733,10 +733,10 @@ func TestConcurrentDuplicateStartSessionPreservesTranscript(t *testing.T) {
 	}
 	atts[winnerIdx].writeOutput(t, "winner-output")
 	waitFor(t, "winner output recorded", func() bool {
-		ts, ok := h.LastOutput(run)
+		ts, ok := h.LastOutput(RunSession(run))
 		return ok && !ts.IsZero()
 	})
-	if err := h.StopSession(context.Background(), run); err != nil {
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
 	_, events := parseCast(t, dir+"/"+string(run)+".cast")
@@ -755,14 +755,14 @@ func TestStoppedSessionReleasesBuffers(t *testing.T) {
 	h, _ := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-mem")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	att.writeOutput(t, "scrollback")
-	if err := h.StopSession(context.Background(), run); err != nil {
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
-	s := h.lookup(run)
+	s := h.lookup(RunSession(run))
 	if s == nil {
 		t.Fatal("stopped session must stay in the map")
 	}
@@ -777,7 +777,7 @@ func TestHostCloseStopsSessions(t *testing.T) {
 	h, _ := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-close")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	a := startAttach(t, h, run, "m1", 80, 24, false)
@@ -794,7 +794,52 @@ func TestHostCloseStopsSessions(t *testing.T) {
 	if !closed {
 		t.Fatal("host close did not close the attachment")
 	}
-	if err := h.StartSession(context.Background(), domain.RunID("run-new"), newFakeAtt()); err == nil {
+	if err := h.StartSession(context.Background(), RunSession(domain.RunID("run-new")), newFakeAtt()); err == nil {
 		t.Fatal("StartSession on closed host succeeded")
+	}
+}
+func TestStopSessionsWithPrefix(t *testing.T) {
+	h, _ := newTestHost(t)
+	shell1 := newFakeAtt()
+	shell2 := newFakeAtt()
+	run := newFakeAtt()
+	if err := h.StartSession(context.Background(), RunShellSession("r1", "t1"), shell1); err != nil {
+		t.Fatalf("start shell1: %v", err)
+	}
+	if err := h.StartSession(context.Background(), RunShellSession("r2", "t1"), shell2); err != nil {
+		t.Fatalf("start shell2: %v", err)
+	}
+	if err := h.StartSession(context.Background(), RunSession("r1"), run); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	h.StopSessionsWithPrefix(context.Background(), "run-shell:r1:")
+	h.StopSessionsWithPrefix(context.Background(), "run-shell:r1:")
+
+	shell1.mu.Lock()
+	shell1Closed := shell1.closed
+	shell1.mu.Unlock()
+	shell2.mu.Lock()
+	shell2Closed := shell2.closed
+	shell2.mu.Unlock()
+	run.mu.Lock()
+	runClosed := run.closed
+	run.mu.Unlock()
+	if !shell1Closed {
+		t.Fatal("matching run-shell session was not stopped")
+	}
+	if shell2Closed {
+		t.Fatal("non-matching run-shell session was stopped")
+	}
+	if runClosed {
+		t.Fatal("run session was stopped")
+	}
+}
+
+func TestTranscriptPathReplacesSessionKeySeparators(t *testing.T) {
+	h, _ := newTestHost(t)
+	want := h.cfg.TranscriptDir + "/terminal-m1-main.cast"
+	if got := h.transcriptPath(TerminalSession("m1", "main")); got != want {
+		t.Fatalf("transcript path = %q, want %q", got, want)
 	}
 }

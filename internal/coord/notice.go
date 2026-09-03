@@ -42,7 +42,7 @@ func (s *Service) notify(ctx context.Context, run domain.RunID, with []events.Ov
 			slog.Warn("coord: overlap notice skipped", "run", run, "peer", peer.RunID, "error", err)
 			continue
 		}
-		err = s.cfg.PTY.Inject(ctx, run, noticeActor, "", text)
+		err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), noticeActor, "", text)
 		switch {
 		case err == nil:
 			s.markNotified(run, peer.RunID)

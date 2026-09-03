@@ -92,7 +92,7 @@ type fakePTY struct {
 	resizes  [][2]uint
 }
 
-func (p *fakePTY) Attach(ctx context.Context, run domain.RunID, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error {
+func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error {
 	p.mu.Lock()
 	if p.err != nil {
 		err, delay := p.err, p.errDelay
@@ -105,7 +105,7 @@ func (p *fakePTY) Attach(ctx context.Context, run domain.RunID, member domain.Me
 	// Mirror ptyhost.Host.Attach: the gate runs for write-mode attaches
 	// only and its denial is wrapped in ErrWriteDenied.
 	if !readOnly && gate != nil {
-		if gerr := gate(ctx, member, run); gerr != nil {
+		if gerr := gate(ctx, member, key); gerr != nil {
 			return fmt.Errorf("%w: %v", errWriteDenied, gerr)
 		}
 	}
@@ -463,4 +463,13 @@ func openSubsystem(t *testing.T, client *ssh.Client, name string, setup func(*ss
 	p := &subsystemPipe{Reader: stdout, stdin: stdin, sess: sess}
 	t.Cleanup(func() { _ = p.Close() })
 	return p
+}
+func TestWriteGateAllowsNonRunSessionKeys(t *testing.T) {
+	gate := NewWriteGate(nil)
+	if err := gate(t.Context(), "member", ptyhost.TerminalSession("member", "main")); err != nil {
+		t.Fatalf("terminal session gate = %v, want nil", err)
+	}
+	if err := gate(t.Context(), "member", ptyhost.RunShellSession("run", "shell")); err != nil {
+		t.Fatalf("run-shell session gate = %v, want nil", err)
+	}
 }

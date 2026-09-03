@@ -1,4 +1,4 @@
-// Package ptyhost owns the persistent server-side PTY session of each run.
+// Package ptyhost owns persistent server-side PTY sessions.
 //
 // A Host adopts the runtime.Attachment opened by the scheduler and keeps the
 // agent's terminal alive independently of any connected client (tmux
@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,7 +27,7 @@ import (
 // WriteGate is the Wave 3 capability-check hook for write-mode attach.
 // nil = allow everyone (Wave 1 default). The hook is the whole contract;
 // no permission logic lives in ptyhost.
-type WriteGate func(ctx context.Context, member domain.MemberID, run domain.RunID) error
+type WriteGate func(ctx context.Context, member domain.MemberID, key SessionKey) error
 
 // Config configures a Host.
 type Config struct {
@@ -35,6 +36,8 @@ type Config struct {
 	DefaultCols   uint      // 120
 	DefaultRows   uint      // 30
 	Gate          WriteGate // nil = allow
+	// OnTitle is declared for the title scanner and never called yet.
+	OnTitle func(key SessionKey, title string)
 }
 
 const (
@@ -55,13 +58,13 @@ var errHostClosed = errors.New("ptyhost: host closed")
 // loop to flush buffered output to a client that has stopped reading.
 const drainTimeout = 5 * time.Second
 
-// Host manages one persistent PTY session per run.
+// Host manages one persistent PTY session per key.
 type Host struct {
 	cfg Config
 
 	mu       sync.Mutex
-	sessions map[domain.RunID]*session
-	starting map[domain.RunID]struct{}
+	sessions map[SessionKey]*session
+	starting map[SessionKey]struct{}
 	closed   bool
 }
 
@@ -84,8 +87,8 @@ func New(cfg Config) (*Host, error) {
 	}
 	return &Host{
 		cfg:      cfg,
-		sessions: make(map[domain.RunID]*session),
-		starting: make(map[domain.RunID]struct{}),
+		sessions: make(map[SessionKey]*session),
+		starting: make(map[SessionKey]struct{}),
 	}, nil
 }
 
@@ -109,26 +112,26 @@ func (h *Host) Close() error {
 }
 
 // StartSession takes ownership of att and starts the persistent session for
-// run: it sets the initial geometry, opens the transcript, and pumps PTY
+// key: it sets the initial geometry, opens the transcript, and pumps PTY
 // output to the transcript, the replay buffer, and every attached client.
 // The session survives zero attachments; when the agent exits (stdout EOF)
 // it enters the ended state and stays queryable until StopSession.
-func (h *Host) StartSession(ctx context.Context, run domain.RunID, att runtime.Attachment) error {
-	// Reserve the run before touching the transcript file so a losing
+func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Attachment) error {
+	// Reserve the key before touching the transcript file so a losing
 	// duplicate StartSession can never truncate the winner's transcript.
-	if err := h.reserve(run); err != nil {
+	if err := h.reserve(key); err != nil {
 		return err
 	}
-	tr, err := newCastWriter(h.transcriptPath(run), h.cfg.DefaultCols, h.cfg.DefaultRows)
+	tr, err := newCastWriter(h.transcriptPath(key), h.cfg.DefaultCols, h.cfg.DefaultRows)
 	if err != nil {
-		h.unreserve(run)
+		h.unreserve(key)
 		return err
 	}
 	// Initial geometry goes out before the session is attachable, so a
 	// concurrent write-attach clamp can never be overwritten by it.
 	_ = att.Resize(ctx, h.cfg.DefaultCols, h.cfg.DefaultRows)
 	s := &session{
-		run:     run,
+		run:     key,
 		att:     att,
 		tr:      tr,
 		stdin:   att.Stdin(),
@@ -140,26 +143,26 @@ func (h *Host) StartSession(ctx context.Context, run domain.RunID, att runtime.A
 	}
 
 	h.mu.Lock()
-	delete(h.starting, run)
+	delete(h.starting, key)
 	if h.closed {
 		h.mu.Unlock()
 		_ = tr.close()
 		_ = att.Close()
 		return errHostClosed
 	}
-	h.sessions[run] = s
+	h.sessions[key] = s
 	h.mu.Unlock()
 
 	go s.pump()
 	return nil
 }
 
-// StopSession closes the run's attachment, flushes and closes the
+// StopSession closes the session's attachment, flushes and closes the
 // transcript, and detaches every client. Idempotent; ErrNoSession only for
-// a run never started.
-func (h *Host) StopSession(ctx context.Context, run domain.RunID) error {
+// a key never started.
+func (h *Host) StopSession(ctx context.Context, key SessionKey) error {
 	_ = ctx
-	s := h.lookup(run)
+	s := h.lookup(key)
 	if s == nil {
 		return ErrNoSession
 	}
@@ -168,9 +171,9 @@ func (h *Host) StopSession(ctx context.Context, run domain.RunID) error {
 }
 
 // LastOutput reports the wall-clock time of the last byte read from the
-// run's PTY; false if the run has no session.
-func (h *Host) LastOutput(run domain.RunID) (time.Time, bool) {
-	s := h.lookup(run)
+// session's PTY; false if the key has no session.
+func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
+	s := h.lookup(key)
 	if s == nil {
 		return time.Time{}, false
 	}
@@ -178,30 +181,30 @@ func (h *Host) LastOutput(run domain.RunID) (time.Time, bool) {
 }
 
 // Inject writes an attributed banner to every attachment and the transcript,
-// then writes message plus a carriage return to the agent's stdin. The
+// then writes message plus a carriage return to the session's stdin. The
 // banner never reaches the agent's input. Authorization is the caller's.
-func (h *Host) Inject(ctx context.Context, run domain.RunID, actorName, actorColor, message string) error {
+func (h *Host) Inject(ctx context.Context, key SessionKey, actorName, actorColor, message string) error {
 	_ = ctx
-	s := h.lookup(run)
+	s := h.lookup(key)
 	if s == nil {
 		return ErrNoSession
 	}
 	return s.inject(actorName, actorColor, message)
 }
 
-// Attach connects conn to the run's PTY session and blocks until conn's read
+// Attach connects conn to the session's PTY and blocks until conn's read
 // side returns EOF or an error, ctx is done, the session ends (returns nil),
 // or the host closes. Reads from conn are keystrokes (discarded when
 // readOnly); writes to conn are raw PTY output, starting with a replay of
 // the recent scrollback. resize carries [cols, rows] updates (nil = fixed
 // geometry). Write-mode attaches are checked against the configured Gate.
-func (h *Host) Attach(ctx context.Context, run domain.RunID, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error {
-	s := h.lookup(run)
+func (h *Host) Attach(ctx context.Context, key SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error {
+	s := h.lookup(key)
 	if s == nil {
 		return ErrNoSession
 	}
 	if !readOnly && h.cfg.Gate != nil {
-		if err := h.cfg.Gate(ctx, member, run); err != nil {
+		if err := h.cfg.Gate(ctx, member, key); err != nil {
 			return fmt.Errorf("%w: %v", ErrWriteDenied, err)
 		}
 	}
@@ -275,35 +278,53 @@ func (h *Host) Attach(ctx context.Context, run domain.RunID, member domain.Membe
 	}
 }
 
-func (h *Host) lookup(run domain.RunID) *session {
+func (h *Host) lookup(key SessionKey) *session {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.sessions[run]
+	return h.sessions[key]
 }
 
-// reserve claims run for an in-flight StartSession under h.mu.
-func (h *Host) reserve(run domain.RunID) error {
+// reserve claims key for an in-flight StartSession under h.mu.
+func (h *Host) reserve(key SessionKey) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
 		return errHostClosed
 	}
-	if _, ok := h.starting[run]; ok {
-		return fmt.Errorf("ptyhost: session already started for run %s", run)
+	if _, ok := h.starting[key]; ok {
+		return fmt.Errorf("ptyhost: session already started for key %s", key)
 	}
-	if prev, ok := h.sessions[run]; ok && !prev.isStopped() {
-		return fmt.Errorf("ptyhost: session already started for run %s", run)
+	if prev, ok := h.sessions[key]; ok && !prev.isStopped() {
+		return fmt.Errorf("ptyhost: session already started for key %s", key)
 	}
-	h.starting[run] = struct{}{}
+	h.starting[key] = struct{}{}
 	return nil
 }
 
-func (h *Host) unreserve(run domain.RunID) {
+func (h *Host) unreserve(key SessionKey) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	delete(h.starting, run)
+	delete(h.starting, key)
 }
 
-func (h *Host) transcriptPath(run domain.RunID) string {
-	return filepath.Join(h.cfg.TranscriptDir, string(run)+".cast")
+func (h *Host) transcriptPath(key SessionKey) string {
+	name := strings.ReplaceAll(string(key), ":", "-")
+	return filepath.Join(h.cfg.TranscriptDir, name+".cast")
+}
+
+// StopSessionsWithPrefix stops every live session whose key has prefix.
+// Repeated calls are safe and never report errors.
+func (h *Host) StopSessionsWithPrefix(ctx context.Context, prefix string) {
+	_ = ctx
+	h.mu.Lock()
+	sessions := make([]*session, 0)
+	for key, s := range h.sessions {
+		if strings.HasPrefix(string(key), prefix) {
+			sessions = append(sessions, s)
+		}
+	}
+	h.mu.Unlock()
+	for _, s := range sessions {
+		s.stop()
+	}
 }

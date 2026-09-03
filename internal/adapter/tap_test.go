@@ -53,7 +53,7 @@ func TestManagerWithRealPTYTap(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = host.Close() })
 	att := newPipeAtt()
-	if startErr := host.StartSession(t.Context(), run, att); startErr != nil {
+	if startErr := host.StartSession(t.Context(), ptyhost.RunSession(run), att); startErr != nil {
 		t.Fatalf("StartSession: %v", startErr)
 	}
 

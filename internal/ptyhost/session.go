@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
-	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -27,7 +26,7 @@ var errSlowClient = errors.New("ptyhost: client too slow, detached")
 // session is one persistent PTY session: the adopted attachment, its pump,
 // the replay ring, the transcript, and the attached clients.
 type session struct {
-	run domain.RunID
+	run SessionKey
 	att runtime.Attachment
 	tr  *castWriter
 

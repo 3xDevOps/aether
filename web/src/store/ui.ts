@@ -1,3 +1,4 @@
+import { clampDockHeight } from '@/components/dock'
 import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
@@ -18,6 +19,8 @@ export interface UiSlice {
   theme: Theme
   sidebarWidth: number
   sidebarCollapsed: boolean
+  terminalDockHeight: number
+  runDockHeight: number
   /**
    * The workspace every scoped surface acts on: the sidebar's run list, the
    * board, launches, templates, budgets and the activity feed. Empty until
@@ -34,6 +37,8 @@ export interface UiSlice {
   dismissedUpdates: Record<UpdateKind, string>
   setTheme: (theme: Theme) => void
   setSidebarWidth: (width: number) => void
+  setTerminalDockHeight: (height: number) => void
+  setRunDockHeight: (height: number) => void
   toggleSidebar: () => void
   setActiveWorkspace: (workspaceID: string) => void
   setGroupBy: (groupBy: GroupBy) => void
@@ -47,6 +52,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   theme: 'system',
   sidebarWidth: 280,
   sidebarCollapsed: false,
+  terminalDockHeight: 280,
+  runDockHeight: 240,
   activeWorkspace: '',
   groupBy: 'status',
   route: { name: 'board', params: {} },
@@ -56,6 +63,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
     set({
       sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, width)),
     }),
+  setTerminalDockHeight: (height) => set({ terminalDockHeight: clampDockHeight(height) }),
+  setRunDockHeight: (height) => set({ runDockHeight: clampDockHeight(height) }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   // Switching scope carries the workspace route with it. Otherwise the
   // switcher would say one workspace while the open view, its budget

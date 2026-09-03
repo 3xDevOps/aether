@@ -9,13 +9,14 @@ let refusal: string | null = null
 let denied = false
 let write = false
 
-function attach(): Attachment {
+function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
   output = []
   states = []
   attaches = 0
   refusal = null
   denied = false
-  return connectAttach('run_1', {
+  const socketURL = typeof url === 'function' ? url : () => url
+  return connectAttach(socketURL, {
     onData: (chunk) => output.push(new TextDecoder().decode(chunk)),
     onAttached: () => {
       attaches++
@@ -71,6 +72,22 @@ describe('connectAttach', () => {
     expect(socket.frames()[1]).toEqual({ type: 'input', data: 'x' })
     a.close()
   })
+  it('reads the caller URL again when reconnecting', () => {
+    let tab = 'main'
+    const a = attach(() => `/ws/terminal?tab=${tab}`)
+    const first = StubSocket.last()
+    expect(first.url).toBe('/ws/terminal?tab=main')
+    first.onopen?.()
+    ack()
+
+    tab = 'logs'
+    first.onclose?.({ code: 1006 })
+    vi.advanceTimersByTime(1_000)
+
+    expect(StubSocket.last().url).toBe('/ws/terminal?tab=logs')
+    a.close()
+  })
+
 
   it('reattaches with write once the caller asks to steer', () => {
     const a = attach()

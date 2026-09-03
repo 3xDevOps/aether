@@ -15,7 +15,11 @@ import (
 // the gate (ptyhost only consults it for write mode), so viewers keep
 // read access. Wired into ptyhost.Config.Gate by the server assembly.
 func NewWriteGate(st store.Store) ptyhost.WriteGate {
-	return func(ctx context.Context, member domain.MemberID, run domain.RunID) error {
+	return func(ctx context.Context, member domain.MemberID, key ptyhost.SessionKey) error {
+		run, ok := key.Run()
+		if !ok {
+			return nil
+		}
 		return checkSteer(ctx, st, member, run)
 	}
 }
