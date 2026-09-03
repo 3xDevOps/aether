@@ -737,9 +737,15 @@ prompt asks the server about itself and shows wherever the member is an admin.
   (`docs/local-gateway.md`; the gateway caches the release lookup, so this
   costs no request to GitHub) and puts the answer on the `local` slice, which
   is also what the status bar reads. It reads `server.update_status` as well -
-  any member may - and re-reads it whenever `server.info` names a different
-  version, which is how the server banner disappears after the restart it
-  asked for.
+  any member may - and re-reads it on every reconnect and whenever
+  `server.info` names a different version. The reconnect is the one that
+  matters: a server that updates itself re-executes, so the socket drops and
+  comes back, and that fresh status is what ends the banner and the notice.
+  `connect()` re-hydrates on the same signal while an update is in flight,
+  even with a cursor to replay from, because only a fresh `server.info` says
+  the server came back on the new version. A read that fails is recorded, not
+  swallowed: the banner then says it could not read the status, with a
+  **Retry**, rather than claiming the server cannot update itself.
 - **The CLI banner is for everyone.** It names the new version and the running
   one, says what updating costs - it replaces the `aether` binary on this
   machine and restarts the dashboard, taking attached terminals and any
@@ -771,16 +777,21 @@ prompt asks the server about itself and shows wherever the member is an admin.
     active* with a **Cancel** that sends `when: "cancel"`.
   - *not capable*: the documented unprivileged install. No buttons: the
     server's own reason, then the two commands to run on the server host with
-    a copy button, as before. A server too old to serve the method keeps that
-    same banner, from `update.check`'s `server_behind`.
+    a copy button, as before. A gateway that does not carry the method keeps
+    that banner from `update.check`'s `server_behind`, and says only what it
+    knows - "The dashboard cannot update the server."
+  - The scheduled state also names what the update is still waiting for
+    (`status.waiting`), because an open workspace shell holds it back the
+    same way a working run does.
 - **The phases come off the feed.** `server.update` events land on the
   `server` slice through `applyEvent`, once per workspace and once more from
   the RPC result, so the slice keeps the furthest phase rather than the last
   one to arrive: *scheduled*, *applying*, *restarting* - the socket drops
-  there, the existing reconnect path resubscribes, and the re-read status
-  ends the banner - or *failed*, which shows the server's error verbatim and
-  falls back to the manual commands. Every phase is a row in the activity
-  feed too, filterable as *Server updates*.
+  there, the reconnect re-hydrates and re-reads the status, and a status
+  whose `server_version` is the version the phases were about clears the
+  progress and ends the banner - or *failed*, which shows the server's error
+  verbatim and falls back to the manual commands. Every phase is a row in
+  the activity feed too, filterable as *Server updates*.
 - **Everyone else gets one line.** A member who is not an admin sees
   *server update scheduled, terminals will reconnect briefly* (or *applying*)
   in the status bar while one is in flight, so a restart nobody explained
@@ -792,8 +803,6 @@ prompt asks the server about itself and shows wherever the member is an admin.
   slice records which version was dismissed for each banner and rides the same
   persisted preferences as the theme and the sidebar, so a dismissal survives a
   reload and the next release shows the banner again. It silences the offer,
-  not an update already moving: a scheduled or applying server comes back
-  regardless, because that banner is why the server is about to restart. It silences the offer,
   not an update already moving: a scheduled or applying server comes back
   regardless, because that banner is why the server is about to restart.
 - **The status bar carries the badge.** The `aether {version}` label gets a dot
