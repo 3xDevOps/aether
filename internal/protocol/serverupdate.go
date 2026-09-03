@@ -17,7 +17,7 @@ const (
 	// dropping attached terminals and live syncs.
 	ServerUpdateNow = "now"
 	// ServerUpdateIdle records one pending update, applied the first time
-	// no run is active and no workspace shell is open.
+	// no run is working and no workspace shell is open.
 	ServerUpdateIdle = "idle"
 	// ServerUpdateCancel clears the pending update.
 	ServerUpdateCancel = "cancel"

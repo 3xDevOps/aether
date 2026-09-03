@@ -3,6 +3,8 @@ package scheduler
 import (
 	"context"
 	"log/slog"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 // UpdateTicker is the poll loop's view of the server self-update service
@@ -37,19 +39,24 @@ func (s *Scheduler) tickUpdates(ctx context.Context) {
 	t.Tick(ctx, s.Idle(ctx))
 }
 
-// Idle reports that nobody is using this server: no run is active and no
-// workspace shell is open. Restarting is safe for runs either way - the
-// scheduler reattaches to live containers on boot - but it drops attached
-// terminals and the interactive shells that have no container to reattach
-// to, so a scheduled update waits for this.
+// Idle reports that nobody is working on this server: no run is queued,
+// provisioning, or running, and no workspace shell is open. Restarting is
+// safe for the runs either way - the scheduler reattaches to live
+// containers on boot - but it drops attached terminals, and the
+// interactive shells have no container to reattach to at all.
+//
+// A run parked at needs-attention does not hold it back. That run is
+// waiting on a person, not working, and its container survives the restart
+// like any other; counting it would leave a busy deployment with no idle
+// moment at all, since finished-but-unclosed runs sit there for days.
 //
 // A store read that fails is not idle: an unknown answer must never be the
 // one that decides to restart.
 func (s *Scheduler) Idle(ctx context.Context) bool {
 	s.mu.Lock()
-	live, shells := len(s.runs), s.shells
+	shells := s.shells
 	s.mu.Unlock()
-	if live > 0 || shells > 0 {
+	if shells > 0 {
 		return false
 	}
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
@@ -57,7 +64,12 @@ func (s *Scheduler) Idle(ctx context.Context) bool {
 		slog.Warn("scheduler: read active runs for the idle check", "error", err)
 		return false
 	}
-	return len(active) == 0
+	for _, r := range active {
+		if r.Status != domain.RunNeedsAttention {
+			return false
+		}
+	}
+	return true
 }
 
 // holdShell counts one open workspace shell for the idle check and returns

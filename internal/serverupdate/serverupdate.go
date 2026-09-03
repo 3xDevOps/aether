@@ -192,8 +192,8 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 	if p.When == protocol.ServerUpdateIdle {
 		// One pending update at a time: a second request replaces the
 		// first rather than queueing behind it.
-		if err := s.cfg.Store.SetPendingServerUpdate(ctx, &pending); err != nil {
-			return protocol.ServerUpdateResult{}, nil, err
+		if serr := s.cfg.Store.SetPendingServerUpdate(ctx, &pending); serr != nil {
+			return protocol.ServerUpdateResult{}, nil, serr
 		}
 		res.Status = protocol.ServerUpdateScheduled
 		s.publish(ctx, actor, events.ServerUpdateScheduled, tag, "")

@@ -60,7 +60,11 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate) 
 	}
 	slog.Info("serverupdate: binaries replaced", "version", pending.Version, "paths", replaced)
 	s.record(ctx, pending.Version, store.ServerUpdateApplied, "")
-	return func() { s.restart(ctx, pending) }, nil
+	// The restart runs after the RPC response has been written, by which
+	// point the request context may be on its way out; the restarting
+	// phase still has to reach the feed, so it is detached from it.
+	restartCtx := context.WithoutCancel(ctx)
+	return func() { s.restart(restartCtx, pending) }, nil
 }
 
 // claim takes the one applying slot, so the RPC path and the idle poll can
@@ -91,6 +95,11 @@ func (s *Service) restart(ctx context.Context, pending store.PendingServerUpdate
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdateRestarting, pending.Version, "")
 	argv := append([]string{s.self}, os.Args[1:]...)
 	err := s.cfg.Exec(s.self, argv, os.Environ())
+	if err == nil {
+		// syscall.Exec never returns on success, so reaching here at all
+		// means the process was not replaced, whatever the seam reported.
+		err = errors.New("returned without replacing the process")
+	}
 	// Exec only returns on failure. Under systemd the unit can still be
 	// restarted from outside; anywhere else there is nothing left to try,
 	// and the swapped binary takes effect at the next start.
