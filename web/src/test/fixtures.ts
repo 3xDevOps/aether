@@ -19,6 +19,7 @@ import type {
   Run,
   Schedule,
   ServerInfo,
+  ServerUpdateStatus,
   Template,
   ToolSnapshot,
   UpdateStatus,
@@ -310,6 +311,20 @@ export function updateStatus(over: Partial<UpdateStatus> = {}): UpdateStatus {
   }
 }
 
+/** One server.update_status answer: a current server that could replace
+ * its own binaries if it had to. The banner tests override it. */
+export function serverUpdateStatus(
+  over: Partial<ServerUpdateStatus> = {},
+): ServerUpdateStatus {
+  return {
+    server_version: 'v1.2.3',
+    latest: 'v1.3.0',
+    update_available: false,
+    capable: true,
+    ...over,
+  }
+}
+
 /** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
   return {
@@ -481,6 +496,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       rebuilding: false,
     })),
     localUpdateStatus: vi.fn(async () => ({ phase: 'idle' as const })),
+    serverUpdateStatus: vi.fn(async () => serverUpdateStatus()),
+    serverUpdate: vi.fn(async () => ({
+      status: 'scheduled' as const,
+      version: 'v1.3.0',
+      requested_by: alice.id,
+      requested_at: '2026-08-14T10:06:00Z',
+    })),
     envStatus: vi.fn(async () => ({
       versions: [envVersion()],
       active_version: 1,

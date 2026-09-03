@@ -399,6 +399,62 @@ describe('applyEvent', () => {
     expect(store.getState().workspaces[workspace.id]).toBeDefined()
   })
 
+  it('follows a server update and never moves it backwards', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const updateEvent = (over: Partial<Event> = {}): Event => ({
+      id: 'evt_srv',
+      seq: 6,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: '',
+      actor_id: alice.id,
+      type: 'server.update',
+      payload: { phase: 'applying', version: 'v1.3.0', actor_id: alice.id },
+      ...over,
+    })
+
+    expect(await applyEvent(store, updateEvent(), fakeApi())).toBe(true)
+    expect(store.getState().serverUpdateProgress).toMatchObject({
+      phase: 'applying',
+      version: 'v1.3.0',
+    })
+
+    await applyEvent(
+      store,
+      updateEvent({
+        seq: 7,
+        payload: { phase: 'restarting', version: 'v1.3.0' },
+      }),
+      fakeApi(),
+    )
+    expect(store.getState().serverUpdateProgress?.phase).toBe('restarting')
+
+    // The same phase is published once per workspace, and the RPC result
+    // races the first of them: a late "applying" must not undo the frame
+    // that says the server is already on its way down.
+    await applyEvent(
+      store,
+      updateEvent({ seq: 8, payload: { phase: 'applying', version: 'v1.3.0' } }),
+      fakeApi(),
+    )
+    expect(store.getState().serverUpdateProgress?.phase).toBe('restarting')
+
+    // A failure always wins: it is the end of that update.
+    await applyEvent(
+      store,
+      updateEvent({
+        seq: 9,
+        payload: { phase: 'failed', version: 'v1.3.0', detail: 'checksum mismatch' },
+      }),
+      fakeApi(),
+    )
+    expect(store.getState().serverUpdateProgress).toMatchObject({
+      phase: 'failed',
+      detail: 'checksum mismatch',
+    })
+  })
+
   it('drives the environment build slice and ignores frames for older versions', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

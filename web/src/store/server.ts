@@ -1,5 +1,12 @@
+import { bareVersion } from '@/lib/format'
 import type { ConnectionState } from '@/lib/stream'
-import type { GatewayCapabilities, ServerInfo } from '@/lib/types'
+import type {
+  GatewayCapabilities,
+  ServerInfo,
+  ServerUpdatePayload,
+  ServerUpdatePhase,
+  ServerUpdateStatus,
+} from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /** Which hop is down when the app cannot reach its data.
@@ -10,6 +17,32 @@ import type { SliceCreator } from '@/store/slice'
  * `server`: the gateway answers but its SSH backend cannot reach
  * aether-server (it reports 503 "server unreachable: ..."). */
 export type UnreachableKind = 'network' | 'gateway' | 'server'
+
+/** The order the phases of one update run in. A terminal phase - failed
+ * or cancelled - is not in it: those always win. */
+const phaseOrder: Record<ServerUpdatePhase, number> = {
+  scheduled: 1,
+  applying: 2,
+  restarting: 3,
+  failed: 0,
+  cancelled: 0,
+}
+
+/**
+ * Whether a frame would move one update backwards. The server.update RPC
+ * result and the event it publishes race, and the events arrive once per
+ * workspace, so the same phase lands several times: without this a late
+ * "applying" would overwrite the "restarting" already shown.
+ */
+function stalePhase(
+  current: ServerUpdatePayload | null,
+  next: ServerUpdatePayload,
+): boolean {
+  if (!current) return false
+  if (phaseOrder[next.phase] === 0 || phaseOrder[current.phase] === 0) return false
+  if (current.version !== next.version) return false
+  return phaseOrder[next.phase] < phaseOrder[current.phase]
+}
 
 export interface ServerSlice {
   info: ServerInfo | null
@@ -25,6 +58,12 @@ export interface ServerSlice {
   streamDead: boolean
   /** Which hop failed on the last fetch, or null when reachable. */
   unreachable: UnreachableKind | null
+  /** The last server.update_status answer; null until the update banner
+   * host reads it, and on a server too old to serve the method. */
+  serverUpdate: ServerUpdateStatus | null
+  /** How far the running self-update has got, from the server.update feed
+   * and the RPC results. Session-scoped: a reload re-reads the status. */
+  serverUpdateProgress: ServerUpdatePayload | null
   setInfo: (info: ServerInfo) => void
   setCapabilities: (capabilities: GatewayCapabilities | null) => void
   setConnection: (state: ConnectionState) => void
@@ -34,6 +73,9 @@ export interface ServerSlice {
   setHydrated: (hydrated: boolean, error?: string | null) => void
   setStreamDead: () => void
   setUnreachable: (kind: UnreachableKind | null) => void
+  setServerUpdate: (status: ServerUpdateStatus | null) => void
+  /** Applies one update phase, from an event or from an RPC result. */
+  applyServerUpdate: (payload: ServerUpdatePayload) => void
   resetConnection: () => void
 }
 
@@ -46,6 +88,8 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => ({
   hydrationError: null,
   streamDead: false,
   unreachable: null,
+  serverUpdate: null,
+  serverUpdateProgress: null,
   setInfo: (info) => set({ info }),
   setCapabilities: (capabilities) => set({ capabilities }),
   setConnection: (connection) => set({ connection }),
@@ -56,6 +100,27 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => ({
     set({ hydrated, hydrationError: error }),
   setStreamDead: () => set({ streamDead: true }),
   setUnreachable: (unreachable) => set({ unreachable }),
+  setServerUpdate: (serverUpdate) =>
+    set((s) => ({
+      serverUpdate,
+      // The status is re-read when server.info names a new version, which
+      // is how an update ends: a server already running the version the
+      // phases were about has finished, so the progress is history and
+      // must stop saying a restart is coming.
+      serverUpdateProgress:
+        serverUpdate &&
+        s.serverUpdateProgress &&
+        bareVersion(s.serverUpdateProgress.version ?? '') ===
+          bareVersion(serverUpdate.server_version)
+          ? null
+          : s.serverUpdateProgress,
+    })),
+  applyServerUpdate: (payload) =>
+    set((s) =>
+      stalePhase(s.serverUpdateProgress, payload)
+        ? {}
+        : { serverUpdateProgress: payload },
+    ),
   resetConnection: () =>
     set({
       connection: 'connecting',

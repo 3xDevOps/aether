@@ -38,6 +38,9 @@ import type {
   RunPatch,
   Schedule,
   ServerInfo,
+  ServerUpdateResult,
+  ServerUpdateStatus,
+  ServerUpdateWhen,
   SyncSessionState,
   SyncStatusResult,
   Template,
@@ -390,6 +393,16 @@ export const api = {
     call<TimelinePage>('workspace.timeline', query),
   runOverlaps: () =>
     call<{ overlaps: Overlap[] }>('run.overlaps').then((r) => r.overlaps),
+  /** Whether the server can replace its own binaries, and what update is
+   * in flight. Any member may read it; only an admin may call server.update. */
+  serverUpdateStatus: () => call<ServerUpdateStatus>('server.update_status'),
+  /** Asks the server to update itself now, at the next idle moment, or to
+   * cancel the pending one. Latest release unless a version is named. */
+  serverUpdate: (when: ServerUpdateWhen, version?: string) =>
+    call<ServerUpdateResult>('server.update', {
+      when,
+      ...(version ? { version } : {}),
+    }),
   // Admin and membership: invites, approvals, colors, workspaces.
   memberInvite: (ttlSeconds?: number) =>
     call<{ code: string; expires_at: string }>('member.invite', {
