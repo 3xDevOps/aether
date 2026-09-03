@@ -2,14 +2,19 @@ package profile
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	profilesvc "github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -174,4 +179,60 @@ func waitCatchups(t *testing.T, w *Watcher, want int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("catch-up count = %d, want %d", w.CatchUpCount(), want)
+}
+
+// TestDefaultPushOneLogsSkippedFiles covers the daemon's share of the
+// size caps. It pushes unattended, so a file left behind would otherwise
+// be absent from the server with nobody told - where before the caps
+// existed the push failed loudly instead.
+func TestDefaultPushOneLogsSkippedFiles(t *testing.T) {
+	root := setupClaudeRoot(t)
+	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
+	mustWrite(t, filepath.Join(root, "notes", "huge.txt"), strings.Repeat("x", profilesvc.MaxFileBytes+1))
+
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	server, clientConn := net.Pipe()
+	t.Cleanup(func() {
+		_ = server.Close()
+		_ = clientConn.Close()
+	})
+	go func() {
+		reader := bufio.NewReader(server)
+		for {
+			line, err := protocol.ReadLine(reader)
+			if err != nil {
+				return
+			}
+			var req protocol.Request
+			if json.Unmarshal(line, &req) != nil {
+				return
+			}
+			var result any
+			switch req.Method {
+			case protocol.MethodProfileStatus:
+				result = protocol.ProfileStatusResult{}
+			case protocol.MethodProfilePush:
+				result = protocol.ProfilePushResult{Snapshot: protocol.ProfileSnapshot{ID: "psn_1"}}
+			default:
+				return
+			}
+			raw, _ := json.Marshal(result)
+			resp, _ := json.Marshal(protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: raw})
+			if _, err := server.Write(append(resp, '\n')); err != nil {
+				return
+			}
+		}
+	}()
+
+	if err := defaultPushOne(t.Context(), protocol.NewClient(clientConn), "claude"); err != nil {
+		t.Fatalf("defaultPushOne: %v", err)
+	}
+	out := logged.String()
+	if !strings.Contains(out, "notes/huge.txt") || !strings.Contains(out, ExcludeTooLarge) {
+		t.Fatalf("the daemon pushed a partial profile without saying so:\n%s", out)
+	}
 }

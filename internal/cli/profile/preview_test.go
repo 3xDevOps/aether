@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	profilesvc "github.com/3xDevOps/Aether/internal/profile"
 )
@@ -255,7 +258,7 @@ func TestInventoryExcludesOversizedFileUnread(t *testing.T) {
 	// A file over the cap whose content would trip the scanner outright.
 	big := append([]byte(nil), fixture...)
 	big = append(big, make([]byte, profilesvc.MaxFileBytes)...)
-	mustWrite(t, filepath.Join(root, "projects", "huge.jsonl"), string(big))
+	mustWrite(t, filepath.Join(root, "notes", "huge.jsonl"), string(big))
 
 	preview, err := Inventory(t.Context(), "claude")
 	if err != nil {
@@ -267,12 +270,12 @@ func TestInventoryExcludesOversizedFileUnread(t *testing.T) {
 	}
 	var found Exclusion
 	for _, e := range preview.Excluded {
-		if e.Path == "projects/huge.jsonl" {
+		if e.Path == "notes/huge.jsonl" {
 			found = e
 		}
 	}
 	if found.Reason != ExcludeTooLarge {
-		t.Fatalf("exclusions = %+v, want projects/huge.jsonl as %s", preview.Excluded, ExcludeTooLarge)
+		t.Fatalf("exclusions = %+v, want notes/huge.jsonl as %s", preview.Excluded, ExcludeTooLarge)
 	}
 	if !strings.Contains(found.Detail, "over the") {
 		t.Errorf("detail does not name the limit: %q", found.Detail)
@@ -340,5 +343,210 @@ func TestInventoryHonorsContextCancellation(t *testing.T) {
 
 	if _, err := Inventory(ctx, "claude"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Inventory error = %v, want context.Canceled", err)
+	}
+}
+
+// TestInventorySkipsNonRegularFiles covers the blocker: a unix socket in a
+// profile root - ~/.codex/ipc/ipc.sock exists on any machine codex has run
+// on - aborted the whole walk with "no such device or address", so the
+// harness could be neither previewed nor pushed.
+func TestInventorySkipsNonRegularFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix sockets are a POSIX file type")
+	}
+	root := setupClaudeRoot(t)
+	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
+	sock := filepath.Join(root, "ipc", "ipc.sock")
+	if err := os.MkdirAll(filepath.Dir(sock), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skipf("cannot create a unix socket here: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatalf("a socket in the profile root aborted the walk: %v", err)
+	}
+	var got Exclusion
+	for _, e := range preview.Excluded {
+		if e.Path == "ipc/ipc.sock" {
+			got = e
+		}
+	}
+	if got.Reason != ExcludeNotRegular {
+		t.Fatalf("exclusions = %+v, want ipc/ipc.sock as %s", preview.Excluded, ExcludeNotRegular)
+	}
+	if !strings.Contains(got.Detail, "socket") {
+		t.Errorf("detail does not name the file type: %q", got.Detail)
+	}
+	if preview.Files != 1 {
+		t.Errorf("files = %d, want only settings.json", preview.Files)
+	}
+	// The push agrees: a socket must not abort discovery either.
+	files, _, err := DiscoverFiles(t.Context(), "claude", nil)
+	if err != nil {
+		t.Fatalf("DiscoverFiles: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "settings.json" {
+		t.Errorf("discovered %+v, want only settings.json", files)
+	}
+}
+
+// TestInventoryDoesNotBlockOnAFifo is the half a socket cannot prove:
+// os.ReadFile on a FIFO blocks until a writer appears, and the context
+// check runs only between entries, so opening one would hang the walk on
+// an fd nothing can reclaim. The walk must refuse it on its mode and
+// return promptly.
+func TestInventoryDoesNotBlockOnAFifo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mkfifo is POSIX-only")
+	}
+	root := setupClaudeRoot(t)
+	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
+	fifo := filepath.Join(root, "pipe")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("cannot create a FIFO here: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Inventory(t.Context(), "claude")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("a FIFO in the profile root failed the walk: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		// Failing rather than hanging the suite: the point of the test is
+		// that nothing waits on a FIFO that will never be written to.
+		t.Fatal("the walk blocked on a FIFO instead of skipping it")
+	}
+}
+
+// TestInventorySpendsBudgetByPriority covers the starvation the reviewer
+// measured on a real ~/.claude: WalkDir visits lexically, so plugins/ and
+// other/ sorted first and spent the whole 20 MiB, leaving zero skills and
+// zero commands - exactly the configuration this feature exists to carry.
+// The fixture reproduces that ordering: "plugins" and "zz-other" bracket
+// "skills" and "commands" alphabetically, and together they overrun the
+// budget.
+func TestInventorySpendsBudgetByPriority(t *testing.T) {
+	root := setupClaudeRoot(t)
+	// Just under the per-file cap each, so the snapshot cap is what bites.
+	body := strings.Repeat("x", profilesvc.MaxFileBytes-1)
+	// 15 MiB of plugin cache, sorting before "skills".
+	for i := range 15 {
+		mustWrite(t, filepath.Join(root, "plugins", fmt.Sprintf("p%02d.json", i)), body)
+	}
+	// 15 MiB of loose files, sorting after "skills" but before nothing
+	// that matters - "other" is last by priority either way.
+	for i := range 15 {
+		mustWrite(t, filepath.Join(root, "aaa-notes", fmt.Sprintf("n%02d.txt", i)), body)
+	}
+	mustWrite(t, filepath.Join(root, "skills", "pdf", "SKILL.md"), "# pdf skill\n")
+	mustWrite(t, filepath.Join(root, "commands", "review.md"), "# review\n")
+	mustWrite(t, filepath.Join(root, "CLAUDE.md"), "# standing instructions\n")
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	carried := map[string]int{}
+	for _, c := range preview.Categories {
+		carried[c.Name] = c.Files
+	}
+	for _, want := range []string{CategoryMemory, CategorySkills, CategoryCommands} {
+		if carried[want] == 0 {
+			t.Errorf("no %s survived the budget; carried = %v", want, carried)
+		}
+	}
+	if preview.Bytes > profilesvc.MaxTotalBytes {
+		t.Errorf("preview promises %d bytes, over the cap", preview.Bytes)
+	}
+	// The bulk categories are what gets cut, not the configuration.
+	over := 0
+	for _, e := range preview.Excluded {
+		if e.Reason == ExcludeOverBudget {
+			over++
+			if strings.HasPrefix(e.Path, "skills/") || strings.HasPrefix(e.Path, "commands/") {
+				t.Errorf("%s was dropped for budget ahead of bulk files", e.Path)
+			}
+		}
+	}
+	if over == 0 {
+		t.Fatal("the fixture did not overrun the budget; the test proves nothing")
+	}
+}
+
+// TestInventoryDefaultIgnoresTransientDirs pins the second half of the
+// same fix: claude's run-time directories are dropped by default, as one
+// entry each rather than one per file, and the user's own ignore file can
+// take them back.
+func TestInventoryDefaultIgnoresTransientDirs(t *testing.T) {
+	root := setupClaudeRoot(t)
+	mustWrite(t, filepath.Join(root, "CLAUDE.md"), "# standing instructions\n")
+	for _, dir := range []string{"projects", "shell-snapshots", "statsig", "todos"} {
+		mustWrite(t, filepath.Join(root, dir, "a.jsonl"), "{}\n")
+		mustWrite(t, filepath.Join(root, dir, "b.jsonl"), "{}\n")
+	}
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Files != 1 {
+		t.Errorf("files = %d, want only CLAUDE.md", preview.Files)
+	}
+	// One entry for the directory, not one per file inside it.
+	if len(preview.Excluded) != 4 {
+		t.Fatalf("excluded = %+v, want one entry per transient directory", preview.Excluded)
+	}
+	for _, e := range preview.Excluded {
+		if e.Reason != ExcludeIgnored || !strings.Contains(e.Detail, "skipped by default") {
+			t.Errorf("exclusion %+v does not say it is an Aether default", e)
+		}
+	}
+
+	// The user's own file has the last word, gitignore-style.
+	mustWrite(t, filepath.Join(root, IgnoreFileName), "!projects/\n")
+	preview, err = Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Files != 3 {
+		t.Errorf("files = %d, want CLAUDE.md plus the two re-included files", preview.Files)
+	}
+}
+
+// TestInventoryCapsExclusions keeps a profile root full of dropped files
+// from shipping thousands of rows for a surface to render, while the
+// count stays exact.
+func TestInventoryCapsExclusions(t *testing.T) {
+	root := setupClaudeRoot(t)
+	mustWrite(t, filepath.Join(root, IgnoreFileName), "junk/\n")
+	for i := range maxExclusions + 25 {
+		mustWrite(t, filepath.Join(root, "junk", fmt.Sprintf("f%04d.txt", i)), "x")
+	}
+	// An ignored directory is reported once, so make each file its own
+	// ignore match instead.
+	mustWrite(t, filepath.Join(root, IgnoreFileName), "*.junk\n")
+	for i := range maxExclusions + 25 {
+		mustWrite(t, filepath.Join(root, fmt.Sprintf("f%04d.junk", i)), "x")
+	}
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Excluded) != maxExclusions {
+		t.Errorf("excluded = %d entries, want the %d cap", len(preview.Excluded), maxExclusions)
+	}
+	if preview.ExcludedTotal <= maxExclusions {
+		t.Errorf("excluded_total = %d, want the exact count above the cap", preview.ExcludedTotal)
 	}
 }

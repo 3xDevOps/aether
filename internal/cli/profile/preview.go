@@ -41,6 +41,12 @@ var categoryOrder = []string{
 	CategoryOther,
 }
 
+// maxExclusions bounds the exclusion list a preview carries, the same way
+// maxCategoryPaths bounds a category's. ExcludedTotal stays exact: a
+// profile root with thousands of dropped files should say so in one
+// number rather than ship thousands of rows for a surface to render.
+const maxExclusions = 200
+
 // maxCategoryPaths bounds the path list one category carries. Counts and
 // byte totals stay exact; a category that hit the cap says so, so neither
 // a huge profile nor the prompt built from it grows without limit.
@@ -83,11 +89,14 @@ type Preview struct {
 	// Present is false when this machine has no profile root for the
 	// harness at all - the normal answer for a harness the user does not
 	// use, not an error.
-	Present    bool        `json:"present"`
-	Files      int         `json:"files"`
-	Bytes      int64       `json:"bytes"`
-	Categories []Category  `json:"categories"`
-	Excluded   []Exclusion `json:"excluded"`
+	Present    bool       `json:"present"`
+	Files      int        `json:"files"`
+	Bytes      int64      `json:"bytes"`
+	Categories []Category `json:"categories"`
+	// Excluded is sorted and capped at maxExclusions; ExcludedTotal is
+	// how many there were.
+	Excluded      []Exclusion `json:"excluded"`
+	ExcludedTotal int         `json:"excluded_total"`
 	// Blocked is true when a push of this profile would be refused rather
 	// than partially carried. It covers every condition Discover aborts
 	// on, so a preview can never promise files a push then refuses.
@@ -187,6 +196,10 @@ func Inventory(ctx context.Context, harnessName string) (Preview, error) {
 		}
 	}
 	sort.Slice(preview.Excluded, func(i, j int) bool { return preview.Excluded[i].Path < preview.Excluded[j].Path })
+	preview.ExcludedTotal = len(preview.Excluded)
+	if len(preview.Excluded) > maxExclusions {
+		preview.Excluded = preview.Excluded[:maxExclusions]
+	}
 	return preview, nil
 }
 

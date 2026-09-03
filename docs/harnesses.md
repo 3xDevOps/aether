@@ -271,7 +271,8 @@ aether profile rollback --agent claude <snapshot-id>
 ```
 
 The local daemon (`aether daemon run`) does the push automatically on change;
-`--no-profile-sync` opts a machine out.
+`--no-profile-sync` opts a machine out. It logs one line per file it left
+behind, so an unattended push never drops a file silently.
 
 The dashboard does the same push without a terminal. Its onboarding wizard has
 an **Agents** step, and it runs on the same two guards: for each harness
@@ -285,8 +286,22 @@ stopped.
 
 - A push carries at most **1 MiB per file** and **20 MiB per snapshot**.
   Files over either limit are left behind rather than failing the push, and
-  both the preview and `aether profile push` name each one. They are decided
-  from the file size alone, so an oversized file is never read.
+  the preview, `aether profile push`, and the daemon's log name each one.
+  They are decided from the file size alone, so an oversized file is never
+  read.
+- The snapshot budget is spent by category, in this order: memory, skills,
+  commands, settings, MCP config, plugins, then everything else. Directory
+  order would otherwise decide it, and a plugin cache that sorts early would
+  crowd out the skills and commands the sync exists to carry.
+- Only regular files sync. A socket, named pipe, or device node inside a
+  profile root is reported and skipped without being opened - a named pipe
+  would otherwise block the read until something wrote to it.
+- **Default excludes.** Aether skips a harness's own run-time directories,
+  which hold transcripts and telemetry rather than configuration. For
+  `claude` those are `projects/`, `shell-snapshots/`, `statsig/` and
+  `todos/`. Each is reported once, as the directory. They are applied before
+  your `.aether-profile-ignore`, so that file has the last word: a line
+  `!projects/` in it syncs the directory anyway.
 
 `--allow-secret` has no dashboard equivalent, deliberately. A scanner finding
 refuses the push there and names the file and the line: the fix is on the

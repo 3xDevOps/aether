@@ -297,6 +297,7 @@ authority.
                 "detail":"credential file excluded for claude"},
                {"path":"notes/key.txt","reason":"secret",
                 "detail":"secret detected (aws-access-key) at line 3"}],
+   "excluded_total":2,
    "blocked":false}
   ```
 
@@ -307,9 +308,19 @@ authority.
   `truncated` set when it was cut; `files` and `bytes` stay exact.
   `reason` on an exclusion is `credential` (a denylisted basename),
   `secret` (a content-scanner finding), `ignored` (an
-  `.aether-profile-ignore` match), `symlink` (a link out of the profile
-  root), `too-large` (over the 1 MiB a push allows for one file), or
-  `over-budget` (the 20 MiB a snapshot holds was already filled).
+  `.aether-profile-ignore` match, or one of the per-harness defaults in
+  [harnesses.md](harnesses.md)), `symlink` (a link out of the profile
+  root), `not-regular` (a socket, named pipe, or device node, refused on
+  its mode without being opened), `too-large` (over the 1 MiB a push
+  allows for one file), or `over-budget` (the 20 MiB a snapshot holds was
+  already filled).
+- An ignored directory is reported once, as the directory, rather than
+  once per file inside it. `excluded` is capped at 200 entries;
+  `excluded_total` is the exact count.
+- The snapshot budget is spent by category priority - memory, skills,
+  commands, settings, mcp, plugins, other - not directory order, so the
+  files this feature exists to carry are not crowded out by whatever
+  sorts first.
 - The two size reasons are decided from the file's stat, before it is
   opened, so an oversized file is never read and never scanned. That is
   not only a saving: an agent's configuration directory routinely holds

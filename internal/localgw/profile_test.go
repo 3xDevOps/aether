@@ -364,8 +364,8 @@ func TestLocalProfileVerbParams(t *testing.T) {
 // on the server.
 func TestLocalProfilePushReportsSkipped(t *testing.T) {
 	profileHome(t, map[string]string{
-		"CLAUDE.md":           "# standing instructions\n",
-		"projects/huge.jsonl": strings.Repeat("x", profilesvc.MaxFileBytes+1),
+		"CLAUDE.md":        "# standing instructions\n",
+		"notes/huge.jsonl": strings.Repeat("x", profilesvc.MaxFileBytes+1),
 	})
 	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
 		results: map[string]json.RawMessage{protocol.MethodProfilePush: pushResultJSON(t, "sha1")},
@@ -390,7 +390,7 @@ func TestLocalProfilePushReportsSkipped(t *testing.T) {
 	if got.Files != 1 {
 		t.Errorf("files = %d, want only the file under the cap", got.Files)
 	}
-	if len(got.Skipped) != 1 || got.Skipped[0].Path != "projects/huge.jsonl" ||
+	if len(got.Skipped) != 1 || got.Skipped[0].Path != "notes/huge.jsonl" ||
 		got.Skipped[0].Reason != profile.ExcludeTooLarge {
 		t.Fatalf("skipped = %+v", got.Skipped)
 	}

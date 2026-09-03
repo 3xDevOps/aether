@@ -36,3 +36,16 @@ func (m *ignoreMatcher) ignored(rel string) bool {
 	}
 	return m.gi.MatchesPath(path.Clean(rel))
 }
+
+// ignoredDir reports whether a directory is excluded. A `projects/`
+// pattern is directory-only, and the matcher cannot tell a directory from
+// a file by its path alone, so the trailing slash is supplied here.
+// Matching the directory lets the walk skip the whole subtree and report
+// it as one entry, instead of walking it to produce one entry per file.
+func (m *ignoreMatcher) ignoredDir(rel string) bool {
+	if m == nil || m.gi == nil || rel == "" || rel == "." {
+		return false
+	}
+	clean := path.Clean(rel)
+	return m.gi.MatchesPath(clean) || m.gi.MatchesPath(clean+"/")
+}

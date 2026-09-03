@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -13,13 +14,14 @@ import (
 )
 
 // Why a file was left out of a push. Discover turns secret and symlink
-// into a blocking error; Inventory reports all four to the user.
+// into a blocking error; Inventory reports every reason to the user.
 const (
 	// ExcludeCredential is a basename on the harness credential denylist.
 	ExcludeCredential = "credential"
 	// ExcludeSecret is a content-scanner finding.
 	ExcludeSecret = "secret"
-	// ExcludeIgnored is a .aether-profile-ignore match.
+	// ExcludeIgnored is a .aether-profile-ignore match, or one of the
+	// per-harness defaults below.
 	ExcludeIgnored = "ignored"
 	// ExcludeSymlink is a symlink pointing outside the profile root.
 	ExcludeSymlink = "symlink"
@@ -28,12 +30,29 @@ const (
 	// keeps a profile root full of multi-megabyte transcripts from
 	// costing minutes of regex time to preview.
 	ExcludeTooLarge = "too-large"
-	// ExcludeOverBudget is a file left out because the files before it
+	// ExcludeOverBudget is a file left out because higher-priority files
 	// already filled the server's per-snapshot cap.
 	ExcludeOverBudget = "over-budget"
+	// ExcludeNotRegular is a socket, FIFO, or device node. Opening one is
+	// not merely useless: a FIFO blocks until something writes to it, and
+	// nothing can interrupt a blocked read, so it is refused on its mode.
+	ExcludeNotRegular = "not-regular"
 )
 
-// visited is one file the walk classified. Reason is empty for a file
+// defaultIgnores are the gitignore-style patterns Aether applies to a
+// harness before the user's own .aether-profile-ignore. These are the
+// directories a harness writes to as it runs - transcripts, shell
+// snapshots, telemetry - rather than anything the user configured. They
+// are large enough to spend the whole per-snapshot budget, and none of it
+// is configuration another machine wants.
+//
+// They come first, so a user's ignore file overrides them the way
+// gitignore does: a later `!projects/` re-includes what this dropped.
+var defaultIgnores = map[string][]string{
+	"claude": {"projects/", "shell-snapshots/", "statsig/", "todos/"},
+}
+
+// visited is one entry the walk classified. Reason is empty for a file
 // that would be pushed; otherwise it is one of the Exclude constants and
 // Detail says which rule fired.
 type visited struct {
@@ -49,36 +68,73 @@ type visited struct {
 	Finding Finding
 }
 
+// candidate is a file that survived pass one: everything about it is
+// known except its content.
+type candidate struct {
+	rel      string
+	abs      string
+	mode     uint32
+	size     int64
+	priority int
+}
+
 // walkRoot walks a harness profile root once, applying the same rules a
-// push applies - credential denylist, .aether-profile-ignore, symlink
-// escape rejection, size caps, content scan - and hands every file to
-// visit with its verdict. allowed names files whose scanner findings pass
-// (the CLI's --allow-secret); Inventory passes none. A visit error aborts
-// the walk and is returned unchanged, which is how Discover stops at the
-// first blocking finding.
+// push applies - default and user ignores, credential denylist, symlink
+// escape rejection, regular-file check, size caps, content scan - and
+// hands every entry to visit with its verdict. allowed names files whose
+// scanner findings pass (the CLI's --allow-secret); Inventory passes
+// none. A visit error aborts the walk and is returned unchanged, which is
+// how Discover stops at the first blocking finding.
+//
+// It runs in two passes. The first stats and classifies the tree without
+// opening anything. The second reads what survived, in category priority
+// order, so the per-snapshot budget is spent on the configuration this
+// feature exists to carry - memory, skills, commands - rather than on
+// whatever a directory listing happens to put first.
 //
 // The walk checks ctx between entries: a profile root can hold thousands
 // of files, so a caller that has gone away - a closed HTTP request, a
 // closed scan socket - must be able to stop the work rather than leave it
 // running against the user's home directory.
 func walkRoot(ctx context.Context, root string, prof harness.Profile, allowed map[string]bool, visit func(visited) error) error {
+	matcher, err := rootMatcher(root, prof.Name)
+	if err != nil {
+		return err
+	}
+	candidates, err := classifyRoot(ctx, root, prof, matcher, visit)
+	if err != nil {
+		return err
+	}
+	return readCandidates(ctx, candidates, allowed, visit)
+}
+
+// rootMatcher compiles the harness defaults followed by the user's own
+// .aether-profile-ignore, so the user's file has the last word.
+func rootMatcher(root, harnessName string) (*ignoreMatcher, error) {
+	lines := append([]string(nil), defaultIgnores[harnessName]...)
+	data, err := os.ReadFile(filepath.Join(root, IgnoreFileName))
+	switch {
+	case err == nil:
+		lines = append(lines, strings.Split(string(data), "\n")...)
+	case !os.IsNotExist(err):
+		return nil, err
+	}
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	return parseIgnoreFile([]byte(strings.Join(lines, "\n"))), nil
+}
+
+// classifyRoot is pass one: it stats every entry, reports the ones no
+// push would carry, and returns the rest for pass two. Nothing is opened
+// here, so a tree of transcripts costs one stat each.
+func classifyRoot(ctx context.Context, root string, prof harness.Profile, matcher *ignoreMatcher, visit func(visited) error) ([]candidate, error) {
 	rootResolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		rootResolved = root
 	}
-	ignoreData, err := os.ReadFile(filepath.Join(root, IgnoreFileName))
-	var matcher *ignoreMatcher
-	switch {
-	case err == nil:
-		matcher = parseIgnoreFile(ignoreData)
-	case !os.IsNotExist(err):
-		return err
-	}
-	// total is the size of everything the walk has accepted so far, so a
-	// tree that would blow the per-snapshot cap stops costing time (and
-	// promising files) at the point the server would stop accepting them.
-	var total int64
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	var out []candidate
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -108,7 +164,13 @@ func walkRoot(ctx context.Context, root string, prof harness.Profile, allowed ma
 			return nil
 		}
 		if d.IsDir() {
-			if matcher != nil && matcher.ignored(relSlash) {
+			if matcher != nil && matcher.ignoredDir(relSlash) {
+				// One entry for the directory rather than one per file
+				// inside it: the user needs to know the directory was
+				// dropped, not to scroll a transcript archive.
+				if err := visit(visited{Rel: relSlash, Abs: path, Reason: ExcludeIgnored, Detail: ignoreDetail(prof.Name, relSlash)}); err != nil {
+					return err
+				}
 				return fs.SkipDir
 			}
 			return nil
@@ -116,13 +178,21 @@ func walkRoot(ctx context.Context, root string, prof harness.Profile, allowed ma
 		if filepath.Base(relSlash) == IgnoreFileName {
 			return nil
 		}
+		// A socket, FIFO, or device node is refused on its mode alone.
+		// os.ReadFile on a FIFO blocks until a writer appears, and the
+		// context check above runs only between entries, so one of these
+		// would hang the walk for good on an fd nothing can reclaim.
+		if !info.Mode().IsRegular() {
+			return visit(visited{Rel: relSlash, Abs: path, Reason: ExcludeNotRegular,
+				Detail: "not a regular file (" + irregularKind(info.Mode()) + ")"})
+		}
 		if profilesvc.DeniedBasename(relSlash, prof.DenyNames) {
 			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeCredential, Detail: "credential file excluded for " + prof.Name})
 		}
 		if matcher != nil && matcher.ignored(relSlash) {
-			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeIgnored, Detail: IgnoreFileName})
+			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeIgnored, Detail: ignoreDetail(prof.Name, relSlash)})
 		}
-		// The size caps are applied from the stat, before the file is
+		// The per-file cap is applied from the stat, before the file is
 		// opened. The server refuses these files anyway, so reading one
 		// buys nothing - and reading it would also hand it to the secret
 		// scanner, whose cost grows sharply with size. A profile root
@@ -132,30 +202,104 @@ func walkRoot(ctx context.Context, root string, prof harness.Profile, allowed ma
 			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeTooLarge,
 				Detail: fmt.Sprintf("%d bytes, over the %d-byte limit for one file", info.Size(), profilesvc.MaxFileBytes)})
 		}
-		if total+info.Size() > profilesvc.MaxTotalBytes {
-			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeOverBudget,
-				Detail: fmt.Sprintf("the %d-byte limit for one snapshot was already reached", profilesvc.MaxTotalBytes)})
+		out = append(out, candidate{
+			rel:      relSlash,
+			abs:      path,
+			mode:     uint32(info.Mode().Perm()),
+			size:     info.Size(),
+			priority: categoryRank(Classify(relSlash)),
+		})
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	return out, nil
+}
+
+// readCandidates is pass two: it reads and scans what pass one kept, in
+// category priority order, spending the per-snapshot budget on the
+// highest-priority files first. Directory order would otherwise decide
+// it, and on a real profile root that means transcripts and plugin
+// caches crowd out every skill and command the user actually wrote.
+func readCandidates(ctx context.Context, candidates []candidate, allowed map[string]bool, visit func(visited) error) error {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority < candidates[j].priority
 		}
-		content, err := os.ReadFile(path)
+		return candidates[i].rel < candidates[j].rel
+	})
+	var total int64
+	for _, c := range candidates {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if total+c.size > profilesvc.MaxTotalBytes {
+			err := visit(visited{Rel: c.rel, Abs: c.abs, Size: c.size, Reason: ExcludeOverBudget,
+				Detail: fmt.Sprintf("the %d-byte limit for one snapshot was already reached", profilesvc.MaxTotalBytes)})
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		content, err := os.ReadFile(c.abs)
 		if err != nil {
 			return err
 		}
-		total += info.Size()
-		file := visited{
-			Rel:     relSlash,
-			Abs:     path,
-			Mode:    uint32(info.Mode().Perm()),
-			Size:    info.Size(),
-			Content: content,
-		}
-		if findings := scanContent(relSlash, content); len(findings) > 0 && !allowed[relSlash] && !allowed[path] {
+		total += c.size
+		file := visited{Rel: c.rel, Abs: c.abs, Mode: c.mode, Size: c.size, Content: content}
+		if findings := scanContent(c.rel, content); len(findings) > 0 && !allowed[c.rel] && !allowed[c.abs] {
 			file.Content = nil
 			file.Reason = ExcludeSecret
 			file.Finding = findings[0]
 			file.Detail = "secret detected (" + findings[0].Kind + ")"
 		}
-		return visit(file)
-	})
+		if err := visit(file); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// categoryRank orders the categories the budget is spent on: the
+// configuration a developer wrote first, the caches a harness generated
+// last. It follows categoryOrder, so adding a category in one place
+// cannot leave the other behind.
+func categoryRank(category string) int {
+	for i, name := range categoryOrder {
+		if name == category {
+			return i
+		}
+	}
+	return len(categoryOrder)
+}
+
+// ignoreDetail says which rule dropped a path: one Aether ships for this
+// harness, or the user's own file. They are compiled together, so the
+// answer is whether a default pattern names this path at all.
+func ignoreDetail(harnessName, rel string) string {
+	for _, pattern := range defaultIgnores[harnessName] {
+		if strings.HasPrefix(rel+"/", strings.TrimSuffix(pattern, "/")+"/") {
+			return "skipped by default for " + harnessName + " (" + pattern +
+				"); add !" + pattern + " to " + IgnoreFileName + " to include it"
+		}
+	}
+	return IgnoreFileName
+}
+
+// irregularKind names the file type for the exclusion message, so the
+// user can tell a stray socket from a device node.
+func irregularKind(mode os.FileMode) string {
+	switch {
+	case mode&os.ModeSocket != 0:
+		return "socket"
+	case mode&os.ModeNamedPipe != 0:
+		return "named pipe"
+	case mode&os.ModeDevice != 0:
+		return "device"
+	default:
+		return "irregular"
+	}
 }
 
 func escapesRoot(root, target string) bool {
