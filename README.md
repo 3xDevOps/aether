@@ -1,4 +1,26 @@
+<div align="center">
+
+<img src="docs/media/aether-mark.png" alt="Aether logo" width="96">
+
 # Aether - Unified Agent Runtime
+
+**A self-hosted development environment for AI coding agents running in the cloud.**
+
+[![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-6EE7D6?style=flat-square)](go.mod)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-4A6FA5?style=flat-square)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/3xDevOps/aether?include_prereleases&style=flat-square&color=4A6FA5)](https://github.com/3xDevOps/aether/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/3xDevOps/aether/ci.yml?branch=main&style=flat-square)](https://github.com/3xDevOps/aether/actions/workflows/ci.yml)
+![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-FF9D6B?style=flat-square)
+
+[Quickstart](docs/quickstart.md) · [Install](docs/install.md) · [Docs](docs/) · [Contributing](CONTRIBUTING.md)
+
+<!-- Goes live once docs/media/demo.gif exists. Shot list and recording recipe: docs/media/README.md.
+![Aether demo](docs/media/demo.gif)
+-->
+
+</div>
+
+---
 
 Aether is a **self-hosted** development environment for AI coding agents running in the cloud. It offers agent-agnostic sandboxed environments that can be hosted **anywhere** and be controlled by **anyone** on your team.
 
@@ -13,19 +35,7 @@ an agent login come first. The [quickstart](docs/quickstart.md) is the real
 path. The install script covers Linux and macOS; Windows clients download the
 release binary ([install.md](docs/install.md#manual-install)).
 
-**Status:** pre-alpha, under active development.
 [10-minute quickstart →](docs/quickstart.md)
-
-<!-- DEMO GIF PLACEHOLDER
-     No demo recording exists yet, and none is faked here.
-     Recording instructions: docs/media/README.md
-     When one exists, replace this comment with:
-     ![Aether demo](docs/media/demo.gif)
--->
-
-> **Demo recording wanted.** A short screen capture of launch → watch → pull
-> belongs here. [docs/media/README.md](docs/media/README.md) has the shot list
-> and the recording recipe.
 
 ## Why
 
