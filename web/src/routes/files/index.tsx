@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, File, Folder, FolderTree } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
