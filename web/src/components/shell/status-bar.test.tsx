@@ -8,6 +8,7 @@ import {
   serverInfo,
   serverUpdateStatus,
   updateStatus,
+  vera,
 } from '@/test/fixtures'
 
 /** The desktop gateway's descriptor, carrying the update verbs. */
@@ -91,8 +92,8 @@ describe('the server update notice', () => {
     expect(screen.getByText(notice)).toBeTruthy()
   })
 
-  test('says the update is applying once it starts', () => {
-    seed({ self: bob })
+  test('says the update is applying once it starts, to a viewer too', () => {
+    seed({ self: vera })
     useStore.getState().applyServerUpdate({ phase: 'applying', version: 'v1.3.0' })
     render(<StatusBar />)
 

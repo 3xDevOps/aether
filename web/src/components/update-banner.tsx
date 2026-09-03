@@ -24,6 +24,7 @@ import { bareVersion, message } from '@/lib/format'
 import type {
   ServerUpdatePayload,
   ServerUpdateStatus,
+  ServerUpdateWaiting,
   ServerUpdateWhen,
   UpdateApplyResult,
   UpdateBuildStatus,
@@ -79,10 +80,15 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
   const update = useStore((s) => s.update)
   const setUpdate = useStore((s) => s.setUpdate)
   const setServerUpdate = useStore((s) => s.setServerUpdate)
-  // Re-read whenever server.info names a different version: that is the
-  // signal the restart is over, and the fresh status is what makes the
-  // banner disappear once the server is current.
+  const setServerUpdateFailed = useStore((s) => s.setServerUpdateFailed)
+  // Re-read whenever the connection changes state or server.info names a
+  // different version. The reconnect is the one that matters: a server
+  // that updates itself re-executes, the socket drops, and the fresh
+  // status is what ends the banner and the status bar's notice. A read
+  // that failed is retried by the same rule, plus the banner's Retry.
   const serverVersion = useStore((s) => s.info?.server_version)
+  const connection = useStore((s) => s.connection)
+  const [statusReads, setStatusReads] = useState(0)
 
   useEffect(() => {
     if (!serves) return
@@ -108,14 +114,24 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
       .then((status) => {
         if (live) setServerUpdate(status)
       })
-      // A server too old to serve the method, or one that could not reach
-      // the release feed, leaves the older banner in place; the failure is
-      // not worth a prompt of its own.
-      .catch(() => {})
+      .catch((err) => {
+        // Recorded rather than swallowed: the banner has to say it could
+        // not read the status instead of claiming the server cannot
+        // update itself, which is a different thing entirely.
+        if (live) setServerUpdateFailed(message(err))
+      })
     return () => {
       live = false
     }
-  }, [readsServerUpdate, serverVersion, client, setServerUpdate])
+  }, [
+    readsServerUpdate,
+    serverVersion,
+    connection,
+    statusReads,
+    client,
+    setServerUpdate,
+    setServerUpdateFailed,
+  ])
 
   return (
     <>
@@ -127,7 +143,7 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
       {serves && update && <CliBanner update={update} client={client} />}
       {/* Not gated on `update.check`: the server answers for itself, so an
           admin on any gateway can act on it. */}
-      <ServerBanner client={client} />
+      <ServerBanner client={client} onRetry={() => setStatusReads((n) => n + 1)} />
     </>
   )
 }
@@ -462,13 +478,52 @@ function activeRunCount(
 }
 
 /**
- * Why the buttons are missing. The server's own reason is kept verbatim -
- * on the documented unprivileged install it names the binary directory -
- * because that is the part an admin acts on.
+ * Why the buttons are missing, in the terms the dashboard can defend.
+ * Three different things end up here and only one of them is the server
+ * saying it cannot update itself: the status read may have failed, and a
+ * gateway may not carry the method at all. Claiming the first for either
+ * of the others would be a friendlier sentence that is not true.
  */
-function incapableLine(status: ServerUpdateStatus | null): string {
-  const reason = status?.incapable ? `: ${status.incapable}` : ''
-  return `The server cannot update itself${reason}. Run these on the server host:`
+function noButtonsLine(
+  status: ServerUpdateStatus | null,
+  error: string | null,
+): string {
+  if (status) {
+    const reason = status.incapable ? `: ${status.incapable}` : ''
+    return `The server cannot update itself${reason}. Run these on the server host:`
+  }
+  if (error) {
+    return `The dashboard could not read the server's update status: ${error}. Run these on the server host:`
+  }
+  return 'The dashboard cannot update the server. Run these on the server host:'
+}
+
+/**
+ * What a pending update is still waiting for. The scheduled line says "no
+ * run is active", but an open workspace shell holds an update back too -
+ * it has no container to reattach to - and an admin whose update never
+ * fires needs to see that here rather than in `aether server update
+ * --status`. Paused runs are left out: they hold nothing back.
+ */
+function waitingLine(waiting: ServerUpdateWaiting | undefined): string {
+  if (!waiting) return ''
+  const parts: string[] = []
+  if (waiting.runs > 0) {
+    parts.push(`${waiting.runs} ${waiting.runs === 1 ? 'run' : 'runs'}`)
+  }
+  if (waiting.shells > 0) {
+    parts.push(`${waiting.shells} open ${waiting.shells === 1 ? 'shell' : 'shells'}`)
+  }
+  return parts.length ? `Waiting for ${parts.join(' and ')}.` : ''
+}
+
+/** What the confirm dialog says a restart costs, with the live run count. */
+function confirmLine(active: number): string {
+  if (active === 0) {
+    return 'No runs are active right now. Attached terminals reconnect on their own.'
+  }
+  const runs = active === 1 ? '1 run is' : `${active} runs are`
+  return `${runs} active right now. They keep running: the server reattaches to their containers when it comes back, and attached terminals reconnect on their own.`
 }
 
 /** The commands to run on a server that cannot update itself. */
@@ -490,9 +545,10 @@ function manualCommands(status: ServerUpdateStatus | null): string[] {
  * the server host, as it has always been. A server too old to answer the
  * method at all keeps that older banner too.
  */
-function ServerBanner({ client }: { client: Api }) {
+function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void }) {
   const update = useStore((s) => s.update)
   const status = useStore((s) => s.serverUpdate)
+  const statusError = useStore((s) => s.serverUpdateError)
   const progress = useStore((s) => s.serverUpdateProgress)
   const applyProgress = useStore((s) => s.applyServerUpdate)
   const members = useStore((s) => s.members)
@@ -544,6 +600,7 @@ function ServerBanner({ client }: { client: Api }) {
 
   const capable = status?.capable ?? false
   const active = activeRunCount(runs, pausedRuns)
+  const waiting = waitingLine(status?.waiting)
   // The feed and the pending row both name the member by id; a member the
   // store has never seen falls back to that id rather than to nobody.
   const scheduledBy =
@@ -564,10 +621,13 @@ function ServerBanner({ client }: { client: Api }) {
           </p>
         )}
         {flow.name === 'scheduled' && (
-          <p className="text-muted-foreground">
-            Update to {flow.version || latest} scheduled by {scheduledBy}, applies
-            when no run is active.
-          </p>
+          <>
+            <p className="text-muted-foreground">
+              Update to {flow.version || latest} scheduled by {scheduledBy}, applies
+              when no run is active.
+            </p>
+            {waiting && <p className="text-muted-foreground">{waiting}</p>}
+          </>
         )}
         {flow.name === 'applying' && (
           <p className="text-muted-foreground">
@@ -592,7 +652,9 @@ function ServerBanner({ client }: { client: Api }) {
         {(!capable || flow.name === 'failed') && (
           <>
             <p className="text-muted-foreground">
-              {capable ? 'Run these on the server host instead:' : incapableLine(status)}
+              {capable
+                ? 'Run these on the server host instead:'
+                : noButtonsLine(status, statusError)}
             </p>
             <div className="space-y-1">
               {manualCommands(status).map((command) => (
@@ -602,6 +664,13 @@ function ServerBanner({ client }: { client: Api }) {
           </>
         )}
       </div>
+      {!status && statusError && (
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      )}
       {canUpdate && capable && (
         <div className="flex items-center gap-2">
           {flow.name === 'scheduled' ? (
@@ -637,11 +706,7 @@ function ServerBanner({ client }: { client: Api }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Update the server to {latest}?</DialogTitle>
-            <DialogDescription>
-              {active === 1 ? '1 run is' : `${active} runs are`} active right now.
-              They keep running: the server reattaches to their containers when it
-              comes back, and attached terminals reconnect on their own.
-            </DialogDescription>
+            <DialogDescription>{confirmLine(active)}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirming(false)}>

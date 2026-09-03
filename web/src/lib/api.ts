@@ -396,13 +396,10 @@ export const api = {
   /** Whether the server can replace its own binaries, and what update is
    * in flight. Any member may read it; only an admin may call server.update. */
   serverUpdateStatus: () => call<ServerUpdateStatus>('server.update_status'),
-  /** Asks the server to update itself now, at the next idle moment, or to
-   * cancel the pending one. Latest release unless a version is named. */
-  serverUpdate: (when: ServerUpdateWhen, version?: string) =>
-    call<ServerUpdateResult>('server.update', {
-      when,
-      ...(version ? { version } : {}),
-    }),
+  /** Asks the server to update itself to the latest release now, at the
+   * next idle moment, or to cancel the pending one. */
+  serverUpdate: (when: ServerUpdateWhen) =>
+    call<ServerUpdateResult>('server.update', { when }),
   // Admin and membership: invites, approvals, colors, workspaces.
   memberInvite: (ttlSeconds?: number) =>
     call<{ code: string; expires_at: string }>('member.invite', {

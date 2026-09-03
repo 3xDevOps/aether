@@ -29,6 +29,14 @@ const phaseOrder: Record<ServerUpdatePhase, number> = {
 }
 
 /**
+ * Whether an update the client is watching is still going. A terminal
+ * phase - failed, or cancelled - is over, and so is no phase at all.
+ */
+export function serverUpdateInFlight(progress: ServerUpdatePayload | null): boolean {
+  return progress !== null && phaseOrder[progress.phase] > 0
+}
+
+/**
  * Whether a frame would move one update backwards. The server.update RPC
  * result and the event it publishes race, and the events arrive once per
  * workspace, so the same phase lands several times: without this a late
@@ -61,6 +69,12 @@ export interface ServerSlice {
   /** The last server.update_status answer; null until the update banner
    * host reads it, and on a server too old to serve the method. */
   serverUpdate: ServerUpdateStatus | null
+  /**
+   * Why the last status read failed, or null. It is what separates a
+   * server that answered "I cannot update myself" from one the dashboard
+   * never reached, which are two different things to tell an admin.
+   */
+  serverUpdateError: string | null
   /** How far the running self-update has got, from the server.update feed
    * and the RPC results. Session-scoped: a reload re-reads the status. */
   serverUpdateProgress: ServerUpdatePayload | null
@@ -73,7 +87,9 @@ export interface ServerSlice {
   setHydrated: (hydrated: boolean, error?: string | null) => void
   setStreamDead: () => void
   setUnreachable: (kind: UnreachableKind | null) => void
-  setServerUpdate: (status: ServerUpdateStatus | null) => void
+  setServerUpdate: (status: ServerUpdateStatus) => void
+  /** Records a failed status read, keeping the last good answer. */
+  setServerUpdateFailed: (detail: string) => void
   /** Applies one update phase, from an event or from an RPC result. */
   applyServerUpdate: (payload: ServerUpdatePayload) => void
   resetConnection: () => void
@@ -89,6 +105,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => ({
   streamDead: false,
   unreachable: null,
   serverUpdate: null,
+  serverUpdateError: null,
   serverUpdateProgress: null,
   setInfo: (info) => set({ info }),
   setCapabilities: (capabilities) => set({ capabilities }),
@@ -103,18 +120,19 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => ({
   setServerUpdate: (serverUpdate) =>
     set((s) => ({
       serverUpdate,
-      // The status is re-read when server.info names a new version, which
-      // is how an update ends: a server already running the version the
-      // phases were about has finished, so the progress is history and
-      // must stop saying a restart is coming.
+      serverUpdateError: null,
+      // The status is re-read on every reconnect, which is how an update
+      // ends: a server already running the version the phases were about
+      // has finished, so the progress is history and must stop saying a
+      // restart is coming.
       serverUpdateProgress:
-        serverUpdate &&
         s.serverUpdateProgress &&
         bareVersion(s.serverUpdateProgress.version ?? '') ===
           bareVersion(serverUpdate.server_version)
           ? null
           : s.serverUpdateProgress,
     })),
+  setServerUpdateFailed: (serverUpdateError) => set({ serverUpdateError }),
   applyServerUpdate: (payload) =>
     set((s) =>
       stalePhase(s.serverUpdateProgress, payload)
