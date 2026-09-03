@@ -115,13 +115,24 @@ func (c Config) knownHostsPath() string {
 	return defaultPath(".ssh", "known_hosts")
 }
 
-// Path is the linked-server config file: ~/.config/aether/config.json on
+// ConfigDirEnv names the directory that holds config.json when set,
+// ahead of the platform lookup. It is one variable on every platform,
+// where os.UserConfigDir reads HOME on macOS, XDG_CONFIG_HOME on Linux,
+// and AppData on Windows; tests set it so the file they write never
+// depends on which of those their platform consults.
+const ConfigDirEnv = "AETHER_CONFIG_DIR"
+
+// Path is the linked-server config file: $AETHER_CONFIG_DIR/aether/config.json
+// when that variable is set, otherwise ~/.config/aether/config.json on
 // Linux, ~/Library/Application Support/aether/config.json on macOS, and
 // %AppData%\aether\config.json on Windows.
 func Path() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("cli: config dir: %w", err)
+	dir := os.Getenv(ConfigDirEnv)
+	if dir == "" {
+		var err error
+		if dir, err = os.UserConfigDir(); err != nil {
+			return "", fmt.Errorf("cli: config dir: %w", err)
+		}
 	}
 	return filepath.Join(dir, "aether", "config.json"), nil
 }

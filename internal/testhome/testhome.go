@@ -15,12 +15,19 @@ import (
 	"testing"
 )
 
+// ConfigDirEnv mirrors cli.ConfigDirEnv, the one variable cli.Path reads
+// ahead of every platform lookup. The name is repeated here because the
+// cli package's own tests import this one.
+const ConfigDirEnv = "AETHER_CONFIG_DIR"
+
 // Isolate points every home and config lookup at a fresh temporary
 // directory for the rest of the test and returns that directory. It
 // fails the test if os.UserConfigDir or os.UserHomeDir still resolve
-// outside it. SSH_AUTH_SOCK is cleared so key discovery never reaches a
-// real agent; Windows tests that must also ignore the OpenSSH pipe stub
-// the agent transport in the cli package.
+// outside it. AETHER_CONFIG_DIR is set as well, so the linked-server
+// config lands inside the directory even if a platform lookup were
+// missed. SSH_AUTH_SOCK is cleared so key discovery never reaches a real
+// agent; Windows tests that must also ignore the OpenSSH pipe stub the
+// agent transport in the cli package.
 func Isolate(t testing.TB) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -28,6 +35,7 @@ func Isolate(t testing.TB) string {
 	t.Setenv("USERPROFILE", dir)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
 	t.Setenv("AppData", filepath.Join(dir, "AppData", "Roaming"))
+	t.Setenv(ConfigDirEnv, filepath.Join(dir, "config"))
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	home, err := os.UserHomeDir()

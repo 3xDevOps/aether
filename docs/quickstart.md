@@ -71,7 +71,8 @@ linked to <server-host>:2222 as admin (admin)
 whole account setup - there is no signup, no password, no config file to edit.
 The link is saved to `~/.config/aether/config.json` on Linux,
 `~/Library/Application Support/aether/config.json` on macOS, or
-`%AppData%\aether\config.json` on Windows. (Joining over a tailnet,
+`%AppData%\aether\config.json` on Windows; set `AETHER_CONFIG_DIR` to keep
+it somewhere else. (Joining over a tailnet,
 the display name comes from your tailnet login instead of the literal
 `admin`; the role is the same. Change any display color with
 `aether member color <#rrggbb>`.)

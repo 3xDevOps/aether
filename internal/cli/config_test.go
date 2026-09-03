@@ -206,7 +206,8 @@ func TestUpsertLink(t *testing.T) {
 }
 
 // useTempConfigDir isolates the config path and proves it landed inside
-// the scratch directory, whichever platform's lookup rules applied.
+// the scratch directory: testhome.Isolate sets AETHER_CONFIG_DIR, which
+// Path reads ahead of any platform lookup.
 func useTempConfigDir(t *testing.T) {
 	t.Helper()
 	dir := testhome.Isolate(t)
@@ -216,5 +217,30 @@ func useTempConfigDir(t *testing.T) {
 	}
 	if rel, err := filepath.Rel(dir, path); err != nil || strings.HasPrefix(rel, "..") {
 		t.Fatalf("config path %s escaped %s", path, dir)
+	}
+}
+
+// TestConfigDirEnvWinsOverPlatformLookup proves AETHER_CONFIG_DIR decides
+// the config path whatever HOME, XDG_CONFIG_HOME, and AppData say, and
+// that clearing it hands the decision back to the platform lookup.
+func TestConfigDirEnvWinsOverPlatformLookup(t *testing.T) {
+	home := testhome.Isolate(t)
+	pin := filepath.Join(home, "pinned")
+	t.Setenv(ConfigDirEnv, pin)
+	other := filepath.Join(home, "other")
+	t.Setenv("HOME", other)
+	t.Setenv("USERPROFILE", other)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(other, ".config"))
+	t.Setenv("AppData", filepath.Join(other, "AppData", "Roaming"))
+	if got, err := Path(); err != nil || got != filepath.Join(pin, "aether", "config.json") {
+		t.Fatalf("Path with %s = %q, %v; want the pin", ConfigDirEnv, got, err)
+	}
+	t.Setenv(ConfigDirEnv, "")
+	got, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got, other) {
+		t.Fatalf("Path without %s = %q, want one under %s", ConfigDirEnv, got, other)
 	}
 }

@@ -18,8 +18,9 @@ func writeTestFile(path, content string) error {
 }
 
 // useTempConfigDir keeps cli.Save/cli.Load away from the real user
-// config directory on every platform and proves the path landed inside
-// the scratch home.
+// config directory: testhome.Isolate sets AETHER_CONFIG_DIR, which
+// cli.Path reads ahead of every platform lookup, and this proves the
+// resolved path landed inside the scratch home.
 func useTempConfigDir(t *testing.T) {
 	t.Helper()
 	dir := testhome.Isolate(t)
@@ -70,6 +71,79 @@ func TestLinkRepoSetsRemoteAndSavesConfig(t *testing.T) {
 	}
 	if got := git(t, repo, "remote", "get-url", "aether"); got != url2 {
 		t.Fatalf("remote url after relink = %q, want %q", got, url2)
+	}
+}
+
+// TestLinkRepoLeavesRealConfigAlone stands a sentinel config where the
+// platform lookup says the user's real one lives (a scratch stand-in,
+// never the developer's own), isolates the test, then points HOME,
+// XDG_CONFIG_HOME, and AppData back at the sentinel. AETHER_CONFIG_DIR
+// still names the scratch directory, and LinkRepo must write only there.
+// This guards against the macOS overwrite an earlier helper caused by
+// setting XDG_CONFIG_HOME and AppData alone.
+func TestLinkRepoLeavesRealConfigAlone(t *testing.T) {
+	requireGit(t)
+	real := t.TempDir()
+	t.Setenv("HOME", real)
+	t.Setenv("USERPROFILE", real)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(real, ".config"))
+	t.Setenv("AppData", filepath.Join(real, "AppData", "Roaming"))
+	t.Setenv(testhome.ConfigDirEnv, "")
+	realPath, err := cli.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel, rerr := filepath.Rel(real, realPath); rerr != nil || strings.HasPrefix(rel, "..") {
+		t.Fatalf("stand-in real config %s is outside %s", realPath, real)
+	}
+	if err = os.MkdirAll(filepath.Dir(realPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := "{\"addr\":\"sentinel:2222\"}\n"
+	if err = os.WriteFile(realPath, []byte(sentinel), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	useTempConfigDir(t)
+	pinned, err := cli.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned == realPath {
+		t.Fatalf("isolation reused the stand-in real path %s", realPath)
+	}
+	// Every platform lookup names the stand-in again; only the dedicated
+	// variable still points at the scratch directory.
+	t.Setenv("HOME", real)
+	t.Setenv("USERPROFILE", real)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(real, ".config"))
+	t.Setenv("AppData", filepath.Join(real, "AppData", "Roaming"))
+	if dir, derr := os.UserConfigDir(); derr != nil || !strings.HasPrefix(realPath, dir) {
+		t.Fatalf("platform lookup does not point at the stand-in: dir %q err %v", dir, derr)
+	}
+
+	repo := t.TempDir()
+	git(t, repo, "init")
+	if _, _, err = LinkRepo(cli.Config{Addr: "host:2222", User: "alice"}, repo, "ws_1"); err != nil {
+		t.Fatalf("LinkRepo: %v", err)
+	}
+	if _, _, err = LinkRepo(cli.Config{Addr: "other:2222", User: "alice"}, repo, "ws_2"); err != nil {
+		t.Fatalf("second LinkRepo: %v", err)
+	}
+
+	got, err := os.ReadFile(realPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != sentinel {
+		t.Fatalf("LinkRepo rewrote the stand-in real config %s:\n%s", realPath, got)
+	}
+	saved, err := os.ReadFile(pinned)
+	if err != nil {
+		t.Fatalf("pinned config %s not written: %v", pinned, err)
+	}
+	if !strings.Contains(string(saved), "other:2222") {
+		t.Fatalf("pinned config = %s", saved)
 	}
 }
 
