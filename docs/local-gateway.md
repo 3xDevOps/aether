@@ -216,16 +216,19 @@ server was not told where the data directory is, or the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
 zero anywhere else).
 
-### `run.patch` and `server.disk` on the control channel
+### `run.patch`, `server.disk`, and files on the control channel
 
-The two `GET` endpoints above are backed by SSH control-channel methods,
-because this gateway proxies the whole API shape over SSH and needs both
-reads without a listener on the server.
+The two `GET` endpoints above and the files methods below are backed by SSH
+control-channel methods, because this gateway proxies the whole API shape over
+SSH and needs these reads without a listener on the server.
 
 | Method | Params | Result |
 | --- | --- | --- |
 | `run.patch` | `RunIDParams` (`{"run_id":"..."}`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+| `files.tree` | `FilesTreeParams` (`{"workspace_id":"...","run_id":"...","path":"src"}`; `run_id` optional) | `FilesTreeResult` - immediate file and directory entries |
+| `files.read` | `FilesReadParams` (`{"workspace_id":"...","run_id":"...","path":"README.md"}`; `run_id` optional) | `FilesReadResult` - read-only content, size, binary, and truncation |
+| `files.diff` | `FilesDiffParams` (`{"run_id":"...","path":"README.md"}`) | `FilesDiffResult` - one file's patch against the run base |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit.

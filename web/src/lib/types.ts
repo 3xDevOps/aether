@@ -219,6 +219,31 @@ export interface RunPatch {
   truncated: boolean
 }
 
+/** One immediate child returned by files.tree. */
+export interface FileTreeEntry {
+  name: string
+  kind: 'file' | 'dir'
+  size: number
+}
+
+export interface FilesTreeResult {
+  entries: FileTreeEntry[]
+}
+
+/** One files.read response. */
+export interface FileRead {
+  content: string
+  truncated: boolean
+  binary: boolean
+  size: number
+}
+
+/** One files.diff response. */
+export interface FileDiff {
+  patch: string
+  truncated: boolean
+}
+
 /** Wire form of a task template (internal/protocol/template.go). */
 export interface Template {
   id: string

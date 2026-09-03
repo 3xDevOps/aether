@@ -128,6 +128,14 @@ and persisted). The only collapse state left is the whole sidebar's.
   shows the way in. All runs is the exception: it is a view of the runs the
   sidebar is already showing, so it needs no gate.
 
+## Files view
+
+`src/routes/files/` is the read-only repository browser. It groups each visible
+workspace's base branch and live run checkouts in a lazy tree, caches each
+directory request in `src/store/files.ts`, and reads file contents through
+`files.read`. Run files can switch to a one-file `files.diff` patch; editing
+stays in the existing local sync and the user's editor.
+
 ## Title bar
 
 `src/components/shell/title-bar.tsx` is the desktop shell's window chrome.
