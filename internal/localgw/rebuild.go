@@ -252,6 +252,11 @@ func (g *Gateway) readPhases(r io.Reader) string {
 	return failure
 }
 
+// stoppedByQuit is what a rebuild the gateway cancelled reports instead of
+// the child's signal. The app is still on the old shell, so the stale-app
+// banner and its `aether gui build` are still the right answer.
+const stoppedByQuit = "the rebuild was stopped when the app quit"
+
 // errRebuild is the build's own error text as an error value.
 type errRebuild string
 
@@ -271,6 +276,13 @@ func (g *Gateway) finishRebuild(err error) {
 		return
 	}
 	msg := strings.TrimSpace(err.Error())
+	// A cancelled context means Close stopped the build, so the child's
+	// "signal: killed" is this gateway's own doing. Saying that on the next
+	// launch would read as a build that broke rather than one the user
+	// interrupted by quitting.
+	if g.ctx.Err() != nil {
+		msg = stoppedByQuit
+	}
 	g.rebuild.fail(msg)
 	// The gateway that reports this to the dashboard is the next one, so
 	// the failure has to outlive this process.

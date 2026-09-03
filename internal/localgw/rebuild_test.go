@@ -360,6 +360,14 @@ func TestClosingTheGatewayStopsTheRebuild(t *testing.T) {
 	if g.ExitCode() != 0 {
 		t.Fatalf("exit code = %d, want 0: no app was installed over", g.ExitCode())
 	}
+	// The child died because this gateway killed it, so neither the status
+	// nor the record the next launch reads may blame the build for it.
+	if got := status(t, g).Error; got != stoppedByQuit {
+		t.Fatalf("error = %q, want %q", got, stoppedByQuit)
+	}
+	if got := localops.LastDesktopBuildError(); got != stoppedByQuit {
+		t.Fatalf("recorded error = %q, want %q", got, stoppedByQuit)
+	}
 }
 
 // A second apply - another tab, or the app beside a browser tab - must not
