@@ -6,7 +6,7 @@
 
 import { Copy } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'

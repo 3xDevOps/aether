@@ -3,7 +3,7 @@
 // verify result and any refusal render verbatim.
 
 import { useCallback, useEffect, useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,

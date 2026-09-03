@@ -8,7 +8,7 @@ import {
   EnvironmentChoice,
   type EnvironmentValue,
 } from '@/components/environment-choice'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'

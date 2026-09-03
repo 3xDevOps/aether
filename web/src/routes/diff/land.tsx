@@ -1,7 +1,7 @@
 import { Archive, Copy, GitMerge, Loader2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
