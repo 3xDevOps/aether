@@ -19,6 +19,27 @@ import { friendly } from '@/routes/onboarding/environment-step'
 import { ProfileImport } from '@/routes/onboarding/profile-import'
 import type { Capability } from '@/store/hooks'
 
+/**
+ * The harness names worth previewing for a configuration import. Profile
+ * sync is wider than environment setup: opencode syncs
+ * ~/.local/share/opencode but cannot run a scan, so env.harnesses alone
+ * would never offer it. agent.list's shipped entries name every harness
+ * the registry knows; a name with no profile sync refuses the preview and
+ * drops out there.
+ */
+export function profileCandidates(
+  harnesses: HarnessStatus[] | null,
+  agents: AgentInfo[] | null,
+): string[] {
+  const names = (harnesses ?? []).map((h) => h.name)
+  for (const agent of agents ?? []) {
+    if (agent.source === 'shipped' && !names.includes(agent.name)) {
+      names.push(agent.name)
+    }
+  }
+  return names
+}
+
 export function AgentsStep({
   client,
   caps,
@@ -197,6 +218,8 @@ export function AgentsStep({
       <ProfileImport
         client={client}
         harnesses={harnesses ?? []}
+        candidates={profileCandidates(harnesses, agents)}
+        served={caps.hasLocal('profile.preview') && caps.hasLocal('profile.push')}
         repoPath={repoPath}
         workspace={workspace}
       />

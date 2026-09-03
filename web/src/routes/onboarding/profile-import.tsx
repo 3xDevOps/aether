@@ -76,12 +76,23 @@ type ScanPhase =
 export function ProfileImport({
   client,
   harnesses,
+  candidates,
+  served,
   repoPath,
   workspace,
 }: {
   client: Api
-  /** The setup-capable harnesses env.harnesses reported. */
+  /** The setup-capable harnesses env.harnesses reported. Only these can
+   * run the scan; profile sync itself covers more of them. */
   harnesses: HarnessStatus[]
+  /** Every harness name worth previewing. Wider than `harnesses`:
+   * opencode syncs a profile from ~/.local/share/opencode but is not
+   * setup-capable, so it would otherwise never be offered. */
+  candidates: string[]
+  /** Whether this gateway serves profile.preview and profile.push. An
+   * older one serves neither, and saying so beats reporting an empty
+   * machine. */
+  served: boolean
   /** The linked repository folder, passed to a profile scan when known. */
   repoPath?: string
   /** The workspace the wizard settled on; only named in the CLI fallback
@@ -101,10 +112,11 @@ export function ProfileImport({
   const [lines, setLines] = useState<string[]>([])
   const session = useRef<EnvScanSession | null>(null)
 
-  const names = harnesses.map((h) => h.name).join(',')
+  const names = candidates.join(',')
 
   useEffect(() => {
     let live = true
+    if (!served) return
     setPreviews({})
     setStatuses({})
     setSettled(0)
@@ -141,11 +153,13 @@ export function ProfileImport({
   // process on the gateway.
   useEffect(() => () => session.current?.close(), [])
 
-  const present = harnesses
-    .map((h) => previews[h.name])
+  const present = candidates
+    .map((name) => previews[name])
     .filter((p): p is ProfilePreview => p !== undefined && p.present)
 
-  const loading = useDelayed(harnesses.length > 0 && settled < harnesses.length)
+  const loading = useDelayed(
+    served && candidates.length > 0 && settled < candidates.length,
+  )
 
   const selected = present
     .filter((p) => checked[p.harness] && !p.blocked)
@@ -230,7 +244,7 @@ export function ProfileImport({
 
       {loading && <Skeleton className="h-16 w-full" />}
 
-      {scanHarness && phase.name === 'idle' && (
+      {served && scanHarness && phase.name === 'idle' && (
         <div className="space-y-1">
           <Button size="sm" variant="outline" onClick={startScan}>
             Ask an agent which configuration to bring
@@ -279,8 +293,18 @@ export function ProfileImport({
         </div>
       )}
 
-      {harnesses.length > 0 &&
-        settled >= harnesses.length &&
+      {!served && (
+        <p className="text-sm text-muted-foreground">
+          This gateway does not serve the profile verbs, so the import runs
+          from a terminal with{' '}
+          <span className="font-mono">aether profile push --agent claude</span>
+          .
+        </p>
+      )}
+
+      {served &&
+        candidates.length > 0 &&
+        settled >= candidates.length &&
         present.length === 0 && (
           <p className="text-sm text-muted-foreground">
             No agent configuration was found on this machine, so there is

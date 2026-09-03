@@ -133,6 +133,61 @@ describe('agents step', () => {
     ).toBeNull()
   })
 
+  it('offers opencode, which syncs a profile but cannot run a scan', async () => {
+    // env.harnesses reports only the setup-capable four. opencode syncs
+    // ~/.local/share/opencode all the same, so leaving Part B to that list
+    // would make its configuration unreachable from the dashboard; the
+    // shipped names from agent.list are what fill the gap.
+    const client = fakeApi({
+      agentList: vi.fn(async () => [
+        agentInfo(),
+        agentInfo({ name: 'opencode', source: 'shipped' }),
+        agentInfo({ name: 'myagent', source: 'member' }),
+      ]),
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'opencode'
+          ? profilePreview({
+              harness,
+              root: '/home/alice/.local/share/opencode',
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+
+    expect(
+      await screen.findByRole('checkbox', {
+        name: 'Bring opencode configuration',
+      }),
+    ).toBeDefined()
+    expect(client.localProfilePreview).toHaveBeenCalledWith('opencode')
+    // A member-registered name is not a shipped profile root, so it is
+    // never previewed.
+    expect(client.localProfilePreview).not.toHaveBeenCalledWith('myagent')
+    // opencode is not setup-capable, so Part A never offers to set it up.
+    expect(
+      screen.queryByRole('button', { name: 'Set up opencode' }),
+    ).toBeNull()
+  })
+
+  it('names the missing verbs rather than reporting an empty machine', async () => {
+    // A gateway that does not serve profile.preview would answer every
+    // preview with a 404, and "nothing to bring" would be a false claim
+    // about the user's machine.
+    const client = fakeApi()
+    renderStep(client, {
+      ...localCaps,
+      local: ['link.status', 'link.repo', 'env.harnesses'],
+    })
+
+    expect(
+      await screen.findByText(/does not serve the profile verbs/),
+    ).toBeDefined()
+    expect(screen.getByText(/aether profile push --agent claude/)).toBeDefined()
+    expect(screen.queryByText(/No agent configuration was found/)).toBeNull()
+    expect(client.localProfilePreview).not.toHaveBeenCalled()
+  })
+
   it('opens the agent-setup shell inline and marks the harness ready on a clean exit', async () => {
     const client = fakeApi()
     const { onReady } = renderStep(client)
