@@ -33,15 +33,21 @@ type Config struct {
 }
 
 // NamedLink is one saved server profile. Empty fields fall back to the
-// top-level defaults when the profile is selected, except Key: a profile
-// saved without --key was linked by automatic discovery and stays that
-// way, because an explicit key narrows the offer to one identity the
-// profile's server may not know.
+// top-level defaults when the profile is selected.
 type NamedLink struct {
-	Name       string `json:"name"`
-	Addr       string `json:"addr"`
-	User       string `json:"user,omitempty"`
-	Key        string `json:"key,omitempty"`
+	Name string `json:"name"`
+	Addr string `json:"addr"`
+	User string `json:"user,omitempty"`
+	// Key is the private-key file this profile was linked with. Empty
+	// without AutoKey is a profile written before `aether link` recorded
+	// a key choice; it inherits the top-level Key like every other empty
+	// field, so those files keep working unchanged.
+	Key string `json:"key,omitempty"`
+	// AutoKey marks a profile linked by automatic discovery (no --key, or
+	// --key auto). Named then ignores the top-level Key: an explicit
+	// default-link key would narrow this profile to one identity its
+	// server may not know.
+	AutoKey    bool   `json:"auto_key,omitempty"`
 	Repo       string `json:"repo,omitempty"`
 	KnownHosts string `json:"known_hosts,omitempty"`
 }
@@ -62,7 +68,12 @@ func (c Config) Named(name string) (Config, bool) {
 		if l.User != "" {
 			out.User = l.User
 		}
-		out.Key = l.Key
+		switch {
+		case l.AutoKey:
+			out.Key = ""
+		case l.Key != "":
+			out.Key = l.Key
+		}
 		if l.Repo != "" {
 			out.Repo = l.Repo
 		}

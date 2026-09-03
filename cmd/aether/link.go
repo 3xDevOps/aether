@@ -52,21 +52,23 @@ func normalizeAddr(addr string) string {
 	return net.JoinHostPort(host, defaultSSHPort)
 }
 
-// savedKey is the private key a previous `aether link` stored for the
-// profile being relinked: the named profile's own key, or the top-level
-// key for the default link. Relinking without --key keeps it, so a user
-// who chose a key once and re-runs link --repo is not silently moved back
-// to automatic discovery.
+// savedKey is the private key a previous `aether link` left in effect for
+// the link being relinked: the top-level key for the default link, or
+// what Named resolves for a profile - its own key, nothing when it was
+// linked by discovery, and the inherited top-level key for a profile
+// saved before keys were recorded per profile. Relinking without --key
+// keeps that, so a user who chose a key once and re-runs link --repo is
+// not silently moved back to automatic discovery, and a legacy profile
+// keeps authenticating the way it did.
 func savedKey(prev cli.Config, name string) string {
 	if name == "" {
 		return prev.Key
 	}
-	for _, l := range prev.Links {
-		if l.Name == name {
-			return l.Key
-		}
+	named, ok := prev.Named(name)
+	if !ok {
+		return ""
 	}
-	return ""
+	return named.Key
 }
 
 // autoKey is the --key value that forgets a saved key. Without it a user
@@ -99,7 +101,9 @@ func linkKey(flag string, prev cli.Config, name string) (string, error) {
 // carrying forward previously saved profiles - Save overwrites the whole
 // file - plus, when name is non-empty, a snapshot of cfg upserted under
 // that name. Without a name the top-level fields change exactly as before
-// profiles existed.
+// profiles existed. A profile records its key choice either way: the
+// file it was linked with, or AutoKey when it used discovery, so a later
+// default-link --key never changes how this profile authenticates.
 func linkConfig(cfg, prev cli.Config, name string) cli.Config {
 	cfg.Links = prev.Links
 	if name == "" {
@@ -110,6 +114,7 @@ func linkConfig(cfg, prev cli.Config, name string) cli.Config {
 		Addr:       cfg.Addr,
 		User:       cfg.User,
 		Key:        cfg.Key,
+		AutoKey:    cfg.Key == "",
 		Repo:       cfg.Repo,
 		KnownHosts: cfg.KnownHosts,
 	})

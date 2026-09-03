@@ -91,9 +91,9 @@ func TestLinksRoundTrip(t *testing.T) {
 }
 
 // TestNamedOverlay proves Named overlays only the profile's non-empty
-// fields on the top-level defaults and sets Active. Key is the exception:
-// a profile linked without --key stays on automatic discovery even when
-// the default link chose a file.
+// fields on the top-level defaults and sets Active. A profile with no key
+// and no AutoKey marker predates per-profile keys and inherits the
+// top-level one like every other empty field.
 func TestNamedOverlay(t *testing.T) {
 	cfg := Config{
 		Addr:       "default:2222",
@@ -117,17 +117,9 @@ func TestNamedOverlay(t *testing.T) {
 	if got.Addr != "prod:2222" || got.User != "deploy" {
 		t.Errorf("overlay = addr %q user %q", got.Addr, got.User)
 	}
-	// Empty link fields keep the top-level defaults, except the key.
-	if got.Repo != "/default/repo" || got.KnownHosts != "/default/kh" {
-		t.Errorf("defaults lost: repo %q known_hosts %q", got.Repo, got.KnownHosts)
-	}
-	if got.Key != "" {
-		t.Errorf("Key = %q, want discovery: the profile saved no key", got.Key)
-	}
-	// A profile's own key is used as saved.
-	cfg.Links = append(cfg.Links, NamedLink{Name: "lab", Addr: "lab:2222", Key: "/lab/key"})
-	if lab, ok := cfg.Named("lab"); !ok || lab.Key != "/lab/key" {
-		t.Errorf("Named(lab) = %+v, %v; want key /lab/key", lab, ok)
+	// Empty link fields keep the top-level defaults.
+	if got.Key != "/default/key" || got.Repo != "/default/repo" || got.KnownHosts != "/default/kh" {
+		t.Errorf("defaults lost: key %q repo %q known_hosts %q", got.Key, got.Repo, got.KnownHosts)
 	}
 	// The source config is untouched.
 	if cfg.Active != "" || cfg.Addr != "default:2222" {
@@ -136,6 +128,59 @@ func TestNamedOverlay(t *testing.T) {
 
 	if _, ok := cfg.Named("nope"); ok {
 		t.Error("Named(nope) = true, want false")
+	}
+}
+
+// TestNamedKeyChoice covers the three key states a profile can be saved
+// in and what each resolves to against an explicit default-link key: a
+// legacy profile (no key, no marker) inherits it, an AutoKey profile
+// ignores it and discovers, and an explicit profile uses its own file.
+// The same file is pushed through JSON to prove the marker persists and
+// that legacy and explicit profiles serialize exactly as before.
+func TestNamedKeyChoice(t *testing.T) {
+	cfg := Config{
+		Addr: "default:2222",
+		Key:  "/default/key",
+		Links: []NamedLink{
+			{Name: "legacy", Addr: "legacy:2222"},
+			{Name: "auto", Addr: "auto:2222", AutoKey: true},
+			{Name: "explicit", Addr: "explicit:2222", Key: "/explicit/key"},
+		},
+	}
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loaded Config
+	if err := json.Unmarshal(body, &loaded); err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Links []map[string]json.RawMessage `json:"links"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []bool{false, true, false} {
+		if _, ok := raw.Links[i]["auto_key"]; ok != want {
+			t.Errorf("profile %d auto_key present = %v, want %v: %s", i, ok, want, body)
+		}
+	}
+
+	for name, want := range map[string]string{
+		"legacy":   "/default/key",
+		"auto":     "",
+		"explicit": "/explicit/key",
+	} {
+		for label, c := range map[string]Config{"in memory": cfg, "after json": loaded} {
+			got, ok := c.Named(name)
+			if !ok {
+				t.Fatalf("Named(%s) %s = false", name, label)
+			}
+			if got.Key != want {
+				t.Errorf("Named(%s) %s key = %q, want %q", name, label, got.Key, want)
+			}
+		}
 	}
 }
 

@@ -33,7 +33,7 @@ func TestLinkConfig(t *testing.T) {
 	if len(got.Links) != 2 {
 		t.Fatalf("staging linkConfig links = %+v", got.Links)
 	}
-	want := cli.NamedLink{Name: "staging", Addr: "new:2222", User: "aether", Repo: "/src/repo"}
+	want := cli.NamedLink{Name: "staging", Addr: "new:2222", User: "aether", Repo: "/src/repo", AutoKey: true}
 	if got.Links[1] != want {
 		t.Fatalf("snapshot = %+v, want %+v", got.Links[1], want)
 	}
@@ -78,9 +78,9 @@ func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 	}
 
 	// The saved config carries the key at the top level and in a named
-	// profile, and Named hands it back.
+	// profile, without the discovery marker, and Named hands it back.
 	cfg := linkConfig(cli.Config{Addr: "h:2222", User: "aether", Key: private}, cli.Config{}, "prod")
-	if cfg.Key != private || len(cfg.Links) != 1 || cfg.Links[0].Key != private {
+	if cfg.Key != private || len(cfg.Links) != 1 || cfg.Links[0].Key != private || cfg.Links[0].AutoKey {
 		t.Fatalf("saved config = %+v", cfg)
 	}
 	if named, ok := cfg.Named("prod"); !ok || named.Key != private {
@@ -108,7 +108,7 @@ func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 		t.Errorf("linkKey(auto) = %q, %v; want discovery", got, err)
 	}
 	cleared := linkConfig(cli.Config{Addr: "h:2222", User: "aether"}, cfg, "prod")
-	if cleared.Key != "" || len(cleared.Links) != 1 || cleared.Links[0].Key != "" {
+	if cleared.Key != "" || len(cleared.Links) != 1 || cleared.Links[0].Key != "" || !cleared.Links[0].AutoKey {
 		t.Fatalf("config after --key auto = %+v", cleared)
 	}
 	if named, ok := cleared.Named("prod"); !ok || named.Key != "" {
@@ -116,6 +116,36 @@ func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 	}
 	if got, _ = linkKey("", cleared, "prod"); got != "" {
 		t.Errorf("prod relink after --key auto = %q, want discovery", got)
+	}
+	// The marker holds even once the default link picks a file: prod
+	// keeps discovering, and relinking it keeps that choice.
+	cleared.Key = private
+	if named, _ := cleared.Named("prod"); named.Key != "" {
+		t.Errorf("Named(prod) with default key = %q, want discovery", named.Key)
+	}
+	if got, _ = linkKey("", cleared, "prod"); got != "" {
+		t.Errorf("prod relink with default key = %q, want discovery", got)
+	}
+
+	// A profile saved before keys were recorded per profile inherits the
+	// top-level key; relinking it without --key keeps that key in effect
+	// and writes it into the profile.
+	legacy := cli.Config{Addr: "h:2222", Key: private, Links: []cli.NamedLink{{Name: "old", Addr: "old:2222"}}}
+	if got, _ = linkKey("", legacy, "old"); got != private {
+		t.Errorf("legacy relink key = %q, want inherited %q", got, private)
+	}
+	relinked := linkConfig(cli.Config{Addr: "old:2222", User: "aether", Key: private}, legacy, "old")
+	if l := relinked.Links[0]; l.Key != private || l.AutoKey {
+		t.Errorf("relinked legacy profile = %+v, want key %q", l, private)
+	}
+	// With no top-level key either, the legacy profile was discovering,
+	// and a relink records that explicitly.
+	legacy.Key = ""
+	if got, _ = linkKey("", legacy, "old"); got != "" {
+		t.Errorf("keyless legacy relink key = %q, want discovery", got)
+	}
+	if l := linkConfig(cli.Config{Addr: "old:2222", User: "aether"}, legacy, "old").Links[0]; l.Key != "" || !l.AutoKey {
+		t.Errorf("relinked keyless legacy profile = %+v, want AutoKey", l)
 	}
 
 	// The wrong half of the key pair is a clear error, not a parse failure.
