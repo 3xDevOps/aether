@@ -1,5 +1,4 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { toast } from 'sonner'
 import type { Api, EnvScanHandlers, EnvScanSession } from '@/lib/api'
 import type {
   EnvScanRequest,
@@ -18,12 +17,6 @@ import {
   serverInfo,
   workspace,
 } from '@/test/fixtures'
-
-// The repo step confirms a push through a toast, which outlives the step it
-// advances past; nothing here renders sonner's own <Toaster />.
-vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
-}))
 
 // The local gateway's descriptor: full method map, shell socket, and the
 // client-machine verbs the wizard rides on.
@@ -226,7 +219,7 @@ describe('onboarding wizard', () => {
     await screen.findByLabelText('Push command')
   }
 
-  it('pushes the base branch from the wizard and moves on', async () => {
+  it('pushes the base branch from the wizard and shows what git did', async () => {
     const client = fakeApi()
     await toPushChoice(client)
 
@@ -235,9 +228,16 @@ describe('onboarding wizard', () => {
     await waitFor(() => {
       expect(client.localRepoPush).toHaveBeenCalledWith(workspace.id)
     })
-    // The confirmation names the branch that landed, and the wizard does not
-    // ask for a second click to continue.
-    expect(toast.success).toHaveBeenCalledWith('Pushed main to aether.')
+    // The confirmation names the branch that landed, and git's own words
+    // stay on the page - "[new branch]" and "Everything up-to-date" are
+    // both success and mean different things.
+    expect(await screen.findByText(/Pushed/)).toBeDefined()
+    expect(screen.getByText(/\[new branch\]/).textContent).toBe(
+      'To ssh://alice@host:2222/wsp_1\n * [new branch] main -> main',
+    )
+    // Nothing invites a second push, and Continue moves on.
+    expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(
       await screen.findByRole('region', { name: 'First run' }),
     ).toBeDefined()

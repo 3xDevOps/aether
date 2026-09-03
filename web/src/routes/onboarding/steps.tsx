@@ -4,7 +4,6 @@
 // and every server refusal is rendered verbatim.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { toast } from 'sonner'
 import {
   EnvironmentChoice,
   type EnvironmentValue,
@@ -18,6 +17,7 @@ import type {
   AgentInfo,
   LinkRepoResult,
   LinkStatus,
+  RepoPushResult,
   Workspace,
 } from '@/lib/types'
 import { EnvironmentBanner } from '@/routes/onboarding/environment-step'
@@ -26,6 +26,10 @@ import type { Capability } from '@/store/hooks'
 
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
+
+// Raw git output: scrollable, wrapped, never truncated.
+const pane =
+  'max-h-64 overflow-x-auto overflow-y-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
 
 /**
  * Step 1: is this machine linked? Checked on every mount - the user may have
@@ -224,8 +228,9 @@ export function WorkspaceStep({
 /**
  * Step 3: point a local clone at the workspace. The gateway adds the
  * `aether` git remote and, where the repo.push verb is served, runs the
- * first push from here; without it the push stays a copy-paste command.
- * Either way the history is the user's: nothing rewrites it.
+ * first push from here, keeping git's own answer on the page; without the
+ * verb the push stays a copy-paste command. Either way the history is the
+ * user's: nothing rewrites it.
  */
 export function RepoStep({
   client,
@@ -245,6 +250,7 @@ export function RepoStep({
   // The push runs on its own flag: a failed push must not disable the link
   // form the user may want to correct, and the reverse.
   const [pushing, setPushing] = useState(false)
+  const [pushed, setPushed] = useState<RepoPushResult | null>(null)
   const [pushError, setPushError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const cmdRef = useRef<HTMLInputElement>(null)
@@ -272,11 +278,10 @@ export function RepoStep({
     setPushing(true)
     setPushError(null)
     try {
-      const pushed = await client.localRepoPush(workspace?.id)
-      // The confirmation rides a toast: the step advances on success, so an
-      // inline note would vanish with it.
-      toast.success(`Pushed ${pushed.branch} to ${pushed.remote}.`)
-      onNext()
+      // The step stays put on success so git's own answer is readable:
+      // "Everything up-to-date" and "[new branch]" mean different things,
+      // and only git can tell them apart.
+      setPushed(await client.localRepoPush(workspace?.id))
     } catch (err) {
       setPushError(message(err))
     } finally {
@@ -335,47 +340,76 @@ export function RepoStep({
         <div className="space-y-2">
           <p className="text-sm">
             Remote <span className="font-mono">{result.remote}</span> added,
-            pointing at <span className="font-mono">{result.url}</span>. Seed
-            the workspace with <span className="font-mono">{branch}</span>:
+            pointing at <span className="font-mono">{result.url}</span>.{' '}
+            {pushed ? (
+              <>
+                Pushed <span className="font-mono">{pushed.branch}</span> to{' '}
+                <span className="font-mono">{pushed.remote}</span>.
+              </>
+            ) : (
+              <>
+                Seed the workspace with{' '}
+                <span className="font-mono">{branch}</span>:
+              </>
+            )}
           </p>
-          {canPush && (
+          {pushed ? (
+            // Git's own answer, kept: "Everything up-to-date" and "[new
+            // branch]" both mean success and say different things.
+            <details className="rounded-md border bg-card">
+              <summary className="cursor-pointer px-3 py-2 text-sm">
+                What git did
+              </summary>
+              <pre className={pane}>
+                {pushed.output.trim() || 'git printed nothing.'}
+              </pre>
+            </details>
+          ) : (
             <>
-              <Button
-                size="sm"
-                disabled={pushing}
-                onClick={() => void push()}
-              >
-                {pushing ? 'Pushing...' : 'Push now'}
-              </Button>
-              {pushError && (
-                <div className="space-y-1">
-                  <p className="text-xs text-state-failed">
-                    The push failed. Git said:
+              {canPush && (
+                <>
+                  <Button
+                    size="sm"
+                    disabled={pushing}
+                    onClick={() => void push()}
+                  >
+                    {pushing ? 'Pushing...' : 'Push now'}
+                  </Button>
+                  {pushError && (
+                    <div className="space-y-1">
+                      <p className="text-xs text-state-failed">
+                        The push failed. Git said:
+                      </p>
+                      <pre className={`rounded-md border bg-card ${pane}`}>
+                        {pushError}
+                      </pre>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    or run it yourself:
                   </p>
-                  <pre className="rounded-md border bg-card px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words">
-                    {pushError}
-                  </pre>
-                </div>
+                </>
               )}
-              <p className="text-xs text-muted-foreground">
-                or run it yourself:
-              </p>
+              <div className="flex gap-2">
+                <input
+                  ref={cmdRef}
+                  readOnly
+                  aria-label="Push command"
+                  className="w-full rounded-md border bg-background px-2 py-1 font-mono text-sm"
+                  value={pushCmd}
+                  onFocus={(e) => e.target.select()}
+                />
+                <Button variant="outline" size="sm" onClick={() => void copy()}>
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
             </>
           )}
-          <div className="flex gap-2">
-            <input
-              ref={cmdRef}
-              readOnly
-              aria-label="Push command"
-              className="w-full rounded-md border bg-background px-2 py-1 font-mono text-sm"
-              value={pushCmd}
-              onFocus={(e) => e.target.select()}
-            />
-            <Button variant="outline" size="sm" onClick={() => void copy()}>
-              {copied ? 'Copied' : 'Copy'}
-            </Button>
-          </div>
-          <Button size="sm" variant={canPush ? 'outline' : 'default'} onClick={onNext}>
+          <Button
+            size="sm"
+            variant={canPush && !pushed ? 'outline' : 'default'}
+            onClick={onNext}
+          >
             Continue
           </Button>
         </div>
