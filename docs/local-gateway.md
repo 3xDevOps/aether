@@ -38,6 +38,14 @@ initial browser tab). The printed URL is
 That line is the contract with the desktop shell sidecar, which spawns
 `aether gui --json`, parses the line, and renders the SPA itself.
 
+Exit statuses are the other half of that contract. `aether gui --json`
+exits **75** to tell the shell that `update.apply` rebuilt the desktop app
+on disk: the shell calls `app.relaunch()` rather than respawning the
+sidecar, so the new window and the new gateway come up together. Every
+other exit keeps the shell's respawn-with-backoff behavior, which is what a
+failed rebuild wants - the CLI half of the update did land, and the shell
+should come back on the new binary.
+
 ## Design
 
 The gateway holds no server code: every read and write is a
@@ -128,7 +136,7 @@ the same capability checks the SSH transport applies.
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
           "link.repo","link.status","link.switch","profile.preview",
           "profile.push","pull","repo.push","sync.start","sync.status",
-          "sync.stop","update.apply","update.check"],
+          "sync.stop","update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -253,7 +261,8 @@ authority.
 | `image.scaffold` | `{"repo":"...","kind":"dockerfile"\|"devcontainer"}` (`repo` defaults to the linked one) | `{"written":["..."]}` |
 | `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`; `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
 | `update.check` | `{}` | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool}` (`server_error` only when the server did not answer) |
-| `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
+| `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
+| `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
   must carry (the onboarding wizard sends the one just picked). Without
@@ -373,7 +382,9 @@ authority.
   `server_behind` compares the linked server's version with that same latest
   release; `supervised` reports whether this gateway was started by the
   desktop shell (`aether gui --json`), which is what decides whether
-  `update.apply` may restart it.
+  `update.apply` may restart it. `shell_build_error` is present only when
+  the last in-app desktop rebuild failed, and carries that build's own
+  error.
 - A `server.info` call that fails costs the server half only: the answer
   still carries `cli`, with an empty `server_version`, `server_behind`
   false, and the backend's own message in `server_error`. The CLI half is
@@ -384,12 +395,34 @@ authority.
   Linux server host, in which case `restart_command` carries the
   `sudo systemctl restart aether-server` the command prints, because the
   running server keeps the old code until its unit restarts. On a
-  supervised gateway it answers `restarting: true` and then exits the
-  process, so the desktop shell's respawn brings up the new binary; started
-  from a terminal it answers `restarting: false` and a note telling the
-  user to rerun `aether gui`. It never updates a *remote* server: the
-  dashboard has no authority there, and the server banner names the
-  commands to run on that host instead.
+  supervised gateway it answers `restarting: true`; started from a terminal
+  it answers `restarting: false` and a note telling the user to rerun
+  `aether gui`. It never updates a *remote* server: the dashboard has no
+  authority there, and the server banner names the commands to run on that
+  host instead.
+- The binary swap is synchronous; the desktop-app rebuild that follows it
+  is not. When an app is installed for this account, `update.apply` spawns
+  `<the new aether> gui build --json` in the background, answers
+  `rebuilding: true`, and the dashboard polls `update.status` for progress.
+  The new binary runs the build because the Electron shell sources ship
+  inside it - the process answering this call is the one being replaced. A
+  machine with no app installed answers `rebuilding: false` and builds
+  nothing.
+- `update.status` reports that rebuild: `phase` is `idle` before any
+  rebuild has run in this process, then the `gui build --json` phases
+  (`unpacking`, `fetching node`, `installing dependencies`, `packaging`,
+  `installing`), then `done` or `error`. `lines_tail` carries the last 20
+  lines of the build's own output, and `error` the build's own message. A
+  gateway that comes up after a rebuild answers `idle`: the build belonged
+  to the process that exited.
+- A supervised gateway exits only once the rebuild ends: **75** on success,
+  so the shell relaunches onto the new app, and **0** on failure, so the
+  shell respawns the sidecar on the new CLI. A failed build is also written
+  to `<user cache>/aether/desktop-build/last-error.txt`, which the next
+  gateway's `update.check` returns as `shell_build_error` so the dashboard
+  can show what went wrong; the next successful `aether gui build` removes
+  it. An *unsupervised* gateway never exits: it rebuilds the app and the
+  note tells the user to restart it.
 - `update.apply` refuses with `-32002` (invalid state) on a dev build, when
   `AETHER_NO_UPDATE_CHECK` is set, when the running build is already the
   newest release (downloading it over itself would report success for work

@@ -103,6 +103,28 @@ either way. `aether update` is not a Windows command; it refuses to run
 there. Upgrading a Windows client means downloading the new release binary
 over the old one, exactly as below.
 
+**It rebuilds the desktop app too.** The dashboard ships inside the CLI, but
+the Electron shell around it does not, so once the binaries are swapped
+`aether update` looks for an installed app (the table under [Desktop
+app](#desktop-app)) and runs `aether gui build` with the binary it just
+installed - the new one, because the shell sources ship inside it. The build
+output streams to your terminal. Skip it with `--no-app`:
+
+```sh
+aether update --no-app
+```
+
+A machine with no app installed builds nothing and downloads nothing, so a
+server box never sees this step. If the app is running when the rebuild
+finishes, the command says to restart it. A rebuild that fails prints the
+build's own error and the command to rerun, and exits non-zero - but the CLI
+update itself already succeeded, and the message says so.
+
+Under `sudo` the rebuild drops back to the invoking account (`SUDO_USER`) with
+`sudo -u <user> -H`, so the app, the build directory and the Node and Electron
+caches all land in that account's home owned by that account. Without it root
+would build an app the user cannot rebuild.
+
 **The check.** `aether update --check` reports whether a newer release exists
 and exits 0 either way; `--check --json` prints one JSON object for a script:
 
@@ -130,11 +152,22 @@ prints one line to stderr when a newer release exists. The dashboard shows a
 dismissible banner naming the new version, with an **Update now** button that
 replaces the binary on this machine. The restart takes the gateway's own work
 with it - attached terminals and any running `aether sync` session stop, while
-the runs themselves keep going on the server. Started from the desktop app the
-gateway exits once the binary is replaced and the app restarts it; started
-from a terminal the banner tells you to rerun `aether gui` yourself.
-Dismissing silences that version only - the next release shows the banner
-again.
+the runs themselves keep going on the server. Dismissing silences that version
+only - the next release shows the banner again.
+
+The button does the same two steps the command does. It swaps the binaries,
+then rebuilds the app when one is installed, and the banner follows along:
+*Updating the CLI...*, then *Rebuilding the app (about a minute; the first
+time also fetches Node)...*, then *Relaunching*. **Update now** stays disabled
+until it is over. In the desktop app the shell relaunches itself onto the new
+build, so the window you end up in is the new one. In a browser tab the
+gateway never exits (it is your terminal's process, not the app's): the app is
+still rebuilt, and the banner tells you to restart it.
+
+A rebuild that fails does not cost you the CLI update. The gateway records the
+build's error, the desktop app comes back on the new CLI in the old shell, and
+the "desktop app is out of date" banner then shows that error above the
+`aether gui build` to run by hand. A successful build clears it.
 
 On a single-box install the same update replaces the `aether-server` beside
 the CLI. The banner then names both binaries and the
@@ -189,10 +222,11 @@ sudo systemctl restart aether-server
 **The desktop app is separate.** The dashboard ships inside the CLI, so
 updating the CLI updates the dashboard. The Electron shell around it - window
 chrome, notifications, `aether://` deep links - is whatever `aether gui build`
-last produced, and records which CLI built it. When that CLI is no longer the
-one serving the gateway, a banner of its own says so and gives the command;
-it is not tied to a release being available, because the usual way to get
-there is to have just updated.
+last produced, and records which CLI built it. Both `aether update` and the
+dashboard's **Update now** rebuild it for you; the banner below is what is
+left when that rebuild was skipped (`--no-app`) or failed. It is not tied to a
+release being available, because the usual way to get there is to have just
+updated.
 
 ## Manual install
 
@@ -345,10 +379,29 @@ electron-builder's own cache (`~/.cache/electron` and
 `~/Library/Caches/electron-builder` on macOS, `%LOCALAPPDATA%\electron\Cache`
 and `%LOCALAPPDATA%\electron-builder` on Windows), so rebuilding is quick.
 Run `aether gui build` again to replace an installed app; on macOS it also
-removes an older copy from the other Applications folder. On Windows, close
-the Aether window first. To remove everything, delete the two paths in the
-table, the `aether` cache directory (the build directory and the private Node
-copy), and those caches.
+removes an older copy from the other Applications folder. The new app is
+staged beside the installed one and swapped in with a rename, so an app that
+is running while you rebuild it keeps working until you restart it - deleting
+its files under it would take the window down. Windows still holds a running
+program's files open, so close the Aether window there first. To remove
+everything, delete the two paths in the table, the `aether` cache directory
+(the build directory and the private Node copy), and those caches.
+
+`aether gui build --json` prints one JSON line per phase on stdout and leaves
+the build's own output on stderr, which is how the dashboard follows a rebuild
+it started:
+
+```json
+{"phase":"unpacking"}
+{"phase":"fetching node"}
+{"phase":"installing dependencies"}
+{"phase":"packaging"}
+{"phase":"installing"}
+{"phase":"done","path":"/home/you/.local/share/aether/desktop"}
+```
+
+A failure ends with `{"phase":"error","error":"..."}` carrying the build's own
+message, and the command still exits non-zero.
 
 The app requires the `aether` CLI installed first; it does not bundle the
 binary and `aether gui build` refuses to run if the shell would not find it.
