@@ -27,10 +27,11 @@ import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { allowed } from '@/lib/permissions'
 import { runState } from '@/lib/status'
-import type { Member, RunStatus } from '@/lib/types'
-import type { Capability } from '@/store/hooks'
+import type { Member, PullResult, RunStatus } from '@/lib/types'
 import { useStore } from '@/store'
+import type { Capability } from '@/store/hooks'
 import type { PaletteDialog } from '@/store/palette'
 import type { RunRecord } from '@/store/runs'
 
@@ -40,6 +41,8 @@ export interface CommandDeps {
   navigate: (name: string, params?: Record<string, string>) => void
   openDialog: (dialog: PaletteDialog, runID?: string) => void
   ackAll: () => void
+  /** Keeps a pull's git output for the diff tab to show. */
+  recordPull: (runID: string, result: PullResult) => void
   /** The template form's open state lives with the dialog host, not the store. */
   onTemplates: () => void
 }
@@ -47,7 +50,13 @@ export interface CommandDeps {
 /** One thing a member can do, however the surface chooses to draw it. */
 export interface Command {
   id: string
+  /** The full sentence, which is what the palette reads best. */
   label: string
+  /**
+   * The one or two words a button uses instead, because eight of these sit
+   * in one header row. The button's tooltip carries the full label.
+   */
+  short?: string
   Icon: LucideIcon
   /** Extra words the palette's fuzzy match should see (handoff targets). */
   value?: string
@@ -57,6 +66,11 @@ export interface Command {
    * dialog openers report nothing.
    */
   done?: string
+  /**
+   * A success toast that names something the call returned - the ref a pull
+   * fetched - instead of the flat past-tense one.
+   */
+  report?: (result: unknown) => string
   /**
    * Set on the verbs a member cannot take back. Buttons ask before running;
    * the palette does not, because a palette item is already two deliberate
@@ -79,6 +93,10 @@ export interface RunCommandContext {
   paused: boolean | undefined
   cap: Capability
   members: Record<string, Member>
+  /** The caller, for the permission questions the server will ask again. */
+  self: { id: string | null; role: Member['role'] | null }
+  /** The run's workspace steer_others policy, when the workspace is known. */
+  steerOthers?: string
 }
 
 /** What the board-wide verbs are gated on. */
@@ -93,7 +111,7 @@ export interface BoardCommandContext {
  * handoff to one; do not offer what will be refused. A pending member has not
  * been approved yet, and the current owner is not a target.
  */
-export function handoffTargets(
+function handoffTargets(
   run: RunRecord,
   members: Record<string, Member>,
 ): Member[] {
@@ -102,8 +120,13 @@ export function handoffTargets(
   )
 }
 
-/** One handoff command per eligible member. */
-export function handoffCommands({ run, members }: RunCommandContext): Command[] {
+/**
+ * One handoff command per eligible member, or none at all when the caller may
+ * not give this run away: the server allows a handoff only from the run's
+ * owner or an admin.
+ */
+export function handoffCommands({ run, members, self }: RunCommandContext): Command[] {
+  if (!allowed('handoff', self, { owner: run.member_id })) return []
   return handoffTargets(run, members).map((m) => ({
     id: `handoff:${m.id}`,
     label: `Hand off to ${m.display_name}`,
@@ -120,16 +143,23 @@ export function handoffCommands({ run, members }: RunCommandContext): Command[] 
  * calls `handoffCommands` instead.
  */
 export function runCommands(ctx: RunCommandContext): Command[] {
-  const { run, paused, cap } = ctx
+  const { run, paused, cap, self, steerOthers } = ctx
   const id = run.id
   const finished = isFinished(run.status)
+  const target = { owner: run.member_id, protected: run.protected, steerOthers }
+  // The same three questions internal/permissions asks. A verb the server
+  // would answer with a denial is not offered on either surface.
+  const maySteer = allowed('steer', self, target)
+  const mayKill = allowed('kill', self, target)
+  const mayProtect = allowed('protect', self, target)
   const list: Command[] = []
 
-  if (!finished) {
+  if (!finished && maySteer) {
     if (paused === true) {
       list.push({
         id: 'resume',
         label: 'Resume run',
+        short: 'Resume',
         Icon: Play,
         done: 'Resumed',
         perform: (d) => d.api.runResume(id),
@@ -139,6 +169,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       list.push({
         id: 'pause',
         label: 'Pause run',
+        short: 'Pause',
         Icon: Pause,
         done: 'Paused',
         perform: (d) => d.api.runPause(id),
@@ -147,12 +178,17 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'inject',
       label: 'Inject a message...',
+      short: 'Inject',
       Icon: MessageSquarePlus,
       perform: (d) => d.openDialog('inject', id),
     })
+  }
+
+  if (!finished && mayKill) {
     list.push({
       id: 'close:merged',
       label: 'Close as merged',
+      short: 'Merged',
       Icon: GitMerge,
       done: 'Closed as merged',
       confirm: {
@@ -165,6 +201,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'close:abandoned',
       label: 'Close as abandoned',
+      short: 'Abandoned',
       Icon: Archive,
       done: 'Closed as abandoned',
       confirm: {
@@ -177,6 +214,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'kill',
       label: 'Kill run',
+      short: 'Kill',
       Icon: Square,
       done: 'Killed',
       confirm: {
@@ -188,31 +226,41 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     })
   }
 
-  if (cap.hasMethod('run.protect')) {
+  if (cap.hasMethod('run.protect') && mayProtect) {
     list.push({
       id: 'protect',
       label: run.protected ? 'Unprotect run' : 'Protect run',
+      short: run.protected ? 'Unprotect' : 'Protect',
       Icon: run.protected ? ShieldOff : Shield,
       done: run.protected ? 'Unprotected' : 'Protected',
       perform: (d) => d.api.runProtect(id, !run.protected),
     })
   }
-  if (finished && cap.hasMethod('run.relaunch')) {
+  if (finished && cap.hasMethod('run.relaunch') && maySteer) {
     list.push({
       id: 'relaunch',
       label: 'Relaunch run',
+      short: 'Relaunch',
       Icon: RefreshCw,
       done: 'Relaunched',
       perform: (d) => d.api.runRelaunch(id),
     })
   }
+  // Pull is the desktop gateway fetching into the repository on this machine,
+  // not a call against the run, so it answers to the local capability alone.
   if (cap.hasLocal('pull')) {
     list.push({
       id: 'pull',
       label: 'Pull branch',
+      short: 'Pull',
       Icon: Download,
       done: 'Pulled branch',
-      perform: (d) => d.api.localPull(id),
+      report: (result) => `Pulled ${(result as PullResult).ref}`,
+      perform: (d) =>
+        d.api.localPull(id).then((result) => {
+          d.recordPull(id, result)
+          return result
+        }),
     })
   }
 
@@ -234,7 +282,7 @@ function isFinished(status: RunStatus): boolean {
  * local gateway advertises every method regardless of who is behind it.
  */
 export function canLaunch({ cap, role }: BoardCommandContext): boolean {
-  return cap.hasMethod('run.launch') && role !== 'viewer'
+  return cap.hasMethod('run.launch') && allowed('launch', { id: null, role })
 }
 
 /** The verbs that act on the board rather than on one run. */
@@ -261,7 +309,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.openDialog('launch'),
     })
   }
-  if (ctx.cap.hasMethod('template.launch') && ctx.role !== 'viewer') {
+  if (ctx.cap.hasMethod('template.launch') && allowed('launch', { id: null, role: ctx.role })) {
     list.push({
       id: 'template',
       label: 'Launch from a template...',
@@ -287,29 +335,33 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
  */
 export function useCommandRunner(
   opts: { onDone?: () => void; onTemplates?: () => void } = {},
-): (command: Command) => void {
+): (command: Command) => Promise<void> {
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const ackAll = useStore((s) => s.ackAll)
+  const recordPull = useStore((s) => s.recordPull)
   const { onDone, onTemplates } = opts
 
   return useCallback(
-    (command: Command) => {
+    async (command: Command) => {
       onDone?.()
       const result = command.perform({
         api,
         navigate,
         openDialog,
         ackAll,
+        recordPull,
         onTemplates: onTemplates ?? (() => {}),
       })
       const done = command.done
       if (!done) return
-      void Promise.resolve(result).then(
-        () => toast.success(done),
-        (err: unknown) => toast.error(`${done} failed: ${message(err)}`),
-      )
+      try {
+        const value = await result
+        toast.success(command.report ? command.report(value) : done)
+      } catch (err) {
+        toast.error(`${done} failed: ${message(err)}`)
+      }
     },
-    [ackAll, navigate, onDone, onTemplates, openDialog],
+    [ackAll, navigate, onDone, onTemplates, openDialog, recordPull],
   )
 }

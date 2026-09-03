@@ -24,7 +24,7 @@ import {
 } from '@/lib/commands'
 import { runLabel, stateLabel } from '@/lib/status'
 import { useStore } from '@/store'
-import { useAttentionRuns, useCapability, useSelfRole } from '@/store/hooks'
+import { useAttentionRuns, useCapability, useSelf } from '@/store/hooks'
 
 /**
  * Everything the palette can do. The verbs themselves live in
@@ -48,7 +48,7 @@ export function PaletteBody({
   const navigate = useStore((s) => s.navigate)
   const pausedRuns = useStore((s) => s.pausedRuns)
   const cap = useCapability()
-  const role = useSelfRole()
+  const self = useSelf()
   const perform = useCommandRunner({ onDone, onTemplates })
 
   // Steering acts on the run the centre view is showing, whichever of the run
@@ -67,7 +67,7 @@ export function PaletteBody({
     <CommandItem
       key={command.id}
       value={command.value}
-      onSelect={() => perform(command)}
+      onSelect={() => void perform(command)}
     >
       <command.Icon />
       {command.label}
@@ -79,6 +79,8 @@ export function PaletteBody({
     paused: pausedRuns[focused.run.id],
     cap,
     members,
+    self,
+    steerOthers: workspaces[focused.run.workspace_id]?.steer_others,
   }
 
   return (
@@ -98,7 +100,7 @@ export function PaletteBody({
         )}
 
         <CommandGroup heading="Board">
-          {boardCommands({ cap, role }).map(item)}
+          {boardCommands({ cap, role: self.role }).map(item)}
         </CommandGroup>
 
         {(cap.hasMethod('member.list') ||

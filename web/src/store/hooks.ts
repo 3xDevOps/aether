@@ -132,6 +132,16 @@ export function useSelfRole(): Member['role'] | null {
   return useStore((s) => s.info?.member.role ?? null)
 }
 
+/**
+ * The caller's own id and role in one object, which is what the permission
+ * mirror in `lib/permissions.ts` asks for. Both are null before hydration.
+ */
+export function useSelf(): { id: string | null; role: Member['role'] | null } {
+  const id = useStore((s) => s.info?.member.id ?? null)
+  const role = useStore((s) => s.info?.member.role ?? null)
+  return useMemo(() => ({ id, role }), [id, role])
+}
+
 /** Whether the caller holds the admin role. False until hydrated. */
 export function useIsAdmin(): boolean {
   return useStore((s) => s.info?.member.role === 'admin')

@@ -1,10 +1,13 @@
 // The focused run's verbs as visible buttons. The list, the gates, the icons
 // and the words all come from `src/lib/commands.ts`, so this bar and the
-// command palette can never drift apart. The one thing this surface adds is
-// the confirm step: a button is one click away from an accident, where a
-// palette item is already several deliberate steps away from one.
+// command palette can never drift apart; buttons take the short label and
+// keep the full one as their tooltip, because eight of these share one
+// header row. The two things this surface adds are the confirm step - a
+// button is one click away from an accident, where a palette item is already
+// several deliberate steps away from one - and the in-flight state, which
+// stops a slow verb being fired twice.
 
-import { UserPlus } from 'lucide-react'
+import { Loader2, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,7 +20,6 @@ import {
 } from '@/components/ui/dialog'
 import {
   handoffCommands,
-  handoffTargets,
   runCommands,
   useCommandRunner,
   type Command,
@@ -25,19 +27,31 @@ import {
 } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { useCapability, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 export function RunActions({ run }: { run: RunRecord }) {
   const paused = useStore((s) => s.pausedRuns[run.id])
   const members = useStore((s) => s.members)
+  const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
+  const self = useSelf()
   const perform = useCommandRunner()
   const [asking, setAsking] = useState<Command | null>(null)
   const [handoff, setHandoff] = useState(false)
+  // One verb at a time per run. Pull shells out to `git fetch` and takes
+  // seconds; without this a member with no feedback clicks it again and the
+  // second fetch loses the ref-lock race, reporting a failure for a pull that
+  // worked.
+  const [running, setRunning] = useState<string | null>(null)
 
-  const context: RunCommandContext = { run, paused, cap, members }
+  const context: RunCommandContext = { run, paused, cap, members, self, steerOthers }
   const confirm = asking?.confirm
+
+  const start = (command: Command) => {
+    setRunning(command.id)
+    void perform(command).finally(() => setRunning(null))
+  }
 
   return (
     <>
@@ -47,23 +61,29 @@ export function RunActions({ run }: { run: RunRecord }) {
           variant="ghost"
           size="sm"
           className="h-6 px-2"
-          onClick={() =>
-            command.confirm ? setAsking(command) : perform(command)
-          }
+          title={command.label}
+          disabled={running !== null}
+          onClick={() => (command.confirm ? setAsking(command) : start(command))}
         >
-          <command.Icon className="size-3" aria-hidden />
-          {buttonLabel(command.label)}
+          {running === command.id ? (
+            <Loader2 className="size-3 animate-spin" aria-hidden />
+          ) : (
+            <command.Icon className="size-3" aria-hidden />
+          )}
+          {command.short ?? command.label}
         </Button>
       ))}
 
       {/* Every eligible member behind one button: a viewer cannot own a run
           and the current owner is not a target, so a run with nobody to hand
           to shows nothing at all. */}
-      {handoffTargets(run, members).length > 0 && (
+      {handoffCommands(context).length > 0 && (
         <Button
           variant="ghost"
           size="sm"
           className="h-6 px-2"
+          title="Hand off to another member"
+          disabled={running !== null}
           onClick={() => setHandoff(true)}
         >
           <UserPlus className="size-3" aria-hidden />
@@ -88,7 +108,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                 variant="destructive"
                 onClick={() => {
                   setAsking(null)
-                  perform(asking)
+                  start(asking)
                 }}
               >
                 {confirm.action}
@@ -115,7 +135,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                   className="justify-start"
                   onClick={() => {
                     setHandoff(false)
-                    perform(command)
+                    start(command)
                   }}
                 >
                   <command.Icon aria-hidden />
@@ -128,13 +148,4 @@ export function RunActions({ run }: { run: RunRecord }) {
       )}
     </>
   )
-}
-
-/**
- * A trailing ellipsis promises "a form follows", which a palette item needs
- * to say and a button does not - clicking one is already the step that opens
- * it. The command keeps its palette wording; only the button trims it.
- */
-function buttonLabel(label: string): string {
-  return label.replace(/\.\.\.$/, '')
 }
