@@ -26,6 +26,7 @@ func runUpdate(args []string) error {
 	tag := fs.String("version", "", "release tag to install (default: latest)")
 	check := fs.Bool("check", false, "only report whether an update is available")
 	jsonOut := fs.Bool("json", false, "with --check, print the check as one JSON line")
+	noApp := fs.Bool("no-app", false, "skip rebuilding the installed desktop app")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -37,6 +38,9 @@ func runUpdate(args []string) error {
 	}
 	if *check && *tag != "" {
 		return errors.New("--version installs a tag and --check installs nothing; pick one")
+	}
+	if *check && *noApp {
+		return errors.New("--no-app skips part of an install and --check installs nothing; pick one")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -74,7 +78,12 @@ func runUpdate(args []string) error {
 	if len(replaced) > 1 {
 		fmt.Println("restart it: sudo systemctl restart aether-server")
 	}
-	return nil
+	if *noApp {
+		return nil
+	}
+	// replaced[0] is this CLI's own path with its symlinks resolved, which
+	// is where the new binary now sits.
+	return rebuildDesktopApp(replaced[0])
 }
 
 // reportCheck prints the release check and exits 0 whatever it says: a
