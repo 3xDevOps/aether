@@ -81,3 +81,28 @@ describe('update dismissals are per version', () => {
     expect(stored.state).not.toHaveProperty('update')
   })
 })
+
+describe('terminal dock heights', () => {
+  it('uses the defaults, clamps updates, and persists both preferences', () => {
+    const initial = useStore.getState()
+    expect(initial.terminalDockHeight).toBe(280)
+    expect(initial.runDockHeight).toBe(240)
+
+    initial.setTerminalDockHeight(0)
+    initial.setRunDockHeight(window.innerHeight)
+
+    expect(useStore.getState().terminalDockHeight).toBe(120)
+    expect(useStore.getState().runDockHeight).toBe(
+      Math.max(120, window.innerHeight - 200),
+    )
+
+    const stored = JSON.parse(
+      window.localStorage.getItem('aether.ui') ?? '{}',
+    ) as { state?: Record<string, unknown> }
+    expect(stored.state).toMatchObject({
+      terminalDockHeight: 120,
+      runDockHeight: Math.max(120, window.innerHeight - 200),
+    })
+    useStore.setState({ terminalDockHeight: 280, runDockHeight: 240 })
+  })
+})

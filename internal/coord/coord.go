@@ -30,6 +30,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -62,7 +63,7 @@ type Peers interface {
 // Injector writes an attributed banner into a run's terminal and its
 // transcript; satisfied by *ptyhost.Host.
 type Injector interface {
-	Inject(ctx context.Context, run domain.RunID, actorName, actorColor, message string) error
+	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error
 }
 
 // Config wires the service. Dir, Store, Mail, Bus, and Peers are

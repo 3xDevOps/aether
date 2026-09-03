@@ -274,6 +274,9 @@ func (r *e2eRuntime) Attach(_ context.Context, id runtime.ID) (runtime.Attachmen
 	c.attOnce.Do(func() { close(c.attached) })
 	return a, nil
 }
+func (r *e2eRuntime) ExecTTY(ctx context.Context, id runtime.ID, _ []string, _ string, _, _ uint) (runtime.Attachment, error) {
+	return r.Attach(ctx, id)
+}
 
 func (r *e2eRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
 	c, err := r.get(id)

@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -214,6 +216,19 @@ func (r *fakeRuntime) Attach(_ context.Context, id runtime.ID) (runtime.Attachme
 	a := &fakeAttachment{c: c, pr: pr, pw: pw}
 	c.atts = append(c.atts, a)
 	return a, nil
+}
+func (r *fakeRuntime) ExecTTY(ctx context.Context, id runtime.ID, _ []string, _ string, cols, rows uint) (runtime.Attachment, error) {
+	att, err := r.Attach(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if cols != 0 && rows != 0 {
+		if err := att.Resize(ctx, cols, rows); err != nil {
+			_ = att.Close()
+			return nil, err
+		}
+	}
+	return att, nil
 }
 
 func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
@@ -533,7 +548,7 @@ func (g *fakeGit) checkoutCount() int {
 // the last byte read.
 type fakePTY struct {
 	mu       sync.Mutex
-	sessions map[domain.RunID]*fakePTYSession
+	sessions map[ptyhost.SessionKey]*fakePTYSession
 	injects  []fakeInject
 }
 
@@ -556,13 +571,13 @@ type fakeInject struct {
 var errFakeNoSession = errors.New("fake ptyhost: no session for run")
 
 func newFakePTY() *fakePTY {
-	return &fakePTY{sessions: make(map[domain.RunID]*fakePTYSession)}
+	return &fakePTY{sessions: make(map[ptyhost.SessionKey]*fakePTYSession)}
 }
 
-func (p *fakePTY) StartSession(_ context.Context, run domain.RunID, att runtime.Attachment) error {
+func (p *fakePTY) StartSession(_ context.Context, key ptyhost.SessionKey, att runtime.Attachment) error {
 	sess := &fakePTYSession{att: att}
 	p.mu.Lock()
-	p.sessions[run] = sess
+	p.sessions[key] = sess
 	p.mu.Unlock()
 	go func() {
 		buf := make([]byte, 4096)
@@ -585,19 +600,32 @@ func (p *fakePTY) StartSession(_ context.Context, run domain.RunID, att runtime.
 	return nil
 }
 
-func (p *fakePTY) StopSession(_ context.Context, run domain.RunID) error {
+func (p *fakePTY) StopSession(_ context.Context, key ptyhost.SessionKey) error {
 	p.mu.Lock()
-	sess, ok := p.sessions[run]
+	sess, ok := p.sessions[key]
 	p.mu.Unlock()
 	if !ok {
 		return errFakeNoSession
 	}
 	return sess.att.Close()
 }
-
-func (p *fakePTY) LastOutput(run domain.RunID) (time.Time, bool) {
+func (p *fakePTY) StopSessionsWithPrefix(_ context.Context, prefix string) {
 	p.mu.Lock()
-	sess, ok := p.sessions[run]
+	sessions := make([]*fakePTYSession, 0)
+	for key, sess := range p.sessions {
+		if strings.HasPrefix(string(key), prefix) {
+			sessions = append(sessions, sess)
+		}
+	}
+	p.mu.Unlock()
+	for _, sess := range sessions {
+		_ = sess.att.Close()
+	}
+}
+
+func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {
+	p.mu.Lock()
+	sess, ok := p.sessions[key]
 	p.mu.Unlock()
 	if !ok {
 		return time.Time{}, false
@@ -607,9 +635,10 @@ func (p *fakePTY) LastOutput(run domain.RunID) (time.Time, bool) {
 	return sess.last, true
 }
 
-func (p *fakePTY) Inject(_ context.Context, run domain.RunID, actorName, actorColor, message string) error {
+func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error {
+	run, _ := key.Run()
 	p.mu.Lock()
-	sess, ok := p.sessions[run]
+	sess, ok := p.sessions[key]
 	if ok {
 		p.injects = append(p.injects, fakeInject{run: run, name: actorName, color: actorColor, message: message})
 	}
@@ -627,7 +656,7 @@ func (p *fakePTY) Inject(_ context.Context, run domain.RunID, actorName, actorCo
 func (p *fakePTY) session(run domain.RunID) *fakePTYSession {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.sessions[run]
+	return p.sessions[ptyhost.RunSession(run)]
 }
 
 func (p *fakePTY) injected() []fakeInject {

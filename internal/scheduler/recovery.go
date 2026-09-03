@@ -10,6 +10,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -298,7 +299,7 @@ func (s *Scheduler) didNotSurvive(ctx context.Context, r *domain.Run, cid runtim
 func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc sidecar, cid runtime.ID) {
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err == nil {
-		if serr := s.cfg.PTY.StartSession(ctx, r.ID, att); serr != nil {
+		if serr := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(r.ID), att); serr != nil {
 			_ = att.Close()
 			err = serr
 		}

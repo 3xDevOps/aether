@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
 // attachAckGrace is how long serveAttach waits for the PTY host to either
@@ -76,7 +77,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	conn := newAttachConn(ch, r, protocol.AttachResponse{OK: true, Cols: cols, Rows: rows})
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.cfg.PTY.Attach(attachCtx, run.ID, member, cols, rows, readOnly, conn, st.resize)
+		errCh <- s.cfg.PTY.Attach(attachCtx, ptyhost.RunSession(run.ID), member, cols, rows, readOnly, conn, st.resize)
 	}()
 
 	var attachErr error

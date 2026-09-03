@@ -66,6 +66,8 @@ export function createRootStore() {
           theme: s.theme,
           sidebarWidth: s.sidebarWidth,
           sidebarCollapsed: s.sidebarCollapsed,
+          terminalDockHeight: s.terminalDockHeight,
+          runDockHeight: s.runDockHeight,
           activeWorkspace: s.activeWorkspace,
           groupBy: s.groupBy,
           dismissedUpdates: s.dismissedUpdates,

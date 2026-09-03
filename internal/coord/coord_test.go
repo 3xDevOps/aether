@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -87,7 +88,8 @@ type injection struct {
 	message string
 }
 
-func (f *fakePTY) Inject(_ context.Context, run domain.RunID, _, _, message string) error {
+func (f *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, _, _, message string) error {
+	run, _ := key.Run()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.attempts == nil {

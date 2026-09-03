@@ -428,6 +428,40 @@ func (d *Docker) Attach(ctx context.Context, id ID) (Attachment, error) {
 	return newDockerAttachment(d.cli, string(id), tty, resp), nil
 }
 
+// ExecTTY opens an additional TTY process inside a running container.
+func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir string, cols, rows uint) (Attachment, error) {
+	opts := container.ExecOptions{
+		Tty:          true,
+		AttachStdin:  true,
+		AttachStdout: true,
+		Cmd:          argv,
+		WorkingDir:   workDir,
+	}
+	if cols != 0 && rows != 0 {
+		opts.ConsoleSize = &[2]uint{rows, cols}
+	}
+	created, err := d.cli.ContainerExecCreate(ctx, string(id), opts)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: exec create: %w", err)
+	}
+	resp, err := d.cli.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{Tty: true})
+	if err != nil {
+		ins, inspectErr := d.cli.ContainerExecInspect(ctx, created.ID)
+		if inspectErr == nil && !ins.Running && (ins.ExitCode == 126 || ins.ExitCode == 127) {
+			return nil, &ExecExitError{Code: ins.ExitCode}
+		}
+		return nil, fmt.Errorf("runtime: exec attach: %w", err)
+	}
+	att := newExecAttachment(d.cli, created.ID, resp)
+	if cols != 0 && rows != 0 {
+		if err := att.Resize(ctx, cols, rows); err != nil {
+			_ = att.Close()
+			return nil, err
+		}
+	}
+	return att, nil
+}
+
 // Wait implements Runtime. A container that has never been started waits
 // for its first run to finish rather than reporting a phantom zero exit.
 func (d *Docker) Wait(ctx context.Context, id ID) (ExitStatus, error) {

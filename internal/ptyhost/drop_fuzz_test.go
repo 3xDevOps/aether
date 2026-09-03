@@ -115,12 +115,12 @@ func FuzzAttachDropMidInput(f *testing.F) {
 		att := newFakeAtt()
 		agent := att.captureStdin()
 		run := domain.RunID("run_drop")
-		if err := h.StartSession(context.Background(), run, att); err != nil {
+		if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 			t.Fatalf("StartSession: %v", err)
 		}
 
 		conn := &dropConn{pending: delivered}
-		err := h.Attach(context.Background(), run, "m1", 80, 24, false, conn, nil)
+		err := h.Attach(context.Background(), RunSession(run), "m1", 80, 24, false, conn, nil)
 		if err != nil && !errors.Is(err, errDropped) {
 			t.Fatalf("Attach after a dropped connection: %v", err)
 		}
@@ -149,12 +149,12 @@ func TestAttachDropDoesNotLeakIntoReattach(t *testing.T) {
 	att := newFakeAtt()
 	agent := att.captureStdin()
 	run := domain.RunID("run_reattach")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 
 	dead := &dropConn{pending: []byte("half-ty")}
-	if err := h.Attach(context.Background(), run, "m1", 80, 24, false, dead, nil); err != nil &&
+	if err := h.Attach(context.Background(), RunSession(run), "m1", 80, 24, false, dead, nil); err != nil &&
 		!errors.Is(err, errDropped) {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestAttachDropDoesNotLeakIntoReattach(t *testing.T) {
 	})
 
 	fresh := &dropConn{pending: []byte("\x03reset\r")}
-	if err := h.Attach(context.Background(), run, "m1", 80, 24, false, fresh, nil); err != nil &&
+	if err := h.Attach(context.Background(), RunSession(run), "m1", 80, 24, false, fresh, nil); err != nil &&
 		!errors.Is(err, errDropped) {
 		t.Fatalf("reattach: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestAttachIgnoresBytesThatArriveAfterItUnwinds(t *testing.T) {
 	att := newFakeAtt()
 	agent := att.captureStdin()
 	run := domain.RunID("run_late")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestAttachIgnoresBytesThatArriveAfterItUnwinds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- h.Attach(ctx, run, "m1", 80, 24, false, conn, nil)
+		done <- h.Attach(ctx, RunSession(run), "m1", 80, 24, false, conn, nil)
 	}()
 	waitFor(t, "the keystrokes the transport did deliver", func() bool {
 		return bytes.Equal(agent.Bytes(), []byte("typed"))
