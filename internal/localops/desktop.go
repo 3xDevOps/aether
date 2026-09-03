@@ -160,8 +160,8 @@ var shellSemver = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$
 // package.json, which main.js hands to the renderer. The dashboard compares
 // it with the CLI serving the gateway and asks for `aether gui build` once
 // the two have drifted apart. A version electron-builder would reject - a
-// dev build's "dev" - leaves the manifest alone, and the comparison then
-// simply never matches.
+// dev build's "dev" - leaves the manifest's own 0.1.0 in place, so a shell
+// built by a dev CLI reads as stale against any release, which it is.
 func stampShellVersion(buildDir, cliVersion string) error {
 	semver := strings.TrimPrefix(cliVersion, "v")
 	if !shellSemver.MatchString(semver) {

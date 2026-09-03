@@ -304,7 +304,9 @@ func TestStampShellVersion(t *testing.T) {
 		{"release tag", "v1.2.3", "1.2.3"},
 		{"prerelease tag", "v1.2.3-rc1", "1.2.3-rc1"},
 		// A dev build has no version electron-builder would accept, so the
-		// manifest keeps its own and the dashboard comparison never matches.
+		// manifest keeps its own 0.1.0. The dashboard then reads a shell
+		// stamped 0.1.0 against whatever CLI serves it, which is what a
+		// shell built by a dev CLI is: stale as soon as a release runs it.
 		{"dev build", "dev", "0.1.0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

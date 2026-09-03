@@ -95,13 +95,27 @@ rate limit. A build whose version is `dev` never reports an update. Set
 an air-gapped machine: the CLI's, the `aether gui` startup line, and the
 dashboard banner all answer `disabled` without touching the network.
 
+A binary built from a checkout reports what `git describe` produced
+(`v1.2.3-4-gabc123`, plus `-dirty` for uncommitted changes). The comparison
+reads that as the tag it descends from *plus* commits on top, so such a build
+is never told to downgrade to that tag, and is still told about a genuinely
+newer release. A checkout with no tags in reach reports a bare commit, which
+cannot be ordered against anything and never reports an update.
+
 **In the dashboard.** `aether gui` runs the same check in the background and
 prints one line to stderr when a newer release exists. The dashboard shows a
 dismissible banner naming the new version, with an **Update now** button that
-replaces the binary on this machine. Started from the desktop app the gateway
-exits once the binary is replaced and the app restarts it; started from a
-terminal the banner tells you to rerun `aether gui` yourself. Dismissing
-silences that version only - the next release shows the banner again.
+replaces the binary on this machine. The restart takes the gateway's own work
+with it - attached terminals and any running `aether sync` session stop, while
+the runs themselves keep going on the server. Started from the desktop app the
+gateway exits once the binary is replaced and the app restarts it; started
+from a terminal the banner tells you to rerun `aether gui` yourself.
+Dismissing silences that version only - the next release shows the banner
+again.
+
+On a single-box install the same update replaces the `aether-server` beside
+the CLI. The banner then names both binaries and the
+`sudo systemctl restart aether-server` that the running server still needs.
 
 Administrators see a second banner when the **server** is behind the latest
 release. The dashboard cannot update the server. Run these on the server host:
@@ -115,7 +129,9 @@ sudo systemctl restart aether-server
 updating the CLI updates the dashboard. The Electron shell around it - window
 chrome, notifications, `aether://` deep links - is whatever `aether gui build`
 last produced, and records which CLI built it. When that CLI is no longer the
-one serving the gateway the banner adds a line: run `aether gui build` again.
+one serving the gateway, a banner of its own says so and gives the command;
+it is not tied to a release being available, because the usual way to get
+there is to have just updated.
 
 ## Manual install
 
