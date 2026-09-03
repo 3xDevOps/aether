@@ -5,9 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/harness"
 )
@@ -128,39 +126,6 @@ func TestDiscoverSymlinkEscapeSkipped(t *testing.T) {
 		if strings.Contains(string(f.Content), "secret") {
 			t.Fatalf("%s carries the escaping target's content", f.Path)
 		}
-	}
-}
-
-// TestDiscoverNeverOpensASymlinkTarget proves the safety claim behind
-// skipping rather than aborting: the target is not read either way. The
-// fixture points the link at a FIFO, which os.ReadFile would block on
-// forever, so a walk that returns at all is a walk that did not open it.
-func TestDiscoverNeverOpensASymlinkTarget(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("mkfifo is POSIX-only")
-	}
-	root := setupClaudeRoot(t)
-	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
-	target := filepath.Join(t.TempDir(), "trap")
-	if err := syscall.Mkfifo(target, 0o600); err != nil {
-		t.Skipf("cannot create a FIFO here: %v", err)
-	}
-	if err := os.Symlink(target, filepath.Join(root, "escape")); err != nil {
-		t.Fatal(err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, _, err := DiscoverFiles(t.Context(), "claude", nil)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("DiscoverFiles: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the walk opened the symlink's target instead of skipping the link")
 	}
 }
 

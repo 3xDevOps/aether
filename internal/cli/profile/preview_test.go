@@ -4,15 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/harness"
 	profilesvc "github.com/3xDevOps/Aether/internal/profile"
@@ -356,88 +353,6 @@ func TestInventoryHonorsContextCancellation(t *testing.T) {
 	}
 }
 
-// TestInventorySkipsNonRegularFiles covers the blocker: a unix socket in a
-// profile root - ~/.codex/ipc/ipc.sock exists on any machine codex has run
-// on - aborted the whole walk with "no such device or address", so the
-// harness could be neither previewed nor pushed.
-func TestInventorySkipsNonRegularFiles(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix sockets are a POSIX file type")
-	}
-	root := setupClaudeRoot(t)
-	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
-	sock := filepath.Join(root, "ipc", "ipc.sock")
-	if err := os.MkdirAll(filepath.Dir(sock), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	listener, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Skipf("cannot create a unix socket here: %v", err)
-	}
-	defer func() { _ = listener.Close() }()
-
-	preview, err := Inventory(t.Context(), "claude")
-	if err != nil {
-		t.Fatalf("a socket in the profile root aborted the walk: %v", err)
-	}
-	var got Exclusion
-	for _, e := range preview.Excluded {
-		if e.Path == "ipc/ipc.sock" {
-			got = e
-		}
-	}
-	if got.Reason != ExcludeNotRegular {
-		t.Fatalf("exclusions = %+v, want ipc/ipc.sock as %s", preview.Excluded, ExcludeNotRegular)
-	}
-	if !strings.Contains(got.Detail, "socket") {
-		t.Errorf("detail does not name the file type: %q", got.Detail)
-	}
-	if preview.Files != 1 {
-		t.Errorf("files = %d, want only settings.json", preview.Files)
-	}
-	// The push agrees: a socket must not abort discovery either.
-	files, _, err := DiscoverFiles(t.Context(), "claude", nil)
-	if err != nil {
-		t.Fatalf("DiscoverFiles: %v", err)
-	}
-	if len(files) != 1 || files[0].Path != "settings.json" {
-		t.Errorf("discovered %+v, want only settings.json", files)
-	}
-}
-
-// TestInventoryDoesNotBlockOnAFifo is the half a socket cannot prove:
-// os.ReadFile on a FIFO blocks until a writer appears, and the context
-// check runs only between entries, so opening one would hang the walk on
-// an fd nothing can reclaim. The walk must refuse it on its mode and
-// return promptly.
-func TestInventoryDoesNotBlockOnAFifo(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("mkfifo is POSIX-only")
-	}
-	root := setupClaudeRoot(t)
-	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
-	fifo := filepath.Join(root, "pipe")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Skipf("cannot create a FIFO here: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := Inventory(t.Context(), "claude")
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("a FIFO in the profile root failed the walk: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		// Failing rather than hanging the suite: the point of the test is
-		// that nothing waits on a FIFO that will never be written to.
-		t.Fatal("the walk blocked on a FIFO instead of skipping it")
-	}
-}
-
 // TestInventorySpendsBudgetByPriority covers the starvation the reviewer
 // measured on a real ~/.claude: WalkDir visits lexically, so plugins/ and
 // other/ sorted first and spent the whole 20 MiB, leaving zero skills and
@@ -696,5 +611,49 @@ func TestInventoryCodexSessionsIgnored(t *testing.T) {
 	}
 	if preview.Files != 4 {
 		t.Errorf("files = %d, want the two transcripts re-included", preview.Files)
+	}
+}
+
+// TestIrregularKindNamesFileTypes covers the naming behind the
+// not-regular exclusion on every platform. The fixtures that create a
+// real socket or FIFO are POSIX-only (walk_unix_test.go), but what the
+// walk calls each file type is a pure function of its mode, and the user
+// reads that string to tell a stray socket from a device node.
+func TestIrregularKindNamesFileTypes(t *testing.T) {
+	for _, c := range []struct {
+		mode os.FileMode
+		want string
+	}{
+		{os.ModeSocket, "socket"},
+		{os.ModeNamedPipe, "named pipe"},
+		{os.ModeDevice, "device"},
+		{os.ModeDevice | os.ModeCharDevice, "device"},
+		{os.ModeIrregular, "irregular"},
+	} {
+		if got := irregularKind(c.mode); got != c.want {
+			t.Errorf("irregularKind(%v) = %q, want %q", c.mode, got, c.want)
+		}
+	}
+}
+
+// TestInventoryCarriesRegularFiles is the other side of the mode check,
+// and it runs everywhere: an ordinary file must not be mistaken for one
+// of the types the walk refuses.
+func TestInventoryCarriesRegularFiles(t *testing.T) {
+	root := setupClaudeRoot(t)
+	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
+	mustWrite(t, filepath.Join(root, "skills", "pdf", "SKILL.md"), "# pdf skill\n")
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Files != 2 {
+		t.Fatalf("files = %d, want both regular files", preview.Files)
+	}
+	for _, e := range preview.Excluded {
+		if e.Reason == ExcludeNotRegular {
+			t.Errorf("a regular file was refused on its mode: %+v", e)
+		}
 	}
 }
