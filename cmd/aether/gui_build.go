@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/3xDevOps/Aether/desktop"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -66,7 +68,13 @@ func guiBuild(args []string) error {
 	fmt.Printf("installed %s\n", app.App)
 	switch runtime.GOOS {
 	case "darwin":
-		fmt.Println("open it from Launchpad or Spotlight as Aether")
+		if strings.HasPrefix(app.App, home+string(filepath.Separator)) {
+			// The per-user folder is hidden in Finder, so the sidebar's
+			// Applications entry would show nothing.
+			fmt.Println("open it from Spotlight as Aether (~/Applications is hidden in Finder; this account cannot write to /Applications)")
+		} else {
+			fmt.Println("open it from your Applications folder or Spotlight as Aether")
+		}
 	case "windows":
 		fmt.Println("open it from the Start Menu as Aether")
 	default:

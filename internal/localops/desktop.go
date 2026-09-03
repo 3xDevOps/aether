@@ -20,9 +20,23 @@ type DesktopApp struct {
 	App string
 	// Launcher is what the desktop environment lists: the .desktop entry
 	// on linux, the Start Menu shortcut on windows, the bundle itself on
-	// darwin (Launchpad and Spotlight index ~/Applications directly).
+	// darwin (Finder and Spotlight index the Applications folders directly).
 	Launcher string
+	// Superseded is where an earlier install of the same app may sit when
+	// the layout has more than one candidate location (the other
+	// Applications folder on darwin); empty otherwise. InstallDesktop
+	// removes it once the new app is in place so the desktop lists one
+	// Aether.
+	Superseded string
 }
+
+// macSystemApplications is the machine-wide Applications folder, the one
+// Finder's sidebar opens and a new user means by "my Applications folder".
+// ~/Applications is hidden in Finder by default, so an app there looks
+// missing even though Spotlight finds it. Administrators can write here
+// without sudo; anyone else falls back to ~/Applications. A variable so
+// tests can point it at a temporary directory.
+var macSystemApplications = "/Applications"
 
 // desktopIcon is the icon copied beside the unpacked linux app; the
 // .desktop entry points at it by absolute path so no icon theme cache
@@ -132,18 +146,19 @@ func writeTree(dir string, src fs.FS) error {
 	})
 }
 
-// InstallDesktop copies the unpacked app at built into this user's
-// application directory for goos and registers a launcher so the desktop
-// environment lists it. home is the user's home directory; icon is the PNG
-// the linux launcher shows. An earlier install at the same place is
-// replaced.
+// InstallDesktop copies the unpacked app at built into the application
+// directory desktopLayout picks for goos and registers a launcher so the
+// desktop environment lists it. home is the user's home directory; icon is
+// the PNG the linux launcher shows. An earlier install at the same place is
+// replaced, and one at app.Superseded is removed after the new app is in
+// place, so a failed copy never costs the last working install.
 func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 	app, err := desktopLayout(goos, home)
 	if err != nil {
 		return DesktopApp{}, err
 	}
 	if err := os.RemoveAll(app.App); err != nil {
-		return DesktopApp{}, fmt.Errorf("localops: remove previous %s (is the Aether window still open?): %w", app.App, err)
+		return DesktopApp{}, fmt.Errorf("localops: remove previous %s%s: %w", app.App, removeHint(goos, app.App, err), err)
 	}
 	if err := os.MkdirAll(filepath.Dir(app.App), 0o755); err != nil {
 		return DesktopApp{}, err
@@ -179,7 +194,30 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 			return DesktopApp{}, fmt.Errorf("localops: create Start Menu shortcut: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 	}
+	if app.Superseded != "" {
+		// RemoveAll succeeds on a missing path, so any error here means
+		// the older copy is still listed beside the new one, or worse
+		// half-deleted: it is reported, not swallowed.
+		if err := os.RemoveAll(app.Superseded); err != nil {
+			return DesktopApp{}, fmt.Errorf("localops: %s is installed, but the earlier %s could not be removed%s: %w", app.App, app.Superseded, removeHint(goos, app.Superseded, err), err)
+		}
+	}
 	return app, nil
+}
+
+// removeHint explains a failed removal of an installed app in the terms
+// the user can act on. Windows holds the files of a running program open,
+// so there the fix is closing the window; on darwin and linux a running
+// app unlinks fine, and a refusal means the bundle belongs to another user.
+func removeHint(goos, path string, err error) string {
+	switch {
+	case goos == "windows":
+		return " (is the Aether window still open?)"
+	case errors.Is(err, fs.ErrPermission):
+		return fmt.Sprintf(" (it belongs to another user; delete it with: sudo rm -rf %q)", path)
+	default:
+		return ""
+	}
 }
 
 // DesktopFindsCLI reports whether the shell will locate the aether binary
@@ -215,8 +253,12 @@ func DesktopFindsCLI(home string) (found bool, shellOnly string) {
 	return false, ""
 }
 
-// desktopLayout is where the app and its launcher live for goos: the
-// per-user locations each desktop indexes without administrator rights.
+// desktopLayout is where the app and its launcher live for goos. Linux and
+// windows use the per-user locations their desktops index without
+// administrator rights. darwin prefers the machine-wide Applications
+// folder, which takes a filesystem probe, and names the per-user folder as
+// Superseded (or the reverse when the probe fails) so an older copy there
+// is cleaned up.
 func desktopLayout(goos, home string) (DesktopApp, error) {
 	switch goos {
 	case "linux":
@@ -231,8 +273,16 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 			Launcher: filepath.Join(data, "applications", "aether-desktop.desktop"),
 		}, nil
 	case "darwin":
-		app := filepath.Join(home, "Applications", "Aether.app")
-		return DesktopApp{App: app, Launcher: app}, nil
+		system := filepath.Join(macSystemApplications, "Aether.app")
+		user := filepath.Join(home, "Applications", "Aether.app")
+		app, other := system, user
+		if !writableDir(macSystemApplications) {
+			app, other = user, system
+		}
+		if other == app {
+			other = ""
+		}
+		return DesktopApp{App: app, Launcher: app, Superseded: other}, nil
 	case "windows":
 		local, roaming := os.Getenv("LOCALAPPDATA"), os.Getenv("APPDATA")
 		if !filepath.IsAbs(local) || !filepath.IsAbs(roaming) {
@@ -245,6 +295,20 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 	default:
 		return DesktopApp{}, fmt.Errorf("localops: no desktop app target for %s", goos)
 	}
+}
+
+// writableDir reports whether this user can create entries in dir. It
+// probes with a temporary file rather than reading permission bits, which
+// miss ACLs and group membership; the install writes there anyway.
+func writableDir(dir string) bool {
+	f, err := os.CreateTemp(dir, ".aether-probe-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return true
 }
 
 // desktopEntry renders the freedesktop launcher for the unpacked app in
