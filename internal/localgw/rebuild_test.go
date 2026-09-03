@@ -9,6 +9,7 @@ package localgw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,8 +43,10 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 // so no test builds a real Electron app.
 func stubRebuild(t *testing.T, script string, installed bool) {
 	t.Helper()
-	oldArgv, oldApp := rebuildArgv, installedDesktopApp
-	t.Cleanup(func() { rebuildArgv, installedDesktopApp = oldArgv, oldApp })
+	oldArgv, oldApp, oldUser := rebuildArgv, installedDesktopApp, lookupRealUser
+	t.Cleanup(func() {
+		rebuildArgv, installedDesktopApp, lookupRealUser = oldArgv, oldApp, oldUser
+	})
 	rebuildArgv = func(string, localops.RealUser, bool) []string { return []string{script} }
 	installedDesktopApp = func(string, localops.RealUser) (string, bool) {
 		return "/home/u/.local/share/aether/desktop", installed
@@ -241,5 +244,172 @@ func TestUpdateApplyNeverExitsAnUnsupervisedGateway(t *testing.T) {
 	case <-g.Exit():
 		t.Fatal("an unsupervised gateway exited under the browser tab that asked")
 	default:
+	}
+}
+
+// scriptBuild writes a script that stands in for `aether gui build --json`
+// with a body of its own, for the cases fakeBuild's fixed output cannot
+// express - a very long line, or a child that never returns.
+func scriptBuild(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "gui-build")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// longLine is shell that writes one stderr line of n bytes. Building it
+// with head and tr rather than a loop keeps the fixture fast enough that a
+// wedged reader, not the fixture, is what a timeout points at.
+func longLine(n int) string {
+	return "head -c " + strconv.Itoa(n) + " /dev/zero | tr '\\0' x >&2\necho >&2\n"
+}
+
+// awaitPhase blocks until update.status reports phase, or fails.
+func awaitPhase(t *testing.T, g *Gateway, phase string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		got := status(t, g)
+		if got.Phase == phase {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("phase = %q, want %q", got.Phase, phase)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// npm and electron-builder draw progress bars that can run past the 64 KiB
+// a default bufio.Scanner accepts. A scanner that stopped there would
+// leave the child blocked on a full pipe and the rebuild wedged with the
+// Update button disabled forever.
+func TestUpdateApplySurvivesAVeryLongBuildLine(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	stubRebuild(t, scriptBuild(t,
+		// One 100 KiB stderr line, then a normal one and the done phase.
+		longLine(102400)+
+			"echo 'installed' >&2\n"+
+			`printf '{"phase":"done","path":"/home/u/.local/share/aether/desktop"}\n'`+"\n"), true)
+
+	if got := applyForRebuild(t, g); !got.Rebuilding {
+		t.Fatalf("apply = %+v, want a rebuild", got)
+	}
+	waitForExit(t, g)
+	if g.ExitCode() != ExitRelaunch {
+		t.Fatalf("exit code = %d, want %d", g.ExitCode(), ExitRelaunch)
+	}
+	final := status(t, g)
+	if final.Phase != localops.PhaseDone {
+		t.Fatalf("phase = %q, want %q", final.Phase, localops.PhaseDone)
+	}
+	joined := strings.Join(final.LinesTail, "\n")
+	if !strings.Contains(joined, "installed") {
+		t.Fatalf("lines_tail = %v, want the lines after the long one", final.LinesTail)
+	}
+	if len(final.LinesTail) == 0 || len(final.LinesTail[0]) < 100000 {
+		t.Fatalf("the long line was dropped: first line is %d bytes", len(final.LinesTail[0]))
+	}
+}
+
+// Past the cap the reader gives up on the line, but it must still drain
+// the pipe: a child blocked writing into a pipe nobody reads would hang
+// the rebuild exactly as the unbounded scanner did.
+func TestUpdateApplyDrainsBuildOutputPastTheCap(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	stubRebuild(t, scriptBuild(t,
+		longLine(2<<20)+
+			`printf '{"phase":"done","path":"/home/u/.local/share/aether/desktop"}\n'`+"\n"), true)
+
+	if got := applyForRebuild(t, g); !got.Rebuilding {
+		t.Fatalf("apply = %+v, want a rebuild", got)
+	}
+	waitForExit(t, g)
+	if g.ExitCode() != ExitRelaunch {
+		t.Fatalf("exit code = %d, want %d", g.ExitCode(), ExitRelaunch)
+	}
+	if got := strings.Join(status(t, g).LinesTail, "\n"); !strings.Contains(got, "build output not fully read") {
+		t.Fatalf("lines_tail = %q, want the truncation note", got)
+	}
+}
+
+// Quitting the app mid-rebuild must not leave a build running: it would
+// still be downloading Node and still swapping the directory of an app the
+// user just closed.
+func TestClosingTheGatewayStopsTheRebuild(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	stubRebuild(t, scriptBuild(t,
+		`printf '{"phase":"packaging"}\n'`+"\nexec sleep 120\n"), true)
+
+	if got := applyForRebuild(t, g); !got.Rebuilding {
+		t.Fatalf("apply = %+v, want a rebuild", got)
+	}
+	awaitPhase(t, g, localops.PhasePackaging)
+
+	if err := g.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// The killed child reports a failure, which is how the rebuild ends.
+	awaitPhase(t, g, localops.PhaseError)
+	waitForExit(t, g)
+	if g.ExitCode() != 0 {
+		t.Fatalf("exit code = %d, want 0: no app was installed over", g.ExitCode())
+	}
+}
+
+// A second apply - another tab, or the app beside a browser tab - must not
+// exit a supervised gateway while the first build is still swapping the
+// app directory. It says a rebuild is running and leaves it alone.
+func TestSecondUpdateApplyDoesNotExitDuringARebuild(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	t.Cleanup(func() { _ = g.Close() })
+	stubRebuild(t, scriptBuild(t,
+		`printf '{"phase":"packaging"}\n'`+"\nexec sleep 120\n"), true)
+
+	if got := applyForRebuild(t, g); !got.Rebuilding {
+		t.Fatalf("first apply = %+v, want a rebuild", got)
+	}
+	awaitPhase(t, g, localops.PhasePackaging)
+
+	second := applyForRebuild(t, g)
+	if !second.Rebuilding {
+		t.Fatalf("second apply = %+v, want it to report the running rebuild", second)
+	}
+	if !strings.Contains(second.Note, "already running") {
+		t.Fatalf("note = %q, want it to say a rebuild is already running", second.Note)
+	}
+	select {
+	case <-g.Exit():
+		t.Fatal("the gateway exited while a rebuild was still running")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// A rebuild that cannot even start leaves nothing for update.status to be
+// polled for, so the reason has to reach the next gateway through the
+// record on disk - or the stale-app banner has no explanation at all.
+func TestUpdateApplyRecordsARebuildThatCannotStart(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	stubRebuild(t, fakeBuild(t, "", "", 0), true)
+	rebuildArgv = func(string, localops.RealUser, bool) []string {
+		t.Fatal("the account could not be resolved; nothing may be built")
+		return nil
+	}
+	lookupRealUser = func() (localops.RealUser, error) {
+		return localops.RealUser{}, errors.New("look up SUDO_USER \"ghost\": unknown user")
+	}
+
+	if got := applyForRebuild(t, g); got.Rebuilding {
+		t.Fatalf("apply = %+v, want no rebuild", got)
+	}
+	if recorded := localops.LastDesktopBuildError(); !strings.Contains(recorded, "ghost") {
+		t.Fatalf("recorded error = %q, want the lookup failure", recorded)
 	}
 }

@@ -2,13 +2,13 @@ package localgw
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"io"
 	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/localops"
 )
@@ -29,6 +29,7 @@ const rebuildTailLines = 20
 var (
 	rebuildArgv         = localops.RebuildAppArgv
 	installedDesktopApp = localops.InstalledDesktopApp
+	lookupRealUser      = localops.LookupRealUser
 )
 
 // rebuildState tracks the desktop-app build update.apply started, for the
@@ -107,25 +108,46 @@ func (s *rebuildState) release() {
 	s.running = false
 }
 
+// rebuildOutcome is what startAppRebuild did. "Nothing to build" and "a
+// build is already running" have to be told apart: a supervised gateway
+// exits when there is nothing to wait for, and doing that during someone
+// else's build would drop the shell back into the old app mid-swap.
+type rebuildOutcome int
+
+const (
+	// rebuildNone: no desktop app is installed for this account, or the
+	// build could not be started at all.
+	rebuildNone rebuildOutcome = iota
+	// rebuildStarted: a build is running because of this call.
+	rebuildStarted
+	// rebuildBusy: a build this gateway started earlier is still running.
+	rebuildBusy
+)
+
 // startAppRebuild rebuilds an installed desktop app with the CLI that
-// update.apply just installed at bin, in the background. It reports
-// whether a build started: a machine with no app installed builds nothing,
-// which is what a browser-only or server install always answers.
+// update.apply just installed at bin, in the background.
 //
 // The build runs as a child of `<bin> gui build --json` rather than in
 // this process, because that binary carries the shell sources the new app
 // has to be built from - this one is the version being replaced.
-func (g *Gateway) startAppRebuild(bin string) bool {
-	who, err := localops.LookupRealUser()
+func (g *Gateway) startAppRebuild(bin string) rebuildOutcome {
+	who, err := lookupRealUser()
 	if err != nil {
-		g.rebuild.fail("find the account to build for: " + err.Error())
-		return false
+		msg := "find the account to build for: " + err.Error()
+		g.rebuild.fail(msg)
+		// Nothing will poll update.status for a rebuild that never began,
+		// so the reason has to go where the next gateway reads it - or the
+		// user gets a stale-app banner with no explanation at all.
+		if writeErr := localops.RecordDesktopBuildError(msg); writeErr != nil {
+			g.rebuild.addLine("could not record the build failure: " + writeErr.Error())
+		}
+		return rebuildNone
 	}
 	if _, ok := installedDesktopApp(runtime.GOOS, who); !ok {
-		return false
+		return rebuildNone
 	}
 	if !g.rebuild.claim() {
-		return false
+		return rebuildBusy
 	}
 	argv := rebuildArgv(bin, who, true)
 	go func() {
@@ -133,14 +155,28 @@ func (g *Gateway) startAppRebuild(bin string) bool {
 		err := g.runRebuild(argv)
 		g.finishRebuild(err)
 	}()
-	return true
+	return rebuildStarted
 }
+
+// buildLineCap bounds one line of build output. npm and electron-builder
+// draw progress bars that can run long, and bufio.Scanner's 64 KiB default
+// would stop the reader on one of them - leaving the child blocked on a
+// full pipe and the rebuild wedged forever.
+const buildLineCap = 1 << 20
+
+// rebuildWaitDelay is how long a child that ignored the kill keeps its
+// pipes before Wait gives up on them, so a wedged build cannot hold the
+// gateway's shutdown open.
+const rebuildWaitDelay = 5 * time.Second
 
 // runRebuild runs the build to completion, feeding update.status from its
 // two streams: one JSON phase line per step on stdout, the build's own
-// output on stderr.
+// output on stderr. The child is tied to the gateway's context, so closing
+// the gateway - quitting the app mid-rebuild - stops it rather than
+// leaving it downloading Node and swapping the app directory on its own.
 func (g *Gateway) runRebuild(argv []string) error {
-	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...)
+	cmd := exec.CommandContext(g.ctx, argv[0], argv[1:]...)
+	cmd.WaitDelay = rebuildWaitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -164,10 +200,7 @@ func (g *Gateway) runRebuild(argv []string) error {
 	}()
 	go func() {
 		defer wg.Done()
-		scan := bufio.NewScanner(stderr)
-		for scan.Scan() {
-			g.rebuild.addLine(scan.Text())
-		}
+		g.scanBuildOutput(stderr, g.rebuild.addLine)
 	}()
 	wg.Wait()
 	waitErr := cmd.Wait()
@@ -177,29 +210,45 @@ func (g *Gateway) runRebuild(argv []string) error {
 	return waitErr
 }
 
+// scanBuildOutput hands each line of r to line, with a bounded token and a
+// drain: a scanner that gives up - a line past buildLineCap, a read error -
+// must never leave the child blocked writing into a pipe nobody reads, or
+// the rebuild hangs with the Update button disabled and no way out but
+// killing the app.
+func (g *Gateway) scanBuildOutput(r io.Reader, line func(string)) {
+	scan := bufio.NewScanner(r)
+	scan.Buffer(make([]byte, 0, 64<<10), buildLineCap)
+	for scan.Scan() {
+		line(scan.Text())
+	}
+	if err := scan.Err(); err != nil {
+		g.rebuild.addLine("build output not fully read: " + err.Error())
+		_, _ = io.Copy(io.Discard, r)
+	}
+}
+
 // readPhases applies the build's JSON phase lines to update.status and
 // returns the message from an error phase, empty when there was none.
 func (g *Gateway) readPhases(r io.Reader) string {
 	failure := ""
-	scan := bufio.NewScanner(r)
-	for scan.Scan() {
+	g.scanBuildOutput(r, func(text string) {
 		var event struct {
 			Phase string `json:"phase"`
 			Error string `json:"error"`
 		}
-		if err := json.Unmarshal(scan.Bytes(), &event); err != nil || event.Phase == "" {
+		if err := json.Unmarshal([]byte(text), &event); err != nil || event.Phase == "" {
 			// Not a phase line. `gui build --json` keeps everything else
 			// on stderr, so this is a stray warning worth keeping beside
 			// the build output rather than dropping.
-			g.rebuild.addLine(scan.Text())
-			continue
+			g.rebuild.addLine(text)
+			return
 		}
 		if event.Phase == localops.PhaseError {
 			failure = event.Error
-			continue
+			return
 		}
 		g.rebuild.setPhase(event.Phase)
-	}
+	})
 	return failure
 }
 

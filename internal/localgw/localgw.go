@@ -90,6 +90,12 @@ type Gateway struct {
 	exitCode int
 	// rebuild tracks the desktop-app build update.apply starts.
 	rebuild *rebuildState
+	// ctx bounds the background work this gateway owns - so far the
+	// desktop-app rebuild child - and Close cancels it. Without it a
+	// rebuild outlives the app that started it, still downloading Node and
+	// still swapping the directory of an app the user just quit.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New builds the gateway and mints its per-process token. It binds
@@ -112,12 +118,15 @@ func New(cfg Config) (*Gateway, error) {
 	if err != nil {
 		return nil, fmt.Errorf("localgw: mint token: %w", err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	g := &Gateway{
 		cfg:     cfg,
 		local:   newLocalState(cfg),
 		token:   token,
 		exit:    make(chan struct{}),
 		rebuild: newRebuildState(),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 	g.mux = http.NewServeMux()
 	g.mux.HandleFunc("POST /api/v1/{method}", g.handleAPI)
@@ -231,8 +240,10 @@ func (g *Gateway) requestExit(code int) {
 }
 
 // Close stops serving, draining in-flight requests briefly before cutting
-// them off. Safe before Start.
+// them off, and stops the background work the gateway owns. Safe before
+// Start, and safe to call twice.
 func (g *Gateway) Close() error {
+	g.cancel()
 	if g.ln == nil {
 		return nil
 	}

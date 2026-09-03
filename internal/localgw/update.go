@@ -94,10 +94,19 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	// The CLI is swapped; the Electron shell around the dashboard is not,
 	// and it is built from the sources inside the binary that just landed.
 	// updated[0] is that binary, symlinks already resolved.
-	rebuilding := len(updated) > 0 && g.startAppRebuild(updated[0])
+	outcome := rebuildNone
+	if len(updated) > 0 {
+		outcome = g.startAppRebuild(updated[0])
+	}
+	rebuilding := outcome != rebuildNone
 
 	note := "rerun aether gui to use the new binary"
 	switch {
+	case outcome == rebuildBusy:
+		// A second apply - another tab, or the app beside a browser tab.
+		// Saying a rebuild is running is the honest answer, and it must
+		// not exit: the first build is still swapping the app directory.
+		note = "a rebuild of the desktop app is already running"
 	case rebuilding && g.cfg.Supervised:
 		note = "rebuilding the desktop app, then relaunching it"
 	case rebuilding:
@@ -107,12 +116,13 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	case g.cfg.Supervised:
 		note = "the desktop app restarts with the new binary"
 	}
-	if g.cfg.Supervised && !rebuilding {
+	if g.cfg.Supervised && outcome == rebuildNone {
 		// Close after the handler returns and Shutdown drains it: the
 		// command waiting on Exit calls Close, which lets this response
 		// finish writing before the process goes away. With a rebuild
-		// running the exit waits for it, so the shell relaunches onto the
-		// new app rather than the old one.
+		// running - this call's or an earlier one's - the exit waits for
+		// it, so the shell relaunches onto the new app rather than the old
+		// one, and never mid-swap.
 		g.requestExit(0)
 	}
 	return struct {
