@@ -28,6 +28,15 @@ func (s *Service) Tick(ctx context.Context) {
 	if state.Pending == nil {
 		return
 	}
+	// A pending update can only be scheduled by a capable server, but the
+	// row outlives the process: an install moved to unprivileged mode
+	// between the schedule and the restart leaves one that can never
+	// apply. Retire it with the reason rather than refusing it quietly
+	// every poll interval for the rest of time.
+	if reason := s.incapableReason(); reason != "" {
+		s.retire(ctx, *state.Pending, reason)
+		return
+	}
 	if busy := s.busyNow(ctx); !busy.Idle() {
 		return
 	}
@@ -39,6 +48,16 @@ func (s *Service) Tick(ctx context.Context) {
 		return
 	}
 	restart()
+}
+
+// retire records a pending update that can never apply and clears it, so
+// an admin reads the reason on server.update_status instead of watching a
+// pending update that never lands.
+func (s *Service) retire(ctx context.Context, pending store.PendingServerUpdate, reason string) {
+	detail := "this server can no longer update itself: " + reason
+	slog.Error("serverupdate: retiring a pending update", "version", pending.Version, "reason", reason)
+	s.record(ctx, pending.Version, store.ServerUpdateFailed, detail)
+	s.publish(ctx, pending.RequestedBy, events.ServerUpdateFailed, pending.Version, detail)
 }
 
 // busyNow asks the run engine what it is doing. A deployment wired without
@@ -56,6 +75,12 @@ func (s *Service) busyNow(ctx context.Context) domain.ServerBusy {
 // pending row so the next idle tick does not retry a broken tag, and is
 // reported as `last` on server.update_status.
 func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate) (func(), error) {
+	// The invariant every caller depends on, checked where it is used
+	// rather than at each call site: nothing downloads a release or
+	// replaces a binary on a server that cannot restart onto it.
+	if reason := s.incapableReason(); reason != "" {
+		return nil, fmt.Errorf("%w: %s", ErrIncapable, reason)
+	}
 	if !s.claim() {
 		return nil, ErrBusy
 	}
