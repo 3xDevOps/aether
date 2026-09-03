@@ -282,8 +282,8 @@ function NavSection() {
           type="button"
           onClick={() => navigate(name)}
           className={cn(
-            'flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-accent/60',
-            route.name === name && 'bg-accent',
+            'flex w-full items-center gap-2 border-l-2 border-transparent px-2 py-1 text-left text-sm hover:bg-accent/60',
+            route.name === name && 'bg-accent border-primary',
           )}
         >
           <Icon className="size-3.5 text-muted-foreground" />
