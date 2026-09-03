@@ -47,4 +47,9 @@ type GatewayCapabilities struct {
 	WS []string `json:"ws"`
 	// Local lists verbs only a local gateway offers, absent remotely.
 	Local []string `json:"local,omitempty"`
+	// Version is the CLI build serving this gateway ("dev" for a local
+	// build), so a client can tell a stale shell from a stale gateway.
+	Version string `json:"version,omitempty"`
+	// Commit is that build's short git commit.
+	Commit string `json:"commit,omitempty"`
 }

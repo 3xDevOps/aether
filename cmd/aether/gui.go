@@ -11,9 +11,11 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localgw"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
 func init() {
@@ -54,10 +56,17 @@ func runGUI(args []string) error {
 		}
 		cfg = named
 	}
+	// One checker serves both the startup nudge and the update verbs, so
+	// the dashboard reads the answer the banner already paid for.
+	checker := selfupdate.DefaultChecker()
 	gw, err := localgw.New(localgw.Config{
 		Port:    *port,
 		Backend: localgw.NewSSHBackend(cfg),
 		CLI:     cfg,
+		Update:  checker,
+		// The desktop shell spawns `aether gui --json` and restarts it,
+		// so an update applied from the dashboard can exit the process.
+		Supervised: *jsonOut,
 	})
 	if err != nil {
 		return err
@@ -85,18 +94,38 @@ func runGUI(args []string) error {
 			openBrowser(url)
 		}
 	}
-	waitForExit()
+	go nudgeUpdate(checker)
+	waitForExit(gw.Exit())
 	return nil
+}
+
+// nudgeUpdate prints one line naming the command when a newer release
+// exists. It writes to stderr because stdout carries the --json handshake
+// the desktop shell parses. A failed check has no reader to report to and
+// no bearing on serving the dashboard, so it stays silent; `aether update
+// --check` reports the same failure with an exit status.
+func nudgeUpdate(c *selfupdate.Checker) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	check, err := c.Check(ctx)
+	if err != nil || !check.UpdateAvailable {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "update available: %s (running %s); run: aether update\n", check.Latest, check.Version)
 }
 
 // waitForExit blocks until the process is told to stop. SIGTERM belongs
 // here with Ctrl-C: without it a `kill` or a systemd stop skips the
 // deferred gateway shutdown and leaves the listener live. SIGHUP covers
-// a closed terminal window the same way.
-func waitForExit() {
+// a closed terminal window the same way. The gateway asks for the same
+// stop through exit after update.apply replaces this binary.
+func waitForExit(exit <-chan struct{}) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, append([]os.Signal{syscall.SIGHUP}, terminationSignals...)...)
-	<-ch
+	select {
+	case <-ch:
+	case <-exit:
+	}
 }
 
 func openBrowser(url string) {

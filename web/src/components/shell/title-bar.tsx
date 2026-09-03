@@ -15,16 +15,26 @@ export type DesktopControls = {
 
 /**
  * What `desktop/preload.js` puts on `window`. Declared here rather than as a
- * global augmentation: this is the only file that reads the bridge, so the
- * shape it depends on is documented beside the code depending on it.
+ * global augmentation: the bar is the bridge's main reader, so the shape it
+ * depends on is documented beside the code depending on it.
  */
 export type AetherDesktop = {
   platform: string
   /** Absent on darwin, where the native traffic lights are kept. */
   controls?: DesktopControls
+  /**
+   * The CLI version that built this shell, without the leading "v" (for
+   * example "1.2.3"). A shell a dev CLI built keeps the manifest's own
+   * "0.1.0" rather than going absent, so it reads as stale against any
+   * release, which it is. Absent only in a browser tab, where the whole
+   * bridge is. The update banner compares it with the CLI serving the
+   * gateway, because a newer CLI needs `aether gui build` run again.
+   */
+  shellVersion?: string
 }
 
-function bridge(): AetherDesktop | undefined {
+/** The desktop bridge, or undefined in a browser tab. */
+export function desktopBridge(): AetherDesktop | undefined {
   return (window as Window & { aetherDesktop?: AetherDesktop }).aetherDesktop
 }
 
@@ -69,7 +79,7 @@ function ControlButton({
  * already has the browser's own chrome.
  */
 export function TitleBar() {
-  const desktop = bridge()
+  const desktop = desktopBridge()
   const controls = desktop?.controls
   const [maximized, setMaximized] = useState(false)
 

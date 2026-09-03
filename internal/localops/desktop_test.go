@@ -1,6 +1,7 @@
 package localops
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -277,5 +278,52 @@ func TestWriteTreeOverwritesExistingSources(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "build", "icons", "16.png")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStampShellVersion(t *testing.T) {
+	manifest := `{"name":"aether-desktop","version":"0.1.0","main":"main.js"}`
+	read := func(t *testing.T, dir string) map[string]any {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(dir, "package.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("parse stamped manifest: %v", err)
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name    string
+		cli     string
+		version string
+	}{
+		{"release tag", "v1.2.3", "1.2.3"},
+		{"prerelease tag", "v1.2.3-rc1", "1.2.3-rc1"},
+		// A dev build has no version electron-builder would accept, so the
+		// manifest keeps its own 0.1.0. The dashboard then reads a shell
+		// stamped 0.1.0 against whatever CLI serves it, which is what a
+		// shell built by a dev CLI is: stale as soon as a release runs it.
+		{"dev build", "dev", "0.1.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := stampShellVersion(dir, tc.cli); err != nil {
+				t.Fatalf("stampShellVersion: %v", err)
+			}
+			got := read(t, dir)
+			if got["version"] != tc.version {
+				t.Fatalf("version = %v, want %s", got["version"], tc.version)
+			}
+			if got["main"] != "main.js" {
+				t.Fatalf("main = %v, want main.js (other fields must survive)", got["main"])
+			}
+		})
 	}
 }

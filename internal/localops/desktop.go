@@ -2,6 +2,7 @@ package localops
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -55,11 +57,12 @@ func DesktopBuildDir() (string, error) {
 }
 
 // BuildDesktop packages the Electron shell in src for this machine: it
-// writes the sources into buildDir, installs the npm dependencies, and runs
-// electron-builder's unpacked (--dir) target. npm and electron-builder
-// output stream to stdout and stderr. It returns the unpacked app: a
-// directory on linux and windows, the .app bundle on darwin.
-func BuildDesktop(ctx context.Context, src fs.FS, buildDir string, stdout, stderr io.Writer) (string, error) {
+// writes the sources into buildDir, stamps cliVersion into the shell's
+// package.json, installs the npm dependencies, and runs electron-builder's
+// unpacked (--dir) target. npm and electron-builder output stream to stdout
+// and stderr. It returns the unpacked app: a directory on linux and
+// windows, the .app bundle on darwin.
+func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, stdout, stderr io.Writer) (string, error) {
 	npm, err := exec.LookPath("npm")
 	if err != nil {
 		return "", errors.New("localops: npm not found; building the desktop app needs Node.js 22+ (https://nodejs.org)")
@@ -70,6 +73,9 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir string, stdout, stder
 	}
 	if err := writeTree(buildDir, src); err != nil {
 		return "", fmt.Errorf("localops: write shell sources: %w", err)
+	}
+	if err := stampShellVersion(buildDir, cliVersion); err != nil {
+		return "", err
 	}
 	// Stale output from an earlier build must not be mistaken for this one.
 	dist := filepath.Join(buildDir, "dist")
@@ -144,6 +150,47 @@ func writeTree(dir string, src fs.FS) error {
 		}
 		return os.WriteFile(target, data, 0o644)
 	})
+}
+
+// shellSemver matches the versions electron-builder accepts in
+// package.json. A release tag is "v1.2.3"; a local build reports "dev".
+var shellSemver = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
+
+// stampShellVersion records which CLI built this shell in the unpacked
+// package.json, which main.js hands to the renderer. The dashboard compares
+// it with the CLI serving the gateway and asks for `aether gui build` once
+// the two have drifted apart. A version electron-builder would reject - a
+// dev build's "dev" - leaves the manifest's own 0.1.0 in place, so a shell
+// built by a dev CLI reads as stale against any release, which it is.
+func stampShellVersion(buildDir, cliVersion string) error {
+	semver := strings.TrimPrefix(cliVersion, "v")
+	if !shellSemver.MatchString(semver) {
+		return nil
+	}
+	path := filepath.Join(buildDir, "package.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("localops: read %s: %w", path, err)
+	}
+	// RawMessage values keep every field the manifest carries verbatim;
+	// only the key order changes, which nothing reads.
+	var manifest map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &manifest); err != nil {
+		return fmt.Errorf("localops: parse %s: %w", path, err)
+	}
+	stamped, err := json.Marshal(semver)
+	if err != nil {
+		return err
+	}
+	manifest["version"] = stamped
+	out, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+		return fmt.Errorf("localops: write %s: %w", path, err)
+	}
+	return nil
 }
 
 // InstallDesktop copies the unpacked app at built into the application

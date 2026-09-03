@@ -1,4 +1,9 @@
-import type { LinkStatus, PullResult, SyncSessionStatus } from '@/lib/types'
+import type {
+  LinkStatus,
+  PullResult,
+  SyncSessionStatus,
+  UpdateStatus,
+} from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /**
@@ -20,6 +25,13 @@ export interface LocalSlice {
    */
   pulls: Record<string, PullResult>
   recordPull: (runID: string, result: PullResult) => void
+  /**
+   * The last update.check answer; null until the banner host fetches it.
+   * Which version the member has already dismissed is a view preference and
+   * lives on the ui slice instead, because that one survives a reload.
+   */
+  update: UpdateStatus | null
+  setUpdate: (update: UpdateStatus) => void
 }
 
 export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
@@ -35,4 +47,6 @@ export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
   pulls: {},
   recordPull: (runID, result) =>
     set((s) => ({ pulls: { ...s.pulls, [runID]: result } })),
+  update: null,
+  setUpdate: (update) => set({ update }),
 })

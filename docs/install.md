@@ -68,16 +68,70 @@ curl -fsSL .../install.sh | sh -s -- --client --bin-dir ~/.local/bin
 curl -fsSL .../install.sh | sh -s -- --role server
 ```
 
-**Upgrading:** `aether update` replaces the running CLI with the latest
-release (or `--version <tag>`), verifying it against the release's
-`checksums.txt`. On a Linux host with `aether-server` installed next to the
-CLI it updates both and reminds you to
-`sudo systemctl restart aether-server`. `aether update --check` only reports
-whether a newer release exists. Binaries in `/usr/local/bin` need
-`sudo aether update`. Re-running the installer does the same job; the data
-directory is untouched either way. `aether update` is not a Windows command;
-it refuses to run there. Upgrading a Windows client means downloading the new
-release binary over the old one, exactly as below.
+## Upgrading
+
+`aether update` replaces the running CLI with the latest release (or
+`--version <tag>`), verifying it against the release's `checksums.txt`. On a
+Linux host with `aether-server` installed next to the CLI it updates both and
+reminds you to `sudo systemctl restart aether-server`. Binaries in
+`/usr/local/bin` need `sudo aether update`; the gateway never escalates
+privileges for you, it names that command. Re-running the installer does the
+same job; the data directory is untouched either way. `aether update` is not a
+Windows command; it refuses to run there. Upgrading a Windows client means
+downloading the new release binary over the old one, exactly as below.
+
+**The check.** `aether update --check` reports whether a newer release exists
+and exits 0 either way; `--check --json` prints one JSON object for a script:
+
+```json
+{"version":"v1.2.3","commit":"abc1234","latest":"v1.3.0","update_available":true,
+ "asset":"aether-linux-amd64","release_url":"https://github.com/3xDevOps/Aether/releases/tag/v1.3.0",
+ "dev":false,"disabled":false,"can_self_update":true,"checked_at":"2026-09-02T10:00:00Z"}
+```
+
+It resolves the tag from the GitHub releases redirect, with no token and no
+rate limit. A build whose version is `dev` never reports an update. Set
+`AETHER_NO_UPDATE_CHECK` to any non-empty value to stop every release check on
+an air-gapped machine: the CLI's, the `aether gui` startup line, and the
+dashboard banner all answer `disabled` without touching the network.
+
+A binary built from a checkout reports what `git describe` produced
+(`v1.2.3-4-gabc123`, plus `-dirty` for uncommitted changes). The comparison
+reads that as the tag it descends from *plus* commits on top, so such a build
+is never told to downgrade to that tag, and is still told about a genuinely
+newer release. A checkout with no tags in reach reports a bare commit, which
+cannot be ordered against anything and never reports an update.
+
+**In the dashboard.** `aether gui` runs the same check in the background and
+prints one line to stderr when a newer release exists. The dashboard shows a
+dismissible banner naming the new version, with an **Update now** button that
+replaces the binary on this machine. The restart takes the gateway's own work
+with it - attached terminals and any running `aether sync` session stop, while
+the runs themselves keep going on the server. Started from the desktop app the
+gateway exits once the binary is replaced and the app restarts it; started
+from a terminal the banner tells you to rerun `aether gui` yourself.
+Dismissing silences that version only - the next release shows the banner
+again.
+
+On a single-box install the same update replaces the `aether-server` beside
+the CLI. The banner then names both binaries and the
+`sudo systemctl restart aether-server` that the running server still needs.
+
+Administrators see a second banner when the **server** is behind the latest
+release. The dashboard cannot update the server. Run these on the server host:
+
+```sh
+sudo aether update
+sudo systemctl restart aether-server
+```
+
+**The desktop app is separate.** The dashboard ships inside the CLI, so
+updating the CLI updates the dashboard. The Electron shell around it - window
+chrome, notifications, `aether://` deep links - is whatever `aether gui build`
+last produced, and records which CLI built it. When that CLI is no longer the
+one serving the gateway, a banner of its own says so and gives the command;
+it is not tied to a release being available, because the usual way to get
+there is to have just updated.
 
 ## Manual install
 

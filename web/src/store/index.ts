@@ -68,6 +68,7 @@ export function createRootStore() {
           sidebarCollapsed: s.sidebarCollapsed,
           activeWorkspace: s.activeWorkspace,
           groupBy: s.groupBy,
+          dismissedUpdates: s.dismissedUpdates,
         }),
       },
     ),

@@ -5,7 +5,7 @@ import type { ConnectionState } from '@/lib/stream'
 import type { DiskUsage } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { UnreachableKind } from '@/store/server'
 
 const connectionLabel: Record<ConnectionState, string> = {
@@ -81,6 +81,38 @@ function LocalStatus() {
   )
 }
 
+/**
+ * The version label, with a dot when a newer release is out. The banner is
+ * the thing that says what to do about it, so the badge's only job is to
+ * bring a dismissed one back - clicking it clears the dismissals rather than
+ * navigating anywhere.
+ */
+function VersionLabel({ version, protocol }: { version: string; protocol: string }) {
+  const update = useStore((s) => s.update)
+  const isAdmin = useIsAdmin()
+  const clearDismissedUpdates = useStore((s) => s.clearDismissedUpdates)
+  const label = `aether ${version}`
+  const available =
+    update !== null &&
+    (update.cli.update_available || (update.server_behind && isAdmin))
+
+  if (!available) return <span title={`protocol ${protocol}`}>{label}</span>
+
+  const latest = update.cli.latest ?? ''
+  return (
+    <button
+      type="button"
+      onClick={clearDismissedUpdates}
+      aria-label={`Update available: ${latest}`}
+      title={`${latest} is available - show the update banner`}
+      className="flex items-center gap-1.5 rounded px-1 hover:text-foreground"
+    >
+      {label}
+      <span className="size-2 rounded-full bg-state-waiting" aria-hidden />
+    </button>
+  )
+}
+
 export function StatusBar() {
   const connection = useStore((s) => s.connection)
   const unreachable = useStore((s) => s.unreachable)
@@ -105,9 +137,10 @@ export function StatusBar() {
         </span>
       )}
       {info && (
-        <span title={`protocol ${info.protocol_version}`}>
-          aether {info.server_version}
-        </span>
+        <VersionLabel
+          version={info.server_version}
+          protocol={info.protocol_version}
+        />
       )}
       {info && <span>{info.member.display_name}</span>}
       {disk && disk.total_bytes > 0 && (

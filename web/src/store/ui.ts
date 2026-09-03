@@ -2,6 +2,8 @@ import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type GroupBy = 'status' | 'member'
+/** The three things an update banner can be about. */
+export type UpdateKind = 'cli' | 'server' | 'shell'
 
 /** Where the center view is pointed. Route names come from the registry. */
 export interface Route {
@@ -24,12 +26,21 @@ export interface UiSlice {
   activeWorkspace: string
   groupBy: GroupBy
   route: Route
+  /**
+   * Which version of each update banner the member has already dismissed,
+   * keyed by kind. Holding the version rather than a boolean is the point:
+   * dismissing v1.3.0 silences v1.3.0 only, and v1.3.1 shows up again.
+   */
+  dismissedUpdates: Record<UpdateKind, string>
   setTheme: (theme: Theme) => void
   setSidebarWidth: (width: number) => void
   toggleSidebar: () => void
   setActiveWorkspace: (workspaceID: string) => void
   setGroupBy: (groupBy: GroupBy) => void
   navigate: (name: string, params?: Record<string, string>) => void
+  dismissUpdate: (kind: UpdateKind, version: string) => void
+  /** Brings every dismissed banner back; the status bar's badge calls it. */
+  clearDismissedUpdates: () => void
 }
 
 export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
@@ -39,6 +50,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   activeWorkspace: '',
   groupBy: 'status',
   route: { name: 'board', params: {} },
+  dismissedUpdates: { cli: '', server: '', shell: '' },
   setTheme: (theme) => set({ theme }),
   setSidebarWidth: (width) =>
     set({
@@ -68,4 +80,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
       set({ activeWorkspace: params.workspaceId })
     }
   },
+  dismissUpdate: (kind, version) =>
+    set((s) => ({ dismissedUpdates: { ...s.dismissedUpdates, [kind]: version } })),
+  clearDismissedUpdates: () =>
+    set({ dismissedUpdates: { cli: '', server: '', shell: '' } }),
 })

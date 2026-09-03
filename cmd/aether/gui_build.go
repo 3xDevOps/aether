@@ -13,6 +13,7 @@ import (
 
 	"github.com/3xDevOps/Aether/desktop"
 	"github.com/3xDevOps/Aether/internal/localops"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // guiBuild packages the embedded Electron shell for this machine and
@@ -53,7 +54,7 @@ func guiBuild(args []string) error {
 	defer stop()
 
 	fmt.Printf("building the desktop app in %s\n", *buildDir)
-	built, err := localops.BuildDesktop(ctx, desktop.Source, *buildDir, os.Stdout, os.Stderr)
+	built, err := localops.BuildDesktop(ctx, desktop.Source, *buildDir, version.Version, os.Stdout, os.Stderr)
 	if err != nil {
 		return err
 	}

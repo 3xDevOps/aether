@@ -84,6 +84,9 @@ export interface GatewayCapabilities {
   methods: string[]
   ws: string[]
   local?: string[]
+  /** The CLI build serving this gateway; absent before the field existed. */
+  version?: string
+  commit?: string
 }
 
 export interface Event {
@@ -393,6 +396,59 @@ export interface DaemonStatusResult {
 /** image.scaffold: the files written (existing files are never overwritten). */
 export interface ImageScaffoldResult {
   written: string[]
+}
+
+/**
+ * update.check: one release-check answer for the CLI on this machine
+ * (internal/selfupdate). `dev` and `disabled` both mean no release was
+ * resolved - a local build, or AETHER_NO_UPDATE_CHECK set - and neither
+ * ever reports an update.
+ */
+export interface UpdateCheck {
+  /** The running version; "dev" for a local build. */
+  version: string
+  commit: string
+  /** The newest release tag; empty when nothing was checked. */
+  latest?: string
+  update_available: boolean
+  /** The release asset for this platform, aether-<goos>-<goarch>. */
+  asset?: string
+  release_url?: string
+  dev: boolean
+  disabled: boolean
+  /** False on Windows, where the binary cannot replace itself. */
+  can_self_update: boolean
+  checked_at: string
+}
+
+/** update.check: the CLI answer plus how the server it talks to compares. */
+export interface UpdateStatus {
+  cli: UpdateCheck
+  /** Empty when the server did not answer; server_error then says why. */
+  server_version: string
+  server_behind: boolean
+  /**
+   * Why the server half is unknown. The CLI half is about a binary on this
+   * machine, so it is answered in full even when the SSH hop is down.
+   */
+  server_error?: string
+  /** The desktop shell spawned this gateway, so it can restart it. */
+  supervised: boolean
+}
+
+/** update.apply: what the self-update replaced and what happens next. */
+export interface UpdateApplyResult {
+  /** Every binary path replaced, in order. */
+  updated: string[]
+  version: string
+  /** True only under the desktop shell, which respawns the gateway. */
+  restarting: boolean
+  note?: string
+  /**
+   * Present when a co-located aether-server was replaced too: the running
+   * server keeps the old code until this command restarts its unit.
+   */
+  restart_command?: string
 }
 
 // Workspace environments: internal/protocol/environment.go and
