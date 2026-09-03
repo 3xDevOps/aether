@@ -584,11 +584,11 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 	if _, err := d.db.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
-		                   finished_at, profile_snapshot_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   finished_at, profile_snapshot_id, title)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
-		r.ProfileSnapshotID,
+		r.ProfileSnapshotID, r.Title
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -604,7 +604,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
-		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID); err != nil {
+		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
@@ -614,8 +614,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 }
 
 const runCols = `id, workspace_id, member_id, task, harness, mode, status,
-	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id`
-
+	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id, title`
 func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 	r, err := scanRun(d.db.QueryRowContext(ctx,
 		`SELECT `+runCols+` FROM runs WHERE id = ?`, id))
@@ -684,11 +683,11 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		`UPDATE runs SET workspace_id = ?, member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
-		     profile_snapshot_id = ?
+		     profile_snapshot_id = ?, title = ?
 		 WHERE id = ?`,
 		r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.ID))
+		r.ProfileSnapshotID, r.Title, r.ID))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
 	}

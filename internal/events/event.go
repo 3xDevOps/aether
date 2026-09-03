@@ -23,6 +23,8 @@ type Type string
 const (
 	// TypeRunStatus signals a run lifecycle transition.
 	TypeRunStatus Type = "run.status"
+	// TypeRunTitle carries the latest terminal title for a run.
+	TypeRunTitle Type = "run.title"
 	// TypeRunDiff carries a periodic diff snapshot of a run's worktree.
 	TypeRunDiff Type = "run.diff"
 	// TypeRunCost carries token usage and cost attribution for a run.
@@ -90,6 +92,12 @@ type RunStatusPayload struct {
 	// Reason is an optional human-readable cause, e.g. "agent exited 1".
 	Reason string `json:"reason,omitempty"`
 }
+// RunTitlePayload reports the latest terminal title for a run.
+type RunTitlePayload struct {
+	Title string `json:"title"`
+}
+
+func (RunTitlePayload) EventType() Type { return TypeRunTitle }
 
 func (RunStatusPayload) EventType() Type { return TypeRunStatus }
 
@@ -272,6 +280,7 @@ func decodeAs[P Payload](data []byte) (Payload, error) {
 
 var payloadCodecs = map[Type]func([]byte) (Payload, error){
 	TypeRunStatus:    decodeAs[RunStatusPayload],
+	TypeRunTitle:     decodeAs[RunTitlePayload],
 	TypeRunDiff:      decodeAs[RunDiffPayload],
 	TypeRunCost:      decodeAs[RunCostPayload],
 	TypePresence:     decodeAs[PresencePayload],

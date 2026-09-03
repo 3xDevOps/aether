@@ -38,8 +38,8 @@ type Config struct {
 	DefaultCols   uint      // 120
 	DefaultRows   uint      // 30
 	Gate          WriteGate // nil = allow
-	// OnTitle is declared for the title scanner and never called yet.
-	OnTitle func(key SessionKey, title string)
+// OnTitle is declared for the title scanner and never called yet.
+OnTitle func(key SessionKey, title string)
 }
 
 const (
@@ -163,6 +163,11 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	}
 	if len(seed) > 0 {
 		s.ring.write(seed)
+	}
+	if h.cfg.OnTitle != nil {
+		s.onTitle = func(title string) {
+			h.cfg.OnTitle(key, title)
+		}
 	}
 
 	h.mu.Lock()

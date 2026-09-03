@@ -203,6 +203,11 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if s.pty, err = ptyhost.New(ptyhost.Config{
 		TranscriptDir: filepath.Join(cfg.DataDir, "transcripts"),
 		Gate:          sshd.NewWriteGate(s.db),
+		OnTitle: func(key ptyhost.SessionKey, title string) {
+			if run, ok := key.Run(); ok && s.sched != nil {
+				s.sched.SetRunTitle(run, title)
+			}
+		},
 	}); err != nil {
 		return nil, err
 	}

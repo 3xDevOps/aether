@@ -16,6 +16,8 @@ export interface Run {
   workspace_id: string
   member_id: string
   task: string
+  /** Latest terminal title, omitted by older servers and for empty titles. */
+  title?: string
   harness: string
   mode: string
   status: RunStatus
@@ -104,6 +106,10 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
+}
+
+export interface RunTitlePayload {
+  title: string
 }
 
 // Team surfaces: the approval inbox, the presence roster, cost and budgets,
