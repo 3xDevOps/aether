@@ -22,4 +22,6 @@ type Services struct {
 	Disk DiskReader
 	// Environments builds and rolls back workspace environment images ().
 	Environments EnvironmentService
+	// ServerUpdate replaces the server's own binaries and restarts ().
+	ServerUpdate ServerUpdateService
 }

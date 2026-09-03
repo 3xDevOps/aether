@@ -23,6 +23,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/toolenv"
@@ -101,6 +102,12 @@ type Config struct {
 	// (the local tailscaled socket when present). The E2E suite stubs it
 	// so join and fallback scenarios need no real tailnet.
 	WhoIs sshd.WhoIsResolver
+	// SelfUpdate overrides the server self-update service's release feed
+	// and restart mechanics; the zero value is the pinned GitHub releases
+	// and a real re-exec of this binary. Store and Bus are the server's
+	// own and are ignored here. The E2E suite sets it so an update runs
+	// against a stub release server and never replaces a real binary.
+	SelfUpdate serverupdate.Config
 	// Harnesses are server-owned, administrator-supplied launch definitions.
 	// They are validated before the scheduler starts; ordinary workspace
 	// members have no request field that can alter them.

@@ -57,7 +57,8 @@ func (s *Server) serveControl(ctx context.Context, member domain.MemberID, ch ss
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		resp := s.handleRequest(ctx, member, line)
+		slot := &afterResponse{}
+		resp := s.handleRequest(context.WithValue(ctx, afterResponseKey{}, slot), member, line)
 		// A canceled serve context means the server is shutting down (or
 		// the channel is tearing down): the connection must die, not
 		// answer - a canceled-context store lookup must never surface to
@@ -68,7 +69,31 @@ func (s *Server) serveControl(ctx context.Context, member domain.MemberID, ch ss
 		if writeJSONLine(ch, resp) != nil {
 			return
 		}
+		if slot.fn != nil {
+			slot.fn()
+		}
 	}
+}
+
+// afterResponse is one request's slot for work that must not run until
+// its response has left the server. Only the server self-update uses it:
+// it re-executes the binary, and a client that never saw the result could
+// not tell a restart from a dropped connection.
+type afterResponse struct{ fn func() }
+
+type afterResponseKey struct{}
+
+// deferUntilResponded registers fn to run once this request's response has
+// been written, reporting whether there was a slot to register it in. A
+// handler reached from anywhere but the control loop gets false and
+// decides for itself.
+func deferUntilResponded(ctx context.Context, fn func()) bool {
+	slot, ok := ctx.Value(afterResponseKey{}).(*afterResponse)
+	if !ok {
+		return false
+	}
+	slot.fn = fn
+	return true
 }
 
 func writeJSONLine(w io.Writer, v any) error {

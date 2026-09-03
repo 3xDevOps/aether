@@ -141,6 +141,13 @@ type Scheduler struct {
 	// staged-bridge directory (UseCoordination); nil means new containers
 	// get no coordination assets.
 	coordination *coordination
+	// updates is the attached server self-update service (UseUpdates);
+	// nil means a scheduled update never applies.
+	updates UpdateTicker
+	// shells counts the workspace shells open right now. They have no
+	// container to reattach to after a restart, so they hold the idle
+	// check open the way an active run does.
+	shells int
 }
 
 // credentialUserReservation protects one writable member+harness
@@ -298,6 +305,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-stall.C:
 			s.checkStalls(ctx)
+			s.tickUpdates(ctx)
 		case <-gcC:
 			s.sweepCheckouts(ctx)
 		}

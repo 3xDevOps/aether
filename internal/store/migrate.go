@@ -580,6 +580,21 @@ CREATE TABLE environment_definitions (
 CREATE UNIQUE INDEX idx_environment_definitions_active
 	ON environment_definitions(workspace_id) WHERE status = 'active';
 `,
+	// v14: the server's own update state. One row, id 1: at most one
+	// pending self-update (a second request replaces it) plus the outcome
+	// of the last attempt, so both survive the restart the update causes.
+	`
+CREATE TABLE server_update_state (
+	id                   INTEGER PRIMARY KEY CHECK (id = 1),
+	pending_version      TEXT NOT NULL DEFAULT '',
+	pending_requested_by TEXT NOT NULL DEFAULT '',
+	pending_requested_at INTEGER NOT NULL DEFAULT 0,
+	last_version         TEXT NOT NULL DEFAULT '',
+	last_outcome         TEXT NOT NULL DEFAULT '',
+	last_detail          TEXT NOT NULL DEFAULT '',
+	last_at              INTEGER NOT NULL DEFAULT 0
+);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:
