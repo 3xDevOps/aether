@@ -122,8 +122,84 @@ func TestPushRejectsUnusableBranchNames(t *testing.T) {
 	if _, err := Push(t.TempDir(), ""); err == nil {
 		t.Fatal("Push accepted an empty branch")
 	}
-	// A leading dash would reach git as a flag rather than a ref.
-	if _, err := Push(t.TempDir(), "--force"); err == nil {
-		t.Fatal("Push accepted a flag-shaped branch")
+	// A leading dash would reach git as a flag rather than a ref, a `+`
+	// would force, and a colon would split the refspec in two.
+	for _, branch := range []string{"--force", "+main", "main:refs/heads/evil", "main evil"} {
+		if _, err := Push(t.TempDir(), branch); err == nil {
+			t.Fatalf("Push accepted the branch name %q", branch)
+		}
+	}
+}
+
+// The seeding push carries the base branch and nothing else, even for a
+// user whose git is configured to send tags along with every push.
+func TestPushLeavesTagsBehind(t *testing.T) {
+	requireGit(t)
+	local, remote := seedRepos(t, "main")
+	git(t, local, "config", "push.followTags", "true")
+	git(t, local, "tag", "-a", "v1", "-m", "release")
+
+	if _, err := Push(local, "main"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if refs := git(t, remote, "for-each-ref", "--format=%(refname)"); strings.Contains(refs, "refs/tags/") {
+		t.Fatalf("the push carried tags: %s", refs)
+	}
+}
+
+// A `+` prefix in a bare refspec means force. Git accepts such a branch
+// name, so the qualified refspec is what keeps the push non-forcing.
+func TestPushDoesNotForceAPlusPrefixedBranch(t *testing.T) {
+	requireGit(t)
+	local, remote := seedRepos(t, "main")
+	// Both sides get a branch named +main, diverged: a forced push would
+	// overwrite the remote's commit, an honest one is refused.
+	git(t, local, "branch", "+main")
+	git(t, local, "push", "aether", "refs/heads/+main:refs/heads/+main")
+	before := git(t, remote, "rev-parse", "+main")
+	git(t, local, "commit", "--allow-empty", "-m", "local only")
+	git(t, local, "branch", "-f", "+main", "HEAD")
+
+	if _, err := Push(local, "+main"); err == nil {
+		t.Fatal("Push accepted a branch name that would read as a force refspec")
+	}
+	if after := git(t, remote, "rev-parse", "+main"); after != before {
+		t.Fatalf("the remote branch moved: %s -> %s", before, after)
+	}
+}
+
+// An unqualified ref is ambiguous when a tag shares the branch's name;
+// the qualified refspec names the branch beyond doubt.
+func TestPushSeedsABranchThatSharesATagName(t *testing.T) {
+	requireGit(t)
+	local, remote := seedRepos(t, "release")
+	git(t, local, "tag", "release")
+
+	if _, err := Push(local, "release"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	want := git(t, local, "rev-parse", "refs/heads/release")
+	if got := git(t, remote, "rev-parse", "refs/heads/release"); got != want {
+		t.Fatalf("remote release = %s, want %s", got, want)
+	}
+}
+
+func TestAetherRemoteURLReportsWhereTheRepoPoints(t *testing.T) {
+	requireGit(t)
+	local, remote := seedRepos(t, "main")
+
+	url, err := AetherRemoteURL(local)
+	if err != nil {
+		t.Fatalf("AetherRemoteURL: %v", err)
+	}
+	if url != remote {
+		t.Fatalf("url = %q, want %q", url, remote)
+	}
+
+	// No remote is not an error: the caller refuses with its own message.
+	bare := t.TempDir()
+	git(t, bare, "init", "-b", "main")
+	if url, err = AetherRemoteURL(bare); err != nil || url != "" {
+		t.Fatalf("AetherRemoteURL = %q, %v; want empty and no error", url, err)
 	}
 }

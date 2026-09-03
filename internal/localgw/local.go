@@ -273,6 +273,9 @@ func (g *Gateway) localRepoPush(r *http.Request, body []byte) (any, *protocol.Er
 	if ws.BaseBranch == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "workspace " + ws.Name + " has no base branch"}
 	}
+	if perr := checkRemoteWorkspace(cfg, ws); perr != nil {
+		return nil, perr
+	}
 	output, err := localops.Push(cfg.Repo, ws.BaseBranch)
 	switch {
 	case errors.Is(err, localops.ErrPushPrecondition):
@@ -285,6 +288,25 @@ func (g *Gateway) localRepoPush(r *http.Request, body []byte) (any, *protocol.Er
 		Remote string `json:"remote"`
 		Output string `json:"output"`
 	}{Branch: ws.BaseBranch, Remote: "aether", Output: output}, nil
+}
+
+// checkRemoteWorkspace refuses a push whose branch was read from one
+// workspace while the `aether` remote points at another. The remote URL
+// carries the workspace ID, so the two can disagree whenever link.repo
+// last ran for a different workspace - and the answer would otherwise
+// report success for a workspace this repository never seeded. A repo
+// with no remote at all passes through to Push's own refusal, which
+// names the fix.
+func checkRemoteWorkspace(cfg cli.Config, ws protocol.Workspace) *protocol.Error {
+	url, err := localops.AetherRemoteURL(cfg.Repo)
+	if err != nil {
+		return &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	if want := cli.GitURL(cfg.User, cfg.Addr, ws.ID); url != "" && url != want {
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: "the aether remote in " + cfg.Repo +
+			" points at " + url + ", not workspace " + ws.Name + "; add the remote for this workspace first"}
+	}
+	return nil
 }
 
 func (g *Gateway) localPull(r *http.Request, body []byte) (any, *protocol.Error) {

@@ -14,6 +14,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/cli"
@@ -50,19 +51,12 @@ func LinkRepo(cfg cli.Config, repo, workspaceID string) (cli.Config, string, err
 // it when it already exists. Git's own output goes to stdout/stderr so
 // the CLI can stream it and the gateway can capture it.
 func GitRemote(repo, url string, stdout, stderr io.Writer) error {
-	out, err := exec.Command("git", "-C", repo, "remote").Output()
+	names, err := remotes(repo)
 	if err != nil {
-		return fmt.Errorf("git remote: %w", err)
-	}
-	has := false
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "aether" {
-			has = true
-			break
-		}
+		return err
 	}
 	args := []string{"-C", repo, "remote", "add", "aether", url}
-	if has {
+	if slices.Contains(names, "aether") {
 		args = []string{"-C", repo, "remote", "set-url", "aether", url}
 	}
 	cmd := exec.Command("git", args...)

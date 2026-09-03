@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
@@ -30,11 +31,20 @@ func (e pushRefusal) Is(target error) bool { return target == ErrPushPreconditio
 // forever.
 const pushTimeout = 10 * time.Minute
 
-// Push seeds the workspace by running `git -C repo push -u aether
-// <branch>`: the one command the onboarding docs tell users to run. It
-// never forces and never pushes a second ref. The branch must already
-// exist locally and the `aether` remote must already be set (link.repo
-// writes it).
+// queryTimeout bounds the local git queries around the push. They read
+// this machine's repository and answer at once, so a repository on a
+// stalled network mount is the only way to exceed it.
+const queryTimeout = 10 * time.Second
+
+// Push seeds the workspace by running one `git push -u aether
+// refs/heads/<branch>:refs/heads/<branch>` in repo. The refspec is
+// fully qualified so the push can carry nothing but that one branch: it
+// cannot be read as a force refspec, and it stays unambiguous when a tag
+// shares the branch's name. `--no-follow-tags` holds even for a user
+// whose `push.followTags` would otherwise send tags along.
+//
+// The branch must already exist locally and the `aether` remote must
+// already be set (link.repo writes it).
 //
 // It returns everything git printed. On failure the output is folded
 // into the error too, so the caller can show git's own words.
@@ -42,8 +52,7 @@ func Push(repo, branch string) (string, error) {
 	if repo == "" {
 		return "", errors.New("localops: repo path is required")
 	}
-	// A branch name starting with a dash would be read as a git flag.
-	if branch == "" || strings.HasPrefix(branch, "-") {
+	if !usableBranch(branch) {
 		return "", fmt.Errorf("localops: %q is not a usable branch name", branch)
 	}
 	if err := pushPreflight(repo, branch); err != nil {
@@ -52,9 +61,11 @@ func Push(repo, branch string) (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", repo, "push", "-u", "aether", branch)
-	// Nothing can answer a credential or host-key prompt from here, so a
-	// missing key must fail loudly instead of hanging on stdin.
+	refspec := "refs/heads/" + branch + ":refs/heads/" + branch
+	cmd := exec.CommandContext(ctx, "git", "-C", repo, "push", "--no-follow-tags", "-u", "aether", refspec)
+	// Nothing here can answer git's own credential prompt. This does not
+	// reach ssh, which asks for a key passphrase on its own terminal; the
+	// push timeout is what bounds that case.
 	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
@@ -68,9 +79,41 @@ func Push(repo, branch string) (string, error) {
 	return output, nil
 }
 
-// pushPreflight refuses, before git dials anything, the three states a
-// user can only fix in their own repository. Each refusal says what to
-// do next.
+// usableBranch rejects the names that would change what the refspec
+// means rather than name a branch: `+` forces, `:` splits source from
+// destination, `-` reads as a flag, and whitespace splits arguments. Git
+// itself accepts a `+`-prefixed branch, so the check is not redundant.
+func usableBranch(branch string) bool {
+	if branch == "" || strings.ContainsAny(branch, "+:\t\n\r ") {
+		return false
+	}
+	return !strings.HasPrefix(branch, "-")
+}
+
+// AetherRemoteURL returns the URL repo's `aether` remote points at, or
+// "" when the repository has no such remote. The URL carries the
+// workspace ID, so a caller can tell which workspace this repository is
+// wired to before pushing to it.
+func AetherRemoteURL(repo string) (string, error) {
+	names, err := remotes(repo)
+	if err != nil {
+		return "", err
+	}
+	if !slices.Contains(names, "aether") {
+		return "", nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "remote", "get-url", "aether").Output()
+	if err != nil {
+		return "", fmt.Errorf("git remote get-url aether: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// pushPreflight refuses, before git dials anything, the states a user
+// can only fix in their own repository. Each refusal says what to do
+// next.
 func pushPreflight(repo, branch string) error {
 	if err := gitQuiet(repo, "rev-parse", "--git-dir"); err != nil {
 		return pushRefusal{repo + " is not a git repository"}
@@ -81,7 +124,11 @@ func pushPreflight(repo, branch string) error {
 	if err := gitQuiet(repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
 		return pushRefusal{missingBranchMessage(repo, branch)}
 	}
-	if !hasAetherRemote(repo) {
+	names, err := remotes(repo)
+	if err != nil {
+		return fmt.Errorf("localops: read git remotes: %w", err)
+	}
+	if !slices.Contains(names, "aether") {
 		return pushRefusal{repo + " has no aether remote yet; add it first with the Add remote button or `aether link --repo`"}
 	}
 	return nil
@@ -92,7 +139,9 @@ func pushPreflight(repo, branch string) error {
 // checked out - the fix is almost always one of the two names.
 func missingBranchMessage(repo, branch string) string {
 	msg := "there is no local branch named " + branch
-	out, err := exec.Command("git", "-C", repo, "branch", "--show-current").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "branch", "--show-current").Output()
 	if current := strings.TrimSpace(string(out)); err == nil && current != "" && current != branch {
 		msg += ", but " + current + " is checked out; rename it or create " + branch
 		return msg
@@ -100,24 +149,29 @@ func missingBranchMessage(repo, branch string) string {
 	return msg + "; create it, or set the workspace base branch to the one you use"
 }
 
-// hasAetherRemote reports whether repo already carries the remote
-// link.repo writes. GitRemote adds it; this only reads.
-func hasAetherRemote(repo string) bool {
-	out, err := exec.Command("git", "-C", repo, "remote").Output()
+// remotes lists the names of repo's git remotes.
+func remotes(repo string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "remote").Output()
 	if err != nil {
-		return false
+		return nil, fmt.Errorf("git remote: %w", err)
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.TrimSpace(line) == "aether" {
-			return true
-		}
+	listed := strings.TrimSpace(string(out))
+	if listed == "" {
+		return nil, nil
 	}
-	return false
+	names := strings.Split(listed, "\n")
+	for i, name := range names {
+		names[i] = strings.TrimSpace(name)
+	}
+	return names, nil
 }
 
 // gitQuiet runs a read-only git query, reporting only whether it
 // succeeded; the callers turn a failure into their own message.
 func gitQuiet(repo string, args ...string) error {
-	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-	return cmd.Run()
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...).Run()
 }

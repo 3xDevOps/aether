@@ -482,17 +482,41 @@ func TestLocalImageScaffold(t *testing.T) {
 	}
 }
 
-// pushGateway wires a gateway whose linked repo is a fresh clone with one
-// commit on branch and an `aether` remote pointing at a bare repo, and
-// whose server reports one workspace with that base branch. It returns
-// the gateway and the bare remote.
-func pushGateway(t *testing.T, branch string) (*Gateway, string) {
+// sshShim makes ssh:// git URLs resolve to local paths, so a test push
+// really moves objects without dialing anything. Same trick as the pull
+// test: the shim runs the wrapped git-receive-pack itself.
+func sshShim(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("test ssh shim is a POSIX shell script")
+	}
+	shim := filepath.Join(t.TempDir(), "fake-ssh")
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\nfor last; do :; done\neval \"$last\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_SSH_COMMAND", shim)
+	// An unknown GIT_SSH_COMMAND defaults to the "simple" variant, which
+	// refuses the URL's port; declare the OpenSSH argv convention.
+	t.Setenv("GIT_SSH_VARIANT", "ssh")
+}
+
+// pushGateway wires a gateway whose linked repo holds one commit on
+// branch and an `aether` remote pointing, through the ssh shim, at a
+// bare repo standing in for the workspace. The server reports that one
+// workspace with that base branch. It returns the gateway, the bare
+// remote's path, and the workspace ID the remote URL carries.
+func pushGateway(t *testing.T, branch string) (*Gateway, string, string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
+	sshShim(t)
+
+	// The bare directory carries a .git suffix so the ssh URL's path
+	// resolves to it verbatim.
 	remote := filepath.Join(t.TempDir(), "wsp_1.git")
 	localGit(t, t.TempDir(), "init", "--bare", "-b", branch, remote)
+	wsID := strings.TrimSuffix(strings.TrimPrefix(remote, "/"), ".git")
 
 	local := t.TempDir()
 	localGit(t, local, "init", "-b", branch)
@@ -501,10 +525,10 @@ func pushGateway(t *testing.T, branch string) (*Gateway, string) {
 	}
 	localGit(t, local, "add", "README.md")
 	localGit(t, local, "commit", "-m", "seed")
-	localGit(t, local, "remote", "add", "aether", remote)
+	localGit(t, local, "remote", "add", "aether", cli.GitURL("alice", "host:2222", wsID))
 
 	list, err := json.Marshal(protocol.WorkspaceListResult{
-		Workspaces: []protocol.Workspace{{ID: "wsp_1", Name: "myproject", BaseBranch: branch}},
+		Workspaces: []protocol.Workspace{{ID: wsID, Name: "myproject", BaseBranch: branch}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -512,14 +536,27 @@ func pushGateway(t *testing.T, branch string) (*Gateway, string) {
 	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
 		results: map[string]json.RawMessage{protocol.MethodWorkspaceList: list},
 	}}
-	return newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: local}), remote
+	g := newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: local})
+	return g, remote, wsID
+}
+
+// pushBody is one repo.push request naming a workspace.
+func pushBody(t *testing.T, wsID string) string {
+	t.Helper()
+	body, err := json.Marshal(struct {
+		WorkspaceID string `json:"workspace_id"`
+	}{wsID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
 }
 
 // The seeding push runs the user's base branch, not a hardcoded main.
 func TestLocalRepoPush(t *testing.T) {
-	g, remote := pushGateway(t, "trunk")
+	g, remote, wsID := pushGateway(t, "trunk")
 
-	rec := do(g, http.MethodPost, "/local/v1/repo.push", `{"workspace_id":"wsp_1"}`, true)
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, wsID), true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("repo.push = %d: %s", rec.Code, rec.Body)
 	}
@@ -545,13 +582,13 @@ func TestLocalRepoPush(t *testing.T) {
 // A rejected push is the server's word, not the gateway's; the handler
 // answers with git's own text so branch protection reads as itself.
 func TestLocalRepoPushSurfacesGitRefusal(t *testing.T) {
-	g, remote := pushGateway(t, "main")
+	g, remote, wsID := pushGateway(t, "main")
 	hook := filepath.Join(remote, "hooks", "pre-receive")
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'main is protected' >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	rec := do(g, http.MethodPost, "/local/v1/repo.push", `{"workspace_id":"wsp_1"}`, true)
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, wsID), true)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
@@ -598,5 +635,27 @@ func TestLocalRepoPushRequiresLinkedRepo(t *testing.T) {
 	perr := decodeError(t, rec.Body.Bytes())
 	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, "no linked repo") {
 		t.Fatalf("error = %+v", perr)
+	}
+}
+
+// The base branch comes from the named workspace, the push lands wherever
+// the `aether` remote points. When those are two different workspaces the
+// verb refuses instead of reporting a seed it did not perform.
+func TestLocalRepoPushRefusesAWorkspaceTheRemoteDoesNotServe(t *testing.T) {
+	g, remote, wsID := pushGateway(t, "main")
+	// link.repo has since re-pointed the remote at another workspace.
+	other := cli.GitURL("alice", "host:2222", "wsp_other")
+	localGit(t, g.local.snapshot().Repo, "remote", "set-url", "aether", other)
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, wsID), true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, other) {
+		t.Fatalf("error = %+v", perr)
+	}
+	if refs := localGit(t, remote, "for-each-ref"); refs != "" {
+		t.Fatalf("the refused push still wrote refs: %s", refs)
 	}
 }
