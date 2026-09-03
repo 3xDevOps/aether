@@ -16,8 +16,8 @@ import {
 import { useStore } from '@/store'
 
 // The verb table below is static prose, not a registry crawl: the verbs live
-// in components/palette/palette.tsx and this table is maintained alongside
-// it. A new palette group earns a row here.
+// in lib/commands.ts and this table is maintained alongside it. A new group
+// of commands earns a row here.
 const groups: { name: string; entries: [string, string][] }[] = [
   {
     name: 'Steer the focused run',
@@ -91,8 +91,8 @@ export function ShortcutsButton() {
           <DialogHeader>
             <DialogTitle>Keyboard shortcuts</DialogTitle>
             <DialogDescription>
-              Everything runs through the command palette; these keys get you
-              there.
+              Every verb below is also a button on the surface it acts on. The
+              palette is the fast path to all of them.
             </DialogDescription>
           </DialogHeader>
           <table className="w-full text-sm">

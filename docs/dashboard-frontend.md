@@ -120,9 +120,13 @@ and persisted). The only collapse state left is the whole sidebar's.
 - **The attention badge counts, it does not navigate.** The runs below are
   already sorted worst-first, so the number is for a scrolled sidebar or a
   stall that landed while the member was elsewhere in the app.
+- **The header carries the way in.** New run opens the launch form (gated on
+  `canLaunch`), the board button and All runs switch between the two
+  whole-workspace views, and the group-by toggle sits beside them.
 - **Below the runs, the nav links are capability-gated** on the method or local
   verb that powers each view, so a gateway that cannot serve a surface never
-  shows the way in.
+  shows the way in. All runs is the exception: it is a view of the runs the
+  sidebar is already showing, so it needs no gate.
 
 ## Title bar
 
@@ -273,8 +277,9 @@ untinted and the card carries the state colour.
 
 Three buckets, and no Idle column: a card is a run, and no run status maps
 to idle, so an idle column could only ever hold something that is not a card.
-A workspace with nothing running is an empty board under a switcher that names
-it, which says the same thing.
+A workspace with nothing in it says so once rather than as three empty
+columns: what a run is, and the New run button, because an empty board is the
+first thing a new member sees.
 
 Two things the buckets do not come from the run status alone:
 
@@ -317,32 +322,73 @@ whose runs carry no `paused` field the state stays unknown until a live
 `workspace.timeline` pause or resume arrives, and the palette offers
 neither verb rather than the one the server would refuse.
 
-## Command palette
+## Commands: one list, two ways to reach it
 
-`src/components/palette/` is the cmdk palette: `⌘K`/`Ctrl+K` anywhere, or the
-button it registers into the `statusbar` slot (it has no home of its own in the
-shell, and the dialog portals out of the status bar anyway). It jumps to runs
-and workspaces - opening a workspace also makes it the active scope, so the
-sidebar and the board follow - carries the board's own commands, and steers
-**the run the center view is showing** - any run-detail tab, since it keys on `route.params.runId`
-rather than on a route name. From the board there is none, so reveal a run
-first. The
-two verbs that need prose, launch and inject, open a dialog; the rest call the
-gateway directly and let the event stream report the result, so no palette
-action writes run state into the store. A third dialog launches from a
-template: it lists the active workspace's templates over `template.list` and
-starts the run with `template.launch` (both on `lib/api.ts` like every other
-call), then reveals it. Its open state lives with the dialog host in
-`index.tsx`, not in the store's dialog union.
+`src/lib/commands.ts` holds every verb the dashboard can perform - the run
+verbs (pause/resume, inject, close as merged or abandoned, kill,
+protect/unprotect, relaunch, pull branch, hand off) and the board verbs
+(open the board or the list, launch, launch from a template, mark all seen) -
+as data: an id, a label, an icon, the capability gate, and the call itself.
+`useCommandRunner()` performs one and reports the outcome the same way
+everywhere: the gateway verbs toast their past-tense name or the server's
+refusal verbatim, and nothing writes run state into the store, because the
+event stream is what reports the result.
 
-The launch form lists the harness names from `internal/harness` because there
-is no `harness.list` control-channel method. A name the server does not know
-is refused by the server, not by the form.
+Two surfaces render that one list, so a label or a gate can never drift:
+
+- **The command palette** (`src/components/palette/`) is the cmdk palette:
+  `⌘K`/`Ctrl+K` anywhere, or the button it registers into the `statusbar`
+  slot (it has no home of its own in the shell, and the dialog portals out of
+  the status bar anyway). It jumps to runs and workspaces - opening a
+  workspace also makes it the active scope, so the sidebar and the board
+  follow - and steers **the run the center view is showing**, any run-detail
+  tab, since it keys on `route.params.runId` rather than on a route name.
+  From the board there is none, so reveal a run first.
+- **Visible buttons**, so nothing important is reachable only by a shortcut:
+  New run in the sidebar header, in the board header and in the board's empty
+  state; All runs in the sidebar nav; and the run action bar
+  (`src/components/run-actions.tsx`) in the header of every run-detail tab,
+  which is where the run verbs live for a member who has not learned `⌘K`
+  yet.
+
+The one thing the buttons add is a confirm step. A `Command` carrying a
+`confirm` field - kill and both closes - opens a dialog naming the run before
+it runs. The palette does not ask: a palette item is already several
+deliberate steps (open, type, select) away from an accident, where a button
+is one click.
+
+### The forms
+
+The three verbs that need prose open a dialog rather than calling straight
+through: launch, inject, and launch from a template. The launch and inject
+forms are a store dialog (`openPaletteDialog` on the `palette` slice), and
+`CommandPalette` hosts them; it rides the `statusbar` slot, so it is mounted
+app-wide and any surface opens a form by asking the store for it. The
+template form's open state lives with the host in `index.tsx` instead, because
+the store's dialog union knows only the other two. It lists the active
+workspace's templates over `template.list` and starts the run with
+`template.launch` (both on `lib/api.ts` like every other call), then reveals
+it.
+
+The launch form asks for a task, a harness and a mode. The task is optional in
+interactive mode - a taskless launch drops the member into the agent's TUI
+with no seeded prompt - and required in headless, which has no interactive
+surface, so the form disables Launch and says why rather than sending a
+request the gateway will refuse (`runLaunch` in `internal/sshd/handlers.go` is
+the same rule). Only what was actually chosen goes on the wire: an empty task
+and the default `tui` mode are the server's own defaults. The harness list
+comes from `agent.list`, plus the always-offered `custom` escape hatch; a name
+the server does not know is refused by the server, not by the form.
 
 Neither launch form asks which workspace to launch into: both take
 `activeWorkspace` and say where the run will land, naming the workspace and its
 base branch. The switcher is the picker, so a second one inside the dialog
 would be a place for the two to disagree.
+
+Launching is gated on `run.launch` **and** on the member not being a viewer
+(`canLaunch`). The local gateway advertises every method regardless of who is
+behind it, so capability alone would put the button in front of someone the
+server would refuse.
 
 ## Terminal view
 
@@ -443,6 +489,12 @@ both what it renders and the overlap set the conflict chips read.
   grammar - the core spec's cut-line, and why neither Monaco nor CodeMirror is
   a dependency. A truncated patch parses to a last file with fewer lines, and
   the view says the diff was cut short rather than failing.
+- **The verbs are not here.** The tab keeps what is only about reading the
+  diff - the refresh, the snapshot list, and the two copyable `git` commands
+  that review the run branch in the linked repository
+  (`review-commands.tsx`). Fetching the branch and closing the run are verbs,
+  so they sit in the run action bar in the header with every other verb rather
+  than a second time in the tab.
 - **Conflict chips are advisory.** `conflict-chips.tsx` registers into
   `card:chips` and the Diff tab renders the same component in its header. It
   reads the overlap set the conflict radar reports (`run.overlaps` at
@@ -646,9 +698,17 @@ off through a real `workspace.timeline` pause and resume run through
 switching the active workspace and opening it, steering from a run-detail tab,
 withholding both pause and resume while the paused state is unknown, launching
 into the active workspace, and offering only members who can own a run as
-handoff targets, never a viewer. The sidebar covers the switcher naming a
-sole workspace instead of offering a picker, a switch rescoping the run list,
-and the attention badge counting. The team surfaces are driven through the same stub
+handoff targets, never a viewer. The buttons that render the same list are
+covered where they live: the run action bar showing pause, resume or neither
+as the pause state is known, asking before a kill and only then killing,
+offering the hand-off targets who may own a run and no button at all when
+there are none, and gating pull and relaunch; the sidebar offering New run to
+a member who may start one and not to a viewer, and All runs opening the flat
+list; the board header opening the launch form and an empty workspace saying
+so once rather than three times; and the launch form refusing a headless run
+with no task while sending nothing the server already defaults. The sidebar
+also covers the switcher naming a sole workspace instead of offering a
+picker, a switch rescoping the run list, and the attention badge counting. The team surfaces are driven through the same stub
 API: the status bar reading roster, queue and budget and rendering all three,
 the approval badge and watcher avatars reaching a real run card, a decision
 going out as `approval.decide` and coming back attributed, a steer refusal
