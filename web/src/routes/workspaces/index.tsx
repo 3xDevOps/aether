@@ -1,6 +1,3 @@
-// The workspace admin surface: what exists, adding one, and each
-// workspace's tool history. The add form maps to protocol.WorkspaceAddParams,
-// with the environment settled by the shared EnvironmentChoice cards.
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -17,7 +14,6 @@ import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import type { Workspace } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
-import { ToolsPanel } from '@/routes/workspaces/tools'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
@@ -26,7 +22,6 @@ const field =
 
 export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
-  const openShell = useStore((s) => s.openShell)
   const navigate = useStore((s) => s.navigate)
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -85,23 +80,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                 >
                   Open
                 </Button>
-                {caps.hasWS('shell') && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      openShell({
-                        workspace: { id: workspace.id },
-                        mode: 'bootstrap-tools',
-                      })
-                      navigate('shell', {})
-                    }}
-                  >
-                    Bootstrap
-                  </Button>
-                )}
               </div>
-              <ToolsPanel workspaceID={workspace.id} client={client} />
             </li>
           ))}
         </ul>

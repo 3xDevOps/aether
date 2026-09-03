@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,9 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/toolenv"
 )
 
 // imageUserResolver is the optional runtime capability used to learn the
@@ -49,48 +47,10 @@ func (s *Scheduler) resolveContainerUser(ctx context.Context, image string, prof
 	return user, nil
 }
 
-// credentialMounts builds and validates the member's read-write harness
-// credential-home mounts (<HomesDir>/<member>/<harness> mirroring the
-// profile's home-relative credential paths beneath the run user's
-// container home), creating host directories on first use. Empty HomesDir
-// disables credential homes.
-func (s *Scheduler) credentialMounts(run *domain.Run, member domain.MemberID, profile harness.Profile, containerHome string) ([]runtime.Mount, error) {
-	if s.cfg.HomesDir == "" {
-		return nil, nil
-	}
-	home := filepath.Join(s.cfg.HomesDir, string(member), profile.Name)
-	mounts := profile.CredentialMounts(home, containerHome)
-	if len(mounts) == 0 {
-		return nil, nil
-	}
-	for _, m := range mounts {
-		// A credential path may be a regular file (auth.json at the top of
-		// home); precreate only what does not exist, as an empty directory.
-		// An existing file must not be MkdirAll'd into an error.
-		if _, statErr := os.Lstat(m.HostPath); statErr == nil {
-			continue
-		}
-		if err := os.MkdirAll(m.HostPath, 0o700); err != nil {
-			return nil, fmt.Errorf("create credential home: %w", err)
-		}
-	}
-	// Containment is the member's own harness home, not all of HomesDir:
-	// a symlink planted during setup must not alias another member's (or
-	// another harness's) files into this run.
-	if err := runtime.ValidateMounts(mounts, runtime.MountPolicy{
-		OwnedRoots:        []string{home},
-		WorktreeHostPath:  run.Worktree,
-		WorktreeMountPath: s.cfg.WorktreeMount,
-	}); err != nil {
-		return nil, err
-	}
-	return mounts, nil
-}
-
-// reserveCredentialUser atomically reserves a writable credential home's
-// non-root uid:gid. Runs and setup sessions use the same registry, so no
-// ownership pass can race a live container using another mapping.
-func (s *Scheduler) reserveCredentialUser(member domain.MemberID, harnessName, user string, sharedHome bool, owner string, run *supervised) (*credentialUserReservation, error) {
+// reserveCredentialUser atomically reserves a writable member home's
+// non-root uid:gid. Runs that share a member home must use one mapping, so
+// no ownership pass can race a live container using another mapping.
+func (s *Scheduler) reserveCredentialUser(member domain.MemberID, user string, sharedHome bool, owner string, run *supervised) (*credentialUserReservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.syncRunUserReservationsLocked()
@@ -101,15 +61,14 @@ func (s *Scheduler) reserveCredentialUser(member domain.MemberID, harnessName, u
 		return nil, nil
 	}
 	for other := range s.credentialUsers {
-		if other.memberID != member || other.harness != harnessName || other.user == user {
+		if other.memberID != member || other.user == user {
 			continue
 		}
-		return nil, fmt.Errorf("credential home %s/%s is reserved by %s as user %s, but %s resolved user %s; concurrent runs and setup sessions for the same member/harness must share one uid:gid mapping",
-			member, harnessName, other.owner, other.user, owner, user)
+		return nil, fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
+			member, other.owner, other.user, owner, user)
 	}
 	reservation := &credentialUserReservation{
 		memberID: member,
-		harness:  harnessName,
 		user:     user,
 		owner:    owner,
 		run:      run,
@@ -147,7 +106,6 @@ func (s *Scheduler) syncRunUserReservationsLocked() {
 		}
 		reservation := &credentialUserReservation{
 			memberID: entry.memberID,
-			harness:  entry.harness,
 			user:     entry.runUser,
 			owner:    "live run " + string(entry.runID),
 			run:      entry,
@@ -170,9 +128,9 @@ func (s *Scheduler) releaseCredentialUser(reservation *credentialUserReservation
 }
 
 // reserveRunUser records the resolved run user and reserves its writable
-// credential home for the full live-run registry lifetime.
+// member home for the full live-run registry lifetime.
 func (s *Scheduler) reserveRunUser(entry *supervised, user string, sharedHome bool) error {
-	_, err := s.reserveCredentialUser(entry.memberID, entry.harness, user, sharedHome, "live run "+string(entry.runID), entry)
+	_, err := s.reserveCredentialUser(entry.memberID, user, sharedHome, "live run "+string(entry.runID), entry)
 	return err
 }
 
@@ -204,36 +162,70 @@ func (s *Scheduler) checkFreeSpace() error {
 		ErrDiskFull, free, s.cfg.MinFreeBytes)
 }
 
-// checkAgentInstalled refuses a launch that could only fail inside runc:
-// on a neutral-image workspace the harness executable can come from nowhere
-// but the member's active tool snapshot, so a missing snapshot means the run
-// dies with "executable file not found" after a container is built and torn
-// down. Refusing up front leaves no failed run row and tells the member the
-// one command that fixes it. Deployment-supplied harness specs (fake,
-// custom) and custom images may carry their executable in the image or the
-// environment, so both skip the check.
-func (s *Scheduler) checkAgentInstalled(ctx context.Context, member domain.MemberID, ws *domain.Workspace, harnessName, executable string) error {
+// checkAgentPresent refuses a neutral-image launch when the member home does
+// not contain the executable expected by the resolved shipped profile.
+func (s *Scheduler) checkAgentPresent(_ context.Context, member domain.MemberID, ws *domain.Workspace, harnessName, executable string) error {
+	installScript := ""
+	if p, ok := harness.Lookup(harnessName); ok {
+		installScript = p.InstallScript
+	}
+	return s.checkAgentPresentWithScript(member, ws, harnessName, executable, installScript)
+}
+
+func (s *Scheduler) checkAgentPresentWithScript(member domain.MemberID, ws *domain.Workspace, harnessName, executable, installScript string) error {
 	if _, deployment := s.harnesses[harnessName]; deployment {
 		return nil
 	}
-	if !ws.Environment.NeutralImage || s.cfg.Store == nil || s.cfg.Toolenv == nil {
+	if ws == nil || !ws.Environment.NeutralImage || s.cfg.Homes == nil {
 		return nil
 	}
-	notInstalled := func() error {
-		return fmt.Errorf("scheduler: agent %q is not set up for workspace %q: %q is not in this workspace's installed tools; run: aether agent add %s --workspace %s",
-			harnessName, ws.Name, executable, harnessName, ws.Name)
+	return s.agentPresenceError(member, harnessName, executable, installScript)
+}
+
+func (s *Scheduler) memberHomeExecutable(member domain.MemberID, executable string) (bool, error) {
+	if s.cfg.Homes == nil {
+		return false, nil
 	}
-	active, err := s.cfg.Toolenv.ActivePath(ctx, member, ws.ID)
-	if errors.Is(err, store.ErrNotFound) {
-		return notInstalled()
+	homePath, err := s.cfg.Homes.Path(member)
+	if err != nil {
+		return false, fmt.Errorf("scheduler: resolve member home: %w", err)
+	}
+	root, err := os.OpenRoot(homePath)
+	if err != nil {
+		return false, fmt.Errorf("scheduler: open member home: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	rel := filepath.Join(".local", "bin", executable)
+	info, err := root.Lstat(rel)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("scheduler: resolve active tool snapshot: %w", err)
+		return false, fmt.Errorf("scheduler: stat member home executable: %w", err)
 	}
-	if statErr := toolenv.StatExecutable(active, executable); statErr != nil {
-		return notInstalled()
+	// Vendor installers commonly leave ~/.local/bin/<exe> as a symlink to
+	// a container-absolute versioned path (claude's native install). That
+	// target only resolves inside the container where the home is mounted
+	// at $HOME, so a symlink counts as installed without following it.
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return true, nil
 	}
-	return nil
+	return info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0, nil
+}
+
+func (s *Scheduler) agentPresenceError(member domain.MemberID, harnessName, executable, installScript string) error {
+	present, err := s.memberHomeExecutable(member, executable)
+	if err != nil {
+		return err
+	}
+	if present {
+		return nil
+	}
+	if installScript == "" {
+		installScript = "install " + harnessName + " into ~/.local/bin"
+	}
+	return fmt.Errorf("scheduler: agent %q is not installed in your environment: %q is not in ~/.local/bin; open your terminal (aether terminal) and run: %s",
+		harnessName, executable, installScript)
 }
 
 // Launch creates a new run and provisions it synchronously: checkout and
@@ -259,7 +251,7 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkAgentInstalled(ctx, member, ws, harness, argv[0]); err != nil {
+	if err := s.checkAgentPresentWithScript(member, ws, harness, argv[0], profile.InstallScript); err != nil {
 		return nil, err
 	}
 	run := &domain.Run{
@@ -328,7 +320,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err := s.pinLatestProfile(ctx, run); err != nil {
 		return fmt.Errorf("pin profile: %w", err)
 	}
-	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, member, profile, EnvironmentPurposeRun, "")
+	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, member, profile, EnvironmentPurposeRun)
 	if err != nil {
 		return err
 	}

@@ -16,8 +16,9 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
-	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -87,6 +88,10 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		t.Fatalf("create member: %v", cerr)
 	}
 
+	homes, err := memberhome.New(filepath.Join(dir, "homes"))
+	if err != nil {
+		t.Fatalf("memberhome.New: %v", err)
+	}
 	e.cfg = Config{
 		Store:    db,
 		Runtime:  e.rt,
@@ -94,6 +99,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		Git:      e.git,
 		PTY:      e.pty,
 		StateDir: filepath.Join(dir, "scheduler"),
+		Homes:    homes,
 	}
 	if mutate != nil {
 		mutate(&e.cfg)
@@ -437,28 +443,28 @@ func TestLaunchSpecIdentityAndCreationKey(t *testing.T) {
 	if c.spec.CreationKey != string(run.ID) {
 		t.Errorf("creation key = %q, want %q", c.spec.CreationKey, run.ID)
 	}
-	if c.spec.User != "" {
-		t.Errorf("user = %q, want empty (root default)", c.spec.User)
+	if len(c.spec.Mounts) != 1 {
+		t.Fatalf("mounts = %v, want one persistent home mount", c.spec.Mounts)
+	}
+	wantHome, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatalf("member home: %v", err)
+	}
+	if c.spec.Mounts[0].HostPath != wantHome || c.spec.Mounts[0].ContainerPath != "/root" || c.spec.Mounts[0].ReadOnly {
+		t.Errorf("home mount = %+v, want %q at /root", c.spec.Mounts[0], wantHome)
 	}
 	if env["HOME"] != "/root" {
 		t.Errorf("HOME = %q, want /root for a root run", env["HOME"])
 	}
-	if len(c.spec.Mounts) != 0 {
-		t.Errorf("mounts = %v, want none without HomesDir", c.spec.Mounts)
-	}
 }
 
-// TestLaunchCredentialMounts pins the credential-home wiring: with a
-// HomesDir configured and a registry harness with credential paths, the
-// member's harness home is created on the host and mounted read-write at
-// the profile's container-side credential path.
-func TestLaunchCredentialMounts(t *testing.T) {
-	homes := filepath.Join(t.TempDir(), "homes")
+// TestLaunchMountsPersistentHome pins that every launch for one member uses
+// the same writable server-owned home at the container's HOME.
+func TestLaunchMountsPersistentHome(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
-		cfg.HomesDir = homes
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "with creds", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "with home", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -466,34 +472,103 @@ func TestLaunchCredentialMounts(t *testing.T) {
 	if c == nil {
 		t.Fatal("no container created")
 	}
-	if len(c.spec.Mounts) != 1 {
-		t.Fatalf("mounts = %v, want the claude credential home", c.spec.Mounts)
-	}
-	m := c.spec.Mounts[0]
-	if m.ContainerPath != "/root/.claude" || m.ReadOnly {
-		t.Errorf("credential mount = %+v", m)
-	}
-	// Mount validation canonicalizes HostPath, so the expectation must be
-	// resolved too (temp dirs can sit behind symlinks).
-	wantHost, err := filepath.EvalSymlinks(filepath.Join(homes, string(e.member.ID), "claude", ".claude"))
+	wantHome, err := e.cfg.Homes.Path(e.member.ID)
 	if err != nil {
-		t.Fatalf("resolve expected host path: %v", err)
+		t.Fatalf("member home: %v", err)
 	}
-	if m.HostPath != wantHost {
-		t.Errorf("credential host path = %q, want %q", m.HostPath, wantHost)
+	if len(c.spec.Mounts) != 1 {
+		t.Fatalf("mounts = %v, want exactly one home mount", c.spec.Mounts)
 	}
-	info, err := os.Stat(m.HostPath)
-	if err != nil || !info.IsDir() {
-		t.Errorf("credential home not created on host: %v", err)
+	if got := c.spec.Mounts[0]; got.HostPath != wantHome || got.ContainerPath != "/root" || got.ReadOnly {
+		t.Fatalf("home mount = %+v, want %q at /root", got, wantHome)
 	}
-	// A second run of the same member+harness shares the same home.
 	run2, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "later run", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("second Launch: %v", err)
 	}
 	c2 := e.rt.byName(string(run2.ID))
-	if c2.spec.Mounts[0].HostPath != wantHost {
-		t.Errorf("second run home = %q, want %q", c2.spec.Mounts[0].HostPath, wantHost)
+	if c2 == nil || len(c2.spec.Mounts) != 1 || c2.spec.Mounts[0].HostPath != wantHome {
+		t.Fatalf("second home mount = %+v, want %q", c2.spec.Mounts, wantHome)
+	}
+}
+
+func TestCheckAgentPresentRefusesMissingExecutable(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ws := &domain.Workspace{Environment: domain.WorkspaceEnvironment{NeutralImage: true}}
+	p, ok := harness.Lookup("claude")
+	if !ok {
+		t.Fatal("claude profile missing")
+	}
+	err := e.sched.checkAgentPresent(t.Context(), e.member.ID, ws, "claude", "claude")
+	if err == nil {
+		t.Fatal("missing agent accepted")
+	}
+	want := fmt.Sprintf("scheduler: agent %q is not installed in your environment: %q is not in ~/.local/bin; open your terminal (aether terminal) and run: %s",
+		"claude", "claude", p.InstallScript)
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+}
+
+func TestCheckAgentPresentSkipsDeploymentAndCustomImages(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.Harnesses = map[string]HarnessSpec{"deployment": {
+			TUIArgs:      []string{"deployment", "{task}"},
+			HeadlessArgs: []string{"deployment", "{task}"},
+			Executable:   "deployment",
+		}}
+	})
+	neutral := &domain.Workspace{Environment: domain.WorkspaceEnvironment{NeutralImage: true}}
+	if err := e.sched.checkAgentPresent(t.Context(), e.member.ID, neutral, "deployment", "missing"); err != nil {
+		t.Fatalf("deployment harness was checked: %v", err)
+	}
+	if err := e.sched.checkAgentPresent(t.Context(), e.member.ID, e.ws, "claude", "missing"); err != nil {
+		t.Fatalf("custom image was checked: %v", err)
+	}
+}
+
+func TestCheckAgentPresentAcceptsAbsoluteSymlink(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ws := &domain.Workspace{Environment: domain.WorkspaceEnvironment{NeutralImage: true}}
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatalf("member home: %v", err)
+	}
+	if mkErr := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); mkErr != nil {
+		t.Fatalf("create agent bin: %v", mkErr)
+	}
+	// The claude native installer leaves ~/.local/bin/claude as a symlink
+	// to an absolute versioned path that only resolves in the container.
+	if lnErr := os.Symlink("/root/.local/share/claude/versions/1.0.0", filepath.Join(home, ".local", "bin", "claude")); lnErr != nil {
+		t.Fatalf("symlink agent: %v", lnErr)
+	}
+	if err := e.sched.checkAgentPresent(t.Context(), e.member.ID, ws, "claude", "claude"); err != nil {
+		t.Fatalf("symlinked agent refused: %v", err)
+	}
+}
+
+func TestLaunchNeutralImageWithHomeExecutable(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.NeutralImage = "neutral:latest" })
+	e.ws.Environment = domain.WorkspaceEnvironment{NeutralImage: true}
+	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatalf("member home: %v", err)
+	}
+	if mkErr := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); mkErr != nil {
+		t.Fatalf("create agent bin: %v", mkErr)
+	}
+	if writeErr := os.WriteFile(filepath.Join(home, ".local", "bin", "claude"), []byte("#!/bin/sh\n"), 0o755); writeErr != nil {
+		t.Fatalf("write agent: %v", writeErr)
+	}
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "neutral", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if run.Status != domain.RunRunning {
+		t.Fatalf("run status = %s, want running", run.Status)
 	}
 }
 
@@ -534,7 +609,10 @@ func TestReserveRunUserConflict(t *testing.T) {
 	entry := &supervised{runID: "run-new", memberID: e.member.ID, harness: "claude"}
 	err := e.sched.reserveRunUser(entry, "2000:2000", true)
 	if err == nil {
-		t.Fatal("conflicting uid accepted for a shared credential home")
+		t.Fatal("conflicting uid accepted for the shared member home")
+	}
+	if !strings.Contains(err.Error(), "member's environment home") {
+		t.Errorf("conflict error %q does not name the member's environment home", err)
 	}
 	for _, want := range []string{"1000:1000", "2000:2000", "run-live"} {
 		if !strings.Contains(err.Error(), want) {
@@ -550,9 +628,9 @@ func TestReserveRunUserConflict(t *testing.T) {
 		t.Errorf("runUser = %q, want recorded 1000:1000", same.runUser)
 	}
 
-	otherHarness := &supervised{runID: "run-codex", memberID: e.member.ID, harness: "codex"}
-	if err := e.sched.reserveRunUser(otherHarness, "2000:2000", true); err != nil {
-		t.Fatalf("different harness rejected: %v", err)
+	otherMember := &supervised{runID: "run-other-member", memberID: "other-member", harness: "codex"}
+	if err := e.sched.reserveRunUser(otherMember, "2000:2000", true); err != nil {
+		t.Fatalf("different member rejected: %v", err)
 	}
 
 	root := &supervised{runID: "run-root", memberID: e.member.ID, harness: "claude"}
@@ -656,30 +734,23 @@ func TestCheckoutTTLDefault(t *testing.T) {
 	}
 }
 
-// TestLaunchProfileAndCredentialMounts pins a snapshot, mounts a writable
-// materialization at LocalRoot, and keeps credential files on a separate
-// host path under the member home (nested via AllowedNestings).
-func TestLaunchProfileAndCredentialMounts(t *testing.T) {
-	dir := t.TempDir()
-	homes := filepath.Join(dir, "homes")
+// TestLaunchPinsProfileWithoutMount pins the snapshot for run provenance,
+// while the member home remains the only environment mount.
+func TestLaunchPinsProfileWithoutMount(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
-		cfg.HomesDir = homes
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
 	ctx := t.Context()
-	svc, err := profile.New(e.db, filepath.Join(dir, "profiles"))
+	svc, err := profile.New(e.db)
 	if err != nil {
 		t.Fatalf("profile.New: %v", err)
 	}
-	// The env already auto-wired a service against the same store; Put
-	// through either instance is visible to Latest/PinRun.
 	snap, err := svc.Put(ctx, string(e.member.ID), "claude", []profile.File{
 		{Path: "settings.json", Mode: 0o644, Content: []byte(`{"ok":true}`)},
 	})
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-
 	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "with profile", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -695,66 +766,13 @@ func TestLaunchProfileAndCredentialMounts(t *testing.T) {
 	if c == nil {
 		t.Fatal("no container")
 	}
-	if len(c.spec.Mounts) < 2 {
-		t.Fatalf("mounts = %v, want profile parent plus credential children", c.spec.Mounts)
-	}
-	prof := c.spec.Mounts[0]
-	if prof.ContainerPath != "/root/.claude" || prof.ReadOnly {
-		t.Errorf("profile mount = %+v", prof)
-	}
-	wantProf, err := filepath.EvalSymlinks(filepath.Join(e.sched.cfg.ProfilesDir, "runs", string(run.ID)))
-	if err != nil {
-		t.Fatalf("resolve profile dest: %v", err)
-	}
-	if prof.HostPath != wantProf {
-		t.Errorf("profile host = %q, want %q", prof.HostPath, wantProf)
-	}
-	seed, err := os.ReadFile(filepath.Join(wantProf, "settings.json"))
-	if err != nil || string(seed) != `{"ok":true}` {
-		t.Errorf("materialized settings = %q err %v", seed, err)
-	}
-	if err = os.WriteFile(filepath.Join(wantProf, "session.json"), []byte("run-local"), 0o644); err != nil {
-		t.Fatalf("write dest: %v", err)
-	}
-
-	var credHost string
-	for _, m := range c.spec.Mounts[1:] {
-		if !strings.HasPrefix(m.ContainerPath, "/root/.claude/") {
-			t.Errorf("credential child %q is not nested under the profile", m.ContainerPath)
-		}
-		if m.HostPath == prof.HostPath {
-			t.Errorf("credential host collides with profile dest")
-		}
-		if !strings.Contains(m.HostPath, string(e.member.ID)) {
-			t.Errorf("credential host %q is not under the member home", m.HostPath)
-		}
-		credHost = m.HostPath
-	}
-	if credHost == "" {
-		t.Fatal("no credential child mounts")
-	}
-	if filepath.Dir(credHost) == wantProf {
-		t.Fatal("credential files live in the ephemeral dest")
-	}
-
-	// A second run gets its own dest; writing the first does not change it.
-	run2, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "later", "claude", domain.LaunchTUI)
-	if err != nil {
-		t.Fatalf("second Launch: %v", err)
-	}
-	c2 := e.rt.byName(string(run2.ID))
-	if c2.spec.Mounts[0].HostPath == prof.HostPath {
-		t.Errorf("runs share a profile dest")
-	}
-	if _, err := os.Stat(filepath.Join(c2.spec.Mounts[0].HostPath, "session.json")); !os.IsNotExist(err) {
-		t.Errorf("second dest inherited first run's write: %v", err)
+	if len(c.spec.Mounts) != 1 || c.spec.Mounts[0].ContainerPath != "/root" || c.spec.Mounts[0].ReadOnly {
+		t.Fatalf("mounts = %v, want only writable home mount", c.spec.Mounts)
 	}
 }
 
-func TestLaunchWithoutSnapshotSkipsProfileMount(t *testing.T) {
-	homes := filepath.Join(t.TempDir(), "homes")
+func TestLaunchWithoutSnapshotHasOnlyHomeMount(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
-		cfg.HomesDir = homes
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "no snap", "claude", domain.LaunchTUI)
@@ -768,25 +786,12 @@ func TestLaunchWithoutSnapshotSkipsProfileMount(t *testing.T) {
 	if got.ProfileSnapshotID != "" {
 		t.Fatalf("unexpected pin %q", got.ProfileSnapshotID)
 	}
+	c := e.rt.byName(string(run.ID))
+	if c == nil || len(c.spec.Mounts) != 1 || c.spec.Mounts[0].ContainerPath != "/root" {
+		t.Fatalf("mounts = %v, want only home mount", c.spec.Mounts)
+	}
 }
 
-func TestCombineProfileCredentialsNested(t *testing.T) {
-	parent := &runtime.Mount{HostPath: "/data/profiles/runs/r1", ContainerPath: "/root/.claude"}
-	creds := []runtime.Mount{{HostPath: "/data/homes/m/claude/.claude/creds", ContainerPath: "/root/.claude/creds"}}
-	mounts, nestings, err := combineProfileCredentials(parent, creds, nil)
-	if err != nil {
-		t.Fatalf("combine: %v", err)
-	}
-	if len(mounts) != 2 {
-		t.Fatalf("mounts = %v", mounts)
-	}
-	if nestings["/root/.claude/creds"] != "/root/.claude" {
-		t.Fatalf("nestings = %v", nestings)
-	}
-	if mounts[0].ContainerPath != "/root/.claude" {
-		t.Fatalf("parent not first: %v", mounts)
-	}
-}
 func TestCustomHarnessDefinition(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{

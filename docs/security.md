@@ -21,6 +21,10 @@ second sandbox inside it.
   restrictions applied inside it: the mount policy, the network it can see, and
   the credentials mounted into it.
 
+Each member's persistent home is mounted only into that member's containers.
+The server never mounts one member's home into another member's run or terminal,
+even when both members use the same workspace or harness.
+
 ### Hostile agents
 
 If you run agents you do not trust, put the `--data-dir` on a filesystem

@@ -1,11 +1,11 @@
 // The onboarding Agents step, between Repository and First run. Two
 // optional halves: setting a coding agent up on the server (the same
-// agent-setup shell the Agents page runs, embedded through AgentWizard),
-// and bringing this machine's own agent configuration across
-// (ProfileImport). Neither is required - "Skip for now" is reachable from
-// every state, including a failed scan and an open setup shell - and
-// nothing here touches another member's setup: an agent login and a
-// profile snapshot are both per-member.
+// environment-terminal instructions the Agents page shows, embedded
+// through AgentWizard), and bringing this machine's own agent
+// configuration across (ProfileImport). Neither is required - "Skip for
+// now" is reachable from every state, including a failed scan and open
+// setup instructions - and nothing here touches another member's setup:
+// an agent login and a profile snapshot are both per-member.
 
 import { useCallback, useEffect, useState } from 'react'
 import { message } from '@/lib/format'
@@ -52,8 +52,8 @@ export function AgentsStep({
   workspace: Workspace | null
   /** Advances the wizard; every state here can reach it. */
   onNext: () => void
-  /** Names the harness a setup shell just finished, so the First run step
-   * can preselect it. */
+  /** Names the harness whose setup was just confirmed, so the First run
+   * step can preselect it. */
   onReady: (harness: string) => void
 }) {
   const [harnesses, setHarnesses] = useState<HarnessStatus[] | null>(null)
@@ -61,8 +61,8 @@ export function AgentsStep({
   const [repoPath, setRepoPath] = useState<string | undefined>(undefined)
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [agentsError, setAgentsError] = useState<string | null>(null)
-  // The harness whose setup shell is open; the step renders nothing else
-  // while a terminal is live.
+  // The harness whose setup instructions are open; the step renders
+  // nothing else while they are.
   const [setup, setSetup] = useState<string | null>(null)
   const [done, setDone] = useState<string[]>([])
 
@@ -91,7 +91,7 @@ export function AgentsStep({
   }, [loadHarnesses, loadAgents])
 
   const loading = useDelayed(harnesses === null && listError === null)
-  const canSetUp = caps.hasMethod('agent.register') && caps.hasWS('shell')
+  const canSetUp = caps.hasMethod('agent.register')
 
   // Both halves are optional, so the way on is always here - including
   // while a setup shell is open and after a scan failed. Once something
@@ -119,7 +119,6 @@ export function AgentsStep({
         <AgentWizard
           agents={agents ?? []}
           harness={setup}
-          workspaceId={workspace?.id}
           onRegistered={() => {
             setDone((prev) =>
               prev.includes(setup) ? prev : [...prev, setup],
@@ -141,8 +140,8 @@ export function AgentsStep({
         <p className="text-sm text-muted-foreground">
           Runs launch a coding agent on the server. The server lists the
           harness names it can launch - every shipped harness is on that
-          list whether or not you have installed and logged one in. The
-          setup shell is what installs and logs in your agent, in your
+          list whether or not you have installed and logged one in. Setup
+          installs the agent into your environment home, once for every
           workspace, and it is safe to re-run.
         </p>
         {loading && <Skeleton className="h-16 w-full" />}
@@ -180,12 +179,12 @@ export function AgentsStep({
                     </span>
                     {done.includes(h.name) && (
                       <span className="block text-xs">
-                        Set up in this session: the login is persisted and the
-                        workspace tools are snapshotted.
+                        Set up in this session: the login and the installed
+                        tools persist in your environment home.
                       </span>
                     )}
                   </span>
-                  {canSetUp && workspace && (
+                  {canSetUp && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -200,16 +199,10 @@ export function AgentsStep({
             })}
           </ul>
         )}
-        {harnesses && harnesses.length > 0 && canSetUp && !workspace && (
-          <p className="text-xs text-muted-foreground">
-            No workspace is selected, and the setup shell installs the agent
-            in one. Go back to the Workspace step to pick it.
-          </p>
-        )}
         {harnesses && harnesses.length > 0 && !canSetUp && (
           <p className="text-xs text-muted-foreground">
-            This gateway does not serve the setup shell, so an agent is set
-            up from a terminal with{' '}
+            This gateway cannot register agents, so an agent is set up from
+            a terminal with{' '}
             <span className="font-mono">aether agent add</span>.
           </p>
         )}

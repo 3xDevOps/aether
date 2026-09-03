@@ -180,7 +180,6 @@ describe('hydrate', () => {
     expect(c.hasMethod('template.save')).toBe(false)
     expect(c.hasMethod('agent.list')).toBe(false)
     expect(c.hasWS('attach')).toBe(true)
-    expect(c.hasWS('shell')).toBe(false)
     expect(c.hasLocal('worktree.open')).toBe(false)
   })
 

@@ -22,8 +22,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/toolenv"
 )
 
 // memberIDExtension is the ssh.Permissions extension carrying the
@@ -69,14 +69,14 @@ type Config struct {
 	PTY         PTYAttacher
 	Runs        RunController
 
-	// Toolenv provides server-owned snapshot lifecycle operations for SSH
-	// control methods. It is optional in narrow unit-test configurations.
-	Toolenv *toolenv.Manager
+	// Homes owns the persistent per-member home directories. It is optional
+	// in narrow unit-test configurations.
+	Homes *memberhome.Manager
 
 	// WhoIs resolves connections to tailnet identities via tailscaled;
 	// nil disables tailnet auth entirely (key auth only). WhoIs runs
-	// once per connection, in the "none" auth attempt every SSH client
-	// sends first; on any failure auth falls back to the publickey path.
+	// once per connection, in the "none" auth attempt every SSH client sends first;
+	// on any failure auth falls back to the publickey path.
 	WhoIs WhoIsResolver
 	// TailnetAutoJoin registers unknown tailnet identities as approved
 	// members instead of pending ones.

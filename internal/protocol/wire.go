@@ -30,7 +30,6 @@ type Run struct {
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
 	ProfileSnapshotID string  `json:"profile_snapshot_id,omitempty"`
-	ToolSnapshotID    string  `json:"tool_snapshot_id,omitempty"`
 }
 
 // Workspace is the wire form of a workspace; image, env, and setup script
@@ -93,7 +92,6 @@ func RunFromDomain(r *domain.Run) Run {
 		StartedAt:         rfc3339Ptr(r.StartedAt),
 		FinishedAt:        rfc3339Ptr(r.FinishedAt),
 		ProfileSnapshotID: string(r.ProfileSnapshotID),
-		ToolSnapshotID:    string(r.ToolSnapshotID),
 	}
 }
 
@@ -326,66 +324,6 @@ type WorkspaceSelector struct {
 	Name string `json:"name,omitempty"`
 }
 
-// WorkspaceShellMode identifies the purpose of a workspace shell.
-type WorkspaceShellMode = domain.WorkspaceShellMode
-
-const (
-	WorkspaceShellBootstrapTools     = domain.WorkspaceShellBootstrapTools
-	WorkspaceShellHarnessLogin       = domain.WorkspaceShellHarnessLogin
-	WorkspaceShellModeBootstrapTools = domain.WorkspaceShellBootstrapTools
-	WorkspaceShellModeHarnessLogin   = domain.WorkspaceShellHarnessLogin
-	WorkspaceShellModeAgentSetup     = domain.WorkspaceShellAgentSetup
-)
-
-// WorkspaceShellRequest is the single header line a client sends after
-// opening the unified workspace-shell subsystem. Geometry precedence is
-// pty-req > header > 80x24.
-type WorkspaceShellRequest struct {
-	Workspace              WorkspaceSelector  `json:"workspace"`
-	Mode                   WorkspaceShellMode `json:"mode"`
-	Harness                string             `json:"harness,omitempty"`
-	VerificationExecutable string             `json:"verification_executable,omitempty"`
-	// TUIArgs/HeadlessArgs are argv template proposals for agent-setup mode.
-	TUIArgs      []string `json:"tui_args,omitempty"`
-	HeadlessArgs []string `json:"headless_args,omitempty"`
-	Resume       bool     `json:"resume,omitempty"`
-	Reset        bool     `json:"reset,omitempty"`
-	Cols         uint     `json:"cols,omitempty"`
-	Rows         uint     `json:"rows,omitempty"`
-}
-
-// Validate checks the server-facing request contract.
-func (r WorkspaceShellRequest) Validate() error {
-	return (domain.WorkspaceShellRequest{
-		Workspace:              domain.WorkspaceSelector{ID: domain.WorkspaceID(r.Workspace.ID), Name: r.Workspace.Name},
-		Mode:                   r.Mode,
-		Harness:                r.Harness,
-		VerificationExecutable: r.VerificationExecutable,
-		TUIArgs:                r.TUIArgs,
-		HeadlessArgs:           r.HeadlessArgs,
-		Resume:                 r.Resume,
-		Reset:                  r.Reset,
-		Cols:                   r.Cols,
-		Rows:                   r.Rows,
-	}).Validate()
-}
-
-// WorkspaceShellResponse acknowledges a WorkspaceShellRequest with the
-// effective geometry and echoed shell selection.
-type WorkspaceShellResponse struct {
-	OK                     bool               `json:"ok"`
-	Workspace              WorkspaceSelector  `json:"workspace,omitempty"`
-	Mode                   WorkspaceShellMode `json:"mode,omitempty"`
-	Harness                string             `json:"harness,omitempty"`
-	VerificationExecutable string             `json:"verification_executable,omitempty"`
-	Resume                 bool               `json:"resume,omitempty"`
-	Reset                  bool               `json:"reset,omitempty"`
-	Cols                   uint               `json:"cols,omitempty"`
-	Rows                   uint               `json:"rows,omitempty"`
-	Code                   int                `json:"code,omitempty"`
-	Error                  string             `json:"error,omitempty"`
-}
-
 // SyncRequest is the single header line a client sends after opening the
 // sync subsystem. Force overrides the mid-write refusal: without it the
 // server rejects the bridge while the run is `running`.
@@ -447,4 +385,7 @@ type AgentListResult struct {
 type AgentInfo struct {
 	Name   string `json:"name"`
 	Source string `json:"source"`
+	// InstallScript is the shipped harness's vendor install command. It is
+	// empty for member-owned custom agents.
+	InstallScript string `json:"install_script,omitempty"`
 }

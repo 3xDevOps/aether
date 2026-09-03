@@ -19,9 +19,9 @@ import (
 type inodeKey struct{ dev, ino uint64 }
 
 // applyRunOwnership hands writable host surfaces (a run checkout when
-// present, plus credential homes) to the resolved non-root container user
-// before the container is created. Root containers (user == "") need no
-// pass: the v1 default stance is a root agent and a root server.
+// present, plus the member's persistent home) to the resolved non-root
+// container user before the container is created. Root containers (user == "")
+// need no pass: the v1 default stance is a root agent and a root server.
 //
 // The pass is hardlink-safe: run checkouts are local hardlink clones
 // (Wave 1 contract §6.2), so checkout object files share inodes with the
@@ -32,10 +32,9 @@ type inodeKey struct{ dev, ino uint64 }
 // checkout link to a protected inode is ever chowned or chmodded,
 // regardless of its current pathname. Everything else - directories
 // (including object directories, so the run can add new objects),
-// unprotected files, credential homes - is chowned normally. Concurrent
-// runs of one member+harness share the credential home under one mapping:
-// reserveRunUser rejects a conflicting uid:gid before this pass runs, so
-// two live runs never chown the shared home back and forth.
+// unprotected files, and member homes - is chowned normally. The member's
+// live containers use one uid:gid mapping, so this pass cannot flip ownership
+// back and forth.
 func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mounts []runtime.Mount, user string) error {
 	if user == "" {
 		return nil
@@ -117,8 +116,8 @@ func protectedInodes(repoDir string) (map[inodeKey]struct{}, error) {
 // chownTree chowns dir and everything under it to uid:gid, skipping any
 // regular file whose inode is protected (a hardlink into the bare repo).
 // The traversal is fd-based via os.Root: a concurrently running container
-// sharing the tree (a credential home) cannot swap a directory for a
-// symlink mid-walk and redirect the chown onto host files outside dir.
+// sharing a member home cannot swap a directory for a symlink mid-walk and
+// redirect the chown onto host files outside dir.
 // Symlinks themselves are chowned, never followed.
 func chownTree(dir string, uid, gid int, protected map[inodeKey]struct{}) error {
 	root, err := os.OpenRoot(dir)

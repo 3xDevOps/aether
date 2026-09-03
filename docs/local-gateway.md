@@ -51,9 +51,8 @@ should come back on the new binary.
 The gateway holds no server code: every read and write is a
 control-channel call proxied over one SSH connection to the linked server,
 through the same `internal/cli` client the terminal commands use. One
-`Backend` interface covers the whole surface - `Call` for methods, and a
-fresh subsystem channel per WebSocket for events, attach, shell, and sync
-- so the HTTP handlers never know they are riding SSH.
+fresh subsystem channel per WebSocket for events, attach, and sync - so the
+HTTP handlers never know they are riding SSH.
 
 The connection is dialed lazily on first use and shared. When a call fails
 on transport (a server restart, a dropped network) the backend redials
@@ -89,7 +88,6 @@ and prefix as a `POST /api/v1` error.
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
-| `GET` | `/ws/shell` | interactive workspace shell (WebSocket) |
 | `GET` | `/ws/envscan` | environment scan on this machine (WebSocket) |
 | `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
 
@@ -133,7 +131,7 @@ the same capability checks the SSH transport applies.
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","shell","envscan"],
+{"gateway":"local","methods":["*"],"ws":["events","attach","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
           "link.repo","link.status","link.switch","profile.preview",
           "profile.push","pull","repo.push","sync.start","sync.status",
@@ -533,26 +531,6 @@ with **1000** and the tab name is free to reopen with a fresh shell.
 Closing the socket only detaches: the shell keeps running, still counts
 toward the four-tab cap, and reconnecting the same tab name reattaches to
 it. Every shell ends with the run's container.
-
-### `GET /ws/shell`
-
-An interactive workspace shell (bootstrap
-tools, harness login, agent setup) with the attach socket's frame
-protocol - binary output, JSON control frames for input and resize,
-always honored.
-
-1. Client sends one **text** frame: a `protocol.WorkspaceShellRequest`
-   (`workspace` selector, `mode`, optional `harness`, geometry, and the
-   agent-setup fields), within 10 seconds of the socket opening. Missing
-   geometry defaults to 80x24.
-2. Server answers one **text** frame: a `WorkspaceShellResponse` -
-   `{"ok":true,...}` echoing the effective selection and geometry, or
-   `{"ok":false,"code":...,"error":"..."}` followed by a close.
-3. Binary output frames stream; text control frames go back, as on
-   attach. Client frames are capped at 64 KiB.
-4. The shell exiting cleanly closes the socket with **1000**; a nonzero
-   remote exit status closes with **4001** and the error text as the
-   reason, so the SPA can tell a dirty exit from a clean one.
 
 ### `GET /ws/envscan`
 

@@ -1,4 +1,4 @@
-// Terminal font handling shared by the run terminal and the workspace shell.
+// Terminal font handling shared by the run and environment terminals.
 //
 // The terminals render agent TUIs, which draw Nerd Font symbols (powerline
 // separators, devicons, codicons) from the Unicode private use area. No

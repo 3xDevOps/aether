@@ -32,5 +32,4 @@ type RunController interface {
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	EnsureRunShellTab(ctx context.Context, run domain.RunID, tab string, cols, rows uint) error
-	WorkspaceShell(ctx context.Context, member domain.MemberID, req domain.WorkspaceShellRequest, cols, rows uint, conn io.ReadWriter, resize <-chan [2]uint) error
 }

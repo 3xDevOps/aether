@@ -78,9 +78,6 @@ type Store interface {
 	// SetRunProtected sets only the run's protected flag, leaving every
 	// other field untouched.
 	SetRunProtected(ctx context.Context, id domain.RunID, protected bool) error
-	// SetRunToolSnapshot updates only the run's tool snapshot pin. The
-	// snapshot must belong to the run's current member and workspace.
-	SetRunToolSnapshot(ctx context.Context, run domain.RunID, id domain.ToolSnapshotID) error
 	DeleteRun(ctx context.Context, id domain.RunID) error
 
 	// Profile snapshots are content-addressed per member+harness.
@@ -96,20 +93,6 @@ type Store interface {
 	GetProfileHead(ctx context.Context, member domain.MemberID, harness string) (*domain.ProfileSnapshot, error)
 	PruneProfileSnapshots(ctx context.Context, member domain.MemberID, harness string, keep int) error
 	SetRunProfileSnapshot(ctx context.Context, run domain.RunID, id domain.ProfileSnapshotID) error
-	// Tool snapshots are immutable filesystem metadata, scoped by member and
-	// workspace. Heads are mutable pointers to those rows.
-	CreateToolSnapshot(ctx context.Context, s *domain.ToolSnapshot) error
-	GetToolSnapshot(ctx context.Context, id domain.ToolSnapshotID) (*domain.ToolSnapshot, error)
-	ListToolSnapshots(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) ([]*domain.ToolSnapshot, error)
-	DeleteToolSnapshot(ctx context.Context, id domain.ToolSnapshotID) error
-	SetToolHead(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, id domain.ToolSnapshotID) error
-	GetToolHead(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) (*domain.ToolSnapshot, error)
-	PruneToolSnapshots(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, keep int) error
-
-	CreatePendingWorkspaceShell(ctx context.Context, s *PendingWorkspaceShell) error
-	GetPendingWorkspaceShell(ctx context.Context, id string) (*PendingWorkspaceShell, error)
-	ListPendingWorkspaceShells(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) ([]*PendingWorkspaceShell, error)
-	DeletePendingWorkspaceShell(ctx context.Context, id string) error
 
 	// Harness definitions are member-owned custom agent profiles. The
 	// Definition blob is opaque JSON validated by callers; upsert keys on
@@ -117,10 +100,6 @@ type Store interface {
 	UpsertHarnessDefinition(ctx context.Context, d *HarnessDefinition) error
 	GetHarnessDefinition(ctx context.Context, member domain.MemberID, name string) (*HarnessDefinition, error)
 	ListHarnessDefinitions(ctx context.Context, member domain.MemberID) ([]*HarnessDefinition, error)
-
-	// Aliases used by shell lifecycle callers.
-	SetActiveToolSnapshot(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, id domain.ToolSnapshotID) error
-	GetActiveToolSnapshot(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) (*domain.ToolSnapshot, error)
 
 	ApprovalStore
 	TemplateStore
@@ -130,21 +109,6 @@ type Store interface {
 
 	Close() error
 }
-
-// PendingWorkspaceShell records server-owned state needed to resume or discard
-// an interactive bootstrap shell. IDs are relative opaque identifiers.
-type PendingWorkspaceShell struct {
-	ID          string
-	WorkspaceID domain.WorkspaceID
-	MemberID    domain.MemberID
-	SnapshotID  domain.ToolSnapshotID
-	StagingID   string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-}
-
-// WorkspaceShellSession is retained as a descriptive alias for callers.
-type WorkspaceShellSession = PendingWorkspaceShell
 
 // HarnessDefinition is one member-owned custom agent definition. The
 // Definition blob is a JSON-encoded internal/harness.Definition using Go

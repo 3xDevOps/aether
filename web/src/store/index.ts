@@ -12,7 +12,6 @@ import { createPresenceSlice, type PresenceSlice } from '@/store/presence'
 import { createRunsSlice, type RunsSlice } from '@/store/runs'
 import { createServerSlice, type ServerSlice } from '@/store/server'
 import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
-import { createShellSlice, type ShellSlice } from '@/store/shell'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createUiSlice, type UiSlice } from '@/store/ui'
@@ -29,7 +28,6 @@ export type RootState = ServerSlice &
   CostSlice &
   TimelineSlice &
   DiffSlice &
-  ShellSlice &
   LocalSlice &
   EnvironmentSlice &
   UiSlice
@@ -54,7 +52,6 @@ export function createRootStore() {
         ...createCostSlice(...a),
         ...createTimelineSlice(...a),
         ...createDiffSlice(...a),
-        ...createShellSlice(...a),
         ...createLocalSlice(...a),
         ...createEnvironmentSlice(...a),
         ...createUiSlice(...a),

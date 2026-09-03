@@ -45,10 +45,6 @@ func (b *apiStubBackend) Attach(protocol.AttachRequest) (cli.Terminal, protocol.
 	panic("not reached")
 }
 
-func (b *apiStubBackend) Shell(protocol.WorkspaceShellRequest) (cli.Terminal, protocol.WorkspaceShellResponse, error) {
-	panic("not reached")
-}
-
 func (b *apiStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
 	panic("not reached")
 }
@@ -266,8 +262,8 @@ func TestCapabilities(t *testing.T) {
 	if !reflect.DeepEqual(caps.Methods, []string{"*"}) {
 		t.Errorf("methods = %v, want [*]", caps.Methods)
 	}
-	if !reflect.DeepEqual(caps.WS, []string{"events", "attach", "shell", "envscan"}) {
-		t.Errorf("ws = %v, want [events attach shell envscan]", caps.WS)
+	if !reflect.DeepEqual(caps.WS, []string{"events", "attach", "envscan"}) {
+		t.Errorf("ws = %v, want [events attach envscan]", caps.WS)
 	}
 	if !reflect.DeepEqual(caps.Local, localVerbs) {
 		t.Errorf("local = %v, want %v", caps.Local, localVerbs)

@@ -150,6 +150,9 @@ func TestAgentListFreshMemberReturnsShippedSet(t *testing.T) {
 		if a.Source != "shipped" {
 			t.Fatalf("fresh member agent %q source = %q, want shipped", a.Name, a.Source)
 		}
+		if p, ok := harness.Lookup(a.Name); ok && a.InstallScript != p.InstallScript {
+			t.Fatalf("shipped agent %q install script = %q, want %q", a.Name, a.InstallScript, p.InstallScript)
+		}
 		got[a.Name] = true
 	}
 	for _, name := range want {
