@@ -69,6 +69,21 @@ func newLocalState(cfg Config) *localState {
 	return state
 }
 
+// cacheConfig updates the in-memory link and its file timestamp together.
+// Callers hold s.mu while changing the cache.
+func (s *localState) cacheConfig(cfg cli.Config) {
+	path, err := cli.Path()
+	if err != nil {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	s.cfg = cfg
+	s.mtime = info.ModTime()
+}
+
 // snapshot returns the current link config under the lock. The CLI may update
 // its config while the gateway is running, so reload it when its mtime changes.
 func (s *localState) snapshot() cli.Config {
@@ -80,12 +95,13 @@ func (s *localState) snapshot() cli.Config {
 		if info, statErr := os.Stat(path); statErr == nil && !info.ModTime().Equal(s.mtime) {
 			if cfg, loadErr := cli.Load(); loadErr == nil {
 				if s.cfg.Active != "" {
-					if named, ok := cfg.Named(s.cfg.Active); ok {
-						cfg = named
+					named, ok := cfg.Named(s.cfg.Active)
+					if !ok {
+						return s.cfg
 					}
+					cfg = named
 				}
-				s.cfg = cfg
-				s.mtime = info.ModTime()
+				s.cacheConfig(cfg)
 			}
 		}
 	}
@@ -236,7 +252,7 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
-	g.local.cfg = cfg
+	g.local.cacheConfig(cfg)
 	return struct {
 		Repo   string `json:"repo"`
 		Remote string `json:"remote"`

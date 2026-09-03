@@ -9,7 +9,6 @@
 import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import type { Workspace } from '@/lib/types'
 import { AgentsStep } from '@/routes/onboarding/agents-step'
 import {
   EnvironmentReview,

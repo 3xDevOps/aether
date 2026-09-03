@@ -64,8 +64,7 @@ function LinkCard({ client }: { client: Api }) {
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const link = useStore((s) => s.linkStatus)
   const [error, setError] = useState<string | null>(null)
-  const serverConfigured =
-    link !== null && (link.server_configured ?? link.addr !== '')
+  const serverConfigured = link !== null && link.server_configured
   // The gateway's SSH identity is process-lifetime, so link.switch always
   // answers an instruction to restart; show it verbatim.
   const [switchNote, setSwitchNote] = useState<string | null>(null)

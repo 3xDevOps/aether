@@ -268,7 +268,6 @@ export function RepoStep({
   workspace: Workspace | null
   onNext: () => void
 }) {
-
   const [repo, setRepo] = useState('')
   const [result, setResult] = useState<LinkRepoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -462,7 +461,7 @@ export function FirstRunStep({
   client: Api
   workspace: Workspace | null
   defaultHarness?: string
-  onBackToWorkspace: () => void
+  onBackToWorkspace?: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
   const setOnboarded = useStore((s) => s.setOnboarded)

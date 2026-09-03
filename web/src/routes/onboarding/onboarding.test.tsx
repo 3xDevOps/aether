@@ -158,8 +158,8 @@ describe('onboarding wizard', () => {
       screen.getByRole('button', { name: 'Continue to repository' }),
     )
 
-    expect(await screen.findByRole('region', { name: 'Repository' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Back to Workspace' })).toBeDefined()
+    expect(await screen.findByLabelText('Repository path')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Back to Workspace' })).toBeNull()
   })
 
   it('rechecks link status when the window regains focus', async () => {

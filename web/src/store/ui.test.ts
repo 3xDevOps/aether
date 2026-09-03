@@ -52,6 +52,23 @@ describe('workspace scope and route stay in sync', () => {
       onboardingWorkspace: '',
     })
   })
+  it('keeps onboarding state when navigating to onboarding again', () => {
+    useStore.setState({
+      route: { name: 'onboarding', params: {} },
+      onboarded: false,
+      onboardingStep: 3,
+      onboardingWorkspace: 'wsp_1',
+    })
+
+    useStore.getState().navigate('onboarding')
+
+    expect(useStore.getState()).toMatchObject({
+      route: { name: 'onboarding', params: {} },
+      onboarded: false,
+      onboardingStep: 3,
+      onboardingWorkspace: 'wsp_1',
+    })
+  })
 })
 
 // A dismissal is a version, not a flag. Storing a boolean would silence

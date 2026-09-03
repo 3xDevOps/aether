@@ -102,7 +102,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   navigate: (name, params = {}) => {
     set((s) => ({
       route: { name, params },
-      ...(s.route.name === 'onboarding'
+      ...(s.route.name === 'onboarding' && name !== 'onboarding'
         ? { onboarded: true, onboardingStep: 0, onboardingWorkspace: '' }
         : {}),
     }))
