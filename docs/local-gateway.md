@@ -310,9 +310,10 @@ authority.
   `secret` (a content-scanner finding), `ignored` (an
   `.aether-profile-ignore` match, or one of the per-harness defaults in
   [harnesses.md](harnesses.md)), `symlink` (a link out of the profile
-  root), `not-regular` (a socket, named pipe, or device node, refused on
-  its mode without being opened), `too-large` (over the 1 MiB a push
-  allows for one file), or `over-budget` (the 20 MiB a snapshot holds was
+  root, skipped rather than followed - its target is never opened),
+  `not-regular` (a socket, named pipe, or device node, refused on its
+  mode without being opened), `too-large` (over the 1 MiB a push allows
+  for one file), or `over-budget` (the 20 MiB a snapshot holds was
   already filled).
 - An ignored directory is reported once, as the directory, rather than
   once per file inside it. `excluded` is capped at 200 entries;
@@ -329,13 +330,12 @@ authority.
   (`internal/profile`), so the preview offers exactly the files a push
   can carry.
 - `blocked` is true when a push would be **refused outright** rather than
-  partially carried - a `secret` or a `symlink` escape, the two
-  conditions discovery aborts on. `blocked_reason`, `blocked_path` and
-  `blocked_detail` name which and where. Size exclusions do not block:
-  the push succeeds carrying what fits, and `profile.push` answers with a
-  `skipped` list naming what it left behind. Only a `secret` has the
-  CLI's `--allow-secret` override, so a surface offering one reads
-  `blocked_reason` rather than assuming.
+  partially carried. A `secret` is the only such condition: it is the one
+  thing whose fix has to happen on this machine, and the one with a CLI
+  override. `blocked_reason`, `blocked_path` and `blocked_detail` name it.
+  Every other exclusion - symlink escapes and both size caps - lets the
+  push succeed carrying what is left, and `profile.push` answers with a
+  `skipped` list naming what it dropped.
 - `present:false` - this machine has no profile root for that harness -
   is a normal answer with zero counts, not an error. A harness name the
   registry does not know, or one with no profile sync, answers `-32602`.

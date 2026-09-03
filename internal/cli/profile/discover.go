@@ -64,12 +64,14 @@ func Discover(ctx context.Context, harnessName string, allowSecret []string) ([]
 	return files, err
 }
 
-// DiscoverFiles is Discover plus the files the size caps left behind.
-// Those are the one exclusion a caller has to be able to mention: a
-// credential or an ignored file is excluded by a rule the user wrote or
-// asked for, but a file dropped for its size is one they would otherwise
-// expect to see on the server. Callers with somewhere to print report
-// them; the daemon, which pushes unattended, uses Discover.
+// DiscoverFiles is Discover plus the entries it skipped without
+// refusing: the ones the size caps dropped, and symlinks pointing out of
+// the profile root. Those are the exclusions a caller has to be able to
+// mention - a credential or an ignored file is excluded by a rule the
+// user wrote or asked for, but a file dropped for its size or a link the
+// walk would not follow is one they would otherwise expect to find on
+// the server. Callers with somewhere to print report them; the daemon,
+// which pushes unattended, logs them.
 func DiscoverFiles(ctx context.Context, harnessName string, allowSecret []string) ([]LocalFile, []Exclusion, error) {
 	root, prof, err := LocalDir(harnessName)
 	if err != nil {
@@ -88,9 +90,13 @@ func discoverRoot(ctx context.Context, root string, prof harness.Profile, allowS
 		switch f.Reason {
 		case ExcludeSecret:
 			return &DiscoverError{Path: f.Finding.Path, Location: f.Finding.Location, Message: f.Detail}
-		case ExcludeSymlink:
-			return &DiscoverError{Path: f.Rel, Message: f.Detail}
-		case ExcludeTooLarge, ExcludeOverBudget:
+		// A symlink out of the profile root is skipped, not fatal. The
+		// walk never reads a link's target and WalkDir never follows one,
+		// so the escaping bytes stay off the server either way; aborting
+		// only decided that the other files stayed off too. Symlinking
+		// skills into a shared directory is an ordinary setup, and it
+		// used to block the whole import with no override to offer.
+		case ExcludeSymlink, ExcludeTooLarge, ExcludeOverBudget:
 			skipped = append(skipped, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: f.Detail})
 		case "":
 			out = append(out, LocalFile{Path: f.Rel, AbsPath: f.Abs, Mode: f.Mode, Content: f.Content})

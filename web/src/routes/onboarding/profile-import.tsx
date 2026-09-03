@@ -63,18 +63,18 @@ export function previewSummary(preview: ProfilePreview): string {
 }
 
 /** The exclusion behind a blocked preview: the one the gateway named, or
- * the first push-aborting one when an older gateway named none. */
+ * the scanner finding when it named none. A scanner finding is the only
+ * thing that blocks a push; everything else is carried as a skip. */
 function flagged(preview: ProfilePreview) {
   const excluded = preview.excluded ?? []
   return (
     excluded.find((e) => e.path === preview.blocked_path) ??
-    excluded.find((e) => e.reason === 'secret' || e.reason === 'symlink')
+    excluded.find((e) => e.reason === 'secret')
   )
 }
 
 /** What blocked this profile, in the gateway's own words where it gave
- * them. A symlink escape and a scanner finding read differently and the
- * user acts on them differently, so neither is described as the other. */
+ * them. */
 function blockedLine(
   preview: ProfilePreview,
   secret: ProfileExclusion | undefined,
@@ -525,21 +525,15 @@ function ProfileRow({
             {blockedLine(preview, secret)}
           </p>
           <p>
-            The push is refused until that is fixed on this machine.
-            {preview.blocked_reason === 'symlink'
-              ? ' A link out of the profile root has no override: point it inside the directory, or drop it.'
-              : ' Remove the secret, or push this harness from a terminal, where the override is attributable:'}
+            The push is refused until that is fixed on this machine. Remove
+            the secret, or push this harness from a terminal, where the
+            override is attributable:
           </p>
-          {/* Only a scanner finding has an override, so only a scanner
-              finding gets the command. Offering it for a symlink escape
-              would send the user to a flag that cannot help them. */}
-          {preview.blocked_reason !== 'symlink' && (
-            <pre className="overflow-x-auto rounded-md border bg-background px-2 py-1 font-mono">
-              {`aether profile push --agent ${preview.harness} --allow-secret ${
-                preview.blocked_path ?? secret?.path ?? '<file>'
-              } --workspace ${workspace?.id ?? '<workspace-id>'}`}
-            </pre>
-          )}
+          <pre className="overflow-x-auto rounded-md border bg-background px-2 py-1 font-mono">
+            {`aether profile push --agent ${preview.harness} --allow-secret ${
+              preview.blocked_path ?? secret?.path ?? '<file>'
+            } --workspace ${workspace?.id ?? '<workspace-id>'}`}
+          </pre>
         </div>
       )}
       {result && (

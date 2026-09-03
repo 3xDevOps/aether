@@ -41,15 +41,25 @@ const (
 
 // defaultIgnores are the gitignore-style patterns Aether applies to a
 // harness before the user's own .aether-profile-ignore. These are the
-// directories a harness writes to as it runs - transcripts, shell
-// snapshots, telemetry - rather than anything the user configured. They
-// are large enough to spend the whole per-snapshot budget, and none of it
-// is configuration another machine wants.
+// paths a harness writes as it runs - transcripts, shell snapshots,
+// telemetry, scratch trees - rather than anything the user configured.
+// They are large enough to spend the whole per-snapshot budget, none of
+// it is configuration another machine wants, and some of it is actively
+// hostile to a walk: codex plants a symlink to its own installed binary
+// under tmp/ on every run.
 //
 // They come first, so a user's ignore file overrides them the way
 // gitignore does: a later `!projects/` re-includes what this dropped.
 var defaultIgnores = map[string][]string{
-	"claude": {"projects/", "shell-snapshots/", "statsig/", "todos/"},
+	"claude": {
+		"projects/", "shell-snapshots/", "statsig/", "todos/",
+		"file-history/", "history.jsonl", "daemon/",
+	},
+	// codex/tmp holds a per-run scratch directory whose apply_patch entry
+	// is a symlink out to the codex binary. plugins/cache is deliberately
+	// not here: it is real third-party content, not something codex wrote
+	// for itself.
+	"codex": {"tmp/", ".tmp/"},
 }
 
 // visited is one entry the walk classified. Reason is empty for a file

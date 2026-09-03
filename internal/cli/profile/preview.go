@@ -113,8 +113,10 @@ type Preview struct {
 // blocksPush reports whether an exclusion reason is one discoverRoot
 // aborts on rather than skips. It is the single place the two agree, so
 // adding an aborting reason to the walk cannot leave the preview behind.
+// A scanner finding is the only one: everything else, symlink escapes
+// included, is carried in the skipped list instead.
 func blocksPush(reason string) bool {
-	return reason == ExcludeSecret || reason == ExcludeSymlink
+	return reason == ExcludeSecret
 }
 
 // CategoryNames returns the categories the preview found files in, in

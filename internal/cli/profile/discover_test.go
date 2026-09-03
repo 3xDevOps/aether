@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/harness"
 )
@@ -89,24 +91,76 @@ func TestDiscoverNegationCannotReincludeDenied(t *testing.T) {
 	}
 }
 
-func TestDiscoverSymlinkEscapeRejected(t *testing.T) {
+// TestDiscoverSymlinkEscapeSkipped pins what a link out of the profile
+// root costs: the link, and nothing else. Symlinking skills into a shared
+// directory is an ordinary setup, and aborting the whole profile over it
+// left the user no override - while keeping no bytes off the server that
+// skipping does not, since the walk never reads a target and WalkDir
+// never follows one.
+func TestDiscoverSymlinkEscapeSkipped(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("os.Symlink needs SeCreateSymbolicLinkPrivilege: Developer Mode or an elevated shell")
 	}
 	root := setupClaudeRoot(t)
 	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
+	mustWrite(t, filepath.Join(root, "skills", "local", "SKILL.md"), "# local\n")
 	outside := filepath.Join(t.TempDir(), "outside.txt")
 	mustWrite(t, outside, "secret")
-	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(root, "skills", "shared")); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Discover(t.Context(), "claude", nil)
-	if err == nil {
-		t.Fatal("expected symlink escape error")
+
+	files, skipped, err := DiscoverFiles(t.Context(), "claude", nil)
+	if err != nil {
+		t.Fatalf("a symlink escape refused the whole profile: %v", err)
 	}
-	var de *DiscoverError
-	if !asDiscover(err, &de) || !strings.Contains(err.Error(), "symlink escape") {
-		t.Fatalf("err = %v, want symlink escape", err)
+	got := names(files)
+	for _, want := range []string{"settings.json", "skills/local/SKILL.md"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("%s was not carried: %v", want, got)
+		}
+	}
+	if len(skipped) != 1 || skipped[0].Path != "skills/shared" || skipped[0].Reason != ExcludeSymlink {
+		t.Fatalf("skipped = %+v, want the escaping link", skipped)
+	}
+	// The escaping target's bytes never reach the caller under any path.
+	for _, f := range files {
+		if strings.Contains(string(f.Content), "secret") {
+			t.Fatalf("%s carries the escaping target's content", f.Path)
+		}
+	}
+}
+
+// TestDiscoverNeverOpensASymlinkTarget proves the safety claim behind
+// skipping rather than aborting: the target is not read either way. The
+// fixture points the link at a FIFO, which os.ReadFile would block on
+// forever, so a walk that returns at all is a walk that did not open it.
+func TestDiscoverNeverOpensASymlinkTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mkfifo is POSIX-only")
+	}
+	root := setupClaudeRoot(t)
+	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
+	target := filepath.Join(t.TempDir(), "trap")
+	if err := syscall.Mkfifo(target, 0o600); err != nil {
+		t.Skipf("cannot create a FIFO here: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := DiscoverFiles(t.Context(), "claude", nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("DiscoverFiles: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the walk opened the symlink's target instead of skipping the link")
 	}
 }
 

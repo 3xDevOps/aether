@@ -296,12 +296,22 @@ stopped.
 - Only regular files sync. A socket, named pipe, or device node inside a
   profile root is reported and skipped without being opened - a named pipe
   would otherwise block the read until something wrote to it.
-- **Default excludes.** Aether skips a harness's own run-time directories,
-  which hold transcripts and telemetry rather than configuration. For
-  `claude` those are `projects/`, `shell-snapshots/`, `statsig/` and
-  `todos/`. Each is reported once, as the directory. They are applied before
-  your `.aether-profile-ignore`, so that file has the last word: a line
-  `!projects/` in it syncs the directory anyway.
+- A **symlink pointing out of the profile root** is skipped and reported,
+  not followed. Symlinking `skills/` entries into a shared directory is an
+  ordinary setup; the link is left behind and everything else still syncs.
+  The target is never opened, so nothing outside the root is uploaded.
+- **Default excludes.** Aether skips what a harness writes for itself as it
+  runs - transcripts, telemetry, scratch trees - rather than anything you
+  configured:
+
+  | Harness | Skipped by default |
+  | --- | --- |
+  | `claude` | `projects/`, `shell-snapshots/`, `statsig/`, `todos/`, `file-history/`, `history.jsonl`, `daemon/` |
+  | `codex` | `tmp/`, `.tmp/` |
+
+  A skipped directory is reported once, as the directory. These are applied
+  before your `.aether-profile-ignore`, so that file has the last word: a
+  line `!projects/` in it syncs the directory anyway.
 
 `--allow-secret` has no dashboard equivalent, deliberately. A scanner finding
 refuses the push there and names the file and the line: the fix is on the

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/harness"
 	profilesvc "github.com/3xDevOps/Aether/internal/profile"
 )
 
@@ -211,11 +212,12 @@ func TestInventoryReportsSymlinkEscape(t *testing.T) {
 	}
 }
 
-// TestInventorySymlinkEscapeBlocks pins the invariant finding 2 broke: a
-// preview must never promise files a push then refuses. A symlink escape
-// aborts Discover, so it has to block the preview too - and it carries no
-// --allow-secret override, which is why the reason travels with the flag.
-func TestInventorySymlinkEscapeBlocks(t *testing.T) {
+// TestInventorySymlinkEscapeAgreesWithPush pins the invariant a preview
+// exists to keep: it promises exactly what a push carries. A symlink out
+// of the root is skipped by both - the walk never reads a target and
+// WalkDir never follows one, so aborting the profile over it only cost
+// the user every other file.
+func TestInventorySymlinkEscapeAgreesWithPush(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("os.Symlink needs SeCreateSymbolicLinkPrivilege: Developer Mode or an elevated shell")
 	}
@@ -231,15 +233,23 @@ func TestInventorySymlinkEscapeBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !preview.Blocked {
-		t.Fatal("a symlink escape must block the preview: the push refuses it")
+	if preview.Blocked {
+		t.Fatalf("a symlink escape blocked the preview: %q at %q", preview.BlockedReason, preview.BlockedPath)
 	}
-	if preview.BlockedReason != ExcludeSymlink || preview.BlockedPath != "escape" {
-		t.Fatalf("blocked reason/path = %q %q", preview.BlockedReason, preview.BlockedPath)
+	if preview.Files != 1 {
+		t.Errorf("files = %d, want the one real file carried", preview.Files)
 	}
-	// The preview and the push must agree about the same tree.
-	if _, _, err := DiscoverFiles(t.Context(), "claude", nil); err == nil {
-		t.Fatal("Discover accepted a symlink escape the preview blocked")
+	// The preview and the push must agree about the same tree: both carry
+	// settings.json, both report the link, neither reads the target.
+	files, skipped, err := DiscoverFiles(t.Context(), "claude", nil)
+	if err != nil {
+		t.Fatalf("Discover refused a tree the preview offered: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "settings.json" {
+		t.Errorf("discovered %+v, want only settings.json", files)
+	}
+	if len(skipped) != 1 || skipped[0].Reason != ExcludeSymlink {
+		t.Errorf("skipped = %+v, want the escaping link", skipped)
 	}
 }
 
@@ -548,5 +558,98 @@ func TestInventoryCapsExclusions(t *testing.T) {
 	}
 	if preview.ExcludedTotal <= maxExclusions {
 		t.Errorf("excluded_total = %d, want the exact count above the cap", preview.ExcludedTotal)
+	}
+}
+
+// setupHarnessRoot is setupClaudeRoot for any harness the registry knows.
+func setupHarnessRoot(t *testing.T, harnessName string) string {
+	t.Helper()
+	home := t.TempDir()
+	userHome = func() (string, error) { return home, nil }
+	t.Cleanup(func() { userHome = os.UserHomeDir })
+	p, ok := harness.Lookup(harnessName)
+	if !ok {
+		t.Fatalf("%s harness missing", harnessName)
+	}
+	root := filepath.Join(home, filepath.FromSlash(p.LocalRoot))
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// TestInventoryCodexScratchTreeIgnored covers the last thing standing
+// between codex and an import: codex plants a symlink to its own
+// installed binary under tmp/ on every run, which escapes the profile
+// root. The scratch tree is a default ignore, so the walk never reaches
+// the link at all.
+func TestInventoryCodexScratchTreeIgnored(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink needs SeCreateSymbolicLinkPrivilege: Developer Mode or an elevated shell")
+	}
+	root := setupHarnessRoot(t, "codex")
+	mustWrite(t, filepath.Join(root, "config.toml"), "model = \"o3\"\n")
+	mustWrite(t, filepath.Join(root, "skills", "pdf", "SKILL.md"), "# pdf skill\n")
+	// The real shape: ~/.codex/tmp/arg0/codex-arg0XXXXXX/apply_patch is a
+	// link out to the codex binary wherever it happens to be installed.
+	scratch := filepath.Join(root, "tmp", "arg0", "codex-arg0DKkhdr")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(t.TempDir(), "codex")
+	mustWrite(t, binary, "#!/bin/sh\n")
+	if err := os.Symlink(binary, filepath.Join(scratch, "apply_patch")); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, err := Inventory(t.Context(), "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Blocked {
+		t.Fatalf("codex is blocked by its own scratch tree: %q at %q",
+			preview.BlockedReason, preview.BlockedPath)
+	}
+	if preview.Files != 2 {
+		t.Errorf("files = %d, want config.toml and the skill", preview.Files)
+	}
+	// One entry for the scratch tree, not one per file inside it, and it
+	// says the default is Aether's rather than the user's.
+	var ignored []Exclusion
+	for _, e := range preview.Excluded {
+		if e.Reason == ExcludeIgnored {
+			ignored = append(ignored, e)
+		}
+	}
+	if len(ignored) != 1 || ignored[0].Path != "tmp" ||
+		!strings.Contains(ignored[0].Detail, "skipped by default") {
+		t.Fatalf("ignored = %+v, want the tmp tree as an Aether default", ignored)
+	}
+	// The push agrees.
+	files, _, err := DiscoverFiles(t.Context(), "codex", nil)
+	if err != nil {
+		t.Fatalf("codex could not be pushed: %v", err)
+	}
+	if len(files) != 2 {
+		t.Errorf("discovered %d files, want 2", len(files))
+	}
+}
+
+// TestInventoryClaudeRuntimeFilesIgnored pins the rest of claude's
+// run-time output: a history log and the daemon's own state are not
+// configuration another machine wants.
+func TestInventoryClaudeRuntimeFilesIgnored(t *testing.T) {
+	root := setupClaudeRoot(t)
+	mustWrite(t, filepath.Join(root, "CLAUDE.md"), "# standing instructions\n")
+	mustWrite(t, filepath.Join(root, "history.jsonl"), "{}\n")
+	mustWrite(t, filepath.Join(root, "file-history", "a.json"), "{}\n")
+	mustWrite(t, filepath.Join(root, "daemon", "roster.json"), "{}\n")
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Files != 1 {
+		t.Errorf("files = %d, want only CLAUDE.md; categories %v", preview.Files, preview.CategoryNames())
 	}
 }
