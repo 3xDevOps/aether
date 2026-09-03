@@ -1,7 +1,8 @@
+import { RunActions } from '@/components/run-actions'
 import { StateDot } from '@/components/state-dot'
+import { ViewHeader } from '@/components/view-header'
 import { timeAgo } from '@/lib/format'
 import { pendingApprovalRuns, runLabel, runState, stateLabel } from '@/lib/status'
-import { ViewHeader } from '@/components/view-header'
 import { EnvironmentBanner } from '@/routes/onboarding/environment-step'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { RunTabs } from '@/routes/terminal/tabs'
@@ -21,7 +22,11 @@ export function RunView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title={runLabel(run)} subtitle={run.branch} />
+      <ViewHeader
+        title={runLabel(run)}
+        subtitle={run.branch}
+        actions={<RunActions run={run} />}
+      />
       <RunTabs runID={run.id} active="run" />
       {/* Nothing renders here until this session started an environment
           build for the run's workspace; hidden when the banner is null so

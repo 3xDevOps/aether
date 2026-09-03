@@ -3,7 +3,7 @@
 // computes cron client-side.
 
 import { useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import type { Schedule } from '@/lib/types'

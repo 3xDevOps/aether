@@ -13,7 +13,7 @@
 // administrator method.
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, type Api, type EnvScanSession } from '@/lib/api'

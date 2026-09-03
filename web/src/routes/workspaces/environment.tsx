@@ -8,7 +8,7 @@
 // or a fresh proposal shows up without a reload.
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,

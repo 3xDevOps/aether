@@ -4,7 +4,16 @@ import { ViewHeader } from '@/components/view-header'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
-import { approval, fakeApi, otherWorkspace, run, workspace } from '@/test/fixtures'
+import {
+  approval,
+  bob,
+  fakeApi,
+  otherWorkspace,
+  run,
+  serverInfo,
+  vera,
+  workspace,
+} from '@/test/fixtures'
 
 beforeEach(async () => {
   useStore.setState({
@@ -135,6 +144,34 @@ describe('Sidebar', () => {
     const sidebar = screen.getByRole('complementary', { name: 'Runs' })
     expect(sidebar.firstElementChild?.className).toContain('h-9')
     expect(screen.getByRole('banner').className).toContain('h-9')
+  })
+
+  it('offers a new run to a member who may start one', () => {
+    useStore.setState({ info: { ...serverInfo, member: bob } })
+    render(<Sidebar />)
+
+    fireEvent.click(screen.getByText('New run'))
+
+    // The form is hosted app-wide; the sidebar only asks for it.
+    expect(useStore.getState().paletteDialog).toBe('launch')
+  })
+
+  it('offers no new run to a viewer', () => {
+    // A viewer cannot own a run, so the server refuses the launch; do not
+    // draw the button that would be refused.
+    useStore.setState({ info: { ...serverInfo, member: vera } })
+    render(<Sidebar />)
+
+    expect(screen.queryByText('New run')).toBeNull()
+  })
+
+  it('opens the flat every-run list', () => {
+    useStore.setState({ route: { name: 'board', params: {} } })
+    render(<Sidebar />)
+
+    fireEvent.click(within(screen.getByLabelText('Surfaces')).getByText('All runs'))
+
+    expect(useStore.getState().route).toEqual({ name: 'overview', params: {} })
   })
 
   it('shows the admin and desktop surfaces the gateway can serve', () => {

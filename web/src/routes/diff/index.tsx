@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { RunActions } from '@/components/run-actions'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api } from '@/lib/api'
@@ -9,7 +10,7 @@ import { cn } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { parsePatch } from '@/routes/diff/parse'
 import { FilePatch } from '@/routes/diff/patch-view'
-import { LandControls } from '@/routes/diff/land'
+import { ReviewCommands } from '@/routes/diff/review-commands'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
@@ -46,7 +47,11 @@ function DiffView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title={runLabel(run)} subtitle={run.branch} />
+      <ViewHeader
+        title={runLabel(run)}
+        subtitle={run.branch}
+        actions={<RunActions run={run} />}
+      />
       <RunTabs runID={runID} active="diff" />
 
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground">
@@ -70,7 +75,7 @@ function DiffView({ params }: RouteProps) {
           <RefreshCw className={cn('size-3', state.status === 'loading' && 'animate-spin')} />
           Refresh
         </Button>
-        <LandControls run={run} />
+        <ReviewCommands run={run} />
       </div>
 
       {state.status === 'error' && (

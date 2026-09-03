@@ -1,10 +1,10 @@
 // The command palette. It has no home of its own in the shell, so it rides
 // the status bar's extension slot: the trigger sits in the status bar and the
-// palette itself is a dialog portalled to the document.
+// palette itself is a dialog portalled to the document. The launch and inject
+// forms are not here - they are the shell's, in `dialogs.tsx`, so a button on
+// any surface can open one.
 
 import { useEffect, useState } from 'react'
-import { InjectDialog } from '@/components/palette/inject-dialog'
-import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { PaletteBody } from '@/components/palette/palette'
 import { TemplateDialog } from '@/components/palette/template-dialog'
 import { registerSlot } from '@/components/slots'
@@ -16,7 +16,6 @@ const shortcut = 'k'
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
   const toggle = useStore((s) => s.togglePalette)
-  const dialog = useStore((s) => s.paletteDialog)
   // The template form is not one of the store's palette dialogs; its open
   // state lives here with the other dialog hosts.
   const [templates, setTemplates] = useState(false)
@@ -26,7 +25,15 @@ export function CommandPalette() {
       if (e.key.toLowerCase() !== shortcut || !(e.metaKey || e.ctrlKey)) return
       e.preventDefault()
       // A form is a modal step out of the palette; do not stack one on top.
-      if (!useStore.getState().paletteDialog && !templates) toggle()
+      // The run action bar's confirm and hand-off dialogs are local state
+      // rather than store state, so ask the document instead of listing them:
+      // any open modal that is not the palette itself keeps the keyboard.
+      const s = useStore.getState()
+      if (s.paletteDialog || templates) return
+      if (!s.paletteOpen && document.querySelector('[role="dialog"][data-state="open"]')) {
+        return
+      }
+      toggle()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -54,8 +61,6 @@ export function CommandPalette() {
           onTemplates={() => setTemplates(true)}
         />
       </CommandDialog>
-      {dialog === 'launch' && <LaunchDialog />}
-      {dialog === 'inject' && <InjectDialog />}
       {templates && <TemplateDialog onClose={() => setTemplates(false)} />}
     </>
   )

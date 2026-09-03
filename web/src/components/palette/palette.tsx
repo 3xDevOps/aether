@@ -1,27 +1,11 @@
 import {
-  Archive,
   Bot,
-  CheckCheck,
   Compass,
-  Download,
   FileText,
   FolderGit2,
-  GitMerge,
-  LayoutGrid,
-  List,
-  MessageSquarePlus,
-  Pause,
-  Play,
-  RefreshCw,
-  Rocket,
   Settings,
-  Shield,
-  ShieldOff,
-  Square,
-  UserPlus,
   Users,
 } from 'lucide-react'
-import { toast } from 'sonner'
 import { StateDot } from '@/components/state-dot'
 import {
   CommandEmpty,
@@ -31,15 +15,21 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command'
-import { api } from '@/lib/api'
+import {
+  boardCommands,
+  handoffCommands,
+  runCommands,
+  useCommandRunner,
+  type Command,
+} from '@/lib/commands'
 import { runLabel, stateLabel } from '@/lib/status'
 import { useStore } from '@/store'
-import { useAttentionRuns, useCapability } from '@/store/hooks'
+import { useAttentionRuns, useCapability, useSelf } from '@/store/hooks'
 
 /**
- * Everything the palette can do. Jumping is local; the steering verbs go
- * straight to the gateway and the event stream reports the result, so nothing
- * here writes run state into the store. Rendered inside CommandDialog, which
+ * Everything the palette can do. The verbs themselves live in
+ * `src/lib/commands.ts` so the visible buttons offer exactly the same list;
+ * jumping is local to the palette. Rendered inside CommandDialog, which
  * supplies the cmdk root.
  */
 export function PaletteBody({
@@ -56,10 +46,10 @@ export function PaletteBody({
   const members = useStore((s) => s.members)
   const route = useStore((s) => s.route)
   const navigate = useStore((s) => s.navigate)
-  const ackAll = useStore((s) => s.ackAll)
-  const openDialog = useStore((s) => s.openPaletteDialog)
   const pausedRuns = useStore((s) => s.pausedRuns)
   const cap = useCapability()
+  const self = useSelf()
+  const perform = useCommandRunner({ onDone, onTemplates })
 
   // Steering acts on the run the centre view is showing, whichever of the run
   // detail routes is showing it - the terminal tab is exactly where a human
@@ -68,27 +58,30 @@ export function PaletteBody({
     ? runs.find((r) => r.run.id === route.params.runId)
     : undefined
 
-  const act = (verb: string, call: Promise<unknown>) => {
-    onDone()
-    void call.then(
-      () => toast.success(verb),
-      (err: unknown) => toast.error(`${verb} failed: ${message(err)}`),
-    )
-  }
-
   const go = (name: string, params?: Record<string, string>) => {
     onDone()
     navigate(name, params)
   }
 
-  const runID = focused?.run.id ?? ''
-  const finished = focused?.state === 'done' || focused?.state === 'failed'
-  // Undefined means nobody knows this run's pause state: hydration seeds it
-  // from the run list's `paused` wire field, but a legacy gateway sends none,
-  // so there a reloaded tab knows no run's state until a pause or resume
-  // event arrives. Offer neither verb rather than the one the server would
-  // refuse. See the paused-badge gap in docs/dashboard-frontend.md.
-  const paused = pausedRuns[runID]
+  const item = (command: Command) => (
+    <CommandItem
+      key={command.id}
+      value={command.value}
+      onSelect={() => void perform(command)}
+    >
+      <command.Icon />
+      {command.label}
+    </CommandItem>
+  )
+
+  const focusedContext = focused && {
+    run: focused.run,
+    paused: pausedRuns[focused.run.id],
+    cap,
+    members,
+    self,
+    steerOthers: workspaces[focused.run.workspace_id]?.steer_others,
+  }
 
   return (
     <>
@@ -96,119 +89,18 @@ export function PaletteBody({
       <CommandList>
         <CommandEmpty>Nothing matches.</CommandEmpty>
 
-        {focused && (
+        {focusedContext && (
           <>
-            <CommandGroup heading={runLabel(focused.run)}>
-              {!finished && (
-                <>
-                  {paused === true && (
-                    <CommandItem onSelect={() => act('Resumed', api.runResume(runID))}>
-                      <Play />
-                      Resume run
-                    </CommandItem>
-                  )}
-                  {paused === false && (
-                    <CommandItem onSelect={() => act('Paused', api.runPause(runID))}>
-                      <Pause />
-                      Pause run
-                    </CommandItem>
-                  )}
-                  <CommandItem onSelect={() => { onDone(); openDialog('inject', runID) }}>
-                    <MessageSquarePlus />
-                    Inject a message...
-                  </CommandItem>
-                  <CommandItem
-                    onSelect={() => act('Closed as merged', api.runClose(runID, 'merged'))}
-                  >
-                    <GitMerge />
-                    Close as merged
-                  </CommandItem>
-                  <CommandItem
-                    onSelect={() =>
-                      act('Closed as abandoned', api.runClose(runID, 'abandoned'))
-                    }
-                  >
-                    <Archive />
-                    Close as abandoned
-                  </CommandItem>
-                  <CommandItem onSelect={() => act('Killed', api.runKill(runID))}>
-                    <Square />
-                    Kill run
-                  </CommandItem>
-                </>
-              )}
-              {cap.hasMethod('run.protect') && (
-                <CommandItem
-                  onSelect={() =>
-                    act(
-                      focused.run.protected ? 'Unprotected' : 'Protected',
-                      api.runProtect(runID, !focused.run.protected),
-                    )
-                  }
-                >
-                  {focused.run.protected ? <ShieldOff /> : <Shield />}
-                  {focused.run.protected ? 'Unprotect run' : 'Protect run'}
-                </CommandItem>
-              )}
-              {finished && cap.hasMethod('run.relaunch') && (
-                <CommandItem onSelect={() => act('Relaunched', api.runRelaunch(runID))}>
-                  <RefreshCw />
-                  Relaunch run
-                </CommandItem>
-              )}
-              {cap.hasLocal('pull') && (
-                <CommandItem onSelect={() => act('Pulled branch', api.localPull(runID))}>
-                  <Download />
-                  Pull branch
-                </CommandItem>
-              )}
-              {/* Viewers cannot own a run, so the server refuses a handoff
-                  to one; do not offer what will be refused. */}
-              {Object.values(members)
-                .filter(
-                  (m) =>
-                    m.id !== focused.run.member_id &&
-                    !m.pending &&
-                    m.role !== 'viewer',
-                )
-                .map((m) => (
-                  <CommandItem
-                    key={m.id}
-                    value={`hand off ${m.display_name} ${m.id}`}
-                    onSelect={() =>
-                      act(`Handed off to ${m.display_name}`, api.runHandoff(runID, m.id))
-                    }
-                  >
-                    <UserPlus />
-                    Hand off to {m.display_name}
-                  </CommandItem>
-                ))}
+            <CommandGroup heading={runLabel(focusedContext.run)}>
+              {runCommands(focusedContext).map(item)}
+              {handoffCommands(focusedContext).map(item)}
             </CommandGroup>
             <CommandSeparator />
           </>
         )}
 
         <CommandGroup heading="Board">
-          <CommandItem onSelect={() => go('board')}>
-            <LayoutGrid />
-            Open the run board
-          </CommandItem>
-          <CommandItem onSelect={() => go('overview')}>
-            <List />
-            Open every run as a list
-          </CommandItem>
-          <CommandItem onSelect={() => { onDone(); openDialog('launch') }}>
-            <Rocket />
-            Launch a run...
-          </CommandItem>
-          <CommandItem onSelect={() => { onDone(); onTemplates() }}>
-            <FileText />
-            Launch from a template...
-          </CommandItem>
-          <CommandItem onSelect={() => { onDone(); ackAll() }}>
-            <CheckCheck />
-            Mark all runs seen
-          </CommandItem>
+          {boardCommands({ cap, role: self.role }).map(item)}
         </CommandGroup>
 
         {(cap.hasMethod('member.list') ||
@@ -290,8 +182,4 @@ export function PaletteBody({
       </CommandList>
     </>
   )
-}
-
-export function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }
