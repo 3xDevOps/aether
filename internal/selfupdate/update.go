@@ -65,7 +65,9 @@ func checkWritable(dir string) error {
 	f, err := os.CreateTemp(dir, ".aether-update-probe-*")
 	if err != nil {
 		if errors.Is(err, os.ErrPermission) {
-			return fmt.Errorf("%s is not writable by this user, re-run as: sudo aether update: %w", dir, err)
+			// The wrapped error comes first so the command to copy ends
+			// the sentence instead of running into a second colon.
+			return fmt.Errorf("%w: %s is not writable by this user; re-run as `sudo aether update`", err, dir)
 		}
 		return fmt.Errorf("stage an update in %s: %w", dir, err)
 	}

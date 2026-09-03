@@ -37,19 +37,23 @@ func TestBehind(t *testing.T) {
 		running, latest string
 		want            bool
 	}{
+		// Equal, and the plain release ordering.
 		{"v1.2.3", "v1.2.3", false},
 		{"v1.2.3", "v1.2.4", true},
 		{"v1.2.4", "v1.2.3", false},
 		{"v1.9.0", "v1.10.0", true},
 		{"v2.0.0", "v10.0.0", true},
+		// A version neither side can order never reports an update.
 		{"dev", "v1.2.3", false},
 		{"v1.2.3", "dev", false},
 		{"v1.2", "v1.2.3", false},
 		{"", "v1.2.3", false},
+		// `git describe --always` on an untagged checkout is a bare commit.
+		{"091b5f5", "v1.2.3", false},
 		// Aether publishes prerelease tags, so these are the live cases.
 		{"v0.1.2-alpha.12", "v0.1.2-alpha.12", false},
-		{"v0.1.2-alpha.2", "v0.1.2-alpha.12", true},
-		{"v0.1.2-alpha.12", "v0.1.2-alpha.2", false},
+		{"v0.1.2-alpha.9", "v0.1.2-alpha.12", true},
+		{"v0.1.2-alpha.12", "v0.1.2-alpha.9", false},
 		{"v0.0.1", "v0.1.2-alpha.12", true},
 		{"v0.1.2-alpha.12", "v0.1.2", true},
 		{"v0.1.2", "v0.1.2-alpha.12", false},
@@ -57,9 +61,22 @@ func TestBehind(t *testing.T) {
 		{"v0.1.2-alpha.1", "v0.1.2-beta.1", true},
 		// Build metadata never decides precedence.
 		{"v1.2.3+build.5", "v1.2.3", false},
-		// A git describe past a tag is a prerelease of the next patch in
-		// semver's reading; either way it is behind a newer release.
+		// A build from source carries a `git describe` tail. It sits past
+		// the tag it names, so it is never behind that tag: reading the
+		// tail as a prerelease would offer this user a downgrade.
+		{"v1.2.3-4-gabc123", "v1.2.3", false},
+		{"v1.2.3-4-gabc123-dirty", "v1.2.3", false},
+		{"v1.2.3-dirty", "v1.2.3", false},
+		// It is still behind a genuinely newer release, on the tag it
+		// descends from rather than on the tail.
 		{"v1.2.3-4-gabc123", "v1.2.4", true},
+		{"v1.2.3-4-gabc123-dirty", "v1.2.4", true},
+		// The live shape in this repository: a describe tail on top of a
+		// prerelease tag, against the next prerelease. The tail is not a
+		// prerelease field, so "12" compares with "13" numerically.
+		{"v0.1.2-alpha.12-10-g091b5f5", "v0.1.2-alpha.13", true},
+		{"v0.1.2-alpha.12-10-g091b5f5", "v0.1.2-alpha.12", false},
+		{"v0.1.2-alpha.12-10-g091b5f5", "v0.1.2", true},
 	}
 	for _, c := range cases {
 		if got := Behind(c.running, c.latest); got != c.want {
