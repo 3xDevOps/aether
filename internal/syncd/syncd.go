@@ -21,6 +21,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -42,7 +43,9 @@ const (
 type Config struct {
 	// Server is the aether-server SSH address, host:port.
 	Server string
-	// KeyPath is the member's SSH private key file.
+	// KeyPath is the member's SSH private key file. Empty means the same
+	// discovery the CLI uses: the SSH agent, then the default files under
+	// ~/.ssh.
 	KeyPath string
 	// KnownHostsPath is the OpenSSH known_hosts file used to verify the
 	// server host key.
@@ -98,9 +101,6 @@ func New(cfg Config) (*Daemon, error) {
 	}
 	if cfg.GitPath == "" {
 		cfg.GitPath = "git"
-	}
-	if cfg.KeyPath == "" {
-		cfg.KeyPath = defaultPath(".ssh", "id_ed25519")
 	}
 	if cfg.KnownHostsPath == "" {
 		cfg.KnownHostsPath = defaultPath(".ssh", "known_hosts")
@@ -191,24 +191,23 @@ type sshStream struct {
 
 func (s *sshStream) Close() error { return s.client.Close() }
 
-// connect dials the server and opens the aether-events subsystem.
+// connect dials the server and opens the aether-events subsystem. Keys
+// come from the same resolver as the CLI and GUI, so `aether link --key`
+// and automatic discovery behave identically here; the daemon differs
+// only in host-key policy, where an unattended process pins nothing and
+// needs the host already in known_hosts.
 func (d *Daemon) connect(ctx context.Context) (*ssh.Client, io.ReadWriteCloser, error) {
-	key, err := os.ReadFile(d.cfg.KeyPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read ssh key: %w", err)
-	}
-	signer, err := ssh.ParsePrivateKey(key)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse ssh key %s: %w", d.cfg.KeyPath, err)
-	}
 	hostKeys, err := knownhosts.New(d.cfg.KnownHostsPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("known_hosts (ssh the server once, or point --known-hosts at a file listing its host key): %w", err)
+		return nil, nil, fmt.Errorf("known_hosts (run aether link once, or point --known-hosts at a file listing the server's host key): %w", err)
 	}
+	auth := cli.ResolveAuth(cli.Config{Key: d.cfg.KeyPath})
+	defer auth.Close()
 	conf := &ssh.ClientConfig{
 		User:            d.cfg.User,
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		Auth:            auth.Methods(),
 		HostKeyCallback: hostKeys,
+		BannerCallback:  auth.Banner,
 		Timeout:         dialTimeout,
 	}
 	nc, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", d.cfg.Server)
@@ -218,7 +217,7 @@ func (d *Daemon) connect(ctx context.Context) (*ssh.Client, io.ReadWriteCloser, 
 	cc, chans, reqs, err := ssh.NewClientConn(nc, d.cfg.Server, conf)
 	if err != nil {
 		_ = nc.Close()
-		return nil, nil, fmt.Errorf("ssh handshake with %s: %w", d.cfg.Server, err)
+		return nil, nil, auth.Explain(fmt.Errorf("ssh handshake with %s: %w", d.cfg.Server, err))
 	}
 	client := ssh.NewClient(cc, chans, reqs)
 	sess, err := client.NewSession()

@@ -33,7 +33,7 @@ func daemonCmd(args []string) error {
 func daemonFlags(fs *flag.FlagSet) (*syncd.Config, *bool) {
 	cfg := &syncd.Config{}
 	fs.StringVar(&cfg.Server, "server", "", "aether-server SSH address, host:port (required)")
-	fs.StringVar(&cfg.KeyPath, "key", "", "SSH private key (default ~/.ssh/id_ed25519)")
+	fs.StringVar(&cfg.KeyPath, "key", "", "SSH private key file (default: ssh-agent, then ~/.ssh/id_ed25519, id_ecdsa, id_rsa)")
 	fs.StringVar(&cfg.KnownHostsPath, "known-hosts", "", "known_hosts file for host key verification (default ~/.ssh/known_hosts)")
 	fs.StringVar(&cfg.User, "user", "aether", "SSH username")
 	fs.StringVar(&cfg.RepoPath, "repo", ".", "local git repository to sync")

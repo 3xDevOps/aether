@@ -226,57 +226,6 @@ func TestDialAnnouncesNewlyPinnedHostKey(t *testing.T) {
 	}
 }
 
-func TestRequiredAuthMethodsWithoutAgentOrKey(t *testing.T) {
-	setDialAgent(t, func(time.Duration) (net.Conn, error) { return nil, nil })
-	cfg := Config{Key: filepath.Join(t.TempDir(), "missing-key")}
-
-	if _, _, err := requiredAuthMethods(cfg); err == nil ||
-		!strings.Contains(err.Error(), "no SSH key or agent available") {
-		t.Fatalf("requiredAuthMethods error = %v, want no SSH key or agent available", err)
-	}
-
-	stderr := captureStderr(t)
-	methods, closeAuth := optionalAuthMethods(cfg)
-	if closeAuth != nil {
-		closeAuth()
-	}
-	if len(methods) != 0 {
-		t.Errorf("optionalAuthMethods returned %d methods, want 0", len(methods))
-	}
-	if got := stderr(); got != "" {
-		t.Errorf("stderr = %q, want nothing when no agent is configured", got)
-	}
-}
-
-// A broken agent must not fail silently: optionalAuthMethods swallows the
-// error so the only trace the user gets is the diagnostic on stderr.
-func TestBrokenAgentIsReported(t *testing.T) {
-	dir := t.TempDir()
-	notASocket := filepath.Join(dir, "agent.sock")
-	if err := os.WriteFile(notASocket, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SSH_AUTH_SOCK", notASocket)
-	cfg := Config{Key: filepath.Join(dir, "missing-key")}
-
-	_, _, err := requiredAuthMethods(cfg)
-	if err == nil || !strings.Contains(err.Error(), "connect ssh agent") {
-		t.Fatalf("requiredAuthMethods error = %v, want connect ssh agent", err)
-	}
-
-	stderr := captureStderr(t)
-	methods, closeAuth := optionalAuthMethods(cfg)
-	if closeAuth != nil {
-		closeAuth()
-	}
-	if len(methods) != 0 {
-		t.Errorf("optionalAuthMethods returned %d methods, want 0", len(methods))
-	}
-	if got := stderr(); !strings.Contains(got, "connect ssh agent") {
-		t.Errorf("stderr = %q, want it to mention connect ssh agent", got)
-	}
-}
-
 // setDialAgent installs a stub agent transport for the duration of the test
 // so the outcome does not depend on whether the host runs an SSH agent.
 func setDialAgent(t *testing.T, fn func(time.Duration) (net.Conn, error)) {

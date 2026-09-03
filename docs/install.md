@@ -104,7 +104,7 @@ Where the client keeps its state:
 | --- | --- |
 | Linked-server config | `%AppData%\aether\config.json` |
 | Host-key trust store | `%USERPROFILE%\.ssh\known_hosts` |
-| Default private key | `%USERPROFILE%\.ssh\id_ed25519` |
+| Private keys tried | `%USERPROFILE%\.ssh\id_ed25519`, `id_ecdsa`, `id_rsa`, or the file from `aether link --key` |
 
 **SSH agent.** The client talks to the Windows OpenSSH agent over its named
 pipe, `\\.\pipe\openssh-ssh-agent`, so a passphrase-protected key works the
@@ -121,8 +121,8 @@ ssh-add $env:USERPROFILE\.ssh\id_ed25519
 `SSH_AUTH_SOCK` takes precedence when it is set: the client dials it as a unix
 socket rather than using the pipe. Leave it unset unless you deliberately run
 a different agent. When neither is reachable the client falls back to the key
-file rather than failing; only with no usable key either does `aether link`
-report `attempted methods [none]`.
+files rather than failing; only with no usable key anywhere does `aether link`
+fail, and the error then lists what it tried.
 
 **Console.** `aether attach` mirrors an agent's TUI byte for byte, so the
 console needs ANSI escape processing. The client enables it on the console it
@@ -416,9 +416,12 @@ prints the command that activates it: a systemd user unit
 (`~/Library/LaunchAgents/com.aether.daemon.plist`) on macOS, and a Scheduled
 Task XML (`%USERPROFILE%\aether-daemon.xml`, registered with
 `schtasks /Create`) on Windows. `aether daemon run --server ... --repo ...`
-does the same work in the foreground on any of them. The daemon also watches
-your local agent-profile directories and pushes changes up; `--no-profile-sync`
-turns that half off.
+does the same work in the foreground on any of them. The daemon finds your
+SSH key the way `aether link` does (ssh-agent, then the default `~/.ssh`
+files). A service usually has no ssh-agent, so if your default key has a
+passphrase, point `--key <private-key>` at an unencrypted one. The daemon also
+watches your local agent-profile
+directories and pushes changes up; `--no-profile-sync` turns that half off.
 
 ## What lives in the data directory
 
@@ -511,7 +514,7 @@ for API-key harnesses. No system user or group is ever created, so there is noth
 ### Client
 
 ```sh
-rm -rf ~/.config/aether ~/.config/aether-desktop
+rm -rf ~/.config/aether ~/.config/aether-desktop   # macOS: see below
 ssh-keygen -R '[<server-host>]:2222'
 sudo rm -f /usr/local/bin/aether        # or ~/.local/bin/aether
 # only if you ran `aether gui build`:
@@ -519,8 +522,9 @@ rm -rf ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.
 rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder
 ```
 
-On macOS the desktop state is `~/Library/Application Support/aether-desktop`,
-the app is `~/Applications/Aether.app`, and the build caches are
+On macOS the linked-server config is
+`~/Library/Application Support/aether/config.json`, the desktop state is
+`~/Library/Application Support/aether-desktop`, the app is `~/Applications/Aether.app`, and the build caches are
 `~/Library/Caches/aether`, `~/Library/Caches/electron`, and
 `~/Library/Caches/electron-builder`. On Windows the state is
 `%APPDATA%\aether-desktop`, the app is `%LOCALAPPDATA%\Programs\Aether` plus
@@ -534,8 +538,9 @@ generates a new host key, so a stale `known_hosts` entry makes the next
 entry for every address you linked through, including a tailnet name and a raw
 IP for the same host.
 
-The client never generates an SSH key of its own. It uses your existing
-`~/.ssh/id_ed25519` or whatever your ssh-agent holds, so leave your keys
+The client never generates an SSH key of its own. It uses whatever your
+ssh-agent holds, your existing `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa`,
+or the private key you named with `aether link --key`, so leave your keys
 alone.
 
 If you installed the sync daemon, remove it before the binary:

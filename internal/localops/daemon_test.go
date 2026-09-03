@@ -4,15 +4,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 func TestDaemonInstallAndStatus(t *testing.T) {
-	// os.UserHomeDir reads HOME on unix and USERPROFILE on windows, so
-	// both have to point at the scratch home for this to stay hermetic
-	// and to exercise the Scheduled Task rendering on windows.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	testhome.Isolate(t)
 
 	installed, unitPath, err := DaemonStatus()
 	if err != nil {

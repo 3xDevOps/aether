@@ -52,6 +52,40 @@ func normalizeAddr(addr string) string {
 	return net.JoinHostPort(host, defaultSSHPort)
 }
 
+// savedKey is the private key a previous `aether link` stored for the
+// profile being relinked: the named profile's own key, or the top-level
+// key for the default link. Relinking without --key keeps it, so a user
+// who chose a key once and re-runs link --repo is not silently moved back
+// to automatic discovery.
+func savedKey(prev cli.Config, name string) string {
+	if name == "" {
+		return prev.Key
+	}
+	for _, l := range prev.Links {
+		if l.Name == name {
+			return l.Key
+		}
+	}
+	return ""
+}
+
+// linkKey resolves the --key flag for this link: an explicit path is made
+// absolute so the saved config works from any directory and checked
+// before anything is dialed; an empty flag keeps the saved key.
+func linkKey(flag string, prev cli.Config, name string) (string, error) {
+	if flag == "" {
+		return savedKey(prev, name), nil
+	}
+	path, err := filepath.Abs(flag)
+	if err != nil {
+		return "", err
+	}
+	if err := cli.CheckKey(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // linkConfig is the config `aether link` saves: the fresh link cfg
 // carrying forward previously saved profiles - Save overwrites the whole
 // file - plus, when name is non-empty, a snapshot of cfg upserted under
@@ -83,17 +117,26 @@ func runLink(args []string) error {
 	fs := flag.NewFlagSet("link", flag.ExitOnError)
 	invite := fs.String("invite", "", "one-time invite code")
 	name := fs.String("name", "", "profile label for this link (also the display name when joining via invite)")
+	key := fs.String("key", "", "SSH private key file to use and remember for this link (default: ssh-agent, then ~/.ssh/id_ed25519, id_ecdsa, id_rsa)")
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
 	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
 	addr, err := parseLeadingArg(fs, args)
 	if err != nil || addr == "" {
-		return fmt.Errorf("usage: aether link <addr> [--invite] [--name] [--repo] [--workspace]")
+		return fmt.Errorf("usage: aether link <addr> [--invite] [--name] [--key] [--repo] [--workspace]")
 	}
 	repoPath, err := absoluteRepo(*repo)
 	if err != nil {
 		return err
 	}
-	cfg := cli.Config{Addr: normalizeAddr(addr), Repo: repoPath, User: "aether"}
+	prev, loadErr := cli.Load()
+	if loadErr != nil {
+		prev = cli.Config{}
+	}
+	keyPath, err := linkKey(*key, prev, *name)
+	if err != nil {
+		return err
+	}
+	cfg := cli.Config{Addr: normalizeAddr(addr), Repo: repoPath, User: "aether", Key: keyPath}
 	var conn *cli.Conn
 	if *invite != "" {
 		conn, err = cli.DialInvite(cfg, *invite, *name)
@@ -119,10 +162,6 @@ func runLink(args []string) error {
 		return fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
 	}
 
-	prev, loadErr := cli.Load()
-	if loadErr != nil {
-		prev = cli.Config{}
-	}
 	if err = cli.Save(linkConfig(cfg, prev, *name)); err != nil {
 		return err
 	}

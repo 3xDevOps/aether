@@ -8,10 +8,11 @@ Two machines are involved, though they can be the same one:
 - **your machine** - Linux, macOS, or Windows. Where you type.
 
 Your machine needs git and, unless both machines are on a tailnet
-(see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
-`~/.ssh/id_ed25519` and your ssh-agent, so `ssh-add` a passphrase-protected
-key first. Windows paths and the OpenSSH agent service are in
-[install.md](install.md#the-windows-client).
+(see [step 3](#3-link-from-your-machine)), an SSH key. Aether offers the keys
+in your ssh-agent, then `~/.ssh/id_ed25519`, `id_ecdsa`, and `id_rsa`;
+`ssh-add` a passphrase-protected key first, or pick a file with
+`aether link --key <private-key>`. Windows paths and the OpenSSH agent
+service are in [install.md](install.md#the-windows-client).
 
 ---
 
@@ -68,7 +69,8 @@ linked to <server-host>:2222 as admin (admin)
 
 **The first identity to link a fresh server becomes the admin.** That is the
 whole account setup - there is no signup, no password, no config file to edit.
-The link is saved to `~/.config/aether/config.json`, or
+The link is saved to `~/.config/aether/config.json` on Linux,
+`~/Library/Application Support/aether/config.json` on macOS, or
 `%AppData%\aether\config.json` on Windows. (Joining over a tailnet,
 the display name comes from your tailnet login instead of the literal
 `admin`; the role is the same. Change any display color with
@@ -79,8 +81,9 @@ How you were identified depends on the network:
 - **On a tailnet:** Tailscale already knows who you are and the server asks it.
   No SSH key, no invite code, nothing to copy. See
   [networking.md](networking.md).
-- **Anywhere else:** your SSH public key (`~/.ssh/id_ed25519`, or any key in
-  your ssh-agent) is registered as the admin's key. Generate one first with
+- **Anywhere else:** the public half of your SSH key (from your ssh-agent,
+  or `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa`, or the file you pass with
+  `--key`) is registered as the admin's key. Generate one first with
   `ssh-keygen -t ed25519` if you do not have one. On Windows that is
   `%USERPROFILE%\.ssh\id_ed25519` and the OpenSSH agent service; `ssh-keygen`
   ships with Windows OpenSSH.
@@ -335,9 +338,11 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 
 | Symptom | Cause |
 | --- | --- |
-| `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`%AppData%\aether\config.json` on Windows) on this machine yet. |
+| `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`~/Library/Application Support/aether/config.json` on macOS, `%AppData%\aether\config.json` on Windows) on this machine yet. |
 | `no Aether member for this key` | The server already has an admin, so you are not bootstrapping. Get an invite: [teams.md](teams.md). |
-| `unable to authenticate, attempted methods [none]` | The CLI found no usable key: none at `~/.ssh/id_ed25519`, no ssh-agent, or a passphrase-protected key with no agent to unlock it. Run `ssh-add`, or generate an unencrypted key. On Windows, check `Get-Service ssh-agent` and look for the key at `%USERPROFILE%\.ssh\id_ed25519`. |
+| `unable to authenticate` followed by `the server wants an SSH key; tried:` | The lines under `tried:` say what happened to the ssh-agent and each default key file, and `server said:` repeats the server's reason. A `passphrase protected` key needs `ssh-add <key>`; a key at another path needs `aether link <addr> --key <private-key>`. On Windows, check `Get-Service ssh-agent`. |
+| `no Aether member for this key` under `server said:` | Your key reached the server but is not registered. The server already has an admin, so get an invite: [teams.md](teams.md). |
+| `is a public key; --key takes the private key` | You passed the `.pub` file. Drop the suffix. |
 | `host key mismatch` / `REMOTE HOST IDENTIFICATION HAS CHANGED` on `aether link` | The server was reinstalled and generated a new host key, but your `known_hosts` still trusts the old one. Clear it: `ssh-keygen -R '[<server-host>]:2222'`. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |

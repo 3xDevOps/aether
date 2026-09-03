@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 // TestLoadOldFormat proves a config file written before Links existed
@@ -147,13 +150,16 @@ func TestUpsertLink(t *testing.T) {
 	}
 }
 
-// useTempConfigDir points os.UserConfigDir at a scratch directory. It has
-// to set both variables: os.UserConfigDir reads XDG_CONFIG_HOME on unix
-// and %AppData% on windows, so setting only the former would leave a
-// windows run writing into the real user profile.
+// useTempConfigDir isolates the config path and proves it landed inside
+// the scratch directory, whichever platform's lookup rules applied.
 func useTempConfigDir(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("AppData", dir)
+	dir := testhome.Isolate(t)
+	path, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel, err := filepath.Rel(dir, path); err != nil || strings.HasPrefix(rel, "..") {
+		t.Fatalf("config path %s escaped %s", path, dir)
+	}
 }

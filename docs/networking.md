@@ -138,11 +138,23 @@ ssh-keygen -t ed25519          # if you do not already have a key
 aether link 192.168.1.50:2222
 ```
 
-The first key to link a fresh server is registered as the admin. The CLI uses
-`~/.ssh/id_ed25519` by default and also offers any key loaded in your ssh-agent.
-There is no `--key` flag: to use a key at another path, or a
-passphrase-protected one, `ssh-add` it first. Without a usable key the
-handshake fails with `attempted methods [none]`.
+The first key to link a fresh server is registered as the admin. The CLI
+offers every key in your ssh-agent, then `~/.ssh/id_ed25519`, `id_ecdsa`, and
+`id_rsa` in that order, skipping any file that is missing or
+passphrase-protected. To use one specific key instead, name the private-key
+file:
+
+```sh
+aether link 192.168.1.50:2222 --key ~/.ssh/work_key
+```
+
+`--key` takes the private key, never the `.pub` half, and only that key is
+offered even when the agent holds others. It is saved with the link, so later
+commands and `aether gui` use it too, and `aether link` remembers it when you
+relink the same profile. A passphrase-protected `--key` works once `ssh-add`
+has loaded it. When no key is accepted the error lists every place the CLI
+looked and what the server said, and ends with the fix: `ssh-add` the key or
+pass `--key`.
 
 ### Everyone else
 

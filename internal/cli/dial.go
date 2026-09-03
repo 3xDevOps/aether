@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
@@ -29,9 +28,10 @@ type Conn struct {
 	cfg    Config
 }
 
-// Dial connects to cfg.Addr as cfg.User (default aether) with the
-// configured key and/or SSH agent, verifying the host against known_hosts
-// (TOFU on first contact).
+// Dial connects to cfg.Addr as cfg.User (default aether) with the key
+// ResolveAuth selects, verifying the host against known_hosts (TOFU on
+// first contact). A server that needs no key connects even when no key
+// was found; one that does gets an error saying what was tried.
 func Dial(cfg Config) (*Conn, error) {
 	return dial(cfg, cfg.user(), false)
 }
@@ -50,31 +50,20 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 	if cfg.Addr == "" {
 		return nil, errors.New("cli: server address required")
 	}
-	var (
-		auth      []ssh.AuthMethod
-		closeAuth func()
-		err       error
-	)
-	if requireAuth {
-		auth, closeAuth, err = requiredAuthMethods(cfg)
-	} else {
-		auth, closeAuth = optionalAuthMethods(cfg)
+	auth := ResolveAuth(cfg)
+	defer auth.Close()
+	if requireAuth && !auth.Offered() {
+		return nil, auth.Missing()
 	}
-	if err != nil {
-		return nil, err
-	}
-	if closeAuth != nil {
-		defer closeAuth()
-	}
-	known := cfg.knownHostsPath()
-	cb, err := hostKeyCallback(known)
+	cb, err := hostKeyCallback(cfg.knownHostsPath())
 	if err != nil {
 		return nil, err
 	}
 	conf := &ssh.ClientConfig{
 		User:            user,
-		Auth:            auth,
+		Auth:            auth.Methods(),
 		HostKeyCallback: cb,
+		BannerCallback:  auth.Banner,
 		Timeout:         dialTimeout,
 	}
 	nc, err := (&net.Dialer{Timeout: dialTimeout}).Dial("tcp", cfg.Addr)
@@ -84,7 +73,7 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 	cc, chans, reqs, err := ssh.NewClientConn(nc, cfg.Addr, conf)
 	if err != nil {
 		_ = nc.Close()
-		return nil, fmt.Errorf("cli: ssh handshake with %s: %w", cfg.Addr, err)
+		return nil, auth.Explain(fmt.Errorf("cli: ssh handshake with %s: %w", cfg.Addr, err))
 	}
 	return &Conn{client: ssh.NewClient(cc, chans, reqs), cfg: cfg}, nil
 }
@@ -94,83 +83,6 @@ func (c *Conn) Close() error { return c.client.Close() }
 
 // SSH is the underlying SSH client (port-forwards, extra sessions).
 func (c *Conn) SSH() *ssh.Client { return c.client }
-
-func optionalAuthMethods(cfg Config) ([]ssh.AuthMethod, func()) {
-	methods, closeAuth, err := loadAuthMethods(cfg)
-	if len(methods) == 0 && err != nil {
-		fmt.Fprintf(os.Stderr, "aether: %v\n", err)
-	}
-	return methods, closeAuth
-}
-
-func requiredAuthMethods(cfg Config) ([]ssh.AuthMethod, func(), error) {
-	methods, closeAuth, err := loadAuthMethods(cfg)
-	if len(methods) > 0 {
-		return methods, closeAuth, nil
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, nil, errors.New("cli: no SSH key or agent available")
-}
-
-func loadAuthMethods(cfg Config) ([]ssh.AuthMethod, func(), error) {
-	var methods []ssh.AuthMethod
-	method, closeAuth, authErr := agentAuthMethod()
-	if method != nil {
-		methods = append(methods, method)
-	}
-	keyPath := cfg.keyPath()
-	if keyPath == "" {
-		return methods, closeAuth, authErr
-	}
-	raw, err := os.ReadFile(keyPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return methods, closeAuth, authErr
-		}
-		return methods, closeAuth, fmt.Errorf("cli: read ssh key: %w", err)
-	}
-	signer, err := ssh.ParsePrivateKey(raw)
-	if err != nil {
-		return methods, closeAuth, fmt.Errorf("cli: parse ssh key %s: %w", keyPath, err)
-	}
-	methods = append(methods, ssh.PublicKeys(signer))
-	return methods, closeAuth, authErr
-}
-
-// agentAuthMethod dials the local SSH agent and collects its signers. A nil
-// method with a nil error means no agent is configured, which is not a
-// failure: key-file auth may still succeed.
-func agentAuthMethod() (ssh.AuthMethod, func(), error) {
-	conn, err := dialAgent(sshAgentTimeout)
-	if err != nil {
-		return nil, nil, fmt.Errorf("cli: connect ssh agent: %w", err)
-	}
-	if conn == nil {
-		return nil, nil, nil
-	}
-	// The deadline guards every exchange with an agent that accepts the
-	// connection and then never answers.
-	if err = conn.SetDeadline(time.Now().Add(sshAgentTimeout)); err != nil {
-		_ = conn.Close()
-		return nil, nil, fmt.Errorf("cli: set ssh agent deadline: %w", err)
-	}
-	signers, err := agent.NewClient(conn).Signers()
-	if err != nil {
-		_ = conn.Close()
-		return nil, nil, fmt.Errorf("cli: load ssh agent keys: %w", err)
-	}
-	if len(signers) == 0 {
-		_ = conn.Close()
-		return nil, nil, errors.New("cli: SSH agent has no signing keys")
-	}
-	if err = conn.SetDeadline(time.Time{}); err != nil {
-		_ = conn.Close()
-		return nil, nil, fmt.Errorf("cli: clear ssh agent deadline: %w", err)
-	}
-	return ssh.PublicKeys(signers...), func() { _ = conn.Close() }, nil
-}
 
 func hostKeyCallback(path string) (ssh.HostKeyCallback, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

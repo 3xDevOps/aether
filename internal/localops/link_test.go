@@ -3,9 +3,12 @@ package localops
 import (
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 // writeTestFile is a tiny os.WriteFile wrapper shared by the git-backed
@@ -14,14 +17,19 @@ func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-// useTempConfigDir points cli.Save/cli.Load at a scratch config
-// directory. Both variables are needed: os.UserConfigDir reads
-// XDG_CONFIG_HOME on unix and %AppData% on windows.
+// useTempConfigDir keeps cli.Save/cli.Load away from the real user
+// config directory on every platform and proves the path landed inside
+// the scratch home.
 func useTempConfigDir(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("AppData", dir)
+	dir := testhome.Isolate(t)
+	path, err := cli.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel, err := filepath.Rel(dir, path); err != nil || strings.HasPrefix(rel, "..") {
+		t.Fatalf("config path %s escaped %s", path, dir)
+	}
 }
 
 func TestLinkRepoSetsRemoteAndSavesConfig(t *testing.T) {

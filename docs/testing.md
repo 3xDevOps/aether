@@ -73,6 +73,14 @@ comes from `AETHER_FAKE_AGENT` at launch (typically
 repo and dispatching on the task). On the fallback runtime the same
 behaviours are registered per task key via `e2eRuntime.script`.
 
+Client tests that read or write the linked-server config or look for keys
+under `~/.ssh` call `testhome.Isolate` (`internal/testhome`), which points
+every platform's home and config lookup at a scratch directory and fails
+the test if `os.UserConfigDir` still resolves outside it. Setting
+`XDG_CONFIG_HOME` alone is not enough: macOS ignores it and a test would
+overwrite the developer's real `config.json`. The same package writes
+throwaway SSH keys for the auth tests.
+
 Two `server.Config` fields exist for this suite (and double as
 deployment wiring): `WhoIs` overrides tailnet identity resolution so
 join and fallback scenarios need no real tailnet, and `Harnesses`

@@ -12,8 +12,11 @@ import (
 
 // Config is the local linked-server configuration written by `aether link`.
 type Config struct {
-	Addr       string `json:"addr"`
-	User       string `json:"user,omitempty"`
+	Addr string `json:"addr"`
+	User string `json:"user,omitempty"`
+	// Key is the private-key file chosen with `aether link --key`. Empty
+	// means automatic discovery: the SSH agent, then the default files
+	// under ~/.ssh (see ResolveAuth).
 	Key        string `json:"key,omitempty"`
 	Repo       string `json:"repo,omitempty"`
 	KnownHosts string `json:"known_hosts,omitempty"`
@@ -91,13 +94,6 @@ func (c Config) user() string {
 	return "aether"
 }
 
-func (c Config) keyPath() string {
-	if c.Key != "" {
-		return c.Key
-	}
-	return defaultPath(".ssh", "id_ed25519")
-}
-
 func (c Config) knownHostsPath() string {
 	if c.KnownHosts != "" {
 		return c.KnownHosts
@@ -105,7 +101,9 @@ func (c Config) knownHostsPath() string {
 	return defaultPath(".ssh", "known_hosts")
 }
 
-// Path is the linked-server config file (~/.config/aether/config.json).
+// Path is the linked-server config file: ~/.config/aether/config.json on
+// Linux, ~/Library/Application Support/aether/config.json on macOS, and
+// %AppData%\aether\config.json on Windows.
 func Path() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
