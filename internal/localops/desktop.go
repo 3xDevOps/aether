@@ -20,9 +20,17 @@ type DesktopApp struct {
 	App string
 	// Launcher is what the desktop environment lists: the .desktop entry
 	// on linux, the Start Menu shortcut on windows, the bundle itself on
-	// darwin (Launchpad and Spotlight index ~/Applications directly).
+	// darwin (Finder and Spotlight index the Applications folders directly).
 	Launcher string
 }
+
+// macSystemApplications is the machine-wide Applications folder, the one
+// Finder's sidebar opens and a new user means by "my Applications folder".
+// ~/Applications is hidden in Finder by default, so an app there looks
+// missing even though Spotlight finds it. Administrators can write here
+// without sudo; anyone else falls back to ~/Applications. A variable so
+// tests can point it at a temporary directory.
+var macSystemApplications = "/Applications"
 
 // desktopIcon is the icon copied beside the unpacked linux app; the
 // .desktop entry points at it by absolute path so no icon theme cache
@@ -145,6 +153,16 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 	if err := os.RemoveAll(app.App); err != nil {
 		return DesktopApp{}, fmt.Errorf("localops: remove previous %s (is the Aether window still open?): %w", app.App, err)
 	}
+	if goos == "darwin" {
+		// An earlier build may sit in the other Applications folder (a
+		// build from before /Applications was preferred, or one made
+		// while it was not writable). Spotlight should list one Aether.
+		for _, dir := range []string{macSystemApplications, filepath.Join(home, "Applications")} {
+			if stale := filepath.Join(dir, "Aether.app"); stale != app.App {
+				_ = os.RemoveAll(stale)
+			}
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(app.App), 0o755); err != nil {
 		return DesktopApp{}, err
 	}
@@ -231,7 +249,11 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 			Launcher: filepath.Join(data, "applications", "aether-desktop.desktop"),
 		}, nil
 	case "darwin":
-		app := filepath.Join(home, "Applications", "Aether.app")
+		dir := macSystemApplications
+		if !writableDir(dir) {
+			dir = filepath.Join(home, "Applications")
+		}
+		app := filepath.Join(dir, "Aether.app")
 		return DesktopApp{App: app, Launcher: app}, nil
 	case "windows":
 		local, roaming := os.Getenv("LOCALAPPDATA"), os.Getenv("APPDATA")
@@ -245,6 +267,20 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 	default:
 		return DesktopApp{}, fmt.Errorf("localops: no desktop app target for %s", goos)
 	}
+}
+
+// writableDir reports whether this user can create entries in dir. It
+// probes with a temporary file rather than reading permission bits, which
+// miss ACLs and group membership; the install writes there anyway.
+func writableDir(dir string) bool {
+	f, err := os.CreateTemp(dir, ".aether-probe-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return true
 }
 
 // desktopEntry renders the freedesktop launcher for the unpacked app in

@@ -177,8 +177,12 @@ desktop lists applications:
 | OS | App | Launcher |
 | --- | --- | --- |
 | Linux | `~/.local/share/aether/desktop/` | `~/.local/share/applications/aether-desktop.desktop` |
-| macOS | `~/Applications/Aether.app` | Launchpad and Spotlight |
+| macOS | `/Applications/Aether.app` | Applications folder and Spotlight |
 | Windows | `%LOCALAPPDATA%\Programs\Aether\` | Start Menu > Aether |
+
+A macOS account without administrator rights cannot write to `/Applications`,
+so the app goes to `~/Applications` instead; the command prints where it put
+it.
 
 The first build downloads the Electron runtime (about 100 MB) into
 electron-builder's own cache (`~/.cache/electron` and
@@ -520,7 +524,8 @@ rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder
 ```
 
 On macOS the desktop state is `~/Library/Application Support/aether-desktop`,
-the app is `~/Applications/Aether.app`, and the build caches are
+the app is `/Applications/Aether.app` (or `~/Applications/Aether.app` for a
+non-administrator account), and the build caches are
 `~/Library/Caches/aether`, `~/Library/Caches/electron`, and
 `~/Library/Caches/electron-builder`. On Windows the state is
 `%APPDATA%\aether-desktop`, the app is `%LOCALAPPDATA%\Programs\Aether` plus

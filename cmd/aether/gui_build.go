@@ -66,7 +66,7 @@ func guiBuild(args []string) error {
 	fmt.Printf("installed %s\n", app.App)
 	switch runtime.GOOS {
 	case "darwin":
-		fmt.Println("open it from Launchpad or Spotlight as Aether")
+		fmt.Println("open it from your Applications folder or Spotlight as Aether")
 	case "windows":
 		fmt.Println("open it from the Start Menu as Aether")
 	default:

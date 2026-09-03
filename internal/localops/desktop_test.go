@@ -84,7 +84,35 @@ func TestDesktopLayoutHonorsXDGDataHome(t *testing.T) {
 	}
 }
 
-func TestDesktopLayoutDarwinIsTheBundle(t *testing.T) {
+func TestDesktopLayoutDarwinPrefersSystemApplications(t *testing.T) {
+	system := t.TempDir()
+	setMacSystemApplications(t, system)
+	app, err := desktopLayout("darwin", "/Users/u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(system, "Aether.app")
+	if app.App != want || app.Launcher != want {
+		t.Fatalf("layout = %+v, want %s", app, want)
+	}
+	if entries, _ := os.ReadDir(system); len(entries) != 0 {
+		t.Fatalf("probe left %v behind", entries)
+	}
+}
+
+func TestDesktopLayoutDarwinFallsBackToHomeApplications(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory modes are not enforced on windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("root writes anywhere")
+	}
+	system := t.TempDir()
+	if err := os.Chmod(system, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(system, 0o755) })
+	setMacSystemApplications(t, system)
 	app, err := desktopLayout("darwin", "/Users/u")
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +121,47 @@ func TestDesktopLayoutDarwinIsTheBundle(t *testing.T) {
 	if app.App != want || app.Launcher != want {
 		t.Fatalf("layout = %+v, want %s", app, want)
 	}
+}
+
+func TestInstallDesktopDarwinReplacesTheHomeCopy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bundle layout uses unix paths")
+	}
+	system := t.TempDir()
+	setMacSystemApplications(t, system)
+	home := t.TempDir()
+	stale := filepath.Join(home, "Applications", "Aether.app", "Contents", "old")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	built := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(built, "Contents", "MacOS"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(built, "Contents", "MacOS", "Aether"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	app, err := InstallDesktop("darwin", home, built, nil)
+	if err != nil {
+		t.Fatalf("InstallDesktop: %v", err)
+	}
+	if want := filepath.Join(system, "Aether.app"); app.App != want {
+		t.Fatalf("App = %q, want %q", app.App, want)
+	}
+	if _, statErr := os.Stat(filepath.Join(app.App, "Contents", "MacOS", "Aether")); statErr != nil {
+		t.Fatal(statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "Applications", "Aether.app")); !os.IsNotExist(statErr) {
+		t.Fatalf("the ~/Applications copy survived: %v", statErr)
+	}
+}
+
+func setMacSystemApplications(t *testing.T, dir string) {
+	t.Helper()
+	previous := macSystemApplications
+	macSystemApplications = dir
+	t.Cleanup(func() { macSystemApplications = previous })
 }
 
 func TestDesktopLayoutRejectsUnknownOS(t *testing.T) {
