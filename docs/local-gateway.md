@@ -127,7 +127,8 @@ the same capability checks the SSH transport applies.
 {"gateway":"local","methods":["*"],"ws":["events","attach","shell","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
           "link.repo","link.status","link.switch","pull","repo.push",
-          "sync.start","sync.status","sync.stop"]}
+          "sync.start","sync.status","sync.stop","update.apply","update.check"],
+ "version":"v1.2.3","commit":"abc1234"}
 ```
 
 `methods` is `["*"]` because this gateway forwards every control-channel
@@ -135,6 +136,10 @@ method; `ws` lists the WebSocket surfaces it serves; `local` is the sorted
 `/local/v1` verb list. A client probes this rather than hard-coding what it
 is talking to; the SPA's `useCapability` seam reads it to gate the
 local-only surfaces.
+
+`version` and `commit` are the `aether` build serving this gateway, which is
+the only way the SPA can learn what CLI it is running against - `server.info`
+answers for the server. Both are absent on a gateway that predates them.
 
 ### `GET /api/v1/run/<run_id>/patch`
 
@@ -244,6 +249,8 @@ authority.
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
 | `image.scaffold` | `{"repo":"...","kind":"dockerfile"\|"devcontainer"}` (`repo` defaults to the linked one) | `{"written":["..."]}` |
 | `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`; `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
+| `update.check` | `{}` | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"supervised":bool}` |
+| `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"note":"..."}` |
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
   must carry (the onboarding wizard sends the one just picked). Without
@@ -282,6 +289,30 @@ authority.
   `sync.stop` dismisses a standing conflict.
 - `image.scaffold` refuses with `-32002` when the files already exist,
   rather than overwriting them.
+- `update.check` answers the release check `aether update --check --json`
+  prints, under `cli`, beside the linked server's version. Its fields are
+  `version`, `commit`, `latest`, `update_available`, `asset`, `release_url`,
+  `dev`, `disabled`, `can_self_update` and `checked_at`
+  ([install.md](install.md#upgrading)). The gateway resolves the latest
+  release at most once every six hours and serves the cached answer in
+  between, so a page load never costs a request to GitHub.
+  `server_behind` compares the linked server's version with that same latest
+  release; `supervised` reports whether this gateway was started by the
+  desktop shell (`aether gui --json`), which is what decides whether
+  `update.apply` may restart it.
+- `update.apply` runs exactly what `aether update` runs, on the `aether`
+  binary this gateway is served from - and `aether-server` beside it on a
+  Linux server host. On a supervised gateway it answers `restarting: true`
+  and then exits the process, so the desktop shell's respawn brings up the
+  new binary; started from a terminal it answers `restarting: false` and a
+  note telling the user to rerun `aether gui`. It never updates the linked
+  server: the dashboard has no authority there, and the server banner names
+  the commands to run on that host instead.
+- `update.apply` refuses with `-32002` (invalid state) on a dev build, when
+  `AETHER_NO_UPDATE_CHECK` is set, and when the binary's directory is not
+  writable - that last message names the exact `sudo aether update` command.
+  The gateway never escalates privileges. A release that cannot be reached
+  answers `-32004` (unavailable) carrying the transport's own error.
 
 ## WebSockets
 

@@ -58,8 +58,8 @@ one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `local`, `environment`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
-collapse state, `activeWorkspace`, grouping) are persisted; server data is
-always re-fetched.
+collapse state, `activeWorkspace`, grouping, dismissed update versions) are
+persisted; server data is always re-fetched.
 
 **`activeWorkspace` is the scope every surface reads.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,
@@ -685,6 +685,50 @@ environment", which just forgets the build, since the workspace image
 already is the fallback. Nothing in the slice persists: after a reload the
 banner is simply gone, and `aether env show` is where the build's outcome
 can still be read.
+
+## Update prompts
+
+`src/components/update-banner.tsx` is where the dashboard says a binary is out
+of date. It is mounted by `AppShell` above everything else, because an
+out-of-date binary is about the whole app rather than the view that happens to
+be open, and it renders nothing at all unless the gateway serves
+`update.check` - a remote monitor cannot update anything on your machine.
+
+- **One fetch, two banners.** The host reads `update.check` once on mount
+  (`docs/local-gateway.md`; the gateway caches the release lookup, so this
+  costs no request to GitHub) and puts the answer on the `local` slice, which
+  is also what the status bar reads.
+- **The CLI banner is for everyone.** It names the new version and the running
+  one, says in one sentence that updating replaces the `aether` binary on this
+  machine and restarts the dashboard, and offers **Update now**, the release
+  notes, and a dismiss. Clicking Update calls `update.apply` and the banner
+  goes to a restarting state; nothing else reconnects, because the existing
+  `ConnectionError` page already owns a gateway that goes away. A refusal is
+  rendered verbatim - a binary in `/usr/local/bin` answers with the exact
+  `sudo aether update` command to run - and the button becomes usable again.
+  Where the platform has no self-update (Windows) the button is not offered at
+  all and the banner links the release instead.
+- **The server banner is for admins.** Capability is half the gate and the
+  caller's role is the other half, the same rule the admin surfaces follow, so
+  it needs `useIsAdmin()` as well. It shows the server version and the latest
+  release side by side, says plainly that the dashboard cannot update the
+  server, and gives the two commands to run on the server host with a copy
+  button.
+- **Dismissal is per version and it persists.** `dismissedUpdates` on the `ui`
+  slice records which version was dismissed for each banner and rides the same
+  persisted preferences as the theme and the sidebar, so a dismissal survives a
+  reload and the next release shows the banner again.
+- **The status bar carries the badge.** The `aether {version}` label gets a dot
+  when either update is available, and clicking it clears the dismissals so the
+  banner comes back - the label is the only always-visible surface, so it is
+  the way back to a banner someone dismissed by reflex.
+- **The desktop shell is versioned separately.** The SPA ships inside the CLI,
+  but the Electron shell around it is whatever `aether gui build` last
+  produced. `aether gui build` stamps the CLI version into the shell's
+  `package.json`, `desktop/main.js` hands it to the renderer, and
+  `desktop/preload.js` exposes it as `window.aetherDesktop.shellVersion`. When
+  it differs from the `version` the capabilities descriptor now carries, the
+  CLI banner adds one line: rebuild the app with `aether gui build`.
 
 ## Styleguide
 
