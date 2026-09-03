@@ -24,8 +24,7 @@ export function Board() {
   const unreachable = error !== null
   const total = columns.reduce((n, c) => n + c.cards.length, 0)
   const loading = useDelayed(!hydrated && !unreachable && total === 0)
-  // Nothing to sort into buckets, and nothing still on its way: the board has
-  // one thing to say, so it says it once.
+  // Nothing to sort into buckets, and nothing still on its way.
   const empty = hydrated && !loading && total === 0
 
   return (
@@ -53,14 +52,15 @@ export function Board() {
         <p className="p-4 text-sm text-muted-foreground">
           {dead ? error : 'Cannot reach the server. Retrying.'}
         </p>
-      ) : empty ? (
-        <EmptyBoard />
       ) : (
-        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
-          {columns.map((column) => (
-            <Column key={column.key} column={column} loading={loading} />
-          ))}
-        </div>
+        <>
+          {empty && <EmptyNotice />}
+          <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
+            {columns.map((column) => (
+              <Column key={column.key} column={column} loading={loading} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   )
@@ -89,15 +89,17 @@ function NewRunButton() {
   )
 }
 
-/** What an empty workspace says: what a run is, and how to start one. */
-function EmptyBoard() {
+/**
+ * What an empty workspace says, above the columns rather than instead of
+ * them: what a run is, and the way to start one.
+ */
+function EmptyNotice() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
-      <p className="text-sm font-medium">No runs yet.</p>
-      <p className="max-w-sm text-xs text-muted-foreground">
-        A run is one agent working on its own branch of this workspace, in its
-        own container. Start one and you land in its terminal.
-      </p>
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
+      <span>
+        No runs yet. A run is one agent working on its own branch of this
+        workspace, in its own container.
+      </span>
       <NewRunButton />
     </div>
   )

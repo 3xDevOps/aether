@@ -236,15 +236,16 @@ describe('run board', () => {
     expect(useStore.getState().paletteDialog).toBe('launch')
   })
 
-  it('says an empty workspace is empty once, not three times', () => {
+  it('offers the way in from an empty workspace, keeping the buckets', () => {
     seed([])
     render(<Board />)
 
-    const empty = screen.getByText('No runs yet.').closest('div') as HTMLElement
-    // The three buckets have nothing to sort, so they are not drawn at all,
-    // and the one thing left to do is offered where the member is looking.
-    expect(screen.queryByRole('region', { name: 'Working' })).toBeNull()
-    expect(within(empty).getByTitle('Launch a run')).toBeDefined()
+    // The columns stay: an empty board is exactly when a new member is
+    // learning that the three buckets exist. The notice above them says what
+    // a run is and offers the one thing left to do.
+    expect(screen.getByRole('region', { name: 'Working' })).toBeDefined()
+    const notice = screen.getByText(/No runs yet/).closest('div') as HTMLElement
+    expect(within(notice).getByTitle('Launch a run')).toBeDefined()
   })
 
   it('renders what another feature registered into a card slot', () => {
