@@ -91,7 +91,9 @@ func TestLinksRoundTrip(t *testing.T) {
 }
 
 // TestNamedOverlay proves Named overlays only the profile's non-empty
-// fields on the top-level defaults and sets Active.
+// fields on the top-level defaults and sets Active. Key is the exception:
+// a profile linked without --key stays on automatic discovery even when
+// the default link chose a file.
 func TestNamedOverlay(t *testing.T) {
 	cfg := Config{
 		Addr:       "default:2222",
@@ -115,9 +117,17 @@ func TestNamedOverlay(t *testing.T) {
 	if got.Addr != "prod:2222" || got.User != "deploy" {
 		t.Errorf("overlay = addr %q user %q", got.Addr, got.User)
 	}
-	// Empty link fields keep the top-level defaults.
-	if got.Key != "/default/key" || got.Repo != "/default/repo" || got.KnownHosts != "/default/kh" {
-		t.Errorf("defaults lost: key %q repo %q known_hosts %q", got.Key, got.Repo, got.KnownHosts)
+	// Empty link fields keep the top-level defaults, except the key.
+	if got.Repo != "/default/repo" || got.KnownHosts != "/default/kh" {
+		t.Errorf("defaults lost: repo %q known_hosts %q", got.Repo, got.KnownHosts)
+	}
+	if got.Key != "" {
+		t.Errorf("Key = %q, want discovery: the profile saved no key", got.Key)
+	}
+	// A profile's own key is used as saved.
+	cfg.Links = append(cfg.Links, NamedLink{Name: "lab", Addr: "lab:2222", Key: "/lab/key"})
+	if lab, ok := cfg.Named("lab"); !ok || lab.Key != "/lab/key" {
+		t.Errorf("Named(lab) = %+v, %v; want key /lab/key", lab, ok)
 	}
 	// The source config is untouched.
 	if cfg.Active != "" || cfg.Addr != "default:2222" {

@@ -69,12 +69,21 @@ func savedKey(prev cli.Config, name string) string {
 	return ""
 }
 
+// autoKey is the --key value that forgets a saved key. Without it a user
+// who once chose a file could only return to agent and default-key
+// discovery by editing config.json.
+const autoKey = "auto"
+
 // linkKey resolves the --key flag for this link: an explicit path is made
 // absolute so the saved config works from any directory and checked
-// before anything is dialed; an empty flag keeps the saved key.
+// before anything is dialed; an empty flag keeps the saved key; "auto"
+// clears it so this link goes back to automatic discovery.
 func linkKey(flag string, prev cli.Config, name string) (string, error) {
-	if flag == "" {
+	switch flag {
+	case "":
 		return savedKey(prev, name), nil
+	case autoKey:
+		return "", nil
 	}
 	path, err := filepath.Abs(flag)
 	if err != nil {
@@ -117,7 +126,7 @@ func runLink(args []string) error {
 	fs := flag.NewFlagSet("link", flag.ExitOnError)
 	invite := fs.String("invite", "", "one-time invite code")
 	name := fs.String("name", "", "profile label for this link (also the display name when joining via invite)")
-	key := fs.String("key", "", "SSH private key file to use and remember for this link (default: ssh-agent, then ~/.ssh/id_ed25519, id_ecdsa, id_rsa)")
+	key := fs.String("key", "", "SSH private key file to use and remember for this link; \"auto\" forgets a saved key (default: ssh-agent, then ~/.ssh/id_ed25519, id_ecdsa, id_rsa)")
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
 	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
 	addr, err := parseLeadingArg(fs, args)

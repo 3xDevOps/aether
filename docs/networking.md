@@ -149,12 +149,28 @@ aether link 192.168.1.50:2222 --key ~/.ssh/work_key
 ```
 
 `--key` takes the private key, never the `.pub` half, and only that key is
-offered even when the agent holds others. It is saved with the link, so later
-commands and `aether gui` use it too, and `aether link` remembers it when you
-relink the same profile. A passphrase-protected `--key` works once `ssh-add`
-has loaded it. When no key is accepted the error lists every place the CLI
-looked and what the server said, and ends with the fix: `ssh-add` the key or
-pass `--key`.
+offered even when the agent holds others. It is saved with the link (per
+profile when you use `--name`) and `aether link` keeps it when you relink
+the same profile without `--key`. To forget it and go back to the
+ssh-agent and default-file order, pass `--key auto`:
+
+```sh
+aether link 192.168.1.50:2222 --key auto
+```
+
+The saved key covers Aether's own SSH connections: every `aether` command
+that talks to the server, `aether gui`, and the sync daemon's event channel
+when you pass the same file to `aether daemon run --key`. It does not reach
+git. `git push aether`, the fetch behind `aether pull`, and the daemon's own
+push and fetch run your system `git` over OpenSSH, which chooses keys from
+your ssh-agent and `~/.ssh/config`. If git is refused while `aether` works,
+`ssh-add` the key or give the server an `IdentityFile` entry in
+`~/.ssh/config`.
+
+A passphrase-protected `--key` works once `ssh-add` has loaded it. When no
+key is accepted the error lists every place the CLI looked and what the
+server said, and ends with the fix: `ssh-add` the key, pass `--key`, or
+`--key auto`.
 
 ### Everyone else
 

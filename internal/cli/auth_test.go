@@ -145,6 +145,35 @@ func TestAuthFailureExplainsWhatWasTried(t *testing.T) {
 	}
 }
 
+// A refused --key names the way back: only that file was tried, and the
+// advice includes --key auto as well as ssh-add and another --key.
+func TestExplicitKeyFailureOffersAuto(t *testing.T) {
+	home := testhome.Isolate(t)
+	disableAgent(t)
+	keyPath := filepath.Join(home, "work_key")
+	testhome.WriteSSHKey(t, keyPath, testhome.Ed25519Key(t), "")
+	testhome.WriteSSHKey(t, filepath.Join(home, ".ssh", "id_ed25519"), testhome.Ed25519Key(t), "")
+	addr, done := serveOnce(t, &ssh.ServerConfig{
+		PublicKeyCallback: func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) {
+			return nil, errors.New("unknown key")
+		},
+	})
+
+	_, err := Dial(Config{Addr: addr, Key: keyPath, KnownHosts: filepath.Join(home, "known_hosts")})
+	<-done
+	if err == nil {
+		t.Fatal("Dial succeeded against a server that refuses the chosen key")
+	}
+	for _, want := range []string{keyPath + ": offered", "--key auto"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q:\n%v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "id_ed25519") {
+		t.Errorf("explicit key error mentions a default key file:\n%v", err)
+	}
+}
+
 // Invites must authenticate, so with nothing to offer the failure is
 // reported before any connection is made and still explains itself.
 func TestDialInviteWithoutAnyKeyExplains(t *testing.T) {

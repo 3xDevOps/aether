@@ -25,6 +25,9 @@ type Auth struct {
 	methods []ssh.AuthMethod
 	closeFn func()
 	tried   []string
+	// explicit is set when cfg.Key chose the key, so the advice can
+	// mention the way back to automatic discovery.
+	explicit bool
 	// banners collects what the server said during the handshake. The
 	// client otherwise drops them, and "no Aether member for this key"
 	// is the one line that explains most rejected keys.
@@ -48,6 +51,7 @@ func ResolveAuth(cfg Config) *Auth {
 	a.closeFn = closeAgent
 	var signers []ssh.Signer
 	if cfg.Key != "" {
+		a.explicit = true
 		signers = a.explicitKey(cfg.Key, fromAgent)
 	} else {
 		a.tried = append(a.tried, "ssh-agent: "+agentNote)
@@ -91,9 +95,10 @@ func (a *Auth) Banner(message string) error {
 }
 
 // Explain turns a handshake error into an actionable one. Authentication
-// failures gain the list of candidates examined and the two ways to
-// recover: ssh-add for a locked key, --key to pick a file. Any other
-// error - a host-key mismatch, a refused connection - is returned as is.
+// failures gain the list of candidates examined and the ways to recover:
+// ssh-add for a locked key, --key to pick a file, --key auto to drop an
+// explicit choice. Any other error - a host-key mismatch, a refused
+// connection - is returned as is.
 func (a *Auth) Explain(err error) error {
 	if err == nil || !isAuthFailure(err) {
 		return err
@@ -123,7 +128,11 @@ func (a *Auth) report(head string) error {
 		b.WriteString("\n  server said: ")
 		b.WriteString(msg)
 	}
-	b.WriteString("\nunlock a key with ssh-add <private-key>, or choose one with --key <private-key>")
+	if a.explicit {
+		b.WriteString("\nunlock it with ssh-add <private-key>, choose another with --key <private-key>, or return to automatic discovery with aether link <addr> --key auto")
+	} else {
+		b.WriteString("\nunlock a key with ssh-add <private-key>, or choose one with --key <private-key>")
+	}
 	return errors.New(b.String())
 }
 

@@ -52,8 +52,9 @@ func TestLinkConfig(t *testing.T) {
 }
 
 // --key is remembered per profile: an explicit path is stored absolute,
-// a relink without the flag keeps what was saved for that profile, and a
-// public-key file is refused before anything is dialed.
+// a relink without the flag keeps what was saved for that profile, --key
+// auto forgets it, and a public-key file is refused before anything is
+// dialed.
 func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 	home := testhome.Isolate(t)
 	key := testhome.Ed25519Key(t)
@@ -64,14 +65,13 @@ func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Fresh link with a relative --key: saved absolute.
-	rel, err := filepath.Rel(mustGetwd(t), private)
+	// Fresh link with a relative --key: saved absolute. The test runs from
+	// the key's directory because the temp dir and the checkout can sit on
+	// different Windows drives, where no relative path joins them.
+	t.Chdir(home)
+	got, err := linkKey("work_key", cli.Config{}, "")
 	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := linkKey(rel, cli.Config{}, "")
-	if err != nil {
-		t.Fatalf("linkKey(%s): %v", rel, err)
+		t.Fatalf("linkKey(work_key): %v", err)
 	}
 	if got != private {
 		t.Fatalf("linkKey = %q, want absolute %q", got, private)
@@ -99,6 +99,25 @@ func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 		t.Errorf("staging relink key = %q, want discovery", got)
 	}
 
+	// --key auto forgets the saved key for the link being relinked, and
+	// the cleared choice persists: the next relink stays on discovery.
+	if got, err = linkKey("auto", cfg, "prod"); err != nil || got != "" {
+		t.Errorf("linkKey(auto, prod) = %q, %v; want discovery", got, err)
+	}
+	if got, err = linkKey("auto", cfg, ""); err != nil || got != "" {
+		t.Errorf("linkKey(auto) = %q, %v; want discovery", got, err)
+	}
+	cleared := linkConfig(cli.Config{Addr: "h:2222", User: "aether"}, cfg, "prod")
+	if cleared.Key != "" || len(cleared.Links) != 1 || cleared.Links[0].Key != "" {
+		t.Fatalf("config after --key auto = %+v", cleared)
+	}
+	if named, ok := cleared.Named("prod"); !ok || named.Key != "" {
+		t.Errorf("Named(prod) after --key auto = %+v, %v; want discovery", named, ok)
+	}
+	if got, _ = linkKey("", cleared, "prod"); got != "" {
+		t.Errorf("prod relink after --key auto = %q, want discovery", got)
+	}
+
 	// The wrong half of the key pair is a clear error, not a parse failure.
 	if _, err := linkKey(public, cli.Config{}, ""); err == nil || !strings.Contains(err.Error(), "is a public key") {
 		t.Errorf("linkKey(%s) = %v, want public-key rejection", public, err)
@@ -106,13 +125,4 @@ func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 	if _, err := linkKey(filepath.Join(home, "missing"), cli.Config{}, ""); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("linkKey(missing) = %v, want not found", err)
 	}
-}
-
-func mustGetwd(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return wd
 }

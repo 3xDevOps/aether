@@ -136,7 +136,10 @@ git push -u aether main
 
 `link --repo` adds an `aether` git remote - a normal git remote over the same
 SSH port, no separate credentials. With multiple workspaces, add
-`--workspace <name-or-id>` (`aether workspace list` shows them).
+`--workspace <name-or-id>` (`aether workspace list` shows them). Git runs
+over OpenSSH with its own key choice, so a key you picked with
+`aether link --key` needs `ssh-add` or an `IdentityFile` line in
+`~/.ssh/config` before `git push` uses it.
 
 ## 5. Set up your agent
 
@@ -340,7 +343,7 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | --- | --- |
 | `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`~/Library/Application Support/aether/config.json` on macOS, `%AppData%\aether\config.json` on Windows) on this machine yet. |
 | `no Aether member for this key` | The server already has an admin, so you are not bootstrapping. Get an invite: [teams.md](teams.md). |
-| `unable to authenticate` followed by `the server wants an SSH key; tried:` | The lines under `tried:` say what happened to the ssh-agent and each default key file, and `server said:` repeats the server's reason. A `passphrase protected` key needs `ssh-add <key>`; a key at another path needs `aether link <addr> --key <private-key>`. On Windows, check `Get-Service ssh-agent`. |
+| `unable to authenticate` followed by `the server wants an SSH key; tried:` | The lines under `tried:` say what happened to the ssh-agent and each default key file, and `server said:` repeats the server's reason. A `passphrase protected` key needs `ssh-add <key>`; a key at another path needs `aether link <addr> --key <private-key>`; a saved `--key` the server no longer knows goes away with `aether link <addr> --key auto`. On Windows, check `Get-Service ssh-agent`. |
 | `no Aether member for this key` under `server said:` | Your key reached the server but is not registered. The server already has an admin, so get an invite: [teams.md](teams.md). |
 | `is a public key; --key takes the private key` | You passed the `.pub` file. Drop the suffix. |
 | `host key mismatch` / `REMOTE HOST IDENTIFICATION HAS CHANGED` on `aether link` | The server was reinstalled and generated a new host key, but your `known_hosts` still trusts the old one. Clear it: `ssh-keygen -R '[<server-host>]:2222'`. |

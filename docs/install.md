@@ -416,12 +416,16 @@ prints the command that activates it: a systemd user unit
 (`~/Library/LaunchAgents/com.aether.daemon.plist`) on macOS, and a Scheduled
 Task XML (`%USERPROFILE%\aether-daemon.xml`, registered with
 `schtasks /Create`) on Windows. `aether daemon run --server ... --repo ...`
-does the same work in the foreground on any of them. The daemon finds your
-SSH key the way `aether link` does (ssh-agent, then the default `~/.ssh`
-files). A service usually has no ssh-agent, so if your default key has a
-passphrase, point `--key <private-key>` at an unencrypted one. The daemon also
-watches your local agent-profile
-directories and pushes changes up; `--no-profile-sync` turns that half off.
+does the same work in the foreground on any of them. The daemon finds the
+SSH key for its event channel the way `aether link` does (ssh-agent, then
+the default `~/.ssh` files); it does not read the key saved by
+`aether link --key`, so pass the same file to `daemon run --key`. A service
+usually has no ssh-agent, so if your default key has a passphrase, point
+`--key <private-key>` at an unencrypted one. The daemon's git push and fetch
+run your system `git` over OpenSSH, which picks its own key: put an
+`IdentityFile` entry for the server in `~/.ssh/config` when that key is not a
+default one. The daemon also watches your local agent-profile directories
+and pushes changes up; `--no-profile-sync` turns that half off.
 
 ## What lives in the data directory
 

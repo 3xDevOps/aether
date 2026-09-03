@@ -16,7 +16,9 @@ type Config struct {
 	User string `json:"user,omitempty"`
 	// Key is the private-key file chosen with `aether link --key`. Empty
 	// means automatic discovery: the SSH agent, then the default files
-	// under ~/.ssh (see ResolveAuth).
+	// under ~/.ssh (see ResolveAuth). `--key auto` clears it. Only
+	// Aether's own SSH connections use it; git commands run the system
+	// git over OpenSSH, which picks its own keys.
 	Key        string `json:"key,omitempty"`
 	Repo       string `json:"repo,omitempty"`
 	KnownHosts string `json:"known_hosts,omitempty"`
@@ -31,7 +33,10 @@ type Config struct {
 }
 
 // NamedLink is one saved server profile. Empty fields fall back to the
-// top-level defaults when the profile is selected.
+// top-level defaults when the profile is selected, except Key: a profile
+// saved without --key was linked by automatic discovery and stays that
+// way, because an explicit key narrows the offer to one identity the
+// profile's server may not know.
 type NamedLink struct {
 	Name       string `json:"name"`
 	Addr       string `json:"addr"`
@@ -57,9 +62,7 @@ func (c Config) Named(name string) (Config, bool) {
 		if l.User != "" {
 			out.User = l.User
 		}
-		if l.Key != "" {
-			out.Key = l.Key
-		}
+		out.Key = l.Key
 		if l.Repo != "" {
 			out.Repo = l.Repo
 		}
