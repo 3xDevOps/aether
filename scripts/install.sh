@@ -316,7 +316,6 @@ fi
 
 setup_ran=no
 gui_built=no
-node_missing=no
 
 # `aether-server setup` asks its own questions and prints the systemd
 # activation line, so this script must not repeat any of that.
@@ -347,14 +346,12 @@ run_server_setup() {
 }
 
 # The CLI is for agents to steer Aether; people should get the desktop app.
-# electron-builder needs Node, which is the one thing the CLI cannot supply.
+# electron-builder needs Node, and the CLI supplies it: a machine without
+# Node 22+ gets a private copy downloaded into the user cache directory, so
+# there is nothing to check for here.
 run_gui_build() {
 	if [ ! -x "${BIN_DIR}/aether" ]; then
 		say "the aether CLI was not installed here, so there is no app to build"
-		return 1
-	fi
-	if ! command -v npm >/dev/null 2>&1 || ! command -v npx >/dev/null 2>&1; then
-		node_missing=yes
 		return 1
 	fi
 	echo
@@ -385,9 +382,7 @@ server)
 	;;
 client)
 	echo "This machine is a client: you work here and connect to a server."
-	if [ "$node_missing" = yes ]; then
-		echo "The desktop app was not built - it needs Node.js 22+ (https://nodejs.org) with npm on PATH."
-	elif [ "$gui_built" != yes ]; then
+	if [ "$gui_built" != yes ]; then
 		echo "The desktop app was not built; the message above says why."
 	fi
 	echo

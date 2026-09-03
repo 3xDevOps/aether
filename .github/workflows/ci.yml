@@ -93,6 +93,37 @@ jobs:
           aether gui build
           desktop-file-validate ~/.local/share/applications/aether-desktop.desktop
           test -x ~/.local/share/aether/desktop/aether-desktop
+      # Proves the app builds on a machine with no Node at all: with node,
+      # npm and npx off PATH, the CLI has to download its own copy into the
+      # cache directory and build with that. The directories that carry node
+      # also carry sh and the rest of the toolchain, so they are mirrored
+      # into a shadow of symlinks with those three names left out rather
+      # than dropped.
+      - name: aether gui build without Node on PATH
+        run: |
+          shadow="$RUNNER_TEMP/no-node"
+          mkdir -p "$shadow"
+          clean=""
+          IFS=:
+          for dir in $PATH; do
+            unset IFS
+            [ -d "$dir" ] || continue
+            if [ -x "$dir/node" ] || [ -x "$dir/npm" ] || [ -x "$dir/npx" ]; then
+              for tool in "$dir"/*; do
+                name="${tool##*/}"
+                case "$name" in node | npm | npx | corepack | '*') continue ;; esac
+                [ -e "$shadow/$name" ] || ln -s "$tool" "$shadow/$name"
+              done
+            else
+              clean="${clean:+$clean:}$dir"
+            fi
+          done
+          export PATH="$HOME/.local/bin:$shadow:$clean"
+          if command -v node; then echo "node is still on PATH" >&2; exit 1; fi
+          aether gui build
+          find ~/.cache/aether/node -type f -name node -perm -u+x | grep -q . ||
+            { echo "no Node was downloaded into ~/.cache/aether/node" >&2; exit 1; }
+          test -x ~/.local/share/aether/desktop/aether-desktop
 
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by
