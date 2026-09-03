@@ -1030,3 +1030,54 @@ func TestInitWorkspaceRepoIdempotentOnExistingRepo(t *testing.T) {
 		t.Error("update hook changed on repeat init")
 	}
 }
+func TestDiffWatchPublishesCommitWithoutTreeEvent(t *testing.T) {
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newTestEngine(t, bus)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run-commit-only", "main", "watch me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffs := subscribeTypes(t, bus, events.TypeRunDiff)
+	branches := subscribeTypes(t, bus, events.TypeGitBranch)
+	if err := e.StartDiffWatch(ctx, "ws1", "run-commit-only"); err != nil {
+		t.Fatalf("StartDiffWatch: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(checkout, "commit-only.txt"), []byte("committed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := nextEvent(t, diffs, 5*time.Second); !ok {
+		t.Fatal("no run.diff event after write")
+	}
+
+	if _, err := e.git(ctx, checkout, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.git(ctx, checkout, "-c", "user.name=Agent", "-c", "user.email=a@x", "commit", "-m", "commit-only"); err != nil {
+		t.Fatal(err)
+	}
+
+	ev, ok := nextEvent(t, branches, 5*time.Second)
+	if !ok {
+		t.Fatal("no git.branch event after commit without tree edit")
+	}
+	payload, ok := ev.Payload.(events.GitBranchPayload)
+	if !ok {
+		t.Fatalf("payload type = %T, want events.GitBranchPayload", ev.Payload)
+	}
+	head, err := e.git(ctx, checkout, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Commit != head {
+		t.Fatalf("published commit = %s, want %s", payload.Commit, head)
+	}
+}

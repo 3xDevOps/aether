@@ -47,7 +47,6 @@ export interface CommandDeps {
   onTemplates: () => void
 }
 
-/** One thing a member can do, however the surface chooses to draw it. */
 export interface Command {
   id: string
   /** The full sentence, which is what the palette reads best. */
@@ -63,7 +62,7 @@ export interface Command {
   /**
    * The past-tense toast on success, and the prefix of the failure toast.
    * Present only when the command calls the gateway; navigation and the
-   * dialog openers report nothing.
+   * dialog openers report nothing because the thing they opened is the feedback.
    */
   done?: string
   /**
@@ -71,6 +70,8 @@ export interface Command {
    * fetched - instead of the flat past-tense one.
    */
   report?: (result: unknown) => string
+  /** A command can be shown but unavailable until its prerequisite exists. */
+  disabled?: boolean
   /**
    * Set on the verbs a member cannot take back. Buttons ask before running;
    * the palette does not, because a palette item is already two deliberate
@@ -246,14 +247,13 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       perform: (d) => d.api.runRelaunch(id),
     })
   }
-  // Pull is the desktop gateway fetching into the repository on this machine,
-  // not a call against the run, so it answers to the local capability alone.
   if (cap.hasLocal('pull')) {
     list.push({
       id: 'pull',
       label: 'Pull branch',
       short: 'Pull',
       Icon: Download,
+      disabled: !run.last_commit,
       done: 'Pulled branch',
       report: (result) => `Pulled ${(result as PullResult).ref}`,
       perform: (d) =>

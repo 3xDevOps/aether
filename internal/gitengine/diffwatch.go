@@ -25,6 +25,7 @@ import (
 
 // snapshotTimeout bounds the git work of a single diff snapshot.
 const snapshotTimeout = 30 * time.Second
+const diffWarnInterval = time.Minute
 
 // diffWatch watches one run checkout for file changes and captures diff
 // snapshots on quiescence (§6.4 of the Wave 1 contract): a snapshot fires
@@ -45,11 +46,14 @@ type diffWatch struct {
 	finished chan struct{}
 
 	// loop-goroutine state
-	dirty     bool
-	lastEvent time.Time
-	lastSnap  time.Time
-	lastHead  string
-	lastFiles []events.FileDiffStat
+	dirty          bool
+	headDirty      bool
+	lastEvent      time.Time
+	lastSnap       time.Time
+	lastHead       string
+	lastFiles      []events.FileDiffStat
+	lastSnapshotWarn time.Time
+	lastPublishWarn  time.Time
 }
 
 // StartDiffWatch begins diff-snapshot watching for a run's checkout,
@@ -66,7 +70,10 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	if err != nil {
 		return err
 	}
-	head, _ := e.git(ctx, checkout, "rev-parse", "HEAD")
+	head, err := e.git(ctx, checkout, "rev-parse", "HEAD")
+	if err != nil {
+		slog.Warn("gitengine: diff snapshot failed", "run", string(run), "error", err)
+	}
 
 	e.mu.Lock()
 	if e.closed {
@@ -100,6 +107,15 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	if err := w.addRecursive(checkout); err != nil {
 		_ = watcher.Close()
 		return err
+	}
+	for _, dir := range []string{
+		filepath.Join(checkout, ".git"),
+		filepath.Join(checkout, ".git", "refs", "heads"),
+	} {
+		if err := watcher.Add(dir); err != nil {
+			_ = watcher.Close()
+			return fmt.Errorf("gitengine: watch %s: %w", dir, err)
+		}
 	}
 
 	e.mu.Lock()
@@ -149,9 +165,14 @@ func (w *diffWatch) stop() {
 	<-w.finished
 }
 
-// ignored reports whether path (absolute) falls outside the watched tree:
-// anything not under the checkout, under .git/, or with a .aether-*
-// component.
+// underGit reports whether path is the .git directory or one of its children.
+func (w *diffWatch) underGit(path string) bool {
+	rel, err := filepath.Rel(filepath.Join(w.checkout, ".git"), path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// ignored reports whether path (absolute) falls outside the watched tree or
+// has an ignored component. .git paths are handled separately by underGit.
 func (w *diffWatch) ignored(path string) bool {
 	rel, err := filepath.Rel(w.checkout, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -213,10 +234,16 @@ func (w *diffWatch) loop() {
 			if !ok {
 				return
 			}
+			now := time.Now()
+			if w.underGit(ev.Name) {
+				w.headDirty = true
+				w.lastEvent = now
+				w.arm(timer, now)
+				continue
+			}
 			if w.ignored(ev.Name) {
 				continue
 			}
-			now := time.Now()
 			w.lastChange.Store(now.UnixNano())
 			w.lastEvent = now
 			w.dirty = true
@@ -235,6 +262,19 @@ func (w *diffWatch) loop() {
 			}
 		case <-timer.C:
 			now := time.Now()
+			if w.headDirty {
+				ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+				if w.checkHead(ctx) {
+					w.headDirty = false
+				} else {
+					w.lastEvent = now
+				}
+				cancel()
+				if w.headDirty || w.dirty {
+					w.arm(timer, time.Now())
+				}
+				continue
+			}
 			if !w.dirty {
 				continue
 			}
@@ -256,14 +296,17 @@ func (w *diffWatch) loop() {
 
 // arm resets the timer to the earliest instant a snapshot could fire:
 // max(lastEvent+QuietPeriod, lastSnap+MinInterval), capped at
-// lastSnap+MaxInterval (the sustained-churn bound).
+// lastSnap+MaxInterval (the sustained-churn bound). A HEAD-only event is
+// gated only by the quiet period.
 func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
 	deadline := w.lastEvent.Add(w.e.cfg.QuietPeriod)
-	if floor := w.lastSnap.Add(w.e.cfg.MinInterval); deadline.Before(floor) {
-		deadline = floor
-	}
-	if churn := w.lastSnap.Add(w.e.cfg.MaxInterval); deadline.After(churn) {
-		deadline = churn
+	if !w.headDirty {
+		if floor := w.lastSnap.Add(w.e.cfg.MinInterval); deadline.Before(floor) {
+			deadline = floor
+		}
+		if churn := w.lastSnap.Add(w.e.cfg.MaxInterval); deadline.After(churn) {
+			deadline = churn
+		}
 	}
 	d := deadline.Sub(now)
 	if d < 0 {
@@ -280,14 +323,13 @@ func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
 
 // snapshot captures the checkout's diff against its recorded base and
 // publishes run.diff when the stat set changed since the last snapshot.
-// When HEAD moved (the agent committed), the run branch is published into
-// the bare repo, which in turn emits git.branch.
 func (w *diffWatch) snapshot() {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 	defer cancel()
 
 	files, err := w.e.diffStats(ctx, w.checkout, w.base)
 	if err != nil {
+		w.warnSnapshot(err)
 		return
 	}
 	if !slices.Equal(files, w.lastFiles) {
@@ -305,13 +347,44 @@ func (w *diffWatch) snapshot() {
 			})
 		}
 	}
-	if head, err := w.e.git(ctx, w.checkout, "rev-parse", "HEAD"); err == nil && head != w.lastHead {
-		if _, pubErr := w.e.PublishRunBranch(ctx, w.run); pubErr == nil {
-			w.lastHead = head
-		}
-		// On failure lastHead stays put so the next snapshot retries the
-		// publication instead of silently dropping it.
+	w.checkHead(ctx)
+}
+
+// checkHead publishes a moved checkout HEAD. It returns true when checking
+// HEAD succeeded, including when it did not move.
+func (w *diffWatch) checkHead(ctx context.Context) bool {
+	head, err := w.e.git(ctx, w.checkout, "rev-parse", "HEAD")
+	if err != nil {
+		w.warnSnapshot(err)
+		return false
 	}
+	if head == w.lastHead {
+		return true
+	}
+	if _, err := w.e.PublishRunBranch(ctx, w.run); err != nil {
+		w.warnPublish(err)
+		return false
+	}
+	w.lastHead = head
+	return true
+}
+
+func (w *diffWatch) warnSnapshot(err error) {
+	now := time.Now()
+	if !w.lastSnapshotWarn.IsZero() && now.Sub(w.lastSnapshotWarn) < diffWarnInterval {
+		return
+	}
+	w.lastSnapshotWarn = now
+	slog.Warn("gitengine: diff snapshot failed", "run", string(w.run), "error", err)
+}
+
+func (w *diffWatch) warnPublish(err error) {
+	now := time.Now()
+	if !w.lastPublishWarn.IsZero() && now.Sub(w.lastPublishWarn) < diffWarnInterval {
+		return
+	}
+	w.lastPublishWarn = now
+	slog.Warn("gitengine: publish run branch failed", "run", string(w.run), "error", err)
 }
 
 // diffStats builds the snapshot stat set: numstat against base for tracked

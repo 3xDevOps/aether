@@ -62,7 +62,7 @@ export function RunActions({ run }: { run: RunRecord }) {
           size="sm"
           className="h-6 px-2"
           title={command.label}
-          disabled={running !== null}
+          disabled={running !== null || command.disabled}
           onClick={() => (command.confirm ? setAsking(command) : start(command))}
         >
           {running === command.id ? (

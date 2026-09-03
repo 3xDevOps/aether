@@ -55,6 +55,15 @@ export function RunView({ params }: RouteProps) {
         <dd>{timeAgo(run.created_at)}</dd>
         <dt className="text-muted-foreground">Changed</dt>
         <dd>{timeAgo(run.stateChangedAt)}</dd>
+        {run.last_commit && (
+          <>
+            <dt className="text-muted-foreground">Last commit</dt>
+            <dd title={run.last_commit}>
+              <code>{run.last_commit.slice(0, 8)}</code>{' '}
+              {timeAgo(run.last_commit_at ?? run.created_at)}
+            </dd>
+          </>
+        )}
       </dl>
     </div>
   )

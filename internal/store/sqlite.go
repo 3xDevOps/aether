@@ -94,6 +94,12 @@ func encodeTimePtr(t *time.Time) (*int64, error) {
 	}
 	return &n, nil
 }
+func encodeOptionalTime(t time.Time) (*int64, error) {
+	if t.IsZero() {
+		return nil, nil
+	}
+	return encodeTimePtr(&t)
+}
 
 func decodeTimePtr(n *int64) *time.Time {
 	if n == nil {
@@ -581,14 +587,18 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 	if err != nil {
 		return fmt.Errorf("store: create run: finished at: %w", err)
 	}
+	lastCommitAt, err := encodeOptionalTime(r.LastCommitAt)
+	if err != nil {
+		return fmt.Errorf("store: create run: last commit at: %w", err)
+	}
 	if _, err := d.db.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
-		                   finished_at, profile_snapshot_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	                   finished_at, profile_snapshot_id, last_commit, last_commit_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
-		r.ProfileSnapshotID,
+		r.ProfileSnapshotID, r.LastCommit, lastCommitAt,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -601,20 +611,26 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		r                     domain.Run
 		createdAt             int64
 		startedAt, finishedAt *int64
+		lastCommitAt          *int64
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
-		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID); err != nil {
+		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID,
+		&r.LastCommit, &lastCommitAt); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
 	r.StartedAt = decodeTimePtr(startedAt)
 	r.FinishedAt = decodeTimePtr(finishedAt)
+	if lastCommitAt != nil {
+		r.LastCommitAt = decodeTime(*lastCommitAt)
+	}
 	return &r, nil
 }
 
 const runCols = `id, workspace_id, member_id, task, harness, mode, status,
-	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id`
+	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id,
+	last_commit, last_commit_at`
 
 func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 	r, err := scanRun(d.db.QueryRowContext(ctx,
@@ -680,17 +696,38 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err != nil {
 		return fmt.Errorf("store: update run: finished at: %w", err)
 	}
+	lastCommitAt, err := encodeOptionalTime(r.LastCommitAt)
+	if err != nil {
+		return fmt.Errorf("store: update run: last commit at: %w", err)
+	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET workspace_id = ?, member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
-		     profile_snapshot_id = ?
+		     profile_snapshot_id = ?, last_commit = ?, last_commit_at = ?
 		 WHERE id = ?`,
 		r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.ID))
+		r.ProfileSnapshotID, r.LastCommit, lastCommitAt, r.ID,
+	))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
+	}
+	return err
+}
+
+// UpdateRunCommit updates only the metadata for the latest published branch
+// commit, so concurrent lifecycle writes cannot clobber it.
+func (d *DB) UpdateRunCommit(ctx context.Context, id domain.RunID, commit string, at time.Time) error {
+	lastCommitAt, err := encodeTime(at)
+	if err != nil {
+		return fmt.Errorf("store: update run commit: %w", err)
+	}
+	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE runs SET last_commit = ?, last_commit_at = ? WHERE id = ?`,
+		commit, lastCommitAt, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("store: update run commit: %w", err)
 	}
 	return err
 }

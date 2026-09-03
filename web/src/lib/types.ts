@@ -20,6 +20,8 @@ export interface Run {
   mode: string
   status: RunStatus
   branch: string
+  last_commit?: string
+  last_commit_at?: string | null
   protected?: boolean
   created_at: string
   started_at: string | null
@@ -29,8 +31,8 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
-}
 
+}
 export interface Workspace {
   id: string
   name: string
@@ -104,6 +106,12 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
+}
+
+export interface GitBranchPayload {
+  workspace_id: string
+  branch: string
+  commit: string
 }
 
 // Team surfaces: the approval inbox, the presence roster, cost and budgets,
@@ -429,8 +437,14 @@ export interface PullResult {
   branch: string
   ref: string
   output: string
+  current: boolean
+  dirty: boolean
 }
 
+/** pull.switch: the run branch now checked out locally. */
+export interface PullSwitchResult {
+  branch: string
+}
 /** repo.push: the base branch seeded into the workspace. */
 export interface RepoPushResult {
   branch: string

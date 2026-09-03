@@ -267,6 +267,10 @@ type Run struct {
 	// leads so the branch reads as what it is, the run ID trails as the
 	// disambiguator.
 	Branch string
+	// LastCommit is the most recently published commit on the run branch.
+	LastCommit string
+	// LastCommitAt is when LastCommit was published.
+	LastCommitAt time.Time
 	// Worktree is the server-side path of the run's git worktree.
 	Worktree string
 	// Protected restricts steering and killing this run to its owner and

@@ -1,4 +1,4 @@
-import { GitBranch, PauseCircle } from 'lucide-react'
+import { GitBranch, GitCommit, PauseCircle } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { StateDot } from '@/components/state-dot'
@@ -77,6 +77,15 @@ export function RunCard({ card }: { card: BoardCard }) {
             <GitBranch className="size-3 shrink-0" aria-hidden />
             <span className="truncate">{run.branch}</span>
           </span>
+          {run.last_commit && (
+            <span
+              className="flex items-center gap-1"
+              title={run.last_commit}
+            >
+              <GitCommit className="size-3 shrink-0" aria-hidden />
+              committed {timeAgo(run.last_commit_at ?? run.created_at)}
+            </span>
+          )}
           <CardSlot name="card:chips" run={run} />
         </div>
 

@@ -70,6 +70,86 @@ func TestPullFetchLandsTrackingRef(t *testing.T) {
 	}
 }
 
+func TestPullCreatesBranchWhenNotCurrent(t *testing.T) {
+	requireGit(t)
+	local, remote := scratchRepos(t, "run-branch")
+	git(t, local, "switch", "-c", "main")
+	git(t, local, "remote", "add", "aether", remote)
+
+	result, err := pull(local, remote, "run-branch")
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if result.Branch != "run-branch" || result.Ref != "refs/remotes/aether/run-branch" {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Current || result.Dirty {
+		t.Fatalf("result = %+v, want non-current clean branch", result)
+	}
+	if got := git(t, local, "rev-parse", "refs/heads/run-branch"); got != git(t, remote, "rev-parse", "run-branch") {
+		t.Fatalf("local branch did not track fetched branch: %s", got)
+	}
+}
+
+func TestPullFastForwardsCurrentBranchAndReportsDirty(t *testing.T) {
+	requireGit(t)
+	local, remote := scratchRepos(t, "run-branch")
+	git(t, local, "switch", "-c", "main")
+	git(t, local, "remote", "add", "aether", remote)
+	first := git(t, remote, "rev-parse", "run-branch")
+	git(t, local, "fetch", remote, "run-branch:refs/heads/run-branch")
+	git(t, local, "switch", "run-branch")
+	writeTestFile(filepath.Join(remote, "second.txt"), "second\n")
+	git(t, remote, "add", "second.txt")
+	git(t, remote, "commit", "-m", "second")
+	second := git(t, remote, "rev-parse", "run-branch")
+	if first == second {
+		t.Fatal("remote commit did not advance")
+	}
+
+	result, err := pull(local, remote, "run-branch")
+	if err != nil {
+		t.Fatalf("Pull current branch: %v", err)
+	}
+	if !result.Current || result.Dirty {
+		t.Fatalf("result = %+v, want current clean branch", result)
+	}
+	if got := git(t, local, "rev-parse", "HEAD"); got != second {
+		t.Fatalf("current branch tip = %s, want %s", got, second)
+	}
+
+	if err := writeTestFile(filepath.Join(local, "uncommitted.txt"), "dirty\n"); err != nil {
+		t.Fatal(err)
+	}
+	result, err = pull(local, remote, "run-branch")
+	if err != nil {
+		t.Fatalf("Pull dirty current branch: %v", err)
+	}
+	if !result.Current || !result.Dirty {
+		t.Fatalf("result = %+v, want current dirty branch", result)
+	}
+}
+
+func TestPullSwitchRefusesDirtyWorktree(t *testing.T) {
+	requireGit(t)
+	local, remote := scratchRepos(t, "run-branch")
+	git(t, local, "switch", "-c", "main")
+	git(t, local, "remote", "add", "aether", remote)
+
+	if err := writeTestFile(filepath.Join(local, "uncommitted.txt"), "dirty\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pull(local, remote, "run-branch"); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if err := SwitchPull(local, "run-branch"); err == nil || !strings.Contains(err.Error(), "working tree is dirty") {
+		t.Fatalf("SwitchPull error = %v, want dirty-worktree refusal", err)
+	}
+	if got := git(t, local, "branch", "--show-current"); got != "main" {
+		t.Fatalf("branch after refused switch = %q, want main", got)
+	}
+}
+
 func TestPullFetchFailureCarriesOutput(t *testing.T) {
 	requireGit(t)
 	local, _ := scratchRepos(t, "main")
@@ -84,7 +164,7 @@ func TestPullFetchFailureCarriesOutput(t *testing.T) {
 }
 
 func TestPullRequiresBranch(t *testing.T) {
-	if _, _, _, err := Pull(t.TempDir(), "aether", "host:2222", protocol.RunPullResult{}); err == nil {
+	if _, err := Pull(t.TempDir(), "aether", "host:2222", protocol.RunPullResult{}); err == nil {
 		t.Fatal("Pull accepted coordinates without a branch")
 	}
 	if _, _, err := PullCommand(t.TempDir(), "aether", "host:2222", protocol.RunPullResult{}); err == nil {

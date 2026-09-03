@@ -456,6 +456,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       branch: 'aether/run-1-checkout',
       ref: 'refs/heads/aether/run-1-checkout',
       output: '',
+      current: false,
+      dirty: false,
+    })),
+    localPullSwitch: vi.fn(async (runID: string) => ({
+      branch: runID,
     })),
     localRepoPush: vi.fn(async () => ({
       branch: 'main',

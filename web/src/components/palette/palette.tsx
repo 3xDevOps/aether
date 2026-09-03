@@ -67,6 +67,7 @@ export function PaletteBody({
     <CommandItem
       key={command.id}
       value={command.value}
+      disabled={command.disabled}
       onSelect={() => void perform(command)}
     >
       <command.Icon />

@@ -8,6 +8,7 @@ import { timeAgo } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
+import { Land } from '@/routes/diff/land'
 import { parsePatch } from '@/routes/diff/parse'
 import { FilePatch } from '@/routes/diff/patch-view'
 import { ReviewCommands } from '@/routes/diff/review-commands'
@@ -53,6 +54,9 @@ function DiffView({ params }: RouteProps) {
         actions={<RunActions run={run} />}
       />
       <RunTabs runID={runID} active="diff" />
+      <div className="px-4 pt-3">
+        <Land run={run} />
+      </div>
 
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground">
         <span>

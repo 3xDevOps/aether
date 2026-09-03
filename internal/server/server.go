@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/adapter"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -194,9 +196,17 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}
 
 	if s.git, err = gitengine.New(gitengine.Config{
-		ReposDir:     filepath.Join(cfg.DataDir, "repos"),
+		ReposDir: filepath.Join(cfg.DataDir, "repos"),
 		CheckoutsDir: filepath.Join(cfg.DataDir, "checkouts"),
-		Bus:          s.bus,
+		Bus: s.bus,
+		OnBranchPublished: func(run domain.RunID, commit string, at time.Time) {
+			if s.sched == nil {
+				return
+			}
+			if err := s.sched.RecordCommit(context.Background(), run, commit, at); err != nil {
+				slog.Warn("server: record run commit failed", "run", run, "error", err)
+			}
+		},
 	}); err != nil {
 		return nil, err
 	}

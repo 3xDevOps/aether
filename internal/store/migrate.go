@@ -611,8 +611,14 @@ CREATE TABLE member_terminals (
 	started_at   INTEGER NOT NULL
 );
 `,
-}
+	// v16: published run commit metadata. The SHA is empty until the first
+	// branch publication; the timestamp remains nullable for that state.
+	`
+ALTER TABLE runs ADD COLUMN last_commit TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN last_commit_at INTEGER;
+`,
 
+}
 // migrate brings the schema to the current version. It is idempotent:
 // already-applied versions (tracked in schema_migrations) are skipped, so
 // it is safe on fresh and existing databases alike, and safe under

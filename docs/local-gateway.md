@@ -134,7 +134,7 @@ the same capability checks the SSH transport applies.
 {"gateway":"local","methods":["*"],"ws":["events","attach","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
           "link.repo","link.status","link.switch","profile.preview",
-          "profile.push","pull","repo.push","sync.start","sync.status",
+          "profile.push","pull","pull.switch","repo.push","sync.start","sync.status",
           "sync.stop","update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
@@ -250,7 +250,8 @@ authority.
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
 | `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
 | `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422,"skipped":[...]}` |
-| `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"..."}` |
+| `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |
+| `pull.switch` | `{"run_id":"..."}` | `{"branch":"..."}` |
 | `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
 | `sync.stop` | `{"run_id":"..."}` | `{"run_id":"...","state":"stopped"}` |
@@ -362,7 +363,13 @@ authority.
 - Both verbs walk the whole profile root, and both stop when the request
   is cancelled: a client that closes the connection stops the work on
   this machine, rather than only stopping its own wait.
-- `pull`, `repo.push`, `sync.start`, and `sync.stop` refuse with `-32002`
+- `pull` fetches the run branch, fast-forwards it when it is checked out, and
+  otherwise creates or updates the local branch without switching branches.
+  `current` reports whether the checkout is on that branch and `dirty` reports
+  uncommitted changes after the operation. `pull.switch` refuses a dirty
+  checkout and switches to the pulled branch when it is clean.
+- `pull`, `pull.switch`, `repo.push`, `sync.start`, and `sync.stop` refuse with
+  `-32002`
   when no repo is linked.
 - A sync session's states are `starting` (the overlay is dialing the run
   worktree), `running`, `stopped`, `conflict` (with the conflict text in

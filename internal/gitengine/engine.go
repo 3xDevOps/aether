@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,7 @@ type Config struct {
 	CheckoutsDir string        // <data>/checkouts
 	GitPath      string        // "git"
 	Bus          events.Bus    // run.diff + git.branch; may be nil in tests
+	OnBranchPublished func(run domain.RunID, commit string, at time.Time)
 	QuietPeriod  time.Duration // default 2s
 	MinInterval  time.Duration // default 10s
 	MaxInterval  time.Duration // default 60s
@@ -320,25 +322,30 @@ func gitEnv() []string {
 }
 
 // publishBranch emits git.branch for a run whose branch tip moved, scoped
-// to the workspace recorded in the watch registry. Silently skipped when
-// the run is unknown or the engine has no bus.
+// to the workspace recorded in the watch registry. The callback records the
+// commit metadata even when no event bus is configured.
 func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, commit string) {
-	if e.cfg.Bus == nil {
-		return
-	}
 	e.mu.Lock()
 	info, ok := e.registry[run]
 	e.mu.Unlock()
 	if !ok {
 		return
 	}
-	_, _ = e.cfg.Bus.Publish(ctx, events.Event{
-		WorkspaceID: info.workspace,
-		RunID:       run,
-		Payload: events.GitBranchPayload{
+	if e.cfg.Bus != nil {
+		_, err := e.cfg.Bus.Publish(ctx, events.Event{
 			WorkspaceID: info.workspace,
-			Branch:      info.branch,
-			Commit:      commit,
-		},
-	})
+			RunID:       run,
+			Payload: events.GitBranchPayload{
+				WorkspaceID: info.workspace,
+				Branch:      info.branch,
+				Commit:      commit,
+			},
+		})
+		if err != nil {
+			slog.Warn("gitengine: publish branch event failed", "run", string(run), "error", err)
+		}
+	}
+	if e.cfg.OnBranchPublished != nil {
+		e.cfg.OnBranchPublished(run, commit, time.Now())
+	}
 }
