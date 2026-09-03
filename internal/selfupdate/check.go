@@ -220,6 +220,11 @@ func sign(a, b int) int {
 type Checker struct {
 	baseURL string
 	ttl     time.Duration
+	// now reads the clock. Tests drive it so cache expiry does not depend
+	// on real time passing: Windows' timer resolution is coarse enough
+	// that two calls in a row can read the same instant, which would leave
+	// even a nanosecond ttl unexpired.
+	now func() time.Time
 
 	// mu guards the cache only, never the network call: a caller whose
 	// request context is cancelled must not hold every other caller behind
@@ -233,7 +238,7 @@ type Checker struct {
 // NewChecker builds a checker against a GitHub repository base URL such as
 // https://github.com/3xDevOps/Aether.
 func NewChecker(baseURL string, ttl time.Duration) *Checker {
-	return &Checker{baseURL: baseURL, ttl: ttl}
+	return &Checker{baseURL: baseURL, ttl: ttl, now: time.Now}
 }
 
 // DefaultChecker checks the Aether repository's releases.
@@ -258,7 +263,7 @@ func (c *Checker) Check(ctx context.Context) (Check, error) {
 		Version:       version.Version,
 		Commit:        version.Commit,
 		CanSelfUpdate: runtime.GOOS != "windows",
-		CheckedAt:     time.Now(),
+		CheckedAt:     c.now(),
 	}
 	var err error
 	switch {
@@ -282,7 +287,7 @@ func (c *Checker) Check(ctx context.Context) (Check, error) {
 func (c *Checker) fresh() (Check, error, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.expires.IsZero() && time.Now().Before(c.expires) {
+	if !c.expires.IsZero() && c.now().Before(c.expires) {
 		return c.cached, c.err, true
 	}
 	return Check{}, nil, false
@@ -295,13 +300,13 @@ func (c *Checker) fresh() (Check, error, bool) {
 func (c *Checker) store(out Check, err error) (Check, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err != nil && c.err == nil && time.Now().Before(c.expires) {
+	if err != nil && c.err == nil && c.now().Before(c.expires) {
 		return c.cached, nil
 	}
 	ttl := c.ttl
 	if err != nil {
 		ttl = failureTTL
 	}
-	c.cached, c.err, c.expires = out, err, time.Now().Add(ttl)
+	c.cached, c.err, c.expires = out, err, c.now().Add(ttl)
 	return out, err
 }

@@ -107,3 +107,16 @@ layer that owns them.
 - Keep the suite fast enough to gate merges: agents are scripted and
   deterministic, containers are seconds-lived, and every test sweeps and
   checks for leaked containers via its `aether.test` label.
+- Never let a test depend on real time passing. A cache or a deadline takes
+  an injectable clock the test winds by hand; a sleep or a tiny TTL is a
+  test that fails on whichever platform has the coarsest timer, and
+  Windows' is coarse enough that two reads of the clock can return the same
+  instant.
+- Behaviour that differs by platform gets a test per platform, not one that
+  skips. The client packages run on a Windows runner too
+  (`.github/workflows/ci.yml`), so a test whose subject refuses on Windows -
+  the self-update swap, say - goes in a `//go:build !windows` file with a
+  `_windows_test.go` counterpart asserting the refusal. Assert the status
+  before the body: an error envelope decodes into a result struct just as
+  happily, and a test that reads only the body can pass on the platform
+  that refused.

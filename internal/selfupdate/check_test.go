@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,6 +23,35 @@ func tagServer(t *testing.T, tag string) (*httptest.Server, *atomic.Int64) {
 	}))
 	t.Cleanup(srv.Close)
 	return srv, &hits
+}
+
+// fakeClock is a hand-wound clock, so a test can expire a cache without
+// sleeping and without trusting the platform's timer resolution.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newClock() *fakeClock {
+	return &fakeClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+// withClock points a checker at a hand-wound clock.
+func withClock(c *Checker, clock *fakeClock) *Checker {
+	c.now = clock.Now
+	return c
 }
 
 // setVersion pins the build metadata for one test.
@@ -148,10 +178,21 @@ func TestCheckCacheExpires(t *testing.T) {
 	setVersion(t, "v1.2.3", "abc1234")
 	srv, hits := tagServer(t, "v1.3.0")
 
-	c := NewChecker(srv.URL, time.Nanosecond)
+	clock := newClock()
+	c := withClock(NewChecker(srv.URL, time.Hour), clock)
 	if _, err := c.Check(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	// Still inside the ttl: the answer comes from the cache.
+	clock.advance(59 * time.Minute)
+	if _, err := c.Check(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("dialed %d times inside the ttl, want 1", n)
+	}
+
+	clock.advance(2 * time.Minute)
 	if _, err := c.Check(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +210,8 @@ func TestCheckCachesFailures(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewChecker(srv.URL, time.Hour)
+	clock := newClock()
+	c := withClock(NewChecker(srv.URL, time.Hour), clock)
 	if _, err := c.Check(t.Context()); err == nil {
 		t.Fatal("expected an error when the endpoint does not redirect")
 	}
@@ -178,6 +220,16 @@ func TestCheckCachesFailures(t *testing.T) {
 	}
 	if n := hits.Load(); n != 1 {
 		t.Fatalf("dialed %d times, want 1 while the failure is cached", n)
+	}
+
+	// A failure is cached far more briefly than a success, so an offline
+	// machine retries within the hour rather than at the end of it.
+	clock.advance(failureTTL + time.Minute)
+	if _, err := c.Check(t.Context()); err == nil {
+		t.Fatal("expected another error after the failure cache expired")
+	}
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("dialed %d times, want 2 once the failure cache expired", n)
 	}
 }
 
