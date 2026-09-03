@@ -126,6 +126,7 @@ type Store interface {
 	TemplateStore
 	CostStore
 	EnvironmentStore
+	ServerUpdateStore
 
 	Close() error
 }

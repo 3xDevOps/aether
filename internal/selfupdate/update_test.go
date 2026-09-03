@@ -20,7 +20,7 @@ func TestUpdateRefusesUnwritableDirectory(t *testing.T) {
 	if err := os.Mkdir(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	err := checkWritable(dir)
+	err := CheckWritable(dir)
 	if err == nil {
 		t.Fatal("expected a permission error")
 	}

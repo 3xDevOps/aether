@@ -118,7 +118,45 @@ the CLI. The banner then names both binaries and the
 `sudo systemctl restart aether-server` that the running server still needs.
 
 Administrators see a second banner when the **server** is behind the latest
-release. The dashboard cannot update the server. Run these on the server host:
+release. An admin updates it from their laptop, no shell on the server box
+needed:
+
+```sh
+aether server update [--version <tag>] [--when now|idle] [--cancel] [--yes]
+aether server update --status
+```
+
+`--when now` (the default) downloads both binaries and verifies them
+against `checksums.txt` before replacing either, then renames
+`aether-server` and the `aether` beside it into place. It restarts by
+re-executing the new binary with the same argv and environment, keeping the
+same PID: the shipped unit is `Restart=on-failure`, so a clean exit would
+not come back. If the re-exec itself fails under systemd, the server falls
+back to `systemctl restart aether-server`.
+
+`--when idle` instead records one pending update, applied the first time no
+run is working and no workspace shell is open. Two kinds of run do not hold
+it back: one parked at `needs-attention`, waiting on a person, and one
+paused with `aether pause`, whose container is frozen. Neither has anything
+running inside it and both survive the restart like any other run. A second
+`--when idle` call replaces the pending one, and `--cancel` clears it.
+
+`--yes` skips the confirmation prompt. `--status` prints the running
+version, the latest release, whether this server can update itself, any
+pending update and what it is still waiting for, and the outcome of the
+last attempt. `server update` is admin only; any member can read
+`--status`.
+
+Runs keep going through the restart: the scheduler reattaches to their live
+containers when the server comes back. Attached terminals and live syncs do
+not - `aether attach` and `aether sync --live` drop and reconnect, the same
+as a client-side update. The dashboard grows the same button in a later
+change; today it is CLI-only.
+
+On the documented unprivileged install (the server binary's directory not
+writable by the server process, see [First boot](#first-boot)), `--status`
+reports that the server cannot update itself and `server update` refuses.
+Run these on the server host instead:
 
 ```sh
 sudo aether update

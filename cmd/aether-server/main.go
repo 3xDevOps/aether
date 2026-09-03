@@ -16,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -145,6 +146,11 @@ func serve(args []string) error {
 		TailnetRequireKey: *o.tailnetRequireKey,
 
 		CoordinationDisabled: !*o.conflictCoordination,
+
+		// The one place a process is granted the right to replace itself
+		// and to ask systemd for a restart. Nothing else supplies it, so
+		// no test binary can reach the host's service manager.
+		SelfUpdate: serverupdate.Config{Host: serverupdate.HostProcess()},
 
 		StallThreshold:   *o.stallThreshold,
 		PollInterval:     *o.pollInterval,

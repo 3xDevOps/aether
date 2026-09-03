@@ -72,7 +72,7 @@ approve, pause), **kill** - plus **push** to the workspace repo and
 | --- | --- | --- | --- |
 | viewer | - | view | read the feed |
 | collaborator (default) | everything | view, steer, kill | launch runs, push, use templates |
-| admin | everything | everything | members, workspaces, budgets, templates, settings |
+| admin | everything | everything | members, workspaces, budgets, templates, settings, server self-update |
 
 The viewer row is a real choice, not a placeholder: `aether member role <id>
 viewer` assigns it. It is for the person who should watch the work and read the
@@ -113,6 +113,11 @@ Admin-only commands answer with a clear error otherwise:
 ```
 aether: rpc error -32001: workspace.add requires the admin role
 ```
+
+`aether server update` is gated the same way: `rpc error -32001: server.update
+requires the admin role` for anyone but an admin. Any member can still read
+`aether server update --status`. See [install.md](install.md#upgrading) for
+the command.
 
 ## Workspaces
 
@@ -222,8 +227,9 @@ timeline dots, overlapping diff hunks, dashboard cards. "Whose agent is doing
 what" is meant to be answerable at a glance from any screen.
 
 Every privileged act - steer, kill, approve, handoff, settings change - is
-stamped into the workspace timeline with the actor. Permissive by default,
-always attributed.
+stamped into the workspace timeline with the actor. A server update is
+stamped into every workspace's timeline, since it affects all of them.
+Permissive by default, always attributed.
 
 ### Conflict radar
 

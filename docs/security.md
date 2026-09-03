@@ -110,6 +110,28 @@ stances are these.
   and the isolation is still the container, exactly as in "The agent container"
   above.
 
+## Server self-update
+
+`aether server update` (see [install.md](install.md#upgrading)) lets an admin
+replace the running server's own binaries and restart onto them, from their
+laptop, with no shell on the server box. That is inside the existing trust
+model, not outside it: an admin can already run arbitrary code on the
+server's Docker daemon through environment builds, so choosing which release
+binary runs grants nothing new.
+
+What bounds it: the `version` a client supplies is validated as a release tag
+- `v` plus semver - and only ever names a release in the pinned
+`3xDevOps/Aether` GitHub repository; the client can never supply a URL.
+
+Both binaries are downloaded and verified against that release's
+`checksums.txt` before either is replaced, and each is then renamed into
+place from a staging file in its own directory. So a bad tag, a network
+error, or a checksum mismatch leaves both binaries exactly as they were.
+Only the renames at the end could leave `aether-server` updated and the
+`aether` beside it not, and a rename within one directory fails only when
+the filesystem does; the recorded failure then names which binaries were
+already replaced. `aether server update --status` shows it.
+
 ## Dependency and toolchain vulnerability scanning
 
 `make vulncheck` runs `govulncheck` over the whole module. CI runs it on every

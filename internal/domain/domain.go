@@ -362,3 +362,31 @@ type Run struct {
 	// container creation. Zero means no active tool snapshot.
 	ToolSnapshotID ToolSnapshotID
 }
+
+// ServerBusy reports what is keeping a server from being idle, which is
+// what a scheduled self-update waits for. It is the run engine's answer,
+// consumed by the update service, so it lives here rather than in either.
+//
+// Paused runs are counted separately because they do not hold anything
+// back: a frozen container survives a restart exactly like a live one, and
+// nothing is working inside it. They are still reported so an admin
+// looking at a pending update is not left wondering why a run that
+// `aether runs` calls running is being ignored.
+type ServerBusy struct {
+	// Unknown reports that the server could not tell what it was doing -
+	// a failed store read. It is never idle: an unknown answer must not be
+	// the one that decides to restart.
+	Unknown bool
+	// Runs is how many runs are still working, which holds an update back.
+	Runs int
+	// Paused is how many runs are paused. They do not hold an update back.
+	Paused int
+	// Shells is how many workspace shells are open. They have no container
+	// to reattach to after a restart, so each one holds an update back.
+	Shells int
+}
+
+// Idle reports that nothing is holding a server update back.
+func (b ServerBusy) Idle() bool {
+	return !b.Unknown && b.Runs == 0 && b.Shells == 0
+}

@@ -23,6 +23,7 @@ func (s *Scheduler) WorkspaceShell(ctx context.Context, member domain.MemberID, 
 		return err
 	}
 	slog.Info("workspace shell started", "mode", string(req.Mode))
+	defer s.holdShell()()
 	if err := s.validateWorkspaceShellMember(ctx, member); err != nil {
 		return err
 	}
