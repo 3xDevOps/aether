@@ -18,7 +18,7 @@ BUN  := bun
 SERVER_PLATFORMS := linux/amd64 linux/arm64
 CLI_PLATFORMS    := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: all build test test-integration vet lint vulncheck fmt-check public-audit dashboard release deploy clean
+.PHONY: all build test test-integration test-scripts vet lint vulncheck fmt-check public-audit dashboard release deploy clean
 
 all: build
 
@@ -32,6 +32,14 @@ test:
 # tagged `integration` and skipped by the plain `test` target.
 test-integration:
 	go test -race -tags integration ./...
+
+# The shell scripts in scripts/ have hermetic tests of their own: every
+# external command they call is stubbed, so nothing here touches the network,
+# a real host, or a real release.
+test-scripts:
+	sh scripts/install-test.sh
+	sh scripts/deploy-test.sh
+	sh scripts/publish-release-test.sh
 
 vet:
 	go vet ./...

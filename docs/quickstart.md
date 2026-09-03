@@ -26,14 +26,23 @@ curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/instal
 On Linux that installs `aether` and `aether-server`; on macOS just `aether`
 (the server is Linux-only). Later, `aether update` upgrades both.
 
+The script then asks what this machine is. Answer **server** on the server box
+and **client** on your own machine, and it finishes that side's setup for you:
+[step 2](#2-start-the-server) on the server, the desktop app
+([step 7](#prefer-a-native-window)) on a client. Enter takes the sensible
+default. To install the binaries and stop there, add `--role none`; see
+[install.md](install.md#the-install-script).
+
 On **Windows** the client is a manual download - three PowerShell commands in
 [install.md](install.md#manual-install). Everything else there is optional:
 pinning a version, the data layout, the desktop app.
 
 ## 2. Start the server
 
-On the server box, one command writes the systemd unit and config and prints
-how to start it:
+Answering **server** in step 1 already ran the command below on the server
+box. It writes the config and the systemd unit but deliberately starts
+nothing, so the activation line it printed is still yours to run. Run setup by
+hand if you skipped the question:
 
 ```sh
 sudo aether-server setup
@@ -207,7 +216,8 @@ browser. See [local-gateway.md](local-gateway.md).
 `aether gui` in a browser tab is the whole dashboard. If you would rather it
 lived in its own window - with desktop notifications and a dock badge when a
 run parks in `needs-attention`, plus `aether://run/<id>` deep links - build
-the desktop app. It needs Node.js 22+ and takes a minute:
+the desktop app. Answering **client** in step 1 already did this. It needs
+Node.js 22+ and takes a minute:
 
 ```sh
 aether gui build
