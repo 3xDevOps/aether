@@ -278,7 +278,15 @@ an **Agents** step, and it runs on the same two guards: for each harness
 configured on your machine it shows what a push would carry, grouped as
 memory, skills, commands, settings, MCP config, plugins, and other, plus every
 file the denylist or the scanner left behind and why. You check the harnesses
-you want and approve. Nothing is uploaded to produce that preview.
+you want and approve. Nothing is uploaded to produce that preview, and it
+reads nothing until you ask it to - walking a configuration directory that
+holds months of transcripts is not instant, so it is a button, and it can be
+stopped.
+
+- A push carries at most **1 MiB per file** and **20 MiB per snapshot**.
+  Files over either limit are left behind rather than failing the push, and
+  both the preview and `aether profile push` name each one. They are decided
+  from the file size alone, so an oversized file is never read.
 
 `--allow-secret` has no dashboard equivalent, deliberately. A scanner finding
 refuses the push there and names the file and the line: the fix is on the

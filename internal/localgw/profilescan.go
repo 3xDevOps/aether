@@ -23,7 +23,7 @@ const envScanNothingToImport = "no agent configuration found on this machine; no
 // recommendation or one error frame. The caller holds the scan slot and
 // has already sent the detecting status frame.
 func (g *Gateway) runProfileScan(ctx context.Context, conn *websocket.Conn, req envScanRequest) {
-	previews, err := profileScanInventories()
+	previews, err := profileScanInventories(ctx)
 	if err != nil {
 		_ = writeFrame(ctx, conn, envScanFrame{Type: envScanFrameError, Detail: err.Error()})
 		_ = conn.Close(websocket.StatusNormalClosure, "scan failed")
@@ -73,13 +73,17 @@ func (g *Gateway) runProfileScan(ctx context.Context, conn *websocket.Conn, req 
 // profileScanInventories previews every harness that syncs a profile and
 // has its configuration directory on this machine. A harness the user
 // does not use is simply absent from the result, never an error.
-func profileScanInventories() ([]profile.Preview, error) {
+//
+// It takes the socket's context because this work runs before the scan's
+// own timeout starts: without it, closing the socket would leave several
+// full-tree walks running with nobody to answer.
+func profileScanInventories(ctx context.Context) ([]profile.Preview, error) {
 	var out []profile.Preview
 	for _, p := range harness.Profiles() {
 		if p.LocalRoot == "" {
 			continue
 		}
-		preview, err := profile.Inventory(p.Name)
+		preview, err := profile.Inventory(ctx, p.Name)
 		if err != nil {
 			return nil, fmt.Errorf("read the %s configuration: %w", p.Name, err)
 		}

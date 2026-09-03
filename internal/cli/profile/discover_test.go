@@ -18,7 +18,7 @@ func TestDiscoverExcludesRegistryCredentials(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "keychain"), "k")
 	mustWrite(t, filepath.Join(root, "commands", "review.md"), "# review\n")
 
-	files, err := Discover("claude", nil)
+	files, err := Discover(t.Context(), "claude", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestDiscoverIgnoreFilePatternsAndPrecedence(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "tmp", "x.txt"), "x")
 	mustWrite(t, filepath.Join(root, IgnoreFileName), "*.log\ntmp/\n!keep.log\n")
 
-	files, err := Discover("claude", nil)
+	files, err := Discover(t.Context(), "claude", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestDiscoverNegationCannotReincludeDenied(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "auth.json"), `{"token":"no"}`)
 	mustWrite(t, filepath.Join(root, IgnoreFileName), "*\n!settings.json\n!.credentials.json\n!auth.json\n")
 
-	files, err := Discover("claude", nil)
+	files, err := Discover(t.Context(), "claude", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestDiscoverSymlinkEscapeRejected(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Discover("claude", nil)
+	_, err := Discover(t.Context(), "claude", nil)
 	if err == nil {
 		t.Fatal("expected symlink escape error")
 	}
@@ -117,7 +117,7 @@ func TestDiscoverEmbeddedTokenBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustWrite(t, filepath.Join(root, "settings.json"), string(fixture))
-	_, err = Discover("claude", nil)
+	_, err = Discover(t.Context(), "claude", nil)
 	if err == nil {
 		t.Fatal("expected secret finding")
 	}
@@ -137,7 +137,7 @@ func TestDiscoverAllowSecretSucceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustWrite(t, filepath.Join(root, "settings.json"), string(fixture))
-	files, err := Discover("claude", []string{"settings.json"})
+	files, err := Discover(t.Context(), "claude", []string{"settings.json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestDiscoverAllowSecretDoesNotMatchBasenameAlone(t *testing.T) {
 	}
 	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
 	mustWrite(t, filepath.Join(root, "nested", "settings.json"), string(fixture))
-	_, err = Discover("claude", []string{"settings.json"})
+	_, err = Discover(t.Context(), "claude", []string{"settings.json"})
 	if err == nil {
 		t.Fatal("basename allow should not cover nested/settings.json")
 	}

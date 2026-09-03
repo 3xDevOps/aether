@@ -14,7 +14,7 @@ import (
 // carry from this machine, and what the guards would leave behind.
 // Nothing is uploaded and the linked server is never called: the walk,
 // the denylist, the ignore file, and the scanner all run here.
-func (g *Gateway) localProfilePreview(_ *http.Request, body []byte) (any, *protocol.Error) {
+func (g *Gateway) localProfilePreview(r *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Harness string `json:"harness"`
 	}
@@ -32,7 +32,10 @@ func (g *Gateway) localProfilePreview(_ *http.Request, body []byte) (any, *proto
 	if _, _, err := profile.LocalDir(params.Harness); err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
-	preview, err := profile.Inventory(params.Harness)
+	// The request context stops the walk when the browser gives up or
+	// navigates away: a profile root can hold thousands of files, and
+	// nobody is waiting for the answer any more.
+	preview, err := profile.Inventory(r.Context(), params.Harness)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
@@ -60,7 +63,7 @@ func (g *Gateway) localProfilePush(r *http.Request, body []byte) (any, *protocol
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
-	files, err := profile.Discover(params.Harness, nil)
+	files, skipped, err := profile.DiscoverFiles(r.Context(), params.Harness, nil)
 	if err != nil {
 		// The harness name is already valid, so everything Discover
 		// refuses - a finding, a symlink escape, a root that is not
@@ -84,17 +87,22 @@ func (g *Gateway) localProfilePush(r *http.Request, body []byte) (any, *protocol
 		totalBytes += int64(len(f.Content))
 	}
 	return struct {
-		Harness    string `json:"harness"`
-		SnapshotID string `json:"snapshot_id"`
-		Digest     string `json:"digest"`
-		Files      int    `json:"files"`
-		Bytes      int64  `json:"bytes"`
+		Harness    string              `json:"harness"`
+		SnapshotID string              `json:"snapshot_id"`
+		Digest     string              `json:"digest"`
+		Files      int                 `json:"files"`
+		Bytes      int64               `json:"bytes"`
+		Skipped    []profile.Exclusion `json:"skipped,omitempty"`
 	}{
 		Harness:    params.Harness,
 		SnapshotID: pushed.Snapshot.ID,
 		Digest:     pushed.Snapshot.Digest,
 		Files:      len(files),
 		Bytes:      totalBytes,
+		// Files the size caps left behind. The push succeeded without
+		// them, so this is the only place the user learns they are not
+		// on the server.
+		Skipped: skipped,
 	}, nil
 }
 

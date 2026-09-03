@@ -1,6 +1,8 @@
 package profile
 
 import (
+	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,6 +23,14 @@ const (
 	ExcludeIgnored = "ignored"
 	// ExcludeSymlink is a symlink pointing outside the profile root.
 	ExcludeSymlink = "symlink"
+	// ExcludeTooLarge is a file over the server's per-file cap. It is
+	// never read, so its content is never scanned either - which is what
+	// keeps a profile root full of multi-megabyte transcripts from
+	// costing minutes of regex time to preview.
+	ExcludeTooLarge = "too-large"
+	// ExcludeOverBudget is a file left out because the files before it
+	// already filled the server's per-snapshot cap.
+	ExcludeOverBudget = "over-budget"
 )
 
 // visited is one file the walk classified. Reason is empty for a file
@@ -41,12 +51,17 @@ type visited struct {
 
 // walkRoot walks a harness profile root once, applying the same rules a
 // push applies - credential denylist, .aether-profile-ignore, symlink
-// escape rejection, content scan - and hands every file to visit with its
-// verdict. allowed names files whose scanner findings pass (the CLI's
-// --allow-secret); Inventory passes none. A visit error aborts the walk
-// and is returned unchanged, which is how Discover stops at the first
-// blocking finding.
-func walkRoot(root string, prof harness.Profile, allowed map[string]bool, visit func(visited) error) error {
+// escape rejection, size caps, content scan - and hands every file to
+// visit with its verdict. allowed names files whose scanner findings pass
+// (the CLI's --allow-secret); Inventory passes none. A visit error aborts
+// the walk and is returned unchanged, which is how Discover stops at the
+// first blocking finding.
+//
+// The walk checks ctx between entries: a profile root can hold thousands
+// of files, so a caller that has gone away - a closed HTTP request, a
+// closed scan socket - must be able to stop the work rather than leave it
+// running against the user's home directory.
+func walkRoot(ctx context.Context, root string, prof harness.Profile, allowed map[string]bool, visit func(visited) error) error {
 	rootResolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		rootResolved = root
@@ -59,9 +74,16 @@ func walkRoot(root string, prof harness.Profile, allowed map[string]bool, visit 
 	case !os.IsNotExist(err):
 		return err
 	}
+	// total is the size of everything the walk has accepted so far, so a
+	// tree that would blow the per-snapshot cap stops costing time (and
+	// promising files) at the point the server would stop accepting them.
+	var total int64
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if path == root {
 			return nil
@@ -100,10 +122,25 @@ func walkRoot(root string, prof harness.Profile, allowed map[string]bool, visit 
 		if matcher != nil && matcher.ignored(relSlash) {
 			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeIgnored, Detail: IgnoreFileName})
 		}
+		// The size caps are applied from the stat, before the file is
+		// opened. The server refuses these files anyway, so reading one
+		// buys nothing - and reading it would also hand it to the secret
+		// scanner, whose cost grows sharply with size. A profile root
+		// holding large agent transcripts is ordinary, so this is the
+		// difference between a preview that answers and one that hangs.
+		if info.Size() > profilesvc.MaxFileBytes {
+			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeTooLarge,
+				Detail: fmt.Sprintf("%d bytes, over the %d-byte limit for one file", info.Size(), profilesvc.MaxFileBytes)})
+		}
+		if total+info.Size() > profilesvc.MaxTotalBytes {
+			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeOverBudget,
+				Detail: fmt.Sprintf("the %d-byte limit for one snapshot was already reached", profilesvc.MaxTotalBytes)})
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
+		total += info.Size()
 		file := visited{
 			Rel:     relSlash,
 			Abs:     path,

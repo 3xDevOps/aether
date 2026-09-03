@@ -17,11 +17,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
+// MaxFileBytes and MaxTotalBytes are the size caps a push must satisfy.
+// They are exported so a client can apply the same numbers before
+// uploading anything: a preview that promised a file this rejects would
+// be a promise the server breaks.
 const (
-	maxFileBytes  = 1 << 20  // 1 MiB
-	maxTotalBytes = 20 << 20 // 20 MiB
-	retainLatest  = 10
+	MaxFileBytes  = 1 << 20  // 1 MiB
+	MaxTotalBytes = 20 << 20 // 20 MiB
 )
+
+const retainLatest = 10
 
 // unix file-type bits a client might send as st_mode.
 const (
@@ -226,12 +231,12 @@ func validateFiles(prof harness.Profile, files []File) ([]File, error) {
 			return nil, fmt.Errorf("%w: %s is a credential/token basename", ErrDenied, path.Base(rel))
 		}
 		n := len(f.Content)
-		if n > maxFileBytes {
-			return nil, fmt.Errorf("%w: %s is %d bytes (max %d)", ErrTooLarge, rel, n, maxFileBytes)
+		if n > MaxFileBytes {
+			return nil, fmt.Errorf("%w: %s is %d bytes (max %d)", ErrTooLarge, rel, n, MaxFileBytes)
 		}
 		total += n
-		if total > maxTotalBytes {
-			return nil, fmt.Errorf("%w: snapshot exceeds %d bytes", ErrTooLarge, maxTotalBytes)
+		if total > MaxTotalBytes {
+			return nil, fmt.Errorf("%w: snapshot exceeds %d bytes", ErrTooLarge, MaxTotalBytes)
 		}
 		if _, dup := seen[rel]; dup {
 			return nil, fmt.Errorf("%w: duplicate path %s", ErrDenied, rel)

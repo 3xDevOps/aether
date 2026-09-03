@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"context"
 	"os"
 	"path"
 	"sort"
@@ -87,9 +88,24 @@ type Preview struct {
 	Bytes      int64       `json:"bytes"`
 	Categories []Category  `json:"categories"`
 	Excluded   []Exclusion `json:"excluded"`
-	// Blocked is true when a scanner finding would refuse the push. The
-	// matching entry in Excluded names the file.
+	// Blocked is true when a push of this profile would be refused rather
+	// than partially carried. It covers every condition Discover aborts
+	// on, so a preview can never promise files a push then refuses.
 	Blocked bool `json:"blocked"`
+	// BlockedReason is the Exclude constant behind Blocked, and
+	// BlockedDetail the sentence for the user. Only a secret finding has
+	// a CLI override, so a surface offering one keys off the reason
+	// rather than assuming.
+	BlockedReason string `json:"blocked_reason,omitempty"`
+	BlockedPath   string `json:"blocked_path,omitempty"`
+	BlockedDetail string `json:"blocked_detail,omitempty"`
+}
+
+// blocksPush reports whether an exclusion reason is one discoverRoot
+// aborts on rather than skips. It is the single place the two agree, so
+// adding an aborting reason to the walk cannot leave the preview behind.
+func blocksPush(reason string) bool {
+	return reason == ExcludeSecret || reason == ExcludeSymlink
 }
 
 // CategoryNames returns the categories the preview found files in, in
@@ -108,7 +124,7 @@ func (p Preview) CategoryNames() []string {
 // never disagree about the denylist, the ignore file, or the scanner; a
 // finding is recorded here instead of aborting, because the point of a
 // preview is to show the user the file they have to fix.
-func Inventory(harnessName string) (Preview, error) {
+func Inventory(ctx context.Context, harnessName string) (Preview, error) {
 	root, prof, err := LocalDir(harnessName)
 	if err != nil {
 		return Preview{}, err
@@ -125,15 +141,22 @@ func Inventory(harnessName string) (Preview, error) {
 	}
 	preview.Present = true
 	groups := map[string]*Category{}
-	walkErr := walkRoot(root, prof, nil, func(f visited) error {
+	walkErr := walkRoot(ctx, root, prof, nil, func(f visited) error {
 		if f.Reason != "" {
 			detail := f.Detail
 			if f.Reason == ExcludeSecret && f.Finding.Location != "" {
 				detail += " at " + f.Finding.Location
 			}
 			preview.Excluded = append(preview.Excluded, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: detail})
-			if f.Reason == ExcludeSecret {
+			// Whatever aborts a push must block the preview, or the
+			// preview promises files the push then refuses. The first
+			// such finding is the one the user has to fix, so it is the
+			// one named.
+			if blocksPush(f.Reason) && !preview.Blocked {
 				preview.Blocked = true
+				preview.BlockedReason = f.Reason
+				preview.BlockedPath = f.Rel
+				preview.BlockedDetail = detail
 			}
 			return nil
 		}

@@ -92,6 +92,15 @@ func ParseRecommendation(data []byte, previews []Preview) (Recommendation, error
 			}
 		}
 	}
+	// Prompt rule 1: one entry per harness the inventory names, whether
+	// or not it is imported. A document that simply omits one is a
+	// document the agent did not finish, and the checklist would silently
+	// present that harness as "not recommended".
+	for _, p := range previews {
+		if !seen[p.Harness] {
+			errs = append(errs, fmt.Errorf("harness %q was in the inventory but has no entry", p.Harness))
+		}
+	}
 	if len(errs) > 0 {
 		return Recommendation{}, fmt.Errorf("profile: invalid recommendation: %w", errors.Join(errs...))
 	}

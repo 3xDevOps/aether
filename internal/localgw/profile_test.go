@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/cli/profile"
 	"github.com/3xDevOps/Aether/internal/harness"
+	profilesvc "github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -353,5 +355,50 @@ func TestLocalProfileVerbParams(t *testing.T) {
 	}
 	if perr := decodeError(t, rec.Body.Bytes()); perr.Code != protocol.CodeMethodNotFound {
 		t.Errorf("code = %d, want %d", perr.Code, protocol.CodeMethodNotFound)
+	}
+}
+
+// TestLocalProfilePushReportsSkipped covers the size caps at the wire: an
+// oversized file is not sent, the push still succeeds, and the answer says
+// which file was left behind - the only place the caller learns it is not
+// on the server.
+func TestLocalProfilePushReportsSkipped(t *testing.T) {
+	profileHome(t, map[string]string{
+		"CLAUDE.md":           "# standing instructions\n",
+		"projects/huge.jsonl": strings.Repeat("x", profilesvc.MaxFileBytes+1),
+	})
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
+		results: map[string]json.RawMessage{protocol.MethodProfilePush: pushResultJSON(t, "sha1")},
+	}}
+	g := newVerbGateway(t, backend, cli.Config{})
+
+	rec := do(g, http.MethodPost, "/local/v1/profile.push", `{"harness":"claude"}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("profile.push = %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Files   int `json:"files"`
+		Skipped []struct {
+			Path   string `json:"path"`
+			Reason string `json:"reason"`
+			Detail string `json:"detail"`
+		} `json:"skipped"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Files != 1 {
+		t.Errorf("files = %d, want only the file under the cap", got.Files)
+	}
+	if len(got.Skipped) != 1 || got.Skipped[0].Path != "projects/huge.jsonl" ||
+		got.Skipped[0].Reason != profile.ExcludeTooLarge {
+		t.Fatalf("skipped = %+v", got.Skipped)
+	}
+	// The oversized file never reaches the wire, not even as a path entry.
+	for _, call := range backend.recorded() {
+		if call.method == protocol.MethodProfilePush &&
+			strings.Contains(call.params, "huge.jsonl") {
+			t.Fatalf("the oversized file was sent: %s", call.params)
+		}
 	}
 }

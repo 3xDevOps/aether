@@ -116,3 +116,20 @@ func TestParseRecommendationRejects(t *testing.T) {
 		})
 	}
 }
+
+// TestParseRecommendationRequiresEveryHarness enforces the prompt's own
+// rule 1: one entry per harness the inventory named. An omitted harness
+// would otherwise reach the checklist looking like a considered "no".
+func TestParseRecommendationRequiresEveryHarness(t *testing.T) {
+	doc := `{"harnesses":[
+		{"harness":"claude","import":true,"categories":["memory"],
+		 "reason":"Standing instructions carry over."}
+	]}`
+	_, err := ParseRecommendation([]byte(doc), recommendPreviews())
+	if err == nil {
+		t.Fatal("a recommendation that skipped codex was accepted")
+	}
+	if !strings.Contains(err.Error(), "codex") {
+		t.Errorf("error does not name the missing harness: %v", err)
+	}
+}

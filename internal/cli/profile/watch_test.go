@@ -40,7 +40,7 @@ func TestNoProfileSyncProducesNoAutomaticUploads(t *testing.T) {
 func TestManualPushPathIndependentOfWatcher(t *testing.T) {
 	root := setupClaudeRoot(t)
 	mustWrite(t, root+"/settings.json", `{"ok":true}`)
-	files, err := Discover("claude", nil)
+	files, err := Discover(t.Context(), "claude", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

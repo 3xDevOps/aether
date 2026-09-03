@@ -249,7 +249,7 @@ func defaultPushOne(ctx context.Context, c *protocol.Client, harnessName string)
 	if c == nil {
 		return errors.New("profile sync: no control client")
 	}
-	files, err := Discover(harnessName, nil)
+	files, err := Discover(ctx, harnessName, nil)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil

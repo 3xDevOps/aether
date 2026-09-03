@@ -242,7 +242,7 @@ authority.
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
 | `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
-| `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422}` |
+| `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422,"skipped":[...]}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"..."}` |
 | `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
@@ -307,9 +307,24 @@ authority.
   `truncated` set when it was cut; `files` and `bytes` stay exact.
   `reason` on an exclusion is `credential` (a denylisted basename),
   `secret` (a content-scanner finding), `ignored` (an
-  `.aether-profile-ignore` match), or `symlink` (a link out of the
-  profile root). `blocked` is true when a scanner finding would refuse
-  the push; the matching `excluded` entry names the file.
+  `.aether-profile-ignore` match), `symlink` (a link out of the profile
+  root), `too-large` (over the 1 MiB a push allows for one file), or
+  `over-budget` (the 20 MiB a snapshot holds was already filled).
+- The two size reasons are decided from the file's stat, before it is
+  opened, so an oversized file is never read and never scanned. That is
+  not only a saving: an agent's configuration directory routinely holds
+  hundreds of megabytes of transcripts, and scanning those would make a
+  preview take minutes. The caps are the server's own
+  (`internal/profile`), so the preview offers exactly the files a push
+  can carry.
+- `blocked` is true when a push would be **refused outright** rather than
+  partially carried - a `secret` or a `symlink` escape, the two
+  conditions discovery aborts on. `blocked_reason`, `blocked_path` and
+  `blocked_detail` name which and where. Size exclusions do not block:
+  the push succeeds carrying what fits, and `profile.push` answers with a
+  `skipped` list naming what it left behind. Only a `secret` has the
+  CLI's `--allow-secret` override, so a surface offering one reads
+  `blocked_reason` rather than assuming.
 - `present:false` - this machine has no profile root for that harness -
   is a normal answer with zero counts, not an error. A harness name the
   registry does not know, or one with no profile sync, answers `-32602`.
@@ -322,7 +337,12 @@ authority.
   the file has to be fixed on the machine it lives on; the
   `--allow-secret` override stays on the CLI, where `--workspace` makes
   it attributable on a timeline. A missing profile root refuses with
-  `-32002` too.
+  `-32002` too. `skipped` carries the size exclusions, in the same shape
+  `profile.preview` uses: the push succeeded without those files, so this
+  is the only place the caller learns they are not on the server.
+- Both verbs walk the whole profile root, and both stop when the request
+  is cancelled: a client that closes the connection stops the work on
+  this machine, rather than only stopping its own wait.
 - `pull`, `repo.push`, `sync.start`, and `sync.stop` refuse with `-32002`
   when no repo is linked.
 - A sync session's states are `starting` (the overlay is dialing the run

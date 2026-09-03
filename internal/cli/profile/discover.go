@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,25 +59,39 @@ func LocalDir(harnessName string) (string, harness.Profile, error) {
 // scanner findings. Negation in the ignore file cannot re-include denied
 // credential paths, extra credential names, symlink escapes, or findings
 // that were not explicitly allowed.
-func Discover(harnessName string, allowSecret []string) ([]LocalFile, error) {
-	root, prof, err := LocalDir(harnessName)
-	if err != nil {
-		return nil, err
-	}
-	return discoverRoot(root, prof, allowSecret)
+func Discover(ctx context.Context, harnessName string, allowSecret []string) ([]LocalFile, error) {
+	files, _, err := DiscoverFiles(ctx, harnessName, allowSecret)
+	return files, err
 }
 
-func discoverRoot(root string, prof harness.Profile, allowSecret []string) ([]LocalFile, error) {
+// DiscoverFiles is Discover plus the files the size caps left behind.
+// Those are the one exclusion a caller has to be able to mention: a
+// credential or an ignored file is excluded by a rule the user wrote or
+// asked for, but a file dropped for its size is one they would otherwise
+// expect to see on the server. Callers with somewhere to print report
+// them; the daemon, which pushes unattended, uses Discover.
+func DiscoverFiles(ctx context.Context, harnessName string, allowSecret []string) ([]LocalFile, []Exclusion, error) {
+	root, prof, err := LocalDir(harnessName)
+	if err != nil {
+		return nil, nil, err
+	}
+	return discoverRoot(ctx, root, prof, allowSecret)
+}
+
+func discoverRoot(ctx context.Context, root string, prof harness.Profile, allowSecret []string) ([]LocalFile, []Exclusion, error) {
 	if err := statRoot(root); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []LocalFile
-	err := walkRoot(root, prof, allowSet(root, allowSecret), func(f visited) error {
+	var skipped []Exclusion
+	err := walkRoot(ctx, root, prof, allowSet(root, allowSecret), func(f visited) error {
 		switch f.Reason {
 		case ExcludeSecret:
 			return &DiscoverError{Path: f.Finding.Path, Location: f.Finding.Location, Message: f.Detail}
 		case ExcludeSymlink:
 			return &DiscoverError{Path: f.Rel, Message: f.Detail}
+		case ExcludeTooLarge, ExcludeOverBudget:
+			skipped = append(skipped, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: f.Detail})
 		case "":
 			out = append(out, LocalFile{Path: f.Rel, AbsPath: f.Abs, Mode: f.Mode, Content: f.Content})
 		}
@@ -84,9 +99,9 @@ func discoverRoot(root string, prof harness.Profile, allowSecret []string) ([]Lo
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return out, nil
+	return out, skipped, nil
 }
 
 // statRoot checks a profile root exists and is a directory before a walk.
