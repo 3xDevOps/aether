@@ -359,6 +359,12 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       ref: 'refs/heads/aether/run-1-checkout',
       output: '',
     })),
+    localRepoPush: vi.fn(async () => ({
+      branch: 'main',
+      remote: 'aether',
+      output:
+        'To ssh://alice@host:2222/wsp_1\n * [new branch] main -> main',
+    })),
     localSyncStart: vi.fn(async (runID: string) => ({
       run_id: runID,
       state: 'running',

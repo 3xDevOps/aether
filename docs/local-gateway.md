@@ -126,8 +126,8 @@ the same capability checks the SSH transport applies.
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","shell","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
-          "link.repo","link.status","link.switch","pull","sync.start",
-          "sync.status","sync.stop"]}
+          "link.repo","link.status","link.switch","pull","repo.push",
+          "sync.start","sync.status","sync.stop"]}
 ```
 
 `methods` is `["*"]` because this gateway forwards every control-channel
@@ -236,6 +236,7 @@ authority.
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"..."}` |
+| `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
 | `sync.stop` | `{"run_id":"..."}` | `{"run_id":"...","state":"stopped"}` |
 | `sync.status` | `{}` | `{"sessions":[{"run_id":"...","state":"...","conflict":"..."\|null}]}` |
@@ -250,12 +251,35 @@ authority.
   workspace resolves implicitly; none or several answers `-32002`
   (invalid state) and is resolved server-side or with the CLI's
   `--workspace` flag first.
-- `pull`, `sync.start`, and `sync.stop` refuse with `-32002` when no repo
-  is linked. A sync session's states are `starting` (the overlay is
-  dialing the run worktree), `running`, `stopped`, `conflict` (with the
-  conflict text in `conflict`), and `error`. A conflict is also reported
-  to the server as a `sync.conflict` call so both affected members see
-  the event; `sync.stop` dismisses a standing conflict.
+- `repo.push` seeds the workspace: one
+  `git push --no-follow-tags -u aether refs/heads/<base>:refs/heads/<base>`
+  in the linked repository, where `<base>` is that workspace's base
+  branch. The same sole-workspace rule as `link.repo` applies when
+  `workspace_id` is omitted; unlike `link.repo`, a `workspace_id` no
+  workspace carries is refused. The refspec is fully qualified so the
+  push carries that one branch and nothing else: no force, no second ref,
+  and no tags even where `push.followTags` is set. `output` is everything
+  git printed.
+- `repo.push` refuses with `-32002` (invalid state), naming the next step,
+  when the repository has no commits, has no local branch named `<base>`
+  (the message names the branch that is checked out instead), has no
+  `aether` remote yet, or has an `aether` remote pointing at a different
+  workspace than the one asked for - the branch would come from one
+  workspace and the objects would land in another. A push git ran and the
+  server rejected - branch protection, a missing key - answers `-32603`
+  carrying git's own stderr.
+- `repo.push` is bounded at ten minutes and runs with
+  `GIT_TERMINAL_PROMPT=0`, so git cannot block on its own credential
+  prompt. That does not reach `ssh`: a passphrase-protected key with no
+  agent still waits on ssh's own prompt until the ten minutes are up. Load
+  the key into an agent before pushing from the dashboard.
+- `pull`, `repo.push`, `sync.start`, and `sync.stop` refuse with `-32002`
+  when no repo is linked.
+- A sync session's states are `starting` (the overlay is dialing the run
+  worktree), `running`, `stopped`, `conflict` (with the conflict text in
+  `conflict`), and `error`. A conflict is also reported to the server as a
+  `sync.conflict` call so both affected members see the event;
+  `sync.stop` dismisses a standing conflict.
 - `image.scaffold` refuses with `-32002` when the files already exist,
   rather than overwriting them.
 
