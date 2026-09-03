@@ -126,8 +126,8 @@ the same capability checks the SSH transport applies.
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","shell","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
-          "link.repo","link.status","link.switch","pull","sync.start",
-          "sync.status","sync.stop"]}
+          "link.repo","link.status","link.switch","pull","repo.push",
+          "sync.start","sync.status","sync.stop"]}
 ```
 
 `methods` is `["*"]` because this gateway forwards every control-channel
@@ -236,6 +236,7 @@ authority.
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"..."}` |
+| `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
 | `sync.stop` | `{"run_id":"..."}` | `{"run_id":"...","state":"stopped"}` |
 | `sync.status` | `{}` | `{"sessions":[{"run_id":"...","state":"...","conflict":"..."\|null}]}` |
@@ -250,8 +251,18 @@ authority.
   workspace resolves implicitly; none or several answers `-32002`
   (invalid state) and is resolved server-side or with the CLI's
   `--workspace` flag first.
-- `pull`, `sync.start`, and `sync.stop` refuse with `-32002` when no repo
-  is linked. A sync session's states are `starting` (the overlay is
+- `repo.push` seeds the workspace: one `git push -u aether <base>` in the
+  linked repository, where `<base>` is that workspace's base branch (the
+  workspace resolves exactly like `link.repo`). It never forces and never
+  pushes a second ref. `output` is everything git printed. It refuses with
+  `-32002` (invalid state), naming the next step, when the repository has
+  no commits, has no local branch named `<base>` (the message names the
+  branch that is checked out instead), or has no `aether` remote yet. A
+  push git ran and the server rejected - branch protection, a missing key -
+  answers `-32603` carrying git's own stderr. The push is bounded at ten
+  minutes.
+- `pull`, `repo.push`, `sync.start`, and `sync.stop` refuse with `-32002`
+  when no repo is linked. A sync session's states are `starting` (the overlay is
   dialing the run worktree), `running`, `stopped`, `conflict` (with the
   conflict text in `conflict`), and `error`. A conflict is also reported
   to the server as a `sync.conflict` call so both affected members see

@@ -133,7 +133,14 @@ git push -u aether main
 
 `link --repo` adds an `aether` git remote - a normal git remote over the same
 SSH port, no separate credentials. With multiple workspaces, add
-`--workspace <name-or-id>` (`aether workspace list` shows them).
+`--workspace <name-or-id>` (`aether workspace list` shows them). The push
+sends the workspace's base branch; replace `main` if you created the
+workspace with `--base`.
+
+In the dashboard, the onboarding wizard's Repository step does both for
+you: it adds the remote, then its **Push now** button runs that push in
+your clone and shows git's output. The command above is the same thing by
+hand.
 
 ## 5. Set up your agent
 
