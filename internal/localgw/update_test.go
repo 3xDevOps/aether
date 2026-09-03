@@ -124,6 +124,108 @@ func TestUpdateCheckReportsDevBuild(t *testing.T) {
 	}
 }
 
+func TestUpdateCheckSurvivesAnUnreachableServer(t *testing.T) {
+	pinVersion(t)
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{errs: map[string]*protocol.Error{
+		protocol.MethodServerInfo: {Code: protocol.CodeUnavailable, Message: "server unreachable: dial tcp: connection refused"},
+	}}}
+	g := updateGateway(t, backend, false)
+
+	rec := do(g, http.MethodPost, "/local/v1/update.check", "{}", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s (a dead server must not take the CLI answer with it)", rec.Code, rec.Body)
+	}
+	var got struct {
+		CLI           selfupdate.Check `json:"cli"`
+		ServerVersion string           `json:"server_version"`
+		ServerBehind  bool             `json:"server_behind"`
+		ServerError   string           `json:"server_error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.CLI.UpdateAvailable || got.CLI.Latest != releaseTag {
+		t.Fatalf("cli check = %+v, want the CLI half answered in full", got.CLI)
+	}
+	if got.ServerVersion != "" || got.ServerBehind {
+		t.Errorf("server = %q behind=%v, want an unknown server rather than a guess", got.ServerVersion, got.ServerBehind)
+	}
+	if !strings.Contains(got.ServerError, "server unreachable") {
+		t.Errorf("server_error = %q, want the backend's own message", got.ServerError)
+	}
+}
+
+func TestUpdateApplyCarriesTheServerRestart(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, false)
+	stubApply(t, func(context.Context, string, string) ([]string, error) {
+		// A single-box install: the swap replaced the server binary too.
+		return []string{"/usr/local/bin/aether", "/usr/local/bin/aether-server"}, nil
+	})
+
+	rec := do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Updated        []string `json:"updated"`
+		RestartCommand string   `json:"restart_command"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Updated) != 2 {
+		t.Fatalf("updated = %v, want both binaries", got.Updated)
+	}
+	if got.RestartCommand != "sudo systemctl restart aether-server" {
+		t.Fatalf("restart_command = %q, want the command aether update prints", got.RestartCommand)
+	}
+}
+
+func TestUpdateApplyOmitsTheRestartWithoutAServer(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, false)
+	stubApply(t, func(context.Context, string, string) ([]string, error) {
+		return []string{"/usr/local/bin/aether"}, nil
+	})
+
+	rec := do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+	var got struct {
+		RestartCommand string `json:"restart_command"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.RestartCommand != "" {
+		t.Fatalf("restart_command = %q on a client-only machine", got.RestartCommand)
+	}
+}
+
+func TestUpdateApplyRefusesWhenAlreadyCurrent(t *testing.T) {
+	old := version.Version
+	t.Cleanup(func() { version.Version = old })
+	version.Version = releaseTag
+	g := updateGateway(t, &verbStubBackend{}, true)
+	stubApply(t, func(context.Context, string, string) ([]string, error) {
+		t.Fatal("the newest release must not be downloaded over itself")
+		return nil, nil
+	})
+
+	rec := do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState {
+		t.Fatalf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(perr.Message, releaseTag) {
+		t.Fatalf("message = %q, want it to name the release already installed", perr.Message)
+	}
+	select {
+	case <-g.Exit():
+		t.Fatal("a refused update asked the process to exit")
+	default:
+	}
+}
+
 func TestUpdateApplyRefusesDevBuild(t *testing.T) {
 	g := updateGateway(t, &verbStubBackend{}, false)
 	stubApply(t, func(context.Context, string, string) ([]string, error) {
