@@ -9,9 +9,9 @@
 // queue is normally empty.
 //
 // The roster is presence: members are online while their heartbeats keep
-// arriving and watching while they hold an attach, and they fall offline
-// when the heartbeat goes stale. It is in-memory on purpose - presence is
-// true only of the running server.
+// arriving and watching while they hold an attach, and they fall offline when
+// the heartbeat goes stale or their last SSH connection closes. It is
+// in-memory on purpose - presence is true only of the running server.
 package approvals
 
 import (
@@ -29,7 +29,7 @@ import (
 
 // DefaultTTL is how long a member stays online after their last
 // heartbeat. Clients heartbeat well inside it.
-const DefaultTTL = 90 * time.Second
+const DefaultTTL = 45 * time.Second
 
 // ErrRunMismatch is returned when a decision names a run the request does
 // not belong to. The capability check is made against the named run, so a
@@ -360,6 +360,19 @@ func (s *Service) Decide(ctx context.Context, id string, run domain.RunID, appro
 	}
 	s.publish(ctx, a, by)
 	return a, nil
+}
+
+// ConnectionOpened records an authenticated SSH connection for member.
+func (s *Service) ConnectionOpened(member domain.MemberID) {
+	s.roster.connectionOpened(member)
+}
+
+// ConnectionClosed records the end of an authenticated SSH connection.
+// When it was the member's last connection, publish their offline rows now.
+func (s *Service) ConnectionClosed(member domain.MemberID) {
+	for _, p := range s.roster.connectionClosed(member) {
+		s.publishPresence(context.Background(), p.Member, p.Workspace, events.PresenceOffline)
+	}
 }
 
 // Heartbeat refreshes a member's presence, publishing the online

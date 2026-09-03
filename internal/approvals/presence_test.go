@@ -56,6 +56,7 @@ func TestStaleHeartbeatGoesOfflineWatcherStays(t *testing.T) {
 	defer func() { _ = presence.Close() }()
 
 	const workspace = domain.WorkspaceID("ws")
+	svc.ConnectionOpened("ada")
 	if err := svc.Heartbeat(ctx, "ada", workspace); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
@@ -113,6 +114,8 @@ func TestWatchingSurvivesSecondAttachAndOtherWorkspace(t *testing.T) {
 	defer func() { _ = svc.Close() }()
 
 	const wsA, wsB = domain.WorkspaceID("ws-a"), domain.WorkspaceID("ws-b")
+	svc.ConnectionOpened("bob")
+	svc.ConnectionOpened("ada")
 	presence := func(member domain.MemberID, run domain.RunID, state events.PresenceState) {
 		t.Helper()
 		if _, perr := bus.Publish(ctx, events.Event{
@@ -147,5 +150,122 @@ func TestWatchingSurvivesSecondAttachAndOtherWorkspace(t *testing.T) {
 	}
 	if got := svc.Roster(wsB, "r1"); len(got) != 0 {
 		t.Fatalf("roster(ws-b, r1) = %+v, want empty: r1 is not that workspace's run", got)
+	}
+}
+
+func TestConnectionClosedPublishesOfflineWhenLastConnectionCloses(t *testing.T) {
+	ctx := context.Background()
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("bus: %v", err)
+	}
+	defer func() { _ = bus.Close() }()
+
+	svc, err := New(Config{Store: nopStore{}, Bus: bus})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = svc.Close() }()
+
+	presence, err := bus.Subscribe(ctx, events.SubscribeOptions{
+		Filter: events.Filter{Types: []events.Type{events.TypePresence}},
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = presence.Close() }()
+
+	const member = domain.MemberID("ada")
+	const workspace = domain.WorkspaceID("ws")
+	svc.ConnectionOpened(member)
+	if err := svc.Heartbeat(ctx, member, workspace); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	waitPresenceState(t, presence, member, events.PresenceOnline)
+
+	svc.ConnectionClosed(member)
+	waitPresenceState(t, presence, member, events.PresenceOffline)
+	if got := svc.Roster(workspace, ""); len(got) != 0 {
+		t.Fatalf("roster after close = %+v, want empty", got)
+	}
+}
+
+func TestSecondConnectionKeepsMemberOnline(t *testing.T) {
+	ctx := context.Background()
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("bus: %v", err)
+	}
+	defer func() { _ = bus.Close() }()
+
+	svc, err := New(Config{Store: nopStore{}, Bus: bus})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = svc.Close() }()
+
+	presence, err := bus.Subscribe(ctx, events.SubscribeOptions{
+		Filter: events.Filter{Types: []events.Type{events.TypePresence}},
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = presence.Close() }()
+
+	const member = domain.MemberID("ada")
+	const workspace = domain.WorkspaceID("ws")
+	svc.ConnectionOpened(member)
+	svc.ConnectionOpened(member)
+	if err := svc.Heartbeat(ctx, member, workspace); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	waitPresenceState(t, presence, member, events.PresenceOnline)
+
+	svc.ConnectionClosed(member)
+	if got := svc.Roster(workspace, ""); len(got) != 1 || got[0].State != events.PresenceOnline {
+		t.Fatalf("roster after first close = %+v, want online", got)
+	}
+	svc.ConnectionClosed(member)
+	waitPresenceState(t, presence, member, events.PresenceOffline)
+}
+
+func TestHeartbeatWithNoConnectionIsIgnored(t *testing.T) {
+	ctx := context.Background()
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("bus: %v", err)
+	}
+	defer func() { _ = bus.Close() }()
+
+	svc, err := New(Config{Store: nopStore{}, Bus: bus})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := svc.Heartbeat(ctx, "ada", "ws"); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	if got := svc.Roster("ws", ""); len(got) != 0 {
+		t.Fatalf("roster = %+v, want empty", got)
+	}
+}
+
+func waitPresenceState(t *testing.T, sub events.Subscription, member domain.MemberID, want events.PresenceState) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-sub.Events():
+			if ev.ActorID == member && ev.Payload.(events.PresencePayload).State == want {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s presence", want)
+		}
 	}
 }

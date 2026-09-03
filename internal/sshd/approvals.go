@@ -18,6 +18,10 @@ type ApprovalService interface {
 	// the caller's steer capability was checked against; a request
 	// belonging to another run is refused.
 	Decide(ctx context.Context, id string, run domain.RunID, approve bool, by domain.MemberID) (*store.Approval, error)
+	// ConnectionOpened records an authenticated SSH connection.
+	ConnectionOpened(member domain.MemberID)
+	// ConnectionClosed releases an authenticated SSH connection.
+	ConnectionClosed(member domain.MemberID)
 	// Heartbeat refreshes a member's presence in a workspace.
 	Heartbeat(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) error
 	// Roster lists present members, narrowed to a workspace and to the
