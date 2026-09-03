@@ -28,8 +28,10 @@ Then it asks one question: is this machine the server, or a client?
 | `none` | Nothing further. The binaries are installed and the script stops. |
 
 Enter takes the default: `server` on a Linux machine that got the server
-binary, `client` everywhere else. `--client` and `--server` already answer the
-question, so it is not asked.
+binary, `client` everywhere else. Answers are case-insensitive. Choosing the
+components yourself also answers this question, so `--client`, `--server` and
+`AETHER_COMPONENTS` skip it; the platform default does not, which is why a Mac
+is still asked.
 
 The script normally arrives through a pipe, which means stdin is the script
 itself, so the question and the command it launches read your terminal

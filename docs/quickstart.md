@@ -39,7 +39,9 @@ pinning a version, the data layout, the desktop app.
 
 ## 2. Start the server
 
-Answering **server** in step 1 already ran this on the server box. Run it by
+Answering **server** in step 1 already ran the command below on the server
+box. It writes the config and the systemd unit but deliberately starts
+nothing, so the activation line it printed is still yours to run. Run setup by
 hand if you skipped the question:
 
 ```sh

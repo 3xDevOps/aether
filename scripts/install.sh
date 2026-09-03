@@ -28,6 +28,19 @@ BIN_DIR="${AETHER_BIN_DIR:-}"
 COMPONENTS="${AETHER_COMPONENTS:-}"
 ROLE="${AETHER_ROLE:-}"
 
+# An explicit component choice - a flag, or AETHER_COMPONENTS - also answers
+# the role question. The platform default must not: macOS gets the client
+# binary automatically and is still asked, with client as the answer Enter
+# takes.
+COMPONENTS_CHOSEN=no
+[ -z "$COMPONENTS" ] || COMPONENTS_CHOSEN=yes
+
+# Test seams. install-test.sh points these at a fake terminal and a fake unit
+# file so the question and the post-setup check are covered without a pty or
+# a writable /etc. They are not documented options.
+TTY_PATH="${AETHER_TTY:-/dev/tty}"
+UNIT_PATH="${AETHER_UNIT_PATH:-/etc/systemd/system/aether-server.service}"
+
 die() {
 	echo "aether install: $*" >&2
 	exit 1
@@ -51,10 +64,12 @@ while [ $# -gt 0 ]; do
 		;;
 	--client)
 		COMPONENTS="client"
+		COMPONENTS_CHOSEN=yes
 		shift
 		;;
 	--server)
 		COMPONENTS="server"
+		COMPONENTS_CHOSEN=yes
 		shift
 		;;
 	--role)
@@ -88,6 +103,7 @@ EOF
 	esac
 done
 
+ROLE="$(printf '%s' "$ROLE" | tr '[:upper:]' '[:lower:]')"
 case "$ROLE" in
 "" | server | client | none) ;;
 *) die "unknown role ${ROLE} (use server, client, or none)" ;;
@@ -174,7 +190,12 @@ $sudo mkdir -p "$BIN_DIR" || die "cannot create ${BIN_DIR}"
 # --- download and verify -----------------------------------------------
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT INT TERM
+# A bare INT trap would clean up and then resume the script, which used to be
+# harmless because nothing followed the downloads. Now a cancelled setup or
+# desktop build would fall through to advice the user did not ask for.
+trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"; exit 130' INT
+trap 'rm -rf "$tmp"; exit 143' TERM
 
 fetch "${BASE_URL}/${VERSION}/checksums.txt" "$tmp/checksums.txt" ||
 	die "cannot download checksums.txt for ${VERSION}"
@@ -217,25 +238,47 @@ esac
 
 # This script is normally piped into sh, so stdin is the script itself: a
 # prompt that read stdin would swallow the rest of the installer. Every
-# question and every interactive child therefore reads the terminal directly,
-# and only when there is one. The open is attempted rather than tested with
-# `-r`: /dev/tty exists and looks readable inside a container or a cron job
-# that has no controlling terminal, and only opening it says so.
-if (exec 3</dev/tty) 2>/dev/null; then
-	tty_in="/dev/tty"
-else
-	tty_in="/dev/null"
+# question and every interactive child therefore uses the terminal directly.
+# The open is attempted rather than tested with `-r`: /dev/tty exists and
+# looks readable inside a container or a cron job that has no controlling
+# terminal, and only opening it says so. It is opened once, on fd 3, because
+# reopening it per read would restart a non-terminal source from the top.
+have_tty=no
+if (exec 3<"$TTY_PATH") 2>/dev/null; then
+	exec 3<"$TTY_PATH"
+	have_tty=yes
 fi
 
-# --client and --server already answered the question.
-if [ -z "$ROLE" ]; then
+# Questions go to the terminal rather than stdout, so a run whose output is
+# redirected to a file still shows what it is waiting for.
+if [ "$have_tty" = yes ] && [ -c "$TTY_PATH" ] && (exec 4>"$TTY_PATH") 2>/dev/null; then
+	exec 4>"$TTY_PATH"
+else
+	exec 4>&1
+fi
+
+ask() { echo "$*" >&4; }
+
+# Runs a command with its stdin on the terminal - never on the script's own
+# stdin, which is the script itself when this arrives through a pipe.
+run_interactive() {
+	if [ "$have_tty" = yes ]; then
+		"$@" <&3
+	else
+		"$@" </dev/null
+	fi
+}
+
+# An explicit --client or --server, or AETHER_COMPONENTS, already answered
+# the question. The platform default did not, so macOS is still asked.
+if [ -z "$ROLE" ] && [ "$COMPONENTS_CHOSEN" = yes ]; then
 	case "$COMPONENTS" in
 	client) ROLE="client" ;;
 	server) ROLE="server" ;;
 	esac
 fi
 
-if [ -z "$ROLE" ] && [ "$tty_in" = "/dev/null" ]; then
+if [ -z "$ROLE" ] && [ "$have_tty" = no ]; then
 	# No terminal to ask on: CI, a provisioning script, a Dockerfile. Install
 	# and stop, exactly as this script has always done.
 	ROLE="none"
@@ -247,24 +290,24 @@ if [ -z "$ROLE" ]; then
 	else
 		role_default="client"
 	fi
-	echo
-	echo "What is this machine?"
-	echo "  server   agents run here, each in its own container on this box"
-	echo "  client   you work here and connect to a server"
-	echo "  none     just the binaries; set the rest up yourself"
+	ask ""
+	ask "What is this machine?"
+	ask "  server   agents run here, each in its own container on this box"
+	ask "  client   you work here and connect to a server"
+	ask "  none     just the binaries; set the rest up yourself"
 	while [ -z "$ROLE" ]; do
-		printf 'role [%s]: ' "$role_default"
-		if IFS= read -r reply </dev/tty; then :; else
+		printf 'role [%s]: ' "$role_default" >&4
+		if IFS= read -r reply <&3; then :; else
 			# Terminal closed mid-question; take the default rather than spin.
 			reply=""
-			echo
+			ask ""
 		fi
-		case "$reply" in
+		case "$(printf '%s' "$reply" | tr '[:upper:]' '[:lower:]')" in
 		"") ROLE="$role_default" ;;
 		s | server) ROLE="server" ;;
 		c | client) ROLE="client" ;;
 		n | none) ROLE="none" ;;
-		*) echo "  answer server, client, or none" ;;
+		*) ask "  answer server, client, or none" ;;
 		esac
 	done
 fi
@@ -293,24 +336,30 @@ run_server_setup() {
 	fi
 	echo
 	say "running aether-server setup"
-	$setup_sudo "${BIN_DIR}/aether-server" setup <"$tty_in" || return 1
+	run_interactive $setup_sudo "${BIN_DIR}/aether-server" setup || return 1
 	# Declining setup's summary is a clean exit that writes nothing, so the
-	# config file rather than the exit status says whether there is a service
-	# to activate. Ask the binary where it puts it instead of guessing.
-	conf="$("${BIN_DIR}/aether-server" config path 2>/dev/null)" || conf=""
-	[ -n "$conf" ] && [ -f "$conf" ]
+	# exit status alone cannot say whether there is a service to activate.
+	# The systemd unit can: setup rewrites it whenever it writes anything,
+	# and if one is already there the activation line is the right next
+	# command regardless. The config file is the wrong signal, because
+	# `aether-server config set` creates one without a unit.
+	[ -f "$UNIT_PATH" ]
 }
 
 # The CLI is for agents to steer Aether; people should get the desktop app.
 # electron-builder needs Node, which is the one thing the CLI cannot supply.
 run_gui_build() {
+	if [ ! -x "${BIN_DIR}/aether" ]; then
+		say "the aether CLI was not installed here, so there is no app to build"
+		return 1
+	fi
 	if ! command -v npm >/dev/null 2>&1 || ! command -v npx >/dev/null 2>&1; then
 		node_missing=yes
 		return 1
 	fi
 	echo
-	say "building the desktop app"
-	"${BIN_DIR}/aether" gui build <"$tty_in" || return 1
+	say "building the desktop app - this downloads Electron and takes a few minutes"
+	run_interactive "${BIN_DIR}/aether" gui build || return 1
 }
 
 case "$ROLE" in
@@ -339,14 +388,12 @@ client)
 	if [ "$node_missing" = yes ]; then
 		echo "The desktop app was not built - it needs Node.js 22+ (https://nodejs.org) with npm on PATH."
 	elif [ "$gui_built" != yes ]; then
-		echo "The desktop app was not built; the error above says why."
+		echo "The desktop app was not built; the message above says why."
 	fi
 	echo
 	echo "next:"
 	echo "  aether link <server-host>:2222  # the first link on a fresh server becomes admin"
-	if [ "$gui_built" = yes ]; then
-		echo "  then open Aether from where your desktop lists applications"
-	else
+	if [ "$gui_built" != yes ]; then
 		echo "  aether gui build               # the desktop app, or run \`aether gui\` for a browser tab"
 	fi
 	;;
