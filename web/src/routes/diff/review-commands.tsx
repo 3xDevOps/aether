@@ -1,141 +1,27 @@
-import { Archive, Copy, GitMerge, Loader2 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { Copy } from 'lucide-react'
+import { useRef } from 'react'
 import { toast } from 'sonner'
-import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { api } from '@/lib/api'
-import { runLabel } from '@/lib/status'
-import type { PullResult } from '@/lib/types'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 /**
- * The "review and land" tail of the diff tab: fetch the run branch into the
- * linked repository (desktop gateways only), copy the commands that review
- * it there, and close the run once it is judged. Closing never touches the
- * store - the run.status event that follows does.
+ * The "review it yourself" tail of the diff tab: the two git commands that
+ * read the run branch in the linked repository, ready to copy. Fetching the
+ * branch and closing the run are verbs, so they live in the run action bar
+ * above with every other verb rather than a second time down here.
  */
-export function LandControls({ run }: { run: RunRecord }) {
-  const caps = useCapability()
+export function ReviewCommands({ run }: { run: RunRecord }) {
   const base = useStore((s) => s.diffs[run.id]?.base ?? '')
-  const [pulling, setPulling] = useState(false)
-  const [pulled, setPulled] = useState<PullResult | null>(null)
-  const [closing, setClosing] = useState<'merged' | 'abandoned' | null>(null)
-
-  const pull = async () => {
-    setPulling(true)
-    try {
-      const result = await api.localPull(run.id)
-      setPulled(result)
-      toast.success(`fetched ${result.ref}`)
-    } catch (err) {
-      toast.error(message(err))
-    } finally {
-      setPulling(false)
-    }
-  }
-
-  const close = async () => {
-    if (!closing) return
-    const outcome = closing
-    setClosing(null)
-    try {
-      await api.runClose(run.id, outcome)
-      toast.success(`Closed as ${outcome}`)
-    } catch (err) {
-      toast.error(message(err))
-    }
-  }
+  if (!run.branch) return null
 
   return (
-    <>
-      {caps.hasLocal('pull') && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2"
-          disabled={pulling}
-          onClick={() => void pull()}
-        >
-          {pulling && <Loader2 className="size-3 animate-spin" aria-hidden />}
-          Pull branch
-        </Button>
-      )}
-      {run.status === 'needs-attention' && (
-        <>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2"
-            onClick={() => setClosing('merged')}
-          >
-            <GitMerge className="size-3" aria-hidden />
-            Close as merged
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2"
-            onClick={() => setClosing('abandoned')}
-          >
-            <Archive className="size-3" aria-hidden />
-            Close as abandoned
-          </Button>
-        </>
-      )}
-
-      {pulled && (
-        <details className="basis-full">
-          <summary className="cursor-pointer select-none">
-            fetched {pulled.ref}
-          </summary>
-          <pre className="mt-1 max-h-48 overflow-auto rounded-md border bg-muted/50 p-2 font-mono text-[11px] whitespace-pre-wrap">
-            {pulled.output}
-          </pre>
-        </details>
-      )}
-
-      {run.branch && (
-        <div className="basis-full space-y-1">
-          <ReviewCommand command={`git log --oneline aether/${run.branch}`} />
-          <ReviewCommand
-            command={`git diff ${base.slice(0, 8) || 'main'}...aether/${run.branch}`}
-          />
-        </div>
-      )}
-
-      {closing && (
-        <Dialog open onOpenChange={() => setClosing(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Close as {closing}?</DialogTitle>
-              <DialogDescription>
-                {closing === 'merged'
-                  ? `The run for "${runLabel(run)}" is recorded as merged and leaves the board.`
-                  : `The run for "${runLabel(run)}" is recorded as abandoned and leaves the board.`}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setClosing(null)}>
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={() => void close()}>
-                Close as {closing}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-    </>
+    <div className="basis-full space-y-1">
+      <CopyableCommand command={`git log --oneline aether/${run.branch}`} />
+      <CopyableCommand
+        command={`git diff ${base.slice(0, 8) || 'main'}...aether/${run.branch}`}
+      />
+    </div>
   )
 }
 
@@ -145,7 +31,7 @@ export function LandControls({ run }: { run: RunRecord }) {
  * the fallback selects the command text for a manual copy (same pattern as
  * the members InviteDialog).
  */
-function ReviewCommand({ command }: { command: string }) {
+function CopyableCommand({ command }: { command: string }) {
   const codeRef = useRef<HTMLElement>(null)
   const copy = async () => {
     try {

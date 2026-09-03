@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
+import { RunActions } from '@/components/run-actions'
 import { ViewHeader } from '@/components/view-header'
 import { terminalFontFamily, whenTerminalFontReady } from '@/lib/term-font'
 import { runLabel } from '@/lib/status'
@@ -146,7 +147,11 @@ function TerminalView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title={runLabel(run)} subtitle={run.branch} />
+      <ViewHeader
+        title={runLabel(run)}
+        subtitle={run.branch}
+        actions={<RunActions run={run} />}
+      />
       <RunTabs runID={runID} active="terminal" />
       <div className="flex items-center gap-3 border-b px-4 py-1.5 text-xs">
         <span
