@@ -1,10 +1,25 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { UpdateBanners } from '@/components/update-banner'
+import type { Api } from '@/lib/api'
 import type { AetherDesktop } from '@/components/shell/title-bar'
-import type { GatewayCapabilities, Member } from '@/lib/types'
+import type {
+  GatewayCapabilities,
+  Member,
+  Run,
+  ServerUpdatePayload,
+  ServerUpdateStatus,
+} from '@/lib/types'
 import { useStore } from '@/store'
 import type { UpdateKind } from '@/store/ui'
-import { alice, bob, fakeApi, serverInfo, updateStatus } from '@/test/fixtures'
+import {
+  alice,
+  bob,
+  fakeApi,
+  run,
+  serverInfo,
+  serverUpdateStatus,
+  updateStatus,
+} from '@/test/fixtures'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
@@ -34,6 +49,9 @@ function seed(
     capabilities: over.capabilities ?? caps(),
     dismissedUpdates: over.dismissedUpdates ?? { cli: '', server: '', shell: '' },
     update: null,
+    serverUpdate: null,
+    serverUpdateProgress: null,
+    members: { [alice.id]: alice, [bob.id]: bob },
     hydrated: true,
     gatewayRestarting: false,
   })
@@ -170,31 +188,240 @@ test('a failed apply shows the gateway message and leaves the button usable', as
 })
 
 // Capability is half the gate and the role is the other half: the local
-// gateway advertises every verb regardless of who is behind it.
-test('the server banner is admin-only and names the commands to run', async () => {
-  const client = fakeApi({
-    localUpdateCheck: vi.fn(async () =>
-      updateStatus({ server_version: 'v1.2.9', server_behind: true }),
-    ),
+// gateway advertises every method regardless of who is behind it.
+describe('the server update banner', () => {
+  const behind = () => serverUpdateStatus({ update_available: true })
+
+  /**
+   * A dashboard whose server answers `server.update_status` with the given
+   * status, and no `update.check` verb: the CLI banner is a separate
+   * prompt with its own Update button, and only one of them is under test
+   * here. A null status is a server too old to serve the method.
+   */
+  function seedServer(
+    over: { self?: Member; status?: ServerUpdateStatus | null; runs?: Run[] } = {},
+  ): Api {
+    seed({ self: over.self, capabilities: caps({ local: ['link.status'] }) })
+    useStore.getState().setRuns(over.runs ?? [])
+    const status = over.status === undefined ? behind() : over.status
+    return fakeApi({
+      serverUpdateStatus: vi.fn(async () => {
+        if (!status) throw new Error('server.update_status: method not found')
+        return status
+      }),
+    })
+  }
+
+  test('offers both buttons to an admin and nothing to a collaborator', async () => {
+    const asBob = seedServer({ self: bob })
+    const collaborator = render(<UpdateBanners client={asBob} />)
+    await waitFor(() => expect(asBob.serverUpdateStatus).toHaveBeenCalled())
+    expect(screen.queryByText('The server is behind.')).toBeNull()
+    collaborator.unmount()
+
+    const client = seedServer()
+    render(<UpdateBanners client={client} />)
+    expect(await screen.findByText('The server is behind.')).toBeTruthy()
+    expect(screen.getByText(/Server v1\.2\.3, latest v1\.3\.0/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Update when idle' })).toBeTruthy()
   })
 
-  seed({ self: bob })
-  const collaborator = render(<UpdateBanners client={client} />)
-  await screen.findByText('Aether v1.3.0 is available.')
-  expect(screen.queryByText('The server is behind.')).toBeNull()
-  collaborator.unmount()
+  // The documented unprivileged install: the binary directory belongs to
+  // root and the service user only reads it, so the button could not work
+  // and the real reason is worth more than a friendlier sentence.
+  test('a server that cannot update itself keeps the commands', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({
+        update_available: true,
+        capable: false,
+        incapable: 'its binary directory is not writable by the server process',
+        manual_commands: ['sudo aether update', 'sudo systemctl restart aether-server'],
+      }),
+    })
+    render(<UpdateBanners client={client} />)
 
-  seed()
-  render(<UpdateBanners client={client} />)
-  expect(await screen.findByText('The server is behind.')).toBeTruthy()
-  expect(screen.getByText(/Server v1\.2\.9, latest v1\.3\.0/)).toBeTruthy()
-  expect(screen.getByText(/dashboard cannot update the server/)).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Copy sudo aether update' })).toBeTruthy()
-  expect(
-    screen.getByRole('button', {
-      name: 'Copy sudo systemctl restart aether-server',
-    }),
-  ).toBeTruthy()
+    expect(await screen.findByText('The server is behind.')).toBeTruthy()
+    expect(
+      screen.getByText(
+        /The server cannot update itself: its binary directory is not writable by the server process\./,
+      ),
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Copy sudo aether update' })).toBeTruthy()
+    expect(
+      screen.getByRole('button', {
+        name: 'Copy sudo systemctl restart aether-server',
+      }),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Update when idle' })).toBeNull()
+  })
+
+  // A server too old to serve server.update_status still says it is behind
+  // through update.check, and there is nothing to press on it.
+  test('falls back to update.check on a server without the status method', async () => {
+    seed()
+    const status = updateStatus({ server_version: 'v1.2.9', server_behind: true })
+    const client = fakeApi({
+      serverUpdateStatus: vi.fn(async () => {
+        throw new Error('server.update_status: method not found')
+      }),
+      // The CLI on this machine is current; only the server is behind.
+      localUpdateCheck: vi.fn(async () => ({
+        ...status,
+        cli: { ...status.cli, update_available: false },
+      })),
+    })
+    render(<UpdateBanners client={client} />)
+
+    expect(await screen.findByText('The server is behind.')).toBeTruthy()
+    expect(screen.getByText(/Server v1\.2\.9, latest v1\.3\.0/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Copy sudo aether update' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+  })
+
+  // The count is the live one from this member's own run list, and it is
+  // the server's definition of busy: a paused run is a frozen container
+  // and a needs-attention run is waiting on a person.
+  test('the confirm dialog counts the runs a restart interrupts', async () => {
+    const client = seedServer({
+      runs: [
+        run({ id: 'run_1', status: 'running' }),
+        run({ id: 'run_2', status: 'provisioning' }),
+        run({ id: 'run_3', status: 'needs-attention' }),
+        run({ id: 'run_4', status: 'merged' }),
+      ],
+    })
+    render(<UpdateBanners client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
+
+    expect(await screen.findByText('Update the server to v1.3.0?')).toBeTruthy()
+    expect(screen.getByText(/2 runs are active right now/)).toBeTruthy()
+    expect(screen.getByText(/They keep running/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update and restart' }))
+    await waitFor(() => expect(client.serverUpdate).toHaveBeenCalledWith('now'))
+  })
+
+  test('Update when idle schedules, and the banner then offers Cancel', async () => {
+    const client = seedServer()
+    render(<UpdateBanners client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update when idle' }))
+    await waitFor(() => expect(client.serverUpdate).toHaveBeenCalledWith('idle'))
+
+    expect(
+      await screen.findByText(
+        'Update to v1.3.0 scheduled by Alice, applies when no run is active.',
+      ),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(client.serverUpdate).toHaveBeenCalledWith('cancel'))
+  })
+
+  // An update someone else scheduled before this tab loaded arrives on the
+  // status answer, not on the feed.
+  test('shows a pending update from the status answer', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({
+        update_available: true,
+        pending: {
+          version: 'v1.3.0',
+          requested_by: alice.id,
+          requested_at: '2026-08-14T10:06:00Z',
+        },
+      }),
+    })
+    render(<UpdateBanners client={client} />)
+
+    expect(
+      await screen.findByText(
+        'Update to v1.3.0 scheduled by Alice, applies when no run is active.',
+      ),
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
+  })
+
+  test('renders every phase the server.update feed carries', async () => {
+    render(<UpdateBanners client={seedServer()} />)
+    await screen.findByRole('button', { name: 'Update now' })
+
+    const phase = (payload: ServerUpdatePayload) =>
+      act(() => useStore.getState().applyServerUpdate(payload))
+
+    phase({ phase: 'scheduled', version: 'v1.3.0', actor_id: alice.id })
+    expect(
+      screen.getByText(
+        'Update to v1.3.0 scheduled by Alice, applies when no run is active.',
+      ),
+    ).toBeTruthy()
+
+    phase({ phase: 'applying', version: 'v1.3.0' })
+    expect(screen.getByText(/Downloading and verifying the release/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+
+    phase({ phase: 'restarting', version: 'v1.3.0' })
+    expect(screen.getByText(/Restarting on the new version/)).toBeTruthy()
+
+    // A failure names the real error and falls back to the two commands,
+    // because the server could not do it for itself.
+    phase({ phase: 'failed', version: 'v1.3.0', detail: 'checksum mismatch' })
+    expect(screen.getByText('checksum mismatch')).toBeTruthy()
+    expect(screen.getByText(/Run these on the server host instead/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Copy sudo aether update' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
+  })
+
+  // The status call is re-read when server.info names a new version, which
+  // is what makes the banner go away after the restart.
+  test('re-reads the status once the server comes back on the new version', async () => {
+    seed({ capabilities: caps({ local: ['link.status'] }) })
+    const client = fakeApi({
+      serverUpdateStatus: vi
+        .fn()
+        .mockResolvedValueOnce(behind())
+        .mockResolvedValue(serverUpdateStatus({ server_version: 'v1.3.0' })),
+    })
+    render(<UpdateBanners client={client} />)
+
+    expect(await screen.findByText('The server is behind.')).toBeTruthy()
+    act(() =>
+      useStore.getState().applyServerUpdate({ phase: 'restarting', version: 'v1.3.0' }),
+    )
+
+    act(() => {
+      useStore.getState().setInfo({ ...serverInfo, server_version: 'v1.3.0' })
+    })
+    await waitFor(() => expect(client.serverUpdateStatus).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByText('The server is behind.')).toBeNull())
+    // The phases are history now: nothing may keep saying a restart is
+    // coming, least of all the notice the status bar shows a collaborator.
+    expect(useStore.getState().serverUpdateProgress).toBeNull()
+  })
+
+  // The server's refusal carries what to do about it - an incapable server
+  // names the commands inside the message - so it is rendered verbatim.
+  test('a refused call shows the server message and leaves the buttons usable', async () => {
+    const client = seedServer()
+    client.serverUpdate = vi.fn(async () => {
+      throw new Error(
+        'this server cannot update itself; on the server host run: sudo aether update',
+      )
+    })
+    render(<UpdateBanners client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update when idle' }))
+
+    expect(
+      await screen.findByText(
+        'this server cannot update itself; on the server host run: sudo aether update',
+      ),
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Update when idle' })).toBeTruthy()
+  })
 })
 
 // Dismissing records the version, not a flag: the next release is a new
