@@ -38,6 +38,8 @@ jobs:
         continue-on-error: true
       - name: Unit tests
         run: make test
+      - name: Shell script tests
+        run: make test-scripts
       - name: Build binaries
         run: make build
 

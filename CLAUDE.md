@@ -44,6 +44,7 @@ make fmt-check
 make vet
 make lint
 make test
+make test-scripts
 make public-audit
 ```
 
