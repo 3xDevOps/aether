@@ -336,6 +336,67 @@ describe('the desktop-app rebuild the Update button waits on', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
     await waitFor(() => expect(useStore.getState().gatewayRestarting).toBe(true))
   })
+
+  // An unsupervised gateway - `aether gui` in a browser tab - rebuilds the
+  // app and deliberately keeps serving. The flag is never cleared, so
+  // setting it here would hide a genuine disconnect in that tab for good.
+  test('leaves gatewayRestarting alone when only a rebuild is running', async () => {
+    const client = fakeApi({
+      localUpdateApply: vi.fn(async () => ({
+        updated: ['/usr/local/bin/aether'],
+        version: 'v1.3.0',
+        restarting: false,
+        rebuilding: true,
+        note: 'rebuilding the desktop app; restart it when the rebuild finishes',
+      })),
+    })
+    seed()
+    render(<UpdateBanners client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
+    await screen.findByText(
+      'Rebuilding the app (about a minute; the first time also fetches Node)...',
+    )
+    expect(useStore.getState().gatewayRestarting).toBe(false)
+  })
+
+  // The gateway's note says what it was about to do. Once the build is over
+  // the banner has to stop saying a finished rebuild is still running.
+  test('says the rebuild finished on a gateway that is not going away', async () => {
+    vi.useFakeTimers()
+    const client = fakeApi({
+      localUpdateApply: vi.fn(async () => ({
+        updated: ['/usr/local/bin/aether'],
+        version: 'v1.3.0',
+        restarting: false,
+        rebuilding: true,
+        note: 'rebuilding the desktop app; restart it when the rebuild finishes',
+      })),
+      localUpdateStatus: vi.fn(async () => ({ phase: 'done' as const })),
+    })
+    seed()
+    render(<UpdateBanners client={client} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+
+    expect(
+      screen.getByText(
+        /Updated to v1\.3\.0\. The app was rebuilt; restart it to use the new version\./,
+      ),
+    ).toBeTruthy()
+    expect(screen.queryByText(/restart it when the rebuild finishes/)).toBeNull()
+    // Nothing left for the button to do.
+    expect(screen.queryByRole('button', { name: /Update|Rebuild|Relaunch/ })).toBeNull()
+  })
 })
 
 describe('the desktop app rebuild notice', () => {

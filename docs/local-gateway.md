@@ -407,7 +407,13 @@ authority.
   The new binary runs the build because the Electron shell sources ship
   inside it - the process answering this call is the one being replaced. A
   machine with no app installed answers `rebuilding: false` and builds
-  nothing.
+  nothing. One build runs at a time: a second `update.apply` while one is
+  still going answers `rebuilding: true` with the note `a rebuild of the
+  desktop app is already running`, and starts nothing - and, critically,
+  does not exit a supervised gateway, which would drop the shell back into
+  the old app mid-swap. The build child belongs to the gateway: closing the
+  gateway kills it rather than leaving it downloading Node and swapping the
+  app directory on its own.
 - `update.status` reports that rebuild: `phase` is `idle` before any
   rebuild has run in this process, then the `gui build --json` phases
   (`unpacking`, `fetching node`, `installing dependencies`, `packaging`,

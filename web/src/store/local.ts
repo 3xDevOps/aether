@@ -33,10 +33,11 @@ export interface LocalSlice {
   update: UpdateStatus | null
   setUpdate: (update: UpdateStatus) => void
   /**
-   * Set once an in-app update tells the gateway to exit and come back,
-   * whether that is the respawn itself or the desktop rebuild that
-   * precedes it. Never cleared: the page that reads it is on its way out
-   * regardless of how the reconnect goes.
+   * Set once an in-app update tells the gateway it is going away and coming
+   * back (`update.apply` answering `restarting`). Never cleared: the page
+   * that reads it is on its way out regardless of how the reconnect goes.
+   * An unsupervised gateway never sets it - that tab keeps its gateway, and
+   * a flag that is never cleared would hide a real disconnect later.
    */
   gatewayRestarting: boolean
   setGatewayRestarting: (gatewayRestarting: boolean) => void

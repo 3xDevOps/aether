@@ -154,6 +154,9 @@ type Flow =
   // unchanged.
   | { name: 'applied'; result: UpdateApplyResult }
   | { name: 'rebuilding'; result: UpdateApplyResult; phase?: string }
+  // The rebuild finished on a gateway that is not going away - a browser
+  // tab - so the app on disk is new and only the window is old.
+  | { name: 'rebuilt'; result: UpdateApplyResult }
   | { name: 'relaunching' }
   | { name: 'rebuildFailed'; error: string }
 
@@ -167,7 +170,7 @@ function deriveFlow(apply: ApplyState, build: UpdateBuildStatus | null): Flow {
     return { name: 'rebuildFailed', error: build.error ?? 'the rebuild failed' }
   }
   if (build?.phase === 'done') {
-    return result.restarting ? { name: 'relaunching' } : { name: 'applied', result }
+    return result.restarting ? { name: 'relaunching' } : { name: 'rebuilt', result }
   }
   return { name: 'rebuilding', result, phase: build?.phase }
 }
@@ -179,12 +182,16 @@ function deriveFlow(apply: ApplyState, build: UpdateBuildStatus | null): Flow {
  * the command the gateway sends back is shown rather than left to the
  * operator to remember.
  */
-function Applied({ result }: { result: UpdateApplyResult }) {
+function Applied({ result, note }: { result: UpdateApplyResult; note?: string }) {
+  // The gateway's note describes what it was about to do. Once that work
+  // is over the caller passes what actually happened instead, so the
+  // banner does not keep saying a finished rebuild is still running.
+  const trailing =
+    note ?? (result.restarting ? 'Restarting the dashboard.' : result.note ?? '')
   return (
     <div className="space-y-1 text-muted-foreground">
       <p>
-        Updated to {result.version}.
-        {result.restarting ? ' Restarting the dashboard.' : result.note ? ` ${result.note}` : ''}
+        Updated to {result.version}.{trailing ? ` ${trailing}` : ''}
       </p>
       <p className="font-mono text-[11px]">{result.updated.join(', ')}</p>
       {result.restart_command && (
@@ -244,11 +251,12 @@ function CliBanner({ update, client }: { update: UpdateStatus; client: Api }) {
     setBuild(null)
     try {
       const result = await client.localUpdateApply()
-      // The page must stop showing the connection-error screen the moment
-      // the gateway says it is going away, whether that is the respawn
-      // itself or the rebuild that precedes it - never cleared, since from
-      // here the page is on its way out regardless of how it reconnects.
-      if (result.restarting || result.rebuilding) setGatewayRestarting(true)
+      // The page must stop showing the connection-error screen while the
+      // gateway is deliberately going away. `restarting` is exactly that
+      // claim; a rebuild on an unsupervised gateway is not - that tab keeps
+      // its gateway, and suppressing the page there would hide a real
+      // disconnect later, because the flag is never cleared.
+      if (result.restarting) setGatewayRestarting(true)
       setApply({ name: 'done', result })
     } catch (err) {
       // The gateway's own message, verbatim: it names the directory and the
@@ -262,7 +270,10 @@ function CliBanner({ update, client }: { update: UpdateStatus; client: Api }) {
   // apply would only answer that this is already the newest release, and a
   // failed rebuild is fixed by the command the banner already shows.
   const offerButton =
-    update.cli.can_self_update && flow.name !== 'applied' && flow.name !== 'rebuildFailed'
+    update.cli.can_self_update &&
+    flow.name !== 'applied' &&
+    flow.name !== 'rebuilt' &&
+    flow.name !== 'rebuildFailed'
   const busy =
     flow.name === 'applying' || flow.name === 'rebuilding' || flow.name === 'relaunching'
   const buttonLabel =
@@ -297,6 +308,12 @@ function CliBanner({ update, client }: { update: UpdateStatus; client: Api }) {
           <p className="text-muted-foreground">Updating the CLI...</p>
         )}
         {flow.name === 'applied' && <Applied result={flow.result} />}
+        {flow.name === 'rebuilt' && (
+          <Applied
+            result={flow.result}
+            note="The app was rebuilt; restart it to use the new version."
+          />
+        )}
         {flow.name === 'applyFailed' && (
           <p className="font-mono text-xs text-state-failed">{flow.detail}</p>
         )}
