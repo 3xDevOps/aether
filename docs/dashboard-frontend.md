@@ -631,12 +631,13 @@ routes (`approvals`, `timeline`).
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the guided first-run path, five steps: Link,
-Workspace, Environment, Repository, First run. It renders only where the
-gateway serves the client-machine verbs (the capability descriptor lists
+`src/routes/onboarding/` is the guided first-run path, six steps: Link,
+Workspace, Environment, Repository, Agents, First run. It renders only where
+the gateway serves the client-machine verbs (the capability descriptor lists
 `link.status`); a remote monitor gets an explanatory empty state instead of
-a broken wizard. The first four steps' components live in `steps.tsx`; the
-Environment step is `environment-step.tsx`.
+a broken wizard. Link, Workspace, Repository and First run live in
+`steps.tsx`; Environment is `environment-step.tsx`; Agents is
+`agents-step.tsx` with its second half in `profile-import.tsx`.
 
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
@@ -660,6 +661,34 @@ card says so and names the four. Cancel and every scan failure land on "try
 again" or "keep the standard environment", so the wizard never dead-ends.
 Non-admin members see only the keep path, because saving an environment is
 an administrator method.
+
+The Agents step has two optional halves and never blocks: **Skip for now**
+is reachable from every state, including an open setup shell and a failed
+scan.
+
+Part A lists the setup-capable harnesses from `env.harnesses` against
+`agent.list`, saying for each whether it is installed on this machine and
+whether the server lists that name. The copy states what those two signals
+actually mean - every shipped harness is on `agent.list` whether or not this
+member has logged one in, so the list is not a "set up" badge - and **Set
+up** embeds the same `AgentWizard` the Agents page uses, driven with the
+harness and workspace already known so it opens the `agent-setup` shell
+without a form. A clean exit refetches `agent.list` and hands the harness to
+the First run step, which preselects it.
+
+Part B (`ProfileImport`) previews each harness configuration on this machine
+with `profile.preview`, showing the category counts and, behind an expander,
+every exclusion with its reason. Checkboxes start unchecked: approving calls
+`profile.push` once per checked harness, one at a time, and a refusal lands
+on its own row while the rest still run. A `blocked` preview gets no
+checkbox at all - the scanner's finding is shown with the flagged file and
+the exact CLI command that can override it, because that override is
+deliberately not in the dashboard. Where a setup-capable harness is
+installed locally, **Ask an agent** runs the `profile` scan over
+`/ws/envscan`, streams the agent's output, and pre-checks what it
+recommended with each one-sentence reason next to its row; the scan is a
+proposal the user edits, and a failure leaves the manual path and both
+buttons live.
 
 The review gate (`EnvironmentReview`, same file) renders the manifest as a
 readable list - name, version, reason - with a per-item remove toggle

@@ -1,4 +1,10 @@
-import type { Api, EnvScanHandlers, EnvScanSession } from '@/lib/api'
+import type {
+  Api,
+  EnvScanHandlers,
+  EnvScanSession,
+  ProfileScanHandlers,
+  ProfileScanRequest,
+} from '@/lib/api'
 import type {
   AgentInfo,
   Approval,
@@ -9,6 +15,7 @@ import type {
   EnvironmentVersion,
   ManifestItem,
   Member,
+  ProfilePreview,
   Run,
   Schedule,
   ServerInfo,
@@ -167,6 +174,46 @@ export function manifestItem(over: Partial<ManifestItem> = {}): ManifestItem {
     start_line: 3,
     end_line: 5,
     check_command: 'jq --version',
+    ...over,
+  }
+}
+
+/** What profile.preview answers for the harness this machine configured.
+ * The other setup-capable harnesses answer present:false, which is a
+ * normal answer rather than an error. */
+export function profilePreview(
+  over: Partial<ProfilePreview> = {},
+): ProfilePreview {
+  return {
+    harness: 'claude',
+    root: '/home/alice/.claude',
+    present: true,
+    files: 42,
+    bytes: 183422,
+    categories: [
+      {
+        category: 'skills',
+        files: 12,
+        bytes: 40201,
+        paths: ['skills/pdf/SKILL.md'],
+        truncated: false,
+      },
+      {
+        category: 'commands',
+        files: 4,
+        bytes: 8120,
+        paths: ['commands/review.md'],
+        truncated: false,
+      },
+    ],
+    excluded: [
+      {
+        path: '.credentials.json',
+        reason: 'credential',
+        detail: 'credential file excluded for claude',
+      },
+    ],
+    blocked: false,
     ...over,
   }
 }
@@ -354,6 +401,26 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       ],
     })),
     profileRollback: vi.fn(async () => ({})),
+    localProfilePreview: vi.fn(async (harness: string) =>
+      harness === 'claude'
+        ? profilePreview()
+        : profilePreview({
+            harness,
+            root: `/home/alice/.${harness}`,
+            present: false,
+            files: 0,
+            bytes: 0,
+            categories: [],
+            excluded: [],
+          }),
+    ),
+    localProfilePush: vi.fn(async (harness: string) => ({
+      harness,
+      snapshot_id: 'psn_2',
+      digest: 'sha256:cafe9012',
+      files: 42,
+      bytes: 183422,
+    })),
     agentList: vi.fn(async () => [
       agentInfo(),
       agentInfo({ name: 'myagent', source: 'member' }),
@@ -443,6 +510,33 @@ export function fakeApi(over: Partial<Api> = {}): Api {
           h.onOutput('fake harness: returning the canned inventory')
           h.onStatus('validating')
           h.onResult(scanResult())
+        })
+        return {
+          close: () => {
+            closed = true
+          },
+        }
+      },
+    ),
+    // A profile scan that recommends the configured harness, like the
+    // gateway's fake harness; tests drive other outcomes by overriding.
+    openProfileScan: vi.fn(
+      (_req: ProfileScanRequest, h: ProfileScanHandlers): EnvScanSession => {
+        let closed = false
+        queueMicrotask(() => {
+          if (closed) return
+          h.onStatus('running')
+          h.onOutput('fake harness: reading the profile inventory')
+          h.onResult({
+            harnesses: [
+              {
+                harness: 'claude',
+                import: true,
+                categories: ['skills', 'commands'],
+                reason: 'your skills and commands match this project',
+              },
+            ],
+          })
         })
         return {
           close: () => {

@@ -16,6 +16,7 @@ import type {
   EnvScanFrame,
   EnvScanRequest,
   EnvScanResult,
+  EnvScanResultFrame,
   EnvScanStatus,
   EnvStatusResult,
   EnvironmentSource,
@@ -27,6 +28,9 @@ import type {
   Member,
   Overlap,
   PresenceEntry,
+  ProfilePreview,
+  ProfilePushResult,
+  ProfileRecommendation,
   ProfileStatus,
   PullResult,
   RepoPushResult,
@@ -158,15 +162,25 @@ export interface EnvScanSession {
   close: () => void
 }
 
+/** What a /ws/envscan session reports while it runs. The terminal success
+ * frame differs by mode, so the shared framing hands it on whole and each
+ * caller reads the half its mode produces. */
+interface ScanHandlers {
+  onOutput: (line: string) => void
+  onStatus: (status: EnvScanStatus) => void
+  onResult: (frame: EnvScanResultFrame) => void
+  onError: (detail: string, outputTail?: string) => void
+}
+
 /**
- * openEnvScan runs one environment inventory on this machine through the
- * local gateway's /ws/envscan socket: one JSON start frame out, then
- * output and status frames in until a terminal result or error frame.
- * Framing mirrors the shell client (routes/shell/client.ts): a session
- * settles exactly once, and a close the caller asked for is not an
- * outcome.
+ * openScan runs one scan on this machine through the local gateway's
+ * /ws/envscan socket: one JSON start frame out, then output and status
+ * frames in until a terminal result or error frame. Framing mirrors the
+ * shell client (routes/shell/client.ts): a session settles exactly once,
+ * and a close the caller asked for is not an outcome. Every mode -
+ * inventory, repo, refine, profile - rides this one function.
  */
-function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
+function openScan(req: EnvScanRequest, h: ScanHandlers): EnvScanSession {
   let socket: WebSocket | null = null
   let disposed = false
   let settled = false
@@ -220,9 +234,7 @@ function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
           h.onStatus(frame.status)
           break
         case 'result':
-          settle(() =>
-            h.onResult({ dockerfile: frame.dockerfile, manifest: frame.manifest }),
-          )
+          settle(() => h.onResult(frame))
           break
         case 'error':
           settle(() => h.onError(frame.detail, frame.output_tail))
@@ -248,6 +260,70 @@ function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
       ws.close()
     },
   }
+}
+
+/**
+ * openEnvScan runs one environment scan - inventory, repo, or refine - and
+ * reports the validated Dockerfile and manifest pair.
+ */
+function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
+  return openScan(req, {
+    onOutput: h.onOutput,
+    onStatus: h.onStatus,
+    onResult: (frame) =>
+      frame.recommendation
+        ? h.onError('the scan answered a recommendation, not an environment')
+        : h.onResult({
+            dockerfile: frame.dockerfile,
+            manifest: frame.manifest,
+          }),
+    onError: h.onError,
+  })
+}
+
+/** The start frame of a profile scan: the harness that runs the agent, and
+ * optionally the repository folder so the project can inform the call. */
+export interface ProfileScanRequest {
+  harness: string
+  repo_path?: string
+}
+
+/** A profile scan's frames. Same output and status stream as an
+ * environment scan; the terminal success frame is a recommendation. */
+export interface ProfileScanHandlers {
+  onOutput: (line: string) => void
+  onStatus: (status: EnvScanStatus) => void
+  /** The agent's proposal: which harnesses to import, and why. Nothing is
+   * imported until the user approves and profile.push runs. */
+  onResult: (recommendation: ProfileRecommendation) => void
+  onError: (detail: string, outputTail?: string) => void
+}
+
+/**
+ * openProfileScan asks the chosen harness which of this machine's agent
+ * configuration is worth bringing to the server. The agent sees paths and
+ * category counts only - never file contents.
+ */
+function openProfileScan(
+  req: ProfileScanRequest,
+  h: ProfileScanHandlers,
+): EnvScanSession {
+  return openScan(
+    {
+      harness: req.harness,
+      mode: 'profile',
+      ...(req.repo_path ? { repo_path: req.repo_path } : {}),
+    },
+    {
+      onOutput: h.onOutput,
+      onStatus: h.onStatus,
+      onResult: (frame) =>
+        frame.recommendation
+          ? h.onResult(frame.recommendation)
+          : h.onError('the scan answered an environment, not a recommendation'),
+      onError: h.onError,
+    },
+  )
 }
 
 // Only what the SPA actually calls; the team-feature methods land with the
@@ -498,7 +574,17 @@ export const api = {
   /** Which setup-capable harnesses this machine has on PATH, plus the
    * linked repository folder when the gateway knows exactly one. */
   envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
+  /** What `aether profile push --agent <harness>` would carry from this
+   * machine, uploading nothing. */
+  localProfilePreview: (harness: string) =>
+    local<ProfilePreview>('profile.preview', { harness }),
+  /** Pushes this member's configuration for one harness. There is no
+   * allow-secret parameter: a scanner finding refuses the push, and the
+   * override lives on the CLI. */
+  localProfilePush: (harness: string) =>
+    local<ProfilePushResult>('profile.push', { harness }),
   openEnvScan,
+  openProfileScan,
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),

@@ -70,14 +70,21 @@ async function toRepoStep() {
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 }
 
-/** Walks all the way to the first-run step, through a repo link. */
-async function toFirstRunStep() {
+/** Walks on to the Agents step, through a repo link. */
+async function toAgentsStep() {
   await toRepoStep()
   fireEvent.change(await screen.findByLabelText('Repository path'), {
     target: { value: '/home/alice/code/myproject' },
   })
   fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+}
+
+/** Walks all the way to the first-run step, skipping the agent setup and
+ * the configuration import - both are optional. */
+async function toFirstRunStep() {
+  await toAgentsStep()
+  fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
 }
 
 describe('onboarding wizard', () => {
@@ -242,6 +249,8 @@ describe('onboarding wizard', () => {
     // Nothing invites a second push, and Continue moves on.
     expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    // The optional Agents step sits between Repository and First run.
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
     expect(
       await screen.findByRole('region', { name: 'First run' }),
     ).toBeDefined()
@@ -287,6 +296,8 @@ describe('onboarding wizard', () => {
     ).toHaveProperty('value', 'git push -u aether main')
     expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    // The optional Agents step sits between Repository and First run.
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
     expect(
       await screen.findByRole('region', { name: 'First run' }),
     ).toBeDefined()
