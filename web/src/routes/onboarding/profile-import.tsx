@@ -9,15 +9,14 @@
 // user's click.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
-import type { Api, EnvScanSession } from '@/lib/api'
+import { ApiError, type Api, type EnvScanSession } from '@/lib/api'
 import { formatBytes } from '@/lib/format'
-import { useDelayed } from '@/lib/hooks'
 import type {
   EnvScanStatus,
   HarnessStatus,
+  ProfileExclusion,
   ProfilePreview,
   ProfilePreviewCategory,
   ProfilePushResult,
@@ -63,9 +62,37 @@ export function previewSummary(preview: ProfilePreview): string {
   return `${counted} - ${formatBytes(preview.bytes)}`
 }
 
-/** The exclusion whose finding refuses the push, when there is one. */
+/** The exclusion behind a blocked preview: the one the gateway named, or
+ * the first push-aborting one when an older gateway named none. */
 function flagged(preview: ProfilePreview) {
-  return (preview.excluded ?? []).find((e) => e.reason === 'secret')
+  const excluded = preview.excluded ?? []
+  return (
+    excluded.find((e) => e.path === preview.blocked_path) ??
+    excluded.find((e) => e.reason === 'secret' || e.reason === 'symlink')
+  )
+}
+
+/** What blocked this profile, in the gateway's own words where it gave
+ * them. A symlink escape and a scanner finding read differently and the
+ * user acts on them differently, so neither is described as the other. */
+function blockedLine(
+  preview: ProfilePreview,
+  secret: ProfileExclusion | undefined,
+): string {
+  const path = preview.blocked_path ?? secret?.path
+  const detail = preview.blocked_detail ?? secret?.detail
+  if (!path) return 'A file in this profile refuses the push.'
+  return detail ? `${path}: ${detail}` : `${path} refuses the push.`
+}
+
+/**
+ * Whether a preview failure means "this harness does not sync a profile"
+ * rather than "something went wrong". The gateway answers -32602 for a
+ * harness name the registry does not know or that has no profile root;
+ * every other failure is real and belongs on the screen.
+ */
+function notSyncable(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 400
 }
 
 type ScanPhase =
@@ -101,7 +128,11 @@ export function ProfileImport({
 }) {
   const [previews, setPreviews] = useState<Record<string, ProfilePreview>>({})
   const [statuses, setStatuses] = useState<Record<string, ProfileStatus>>({})
-  const [settled, setSettled] = useState(0)
+  // Which harnesses have answered a preview, and which one is being
+  // walked right now ('' when none is).
+  const [previewed, setPreviewed] = useState<string[]>([])
+  const [looking, setLooking] = useState('')
+  const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({})
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [results, setResults] = useState<Record<string, ProfilePushResult>>({})
   const [failures, setFailures] = useState<Record<string, string>>({})
@@ -112,42 +143,66 @@ export function ProfileImport({
   const [lines, setLines] = useState<string[]>([])
   const session = useRef<EnvScanSession | null>(null)
 
-  const names = candidates.join(',')
+  // A preview walks and secret-scans a whole profile root. That is not
+  // free - an agent's configuration directory routinely holds hundreds of
+  // megabytes of transcripts - so it never runs on mount: the user asks
+  // for it, one harness at a time, and can stop it.
+  const scanning = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    let live = true
-    if (!served) return
-    setPreviews({})
-    setStatuses({})
-    setSettled(0)
-    const done = () => {
-      if (live) setSettled((n) => n + 1)
+  const cancelPreviews = useCallback(() => {
+    scanning.current?.abort()
+    scanning.current = null
+    setLooking('')
+  }, [])
+
+  // Aborting on unmount stops the walk on the gateway, not just this
+  // component's interest in it.
+  useEffect(() => () => scanning.current?.abort(), [])
+
+  const runPreviews = useCallback(async () => {
+    if (scanning.current) return
+    const controller = new AbortController()
+    scanning.current = controller
+    setPreviewErrors({})
+    // One at a time: several concurrent walks of the same home directory
+    // are slower than the same work in sequence, and the per-harness
+    // label would be a lie.
+    for (const name of candidates) {
+      if (controller.signal.aborted) break
+      setLooking(name)
+      try {
+        const preview = await client.localProfilePreview(name, controller.signal)
+        if (controller.signal.aborted) break
+        setPreviews((prev) => ({ ...prev, [name]: preview }))
+        setPreviewed((prev) => (prev.includes(name) ? prev : [...prev, name]))
+        if (!preview.present) continue
+        // A snapshot on the server means this member already imported
+        // this harness; the row says so rather than redoing it.
+        try {
+          const status = await client.profileStatus(name)
+          setStatuses((prev) => ({ ...prev, [name]: status }))
+        } catch {
+          // The row simply does not claim a previous import. Nothing the
+          // user has to act on, and the preview itself stands.
+        }
+      } catch (err) {
+        if (controller.signal.aborted) break
+        setPreviewed((prev) => (prev.includes(name) ? prev : [...prev, name]))
+        // A harness the registry has no profile sync for refuses with
+        // -32602. That is the one answer that means "not something this
+        // machine can import" rather than "something went wrong", so it
+        // is the only one swallowed; everything else is the user's to
+        // see, on that harness's own row.
+        if (!notSyncable(err)) {
+          setPreviewErrors((prev) => ({ ...prev, [name]: message(err) }))
+        }
+      }
     }
-    for (const name of names ? names.split(',') : []) {
-      client
-        .localProfilePreview(name)
-        .then((preview) => {
-          if (!live) return
-          setPreviews((prev) => ({ ...prev, [name]: preview }))
-          if (!preview.present) return
-          // A snapshot on the server means this member already imported
-          // this harness; the row says so rather than redoing it.
-          client
-            .profileStatus(name)
-            .then((status) => {
-              if (live) setStatuses((prev) => ({ ...prev, [name]: status }))
-            })
-            .catch(() => {})
-        })
-        // A harness with no profile sync at all refuses the preview. That
-        // is not a failure of the step: skip the harness.
-        .catch(() => {})
-        .finally(done)
+    if (scanning.current === controller) {
+      scanning.current = null
+      setLooking('')
     }
-    return () => {
-      live = false
-    }
-  }, [client, names])
+  }, [client, candidates])
 
   // Leaving the step closes the socket, which cancels the scan and its
   // process on the gateway.
@@ -157,9 +212,7 @@ export function ProfileImport({
     .map((name) => previews[name])
     .filter((p): p is ProfilePreview => p !== undefined && p.present)
 
-  const loading = useDelayed(
-    served && candidates.length > 0 && settled < candidates.length,
-  )
+  const looked = previewed.length >= candidates.length && looking === ''
 
   const selected = present
     .filter((p) => checked[p.harness] && !p.blocked)
@@ -238,13 +291,44 @@ export function ProfileImport({
         Your skills, custom commands, standing instructions, settings, MCP
         servers and plugins live on this machine. Aether can copy them to the
         server so an agent there runs with your configuration. Credential
-        files are excluded before anything is read, and a push carries a
-        harness's whole configuration minus what is listed as left out.
+        files are excluded before anything is read, a file over 1 MiB or
+        past the 20 MiB a snapshot holds is left behind, and a push carries
+        a harness's whole configuration minus what is listed as left out.
       </p>
 
-      {loading && <Skeleton className="h-16 w-full" />}
+      {served && looking === '' && !looked && (
+        <div className="space-y-1">
+          <Button size="sm" onClick={() => void runPreviews()}>
+            {previewed.length > 0 ? 'Look again' : 'Look at what is here'}
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Reads the file list under each agent's configuration directory
+            on this machine and checks it for secrets. Nothing is uploaded,
+            and nothing runs until you press it - a large configuration
+            directory takes a while to read.
+          </p>
+        </div>
+      )}
+      {looking !== '' && (
+        <div className="space-y-1">
+          <p className="text-sm" role="status">
+            Reading {friendly[looking] ?? looking}...
+          </p>
+          <Button size="sm" variant="outline" onClick={cancelPreviews}>
+            Stop
+          </Button>
+        </div>
+      )}
+      {Object.entries(previewErrors).map(([name, detail]) => (
+        <div key={name} className="space-y-1">
+          <p className="text-xs text-state-failed">
+            Reading the {friendly[name] ?? name} configuration failed:{' '}
+            {detail}
+          </p>
+        </div>
+      ))}
 
-      {served && scanHarness && phase.name === 'idle' && (
+      {served && looked && scanHarness && phase.name === 'idle' && (
         <div className="space-y-1">
           <Button size="sm" variant="outline" onClick={startScan}>
             Ask an agent which configuration to bring
@@ -304,7 +388,8 @@ export function ProfileImport({
 
       {served &&
         candidates.length > 0 &&
-        settled >= candidates.length &&
+        looked &&
+        Object.keys(previewErrors).length === 0 &&
         present.length === 0 && (
           <p className="text-sm text-muted-foreground">
             No agent configuration was found on this machine, so there is
@@ -427,27 +512,45 @@ function ProfileRow({
       {preview.blocked && (
         <div className="space-y-1 rounded-md border bg-card p-3 text-xs">
           <p className="text-state-failed">
-            {secret
-              ? `The scanner flagged ${secret.path}: ${secret.detail}`
-              : 'The scanner flagged a file in this profile.'}
+            {blockedLine(preview, secret)}
           </p>
           <p>
-            The push is refused until that file is fixed on this machine.
-            Remove the secret, or push this harness from a terminal, where
-            the override is attributable:
+            The push is refused until that is fixed on this machine.
+            {preview.blocked_reason === 'symlink'
+              ? ' A link out of the profile root has no override: point it inside the directory, or drop it.'
+              : ' Remove the secret, or push this harness from a terminal, where the override is attributable:'}
           </p>
-          <pre className="overflow-x-auto rounded-md border bg-background px-2 py-1 font-mono">
-            {`aether profile push --agent ${preview.harness} --allow-secret ${
-              secret?.path ?? '<file>'
-            } --workspace ${workspace?.id ?? '<workspace-id>'}`}
-          </pre>
+          {/* Only a scanner finding has an override, so only a scanner
+              finding gets the command. Offering it for a symlink escape
+              would send the user to a flag that cannot help them. */}
+          {preview.blocked_reason !== 'symlink' && (
+            <pre className="overflow-x-auto rounded-md border bg-background px-2 py-1 font-mono">
+              {`aether profile push --agent ${preview.harness} --allow-secret ${
+                preview.blocked_path ?? secret?.path ?? '<file>'
+              } --workspace ${workspace?.id ?? '<workspace-id>'}`}
+            </pre>
+          )}
         </div>
       )}
       {result && (
-        <p className="text-xs">
-          Imported {result.files} files, {formatBytes(result.bytes)}, as
-          snapshot <span className="font-mono">{result.snapshot_id}</span>.
-        </p>
+        <>
+          <p className="text-xs">
+            Imported {result.files} files, {formatBytes(result.bytes)}, as
+            snapshot <span className="font-mono">{result.snapshot_id}</span>.
+          </p>
+          {/* The push succeeded without these, so this is the only place
+              the user learns they are not on the server. */}
+          {result.skipped && result.skipped.length > 0 && (
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {result.skipped.map((e) => (
+                <li key={e.path}>
+                  <span className="font-mono">{e.path}</span> was not sent -{' '}
+                  {e.detail}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
       {failure && <p className="text-xs text-state-failed">{failure}</p>}
     </li>

@@ -109,7 +109,11 @@ async function get<T>(path: string): Promise<T> {
  * serves these (useCapability's hasLocal says which); failures carry the
  * same JSON-RPC error envelope as the proxied API.
  */
-async function local<T>(verb: string, params: unknown = {}): Promise<T> {
+async function local<T>(
+  verb: string,
+  params: unknown = {},
+  signal?: AbortSignal,
+): Promise<T> {
   const token = bearer()
   const res = await fetch(`/local/v1/${verb}`, {
     method: 'POST',
@@ -118,6 +122,11 @@ async function local<T>(verb: string, params: unknown = {}): Promise<T> {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(params),
+    // Aborting closes the connection, which cancels the request context
+    // on the gateway. A verb that walks the user's whole profile root
+    // needs that: leaving the step must stop the work, not just stop
+    // waiting for it.
+    signal,
   })
   if (!res.ok) throw new ApiError(res.status, `${verb}: ${await failure(res)}`)
   return (await res.json()) as T
@@ -575,9 +584,10 @@ export const api = {
    * linked repository folder when the gateway knows exactly one. */
   envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
   /** What `aether profile push --agent <harness>` would carry from this
-   * machine, uploading nothing. */
-  localProfilePreview: (harness: string) =>
-    local<ProfilePreview>('profile.preview', { harness }),
+   * machine, uploading nothing. It walks the whole profile root, so it
+   * takes a signal: aborting stops the walk on the gateway too. */
+  localProfilePreview: (harness: string, signal?: AbortSignal) =>
+    local<ProfilePreview>('profile.preview', { harness }, signal),
   /** Pushes this member's configuration for one harness. There is no
    * allow-secret parameter: a scanner finding refuses the push, and the
    * override lives on the CLI. */

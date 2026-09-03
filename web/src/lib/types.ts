@@ -347,19 +347,32 @@ export interface ProfilePreviewCategory {
   truncated: boolean
 }
 
+/** Why a file was left out of a profile push. `too-large` and
+ * `over-budget` are the server's size caps, applied before the file is
+ * ever read. */
+export type ProfileExcludeReason =
+  | 'credential'
+  | 'secret'
+  | 'ignored'
+  | 'symlink'
+  | 'too-large'
+  | 'over-budget'
+
 /** One file the guards left out of a profile push, and why. */
 export interface ProfileExclusion {
   path: string
-  reason: 'credential' | 'secret' | 'ignored' | 'symlink'
+  reason: ProfileExcludeReason
   detail: string
 }
 
 /**
  * profile.preview: the discovery a push would run, uploading nothing.
  * `present` is false when this machine has no profile root for the harness
- * - a normal answer, not an error. `blocked` is true when a scanner
- * finding would refuse the push; the matching `excluded` entry names the
- * file.
+ * - a normal answer, not an error. `blocked` is true when the push would
+ * be refused outright rather than partially carried; `blocked_reason`,
+ * `blocked_path` and `blocked_detail` name which condition and where.
+ * Only a `secret` has a CLI override, so a surface offering one must read
+ * the reason rather than assume.
  */
 export interface ProfilePreview {
   harness: string
@@ -370,11 +383,17 @@ export interface ProfilePreview {
   categories?: ProfilePreviewCategory[]
   excluded?: ProfileExclusion[]
   blocked: boolean
+  blocked_reason?: ProfileExcludeReason
+  blocked_path?: string
+  blocked_detail?: string
 }
 
-/** profile.push: the snapshot the push created. */
+/** profile.push: the snapshot the push created, and the files the size
+ * caps left behind - the only place the user learns they are not on the
+ * server, since the push itself succeeded without them. */
 export interface ProfilePushResult {
   harness: string
+  skipped?: ProfileExclusion[]
   snapshot_id: string
   digest: string
   files: number

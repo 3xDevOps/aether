@@ -678,11 +678,19 @@ the First run step, which preselects it.
 
 Part B (`ProfileImport`) previews each harness configuration on this machine
 with `profile.preview`, showing the category counts and, behind an expander,
-every exclusion with its reason. Checkboxes start unchecked: approving calls
+every exclusion with its reason. Previews never run on mount: a profile root
+can hold hundreds of megabytes, so the user presses **Look at what is here**,
+the harnesses are walked one at a time with the current one named, and
+**Stop** aborts the fetch - which cancels the request context and stops the
+walk on the gateway, not just the waiting. A preview that fails shows its
+error on that harness's row; only the `-32602` that means "this harness does
+not sync a profile" is silent, and the "nothing to bring" line renders only
+when every harness answered without one. Checkboxes start unchecked: approving calls
 `profile.push` once per checked harness, one at a time, and a refusal lands
 on its own row while the rest still run. A `blocked` preview gets no
-checkbox at all - the scanner's finding is shown with the flagged file and
-the exact CLI command that can override it, because that override is
+checkbox at all - the row names the condition from `blocked_reason` and shows
+the flagged file, and offers the `--allow-secret` command only for a scanner
+finding, since a symlink escape has no override. That override is
 deliberately not in the dashboard. Where a setup-capable harness is
 installed locally, **Ask an agent** runs the `profile` scan over
 `/ws/envscan`, streams the agent's output, and pre-checks what it

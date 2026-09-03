@@ -1,5 +1,12 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { api } from '@/lib/api'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
+import { api, ApiError } from '@/lib/api'
 import type { Api } from '@/lib/api'
 import type { GatewayCapabilities } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
@@ -82,6 +89,23 @@ function bothPresent() {
   )
 }
 
+/**
+ * Presses Part B's preview button and waits for the walk to finish.
+ * Previews are deliberately not automatic - a profile root can hold
+ * hundreds of megabytes - so every test that wants one asks for it, the
+ * way a user does.
+ */
+async function look() {
+  fireEvent.click(
+    await screen.findByRole('button', { name: /Look at what is here/ }),
+  )
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('button', { name: 'Look at what is here' }),
+    ).toBeNull(),
+  )
+}
+
 function frame(data: object) {
   StubSocket.last().onmessage?.({ data: JSON.stringify(data) })
 }
@@ -99,14 +123,18 @@ describe('agents step', () => {
   it('renders both halves from env.harnesses, agent.list and the previews', async () => {
     const client = fakeApi()
     renderStep(client)
+    await look()
 
     // Part A: one row per setup-capable harness, by friendly name, saying
     // what each of the two signals actually means.
     expect(
       await screen.findByRole('region', { name: 'Set up an agent' }),
     ).toBeDefined()
-    expect(screen.getByText('Claude Code')).toBeDefined()
-    expect(screen.getByText('Codex')).toBeDefined()
+    // Both halves name the harness, so Part A's rows are queried inside
+    // Part A's own region.
+    const partA = screen.getByRole('region', { name: 'Set up an agent' })
+    expect(within(partA).getByText('Claude Code')).toBeDefined()
+    expect(within(partA).getByText('Codex')).toBeDefined()
     expect(
       screen.getByText(/installed on this machine - the server can launch claude/),
     ).toBeDefined()
@@ -127,7 +155,10 @@ describe('agents step', () => {
         name: 'Bring Claude Code configuration',
       }),
     ).toBeDefined()
-    expect(client.localProfilePreview).toHaveBeenCalledWith('claude')
+    expect(client.localProfilePreview).toHaveBeenCalledWith(
+      'claude',
+      expect.anything(),
+    )
     expect(
       screen.queryByRole('checkbox', { name: 'Bring Codex configuration' }),
     ).toBeNull()
@@ -154,16 +185,23 @@ describe('agents step', () => {
       ),
     })
     renderStep(client)
+    await look()
 
     expect(
       await screen.findByRole('checkbox', {
         name: 'Bring opencode configuration',
       }),
     ).toBeDefined()
-    expect(client.localProfilePreview).toHaveBeenCalledWith('opencode')
+    expect(client.localProfilePreview).toHaveBeenCalledWith(
+      'opencode',
+      expect.anything(),
+    )
     // A member-registered name is not a shipped profile root, so it is
     // never previewed.
-    expect(client.localProfilePreview).not.toHaveBeenCalledWith('myagent')
+    expect(client.localProfilePreview).not.toHaveBeenCalledWith(
+      'myagent',
+      expect.anything(),
+    )
     // opencode is not setup-capable, so Part A never offers to set it up.
     expect(
       screen.queryByRole('button', { name: 'Set up opencode' }),
@@ -245,6 +283,7 @@ describe('agents step', () => {
   it('lists a preview by category and what the guards left out', async () => {
     const client = fakeApi()
     renderStep(client)
+    await look()
 
     expect(await screen.findByText('12 skills, 4 commands - 179 KB')).toBeDefined()
     expect(screen.getByText('/home/alice/.claude')).toBeDefined()
@@ -262,6 +301,7 @@ describe('agents step', () => {
   it('pushes exactly the checked harnesses', async () => {
     const client = fakeApi({ localProfilePreview: bothPresent() })
     renderStep(client)
+    await look()
 
     fireEvent.click(
       await screen.findByRole('checkbox', {
@@ -297,12 +337,13 @@ describe('agents step', () => {
       ),
     })
     renderStep(client)
+    await look()
 
     // No checkbox at all: the push is refused server-side, so offering it
     // would be a lie.
     expect(
       await screen.findByText(
-        'The scanner flagged notes/key.txt: secret detected (aws-access-key) at line 3',
+        'notes/key.txt: secret detected (aws-access-key) at line 3',
       ),
     ).toBeDefined()
     expect(
@@ -341,6 +382,7 @@ describe('agents step', () => {
       }),
     })
     renderStep(client)
+    await look()
 
     fireEvent.click(
       await screen.findByRole('checkbox', {
@@ -370,6 +412,7 @@ describe('agents step', () => {
       openProfileScan: api.openProfileScan,
     })
     renderStep(client)
+    await look()
 
     fireEvent.click(
       await screen.findByRole('button', {
@@ -446,6 +489,7 @@ describe('agents step', () => {
       openProfileScan: api.openProfileScan,
     })
     const { onNext } = renderStep(client)
+    await look()
 
     fireEvent.click(
       await screen.findByRole('button', {
@@ -481,6 +525,7 @@ describe('agents step', () => {
   it('cancels a running scan and closes the socket', async () => {
     const client = fakeApi({ openProfileScan: api.openProfileScan })
     renderStep(client)
+    await look()
 
     fireEvent.click(
       await screen.findByRole('button', {
@@ -513,25 +558,63 @@ describe('agents step', () => {
     expect(onNext).toHaveBeenCalledTimes(2)
   })
 
-  it('skips a harness whose preview the gateway refuses', async () => {
+  it('skips a harness the registry has no profile sync for', async () => {
     const client = fakeApi({
       localProfilePreview: vi.fn(async (harness: string) => {
+        // -32602 maps to HTTP 400: this name cannot be imported at all.
         if (harness !== 'claude') {
-          throw new Error(`profile.preview: unknown harness ${harness}`)
+          throw new ApiError(400, `profile.preview: unknown harness ${harness}`)
         }
         return profilePreview()
       }),
     })
     renderStep(client)
+    await look()
 
-    // A harness with no profile sync answers an error; the step drops that
-    // harness instead of failing.
     expect(
       await screen.findByRole('checkbox', {
         name: 'Bring Claude Code configuration',
       }),
     ).toBeDefined()
     expect(screen.queryByText(/unknown harness/)).toBeNull()
+  })
+
+  it('shows a real preview failure instead of claiming the machine is empty', async () => {
+    // A permission error inside a profile root, a gateway restart: any of
+    // these answer -32603, and swallowing them made the step state
+    // something about the user's machine it had not checked.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async () => {
+        throw new ApiError(500, 'profile.preview: open /home/alice/.claude: permission denied')
+      }),
+    })
+    renderStep(client)
+    await look()
+
+    // One line per harness that failed, each naming its own harness.
+    expect((await screen.findAllByText(/permission denied/)).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/No agent configuration was found/)).toBeNull()
+  })
+
+  it('runs no preview until asked, and walks one harness at a time', async () => {
+    // The blocker: a profile root can hold hundreds of megabytes, and
+    // every file is secret-scanned. Mounting the step must cost nothing.
+    const client = fakeApi()
+    renderStep(client)
+
+    expect(await screen.findByText('Claude Code')).toBeDefined()
+    expect(client.localProfilePreview).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole('button', { name: 'Look at what is here' }),
+    ).toBeDefined()
+
+    await look()
+    expect(client.localProfilePreview).toHaveBeenCalled()
+    // Every call carries a signal, so leaving the step stops the walk on
+    // the gateway rather than only stopping the wait.
+    for (const call of vi.mocked(client.localProfilePreview).mock.calls) {
+      expect(call[1]).toBeInstanceOf(AbortSignal)
+    }
   })
 })
 
