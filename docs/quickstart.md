@@ -118,7 +118,8 @@ and build what the project needs. The
 agent proposes a list of tools, you review and approve it, and the image
 builds in the background while you finish onboarding - until it is ready,
 runs use the image the workspace was created with and the dashboard shows a
-banner saying so.
+banner saying so. An Agents step follows the Repository step and covers
+step 5 below.
 
 To change the environment later, open the workspace page in the dashboard.
 Its Environment panel shows what is installed, keeps every previous version
@@ -179,6 +180,30 @@ If the connection drops before you exit, resume with
 `aether workspace bootstrap myproject --resume`. The individual steps
 (re-install tools, re-run a login, manage snapshots) are in
 [bootstrap.md](bootstrap.md) and [harnesses.md](harnesses.md).
+
+Your own agent configuration - skills, custom commands, standing
+instructions like `CLAUDE.md`, settings, plugins - is separate from the
+login and syncs one way from your machine:
+
+```sh
+aether profile push --agent claude
+```
+
+The dashboard does both without a terminal. Its onboarding wizard's
+**Agents** step opens the same setup shell in the page, and then shows what
+a profile push would carry from each agent you have configured locally,
+grouped as skills, commands, memory, settings, MCP config and plugins, with
+every file the credential denylist or the secret scanner left behind and
+why. Check the agents you want and approve. Where a setup-capable agent is
+installed on your machine you can also let one read the inventory and
+recommend what is worth bringing, with a sentence of reasoning per agent;
+the recommendation is a checklist you edit, never something that acts on
+its own. Both parts are optional - **Skip for now** moves on.
+
+Secrets never sync, and the dashboard has no override: a scanner finding
+refuses the push and names the file so you can fix it locally.
+[harnesses.md](harnesses.md) has the full rules, including the CLI-only
+`--allow-secret`.
 
 ## 6. Launch a run
 

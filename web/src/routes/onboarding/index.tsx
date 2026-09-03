@@ -1,6 +1,7 @@
 // The onboarding wizard: the quickstart's most error-prone stretch - link,
-// workspace, environment, repo remote, first run - as five steps. It exists
-// only where the gateway has this machine's SSH identity and filesystem, so
+// workspace, environment, repo remote, agents, first run - as six steps. It
+// exists only where the gateway has this machine's SSH identity and
+// filesystem, so
 // the whole route gates on the link.status local verb; a remote gateway gets
 // an empty state, not a broken wizard. Nothing persists: every mount
 // re-checks link status.
@@ -9,6 +10,7 @@ import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
+import { AgentsStep } from '@/routes/onboarding/agents-step'
 import {
   EnvironmentReview,
   EnvironmentStep,
@@ -23,13 +25,23 @@ import {
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useCapability } from '@/store/hooks'
 
-const steps = ['Link', 'Workspace', 'Environment', 'Repository', 'First run'] as const
+const steps = [
+  'Link',
+  'Workspace',
+  'Environment',
+  'Repository',
+  'Agents',
+  'First run',
+] as const
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const [step, setStep] = useState(0)
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [review, setReview] = useState<EnvScanReview | null>(null)
+  // The harness the Agents step set up, so the first run starts on the one
+  // that is actually logged in. Empty until a setup shell exits cleanly.
+  const [setUpHarness, setSetUpHarness] = useState('')
 
   if (!caps.hasLocal('link.status')) {
     return (
@@ -109,7 +121,22 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             onNext={() => setStep(4)}
           />
         )}
-        {step === 4 && <FirstRunStep client={client} workspace={workspace} />}
+        {step === 4 && (
+          <AgentsStep
+            client={client}
+            caps={caps}
+            workspace={workspace}
+            onNext={() => setStep(5)}
+            onReady={setSetUpHarness}
+          />
+        )}
+        {step === 5 && (
+          <FirstRunStep
+            client={client}
+            workspace={workspace}
+            defaultHarness={setUpHarness}
+          />
+        )}
 
         {step > 0 && (
           <button

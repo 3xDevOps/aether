@@ -52,6 +52,15 @@ Dockerfile lines that install it, and a check command. Raw agent output
 streams behind a collapsed "View process" expander. Malformed output gets
 one automatic retry; scans time out after ten minutes.
 
+The same headless machinery runs one more scan, in the wizard's Agents
+step: a `profile` scan reads what each coding agent on your machine is
+configured with - paths and counts only, never file contents and never
+anything the credential denylist or the secret scanner flagged - and
+recommends which of it is worth importing into Aether, one sentence of
+reasoning per harness. The recommendation is a checklist you edit and
+approve; importing itself is profile sync, described in
+[harnesses.md](harnesses.md).
+
 You then review the result as a plain list: remove items, ask for changes
 in your own words (the agent re-runs with your note), or approve. Approval
 saves the definition and builds it in the background while onboarding

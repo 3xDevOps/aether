@@ -29,12 +29,33 @@ func BuildPushParams(c *protocol.Client, harness string, files []LocalFile, allo
 	if c != nil {
 		var st protocol.ProfileStatusResult
 		if err := c.Call(protocol.MethodProfileStatus, protocol.ProfileStatusParams{Harness: harness}, &st); err == nil {
-			for _, f := range st.Files {
-				if f.Digest != "" {
-					known[f.Digest] = struct{}{}
-				}
-			}
+			known = KnownDigests(st)
 		}
+	}
+	return PushParams(known, harness, files, allowSecret, workspaceID), nil
+}
+
+// KnownDigests is the set of blob digests the server already holds for a
+// harness, read from a profile.status result. Callers that reach the
+// server through something other than protocol.Client (the local
+// gateway's SSH backend) fetch the status themselves and pass the set to
+// PushParams.
+func KnownDigests(st protocol.ProfileStatusResult) map[string]struct{} {
+	known := make(map[string]struct{}, len(st.Files))
+	for _, f := range st.Files {
+		if f.Digest != "" {
+			known[f.Digest] = struct{}{}
+		}
+	}
+	return known
+}
+
+// PushParams builds the content-addressed delta: every file's path and
+// digest, and blob content only for digests the server does not already
+// have.
+func PushParams(known map[string]struct{}, harness string, files []LocalFile, allowSecret []string, workspaceID string) protocol.ProfilePushParams {
+	if known == nil {
+		known = map[string]struct{}{}
 	}
 	params := protocol.ProfilePushParams{
 		Harness:     harness,
@@ -59,7 +80,7 @@ func BuildPushParams(c *protocol.Client, harness string, files []LocalFile, allo
 		})
 		known[digest] = struct{}{}
 	}
-	return params, nil
+	return params
 }
 
 // Status fetches the latest snapshot for harness.

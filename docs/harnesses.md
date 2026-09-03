@@ -271,7 +271,52 @@ aether profile rollback --agent claude <snapshot-id>
 ```
 
 The local daemon (`aether daemon run`) does the push automatically on change;
-`--no-profile-sync` opts a machine out.
+`--no-profile-sync` opts a machine out. It logs one line per file it left
+behind, so an unattended push never drops a file silently.
+
+The dashboard does the same push without a terminal. Its onboarding wizard has
+an **Agents** step, and it runs on the same two guards: for each harness
+configured on your machine it shows what a push would carry, grouped as
+memory, skills, commands, settings, MCP config, plugins, and other, plus every
+file the denylist or the scanner left behind and why. You check the harnesses
+you want and approve. Nothing is uploaded to produce that preview, and it
+reads nothing until you ask it to - walking a configuration directory that
+holds months of transcripts is not instant, so it is a button, and it can be
+stopped.
+
+- A push carries at most **1 MiB per file** and **20 MiB per snapshot**.
+  Files over either limit are left behind rather than failing the push, and
+  the preview, `aether profile push`, and the daemon's log name each one.
+  They are decided from the file size alone, so an oversized file is never
+  read.
+- The snapshot budget is spent by category, in this order: memory, skills,
+  commands, settings, MCP config, plugins, then everything else. Directory
+  order would otherwise decide it, and a plugin cache that sorts early would
+  crowd out the skills and commands the sync exists to carry.
+- Only regular files sync. A socket, named pipe, or device node inside a
+  profile root is reported and skipped without being opened - a named pipe
+  would otherwise block the read until something wrote to it.
+- A **symlink pointing out of the profile root** is skipped and reported,
+  not followed. Symlinking `skills/` entries into a shared directory is an
+  ordinary setup; the link is left behind and everything else still syncs.
+  The target is never opened, so nothing outside the root is uploaded.
+- **Default excludes.** Aether skips what a harness writes for itself as it
+  runs - transcripts, telemetry, scratch trees - rather than anything you
+  configured:
+
+  | Harness | Skipped by default |
+  | --- | --- |
+  | `claude` | `projects/`, `shell-snapshots/`, `statsig/`, `todos/`, `file-history/`, `history.jsonl`, `daemon/` |
+  | `codex` | `tmp/`, `.tmp/`, `sessions/` |
+
+  A skipped directory is reported once, as the directory. These are applied
+  before your `.aether-profile-ignore`, so that file has the last word: a
+  line `!projects/` in it syncs the directory anyway.
+
+`--allow-secret` has no dashboard equivalent, deliberately. A scanner finding
+refuses the push there and names the file and the line: the fix is on the
+machine the file lives on. Overriding a false positive stays a CLI act, where
+`--workspace` records who overrode what, and on which timeline.
 
 - The synced directory is the harness's profile root from the table above.
 - A run **pins** the latest snapshot when it is provisioned. Pushing mid-run

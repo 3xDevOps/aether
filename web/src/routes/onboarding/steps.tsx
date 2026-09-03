@@ -421,16 +421,20 @@ export function RepoStep({
 }
 
 /**
- * Step 4: the first run, in the workspace step 2 settled on. The harness
- * comes from agent.list with a free-text fallback, and launch lands the user
- * on the run view.
+ * The last step: the first run, in the workspace step 2 settled on. The
+ * harness comes from agent.list with a free-text fallback, and launch lands
+ * the user on the run view. `defaultHarness` is the one the Agents step set
+ * up; it is preselected only when agent.list carries that name, because a
+ * name the server cannot launch would just move the refusal later.
  */
 export function FirstRunStep({
   client,
   workspace,
+  defaultHarness,
 }: {
   client: Api
   workspace: Workspace | null
+  defaultHarness?: string
 }) {
   const navigate = useStore((s) => s.navigate)
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
@@ -444,9 +448,14 @@ export function FirstRunStep({
     // agent.list failing is not fatal: the harness field falls back to text.
     client
       .agentList()
-      .then(setAgents)
+      .then((list) => {
+        setAgents(list)
+        if (defaultHarness && list.some((a) => a.name === defaultHarness)) {
+          setHarness((prev) => prev || defaultHarness)
+        }
+      })
       .catch(() => setAgents([]))
-  }, [client])
+  }, [client, defaultHarness])
 
   const freeText = agents !== null && agents.length === 0
   const chosen = freeText || harness === '__custom' ? custom.trim() : harness

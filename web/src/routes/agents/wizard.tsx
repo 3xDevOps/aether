@@ -2,7 +2,7 @@
 // shell embedded right here (registration happens when that shell exits
 // cleanly, so the wizard never navigates away from it), then the result.
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { AgentInfo } from '@/lib/types'
 import { ShellPane } from '@/routes/shell/pane'
@@ -24,11 +24,19 @@ type Step = 'form' | 'shell' | 'done'
 
 export function AgentWizard({
   agents,
+  harness,
+  workspaceId,
   onRegistered,
   onCancel,
 }: {
   /** The current list, for shipped-name detection and duplicate hints. */
   agents: AgentInfo[]
+  /** The harness to set up, when the caller already knows it (onboarding).
+   * With workspaceId set too, the form has nothing left to ask and the
+   * setup shell opens on mount. */
+  harness?: string
+  /** The workspace to set the agent up in; without it the member picks. */
+  workspaceId?: string
   /** A clean shell exit registered the agent; the caller refetches. */
   onRegistered: () => void
   onCancel: () => void
@@ -39,10 +47,10 @@ export function AgentWizard({
   const shellRequest = useStore((s) => s.shellRequest)
 
   const [step, setStep] = useState<Step>('form')
-  const [name, setName] = useState('')
+  const [name, setName] = useState(harness ?? '')
   // Empty until the member picks one, so the sidebar's choice keeps
   // following them until they mean to set up an agent somewhere else.
-  const [picked, setPicked] = useState('')
+  const [picked, setPicked] = useState(workspaceId ?? '')
   // Argv templates follow the name until the user edits them.
   const [tui, setTui] = useState<string | null>(null)
   const [headless, setHeadless] = useState<string | null>(null)
@@ -79,6 +87,20 @@ export function AgentWizard({
     setStep('shell')
   }
 
+  // Onboarding drives the wizard with both answers in hand, so there is no
+  // form to show: open the setup shell straight away. The standalone page
+  // passes neither prop and is untouched.
+  const driven = Boolean(harness && workspaceId)
+  const started = useRef(false)
+  useEffect(() => {
+    if (!driven || started.current) return
+    started.current = true
+    // start() reads only state seeded from these props, so one run on
+    // mount is the whole contract; the ref keeps a re-render from opening
+    // a second shell.
+    start()
+  }, [driven])
+
   if (step === 'done') {
     return (
       <div className="space-y-3 rounded-md border p-4">
@@ -114,6 +136,10 @@ export function AgentWizard({
       </div>
     )
   }
+
+  // The driven wizard never shows its form; the mount effect above is
+  // opening the shell.
+  if (driven) return null
 
   return (
     <form

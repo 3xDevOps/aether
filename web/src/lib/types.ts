@@ -327,6 +327,96 @@ export interface ProfileStatus {
   snapshots: ProfileSnapshot[]
 }
 
+/** The categories a profile preview groups files into, in report order. */
+export type ProfileCategory =
+  | 'memory'
+  | 'skills'
+  | 'commands'
+  | 'settings'
+  | 'mcp'
+  | 'plugins'
+  | 'other'
+
+/** One category of a profile preview. `paths` is capped server-side, with
+ * `truncated` set when it was cut; `files` and `bytes` stay exact. */
+export interface ProfilePreviewCategory {
+  category: ProfileCategory
+  files: number
+  bytes: number
+  paths: string[]
+  truncated: boolean
+}
+
+/** Why a file was left out of a profile push. `too-large` and
+ * `over-budget` are the server's size caps, applied before the file is
+ * ever read. */
+export type ProfileExcludeReason =
+  | 'credential'
+  | 'secret'
+  | 'ignored'
+  | 'symlink'
+  | 'too-large'
+  | 'over-budget'
+  | 'not-regular'
+
+/** One file the guards left out of a profile push, and why. */
+export interface ProfileExclusion {
+  path: string
+  reason: ProfileExcludeReason
+  detail: string
+}
+
+/**
+ * profile.preview: the discovery a push would run, uploading nothing.
+ * `present` is false when this machine has no profile root for the harness
+ * - a normal answer, not an error. `blocked` is true when the push would
+ * be refused outright rather than partially carried; `blocked_reason`,
+ * `blocked_path` and `blocked_detail` name which condition and where.
+ * Only a `secret` has a CLI override, so a surface offering one must read
+ * the reason rather than assume.
+ */
+export interface ProfilePreview {
+  harness: string
+  root: string
+  present: boolean
+  files: number
+  bytes: number
+  categories?: ProfilePreviewCategory[]
+  /** Capped; `excluded_total` is how many there were. */
+  excluded?: ProfileExclusion[]
+  excluded_total?: number
+  blocked: boolean
+  blocked_reason?: ProfileExcludeReason
+  blocked_path?: string
+  blocked_detail?: string
+}
+
+/** profile.push: the snapshot the push created, and the files the size
+ * caps left behind - the only place the user learns they are not on the
+ * server, since the push itself succeeded without them. */
+export interface ProfilePushResult {
+  harness: string
+  skipped?: ProfileExclusion[]
+  snapshot_id: string
+  digest: string
+  files: number
+  bytes: number
+}
+
+/** One harness in a profile scan's recommendation. A proposal, never an
+ * action: the import is a separate profile.push the user approves. */
+export interface HarnessRecommendation {
+  harness: string
+  import: boolean
+  categories: ProfileCategory[]
+  reason: string
+}
+
+/** What a `profile` scan answers instead of a Dockerfile and manifest. */
+export interface ProfileRecommendation {
+  harnesses: HarnessRecommendation[]
+}
+
 // The local gateway's client-machine verbs, POST /local/v1/<verb>
 // (internal/localgw/local.go). Only a gateway with the user's repository
 // and SSH key serves these; useCapability's hasLocal gates every caller.
@@ -561,10 +651,11 @@ export interface EnvHarnessesResult {
 /** The first frame the client sends on /ws/envscan. A repo scan names the
  * repository folder to read; a refine run carries the pair it starts from
  * and the user's feedback, plus the repo folder when that pair came from
- * a repo scan. Inventory omits them all. */
+ * a repo scan. A profile scan reads this machine's agent configuration and
+ * takes the repo folder optionally. Inventory omits them all. */
 export interface EnvScanRequest {
   harness: string
-  mode: 'inventory' | 'repo' | 'refine'
+  mode: 'inventory' | 'repo' | 'refine' | 'profile'
   repo_path?: string
   previous_dockerfile?: string
   previous_manifest_json?: string
@@ -581,10 +672,25 @@ export interface EnvScanResult {
   manifest: ManifestItem[]
 }
 
+/** The terminal success frame. Which half it carries follows the mode: a
+ * pair for the three environment scans, a recommendation for `profile`. */
+export type EnvScanResultFrame =
+  | {
+      type: 'result'
+      dockerfile: string
+      manifest: ManifestItem[]
+      recommendation?: undefined
+    }
+  | {
+      type: 'result'
+      recommendation: ProfileRecommendation
+      dockerfile?: undefined
+    }
+
 /** One frame from the gateway on /ws/envscan. `result` and `error` are
  * terminal; closing the socket cancels the scan. */
 export type EnvScanFrame =
   | { type: 'output'; line: string }
   | { type: 'status'; status: EnvScanStatus }
-  | { type: 'result'; dockerfile: string; manifest: ManifestItem[] }
+  | EnvScanResultFrame
   | { type: 'error'; detail: string; output_tail?: string }
