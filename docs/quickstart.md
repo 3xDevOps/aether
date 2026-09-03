@@ -23,14 +23,20 @@ On the server box and on a Linux or macOS machine:
 curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
 ```
 
-On Linux that installs `aether` and `aether-server`; on macOS just `aether`
-(the server is Linux-only). Later, `aether update` upgrades both.
+The script asks what this machine is. Answer **server** on the server box and
+**client** on your own machine; Enter takes the sensible default.
 
-The script then asks what this machine is. Answer **server** on the server box
-and **client** on your own machine, and it finishes that side's setup for you:
-[step 2](#2-start-the-server) on the server, the desktop app
-([step 7](#prefer-a-native-window)) on a client. Enter takes the sensible
-default. To install the binaries and stop there, add `--role none`; see
+That answer decides what you get. A server gets `aether` and `aether-server`
+in `/usr/local/bin`, with `sudo`. A client gets the `aether` CLI alone in
+`~/.local/bin`, without `sudo`, so the desktop app can replace it when it
+updates; if that directory is not on your `PATH`, the script prints the one
+line that adds it, and the app finds it either way. macOS is a client
+platform, so it only ever gets `aether`. Later, `aether update` upgrades
+whatever is installed.
+
+It then finishes that side's setup: [step 2](#2-start-the-server) on the
+server, the desktop app ([step 7](#prefer-a-native-window)) on a client. To
+install the binaries and stop there, add `--role none`; see
 [install.md](install.md#the-install-script).
 
 On **Windows** the client is a manual download - three PowerShell commands in

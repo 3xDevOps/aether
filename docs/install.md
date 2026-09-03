@@ -13,19 +13,40 @@ does, how to run the server as a service, and what lives in the data directory.
 curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
 ```
 
-It detects your OS and CPU, downloads the matching binaries from the latest
-GitHub release, verifies each one against the release's `checksums.txt`, and
-installs them into `/usr/local/bin` (via `sudo` if needed, falling back to
-`~/.local/bin` when there is no sudo). On Linux it installs both binaries; on
-macOS only `aether`, because the server is Linux-only.
+It detects your OS and CPU, downloads the release assets it needs, and
+verifies each one against the release's `checksums.txt`. macOS only ever gets
+`aether`, because the server is Linux-only.
 
-Then it asks one question: is this machine the server, or a client?
+It asks one question first: is this machine the server, or a client? The
+answer picks which binaries are installed, where they go, and what runs
+afterwards.
 
-| Answer | What it runs next |
-| --- | --- |
-| `server` | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, then the systemd activation line. |
-| `client` | `aether gui build` - packages and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
-| `none` | Nothing further. The binaries are installed and the script stops. |
+| Answer | What is installed, and where | What it runs next |
+| --- | --- | --- |
+| `server` | On Linux both `aether` and `aether-server`, into `/usr/local/bin`, root-owned, using `sudo` when it has to; on a machine with no `sudo` at all it falls back to `~/.local/bin`. | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, then the systemd activation line. |
+| `client` | `aether` alone, into `~/.local/bin`, created if it is missing. No `sudo`, and the files stay yours. | `aether gui build` - packages and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
+| `none` | The same as `server`, `sudo` fallback included. | Nothing further. The binaries are installed and the script stops. |
+
+A client gets `~/.local/bin` because the dashboard's **Update now** button
+replaces the CLI from the `aether gui` process, which runs as you. A
+root-owned binary in `/usr/local/bin` leaves that button with nothing to do
+but print `sudo aether update`. `--bin-dir` overrides the choice for every
+role.
+
+A client gets the CLI alone for the same reason: `aether update` reads an
+`aether-server` next to the CLI as proof the machine is a server, so one
+sitting in `~/.local/bin` would make every update pull a server binary this
+machine never runs and make the dashboard ask for a
+`sudo systemctl restart aether-server` that no unit backs. `--client`,
+`--server` and `AETHER_COMPONENTS` still choose the components themselves.
+
+If the install directory is not on your `PATH`, the script prints the one line
+that adds it for your shell - bash, zsh, or fish, and a plain `export` when it
+cannot tell - and never edits a profile for you. The desktop app looks in
+`~/.local/bin` itself, so it starts either way; a terminal needs the line. If
+an older `aether` is still in `/usr/local/bin`, the script names it and prints
+the `sudo rm -f` that removes it, because that copy comes first on most
+`PATH`s and would shadow the new one.
 
 Enter takes the default: `server` on a Linux machine that got the server
 binary, `client` everywhere else. Answers are case-insensitive. Choosing the
@@ -54,7 +75,7 @@ Options, as flags or environment variables:
 | Flag | Variable | Effect |
 | --- | --- | --- |
 | `--version <tag>` | `AETHER_VERSION` | Install a specific release instead of the latest. |
-| `--bin-dir <dir>` | `AETHER_BIN_DIR` | Install somewhere else. |
+| `--bin-dir <dir>` | `AETHER_BIN_DIR` | Install somewhere else, whichever role is chosen. |
 | `--client` | `AETHER_COMPONENTS=client` | CLI only. |
 | `--server` | `AETHER_COMPONENTS=server` | Server only. |
 | `--role <role>` | `AETHER_ROLE` | Answer the role question up front: `server`, `client`, or `none` to skip it. |
@@ -64,7 +85,7 @@ Options, as flags or environment variables:
 Passing flags through a pipe needs `sh -s --`:
 
 ```sh
-curl -fsSL .../install.sh | sh -s -- --client --bin-dir ~/.local/bin
+curl -fsSL .../install.sh | sh -s -- --client --bin-dir ~/bin
 curl -fsSL .../install.sh | sh -s -- --role server
 ```
 
@@ -73,12 +94,14 @@ curl -fsSL .../install.sh | sh -s -- --role server
 `aether update` replaces the running CLI with the latest release (or
 `--version <tag>`), verifying it against the release's `checksums.txt`. On a
 Linux host with `aether-server` installed next to the CLI it updates both and
-reminds you to `sudo systemctl restart aether-server`. Binaries in
-`/usr/local/bin` need `sudo aether update`; the gateway never escalates
-privileges for you, it names that command. Re-running the installer does the
-same job; the data directory is untouched either way. `aether update` is not a
-Windows command; it refuses to run there. Upgrading a Windows client means
-downloading the new release binary over the old one, exactly as below.
+reminds you to `sudo systemctl restart aether-server`. A client CLI in
+`~/.local/bin` updates in place, which is what the dashboard's **Update now**
+button uses; binaries in `/usr/local/bin` need `sudo aether update`, because
+the gateway never escalates privileges for you, it names that command.
+Re-running the installer does the same job; the data directory is untouched
+either way. `aether update` is not a Windows command; it refuses to run
+there. Upgrading a Windows client means downloading the new release binary
+over the old one, exactly as below.
 
 **The check.** `aether update --check` reports whether a newer release exists
 and exits 0 either way; `--check --json` prints one JSON object for a script:
@@ -652,11 +675,19 @@ for API-key harnesses. No system user or group is ever created, so there is noth
 ```sh
 rm -rf ~/.config/aether ~/.config/aether-desktop
 ssh-keygen -R '[<server-host>]:2222'
-sudo rm -f /usr/local/bin/aether        # or ~/.local/bin/aether
+rm -f ~/.local/bin/aether       # the client default
+# sudo rm -f /usr/local/bin/aether if you installed there instead
 # only if you ran `aether gui build`:
 rm -rf ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop
 rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder
 ```
+
+A client install writes one binary, so `aether` is the only name to remove.
+A machine that answered `server` has `aether-server` beside it and the server
+list above is the one to follow. An install that named its own components
+(`--server`, `AETHER_COMPONENTS`) put whatever it was told wherever
+`--bin-dir` pointed; `command -v aether` and `command -v aether-server` find
+what is actually there.
 
 The `aether` cache directory - `~/.cache/aether` above, and its macOS and
 Windows equivalents below - holds the desktop build directory and the private

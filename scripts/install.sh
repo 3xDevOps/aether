@@ -8,16 +8,19 @@
 #
 # Flags (or the matching environment variables):
 #   --version <tag>   AETHER_VERSION      release tag; default: latest
-#   --bin-dir <dir>   AETHER_BIN_DIR      install directory; default: /usr/local/bin
+#   --bin-dir <dir>   AETHER_BIN_DIR      install directory; default: /usr/local/bin,
+#                                         or ~/.local/bin for the client role
 #   --client          AETHER_COMPONENTS=client   CLI only
 #   --server          AETHER_COMPONENTS=server   server only
 #   --role <role>     AETHER_ROLE         server | client | none
 #
 # The server binary is Linux-only by design. On macOS this installs the CLI.
 #
-# After the binaries are in place the script asks whether this machine is the
-# server or a client, then finishes that role's setup: `aether-server setup`
-# on a server, `aether gui build` on a client. Pass --role none to skip.
+# The script asks whether this machine is the server or a client. The answer
+# picks what is installed and where: a client gets the CLI alone in
+# ~/.local/bin, which the desktop app can replace on update without sudo. It
+# then finishes that role's setup: `aether-server setup` on a server,
+# `aether gui build` on a client. Pass --role none to skip both.
 
 set -eu
 
@@ -40,6 +43,11 @@ COMPONENTS_CHOSEN=no
 # a writable /etc. They are not documented options.
 TTY_PATH="${AETHER_TTY:-/dev/tty}"
 UNIT_PATH="${AETHER_UNIT_PATH:-/etc/systemd/system/aether-server.service}"
+SYSTEM_BIN_DIR="${AETHER_SYSTEM_BIN_DIR:-/usr/local/bin}"
+
+# Where the client CLI goes, and where the desktop launcher looks for it on
+# its own (internal/localops/desktop.go).
+USER_BIN_DIR="${HOME:-}/.local/bin"
 
 die() {
 	echo "aether install: $*" >&2
@@ -83,13 +91,16 @@ usage: install.sh [--version <tag>] [--bin-dir <dir>] [--client | --server]
                   [--role server|client|none]
 
   --version   release tag to install (default: the latest release)
-  --bin-dir   where to put the binaries (default: /usr/local/bin)
+  --bin-dir   where to put the binaries (default: /usr/local/bin, or
+              ~/.local/bin when the role is client)
   --client    install the aether CLI only
   --server    install the aether-server binary only (Linux)
   --role      what this machine is, skipping the question:
-                server  run `aether-server setup` after installing
-                client  run `aether gui build` after installing
-                none    install the binaries and stop
+                server  both binaries into /usr/local/bin, then
+                        `aether-server setup`
+                client  the CLI alone into ~/.local/bin, then
+                        `aether gui build`
+                none    install into /usr/local/bin and stop
 
 Without --role the script asks, and answers the question itself when there is
 no terminal to ask on (any non-interactive run behaves like --role none).
@@ -169,71 +180,6 @@ if [ -z "$VERSION" ]; then
 fi
 say "installing ${VERSION} for ${os}/${arch}"
 
-# --- destination -------------------------------------------------------
-
-sudo=""
-if [ -z "$BIN_DIR" ]; then
-	BIN_DIR="/usr/local/bin"
-	if [ ! -w "$BIN_DIR" ]; then
-		if command -v sudo >/dev/null 2>&1; then
-			sudo="sudo"
-		else
-			BIN_DIR="$HOME/.local/bin"
-			say "no write access to /usr/local/bin and no sudo; using ${BIN_DIR}"
-		fi
-	fi
-elif [ ! -w "$BIN_DIR" ] && [ -d "$BIN_DIR" ] && command -v sudo >/dev/null 2>&1; then
-	sudo="sudo"
-fi
-$sudo mkdir -p "$BIN_DIR" || die "cannot create ${BIN_DIR}"
-
-# --- download and verify -----------------------------------------------
-
-tmp="$(mktemp -d)"
-# A bare INT trap would clean up and then resume the script, which used to be
-# harmless because nothing followed the downloads. Now a cancelled setup or
-# desktop build would fall through to advice the user did not ask for.
-trap 'rm -rf "$tmp"' EXIT
-trap 'rm -rf "$tmp"; exit 130' INT
-trap 'rm -rf "$tmp"; exit 143' TERM
-
-fetch "${BASE_URL}/${VERSION}/checksums.txt" "$tmp/checksums.txt" ||
-	die "cannot download checksums.txt for ${VERSION}"
-
-install_one() {
-	name="$1"
-	asset="${name}-${os}-${arch}"
-	say "downloading ${asset}"
-	fetch "${BASE_URL}/${VERSION}/${asset}" "$tmp/$asset" ||
-		die "cannot download ${asset}"
-	want="$(awk -v a="$asset" '$2 == a || $2 == "*" a { print $1 }' "$tmp/checksums.txt" | head -1)"
-	[ -n "$want" ] || die "${asset} is not listed in checksums.txt"
-	got="$(sha256_of "$tmp/$asset")"
-	[ "$want" = "$got" ] || die "checksum mismatch for ${asset}: expected ${want}, got ${got}"
-	chmod 0755 "$tmp/$asset"
-	$sudo mv "$tmp/$asset" "${BIN_DIR}/${name}" || die "cannot install into ${BIN_DIR}"
-	# mv carries the invoking user's ownership into the destination, which
-	# would leave a root-executed binary writable by that user.
-	[ -z "$sudo" ] || $sudo chown 0:0 "${BIN_DIR}/${name}" ||
-		die "cannot set root ownership on ${BIN_DIR}/${name}"
-	say "installed ${BIN_DIR}/${name}"
-}
-
-case "$COMPONENTS" in
-client) install_one aether ;;
-server) install_one aether-server ;;
-both)
-	install_one aether
-	install_one aether-server
-	;;
-*) die "unknown component set ${COMPONENTS}" ;;
-esac
-
-case ":${PATH}:" in
-*":${BIN_DIR}:"*) ;;
-*) say "warning: ${BIN_DIR} is not on your PATH" ;;
-esac
-
 # --- which role does this machine play? --------------------------------
 
 # This script is normally piped into sh, so stdin is the script itself: a
@@ -312,6 +258,93 @@ if [ -z "$ROLE" ]; then
 	done
 fi
 
+# The platform default asked for both binaries before the role was known. A
+# client answer makes aether-server irrelevant, and worse than useless next to
+# the CLI: `aether update` treats it as proof this box is a server, so every
+# update pulls a server binary this machine never runs and the dashboard asks
+# for a `systemctl restart aether-server` that no unit backs. An explicit
+# --client, --server or AETHER_COMPONENTS still decides for itself.
+if [ "$ROLE" = client ] && [ "$COMPONENTS_CHOSEN" = no ]; then
+	COMPONENTS="client"
+fi
+
+# --- destination -------------------------------------------------------
+
+# A trailing slash would make the PATH check miss and the shadow check below
+# compare the install directory against itself.
+while [ "$BIN_DIR" != "/" ] && [ "${BIN_DIR%/}" != "$BIN_DIR" ]; do
+	BIN_DIR="${BIN_DIR%/}"
+done
+
+sudo=""
+if [ -n "$BIN_DIR" ]; then
+	# An explicit --bin-dir or AETHER_BIN_DIR wins over the role.
+	if [ ! -w "$BIN_DIR" ] && [ -d "$BIN_DIR" ] && command -v sudo >/dev/null 2>&1; then
+		sudo="sudo"
+	fi
+elif [ "$ROLE" = client ]; then
+	# The desktop app's Update button replaces this binary from the gateway,
+	# which runs as you. A root-owned binary in /usr/local/bin turns that
+	# button into "run `sudo aether update`" on every default Linux install.
+	[ -n "${HOME:-}" ] || die "HOME is not set; pass --bin-dir <dir>"
+	BIN_DIR="$USER_BIN_DIR"
+else
+	BIN_DIR="$SYSTEM_BIN_DIR"
+	if [ ! -w "$BIN_DIR" ]; then
+		if command -v sudo >/dev/null 2>&1; then
+			sudo="sudo"
+		else
+			[ -n "${HOME:-}" ] ||
+				die "no write access to ${SYSTEM_BIN_DIR}, no sudo, and HOME is not set; pass --bin-dir <dir>"
+			BIN_DIR="$USER_BIN_DIR"
+			say "no write access to ${SYSTEM_BIN_DIR} and no sudo; using ${BIN_DIR}"
+		fi
+	fi
+fi
+$sudo mkdir -p "$BIN_DIR" || die "cannot create ${BIN_DIR}"
+
+# --- download and verify -----------------------------------------------
+
+tmp="$(mktemp -d)"
+# A bare INT trap would clean up and then resume the script, which used to be
+# harmless because nothing followed the downloads. Now a cancelled setup or
+# desktop build would fall through to advice the user did not ask for.
+trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"; exit 130' INT
+trap 'rm -rf "$tmp"; exit 143' TERM
+
+fetch "${BASE_URL}/${VERSION}/checksums.txt" "$tmp/checksums.txt" ||
+	die "cannot download checksums.txt for ${VERSION}"
+
+install_one() {
+	name="$1"
+	asset="${name}-${os}-${arch}"
+	say "downloading ${asset}"
+	fetch "${BASE_URL}/${VERSION}/${asset}" "$tmp/$asset" ||
+		die "cannot download ${asset}"
+	want="$(awk -v a="$asset" '$2 == a || $2 == "*" a { print $1 }' "$tmp/checksums.txt" | head -1)"
+	[ -n "$want" ] || die "${asset} is not listed in checksums.txt"
+	got="$(sha256_of "$tmp/$asset")"
+	[ "$want" = "$got" ] || die "checksum mismatch for ${asset}: expected ${want}, got ${got}"
+	chmod 0755 "$tmp/$asset"
+	$sudo mv "$tmp/$asset" "${BIN_DIR}/${name}" || die "cannot install into ${BIN_DIR}"
+	# mv carries the invoking user's ownership into the destination, which
+	# would leave a root-executed binary writable by that user.
+	[ -z "$sudo" ] || $sudo chown 0:0 "${BIN_DIR}/${name}" ||
+		die "cannot set root ownership on ${BIN_DIR}/${name}"
+	say "installed ${BIN_DIR}/${name}"
+}
+
+case "$COMPONENTS" in
+client) install_one aether ;;
+server) install_one aether-server ;;
+both)
+	install_one aether
+	install_one aether-server
+	;;
+*) die "unknown component set ${COMPONENTS}" ;;
+esac
+
 # --- finish that role's setup ------------------------------------------
 
 setup_ran=no
@@ -363,6 +396,53 @@ case "$ROLE" in
 server) run_server_setup && setup_ran=yes || true ;;
 client) run_gui_build && gui_built=yes || true ;;
 esac
+
+# --- PATH, and an older CLI that would shadow this one -----------------
+
+# The one line that adds BIN_DIR to PATH for the login shell in $SHELL.
+# Nothing here edits a profile; the user runs it. SHELL is unset in
+# containers, cron jobs and most CI runners - exactly the machines that take
+# this branch - so an unset or unrecognised shell gets the generic export
+# rather than a "parameter not set" error under `set -u`.
+path_line() {
+	shell_name="${SHELL:-}"
+	shell_name="${shell_name##*/}"
+	case "$shell_name" in
+	fish) echo "fish_add_path ${BIN_DIR}   # run this one in fish" ;;
+	zsh) echo "echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ~/.zshrc" ;;
+	bash)
+		if [ "$os" = darwin ]; then
+			echo "echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ~/.bash_profile"
+		else
+			echo "echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ~/.bashrc"
+		fi
+		;;
+	*) echo "export PATH=\"${BIN_DIR}:\$PATH\"   # add this to your shell profile" ;;
+	esac
+}
+
+warned=no
+case ":${PATH}:" in
+*":${BIN_DIR}:"*) ;;
+*)
+	echo
+	warned=yes
+	say "warning: ${BIN_DIR} is not on your PATH. Add it, then open a new shell:"
+	echo "  $(path_line)"
+	if [ "$BIN_DIR" = "$USER_BIN_DIR" ]; then
+		say "the desktop app looks in ~/.local/bin itself, so it starts either way."
+	fi
+	;;
+esac
+
+# An older CLI in /usr/local/bin comes first on most PATHs, so it would run
+# instead of the one just installed.
+if [ "$BIN_DIR" != "$SYSTEM_BIN_DIR" ] && [ "$COMPONENTS" != server ] &&
+	[ -e "${SYSTEM_BIN_DIR}/aether" ]; then
+	[ "$warned" = yes ] || echo
+	say "warning: an older ${SYSTEM_BIN_DIR}/aether would shadow ${BIN_DIR}/aether. Remove it:"
+	echo "  sudo rm -f ${SYSTEM_BIN_DIR}/aether"
+fi
 
 # --- what happened, what is next, and the guide ------------------------
 

@@ -16,10 +16,13 @@ script="$script_dir/install.sh"
 bin="$tmp/bin"           # stubs the installer itself calls
 node="$tmp/node"         # npm and npx, dropped from PATH in one case
 bindir="$tmp/bindir"     # AETHER_BIN_DIR: where the fake binaries land
+sysbin="$tmp/usrlocal"   # stands in for /usr/local/bin
+home="$tmp/home"         # HOME, so ~/.local/bin is inside the sandbox
 fixtures="$tmp/fixtures" # what the fake curl serves
 log="$tmp/cmd.log"
 out="$tmp/out.txt"
-mkdir -p "$bin" "$node" "$bindir" "$fixtures"
+err="$tmp/err.txt"
+mkdir -p "$bin" "$node" "$bindir" "$sysbin" "$home" "$fixtures"
 
 sha_of() {
 	if command -v sha256sum >/dev/null 2>&1; then
@@ -106,9 +109,20 @@ cat >"$bin/id" <<'EOF'
 echo 1000
 EOF
 
+# Logs, then runs the command as a real root would. STUB_ROOT_DIR names the
+# read-only stand-in for /usr/local/bin, whose permissions root would ignore;
+# chown is only logged, because no test runs as a user who could do it.
 cat >"$bin/sudo" <<'EOF'
 #!/bin/sh
 printf 'sudo %s\n' "$*" >>"$CMD_LOG"
+case "${1:-}" in chown) exit 0 ;; esac
+if [ -n "${STUB_ROOT_DIR:-}" ]; then
+	chmod u+w "$STUB_ROOT_DIR"
+	status=0
+	"$@" || status=$?
+	chmod a-w "$STUB_ROOT_DIR"
+	exit "$status"
+fi
 exec "$@"
 EOF
 
@@ -154,6 +168,9 @@ export CMD_LOG="$log" FIXTURES="$fixtures"
 # Test seams: a unit path outside /etc, so the post-setup check is real
 # without root, and a fake terminal per case (set by answer(), below).
 export AETHER_UNIT_PATH="$tmp/aether-server.service"
+# The system directory and HOME both point inside the sandbox, so no case can
+# write to the real /usr/local/bin or the real ~/.local/bin.
+export AETHER_SYSTEM_BIN_DIR="$sysbin" HOME="$home"
 export AETHER_VERSION="v0.0.0-test" AETHER_BIN_DIR="$bindir"
 export PATH="$bin:$node:$bindir:$PATH"
 
@@ -167,6 +184,8 @@ fail() {
 	cat "$log" >&2 2>/dev/null || true
 	echo "--- installer output ---" >&2
 	cat "$out" >&2 2>/dev/null || true
+	echo "--- installer stderr ---" >&2
+	cat "$err" >&2 2>/dev/null || true
 	exit 1
 }
 
@@ -174,7 +193,10 @@ reset() {
 	case_name="$1"
 	: >"$log"
 	: >"$out"
+	: >"$err"
 	rm -f "$bindir/aether" "$bindir/aether-server" "$AETHER_UNIT_PATH"
+	chmod 0755 "$sysbin"
+	rm -rf "${sysbin:?}"/* "$home/.local"
 	rm -f "$answers"
 }
 
@@ -191,6 +213,9 @@ ran() { grep -Fq "$1" "$log" || fail "expected to run: $1"; }
 not_ran() { ! grep -Fq "$1" "$log" || fail "should not have run: $1"; }
 printed() { grep -Fq "$1" "$out" || fail "missing from output: $1"; }
 not_printed() { ! grep -Fq "$1" "$out" || fail "should not be in output: $1"; }
+# Only the cases that redirect stderr separately can use this; everywhere else
+# stderr is folded into $out.
+no_stderr() { [ ! -s "$err" ] || fail "wrote to stderr"; }
 
 question="What is this machine?"
 
@@ -410,6 +435,163 @@ printed "This machine is a client"
 printed "aether link <server-host>:2222"
 not_printed "Node.js 22+"
 printed "$quickstart"
+
+# --- where each role installs --------------------------------------------
+#
+# These are the only cases that drop AETHER_BIN_DIR, so the resolved role
+# picks the directory. Each runs in its own subshell so the unset stays there.
+
+reset "client role installs the CLI alone into ~/.local/bin, without sudo"
+(
+	unset AETHER_BIN_DIR
+	sh "$script" --role client
+) >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$home/.local/bin/aether" ] || fail "the CLI did not land in ~/.local/bin"
+not_ran "sudo "
+printed "installed $home/.local/bin/aether"
+ran "aether gui build"
+# An aether-server next to the CLI makes `aether update` treat this machine as
+# a server, so a client answer must not download or install one.
+[ ! -e "$home/.local/bin/aether-server" ] || fail "a client answer installed the server binary"
+not_printed "aether-server-linux-amd64"
+
+reset "an explicit component set still wins over the client role"
+(
+	unset AETHER_BIN_DIR
+	AETHER_COMPONENTS=both sh "$script" --role client
+) >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$home/.local/bin/aether" ] || fail "the CLI did not land in ~/.local/bin"
+[ -x "$home/.local/bin/aether-server" ] || fail "AETHER_COMPONENTS=both was overridden"
+
+reset "server role installs into /usr/local/bin with sudo and root ownership"
+chmod 0555 "$sysbin"
+(
+	unset AETHER_BIN_DIR
+	STUB_ROOT_DIR="$sysbin" sh "$script" --role server
+) >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$sysbin/aether-server" ] || fail "the server did not land in /usr/local/bin"
+[ ! -e "$home/.local/bin/aether-server" ] || fail "the server went to ~/.local/bin"
+ran "sudo mv"
+ran "sudo chown 0:0 $sysbin/aether-server"
+printed "installed $sysbin/aether-server"
+
+reset "--bin-dir wins over the client role"
+sh "$script" --role client --bin-dir "$bindir" >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$bindir/aether" ] || fail "--bin-dir was ignored"
+[ ! -e "$home/.local/bin/aether" ] || fail "--bin-dir still used ~/.local/bin"
+
+reset "--bin-dir wins over the server role"
+sh "$script" --role server --bin-dir "$bindir" >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$bindir/aether-server" ] || fail "--bin-dir was ignored"
+[ ! -e "$sysbin/aether-server" ] || fail "--bin-dir still used /usr/local/bin"
+
+reset "role none keeps /usr/local/bin"
+(
+	unset AETHER_BIN_DIR
+	sh "$script" --role none
+) >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$sysbin/aether" ] || fail "role none did not use /usr/local/bin"
+[ ! -e "$home/.local/bin/aether" ] || fail "role none used ~/.local/bin"
+not_printed "would shadow"
+
+# --- the PATH line, one per shell ----------------------------------------
+#
+# ~/.local/bin is not on the test PATH, so the client role always prints it.
+
+path_case() {
+	reset "PATH hint for ${1##*/}"
+	(
+		unset AETHER_BIN_DIR
+		SHELL="$1" STUB_OS="${3:-Linux}" sh "$script" --role client
+	) >"$out" 2>"$err" || fail "installer exited non-zero"
+	no_stderr
+	printed "$home/.local/bin is not on your PATH"
+	printed "$2"
+	printed "the desktop app looks in ~/.local/bin itself"
+}
+
+path_case /usr/bin/fish "fish_add_path $home/.local/bin"
+path_case /bin/zsh '>> ~/.zshrc'
+path_case /bin/bash '>> ~/.bashrc'
+path_case /bin/bash '>> ~/.bash_profile' Darwin
+path_case /bin/ksh "add this to your shell profile"
+
+# No SHELL at all: a container, a cron job, a CI runner. `${SHELL##*/}` under
+# `set -u` is a fatal "parameter not set" there, which left a blank line where
+# the fix should be. A shell that sets SHELL for itself - bash does - takes one
+# of the named branches instead, so this is only a real test of the fallback
+# under dash or busybox ash; what it asserts holds either way.
+reset "no SHELL: still one runnable line, and nothing on stderr"
+(
+	unset AETHER_BIN_DIR
+	unset SHELL
+	sh "$script" --role client
+) >"$out" 2>"$err" || fail "installer exited non-zero"
+no_stderr
+printed "$home/.local/bin is not on your PATH"
+grep -q "^  .*${home}/.local/bin" "$out" || fail "the PATH hint names no directory"
+
+# The same case under a shell that leaves SHELL alone, which is the one the
+# `curl ... | sh` line lands on. dash and busybox ash are the two that ship as
+# /bin/sh; either proves the generic fallback branch, and CI has dash.
+strict=""
+if command -v dash >/dev/null 2>&1; then
+	strict="dash"
+elif command -v busybox >/dev/null 2>&1; then
+	strict="busybox sh"
+fi
+if [ -n "$strict" ]; then
+	reset "no SHELL under $strict: the generic export"
+	(
+		unset AETHER_BIN_DIR
+		unset SHELL
+		# shellcheck disable=SC2086
+		$strict "$script" --role client
+	) >"$out" 2>"$err" || fail "installer exited non-zero"
+	no_stderr
+	printed "add this to your shell profile"
+	grep -q "^  .*${home}/.local/bin" "$out" || fail "the PATH hint names no directory"
+else
+	echo "install-test: no dash or busybox; skipping the strict-shell no-SHELL case" >&2
+fi
+
+reset "no PATH hint when the directory is already on PATH"
+(
+	unset AETHER_BIN_DIR
+	PATH="$home/.local/bin:$PATH" sh "$script" --role client
+) >"$out" 2>"$err" || fail "installer exited non-zero"
+no_stderr
+not_printed "is not on your PATH"
+not_printed "the desktop app looks in"
+
+reset "a trailing slash on --bin-dir does not fake a PATH miss"
+sh "$script" --role client --bin-dir "$bindir/" >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$bindir/aether" ] || fail "--bin-dir with a trailing slash installed nothing"
+not_printed "is not on your PATH"
+
+# --- an older /usr/local/bin/aether would shadow the new one -------------
+
+reset "stale /usr/local/bin/aether on a client"
+: >"$sysbin/aether"
+(
+	unset AETHER_BIN_DIR
+	sh "$script" --role client
+) >"$out" 2>&1 || fail "installer exited non-zero"
+printed "an older $sysbin/aether would shadow $home/.local/bin/aether"
+printed "sudo rm -f $sysbin/aether"
+
+reset "stale /usr/local/bin/aether warns for an explicit --bin-dir too"
+: >"$sysbin/aether"
+sh "$script" --role client --bin-dir "$bindir" >"$out" 2>&1 || fail "installer exited non-zero"
+printed "an older $sysbin/aether would shadow $bindir/aether"
+
+# Without normalising the path the check compares the install directory
+# against itself and tells the user to delete what was just written.
+reset "a trailing slash on --bin-dir does not warn about its own binary"
+: >"$sysbin/aether"
+sh "$script" --role client --bin-dir "$sysbin/" >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$sysbin/aether" ] || fail "--bin-dir with a trailing slash installed nothing"
+not_printed "would shadow"
 
 # --- an unknown role is a usage error ------------------------------------
 

@@ -29,6 +29,9 @@ go.work.sum
 
 # Build output
 /dist/
+# `go build` with no -o leaves these two at the repo root.
+/aether
+/aether-server
 
 # Dashboard SPA. Dependencies and build output stay out of git; the committed
 # web/dist/.gitkeep is what keeps `go:embed all:dist` compiling on a clean
