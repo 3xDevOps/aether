@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -29,6 +31,143 @@ func TestFilePathsRejectTraversal(t *testing.T) {
 				t.Fatalf("ListTree(%q) error = %v, want ErrInvalidPath", path, err)
 			}
 		})
+	}
+}
+func TestReadCheckoutFileRejectsSymlinks(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := context.Background()
+	checkout := t.TempDir()
+	if err := os.Mkdir(filepath.Join(checkout, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, ".git", "config"), []byte("url = ssh://host/data\n"), 0o600); err != nil {
+		t.Fatalf("write git config: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		target string
+		path   string
+	}{
+		{name: "git metadata alias", target: ".git", path: "gitlink/config"},
+		{name: "absolute escape", target: "/etc", path: "escape/passwd"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := os.Symlink(test.target, filepath.Join(checkout, strings.Split(test.path, "/")[0])); err != nil {
+				t.Fatalf("symlink %s: %v", test.target, err)
+			}
+			if _, _, _, err := e.ReadFile(ctx, checkout, "", test.path, 0); !errors.Is(err, ErrInvalidPath) {
+				t.Fatalf("ReadFile(%q) error = %v, want ErrInvalidPath", test.path, err)
+			}
+		})
+	}
+}
+
+func TestReadCheckoutFileRejectsFIFO(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := context.Background()
+	checkout := t.TempDir()
+	if err := os.Mkdir(filepath.Join(checkout, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	pipe := filepath.Join(checkout, "pipe")
+	if err := syscall.Mkfifo(pipe, 0o600); err != nil {
+		t.Fatalf("Mkfifo: %v", err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, _, _, err := e.ReadFile(ctx, checkout, "", "pipe", 0)
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrInvalidPath) {
+			t.Fatalf("ReadFile FIFO error = %v, want ErrInvalidPath", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ReadFile FIFO blocked instead of rejecting it")
+	}
+}
+
+func TestBareFilesUseHeadsRef(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := context.Background()
+	repo, err := e.InitWorkspaceRepo(ctx, domain.WorkspaceID("ws1"))
+	if err != nil {
+		t.Fatalf("InitWorkspaceRepo: %v", err)
+	}
+	source := t.TempDir()
+	gitFileTest(t, source, "init", "-q", "-b", "main")
+	gitFileTest(t, source, "config", "user.name", "Files Test")
+	gitFileTest(t, source, "config", "user.email", "files@example.test")
+	if writeErr := os.WriteFile(filepath.Join(source, "branch.txt"), []byte("branch\n"), 0o644); writeErr != nil {
+		t.Fatalf("write branch file: %v", writeErr)
+	}
+	gitFileTest(t, source, "add", "branch.txt")
+	gitFileTest(t, source, "commit", "-q", "-m", "branch")
+	gitFileTest(t, source, "push", "-q", repo, "main")
+	if removeErr := os.Remove(filepath.Join(source, "branch.txt")); removeErr != nil {
+		t.Fatalf("remove branch file: %v", removeErr)
+	}
+	if writeErr := os.WriteFile(filepath.Join(source, "tag.txt"), []byte("tag\n"), 0o644); writeErr != nil {
+		t.Fatalf("write tag file: %v", writeErr)
+	}
+	gitFileTest(t, source, "add", "-A")
+	gitFileTest(t, source, "commit", "-q", "-m", "tag")
+	gitFileTest(t, source, "tag", "-f", "main")
+	gitFileTest(t, source, "push", "-q", repo, "refs/tags/main")
+
+	entries, err := e.ListTree(ctx, repo, "main", "")
+	if err != nil {
+		t.Fatalf("ListTree: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != "branch.txt" {
+		t.Fatalf("ListTree = %+v, want branch.txt from refs/heads/main", entries)
+	}
+	content, _, _, err := e.ReadFile(ctx, repo, "main", "branch.txt", 0)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(content) != "branch\n" {
+		t.Fatalf("ReadFile = %q, want branch content", content)
+	}
+}
+
+func TestListCheckoutSkipsMissingAndSymlinkLeaves(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := context.Background()
+	repo, err := e.InitWorkspaceRepo(ctx, domain.WorkspaceID("ws1"))
+	if err != nil {
+		t.Fatalf("InitWorkspaceRepo: %v", err)
+	}
+	source := t.TempDir()
+	gitFileTest(t, source, "init", "-q", "-b", "main")
+	gitFileTest(t, source, "config", "user.name", "Files Test")
+	gitFileTest(t, source, "config", "user.email", "files@example.test")
+	for name, body := range map[string]string{"keep.txt": "keep\n", "deleted.txt": "gone\n"} {
+		if writeErr := os.WriteFile(filepath.Join(source, name), []byte(body), 0o644); writeErr != nil {
+			t.Fatalf("write %s: %v", name, writeErr)
+		}
+	}
+	gitFileTest(t, source, "add", "-A")
+	gitFileTest(t, source, "commit", "-q", "-m", "seed")
+	gitFileTest(t, source, "push", "-q", repo, "main")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "list files")
+	if err != nil {
+		t.Fatalf("CreateRunCheckout: %v", err)
+	}
+	if removeErr := os.Remove(filepath.Join(checkout, "deleted.txt")); removeErr != nil {
+		t.Fatalf("delete tracked file: %v", removeErr)
+	}
+	if symlinkErr := os.Symlink("/etc", filepath.Join(checkout, "escape")); symlinkErr != nil {
+		t.Fatalf("symlink escape: %v", symlinkErr)
+	}
+
+	entries, err := e.ListTree(ctx, checkout, "", "")
+	if err != nil {
+		t.Fatalf("ListTree: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != "keep.txt" || entries[0].Kind != "file" {
+		t.Fatalf("ListTree = %+v, want only keep.txt", entries)
 	}
 }
 

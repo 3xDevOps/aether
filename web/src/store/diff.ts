@@ -61,7 +61,7 @@ export interface DiffSlice {
   applyOverlap: (runID: string, peers: OverlapPeer[]) => void
 }
 
-export const createDiffSlice: SliceCreator<DiffSlice> = (set) => ({
+export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
   diffs: {},
   overlaps: {},
   setDiff: (runID, patch) =>
@@ -83,7 +83,8 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set) => ({
         },
       },
     })),
-  noteDiffSnapshot: (runID, snapshot) =>
+  noteDiffSnapshot: (runID, snapshot) => {
+    get().invalidateRun(runID)
     set((s) => {
       const current = s.diffs[runID] ?? initialDiff
       return {
@@ -96,7 +97,8 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set) => ({
           },
         },
       }
-    }),
+    })
+  },
   // Refresh asks again by declaring the current patch one revision behind.
   refreshDiff: (runID) =>
     set((s) => {

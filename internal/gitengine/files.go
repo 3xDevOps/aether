@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,7 +70,7 @@ func (e *Engine) listBare(ctx context.Context, repoPath, ref, dir string) ([]Tre
 	if strings.TrimSpace(ref) == "" {
 		return nil, errors.New("gitengine: repository ref is required")
 	}
-	args := []string{"ls-tree", "-z", "-l", ref, "--"}
+	args := []string{"ls-tree", "-z", "-l", "refs/heads/" + ref, "--"}
 	if dir != "" {
 		args = append(args, strings.TrimSuffix(dir, "/")+"/")
 	}
@@ -167,9 +168,15 @@ func (e *Engine) listCheckout(ctx context.Context, checkout, dir string) ([]Tree
 			if dir != "" {
 				statPath = strings.TrimSuffix(dir, "/") + "/" + child
 			}
-			info, statErr := root.Stat(statPath)
+			info, statErr := root.Lstat(statPath)
 			if statErr != nil {
+				if errors.Is(statErr, fs.ErrNotExist) {
+					continue
+				}
 				return nil, fmt.Errorf("gitengine: stat checkout file %s: %w", child, statErr)
+			}
+			if !info.Mode().IsRegular() {
+				continue
 			}
 			entry.Kind = "file"
 			entry.Size = info.Size()
@@ -212,7 +219,7 @@ func (e *Engine) ReadFile(ctx context.Context, repoPath, ref, path string, maxBy
 		if strings.TrimSpace(ref) == "" {
 			return nil, false, false, errors.New("gitengine: repository ref is required")
 		}
-		content, truncated, err = e.gitBounded(ctx, repoPath, maxBytes, "cat-file", "-p", ref+":"+path)
+		content, truncated, err = e.gitBounded(ctx, repoPath, maxBytes, "cat-file", "-p", "refs/heads/"+ref+":"+path)
 	}
 	if err != nil {
 		return nil, false, false, err
@@ -227,6 +234,9 @@ func readCheckoutFile(checkout, path string, maxBytes int) ([]byte, bool, error)
 		return nil, false, fmt.Errorf("gitengine: open checkout: %w", err)
 	}
 	defer func() { _ = root.Close() }()
+	if _, checkErr := checkoutRegularFile(root, path); checkErr != nil {
+		return nil, false, checkErr
+	}
 	file, err := root.Open(path)
 	if err != nil {
 		return nil, false, fmt.Errorf("gitengine: open checkout file: %w", err)
@@ -241,6 +251,30 @@ func readCheckoutFile(checkout, path string, maxBytes int) ([]byte, bool, error)
 		content = content[:maxBytes]
 	}
 	return content, truncated, nil
+}
+
+func checkoutRegularFile(root *os.Root, path string) (os.FileInfo, error) {
+	var info os.FileInfo
+	current := ""
+	for _, component := range strings.Split(path, "/") {
+		if current == "" {
+			current = component
+		} else {
+			current += "/" + component
+		}
+		var err error
+		info, err = root.Lstat(current)
+		if err != nil {
+			return nil, fmt.Errorf("gitengine: stat checkout path %s: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("%w: checkout path contains symlink", ErrInvalidPath)
+		}
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: checkout path is not a regular file", ErrInvalidPath)
+	}
+	return info, nil
 }
 
 // FileDiff renders only path from a run checkout against its recorded base.

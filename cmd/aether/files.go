@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -86,41 +87,16 @@ func filesParams(c *protocol.Client, target, path string) (protocol.FilesReadPar
 	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
 		return protocol.FilesReadParams{}, err
 	}
-	if id, ok := workspaceTargetID(list.Workspaces, target); ok {
+	id, err := workspaceIDIn(list.Workspaces, target)
+	if err == nil {
 		return protocol.FilesReadParams{WorkspaceID: id, Path: path}, nil
 	}
-	for _, workspace := range list.Workspaces {
-		if workspace.Name == target {
-			_, err := workspaceIDIn(list.Workspaces, target)
-			return protocol.FilesReadParams{}, err
-		}
+	if !strings.HasSuffix(err.Error(), " not found") {
+		return protocol.FilesReadParams{}, err
 	}
 	var result protocol.RunResult
 	if err := c.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: target}, &result); err != nil {
 		return protocol.FilesReadParams{}, err
 	}
 	return protocol.FilesReadParams{WorkspaceID: result.Run.WorkspaceID, RunID: result.Run.ID, Path: path}, nil
-}
-
-func workspaceTargetID(workspaces []protocol.Workspace, input string) (string, bool) {
-	for _, workspace := range workspaces {
-		if workspace.ID == input {
-			return workspace.ID, true
-		}
-	}
-	for _, workspace := range workspaces {
-		if workspace.Name == input {
-			matches := 0
-			for _, candidate := range workspaces {
-				if candidate.Name == input {
-					matches++
-				}
-			}
-			if matches == 1 {
-				return workspace.ID, true
-			}
-			return "", false
-		}
-	}
-	return "", false
 }

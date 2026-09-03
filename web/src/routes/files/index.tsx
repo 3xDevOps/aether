@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, File, Folder, FolderTree } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { message } from '@/components/palette/palette'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
@@ -28,21 +28,10 @@ type ViewerMode = 'file' | 'diff'
 export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
   const workspaces = useStore((s) => s.workspaces)
   const runs = useStore((s) => s.runs)
-  const diffs = useStore((s) => s.diffs)
-  const invalidateRun = useStore((s) => s.invalidateRun)
   const filesEpoch = useStore((s) => s.filesEpoch)
   const capabilities = useCapability()
   const [selection, setSelection] = useState<Selection | null>(null)
   const [mode, setMode] = useState<ViewerMode>('file')
-  const seenRevisions = useRef<Record<string, number>>({})
-
-  useEffect(() => {
-    for (const [runID, diff] of Object.entries(diffs)) {
-      const previous = seenRevisions.current[runID]
-      if (previous !== undefined && previous !== diff.revision) invalidateRun(runID)
-      seenRevisions.current[runID] = diff.revision
-    }
-  }, [diffs, invalidateRun])
 
   const select = (source: FileSource, path: string) => {
     setSelection({ ...source, path })

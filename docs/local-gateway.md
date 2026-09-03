@@ -232,12 +232,14 @@ SSH and needs these reads without a listener on the server.
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit.
-- Both answer `-32004` (unavailable) when the read cannot be served:
-  `run.patch` when diff rendering is not enabled (no git engine wired) or the
-  run has no checkout left to diff, `server.disk` when the server was not
-  told where the data directory is or the filesystem holding it could not be
-  read. The underlying errors name server-side paths, so they are not echoed
-  to the client.
+- The read methods answer `-32004` (unavailable) when the read cannot be
+  served: `run.patch` when diff rendering is not enabled (no git engine wired)
+  or the run has no checkout left to diff, `server.disk` when the server was
+  not told where the data directory is or the filesystem holding it could not
+  be read, and `files.tree`, `files.read`, or `files.diff` when their
+  checkout or repository is unavailable. All three files methods also answer
+  `-32602` for a rejected path. The underlying errors name server-side paths,
+  so they are not echoed to the client.
 
 ## `/local/v1` verbs
 

@@ -25,4 +25,25 @@ describe('files cache', () => {
     expect(store.getState().documents[runKey]).toBeUndefined()
     expect(store.getState().trees[baseKey]?.entries).toEqual([])
   })
+
+  it('invalidates a run file cache when a diff snapshot lands unmounted', () => {
+    const store = createRootStore()
+    const runKey = filesKey('ws-1', 'run-1', 'src')
+    store.getState().setTree(runKey, { entries: [] })
+    store.getState().setDocument(runKey, {
+      content: 'stale\n',
+      truncated: false,
+      binary: false,
+      size: 6,
+    })
+    store.getState().setFileDiff(runKey, { patch: 'stale', truncated: false })
+
+    store.getState().noteDiffSnapshot('run-1', { time: '2026-09-03T00:00:00Z', files: [] })
+
+    const state = store.getState()
+    expect(state.diffs['run-1']?.revision).toBe(1)
+    expect(state.trees[runKey]).toBeUndefined()
+    expect(state.documents[runKey]).toBeUndefined()
+    expect(state.fileDiffs[runKey]).toBeUndefined()
+  })
 })
