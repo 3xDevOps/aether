@@ -139,8 +139,8 @@ workspace with `--base`.
 
 In the dashboard, the onboarding wizard's Repository step does both for
 you: it adds the remote, then its **Push now** button runs that push in
-your clone and shows git's output. The command above is the same thing by
-hand.
+your clone and keeps git's own output on the page. The command above is
+the same thing by hand.
 
 ## 5. Set up your agent
 

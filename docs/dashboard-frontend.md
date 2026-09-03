@@ -568,12 +568,14 @@ Environment step is `environment-step.tsx`.
 
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
-button that runs `git push -u aether <base>` in the clone, confirms with a
-toast naming the branch, and advances; a refusal keeps the user on the step
-with git's own output in a monospace block, both retry and the copyable
-command still there. The branch is the workspace's base branch, so a
-workspace created with `--base` seeds the branch its runs fork from. An
-older gateway without the verb shows only the copyable command.
+button that runs the push in the clone. Success names the branch that
+landed and keeps git's output behind a "What git did" expander, because
+`Everything up-to-date` and `[new branch]` are both success and mean
+different things; Continue then moves on. A refusal keeps the user on the
+step with git's own output in a monospace block, both retry and the
+copyable command still there. The branch is the workspace's base branch,
+so a workspace created with `--base` seeds the branch its runs fork from.
+An older gateway without the verb shows only the copyable command.
 
 The Environment step offers two cards: mirror this machine (recommended,
 preselected) and keep the standard environment the workspace was created
