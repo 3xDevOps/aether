@@ -1,4 +1,4 @@
-import type { LinkStatus, SyncSessionStatus } from '@/lib/types'
+import type { LinkStatus, PullResult, SyncSessionStatus } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /**
@@ -13,6 +13,13 @@ export interface LocalSlice {
   /** The last link.status answer; null until fetched. */
   linkStatus: LinkStatus | null
   setLinkStatus: (status: LinkStatus) => void
+  /**
+   * What the last pull fetched, by run id. The verb lives in the run action
+   * bar and the git output belongs on the diff tab, so the result waits here
+   * for whichever surface shows it. Lasts as long as the tab.
+   */
+  pulls: Record<string, PullResult>
+  recordPull: (runID: string, result: PullResult) => void
 }
 
 export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
@@ -25,4 +32,7 @@ export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
     }),
   linkStatus: null,
   setLinkStatus: (linkStatus) => set({ linkStatus }),
+  pulls: {},
+  recordPull: (runID, result) =>
+    set((s) => ({ pulls: { ...s.pulls, [runID]: result } })),
 })
