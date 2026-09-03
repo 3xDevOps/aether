@@ -206,7 +206,8 @@ aether gui build
 ```
 
 That installs Aether into your application menu (Linux), your Applications
-folder (macOS), or the Start Menu (Windows). Open it like any other app.
+folder (macOS; `~/Applications` without administrator rights, and the command
+prints the path), or the Start Menu (Windows). Open it like any other app.
 
 Two things to know:
 

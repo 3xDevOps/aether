@@ -189,8 +189,9 @@ electron-builder's own cache (`~/.cache/electron` and
 `~/.cache/electron-builder` on Linux, `~/Library/Caches/electron` and
 `~/Library/Caches/electron-builder` on macOS, `%LOCALAPPDATA%\electron\Cache`
 and `%LOCALAPPDATA%\electron-builder` on Windows), so rebuilding is quick.
-Run `aether gui build` again to replace an installed app; close the Aether
-window first. To remove everything, delete the two paths in the table, the
+Run `aether gui build` again to replace an installed app; on macOS it also
+removes an older copy from the other Applications folder. On Windows, close
+the Aether window first. To remove everything, delete the two paths in the table, the
 build directory, and those caches.
 
 The app requires the `aether` CLI installed first; it does not bundle the
