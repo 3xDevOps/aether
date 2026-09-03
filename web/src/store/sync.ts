@@ -14,7 +14,7 @@ import type {
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import { pausedFromTimeline } from '@/store/board'
-import { serverUpdateInFlight, type UnreachableKind } from '@/store/server'
+import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 
 /**
  * Names the hop that failed. The local gateway reports a dead transport as
@@ -299,12 +299,12 @@ export function connect(store: RootStore, client: Api = api): () => void {
       if (state !== 'live') return
       // The subscription is installed. Hydrate behind it on the first connect,
       // and again on a reconnect that has no cursor to replay from - or one
-      // that follows a server update the client was watching, because that
-      // is a server that may have just re-executed on a new version. Only a
-      // fresh server.info says it did, and the update banner and the notice
-      // in the status bar both end on that answer.
+      // that came while the server was replacing its own binaries, because
+      // that is a server that may have just re-executed on a new version.
+      // Only a fresh server.info says it did, and the update banner and the
+      // notice in the status bar both end on that answer.
       const s = store.getState()
-      if (!subscribed || s.lastSeq === 0 || serverUpdateInFlight(s.serverUpdateProgress)) {
+      if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress)) {
         void load()
       }
       subscribed = true

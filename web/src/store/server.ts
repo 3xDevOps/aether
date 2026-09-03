@@ -29,11 +29,15 @@ const phaseOrder: Record<ServerUpdatePhase, number> = {
 }
 
 /**
- * Whether an update the client is watching is still going. A terminal
- * phase - failed, or cancelled - is over, and so is no phase at all.
+ * Whether the server is replacing its own binaries right now, which is
+ * what makes a dropped connection a possible re-exec. A scheduled update
+ * is deliberately not one: it can sit idle for days, and re-hydrating on
+ * every network blip until then would cost far more than it saves. The
+ * banner re-reads the status on any reconnect anyway, so a schedule that
+ * applied while the tab was away is still picked up.
  */
-export function serverUpdateInFlight(progress: ServerUpdatePayload | null): boolean {
-  return progress !== null && phaseOrder[progress.phase] > 0
+export function serverUpdateApplying(progress: ServerUpdatePayload | null): boolean {
+  return progress?.phase === 'applying' || progress?.phase === 'restarting'
 }
 
 /**
