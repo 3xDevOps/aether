@@ -357,6 +357,7 @@ export type ProfileExcludeReason =
   | 'symlink'
   | 'too-large'
   | 'over-budget'
+  | 'not-regular'
 
 /** One file the guards left out of a profile push, and why. */
 export interface ProfileExclusion {
@@ -381,7 +382,9 @@ export interface ProfilePreview {
   files: number
   bytes: number
   categories?: ProfilePreviewCategory[]
+  /** Capped; `excluded_total` is how many there were. */
   excluded?: ProfileExclusion[]
+  excluded_total?: number
   blocked: boolean
   blocked_reason?: ProfileExcludeReason
   blocked_path?: string

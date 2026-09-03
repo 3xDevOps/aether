@@ -453,6 +453,8 @@ function ProfileRow({
 }) {
   const label = friendly[preview.harness] ?? preview.harness
   const excluded = preview.excluded ?? []
+  // excluded is capped by the gateway; excluded_total is exact.
+  const excludedTotal = preview.excluded_total ?? excluded.length
   const secret = flagged(preview)
   const snapshot = status?.snapshot
 
@@ -492,11 +494,11 @@ function ProfileRow({
           )}
         </div>
       </div>
-      {excluded.length > 0 && (
+      {excludedTotal > 0 && (
         <details className="rounded-md border bg-card">
           <summary className="cursor-pointer px-3 py-2 text-xs">
-            {`Left out of ${label}: ${excluded.length} ${
-              excluded.length === 1 ? 'file' : 'files'
+            {`Left out of ${label}: ${excludedTotal} ${
+              excludedTotal === 1 ? 'entry' : 'entries'
             }`}
           </summary>
           <ul className="space-y-1 border-t px-3 py-2 text-xs">
@@ -506,6 +508,14 @@ function ProfileRow({
                 <span className="text-muted-foreground"> - {e.detail}</span>
               </li>
             ))}
+            {/* The gateway caps the list it sends; the count above is
+                exact, so say how many are not shown rather than implying
+                the list is all of them. */}
+            {excludedTotal > excluded.length && (
+              <li className="text-muted-foreground">
+                and {excludedTotal - excluded.length} more
+              </li>
+            )}
           </ul>
         </details>
       )}

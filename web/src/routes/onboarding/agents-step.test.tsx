@@ -288,7 +288,7 @@ describe('agents step', () => {
     expect(await screen.findByText('12 skills, 4 commands - 179 KB')).toBeDefined()
     expect(screen.getByText('/home/alice/.claude')).toBeDefined()
     // The exclusions carry the guard's own reason, file by file.
-    expect(screen.getByText('Left out of Claude Code: 1 file')).toBeDefined()
+    expect(screen.getByText('Left out of Claude Code: 1 entry')).toBeDefined()
     expect(screen.getByText('.credentials.json')).toBeDefined()
     expect(
       screen.getByText(/credential file excluded for claude/),
@@ -296,6 +296,35 @@ describe('agents step', () => {
     // profile.status already carries a snapshot, so the row says so rather
     // than pretending this is the first import.
     expect(screen.getByText(/Already imported on/)).toBeDefined()
+  })
+
+  it('says how many exclusions the gateway did not send', async () => {
+    // A real profile root produces thousands; the gateway caps the list
+    // it sends and reports the exact count, so the row must not imply the
+    // handful it received is all of them.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: 'projects/',
+                  reason: 'ignored',
+                  detail: 'skipped by default for claude (projects/)',
+                },
+              ],
+              excluded_total: 1403,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(
+      await screen.findByText('Left out of Claude Code: 1403 entries'),
+    ).toBeDefined()
+    expect(screen.getByText('and 1402 more')).toBeDefined()
   })
 
   it('pushes exactly the checked harnesses', async () => {
