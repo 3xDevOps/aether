@@ -65,6 +65,15 @@ type PendingServerUpdate struct {
 	RequestedAt string `json:"requested_at"`
 }
 
+// ServerUpdateWaiting says what a pending update has not applied yet for.
+// Paused runs are listed but do not hold anything back: a frozen container
+// survives a restart like a live one, and nothing is working inside it.
+type ServerUpdateWaiting struct {
+	Runs   int `json:"runs"`
+	Paused int `json:"paused"`
+	Shells int `json:"shells"`
+}
+
 // ServerUpdateAttempt is the outcome of the last update the server tried.
 type ServerUpdateAttempt struct {
 	Version string `json:"version"`
@@ -77,16 +86,21 @@ type ServerUpdateAttempt struct {
 // by any member.
 //
 // Capable is false when the server process cannot replace its own binary -
-// the documented unprivileged install, where the binary directory is not
-// writable by the service user. ManualCommands then carries the commands
-// to run on the server host instead, and server.update refuses with
-// CodeInvalidState.
+// most often the documented unprivileged install, where the binary
+// directory is not writable by the service user. Incapable then says which
+// reason it is, ManualCommands carries the commands to run on the server
+// host instead, and server.update refuses with CodeInvalidState.
+//
+// Waiting is set when a pending update has not applied yet because the
+// server is busy; it names what it is waiting for.
 type ServerUpdateStatusResult struct {
 	ServerVersion   string               `json:"server_version"`
 	Latest          string               `json:"latest,omitempty"`
 	UpdateAvailable bool                 `json:"update_available"`
 	Capable         bool                 `json:"capable"`
+	Incapable       string               `json:"incapable,omitempty"`
 	Pending         *PendingServerUpdate `json:"pending,omitempty"`
+	Waiting         *ServerUpdateWaiting `json:"waiting,omitempty"`
 	Last            *ServerUpdateAttempt `json:"last,omitempty"`
 	ManualCommands  []string             `json:"manual_commands,omitempty"`
 }

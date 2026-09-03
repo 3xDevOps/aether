@@ -6,9 +6,15 @@
 // itself.
 //
 // The release feed is the pinned GitHub repository in internal/selfupdate
-// and nothing else: the client names a tag, never a URL. Downloads are
-// checksum-verified and swapped in atomically by selfupdate.Apply, so a
-// failure at any point leaves the running binary untouched.
+// and nothing else: the client names a tag, never a URL. Every binary is
+// downloaded and checksum-verified before any of them is replaced, and
+// each is then renamed into place, so a bad tag, a network error, or a
+// checksum mismatch leaves every binary as it was.
+//
+// Everything this package does to the machine it runs on goes through
+// Config.Host, which only cmd/aether-server supplies. A service built
+// without one still answers server.update_status; it just refuses to
+// apply anything.
 package serverupdate
 
 import (
@@ -19,7 +25,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -30,11 +35,18 @@ import (
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
-// ErrIncapable is returned when the server process cannot replace its own
-// binary: the documented unprivileged install, where the binary directory
-// belongs to root and the service user only reads it. The admin runs
-// ManualCommands on the server host instead.
-var ErrIncapable = errors.New("this server cannot update itself: its binary directory is not writable by the server process")
+// ErrIncapable is returned when this server process cannot update itself.
+// The wrapped message says why - most often the documented unprivileged
+// install, where the binary directory belongs to root and the service user
+// only reads it. The admin runs ManualCommands on the server host instead.
+var ErrIncapable = errors.New("this server cannot update itself")
+
+// notWritable explains the unprivileged install, the common reason.
+const notWritable = "its binary directory is not writable by the server process"
+
+// noHost explains a service built without host controls, which is every
+// build but the real server command.
+const noHost = "this build has no host restart mechanics"
 
 // ErrBadTag is returned for a version that is not a release tag.
 var ErrBadTag = errors.New("version must be a release tag: v plus semver, for example v0.2.0")
@@ -51,22 +63,25 @@ func ManualCommands() []string {
 	return []string{"sudo aether update", "sudo systemctl restart aether-server"}
 }
 
-// Config wires the service. Executable, Exec, Restart, and Now default to
-// the real thing; tests inject all four so no test ever touches a real
-// binary or re-executes the test process.
+// Config wires the service. Store and Bus are required; everything that
+// touches the host goes through Host, which is never defaulted.
 type Config struct {
 	Store   store.Store
 	Bus     events.Bus
 	Checker *selfupdate.Checker
+	// Host carries the process-replacing side effects. A zero Host leaves
+	// the service unable to apply anything, which is what keeps every test
+	// binary away from the host's systemd. cmd/aether-server passes
+	// HostProcess().
+	Host Host
 	// Executable is the running aether-server binary. Empty resolves
 	// os.Executable.
 	Executable string
-	// Exec replaces this process image with the binary at path. It does
-	// not return on success. Empty uses syscall.Exec.
-	Exec func(path string, argv, env []string) error
-	// Restart is the fallback when Exec fails under systemd. Empty runs
-	// `systemctl restart aether-server`.
-	Restart func() error
+	// Busy reports what the server is doing, so a scheduled update lands
+	// at the first idle moment and an admin can see what it is waiting
+	// for. Nil reports an idle server: a deployment with no run engine has
+	// nothing to wait for.
+	Busy func(context.Context) domain.ServerBusy
 	// Now reads the clock.
 	Now func() time.Time
 }
@@ -76,12 +91,24 @@ type Config struct {
 type Service struct {
 	cfg  Config
 	self string
+	// incapable is why this process cannot update itself, fixed at
+	// construction and empty when it can. It covers the reasons that
+	// cannot change while the process runs - a binary that could not be
+	// resolved, a build with no host controls - as opposed to the
+	// directory permissions, which are probed per call.
+	incapable string
 
 	mu       sync.Mutex
 	applying bool
 }
 
-// New validates cfg and resolves the binary to replace.
+// New builds the service. It never fails: self-update is a convenience,
+// and a server that cannot resolve its own binary must still serve runs.
+// A problem found here is reported through Capable and
+// server.update_status instead, where an admin will actually read it.
+//
+// Store and Bus are the two things the caller must get right, so those
+// stay errors - they are wiring bugs, not deployment facts.
 func New(cfg Config) (*Service, error) {
 	switch {
 	case cfg.Store == nil:
@@ -92,47 +119,65 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Checker == nil {
 		cfg.Checker = selfupdate.DefaultChecker()
 	}
-	if cfg.Exec == nil {
-		cfg.Exec = syscall.Exec
-	}
-	if cfg.Restart == nil {
-		cfg.Restart = systemctlRestart
-	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	s := &Service{cfg: cfg}
+	if !cfg.Host.complete() {
+		s.incapable = noHost
 	}
 	self := cfg.Executable
 	if self == "" {
 		found, err := os.Executable()
 		if err != nil {
-			return nil, fmt.Errorf("serverupdate: locate this binary: %w", err)
+			return s.disabled(fmt.Sprintf("locating this binary failed: %v", err)), nil
 		}
 		self = found
 	}
 	resolved, err := filepath.EvalSymlinks(self)
 	if err != nil {
-		return nil, fmt.Errorf("serverupdate: resolve %s: %w", self, err)
+		return s.disabled(fmt.Sprintf("resolving %s failed: %v", self, err)), nil
 	}
-	return &Service{cfg: cfg, self: resolved}, nil
+	s.self = resolved
+	return s, nil
 }
 
-// Capable reports whether this process can replace its own binary. It is
-// probed rather than assumed: an install can be moved to an unprivileged
-// unit without the server being rebuilt.
-func (s *Service) Capable() bool {
-	return selfupdate.CheckWritable(filepath.Dir(s.self)) == nil
+// disabled records why the service cannot apply anything and logs it once,
+// at construction, so the reason is in the journal as well as on the wire.
+func (s *Service) disabled(reason string) *Service {
+	s.incapable = reason
+	slog.Warn("serverupdate: this server cannot update itself", "reason", reason)
+	return s
+}
+
+// Capable reports whether this process can replace its own binary and
+// restart onto it. The directory permissions are probed rather than
+// assumed: an install can be moved to an unprivileged unit without the
+// server being rebuilt.
+func (s *Service) Capable() bool { return s.incapableReason() == "" }
+
+// incapableReason is why this server cannot update itself, empty when it
+// can.
+func (s *Service) incapableReason() string {
+	if s.incapable != "" {
+		return s.incapable
+	}
+	if err := selfupdate.CheckWritable(filepath.Dir(s.self)); err != nil {
+		return notWritable
+	}
+	return ""
 }
 
 // Status reports the server's own update state. A release check that
 // fails - an air-gapped box, GitHub down - is not an error here: the
 // pending update, the last outcome, and the capability still answer.
 func (s *Service) Status(ctx context.Context) (protocol.ServerUpdateStatusResult, error) {
-	out := protocol.ServerUpdateStatusResult{
-		ServerVersion: version.Version,
-		Capable:       s.Capable(),
-	}
-	if !out.Capable {
+	out := protocol.ServerUpdateStatusResult{ServerVersion: version.Version}
+	if reason := s.incapableReason(); reason != "" {
+		out.Incapable = reason
 		out.ManualCommands = ManualCommands()
+	} else {
+		out.Capable = true
 	}
 	if check, err := s.cfg.Checker.Check(ctx); err == nil {
 		out.Latest = check.Latest
@@ -149,6 +194,16 @@ func (s *Service) Status(ctx context.Context) (protocol.ServerUpdateStatusResult
 			Version:     p.Version,
 			RequestedBy: string(p.RequestedBy),
 			RequestedAt: p.RequestedAt.UTC().Format(time.RFC3339),
+		}
+		// Asked live rather than cached from the last poll: a status call
+		// an admin makes after killing the last run should say the update
+		// is about to land, not what was true 30 seconds ago. Nothing
+		// pending means this is never reached, so an idle deployment
+		// never pays for the run-table scan.
+		if busy := s.busyNow(ctx); !busy.Idle() {
+			out.Waiting = &protocol.ServerUpdateWaiting{
+				Runs: busy.Runs, Paused: busy.Paused, Shells: busy.Shells,
+			}
 		}
 	}
 	if l := state.Last; l != nil {
@@ -176,8 +231,8 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 	default:
 		return protocol.ServerUpdateResult{}, nil, ErrBadWhen
 	}
-	if !s.Capable() {
-		return protocol.ServerUpdateResult{}, nil, ErrIncapable
+	if reason := s.incapableReason(); reason != "" {
+		return protocol.ServerUpdateResult{}, nil, fmt.Errorf("%w: %s", ErrIncapable, reason)
 	}
 	tag, err := s.resolveTag(ctx, p.Version)
 	if err != nil {

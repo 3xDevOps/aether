@@ -220,3 +220,91 @@ func TestFollowServerUpdateStreamEndReportsRestarting(t *testing.T) {
 		t.Fatalf("stream-end message = %q, want it to say the server is restarting and to reconnect", got)
 	}
 }
+
+func TestWaitingLine(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   *protocol.ServerUpdateWaiting
+		want string
+	}{
+		{
+			name: "nothing holding it back",
+			in:   nil,
+			want: "nothing is holding it back; it applies on the next poll",
+		},
+		{
+			name: "one run",
+			in:   &protocol.ServerUpdateWaiting{Runs: 1},
+			want: "waiting: 1 run is still working",
+		},
+		{
+			name: "runs and shells",
+			in:   &protocol.ServerUpdateWaiting{Runs: 2, Shells: 3},
+			want: "waiting: 2 runs are still working, 3 workspace shells are open",
+		},
+		{
+			// A paused run looks running in `aether runs`, so it is named
+			// even though it holds nothing back.
+			name: "paused runs are named but excused",
+			in:   &protocol.ServerUpdateWaiting{Runs: 1, Paused: 2},
+			want: "waiting: 1 run is still working, 2 paused runs are not holding it back",
+		},
+		{
+			name: "a newer server reporting something this client cannot name",
+			in:   &protocol.ServerUpdateWaiting{},
+			want: "waiting: the server did not say what for",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := waitingLine(tc.in); got != tc.want {
+				t.Fatalf("waitingLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// An incapable server prints the real reason and the exact commands, not a
+// friendlier summary of them.
+func TestPrintServerUpdateStatusIncapable(t *testing.T) {
+	var out bytes.Buffer
+	err := printServerUpdateStatus(&out, protocol.ServerUpdateStatusResult{
+		ServerVersion:  "v0.1.0",
+		Capable:        false,
+		Incapable:      "its binary directory is not writable by the server process",
+		ManualCommands: []string{"sudo aether update", "sudo systemctl restart aether-server"},
+	})
+	if err != nil {
+		t.Fatalf("print: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"its binary directory is not writable by the server process",
+		"sudo aether update",
+		"sudo systemctl restart aether-server",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status %q is missing %q", got, want)
+		}
+	}
+}
+
+// A pending update always says what it is waiting for.
+func TestPrintServerUpdateStatusPendingSaysWhatItWaitsFor(t *testing.T) {
+	var out bytes.Buffer
+	err := printServerUpdateStatus(&out, protocol.ServerUpdateStatusResult{
+		ServerVersion: "v0.1.0",
+		Capable:       true,
+		Pending:       &protocol.PendingServerUpdate{Version: "v0.2.0", RequestedBy: "mem_1", RequestedAt: "2026-09-03T12:00:00Z"},
+		Waiting:       &protocol.ServerUpdateWaiting{Runs: 1, Paused: 1},
+	})
+	if err != nil {
+		t.Fatalf("print: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "pending update: v0.2.0") {
+		t.Fatalf("status %q does not name the pending update", got)
+	}
+	if !strings.Contains(got, "1 run is still working") || !strings.Contains(got, "1 paused run is not holding it back") {
+		t.Fatalf("status %q does not say what it is waiting for", got)
+	}
+}

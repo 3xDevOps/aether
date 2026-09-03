@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -14,20 +13,22 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// Tick is the idle poll: the scheduler calls it once per poll interval
-// with whether the server is idle right now. A pending update applies the
-// first time idle is true, and applying it does not return - the process
-// re-executes on the new binary.
-func (s *Service) Tick(ctx context.Context, idle bool) {
-	if !idle {
-		return
-	}
+// Tick is the idle poll: the scheduler calls it once per poll interval. A
+// pending update applies the first time the server is idle, and applying
+// it does not return - the process re-executes on the new binary.
+//
+// The pending row is read first, so a deployment with no update waiting
+// never pays for the run-table scan behind Config.Busy.
+func (s *Service) Tick(ctx context.Context) {
 	state, err := s.cfg.Store.GetServerUpdate(ctx)
 	if err != nil {
 		slog.Warn("serverupdate: read pending update", "error", err)
 		return
 	}
 	if state.Pending == nil {
+		return
+	}
+	if busy := s.busyNow(ctx); !busy.Idle() {
 		return
 	}
 	restart, err := s.apply(ctx, *state.Pending)
@@ -38,6 +39,15 @@ func (s *Service) Tick(ctx context.Context, idle bool) {
 		return
 	}
 	restart()
+}
+
+// busyNow asks the run engine what it is doing. A deployment wired without
+// one - anything embedding the server for a test - has nothing to wait for.
+func (s *Service) busyNow(ctx context.Context) domain.ServerBusy {
+	if s.cfg.Busy == nil {
+		return domain.ServerBusy{}
+	}
+	return s.cfg.Busy(ctx)
 }
 
 // apply downloads and swaps the release, recording the outcome either way.
@@ -94,7 +104,7 @@ func (s *Service) release() {
 func (s *Service) restart(ctx context.Context, pending store.PendingServerUpdate) {
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdateRestarting, pending.Version, "")
 	argv := append([]string{s.self}, os.Args[1:]...)
-	err := s.cfg.Exec(s.self, argv, os.Environ())
+	err := s.cfg.Host.Exec(s.self, argv, os.Environ())
 	if err == nil {
 		// syscall.Exec never returns on success, so reaching here at all
 		// means the process was not replaced, whatever the seam reported.
@@ -103,9 +113,9 @@ func (s *Service) restart(ctx context.Context, pending store.PendingServerUpdate
 	// Exec only returns on failure. Under systemd the unit can still be
 	// restarted from outside; anywhere else there is nothing left to try,
 	// and the swapped binary takes effect at the next start.
-	if os.Getenv("INVOCATION_ID") != "" {
+	if s.cfg.Host.UnderSystemd() {
 		slog.Error("serverupdate: re-exec failed, asking systemd to restart", "error", err)
-		if rerr := s.cfg.Restart(); rerr != nil {
+		if rerr := s.cfg.Host.Restart(); rerr != nil {
 			s.failRestart(ctx, pending, fmt.Errorf("re-exec failed (%v) and systemctl restart failed: %w", err, rerr))
 		}
 		return
@@ -155,14 +165,4 @@ func (s *Service) publish(ctx context.Context, actor domain.MemberID, phase even
 			slog.Warn("serverupdate: publish update phase", "phase", phase, "workspace", ws.ID, "error", perr)
 		}
 	}
-}
-
-// systemctlRestart is the fallback restart when re-exec fails under a
-// systemd unit.
-func systemctlRestart() error {
-	out, err := exec.Command("systemctl", "restart", "aether-server").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("systemctl restart aether-server: %w: %s", err, out)
-	}
-	return nil
 }

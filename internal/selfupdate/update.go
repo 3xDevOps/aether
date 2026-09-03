@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // ErrWindows refuses the in-place swap on Windows: the OS cannot rename
@@ -33,11 +34,17 @@ func Update(ctx context.Context, baseURL, tag string) ([]string, error) {
 }
 
 // UpdateBinaries replaces the binary at self with tag's release asset
-// named primary, then each companion asset that already sits beside it,
-// and returns the paths it replaced in order. Symlinks are resolved so the
-// real file is swapped rather than the link. A failure replaces nothing
-// past the point it happened; the binaries already swapped are still
-// reported.
+// named primary, along with each companion asset that already sits beside
+// it, and returns the paths it replaced in order. Symlinks are resolved so
+// the real file is swapped rather than the link.
+//
+// Every asset is downloaded and checksum-verified before any of them is
+// replaced, so a bad tag, a network error, or a checksum mismatch leaves
+// every binary exactly as it was - a half-updated pair is worse than no
+// update, because the CLI and the server would disagree about the
+// protocol. Only the renames at the end can leave a partial swap, and a
+// rename within one directory fails only when the filesystem does; the
+// error then names which binaries were already replaced.
 func UpdateBinaries(ctx context.Context, baseURL, tag, self, primary string, companions ...string) ([]string, error) {
 	if runtime.GOOS == "windows" {
 		return nil, ErrWindows
@@ -53,20 +60,38 @@ func UpdateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 
 	assets := baseURL + "/releases/download/" + tag
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
-	if err := Apply(ctx, assets, primary+suffix, self); err != nil {
-		return nil, err
-	}
-	replaced := []string{self}
-
+	targets := []struct{ asset, dst string }{{primary + suffix, self}}
 	for _, name := range companions {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		if err := Apply(ctx, assets, name+suffix, path); err != nil {
-			return replaced, fmt.Errorf("%s updated but %s failed: %w", primary, name, err)
+		targets = append(targets, struct{ asset, dst string }{name + suffix, path})
+	}
+
+	staged := make([]*Staged, 0, len(targets))
+	defer func() {
+		for _, s := range staged {
+			s.Discard()
 		}
-		replaced = append(replaced, path)
+	}()
+	for _, t := range targets {
+		s, serr := Stage(ctx, assets, t.asset, t.dst)
+		if serr != nil {
+			return nil, serr
+		}
+		staged = append(staged, s)
+	}
+
+	replaced := make([]string, 0, len(staged))
+	for _, s := range staged {
+		if cerr := s.Commit(); cerr != nil {
+			if len(replaced) == 0 {
+				return nil, cerr
+			}
+			return replaced, fmt.Errorf("replaced %s but %w", strings.Join(replaced, ", "), cerr)
+		}
+		replaced = append(replaced, s.Path())
 	}
 	return replaced, nil
 }

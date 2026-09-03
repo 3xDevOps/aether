@@ -129,7 +129,12 @@ func printServerUpdateStatus(w io.Writer, res protocol.ServerUpdateStatusResult)
 		return err
 	}
 	if !res.Capable {
-		if _, err := fmt.Fprintln(w, "\nthis server cannot update itself; run on the server host:"); err != nil {
+		reason := res.Incapable
+		if reason == "" {
+			reason = "reason not reported"
+		}
+		if _, err := fmt.Fprintf(w, "\nthis server cannot update itself: %s\nrun on the server host:\n",
+			printable(reason)); err != nil {
 			return err
 		}
 		for _, cmd := range res.ManualCommands {
@@ -141,6 +146,9 @@ func printServerUpdateStatus(w io.Writer, res protocol.ServerUpdateStatusResult)
 	if res.Pending != nil {
 		if _, err := fmt.Fprintf(w, "\npending update: %s, requested by %s at %s\n",
 			res.Pending.Version, res.Pending.RequestedBy, shortTime(res.Pending.RequestedAt)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "  %s\n", waitingLine(res.Waiting)); err != nil {
 			return err
 		}
 	}
@@ -156,6 +164,33 @@ func printServerUpdateStatus(w io.Writer, res protocol.ServerUpdateStatusResult)
 		}
 	}
 	return nil
+}
+
+// waitingLine says what a pending update has not applied for. Paused runs
+// are named because they look active in `aether runs` but are not holding
+// anything back; leaving them out would make the count look wrong.
+func waitingLine(w *protocol.ServerUpdateWaiting) string {
+	if w == nil {
+		return "nothing is holding it back; it applies on the next poll"
+	}
+	parts := make([]string, 0, 3)
+	if w.Runs > 0 {
+		parts = append(parts, plural(w.Runs, "run")+" still working")
+	}
+	if w.Shells > 0 {
+		parts = append(parts, plural(w.Shells, "workspace shell")+" open")
+	}
+	if w.Paused > 0 {
+		// Named because a paused run shows as running in `aether runs`;
+		// leaving it out would make the count look wrong.
+		parts = append(parts, plural(w.Paused, "paused run")+" not holding it back")
+	}
+	if len(parts) == 0 {
+		// The server reported busy without naming anything this client
+		// understands, which means it is running a newer protocol.
+		return "waiting: the server did not say what for"
+	}
+	return "waiting: " + strings.Join(parts, ", ")
 }
 
 func serverUpdateCancel() error {

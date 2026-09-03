@@ -24,6 +24,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 const (
@@ -108,10 +109,22 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 		SelfUpdate: serverupdate.Config{
 			Checker:    selfupdate.NewChecker(release.URL, time.Hour),
 			Executable: serverBin,
-			Exec: func(_ string, argv, _ []string) error {
-				execed <- argv
-				<-hold
-				return errors.New("the test process is never replaced")
+			// Every host control is injected. A nil one would fall back to
+			// nothing - serverupdate.New treats a partial Host as none -
+			// but the whole set is spelled out so this test can never
+			// reach the developer's own systemd, and so a reader sees
+			// exactly which side effects it has replaced.
+			Host: serverupdate.Host{
+				Exec: func(_ string, argv, _ []string) error {
+					execed <- argv
+					<-hold
+					return errors.New("the test process is never replaced")
+				},
+				Restart: func() error {
+					t.Error("the test asked the host's systemd to restart aether-server")
+					return errors.New("refused: this is a test")
+				},
+				UnderSystemd: func() bool { return false },
 			},
 		},
 	})
@@ -219,6 +232,11 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	if status.Pending == nil || status.Pending.Version != "v9.9.9" || status.Pending.RequestedBy != string(member.ID) {
 		t.Fatalf("pending = %+v, want v9.9.9 by the admin", status.Pending)
 	}
+	// The admin can see why it has not applied instead of watching
+	// nothing happen.
+	if status.Waiting == nil || status.Waiting.Runs != 1 {
+		t.Fatalf("waiting = %+v, want it to name the one working run", status.Waiting)
+	}
 
 	// Finish the run. The agent exits on the injected line and the run
 	// parks, which is the first idle tick.
@@ -249,6 +267,27 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	}
 	if body, rerr := os.ReadFile(cliBin); rerr != nil || string(body) != updatedCLIBinary {
 		t.Fatalf("aether = %q (%v), want the release build", body, rerr)
+	}
+	// The swap is recorded before the restart is attempted, so a status
+	// call at this point already names the version that is installed.
+	// Decoded into a fresh result: an absent omitempty field leaves the
+	// destination's old value in place, so reusing `status` here would
+	// assert against the pending update this call is meant to prove gone.
+	var applied protocol.ServerUpdateStatusResult
+	if err := ctrl.Call(protocol.MethodServerUpdateStatus, struct{}{}, &applied); err != nil {
+		t.Fatalf("server.update_status: %v", err)
+	}
+	if applied.Pending != nil {
+		t.Fatalf("pending = %+v, want none once the update applied", applied.Pending)
+	}
+	if applied.Waiting != nil {
+		t.Fatalf("waiting = %+v, want none with nothing pending", applied.Waiting)
+	}
+	if applied.Last == nil || applied.Last.Version != "v9.9.9" {
+		t.Fatalf("last = %+v, want the v9.9.9 attempt", applied.Last)
+	}
+	if applied.Last.Outcome != store.ServerUpdateApplied {
+		t.Fatalf("last outcome = %q, want applied", applied.Last.Outcome)
 	}
 
 	releaseExec()

@@ -8,12 +8,12 @@ import (
 )
 
 // UpdateTicker is the poll loop's view of the server self-update service
-// (*serverupdate.Service). Tick is called once per poll interval with
-// whether the server is idle right now; a pending update applies on the
-// first idle tick and does not return - the process re-executes on the new
-// binary.
+// (*serverupdate.Service). Tick is called once per poll interval; a
+// pending update applies at the first idle moment and does not return -
+// the process re-executes on the new binary. The service reads Busy for
+// itself, so a poll with nothing pending costs one row read.
 type UpdateTicker interface {
-	Tick(ctx context.Context, idle bool)
+	Tick(ctx context.Context)
 }
 
 // UseUpdates attaches the self-update service to the poll loop. It is
@@ -25,10 +25,10 @@ func (s *Scheduler) UseUpdates(t UpdateTicker) {
 	s.updates = t
 }
 
-// tickUpdates reports the current idleness to the attached self-update
-// service. It rides the stall-detection poll rather than adding a ticker
-// of its own, so `--poll-interval` is the one knob for how promptly a
-// scheduled update lands.
+// tickUpdates gives the self-update service its turn. It rides the
+// stall-detection poll rather than adding a ticker of its own, so
+// `--poll-interval` is the one knob for how promptly a scheduled update
+// lands.
 func (s *Scheduler) tickUpdates(ctx context.Context) {
 	s.mu.Lock()
 	t := s.updates
@@ -36,40 +36,44 @@ func (s *Scheduler) tickUpdates(ctx context.Context) {
 	if t == nil {
 		return
 	}
-	t.Tick(ctx, s.Idle(ctx))
+	t.Tick(ctx)
 }
 
-// Idle reports that nobody is working on this server: no run is queued,
-// provisioning, or running, and no workspace shell is open. Restarting is
-// safe for the runs either way - the scheduler reattaches to live
-// containers on boot - but it drops attached terminals, and the
-// interactive shells have no container to reattach to at all.
+// Busy reports what this server is doing, which is what a scheduled
+// self-update waits for. Restarting is safe for the runs either way - the
+// scheduler reattaches to live containers on boot - but it drops attached
+// terminals, and the interactive shells have no container to reattach to
+// at all.
 //
-// A run parked at needs-attention does not hold it back. That run is
-// waiting on a person, not working, and its container survives the restart
-// like any other; counting it would leave a busy deployment with no idle
-// moment at all, since finished-but-unclosed runs sit there for days.
+// Two kinds of run are not counted as working. A run parked at
+// needs-attention is waiting on a person; a paused run is a frozen
+// container. Neither has anything running inside it, both survive the
+// restart like any other, and counting either would leave a busy
+// deployment with no idle moment at all, since finished-but-unclosed and
+// paused runs sit for days.
 //
-// A store read that fails is not idle: an unknown answer must never be the
-// one that decides to restart.
-func (s *Scheduler) Idle(ctx context.Context) bool {
-	s.mu.Lock()
-	shells := s.shells
-	s.mu.Unlock()
-	if shells > 0 {
-		return false
-	}
+// A store read that fails reports Unknown, which is never idle: an unknown
+// answer must not be the one that decides to restart.
+func (s *Scheduler) Busy(ctx context.Context) domain.ServerBusy {
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
 	if err != nil {
 		slog.Warn("scheduler: read active runs for the idle check", "error", err)
-		return false
+		return domain.ServerBusy{Unknown: true}
 	}
+	out := domain.ServerBusy{}
+	s.mu.Lock()
+	out.Shells = s.shells
 	for _, r := range active {
-		if r.Status != domain.RunNeedsAttention {
-			return false
+		switch {
+		case r.Status == domain.RunNeedsAttention:
+		case s.runs[r.ID] != nil && s.runs[r.ID].paused:
+			out.Paused++
+		default:
+			out.Runs++
 		}
 	}
-	return true
+	s.mu.Unlock()
+	return out
 }
 
 // holdShell counts one open workspace shell for the idle check and returns

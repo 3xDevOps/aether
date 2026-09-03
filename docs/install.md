@@ -126,20 +126,26 @@ aether server update [--version <tag>] [--when now|idle] [--cancel] [--yes]
 aether server update --status
 ```
 
-`--when now` (the default) downloads the release, verifies it against
-`checksums.txt`, and swaps in `aether-server` plus the `aether` beside it
-with an atomic rename, then restarts by re-executing the new binary with the
-same argv and environment, keeping the same PID - the shipped unit is `Restart=on-failure`, so a clean exit would not
-come back. If the re-exec itself fails under systemd, the server falls back
-to `systemctl restart aether-server`. `--when idle` instead records one
-pending update, applied the first time no run is working and no workspace
-shell is open. A run parked at `needs-attention` does not hold it back: that
-run is waiting on a person, and its container survives the restart like any
-other. A second `--when idle` call replaces the pending one, and `--cancel`
-clears it. `--yes` skips the confirmation prompt. `--status`
-prints the running version, the latest release, whether this server can
-update itself, any pending update, and the outcome of the last attempt.
-`server update` is admin only; any member can read `--status`.
+`--when now` (the default) downloads both binaries and verifies them
+against `checksums.txt` before replacing either, then renames
+`aether-server` and the `aether` beside it into place. It restarts by
+re-executing the new binary with the same argv and environment, keeping the
+same PID: the shipped unit is `Restart=on-failure`, so a clean exit would
+not come back. If the re-exec itself fails under systemd, the server falls
+back to `systemctl restart aether-server`.
+
+`--when idle` instead records one pending update, applied the first time no
+run is working and no workspace shell is open. Two kinds of run do not hold
+it back: one parked at `needs-attention`, waiting on a person, and one
+paused with `aether pause`, whose container is frozen. Neither has anything
+running inside it and both survive the restart like any other run. A second
+`--when idle` call replaces the pending one, and `--cancel` clears it.
+
+`--yes` skips the confirmation prompt. `--status` prints the running
+version, the latest release, whether this server can update itself, any
+pending update and what it is still waiting for, and the outcome of the
+last attempt. `server update` is admin only; any member can read
+`--status`.
 
 Runs keep going through the restart: the scheduler reattaches to their live
 containers when the server comes back. Attached terminals and live syncs do
