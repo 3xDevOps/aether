@@ -14,6 +14,7 @@ import type {
   ServerInfo,
   Template,
   ToolSnapshot,
+  UpdateStatus,
   Workspace,
 } from '@/lib/types'
 
@@ -240,6 +241,28 @@ export function envGetResult(over: Partial<EnvGetResult> = {}): EnvGetResult {
   }
 }
 
+/** One update.check answer: a CLI a release behind, a current server. */
+export function updateStatus(over: Partial<UpdateStatus> = {}): UpdateStatus {
+  return {
+    cli: {
+      version: 'v1.2.3',
+      commit: 'abc1234',
+      latest: 'v1.3.0',
+      update_available: true,
+      asset: 'aether-linux-amd64',
+      release_url: 'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+      dev: false,
+      disabled: false,
+      can_self_update: true,
+      checked_at: '2026-08-14T10:00:00Z',
+    },
+    server_version: 'v1.3.0',
+    server_behind: false,
+    supervised: true,
+    ...over,
+  }
+}
+
 /** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
   return {
@@ -383,6 +406,12 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       unit_path: '',
     })),
     localImageScaffold: vi.fn(async () => ({ written: ['Dockerfile'] })),
+    localUpdateCheck: vi.fn(async () => updateStatus()),
+    localUpdateApply: vi.fn(async () => ({
+      updated: ['/usr/local/bin/aether'],
+      version: 'v1.3.0',
+      restarting: true,
+    })),
     envStatus: vi.fn(async () => ({
       versions: [envVersion()],
       active_version: 1,

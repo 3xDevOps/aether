@@ -41,6 +41,8 @@ import type {
   TimelinePage,
   TimelineQuery,
   ToolSnapshot,
+  UpdateApplyResult,
+  UpdateStatus,
   Workspace,
   WorkspaceSelector,
 } from '@/lib/types'
@@ -437,6 +439,11 @@ export const api = {
   localDaemonInstall: (server: string, repo: string) =>
     local<DaemonInstallResult>('daemon.install', { server, repo }),
   localDaemonStatus: () => local<DaemonStatusResult>('daemon.status'),
+  /** Whether the CLI on this machine, and the server it talks to, are
+   * behind the newest release. */
+  localUpdateCheck: () => local<UpdateStatus>('update.check'),
+  /** Replaces the aether binary on this machine with the newest release. */
+  localUpdateApply: () => local<UpdateApplyResult>('update.apply'),
   localImageScaffold: (repo: string, kind: 'dockerfile' | 'devcontainer') =>
     local<ImageScaffoldResult>('image.scaffold', { repo, kind }),
   // Workspace environments: definitions live on the server (admin-guarded
