@@ -126,8 +126,9 @@ the same capability checks the SSH transport applies.
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","shell","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
-          "link.repo","link.status","link.switch","pull","repo.push",
-          "sync.start","sync.status","sync.stop","update.apply","update.check"],
+          "link.repo","link.status","link.switch","profile.preview",
+          "profile.push","pull","repo.push","sync.start","sync.status",
+          "sync.stop","update.apply","update.check"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -240,6 +241,8 @@ authority.
 | `link.status` | `{}` | `{"linked":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"..."}],"active":"..."}` (`links`/`active` present only with named profiles) |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
+| `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
+| `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"..."}` |
 | `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
@@ -280,6 +283,46 @@ authority.
   prompt. That does not reach `ssh`: a passphrase-protected key with no
   agent still waits on ssh's own prompt until the ten minutes are up. Load
   the key into an agent before pushing from the dashboard.
+- `profile.preview` runs the discovery `aether profile push --agent
+  <harness>` would run and uploads nothing. It reports what a push would
+  carry, grouped into categories a developer recognizes, and everything
+  the guards left behind:
+
+  ```json
+  {"harness":"claude","root":"/home/you/.claude","present":true,
+   "files":42,"bytes":183422,
+   "categories":[{"category":"skills","files":12,"bytes":40201,
+                  "paths":["skills/pdf/SKILL.md"],"truncated":false}],
+   "excluded":[{"path":".credentials.json","reason":"credential",
+                "detail":"credential file excluded for claude"},
+               {"path":"notes/key.txt","reason":"secret",
+                "detail":"secret detected (aws-access-key) at line 3"}],
+   "blocked":false}
+  ```
+
+  Categories, in the order they are reported: `memory` (standing
+  instructions - `CLAUDE.md`, `AGENTS.md`, `memory/`), `skills`,
+  `commands` (`commands/`, and codex's `prompts/`), `settings`, `mcp`,
+  `plugins`, `other`. `paths` is capped at 200 entries per category, with
+  `truncated` set when it was cut; `files` and `bytes` stay exact.
+  `reason` on an exclusion is `credential` (a denylisted basename),
+  `secret` (a content-scanner finding), `ignored` (an
+  `.aether-profile-ignore` match), or `symlink` (a link out of the
+  profile root). `blocked` is true when a scanner finding would refuse
+  the push; the matching `excluded` entry names the file.
+- `present:false` - this machine has no profile root for that harness -
+  is a normal answer with zero counts, not an error. A harness name the
+  registry does not know, or one with no profile sync, answers `-32602`.
+- `profile.push` performs the push `aether profile push --agent
+  <harness>` performs, through the gateway's SSH connection: the same
+  discovery, the same per-harness credential denylist, the same secret
+  scanner, and the same content-addressed delta against the server's
+  current head. **It takes no allow-secret parameter.** A scanner finding
+  refuses the push with `-32002` naming the file and the line, because
+  the file has to be fixed on the machine it lives on; the
+  `--allow-secret` override stays on the CLI, where `--workspace` makes
+  it attributable on a timeline. A missing profile root refuses with
+  `-32002` too.
 - `pull`, `repo.push`, `sync.start`, and `sync.stop` refuse with `-32002`
   when no repo is linked.
 - A sync session's states are `starting` (the overlay is dialing the run
@@ -429,10 +472,11 @@ always honored.
 
 ### `GET /ws/envscan`
 
-Runs one environment scan on this machine: the chosen coding agent
-inspects the local toolchains (or, in repo mode, a repository's own
-files) headless and writes the Dockerfile and manifest pair the
-onboarding wizard reviews into a scratch directory. Every frame is JSON
+Runs one scan on this machine: the chosen coding agent runs headless and
+writes a validated result into a scratch directory. Four modes: three
+build a workspace image (the local toolchains, or a repository's own
+files, or a revision of a previous pair) and one recommends which of
+your local agent configuration is worth importing. Every frame is JSON
 text.
 
 1. Client sends one **text** start frame within 10 seconds. `mode` is
@@ -441,13 +485,16 @@ text.
    `repo_path`, the repository folder on this machine; `refine` reruns
    the agent over a previous pair with the user's feedback and carries
    the three extra fields (plus `repo_path` when that pair came from a
-   repo scan):
+   repo scan); `profile` reads the `profile.preview` inventory of every
+   harness configured on this machine and recommends what to import,
+   optionally with `repo_path` so the project can inform the call:
 
    ```json
    {"harness":"claude","mode":"inventory"}
    {"harness":"claude","mode":"repo","repo_path":"/path/to/clone"}
    {"harness":"claude","mode":"refine","previous_dockerfile":"FROM ...",
     "previous_manifest_json":"[...]","feedback":"drop jq, add ripgrep"}
+   {"harness":"claude","mode":"profile","repo_path":"/path/to/clone"}
    ```
 
    A `repo_path` that is missing, not a folder, or not a git repository
@@ -476,6 +523,27 @@ text.
    {"type":"result","dockerfile":"FROM ubuntu:24.04\n...",
     "manifest_json":"[...]","manifest":[{"name":"go","version":"1.24.1",...}]}
    ```
+
+   A `profile` scan answers a recommendation instead of a pair: one
+   entry per harness the agent was shown, each with a one-sentence
+   reason a developer can check against the file list. It is a proposal,
+   never an action - importing is a separate `profile.push` per harness,
+   after the user edits and approves the list:
+
+   ```json
+   {"type":"result","recommendation":{"harnesses":[
+     {"harness":"claude","import":true,"categories":["skills","commands"],
+      "reason":"..."},
+     {"harness":"codex","import":false,"categories":[],"reason":"..."}]}}
+   ```
+
+   The agent is shown paths and category counts only. File contents,
+   credential paths, and anything the denylist or the scanner flagged
+   never reach the prompt. An entry naming a harness or a category that
+   was not in the inventory fails validation, which earns the same one
+   retry a malformed manifest earns. A machine with no agent
+   configuration at all answers one `error` frame
+   (`no agent configuration found on this machine; nothing to import`).
 
    Failure carries the reason and the last agent output for diagnosis:
 

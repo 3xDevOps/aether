@@ -273,6 +273,18 @@ aether profile rollback --agent claude <snapshot-id>
 The local daemon (`aether daemon run`) does the push automatically on change;
 `--no-profile-sync` opts a machine out.
 
+The dashboard does the same push without a terminal. Its onboarding wizard has
+an **Agents** step, and it runs on the same two guards: for each harness
+configured on your machine it shows what a push would carry, grouped as
+memory, skills, commands, settings, MCP config, plugins, and other, plus every
+file the denylist or the scanner left behind and why. You check the harnesses
+you want and approve. Nothing is uploaded to produce that preview.
+
+`--allow-secret` has no dashboard equivalent, deliberately. A scanner finding
+refuses the push there and names the file and the line: the fix is on the
+machine the file lives on. Overriding a false positive stays a CLI act, where
+`--workspace` records who overrode what, and on which timeline.
+
 - The synced directory is the harness's profile root from the table above.
 - A run **pins** the latest snapshot when it is provisioned. Pushing mid-run
   never mutates a running agent - the next run picks it up.
