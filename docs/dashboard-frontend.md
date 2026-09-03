@@ -569,9 +569,9 @@ Environment step is `environment-step.tsx`.
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
 button that runs the push in the clone. Success names the branch that
-landed and keeps git's output behind a "What git did" expander, because
-`Everything up-to-date` and `[new branch]` are both success and mean
-different things; Continue then moves on. A refusal keeps the user on the
+landed and keeps git's output in a "What git did" panel, open on arrival
+because `Everything up-to-date` and `[new branch]` are both success and
+mean different things; Continue then moves on. A refusal keeps the user on the
 step with git's own output in a monospace block, both retry and the
 copyable command still there. The branch is the workspace's base branch,
 so a workspace created with `--base` seeds the branch its runs fork from.

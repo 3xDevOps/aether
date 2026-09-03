@@ -232,9 +232,13 @@ describe('onboarding wizard', () => {
     // stay on the page - "[new branch]" and "Everything up-to-date" are
     // both success and mean different things.
     expect(await screen.findByText(/Pushed/)).toBeDefined()
-    expect(screen.getByText(/\[new branch\]/).textContent).toBe(
+    const output = screen.getByText(/\[new branch\]/)
+    expect(output.textContent).toBe(
       'To ssh://alice@host:2222/wsp_1\n * [new branch] main -> main',
     )
+    // Open, not merely present: the reader who needs to tell "[new branch]"
+    // from "Everything up-to-date" would not know to go looking.
+    expect(output.closest('details')?.open).toBe(true)
     // Nothing invites a second push, and Continue moves on.
     expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))

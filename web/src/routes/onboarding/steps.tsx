@@ -354,9 +354,11 @@ export function RepoStep({
             )}
           </p>
           {pushed ? (
-            // Git's own answer, kept: "Everything up-to-date" and "[new
-            // branch]" both mean success and say different things.
-            <details className="rounded-md border bg-card">
+            // Git's own answer, open: "Everything up-to-date" and "[new
+            // branch]" both mean success and say different things, and the
+            // reader who needs that distinction is the one who would not
+            // know to go looking for it.
+            <details open className="rounded-md border bg-card">
               <summary className="cursor-pointer px-3 py-2 text-sm">
                 What git did
               </summary>

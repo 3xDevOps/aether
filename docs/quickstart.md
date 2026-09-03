@@ -139,8 +139,9 @@ workspace with `--base`.
 
 In the dashboard, the onboarding wizard's Repository step does both for
 you: it adds the remote, then its **Push now** button runs that push in
-your clone and keeps git's own output on the page. The command above is
-the same thing by hand.
+your clone and keeps git's own output on the page. It runs the same push
+with `--no-follow-tags`, so the command above also sends your tags if you
+have `push.followTags` set.
 
 ## 5. Set up your agent
 
