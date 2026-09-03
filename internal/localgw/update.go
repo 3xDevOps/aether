@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
@@ -34,7 +35,12 @@ func (g *Gateway) localUpdateCheck(r *http.Request, _ []byte) (any, *protocol.Er
 		ServerBehind  bool             `json:"server_behind"`
 		ServerError   string           `json:"server_error,omitempty"`
 		Supervised    bool             `json:"supervised"`
-	}{CLI: check, Supervised: g.cfg.Supervised}
+		// ShellBuildError is why the last desktop-app rebuild failed. The
+		// gateway that ran it exited so the shell could respawn on the new
+		// CLI, so this gateway reads the record it left behind: without it
+		// the app would just look stale, with no sign of what went wrong.
+		ShellBuildError string `json:"shell_build_error,omitempty"`
+	}{CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError()}
 
 	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerInfo, nil)
 	if perr != nil {
@@ -85,24 +91,60 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "install " + check.Latest + ": " + err.Error()}
 	}
 
+	// The CLI is swapped; the Electron shell around the dashboard is not,
+	// and it is built from the sources inside the binary that just landed.
+	// updated[0] is that binary, symlinks already resolved.
+	outcome := rebuildNone
+	if len(updated) > 0 {
+		outcome = g.startAppRebuild(updated[0])
+	}
+	rebuilding := outcome != rebuildNone
+
 	note := "rerun aether gui to use the new binary"
-	if g.cfg.Supervised {
+	switch {
+	case outcome == rebuildBusy:
+		// A second apply - another tab, or the app beside a browser tab.
+		// Saying a rebuild is running is the honest answer, and it must
+		// not exit: the first build is still swapping the app directory.
+		note = "a rebuild of the desktop app is already running"
+	case rebuilding && g.cfg.Supervised:
+		note = "rebuilding the desktop app, then relaunching it"
+	case rebuilding:
+		// A gateway nobody supervises must not exit under the user, so the
+		// browser tab keeps working and the user restarts the app itself.
+		note = "rebuilding the desktop app; restart it when the rebuild finishes"
+	case g.cfg.Supervised:
 		note = "the desktop app restarts with the new binary"
+	}
+	if g.cfg.Supervised && outcome == rebuildNone {
 		// Close after the handler returns and Shutdown drains it: the
 		// command waiting on Exit calls Close, which lets this response
-		// finish writing before the process goes away.
-		g.requestExit()
+		// finish writing before the process goes away. With a rebuild
+		// running - this call's or an earlier one's - the exit waits for
+		// it, so the shell relaunches onto the new app rather than the old
+		// one, and never mid-swap.
+		g.requestExit(0)
 	}
 	return struct {
 		Updated        []string `json:"updated"`
 		Version        string   `json:"version"`
 		Restarting     bool     `json:"restarting"`
+		Rebuilding     bool     `json:"rebuilding"`
 		Note           string   `json:"note,omitempty"`
 		RestartCommand string   `json:"restart_command,omitempty"`
 	}{
-		Updated: updated, Version: check.Latest, Restarting: g.cfg.Supervised, Note: note,
+		Updated: updated, Version: check.Latest, Restarting: g.cfg.Supervised,
+		Rebuilding: rebuilding, Note: note,
 		RestartCommand: restartCommand(updated),
 	}, nil
+}
+
+// localUpdateStatus reports the desktop-app rebuild update.apply started,
+// which the dashboard polls once a second while its banner shows progress.
+// It answers "idle" when no rebuild has run in this process, including in
+// the gateway that comes up after one.
+func (g *Gateway) localUpdateStatus(_ *http.Request, _ []byte) (any, *protocol.Error) {
+	return g.rebuild.snapshot(), nil
 }
 
 // restartCommand names the follow-up a swapped aether-server needs, the

@@ -96,6 +96,14 @@ func runGUI(args []string) error {
 	}
 	go nudgeUpdate(checker)
 	waitForExit(gw.Exit())
+	if code := gw.ExitCode(); code != 0 {
+		// localgw.ExitRelaunch: update.apply rebuilt the desktop app, so
+		// the shell has to relaunch itself instead of respawning this
+		// sidecar into the window running the old app. The deferred Close
+		// does not run past os.Exit, so drain the gateway first.
+		_ = gw.Close()
+		os.Exit(code)
+	}
 	return nil
 }
 

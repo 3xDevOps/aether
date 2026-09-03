@@ -56,21 +56,32 @@ func DesktopBuildDir() (string, error) {
 	return filepath.Join(cache, "aether", "desktop-build"), nil
 }
 
+// The phases a desktop build reports, in the order BuildDesktop and
+// `aether gui build` run them. `--json` prints one line per phase and the
+// gateway turns them into the dashboard's progress line, so these strings
+// are a contract (docs/local-gateway.md).
+const (
+	PhaseUnpacking    = "unpacking"
+	PhaseFetchingNode = "fetching node"
+	PhaseDependencies = "installing dependencies"
+	PhasePackaging    = "packaging"
+	PhaseInstalling   = "installing"
+	PhaseDone         = "done"
+	PhaseError        = "error"
+)
+
 // BuildDesktop packages the Electron shell in src for this machine: it
 // writes the sources into buildDir, stamps cliVersion into the shell's
 // package.json, installs the npm dependencies, and runs electron-builder's
 // unpacked (--dir) target. npm and electron-builder output stream to stdout
-// and stderr. It returns the unpacked app: a directory on linux and
+// and stderr. phase, when non-nil, is called with each Phase* constant as
+// that step starts. It returns the unpacked app: a directory on linux and
 // windows, the .app bundle on darwin.
-func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, stdout, stderr io.Writer) (string, error) {
-	nodeRoot, err := nodeCacheDir()
-	if err != nil {
-		return "", err
+func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, stdout, stderr io.Writer, phase func(string)) (string, error) {
+	if phase == nil {
+		phase = func(string) {}
 	}
-	node, err := ensureNode(ctx, nodeRoot, stdout)
-	if err != nil {
-		return "", err
-	}
+	phase(PhaseUnpacking)
 	if err := writeTree(buildDir, src); err != nil {
 		return "", fmt.Errorf("localops: write shell sources: %w", err)
 	}
@@ -81,6 +92,16 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 	dist := filepath.Join(buildDir, "dist")
 	if err := os.RemoveAll(dist); err != nil {
 		return "", fmt.Errorf("localops: clear %s: %w", dist, err)
+	}
+
+	phase(PhaseFetchingNode)
+	nodeRoot, err := nodeCacheDir()
+	if err != nil {
+		return "", err
+	}
+	node, err := ensureNode(ctx, nodeRoot, stdout)
+	if err != nil {
+		return "", err
 	}
 
 	run := func(name string, args ...string) error {
@@ -105,9 +126,11 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 		}
 		return nil
 	}
+	phase(PhaseDependencies)
 	if err := run(node.npm, "install", "--no-audit", "--no-fund"); err != nil {
 		return "", err
 	}
+	phase(PhasePackaging)
 	if err := run(node.npx, "electron-builder", "--dir", "--publish", "never"); err != nil {
 		return "", err
 	}
@@ -200,31 +223,58 @@ func stampShellVersion(buildDir, cliVersion string) error {
 	return nil
 }
 
+// Prefixes for the two directories the install swap uses, both beside the
+// installed app so a rename never crosses a filesystem, both dot-prefixed
+// so neither shows up in an Applications listing.
+const (
+	installStagingPrefix = ".aether-staging-"
+	installOldPrefix     = ".aether-old-"
+)
+
 // InstallDesktop copies the unpacked app at built into the application
 // directory desktopLayout picks for goos and registers a launcher so the
 // desktop environment lists it. home is the user's home directory; icon is
-// the PNG the linux launcher shows. An earlier install at the same place is
-// replaced, and one at app.Superseded is removed after the new app is in
-// place, so a failed copy never costs the last working install.
+// the PNG the linux launcher shows.
+//
+// The new app is staged beside the target and swapped in by rename: the app
+// being replaced is often the one the user is looking at, and deleting a
+// running Electron's own files takes that window down with it. An earlier
+// install at app.Superseded is removed after the new app is in place, so a
+// failed copy never costs the last working install.
 func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 	app, err := desktopLayout(goos, home)
 	if err != nil {
 		return DesktopApp{}, err
 	}
-	if err := os.RemoveAll(app.App); err != nil {
-		return DesktopApp{}, fmt.Errorf("localops: remove previous %s%s: %w", app.App, removeHint(goos, app.App, err), err)
-	}
-	if err := os.MkdirAll(filepath.Dir(app.App), 0o755); err != nil {
+	parent := filepath.Dir(app.App)
+	if err = os.MkdirAll(parent, 0o755); err != nil {
 		return DesktopApp{}, err
 	}
-	if err := os.CopyFS(app.App, os.DirFS(built)); err != nil {
-		return DesktopApp{}, fmt.Errorf("localops: copy %s to %s: %w", built, app.App, err)
+	// Leftovers from an earlier swap whose removal the running app blocked.
+	// It may have exited since; if it has not, the next install tries again.
+	sweepInstallLeftovers(parent)
+
+	staging, err := os.MkdirTemp(parent, installStagingPrefix+"*")
+	if err != nil {
+		return DesktopApp{}, fmt.Errorf("localops: stage the app beside %s: %w", app.App, err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	staged := filepath.Join(staging, filepath.Base(app.App))
+	if err := os.CopyFS(staged, os.DirFS(built)); err != nil {
+		return DesktopApp{}, fmt.Errorf("localops: copy %s to %s: %w", built, staged, err)
+	}
+	// Everything that belongs inside the app goes in before the swap, so
+	// the directory the rename publishes is already complete.
+	if goos == "linux" {
+		if err := os.WriteFile(filepath.Join(staged, desktopIcon), icon, 0o644); err != nil {
+			return DesktopApp{}, err
+		}
+	}
+	if err := swapInstalled(goos, staged, app.App); err != nil {
+		return DesktopApp{}, err
 	}
 	switch goos {
 	case "linux":
-		if err := os.WriteFile(filepath.Join(app.App, desktopIcon), icon, 0o644); err != nil {
-			return DesktopApp{}, err
-		}
 		if err := os.MkdirAll(filepath.Dir(app.Launcher), 0o755); err != nil {
 			return DesktopApp{}, err
 		}
@@ -257,6 +307,57 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 		}
 	}
 	return app, nil
+}
+
+// swapInstalled publishes staged at target with two renames: the installed
+// app moves aside, the new one takes its place, and only then is the old
+// copy deleted. A rename leaves a running app's open files intact, so the
+// window the user is looking at keeps working until they restart it.
+//
+// A removal that fails - Windows holds a running program's files open -
+// leaves a dot-prefixed directory beside the app that the next install
+// sweeps up. A failed second rename puts the working install back.
+func swapInstalled(goos, staged, target string) error {
+	parent := filepath.Dir(target)
+	old := ""
+	if _, err := os.Lstat(target); err == nil {
+		aside, err := os.MkdirTemp(parent, installOldPrefix+"*")
+		if err != nil {
+			return fmt.Errorf("localops: make room beside %s: %w", target, err)
+		}
+		old = filepath.Join(aside, filepath.Base(target))
+		if err := os.Rename(target, old); err != nil {
+			_ = os.RemoveAll(aside)
+			return fmt.Errorf("localops: move the installed %s aside%s: %w", target, removeHint(goos, target, err), err)
+		}
+	}
+	if err := os.Rename(staged, target); err != nil {
+		if old != "" {
+			_ = os.Rename(old, target)
+			_ = os.RemoveAll(filepath.Dir(old))
+		}
+		return fmt.Errorf("localops: install %s: %w", target, err)
+	}
+	if old != "" {
+		_ = os.RemoveAll(filepath.Dir(old))
+	}
+	return nil
+}
+
+// sweepInstallLeftovers deletes the staging and set-aside directories an
+// earlier install could not remove. Best effort by design: this is
+// housekeeping, and failing an install over it would be worse than the
+// megabytes it leaves behind.
+func sweepInstallLeftovers(parent string) {
+	for _, prefix := range []string{installStagingPrefix, installOldPrefix} {
+		matches, err := filepath.Glob(filepath.Join(parent, prefix+"*"))
+		if err != nil {
+			continue
+		}
+		for _, dir := range matches {
+			_ = os.RemoveAll(dir)
+		}
+	}
 }
 
 // removeHint explains a failed removal of an installed app in the terms

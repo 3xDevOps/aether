@@ -46,6 +46,7 @@ import type {
   TimelineQuery,
   ToolSnapshot,
   UpdateApplyResult,
+  UpdateBuildStatus,
   UpdateStatus,
   Workspace,
   WorkspaceSelector,
@@ -529,6 +530,8 @@ export const api = {
   localUpdateCheck: () => local<UpdateStatus>('update.check'),
   /** Replaces the aether binary on this machine with the newest release. */
   localUpdateApply: () => local<UpdateApplyResult>('update.apply'),
+  /** Progress of a desktop-app rebuild started by update.apply. */
+  localUpdateStatus: () => local<UpdateBuildStatus>('update.status'),
   localImageScaffold: (repo: string, kind: 'dockerfile' | 'devcontainer') =>
     local<ImageScaffoldResult>('image.scaffold', { repo, kind }),
   // Workspace environments: definitions live on the server (admin-guarded

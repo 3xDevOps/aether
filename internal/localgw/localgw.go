@@ -84,6 +84,18 @@ type Gateway struct {
 	// command that owns the process waits on it beside its signals.
 	exit     chan struct{}
 	exitOnce sync.Once
+	// exitCode is the status that command should exit with, written
+	// before exit closes and read only after. ExitRelaunch tells the
+	// desktop shell to relaunch itself rather than respawn the sidecar.
+	exitCode int
+	// rebuild tracks the desktop-app build update.apply starts.
+	rebuild *rebuildState
+	// ctx bounds the background work this gateway owns - so far the
+	// desktop-app rebuild child - and Close cancels it. Without it a
+	// rebuild outlives the app that started it, still downloading Node and
+	// still swapping the directory of an app the user just quit.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New builds the gateway and mints its per-process token. It binds
@@ -106,11 +118,15 @@ func New(cfg Config) (*Gateway, error) {
 	if err != nil {
 		return nil, fmt.Errorf("localgw: mint token: %w", err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	g := &Gateway{
-		cfg:   cfg,
-		local: newLocalState(cfg),
-		token: token,
-		exit:  make(chan struct{}),
+		cfg:     cfg,
+		local:   newLocalState(cfg),
+		token:   token,
+		exit:    make(chan struct{}),
+		rebuild: newRebuildState(),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 	g.mux = http.NewServeMux()
 	g.mux.HandleFunc("POST /api/v1/{method}", g.handleAPI)
@@ -208,14 +224,26 @@ func (g *Gateway) Token() string { return g.token }
 // update.apply on a supervised gateway. It stays open otherwise.
 func (g *Gateway) Exit() <-chan struct{} { return g.exit }
 
-// requestExit closes Exit, at most once however many verbs ask.
-func (g *Gateway) requestExit() {
-	g.exitOnce.Do(func() { close(g.exit) })
+// ExitCode is the status the process should exit with, valid once Exit is
+// closed. Zero means an ordinary stop the desktop shell answers by
+// respawning the sidecar; ExitRelaunch means the app on disk was rebuilt
+// and the shell has to relaunch itself to pick it up.
+func (g *Gateway) ExitCode() int { return g.exitCode }
+
+// requestExit closes Exit with the status the process should carry, at
+// most once however many verbs ask.
+func (g *Gateway) requestExit(code int) {
+	g.exitOnce.Do(func() {
+		g.exitCode = code
+		close(g.exit)
+	})
 }
 
 // Close stops serving, draining in-flight requests briefly before cutting
-// them off. Safe before Start.
+// them off, and stops the background work the gateway owns. Safe before
+// Start, and safe to call twice.
 func (g *Gateway) Close() error {
+	g.cancel()
 	if g.ln == nil {
 		return nil
 	}

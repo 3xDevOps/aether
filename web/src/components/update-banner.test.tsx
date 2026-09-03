@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { UpdateBanners } from '@/components/update-banner'
 import type { AetherDesktop } from '@/components/shell/title-bar'
 import type { GatewayCapabilities, Member } from '@/lib/types'
@@ -35,12 +35,17 @@ function seed(
     dismissedUpdates: over.dismissedUpdates ?? { cli: '', server: '', shell: '' },
     update: null,
     hydrated: true,
+    gatewayRestarting: false,
   })
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
   delete shellWindow.aetherDesktop
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 test('renders nothing where the gateway does not serve update.check', async () => {
@@ -111,6 +116,7 @@ test('the done state names the replaced binaries and the server restart', async 
       updated: ['/usr/local/bin/aether', '/usr/local/bin/aether-server'],
       version: 'v1.3.0',
       restarting: false,
+      rebuilding: false,
       note: 'rerun aether gui to use the new binary',
       restart_command: 'sudo systemctl restart aether-server',
     })),
@@ -221,8 +227,197 @@ test('a dismissal hides that version and a newer release comes back', async () =
   expect(await screen.findByText('Aether v1.3.1 is available.')).toBeTruthy()
 })
 
+// update.apply can start a background rebuild of the desktop app after
+// swapping the CLI binary. The banner polls update.status for its progress
+// while the Update button stays disabled through the whole thing.
+describe('the desktop-app rebuild the Update button waits on', () => {
+  function rebuildApply() {
+    return vi.fn(async () => ({
+      updated: ['/usr/local/bin/aether'],
+      version: 'v1.3.0',
+      restarting: true,
+      rebuilding: true,
+    }))
+  }
+
+  test('walks the phases while the button stays disabled, then relaunches', async () => {
+    vi.useFakeTimers()
+    const client = fakeApi({
+      localUpdateApply: rebuildApply(),
+      localUpdateStatus: vi
+        .fn()
+        .mockResolvedValueOnce({ phase: 'installing dependencies' })
+        .mockResolvedValue({ phase: 'done' }),
+    })
+    seed()
+    render(<UpdateBanners client={client} />)
+
+    // Let the initial update.check settle - a plain microtask, no timer.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
+    expect(screen.getByText('Updating the CLI...')).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Updating...' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+
+    // update.apply resolves.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(
+      screen.getByText(
+        'Rebuilding the app (about a minute; the first time also fetches Node)...',
+      ),
+    ).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Rebuilding...' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+
+    // First update.status poll: still building, and names the phase.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(screen.getByText('installing dependencies')).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Rebuilding...' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+
+    // Second poll: the build is done and the apply said it would restart.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(screen.getByText('Relaunching')).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Relaunching...' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect(client.localUpdateStatus).toHaveBeenCalledTimes(2)
+  })
+
+  test('a failed rebuild shows the real error and the manual command', async () => {
+    vi.useFakeTimers()
+    const client = fakeApi({
+      localUpdateApply: rebuildApply(),
+      localUpdateStatus: vi.fn(async () => ({
+        phase: 'error' as const,
+        error: 'npm install: exit status 1',
+      })),
+    })
+    seed()
+    render(<UpdateBanners client={client} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+
+    expect(screen.getByText('npm install: exit status 1')).toBeTruthy()
+    expect(screen.getByText('aether gui build')).toBeTruthy()
+    // The polling loop stops itself once the phase is terminal.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(client.localUpdateStatus).toHaveBeenCalledTimes(1)
+  })
+
+  test('sets gatewayRestarting as soon as the apply says the gateway is going away', async () => {
+    const client = fakeApi({ localUpdateApply: rebuildApply() })
+    seed()
+    render(<UpdateBanners client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
+    await waitFor(() => expect(useStore.getState().gatewayRestarting).toBe(true))
+  })
+
+  // An unsupervised gateway - `aether gui` in a browser tab - rebuilds the
+  // app and deliberately keeps serving. The flag is never cleared, so
+  // setting it here would hide a genuine disconnect in that tab for good.
+  test('leaves gatewayRestarting alone when only a rebuild is running', async () => {
+    const client = fakeApi({
+      localUpdateApply: vi.fn(async () => ({
+        updated: ['/usr/local/bin/aether'],
+        version: 'v1.3.0',
+        restarting: false,
+        rebuilding: true,
+        note: 'rebuilding the desktop app; restart it when the rebuild finishes',
+      })),
+    })
+    seed()
+    render(<UpdateBanners client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
+    await screen.findByText(
+      'Rebuilding the app (about a minute; the first time also fetches Node)...',
+    )
+    expect(useStore.getState().gatewayRestarting).toBe(false)
+  })
+
+  // The gateway's note says what it was about to do. Once the build is over
+  // the banner has to stop saying a finished rebuild is still running.
+  test('says the rebuild finished on a gateway that is not going away', async () => {
+    vi.useFakeTimers()
+    const client = fakeApi({
+      localUpdateApply: vi.fn(async () => ({
+        updated: ['/usr/local/bin/aether'],
+        version: 'v1.3.0',
+        restarting: false,
+        rebuilding: true,
+        note: 'rebuilding the desktop app; restart it when the rebuild finishes',
+      })),
+      localUpdateStatus: vi.fn(async () => ({ phase: 'done' as const })),
+    })
+    seed()
+    render(<UpdateBanners client={client} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+
+    expect(
+      screen.getByText(
+        /Updated to v1\.3\.0\. The app was rebuilt; restart it to use the new version\./,
+      ),
+    ).toBeTruthy()
+    expect(screen.queryByText(/restart it when the rebuild finishes/)).toBeNull()
+    // Nothing left for the button to do.
+    expect(screen.queryByRole('button', { name: /Update|Rebuild|Relaunch/ })).toBeNull()
+  })
+})
+
 describe('the desktop app rebuild notice', () => {
   const notice = 'The desktop app is out of date.'
+
+  // A rebuild in the app can itself fail; the gateway persists that error
+  // to a file and update.check reports it until a rebuild succeeds. That is
+  // exactly why the shell is still old, so the notice says so.
+  test('shows a persisted rebuild error from update.check', async () => {
+    shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () =>
+        updateStatus({ shell_build_error: 'npm install: exit status 1' }),
+      ),
+    })
+    seed()
+    render(<UpdateBanners client={client} />)
+
+    expect(await screen.findByText(notice)).toBeTruthy()
+    expect(screen.getByText('npm install: exit status 1')).toBeTruthy()
+  })
 
   test('appears when the shell was built by a different CLI', async () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }

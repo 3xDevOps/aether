@@ -39,3 +39,29 @@ describe('App offline state', () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 })
+
+// An in-app update makes the gateway exit and come back on purpose: the
+// same disconnect this page normally reports as a failure. The update
+// banner sets gatewayRestarting before that happens, and it is never
+// cleared - the page below is on its way out regardless of how the
+// reconnect goes.
+describe('App during an in-app update', () => {
+  beforeEach(() => {
+    useStore.setState({
+      connection: 'offline',
+      hydrated: false,
+      hydrationError: 'server unreachable: connection refused',
+      streamDead: false,
+      unreachable: 'server',
+      gatewayRestarting: true,
+    })
+  })
+
+  it('does not replace the shell with the connection-error page', () => {
+    render(<App />)
+
+    expect(
+      screen.queryByRole('heading', { name: 'Cannot reach your Aether server' }),
+    ).toBeNull()
+  })
+})

@@ -32,6 +32,15 @@ export interface LocalSlice {
    */
   update: UpdateStatus | null
   setUpdate: (update: UpdateStatus) => void
+  /**
+   * Set once an in-app update tells the gateway it is going away and coming
+   * back (`update.apply` answering `restarting`). Never cleared: the page
+   * that reads it is on its way out regardless of how the reconnect goes.
+   * An unsupervised gateway never sets it - that tab keeps its gateway, and
+   * a flag that is never cleared would hide a real disconnect later.
+   */
+  gatewayRestarting: boolean
+  setGatewayRestarting: (gatewayRestarting: boolean) => void
 }
 
 export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
@@ -49,4 +58,6 @@ export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
     set((s) => ({ pulls: { ...s.pulls, [runID]: result } })),
   update: null,
   setUpdate: (update) => set({ update }),
+  gatewayRestarting: false,
+  setGatewayRestarting: (gatewayRestarting) => set({ gatewayRestarting }),
 })
