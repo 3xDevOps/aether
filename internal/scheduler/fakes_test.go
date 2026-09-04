@@ -717,9 +717,10 @@ func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, a
 	if !ok {
 		return errFakeNoSession
 	}
-	// Like ptyhost.Host, the banner is the server's own output and never
-	// advances the session's last-output clock; only the agent's answer,
-	// which arrives on the attachment, does.
+	// The banner never advances the session's last-output clock; only what
+	// arrives on the attachment does. This fake has no terminal, so it
+	// models none of ptyhost.Host's echo handling - that lives in the
+	// ptyhost tests.
 	_, err := sess.att.Stdin().Write([]byte(message + "\r"))
 	return err
 }

@@ -452,15 +452,113 @@ func TestInjectAndTranscriptReplay(t *testing.T) {
 	}
 }
 
-// TestInjectIsNotAgentOutput pins the liveness clock stall detection reads.
-// A steer puts two lots of bytes on the PTY that the agent did not write:
-// the banner, and the line discipline's echo of the injected line, which
-// arrives even when the agent never reads its stdin. Neither may refresh
-// LastOutput, or steering a hung agent would clear its stall.
+// echoStep is one delivered chunk of PTY output and whether it should count
+// as the agent talking.
+type echoStep struct {
+	out  string
+	want bool
+}
+
+// TestEchoExpectation covers the shapes the terminal's echo actually takes.
+// The line discipline rewrites lone CRs and LFs as CRLF and renders control
+// bytes in hat notation, so the expectation the session builds has to match
+// what comes back rather than what was written - a shape it gets wrong is a
+// shape where steering a hung agent still refreshes its liveness clock.
+func TestEchoExpectation(t *testing.T) {
+	start := time.Now()
+	cases := []struct {
+		name   string
+		writes []string      // what the server wrote to the agent's stdin
+		delay  time.Duration // how long the terminal took to answer
+		steps  []echoStep
+	}{
+		{
+			name:   "line echoes as CRLF",
+			writes: []string{"wake\r"},
+			steps:  []echoStep{{"wake\r\n", false}, {"got:wake\r\n", true}},
+		},
+		{
+			name:   "echo split across reads",
+			writes: []string{"wake\r"},
+			steps:  []echoStep{{"wa", false}, {"ke\r\n", false}, {"got:wake\r\n", true}},
+		},
+		{
+			name:   "terminal without ONLCR echoes the CR alone",
+			writes: []string{"wake\r"},
+			steps:  []echoStep{{"wake\r", false}, {"got:wake\r\n", true}},
+		},
+		{
+			name:   "multi-line steer echoes every newline as CRLF",
+			writes: []string{"wake\nup\r"},
+			steps:  []echoStep{{"wake\r\nup\r\n", false}, {"got:wake\r\n", true}},
+		},
+		{
+			name:   "control byte echoes in hat notation",
+			writes: []string{"a\x01b\r"},
+			steps:  []echoStep{{"a^Ab\r\n", false}, {"got\r\n", true}},
+		},
+		{
+			name:   "tab echoes as itself",
+			writes: []string{"a\tb\r"},
+			steps:  []echoStep{{"a\tb\r\n", false}},
+		},
+		{
+			name:   "queued writes echo in order",
+			writes: []string{"one\r", "two\r"},
+			steps:  []echoStep{{"one\r\ntwo\r\n", false}, {"got\r\n", true}},
+		},
+		{
+			name:   "divergent output is the agent",
+			writes: []string{"wake\r"},
+			steps:  []echoStep{{"thinking...\r\n", true}},
+		},
+		{
+			name:   "echo and answer in one chunk",
+			writes: []string{"wake\r"},
+			steps:  []echoStep{{"wake\r\ngot:wake\r\n", true}},
+		},
+		{
+			name:   "an echo that never came expires",
+			writes: []string{"wake\r"},
+			delay:  2 * echoWindow,
+			steps:  []echoStep{{"wake\r\n", true}},
+		},
+		{
+			name:   "an expectation past the cap is dropped whole",
+			writes: []string{strings.Repeat("x", maxPendingEcho) + "\r"},
+			steps:  []echoStep{{"xxx", true}},
+		},
+		{
+			name:  "no expectation at all",
+			steps: []echoStep{{"thinking...\r\n", true}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &session{}
+			for _, w := range tc.writes {
+				s.expectEcho([]byte(w), start)
+			}
+			now := start.Add(tc.delay)
+			for i, step := range tc.steps {
+				if got := s.consumeEcho([]byte(step.out), now); got != step.want {
+					t.Fatalf("step %d: consumeEcho(%q) = %v, want %v", i, step.out, got, step.want)
+				}
+			}
+		})
+	}
+}
+
+// TestInjectIsNotAgentOutput pins the liveness clock stall detection reads,
+// end to end through the host. A steer puts two lots of bytes on the PTY
+// that the agent did not write: the banner, and the line discipline's echo
+// of the injected line, which arrives even when the agent never reads its
+// stdin. Keystrokes typed on an attach echo the same way. None of it may
+// refresh LastOutput, or steering a hung agent would clear its stall.
 func TestInjectIsNotAgentOutput(t *testing.T) {
 	h, _ := newTestHost(t)
 	att := newFakeAtt()
-	_ = att.captureStdin() // drain the injected line
+	stdin := att.captureStdin()
 	run := domain.RunID("run-liveness")
 	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -474,17 +572,40 @@ func TestInjectIsNotAgentOutput(t *testing.T) {
 	if !ok || before.IsZero() {
 		t.Fatalf("LastOutput = %v, %v after agent output", before, ok)
 	}
+	unmoved := func(t *testing.T, what string) {
+		t.Helper()
+		if ts, _ := h.LastOutput(RunSession(run)); !ts.Equal(before) {
+			t.Fatalf("LastOutput moved from %v to %v across %s", before, ts, what)
+		}
+	}
 
+	// A single-line steer, its echo split across reads as a real PTY
+	// delivers it.
 	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "wake"); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
-	// The echo comes back split across reads, as a real PTY delivers it.
 	att.writeOutput(t, "wa")
 	att.writeOutput(t, "ke\r\n")
 	waitFor(t, "banner and echo on the stream", func() bool { return strings.HasSuffix(a.out.String(), "wake\r\n") })
-	if ts, _ := h.LastOutput(RunSession(run)); !ts.Equal(before) {
-		t.Fatalf("LastOutput moved from %v to %v across a steer the agent never answered", before, ts)
+	unmoved(t, "a steer the agent never answered")
+
+	// The dashboard's steer box is a textarea, so a message can carry
+	// interior newlines; every one of them echoes back as CRLF.
+	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "wake\nup"); err != nil {
+		t.Fatalf("Inject multi-line: %v", err)
 	}
+	att.writeOutput(t, "wake\r\nup\r\n")
+	waitFor(t, "multi-line echo on the stream", func() bool { return strings.HasSuffix(a.out.String(), "up\r\n") })
+	unmoved(t, "a multi-line steer the agent never answered")
+
+	// Typing on an attach reaches the same stdin and echoes the same way.
+	if _, err := a.keys.Write([]byte("hi\r")); err != nil {
+		t.Fatalf("write keystrokes: %v", err)
+	}
+	waitFor(t, "keystrokes on the agent's stdin", func() bool { return strings.HasSuffix(stdin.String(), "hi\r") })
+	att.writeOutput(t, "hi\r\n")
+	waitFor(t, "keystroke echo on the stream", func() bool { return strings.HasSuffix(a.out.String(), "hi\r\n") })
+	unmoved(t, "keystrokes the agent never answered")
 
 	// The agent's own answer is what moves it.
 	att.writeOutput(t, "got:wake\r\n")

@@ -274,8 +274,11 @@ func TestIntegrationChaosStallUX(t *testing.T) {
 		p, ok := e.Payload.(events.RunStatusPayload)
 		return ok && e.RunID == deafID && p.To == domain.RunNeedsAttention
 	})
+	// A multi-line steer, which is what the dashboard's textarea sends: the
+	// line discipline echoes every newline back as CRLF, so the expectation
+	// has to cover the interior one as well as the trailing carriage return.
 	if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: string(deafID), Message: "wake",
+		RunID: string(deafID), Message: "wake\nup",
 	}, nil); err != nil {
 		t.Fatalf("run.inject hung agent: %v", err)
 	}

@@ -42,11 +42,14 @@ Parking is not terminal. A stalled run whose agent starts producing output
 again returns to running on the next poll, and steering it (`aether inject`,
 or typing on an attach) is usually what gets it talking.
 
-Steering it is not itself that output. A steer's attributed banner is the
-server's own, and so is the terminal's echo of the steered line, which comes
-back even when the agent never reads its input - so a run whose agent does
-not answer stays parked instead of flipping back to running and hiding the
-hang for another threshold.
+Steering is not itself that output. A steer's attributed banner is the
+server's own, and so is the terminal's echo of the steered line - or of
+keystrokes typed on an attach - which comes back even when the agent never
+reads its input. None of it refreshes the clock, so poking a hung agent
+does not hide the hang for another threshold. What the agent puts on the
+stream itself always counts: a full-screen agent that repaints its UI in
+response is producing real output and clears its stall, which is the point.
+The run parks on silence from the agent, not on silence from the stream.
 
 ### Picking a disk floor
 

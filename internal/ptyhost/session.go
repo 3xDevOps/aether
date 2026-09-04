@@ -21,6 +21,19 @@ const maxClientBuffer = 4 << 20
 // off the session lock and a hung runtime must never wedge it forever.
 const resizeTimeout = 5 * time.Second
 
+// echoWindow bounds how long the terminal's echo of written input is still
+// expected back. The line discipline echoes as it accepts the bytes, so
+// anything later is the agent's own output; without the bound a terminal
+// with echo off - every full-screen agent - would leave the expectation
+// standing against whatever the agent printed next.
+const echoWindow = time.Second
+
+// maxPendingEcho caps the echo the session tracks at once. An expectation
+// past it is dropped whole: the bytes then count as the agent's, which only
+// costs a stall one more threshold, where an unbounded queue would grow for
+// as long as anyone kept steering.
+const maxPendingEcho = 8 << 10
+
 var errSlowClient = errors.New("ptyhost: client too slow, detached")
 
 // session is one persistent PTY session: the adopted attachment, its pump,
@@ -47,11 +60,13 @@ type session struct {
 	title      titleScanner
 	onTitle    func(string)
 
-	// pendingEcho is the echo an injection is still owed by the terminal.
-	// The line discipline echoes injected input back through the PTY even
-	// when the agent never reads it, so those bytes are not evidence the
-	// agent is alive; see consumeEcho.
-	pendingEcho []byte
+	// pendingEcho is the echo the terminal still owes for input the server
+	// wrote to the agent - an injected line, or a member's keystrokes. The
+	// line discipline echoes them back through the PTY even when the agent
+	// never reads them, so those bytes are not evidence the agent is alive;
+	// see expectEcho and consumeEcho. echoDeadline expires the expectation.
+	pendingEcho  []byte
+	echoDeadline time.Time
 
 	// resizeMu serializes att.Resize applications so nudge sequences from
 	// concurrent reconciles never interleave; it is never held with mu.
@@ -81,8 +96,9 @@ func (s *session) deliver(p []byte) {
 		return
 	}
 	// Viewers, the transcript and the title scanner get every byte; only
-	// the liveness clock discounts the echo of what the server injected.
-	if s.consumeEcho(p) {
+	// the liveness clock discounts the terminal's echo of what the server
+	// wrote.
+	if s.consumeEcho(p, now) {
 		s.lastOut = now
 	}
 	s.title.scan(p, s.onTitle)
@@ -255,22 +271,33 @@ func (s *session) applyResize() {
 }
 
 // writeStdin forwards keystrokes to the agent; false once the session is
-// over.
+// over. The terminal echoes them back exactly as it echoes an injected
+// line, so they register the same expectation: a member typing at a hung
+// agent is not the agent talking. stdinMu is held across the registration
+// so the queued echoes stay in the order the writes reach the PTY.
 func (s *session) writeStdin(p []byte) bool {
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
 	s.mu.Lock()
-	over := s.ended || s.stopped
-	s.mu.Unlock()
-	if over {
+	if s.ended || s.stopped {
+		s.mu.Unlock()
 		return false
 	}
-	s.stdinMu.Lock()
+	s.expectEcho(p, time.Now())
+	s.mu.Unlock()
+
 	_, err := s.stdin.Write(p)
-	s.stdinMu.Unlock()
+	if err != nil {
+		s.dropEcho()
+	}
 	return err == nil
 }
 
 func (s *session) inject(actorName, actorColor, message string) error {
 	banner := renderBanner(actorName, actorColor, message)
+	line := []byte(message + "\r")
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
@@ -282,9 +309,8 @@ func (s *session) inject(actorName, actorColor, message string) error {
 	}
 	// Neither the banner nor the echo the terminal owes us may touch
 	// lastOut: stall detection reads that clock, and counting the server's
-	// own bytes would clear a stall for an agent that never answered. The
-	// line discipline turns the trailing CR into CRLF on the way back.
-	s.pendingEcho = append(s.pendingEcho, bytes.ReplaceAll([]byte(message+"\r"), []byte("\r"), []byte("\r\n"))...)
+	// own bytes would clear a stall for an agent that never answered.
+	s.expectEcho(line, time.Now())
 	s.tr.output(banner)
 	s.tr.marker("inject by " + actorName + ": " + message)
 	for c := range s.clients {
@@ -292,22 +318,64 @@ func (s *session) inject(actorName, actorColor, message string) error {
 	}
 	s.mu.Unlock()
 
-	s.stdinMu.Lock()
-	defer s.stdinMu.Unlock()
-	if _, err := s.stdin.Write([]byte(message + "\r")); err != nil {
+	if _, err := s.stdin.Write(line); err != nil {
+		s.dropEcho()
 		return fmt.Errorf("ptyhost: inject stdin write: %w", err)
 	}
 	return nil
 }
 
-// consumeEcho strips the echo an injection is still owed from the head of
-// p and reports whether anything is left over - that leftover is the agent
-// talking. The terminal echoes injected input back through the PTY even
-// when the agent never reads it, so an echo alone must not refresh the
-// liveness clock. The first byte that diverges from the expected echo drops
-// the expectation: a terminal with echo off never sends it, and everything
-// from there is the agent's. Callers hold mu.
-func (s *session) consumeEcho(p []byte) bool {
+// expectEcho queues the bytes the terminal will echo back for input the
+// server just wrote to the agent's stdin. The line discipline rewrites
+// every lone CR or LF as CRLF (ICRNL and ONLCR) and renders any other
+// control byte in hat notation (ECHOCTL), TAB excepted, so a multi-line or
+// control-bearing steer echoes as something quite unlike what was written.
+// An expectation too large to hold is dropped whole rather than
+// half-matched. Callers hold mu, and stdinMu so the queue keeps the order
+// the writes reach the PTY.
+func (s *session) expectEcho(in []byte, now time.Time) {
+	echo := make([]byte, 0, len(in)+8)
+	for _, b := range in {
+		switch {
+		case b == '\r' || b == '\n':
+			echo = append(echo, '\r', '\n')
+		case b == '\t':
+			echo = append(echo, b)
+		case b < 0x20 || b == 0x7f:
+			echo = append(echo, '^', b^0x40)
+		default:
+			echo = append(echo, b)
+		}
+	}
+	if len(s.pendingEcho)+len(echo) > maxPendingEcho {
+		s.pendingEcho = nil
+		return
+	}
+	s.pendingEcho = append(s.pendingEcho, echo...)
+	s.echoDeadline = now.Add(echoWindow)
+}
+
+// dropEcho forgets the queued echo after a failed stdin write: bytes that
+// never reached the terminal are never echoed, and discounting them would
+// eat the agent's own output instead.
+func (s *session) dropEcho() {
+	s.mu.Lock()
+	s.pendingEcho = nil
+	s.mu.Unlock()
+}
+
+// consumeEcho strips the echo the session is still owed from the head of p
+// and reports whether anything is left over - that leftover is the agent
+// talking. The terminal echoes written input back through the PTY even when
+// the agent never reads it, so an echo alone must not refresh the liveness
+// clock. Two things end the expectation: the first byte that diverges from
+// it, and echoWindow passing, since a terminal that is going to echo does
+// so as it accepts the bytes. Either way the bytes count as the agent's,
+// which is the safe direction. Callers hold mu.
+func (s *session) consumeEcho(p []byte, now time.Time) bool {
+	if len(s.pendingEcho) > 0 && now.After(s.echoDeadline) {
+		s.pendingEcho = nil
+	}
 	n := 0
 	for n < len(p) && n < len(s.pendingEcho) && p[n] == s.pendingEcho[n] {
 		n++

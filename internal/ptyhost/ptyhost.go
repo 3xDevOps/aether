@@ -200,9 +200,9 @@ func (h *Host) StopSession(ctx context.Context, key SessionKey) error {
 
 // LastOutput reports the wall-clock time of the last byte the agent wrote
 // to the session's PTY; false if the key has no session. Bytes that came
-// from the server - an injection banner, and the terminal's echo of the
-// injected line - are excluded, so this is a liveness clock for the agent
-// rather than for the stream.
+// from the server are excluded - an injection banner, and the terminal's
+// echo of anything written to the agent's input, injected or typed on an
+// attach - so this is a liveness clock for the agent, not for the stream.
 func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
 	s := h.lookup(key)
 	if s == nil {
