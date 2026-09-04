@@ -611,6 +611,10 @@ CREATE TABLE member_terminals (
 	started_at   INTEGER NOT NULL
 );
 `,
+	// v16: runs gain the latest title reported by the agent's terminal.
+	`
+ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

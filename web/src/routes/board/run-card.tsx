@@ -44,6 +44,11 @@ export function RunCard({ card }: { card: BoardCard }) {
             className={cn('min-w-0 flex-1 text-sm break-words', unseen && 'font-medium')}
           >
             <span className="line-clamp-2">{runLabel(run)}</span>
+            {run.title?.trim() && run.task.trim() && (
+              <span className="block truncate text-xs text-muted-foreground">
+                {run.task.trim()}
+              </span>
+            )}
           </span>
           {paused && (
             <span

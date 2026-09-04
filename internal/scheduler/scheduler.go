@@ -132,6 +132,8 @@ type Scheduler struct {
 	// workspace: one build at a time per workspace, later callers wait.
 	// Entries are created on first use and kept for the scheduler's life.
 	envBuildLocks map[domain.WorkspaceID]*sync.Mutex
+	titleMu       sync.Mutex
+	titleUpdates  map[domain.RunID]*pendingRunTitle
 	// coordination is the attached conflict-coordination service and the
 	// staged-bridge directory (UseCoordination); nil means new containers
 	// get no coordination assets.
@@ -294,6 +296,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 func (s *Scheduler) Close() error {
 	s.superCancel()
 	s.wg.Wait()
+	s.flushPendingRunTitles()
 	return nil
 }
 func validateHarnessSpec(name string, spec HarnessSpec) error {

@@ -44,6 +44,8 @@ type session struct {
 	stopped    bool
 	lastOut    time.Time
 	done       chan struct{}
+	title      titleScanner
+	onTitle    func(string)
 
 	// resizeMu serializes att.Resize applications so nudge sequences from
 	// concurrent reconciles never interleave; it is never held with mu.
@@ -73,6 +75,7 @@ func (s *session) deliver(p []byte) {
 		return
 	}
 	s.lastOut = now
+	s.title.scan(p, s.onTitle)
 	s.ring.write(p)
 	s.tr.output(p)
 	for c := range s.clients {

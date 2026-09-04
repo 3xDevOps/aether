@@ -83,7 +83,7 @@ func runRuns(args []string) error {
 			overlapOf[o.RunID] = strings.Join(flags, "; ")
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tHARNESS\tMEMBER\tOVERLAP\tTASK")
+		_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tHARNESS\tMEMBER\tOVERLAP\tTITLE\tTASK")
 		waiting := 0
 		for _, r := range rl.Runs {
 			if needsAttention(r) {
@@ -92,9 +92,14 @@ func runRuns(args []string) error {
 			if *attention && !needsAttention(r) {
 				continue
 			}
+			title := r.Title
+			if title == "" {
+				title = r.Task
+			}
+			title = strings.ReplaceAll(title, "\n", " ")
 			task := strings.ReplaceAll(r.Task, "\n", " ")
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				r.ID, r.Status, r.Harness, memberName(r.MemberID), overlapOf[r.ID], task)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				r.ID, r.Status, r.Harness, memberName(r.MemberID), overlapOf[r.ID], title, task)
 		}
 		if err := tw.Flush(); err != nil {
 			return err

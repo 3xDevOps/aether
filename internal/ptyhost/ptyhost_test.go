@@ -945,3 +945,33 @@ func TestStartSessionReplacesEndedSession(t *testing.T) {
 		t.Fatalf("replay contains the dead shell's output: %q", got)
 	}
 }
+
+func TestStartSessionTitleCallbackUsesSessionKey(t *testing.T) {
+	got := make(chan struct {
+		key   SessionKey
+		title string
+	}, 1)
+	h, _ := newTestHost(t, func(cfg *Config) {
+		cfg.OnTitle = func(key SessionKey, title string) {
+			got <- struct {
+				key   SessionKey
+				title string
+			}{key: key, title: title}
+		}
+	})
+	key := RunSession("run-1")
+	att := newFakeAtt()
+	if err := h.StartSession(context.Background(), key, att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	att.writeOutput(t, "\x1b]0;run title\x07")
+
+	select {
+	case gotTitle := <-got:
+		if gotTitle.key != key || gotTitle.title != "run title" {
+			t.Fatalf("title callback = %#v, want key %q and title %q", gotTitle, key, "run title")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for title callback")
+	}
+}

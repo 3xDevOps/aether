@@ -76,6 +76,9 @@ type Store interface {
 	// is the mutator lifecycle transitions should use so they cannot
 	// clobber concurrent writes to other fields.
 	UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
+	// SetRunTitle sets only the run's title, leaving every other field
+	// untouched.
+	SetRunTitle(ctx context.Context, id domain.RunID, title string) error
 	// TransferRun reassigns only the run's owning member (handoff),
 	// leaving every other field untouched.
 	TransferRun(ctx context.Context, id domain.RunID, to domain.MemberID) error

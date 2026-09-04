@@ -32,6 +32,7 @@ const (
 // history. Asking for either by type still returns it.
 var detailTypes = map[events.Type]bool{
 	events.TypeRunDiff:    true,
+	events.TypeRunTitle:   true,
 	events.TypeAgentEvent: true,
 }
 

@@ -272,6 +272,8 @@ type Run struct {
 	MemberID MemberID
 	// Task is the prompt the agent was launched with.
 	Task string
+	// Title is the latest terminal title reported by the agent.
+	Title string
 	// Harness is the agent harness name, e.g. "claude", "codex".
 	Harness string
 	Mode    LaunchMode
