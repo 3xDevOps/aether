@@ -72,7 +72,11 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(attachEndClose(err))
 		return
 	}
-	_ = conn.Close(websocket.StatusNormalClosure, "")
+	// A clean EOF is the run's terminal session ending (the attach
+	// channel's exit-status 0): a finished agent or a drained transcript
+	// replay. Name it so the dashboard stops reconnecting instead of
+	// looping attach -> EOF -> reattach against a session that is over.
+	_ = conn.Close(websocket.StatusNormalClosure, "session ended")
 }
 
 // attachEndClose maps a terminal read error to the close frame the

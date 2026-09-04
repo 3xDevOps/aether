@@ -650,8 +650,11 @@ needs.
    or `{"ok":false,"code":-32001,"error":"..."}` followed by a close.
    A write attach is refused with `-32001` unless the member holds the
    **steer** capability on that run; dropping `"write"` always works for
-   a member who can see the run. An unknown run is refused with `-32000`,
-   a run with no live terminal with `-32004`.
+   a member who can see the run. An unknown run is refused with `-32000`.
+   A finished run attaches as a read-only replay of its recorded
+   transcript, ending with the session-end close below; only a run whose
+   session is transiently missing (server recovery in progress) or whose
+   transcript predates recording is refused with `-32004`.
 3. Server then streams terminal output as **binary** frames.
 4. Client sends **text** control frames:
 
@@ -670,7 +673,9 @@ needs.
    `steer permission withdrawn`; the SPA reconnects as a read-only mirror.
    A member removed or set back to pending closes with **1008**, reason
    `membership withdrawn`, and the SPA stops reconnecting. The run's
-   terminal session ending closes with **1000**; any other end with **1011**.
+   terminal session ending - the agent exiting, or a finished run's replay
+   draining - closes with **1000**, reason `session ended`, and the SPA
+   stops reconnecting; any other end closes with **1011**.
 
 Closing the socket detaches; the run is unaffected.
 

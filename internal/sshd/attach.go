@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -112,6 +115,17 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	}
 	if returned && attachErr != nil {
 		if !conn.okSent() {
+			// A finished run has no live session by design; its transcript
+			// is the artifact. Serve that instead of a refusal the client
+			// can only retry forever - but only for the run's own agent
+			// session: a shell tab is a fresh process, and replaying the
+			// agent's transcript into it would mislead. Queued,
+			// provisioning, and running runs keep the refusal: there a
+			// missing session is a transient race (recovery mid-reattach)
+			// the client's retry resolves.
+			if _, isRunSession := key.Run(); isRunSession && replayableStatus(run.Status) && s.serveReplay(ch, run, cols, rows) {
+				return
+			}
 			e := rpcError(attachErr)
 			_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
 		} else {
@@ -141,6 +155,42 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		// failure from a clean session end.
 		sendExitStatus(ch, 1)
 	}
+}
+
+// replayableStatus reports whether a run without a PTY session is
+// permanently without one - finished or interrupted - rather than caught
+// in a transient provisioning or recovery window.
+func replayableStatus(st domain.RunStatus) bool {
+	switch st {
+	case domain.RunQueued, domain.RunProvisioning, domain.RunRunning:
+		return false
+	default:
+		return true
+	}
+}
+
+// serveReplay streams a finished run's recorded transcript as the attach's
+// output and ends the channel cleanly (exit-status 0), reporting whether it
+// served. A run without a transcript - an artifact predating recording -
+// reports false so the caller falls back to the real refusal. A replay is
+// read-only history: no presence, no revocation watch, no input.
+func (s *Server) serveReplay(ch ssh.Channel, run *domain.Run, cols, rows uint) bool {
+	rc, err := s.cfg.PTY.Replay(run.ID)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("sshd: open transcript for attach replay", "run", run.ID, "error", err)
+		}
+		return false
+	}
+	defer func() { _ = rc.Close() }()
+	_ = writeJSONLine(ch, protocol.AttachResponse{OK: true, Cols: cols, Rows: rows})
+	if _, cerr := io.Copy(ch, rc); cerr != nil {
+		slog.Warn("sshd: stream transcript replay", "run", run.ID, "error", cerr)
+		sendExitStatus(ch, 1)
+		return true
+	}
+	sendExitStatus(ch, 0)
+	return true
 }
 
 // revokeAttachOnPolicyChange re-runs the attach's authorization for as

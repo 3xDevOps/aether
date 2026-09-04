@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -78,18 +79,39 @@ func (g *fakeGit) ReceivePack(_ context.Context, ws domain.WorkspaceID, stdin io
 }
 
 // fakePTY records attach parameters, replays canned output, and echoes
-// keystrokes prefixed with "echo:".
+// keystrokes prefixed with "echo:". transcripts backs the Replay seam:
+// a run with an entry replays it, anything else reports os.ErrNotExist.
 type fakePTY struct {
-	mu       sync.Mutex
-	err      error
-	errDelay time.Duration
-	gate     ptyhost.WriteGate
-	replay   []byte
-	cols     uint
-	rows     uint
-	readOnly bool
-	input    bytes.Buffer
-	resizes  [][2]uint
+	mu          sync.Mutex
+	err         error
+	errDelay    time.Duration
+	gate        ptyhost.WriteGate
+	replay      []byte
+	transcripts map[domain.RunID][]byte
+	cols        uint
+	rows        uint
+	readOnly    bool
+	input       bytes.Buffer
+	resizes     [][2]uint
+}
+
+func (p *fakePTY) Replay(run domain.RunID) (io.ReadCloser, error) {
+	p.mu.Lock()
+	data, ok := p.transcripts[run]
+	p.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("ptyhost: open transcript: %w", os.ErrNotExist)
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (p *fakePTY) setTranscript(run domain.RunID, data []byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.transcripts == nil {
+		p.transcripts = map[domain.RunID][]byte{}
+	}
+	p.transcripts[run] = data
 }
 
 func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error {

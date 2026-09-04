@@ -10,6 +10,7 @@
 package ptyhost
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -235,6 +236,20 @@ func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return s.lastOutput()
+}
+
+// Replay streams the run's recorded terminal output exactly as the agent
+// wrote it, decoded from the asciinema transcript. It fails with
+// os.ErrNotExist when the run never recorded a transcript - a session that
+// was never started, or an artifact from before recording existed. The
+// error is returned before anything is written, so a caller can fall back
+// to its own refusal when no transcript exists.
+func (h *Host) Replay(run domain.RunID) (io.ReadCloser, error) {
+	f, err := os.Open(h.transcriptPath(RunSession(run)))
+	if err != nil {
+		return nil, fmt.Errorf("ptyhost: open transcript: %w", err)
+	}
+	return &replayReader{f: f, br: bufio.NewReader(f)}, nil
 }
 
 // Inject writes an attributed banner to every attachment and the transcript,

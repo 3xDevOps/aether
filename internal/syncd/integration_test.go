@@ -138,3 +138,68 @@ func TestIntegrationPushBase(t *testing.T) {
 		t.Errorf("lastPushed = %s, want %s", d.lastPushed, tip)
 	}
 }
+
+// TestIntegrationForwardOriginBase pins the refs-only origin sync: a
+// commit pushed to the origin remote lands on the server's base branch
+// while the local clone keeps its own branch tip and a clean working
+// tree, and a server base ahead of origin is left alone.
+func TestIntegrationForwardOriginBase(t *testing.T) {
+	bare, local := newRepoPair(t)
+	root := filepath.Dir(bare)
+	// A second bare repo stands in for the project's origin.
+	origin := filepath.Join(root, "origin.git")
+	gitc(t, root, "clone", "--bare", bare, origin)
+	gitc(t, local, "remote", "add", "origin", origin)
+
+	// Advance origin's main past the seed via a throwaway clone.
+	work := t.TempDir()
+	gitc(t, filepath.Dir(work), "clone", origin, work)
+	gitc(t, work, "checkout", "-b", "main", "origin/main")
+	if err := os.WriteFile(filepath.Join(work, "upstream.txt"), []byte("up\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitc(t, work, "add", ".")
+	gitc(t, work, "commit", "-m", "upstream work")
+	upstream := gitc(t, work, "rev-parse", "HEAD")
+	gitc(t, work, "push", origin, "main:main")
+
+	d, err := New(Config{Server: "unused:1", RepoPath: local})
+	if err != nil {
+		t.Fatal(err)
+	}
+	localBase := gitc(t, local, "rev-parse", "refs/heads/main")
+
+	if err := d.forwardOriginBase(context.Background()); err != nil {
+		t.Fatalf("forwardOriginBase: %v", err)
+	}
+	if got := gitc(t, bare, "rev-parse", "refs/heads/main"); got != upstream {
+		t.Errorf("server main = %s, want upstream tip %s", got, upstream)
+	}
+	if got := gitc(t, local, "rev-parse", "refs/heads/main"); got != localBase {
+		t.Errorf("local main moved to %s, want untouched %s", got, localBase)
+	}
+	if out := gitc(t, local, "status", "--porcelain"); out != "" {
+		t.Errorf("working tree dirtied by origin sync:\n%s", out)
+	}
+	// The member integrates upstream, then commits locally: the local
+	// base is now ahead of origin, and the server follows it.
+	gitc(t, local, "merge", "--ff-only", "refs/remotes/origin/main")
+	if err := os.WriteFile(filepath.Join(local, "f.txt"), []byte("local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitc(t, local, "add", ".")
+	gitc(t, local, "commit", "-m", "local ahead")
+	if err := d.pushBase(context.Background()); err != nil {
+		t.Fatalf("pushBase: %v", err)
+	}
+	ahead := gitc(t, local, "rev-parse", "refs/heads/main")
+
+	// A server base ahead of origin (local work pushed up first) is not
+	// rewritten: the fast-forward-only push is refused.
+	if err := d.forwardOriginBase(context.Background()); err == nil {
+		t.Error("forwardOriginBase rewrote a server base ahead of origin; want refusal")
+	}
+	if got := gitc(t, bare, "rev-parse", "refs/heads/main"); got != ahead {
+		t.Errorf("server main = %s, want untouched local-ahead tip %s", got, ahead)
+	}
+}

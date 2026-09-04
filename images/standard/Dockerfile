@@ -24,6 +24,7 @@ RUN apt-get update \
         python3 \
         python3-venv \
         ripgrep \
+        sudo \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 

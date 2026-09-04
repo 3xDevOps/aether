@@ -19,6 +19,11 @@ const connectionLabel: Record<string, string> = {
   offline: 'Offline',
 }
 
+/** Statuses that can still gain a live terminal session. Mirrors the
+ * server's replay gate: anything past these is permanently sessionless, so
+ * a refusal there means no transcript exists to replay either. */
+const liveStatuses = ['queued', 'provisioning', 'running']
+
 function TerminalView({ params }: RouteProps) {
   const runID = params.runId
   const run = useStore((s) => s.runs[runID])
@@ -115,7 +120,11 @@ function TerminalView({ params }: RouteProps) {
           </span>
         )}
         {state.message && (
-          <span className="truncate text-muted-foreground">{state.message}</span>
+          <span className="truncate text-muted-foreground">
+            {state.refused && !liveStatuses.includes(run.status)
+              ? 'This run has ended and left no recorded terminal to replay.'
+              : state.message}
+          </span>
         )}
         {state.refused && (
           <Button size="sm" variant="ghost" onClick={retry}>

@@ -97,6 +97,32 @@ describe('hydrate', () => {
     expect(store.getState().hydrationError).toContain('502')
   })
 
+  it('fetches the link status on a local gateway so the chip starts truthful', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        capabilities: vi.fn(async () => ({
+          gateway: 'local',
+          methods: ['*'],
+          ws: ['events', 'attach'],
+          local: ['link.status'],
+        })),
+      }),
+    )
+
+    expect(store.getState().linkStatus?.linked).toBe(true)
+  })
+
+  it('leaves the link status alone on a remote gateway', async () => {
+    const store = createRootStore()
+    const client = fakeApi()
+    await hydrate(store, client)
+
+    expect(client.localLinkStatus).not.toHaveBeenCalled()
+    expect(store.getState().linkStatus).toBeNull()
+  })
+
   it('seeds pausedRuns from the run list, so paused survives a reload', async () => {
     const store = createRootStore()
     await hydrate(

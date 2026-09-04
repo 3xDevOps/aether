@@ -28,6 +28,7 @@ type (
 	}
 	sshdPTYAttacher interface {
 		Attach(ctx context.Context, key SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error
+		Replay(run domain.RunID) (io.ReadCloser, error)
 	}
 )
 
@@ -1186,5 +1187,48 @@ func TestStartSessionTitleCallbackUsesSessionKey(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for title callback")
+	}
+}
+
+// TestReplayTranscript pins the finished-run replay path: after StopSession
+// the recorded transcript still replays the exact bytes the agent wrote,
+// binary included, and a run that never recorded one reports
+// os.ErrNotExist so callers can fall back to their own refusal.
+func TestReplayTranscript(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-replay")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	att.writeOutput(t, "hello ")
+	att.writeOutput(t, "\xffworld")
+	// A mirror confirms both chunks passed deliver() - and with it the
+	// transcript writer - before the session stops.
+	a := startAttach(t, h, run, "m1", 80, 24, true)
+	waitFor(t, "output delivered", func() bool {
+		return a.out.String() == "hello \xffworld"
+	})
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+
+	rc, err := h.Replay(run)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read replay: %v", err)
+	}
+	if cerr := rc.Close(); cerr != nil {
+		t.Fatalf("close replay: %v", cerr)
+	}
+	if string(got) != "hello \xffworld" {
+		t.Fatalf("replay = %q, want the exact recorded bytes", got)
+	}
+
+	if _, err := h.Replay("run-never"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Replay unknown run = %v, want os.ErrNotExist", err)
 	}
 }

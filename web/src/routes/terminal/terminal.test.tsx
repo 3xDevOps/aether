@@ -133,4 +133,25 @@ describe('terminal view', () => {
     expect(StubSocket.opened).toHaveLength(2)
     view.unmount()
   })
+
+  it('says a finished run has ended instead of echoing the refusal', () => {
+    const view = mount()
+    act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
+    act(() => StubSocket.last().onopen?.())
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: -32004,
+          error: 'ptyhost: no session for run',
+        }),
+      }),
+    )
+
+    expect(
+      screen.getByText('This run has ended and left no recorded terminal to replay.'),
+    ).toBeDefined()
+    expect(screen.queryByText('ptyhost: no session for run')).toBeNull()
+    view.unmount()
+  })
 })
