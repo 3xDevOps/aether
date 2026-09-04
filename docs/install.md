@@ -28,10 +28,13 @@ afterwards.
 | `none` | The same as `server`, `sudo` fallback included. | Nothing further. The binaries are installed and the script stops. |
 
 A client gets `~/.local/bin` because the dashboard's **Update now** button
-replaces the CLI from the `aether gui` process, which runs as you. A
-root-owned binary in `/usr/local/bin` leaves that button with nothing to do
-but print `sudo aether update`. `--bin-dir` overrides the choice for every
-role.
+replaces the CLI from the `aether gui` process, which runs as you, and a
+directory you own never asks for a password. A binary in a directory this
+account cannot write, such as `/usr/local/bin`, still updates from the button
+on macOS, through one administrator dialog (Touch ID or password); on Linux
+the banner shows the `sudo aether update` to run instead (see
+[Upgrading](#upgrading)).
+`--bin-dir` overrides the choice for every role.
 
 A client gets the CLI alone for the same reason: `aether update` reads an
 `aether-server` next to the CLI as proof the machine is a server, so one
@@ -94,14 +97,51 @@ curl -fsSL .../install.sh | sh -s -- --role server
 `aether update` replaces the running CLI with the latest release (or
 `--version <tag>`), verifying it against the release's `checksums.txt`. On a
 Linux host with `aether-server` installed next to the CLI it updates both and
-reminds you to `sudo systemctl restart aether-server`. A client CLI in
-`~/.local/bin` updates in place, which is what the dashboard's **Update now**
-button uses; binaries in `/usr/local/bin` need `sudo aether update`, because
-the gateway never escalates privileges for you, it names that command.
+reminds you to `sudo systemctl restart aether-server`. The command never asks
+for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
+a stock install, is refused before anything is downloaded. The refusal names
+the probe file it could not create (the number varies) and ends with the
+command to run:
+
+```
+aether: open /usr/local/bin/.aether-update-probe-1234567890: permission denied: /usr/local/bin is not writable by this user; re-run as `sudo aether update`
+```
+
 Re-running the installer does the same job; the data directory is untouched
 either way. `aether update` is not a Windows command; it refuses to run
 there. Upgrading a Windows client means downloading the new release binary
 over the old one, exactly as below.
+
+**From the dashboard.** The **Update now** button runs the same swap from the
+`aether gui` process, which runs as you. A CLI in a directory you own -
+`~/.local/bin`, a Homebrew prefix - is replaced without a question on macOS
+and Linux (Windows has no self-update). A CLI in a directory this account
+cannot write, such as `/usr/local/bin`, splits by platform, and the banner
+says which case you are in before you click:
+
+- **macOS.** The banner says *macOS will ask for an administrator password:
+  /usr/local/bin/aether is in a directory this account cannot write to. The
+  dialog is labelled osascript, the tool Aether asks through. Aether never
+  sees your password.* The button shows the standard macOS administrator
+  dialog, once. The dialog is titled `osascript` because the request goes
+  through `/usr/bin/osascript`, the system tool that asks for administrator
+  rights on behalf of an app that is built locally and unsigned. Beneath the
+  title is Aether's own text, quoted in
+  [local-gateway.md](local-gateway.md#localv1-verbs), which names the file
+  and the release; the last line is the system's own, "Touch ID or enter
+  your password to allow this." The password or the Touch ID match goes to
+  macOS's authorization service; Aether never sees it. Root then runs one
+  fixed copy-and-verify command made of system tools, never Aether's own
+  code ([security.md](security.md#client-self-update-on-macos) has the
+  command). Cancelling the dialog, or a wrong password macOS gives up on,
+  changes nothing: the banner says *Update cancelled, nothing was changed.*
+  and the button comes back. The button is offered only where the dialog
+  can install: the gateway must be in a GUI login session (not started over
+  SSH), and only root can write the binary's directory or any directory
+  above it. Anywhere else the banner shows `sudo aether update` instead;
+  the full rule, and why, sits beside the quoted text in local-gateway.md.
+- **Linux.** No button. The banner shows `sudo aether update` to run in a
+  terminal instead.
 
 **It rebuilds the desktop app too.** The dashboard ships inside the CLI, but
 the Electron shell around it does not, so once the binaries are swapped
@@ -158,8 +198,12 @@ only - the next release shows the banner again.
 The button does the same two steps the command does. It swaps the binaries,
 then rebuilds the app when one is installed, and the banner follows along:
 *Updating the CLI...*, then *Rebuilding the app (about a minute; the first
-time also fetches Node)...*, then *Relaunching*. **Update now** stays disabled
-until it is over. In the desktop app the shell relaunches itself onto the new
+time also fetches Node)...*, then *Relaunching*. On macOS with a binary in
+a directory this account cannot write, the first step reads *Downloading
+v1.3.0, then macOS asks for an administrator password...* and the dialog
+(Touch ID or password) opens once the download is verified; cancelling it
+ends the update there with nothing changed.
+**Update now** stays disabled until it is over. In the desktop app the shell relaunches itself onto the new
 build, so the window you end up in is the new one. In a browser tab the
 gateway never exits (it is your terminal's process, not the app's): the app is
 still rebuilt, and the banner tells you to restart it.

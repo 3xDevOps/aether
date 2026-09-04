@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
@@ -86,14 +87,34 @@ type Gateway struct {
 	// before exit closes and read only after. ExitRelaunch tells the
 	// desktop shell to relaunch itself rather than respawn the sidecar.
 	exitCode int
-	// rebuild tracks the desktop-app build update.apply starts.
+	// rebuild tracks the desktop-app build update.apply starts, and
+	// builds counts the goroutine running it, so Close can wait for the
+	// killed child to be reaped and its outcome recorded before the
+	// process, or a test, moves on.
 	rebuild *rebuildState
+	builds  sync.WaitGroup
+	// updating is set while one update.apply is swapping the binary, so
+	// a second cannot start another swap - or a second administrator
+	// dialog - under it.
+	updating atomic.Bool
+	// installed is what update.apply last put on disk from this process.
+	// The release check keeps reporting the version this process was
+	// built with, so without it a second tab's click would download and,
+	// on macOS, ask for the password again to install the same bytes.
+	installed atomic.Pointer[installedRelease]
 	// ctx bounds the background work this gateway owns - so far the
 	// desktop-app rebuild child - and Close cancels it. Without it a
 	// rebuild outlives the app that started it, still downloading Node and
 	// still swapping the directory of an app the user just quit.
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// installedRelease is one release update.apply installed: its tag and
+// the binaries it replaced, in order.
+type installedRelease struct {
+	tag   string
+	paths []string
 }
 
 // New builds the gateway and mints its per-process token. It binds
@@ -249,6 +270,18 @@ func (g *Gateway) Close() error {
 	err := g.srv.Shutdown(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = g.srv.Close()
+	}
+	// The cancelled context has killed any rebuild; its goroutine still
+	// has to reap the child and record why it stopped. Waiting here keeps
+	// that record with this gateway rather than whatever comes after it.
+	built := make(chan struct{})
+	go func() {
+		g.builds.Wait()
+		close(built)
+	}()
+	select {
+	case <-built:
+	case <-ctx.Done():
 	}
 	return err
 }

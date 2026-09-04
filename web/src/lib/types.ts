@@ -514,6 +514,17 @@ export interface UpdateStatus {
    * has run.
    */
   shell_build_error?: string
+  /** The binary update.apply replaces, symlinks resolved. Absent when the
+   * gateway could not probe it; install_method is absent with it. */
+  cli_path?: string
+  /**
+   * How update.apply gets to write cli_path. `direct`: its directory is
+   * writable and the update just happens. `admin-prompt`: macOS shows its
+   * administrator password dialog first. `manual`: the gateway cannot
+   * replace it (a root-owned directory on Linux, or Windows), so the member
+   * runs `sudo aether update` in a terminal. Absent when the probe failed.
+   */
+  install_method?: 'direct' | 'admin-prompt' | 'manual'
 }
 
 /** update.apply: what the self-update replaced and what happens next. */

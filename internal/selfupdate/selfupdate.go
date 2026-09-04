@@ -81,8 +81,12 @@ func Apply(ctx context.Context, baseURL, asset, dst string) error {
 // what lets a caller replacing several binaries verify all of them before
 // it replaces any: see UpdateBinaries.
 type Staged struct {
-	// dst is the binary this replaces, tmp the verified file beside it.
+	// dst is the binary this replaces, tmp the verified file staged for it.
 	dst, tmp string
+	// sum is the hex SHA-256 checksums.txt lists for the asset, which the
+	// staged file was verified against. An authorized install checks the
+	// copy root makes against it a second time.
+	sum string
 	// committed stops Discard from removing a file that is now the
 	// destination.
 	committed bool
@@ -94,6 +98,15 @@ type Staged struct {
 // caller must call Discard (Commit or not) so a staged file never
 // outlives the attempt.
 func Stage(ctx context.Context, baseURL, asset, dst string) (*Staged, error) {
+	// Beside dst, so the final rename is atomic (same filesystem) and
+	// never leaves a half-written binary on PATH.
+	return stageIn(ctx, baseURL, asset, dst, filepath.Dir(dst))
+}
+
+// stageIn is Stage with the staging directory chosen by the caller: dst's
+// own directory when it is writable, a private directory of the user's
+// when root has to make the copy.
+func stageIn(ctx context.Context, baseURL, asset, dst, dir string) (*Staged, error) {
 	sums, err := fetch(ctx, baseURL+"/checksums.txt")
 	if err != nil {
 		return nil, fmt.Errorf("download checksums.txt: %w", err)
@@ -103,14 +116,11 @@ func Stage(ctx context.Context, baseURL, asset, dst string) (*Staged, error) {
 		return nil, err
 	}
 
-	// Stage in dst's directory so the final rename is atomic (same
-	// filesystem) and never leaves a half-written binary on PATH.
-	dir := filepath.Dir(dst)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dst)+".update-*")
 	if err != nil {
 		return nil, fmt.Errorf("stage update in %s: %w", dir, err)
 	}
-	staged := &Staged{dst: dst, tmp: tmp.Name()}
+	staged := &Staged{dst: dst, tmp: tmp.Name(), sum: want}
 
 	body, err := fetch(ctx, baseURL+"/"+asset)
 	if err != nil {

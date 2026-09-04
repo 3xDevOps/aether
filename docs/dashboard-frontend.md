@@ -740,11 +740,14 @@ can still be read.
 ## Update prompts
 
 `src/components/update-banner.tsx` is where the dashboard says a binary is out
-of date. It is mounted by `AppShell` above everything else, because an
-out-of-date binary is about the whole app rather than the view that happens to
-be open. The CLI and shell prompts need the gateway to serve `update.check` -
-a remote monitor cannot update anything on your machine - while the server
-prompt asks the server about itself and shows wherever the member is an admin.
+of date: it hosts the banners, with the CLI one in
+`src/components/cli-update-banner.tsx` and the pieces they share in
+`src/components/update-banner-shared.tsx`. It is mounted by `AppShell` above
+everything else, because an out-of-date binary is about the whole app rather
+than the view that happens to be open. The CLI and shell prompts need the
+gateway to serve `update.check` - a remote monitor cannot update anything on
+your machine - while the server prompt asks the server about itself and shows
+wherever the member is an admin.
 
 - **Two reads.** The host reads `update.check` once on mount
   (`docs/local-gateway.md`; the gateway caches the release lookup, so this
@@ -763,17 +766,30 @@ prompt asks the server about itself and shows wherever the member is an admin.
   one, says what updating costs - it replaces the `aether` binary on this
   machine and restarts the dashboard, taking attached terminals and any
   running sync session with it, while the runs keep going on the server - and
-  offers **Update now**, the release notes, and a dismiss. Clicking Update
-  calls `update.apply` and the banner goes to a restarting state; nothing else
+  offers **Update now**, the release notes, and a dismiss. What the button
+  will do is decided before the click, from `update.check`'s `install_method`
+  (`docs/local-gateway.md`): *direct* offers the button and nothing more;
+  *admin-prompt* (macOS with a GUI session and a `cli_path` in a directory
+  only root can write, such as `/usr/local/bin/aether`) offers the
+  button and says, before the click: *macOS will ask for an administrator
+  password: {cli_path} is in a directory this account cannot write to. The
+  dialog is labelled osascript, the tool Aether asks through. Aether never
+  sees your password.*; *manual* (Linux with a directory this account
+  cannot write, Windows, or a macOS gateway the dialog cannot serve - the
+  rule is in `docs/local-gateway.md`) offers no button and shows the
+  command to run instead - `sudo aether update` with a copy button, or the
+  release link where the platform has no self-update at all. Clicking Update calls
+  `update.apply` and the banner goes to a restarting state; nothing else
   reconnects, because the existing `ConnectionError` page already owns a
   gateway that goes away. The done state names every binary the swap replaced
   and, on a single-box install where `aether-server` was one of them, the
   `restart_command` the gateway sends back: the server keeps running the old
-  code until its unit restarts, and the CLI prints that same line. A refusal is
-  rendered verbatim - a binary in `/usr/local/bin` answers with the exact
-  `sudo aether update` command to run - and the button becomes usable again.
-  Where the platform has no self-update (Windows) the button is not offered at
-  all and the banner links the release instead.
+  code until its unit restarts, and the CLI prints that same line. A `-32001`
+  (denied) answer is the dialog cancelled or the password refused: the banner
+  shows *Update cancelled, nothing was changed.* muted rather than as a
+  failure, and the button comes back. Any other refusal is rendered verbatim -
+  the gateway's own message, ending in the command to run where there is one -
+  and the button becomes usable again.
 - **The server banner is for admins, and it acts.** Capability is half the
   gate and the caller's role is the other half, the same rule the admin
   surfaces follow, so it needs `useIsAdmin()` as well. It shows the server
