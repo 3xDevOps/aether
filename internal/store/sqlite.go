@@ -597,6 +597,7 @@ func (d *DB) DeleteTerminal(ctx context.Context, member domain.MemberID) error {
 	}
 	return nil
 }
+
 // collect drains rows through scan, closing them and surfacing iteration
 // errors.
 func collect[T any](rows *sql.Rows, scan func(interface{ Scan(...any) error }) (*T, error)) ([]*T, error) {
