@@ -2,7 +2,7 @@
 
 <img src="docs/media/aether-mark.png" alt="Aether logo" width="96">
 
-# Aether - Unified Agent Runtime
+# Aether - Multiplayer Cloud Agent Runtime
 
 **A self-hosted development environment for AI coding agents running in the cloud.**
 
