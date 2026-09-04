@@ -50,16 +50,20 @@ func (f *fakeCoordinator) releasedRuns() []domain.RunID {
 	return slices.Clone(f.released)
 }
 
-// fakeServerBinary points the stager at a stand-in for /proc/self/exe.
-func fakeServerBinary(t *testing.T, content string) {
+// fakeServerBinary writes a stand-in for the running server binary and
+// returns its path, for Config.ServerBinary.
+func fakeServerBinary(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "aether-server")
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatalf("write fake server binary: %v", err)
 	}
-	old := selfExe
-	selfExe = path
-	t.Cleanup(func() { selfExe = old })
+	return path
+}
+
+// withServerBinary points a test scheduler's stager at path.
+func withServerBinary(path string) func(*Config) {
+	return func(c *Config) { c.ServerBinary = path }
 }
 
 // withCoordination attaches a coordinator and a staged-bridge directory to
@@ -88,8 +92,8 @@ func mountFor(spec runtime.Spec, containerPath string) (runtime.Mount, bool) {
 // durable before the container exists, and both are cleaned up only after
 // the container is destroyed.
 func TestRunCarriesCoordinationAssets(t *testing.T) {
-	fakeServerBinary(t, "#!/bin/sh\necho aether\n")
-	e := newTestEnv(t, nil)
+	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
+	e := newTestEnv(t, withServerBinary(staged))
 	coord, binDir := withCoordination(t, e)
 	sub := e.subscribe(t)
 
@@ -104,7 +108,7 @@ func TestRunCarriesCoordinationAssets(t *testing.T) {
 		t.Fatalf("no read-only coordination mount in %+v", container.spec.Mounts)
 	}
 
-	digest, err := hashFile(selfExe)
+	digest, err := hashFile(staged)
 	if err != nil {
 		t.Fatalf("hash source binary: %v", err)
 	}
@@ -152,8 +156,7 @@ func TestRunCarriesCoordinationAssets(t *testing.T) {
 // references, so a build a surviving container still holds is kept and one
 // nothing names is collected.
 func TestStagedBridgesAreCollectedOnlyWhenUnreferenced(t *testing.T) {
-	fakeServerBinary(t, "current build")
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "current build")))
 	_, binDir := withCoordination(t, e)
 
 	seam := e.sched.coordinationSeam()
@@ -232,9 +235,7 @@ func TestArgvOverrideDropsMCPRegistration(t *testing.T) {
 // without coordination, and the reason is on the run's timeline rather than
 // in a log nobody reads.
 func TestStagingIsFailClosed(t *testing.T) {
-	fakeServerBinary(t, "unused")
-	selfExe = filepath.Join(t.TempDir(), "not-a-binary")
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withServerBinary(filepath.Join(t.TempDir(), "not-a-binary")))
 	withCoordination(t, e)
 	sub := e.subscribe(t)
 
@@ -256,8 +257,7 @@ func TestStagingIsFailClosed(t *testing.T) {
 // and turning it on afterwards does not pretend an existing container has
 // them.
 func TestCoordinationOffLeavesContainersAlone(t *testing.T) {
-	fakeServerBinary(t, "current build")
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "current build")))
 
 	binDir := filepath.Join(t.TempDir(), "runtime", "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
