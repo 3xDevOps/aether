@@ -79,7 +79,19 @@ type Config struct {
 	// definitions shape argv inside that member's own container and do not
 	// leak across members.
 	Harnesses map[string]HarnessSpec
+	// ServerBinary is the server binary staged into run containers to
+	// serve the MCP bridge (docs/mcp-bridge.md). Empty means
+	// DefaultServerBinary: the running binary, which survives a PATH
+	// change, a relative launch, and an upgrade that replaced the file
+	// underneath the process. The E2E suite points it at a binary it
+	// built, because under `go test` /proc/self/exe is the test binary and
+	// has no mcp subcommand.
+	ServerBinary string
 }
+
+// DefaultServerBinary is the running server binary, /proc/self/exe rather
+// than os.Args[0].
+const DefaultServerBinary = "/proc/self/exe"
 
 // HarnessSpec is an administrator-supplied generic harness definition. A
 // zero-valued Executable keeps the legacy argv-only override behavior for
@@ -223,6 +235,9 @@ func New(cfg Config) (*Scheduler, error) {
 		}
 	}
 	maps.Copy(harnesses, cfg.Harnesses)
+	if cfg.ServerBinary == "" {
+		cfg.ServerBinary = DefaultServerBinary
+	}
 	if cfg.MinFreeBytes == 0 {
 		cfg.MinFreeBytes = DefaultMinFreeBytes
 	}

@@ -113,6 +113,12 @@ type Config struct {
 	// They are validated before the scheduler starts; ordinary workspace
 	// members have no request field that can alter them.
 	Harnesses map[string]scheduler.HarnessSpec
+	// ServerBinary overrides the binary staged into run containers to
+	// serve the MCP bridge; empty stages this running server
+	// (scheduler.DefaultServerBinary). The E2E suite points it at a
+	// binary it built, because under `go test` /proc/self/exe is the test
+	// binary and has no mcp subcommand.
+	ServerBinary string
 
 	// The failure-handling tuning knobs, all passed through to the
 	// scheduler and all documented in docs/failure-handling.md. Zero means
@@ -255,6 +261,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		PollInterval:   cfg.PollInterval,
 		CheckoutTTL:    cfg.CheckoutTTL,
 		MinFreeBytes:   cfg.MinFreeDiskBytes,
+		ServerBinary:   cfg.ServerBinary,
 	}); err != nil {
 		return nil, err
 	}

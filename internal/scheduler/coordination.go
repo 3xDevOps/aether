@@ -47,12 +47,6 @@ import (
 // advisory, and an agent without the bridge still gets the overlap notice -
 // but the failure is recorded on the run's timeline rather than swallowed.
 
-// selfExe is the running server binary. /proc/self/exe rather than
-// os.Args[0] because it survives a PATH change, a relative launch, and an
-// upgrade that replaced the file underneath the process. Overridden in
-// tests.
-var selfExe = "/proc/self/exe"
-
 // bridgePrefix names staged binaries. The content hash is the whole
 // identity: a container provisioned against one build keeps its own copy
 // after the server upgrades, and two servers staging the same build share.
@@ -89,6 +83,8 @@ type Coordinator interface {
 type coordination struct {
 	svc    Coordinator
 	binDir string
+	// selfExe is the binary staged into containers (Config.ServerBinary).
+	selfExe string
 
 	// stageMu serializes stage() against collectStagedBridges(). Without
 	// it a collector whose snapshot predates a concurrent stage could
@@ -125,7 +121,7 @@ func (c *coordination) currentDigest() string {
 func (s *Scheduler) UseCoordination(svc Coordinator, binDir string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.coordination = &coordination{svc: svc, binDir: binDir}
+	s.coordination = &coordination{svc: svc, binDir: binDir, selfExe: s.cfg.ServerBinary}
 }
 
 func (s *Scheduler) coordinationSeam() *coordination {
@@ -255,7 +251,7 @@ func checkCoordinationMounts(mounts []runtime.Mount) error {
 func (c *coordination) stage() (digest, path string, err error) {
 	c.stageMu.Lock()
 	defer c.stageMu.Unlock()
-	digest, err = hashFile(selfExe)
+	digest, err = hashFile(c.selfExe)
 	if err != nil {
 		return "", "", fmt.Errorf("hash server binary: %w", err)
 	}
@@ -267,7 +263,7 @@ func (c *coordination) stage() (digest, path string, err error) {
 	if err := os.MkdirAll(c.binDir, 0o755); err != nil {
 		return "", "", fmt.Errorf("create %s: %w", c.binDir, err)
 	}
-	if err := installBinary(selfExe, path); err != nil {
+	if err := installBinary(c.selfExe, path); err != nil {
 		return "", "", err
 	}
 	// Never mount what was not verified after it landed: a short copy or a
