@@ -80,19 +80,29 @@ against the runtime's actual containers:
 An interrupted run relaunches in one click (`aether relaunch <run>`, or the
 run card). The relaunch is a new run cloned from the published branch, and
 where the harness supports it the agent is asked to continue its own
-conversation: Claude Code gets `--continue`. A harness with no resume flag starts fresh,
-and a deployment-supplied argv override never has one appended - nothing
-checks the override is still that CLI. See [harnesses.md](harnesses.md).
+conversation. A harness with no resume flag starts fresh, and a
+deployment-supplied argv override never has one appended - nothing checks
+the override is still that CLI. See [harnesses.md](harnesses.md).
 
-`--continue` names no conversation. Every run mounts its checkout at the
-same container path and shares one credential home per member, so it resumes
-that member's most recent conversation at that path - which after a reboot that
-interrupted several of their runs is not necessarily this one, and not
-necessarily one from this workspace. Treat the resume as a convenience, not
-a guarantee, and read the agent's first turn before steering it.
+For a harness that can name a conversation, the run's identity is pinned at
+launch: the server generates one UUID per run, launches with
+`claude --session-id <uuid>`, and records it on the run row. The relaunch
+then runs `claude --resume <uuid>`, which names that exact conversation. It
+is unaffected by every run mounting its checkout at the same container path
+and sharing one credential home per member, so a reboot that interrupted
+several of a member's runs still relaunches each one into its own
+conversation.
+
+A run whose harness cannot pin a session (`pi`) falls back to
+`--continue`, and so does a run row created before pinning existed.
+`--continue` names no conversation: it resumes that member's most recent
+conversation at that container path, which is not necessarily this run's own
+and not necessarily one from this workspace. Treat that fallback as a
+convenience, not a guarantee, and read the agent's first turn before
+steering it.
 
 Relaunching a run that finished on its own does *not* resume: there is no
-interrupted conversation behind it.
+interrupted conversation behind it. It gets a session of its own instead.
 
 ### Disk pressure
 

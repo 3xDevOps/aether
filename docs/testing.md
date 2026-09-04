@@ -120,7 +120,7 @@ layer that owns them.
 | Failure | Covered by |
 | --- | --- |
 | Agent crashes or hangs | Multi-member E2E (crash -> `failed`, `wip:` commit); stall chaos E2E (park at needs-attention with a `stalled:` reason, surfaced on the run listing, then back to running when steered); stall detection matrix in `internal/scheduler` unit tests; the dashboard badge in `web`'s sidebar tests |
-| Server reboot | Both reboot chaos E2Es (SIGKILL mid-run, surviving and lost container); coordination kill-switch E2E (restart with surviving containers); recovery matrix and the relaunch resume flag in `internal/scheduler`; the resume argv itself in `internal/harness` |
+| Server reboot | Both reboot chaos E2Es (SIGKILL mid-run, surviving and lost container); coordination kill-switch E2E (restart with surviving containers); recovery matrix in `internal/scheduler`, plus the launch-to-relaunch session pin there (`--session-id` at launch, `--resume <uuid>` on the relaunch, `--continue` for a row that predates pinning); the argv construction itself in `internal/harness` |
 | Laptop offline | `internal/syncd` daemon tests (refs-only catch-up) |
 | SSH drop mid-attach | Solo E2E detach/reattach; `FuzzAttachDropMidInput`, the post-unwind straggler test and the reattach-leak test in `internal/ptyhost` |
 | Live overlay conflict | `internal/sshd` sync overlay tests |

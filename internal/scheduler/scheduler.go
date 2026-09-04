@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -378,9 +380,12 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 				DenyNames:       spec.DenyNames,
 			}).Profile()
 		}
-		// An explicit argv override is respected verbatim. Registry MCP and
-		// resume flags belong to the shipped CLI, not an override.
+		// An explicit argv override is respected verbatim. Registry MCP,
+		// session, and resume flags belong to the shipped CLI, not an
+		// override: nothing checks the override is still that CLI.
 		profile.MCPConfigFlag = ""
+		profile.SessionFlag = ""
+		profile.SessionResumeFlag = ""
 		profile.ResumeFlag = ""
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
@@ -403,6 +408,34 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 		return nil, harness.Profile{}, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
 	}
 	return harness.Argv(argv, task), profile, nil
+}
+
+// pinSession gives a launch a conversation of its own and returns the argv
+// to run plus the session ID to record on the run row. Claude Code's
+// --session-id names the conversation up front so a later relaunch can name
+// it back; a harness without that flag records nothing and relaunches on
+// ResumeFlag's best effort.
+func pinSession(argv []string, profile harness.Profile) ([]string, string) {
+	if profile.SessionFlag == "" || len(argv) == 0 {
+		return argv, ""
+	}
+	id := uuid.NewString()
+	return harness.WithFlag(argv, profile.SessionFlag, id), id
+}
+
+// resumeSession points a relaunch at the interrupted run's own conversation
+// and returns the argv plus the session the new row carries forward. A run
+// with a pinned session is resumed by ID, which names the conversation
+// outright rather than trusting "the most recent one in this directory" -
+// every run mounts its checkout at the same container path and shares one
+// credential home per member, so that guess can land on another run's
+// conversation, even one from another workspace. A run whose harness cannot
+// pin, or whose row predates pinning, keeps that best-effort behavior.
+func resumeSession(argv []string, profile harness.Profile, session string) ([]string, string) {
+	if session != "" && profile.SessionResumeFlag != "" {
+		return harness.WithFlag(argv, profile.SessionResumeFlag, session), session
+	}
+	return harness.WithFlag(argv, profile.ResumeFlag, ""), ""
 }
 
 // memberHarnessSpec loads and validates the member's stored definition for

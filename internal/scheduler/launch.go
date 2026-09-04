@@ -243,6 +243,7 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 	if err != nil {
 		return nil, err
 	}
+	argv, session := pinSession(argv, profile)
 	m, err := s.cfg.Store.GetMember(ctx, member)
 	if err != nil {
 		return nil, err
@@ -255,12 +256,13 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 		return nil, err
 	}
 	run := &domain.Run{
-		WorkspaceID: workspace,
-		MemberID:    member,
-		Task:        task,
-		Harness:     harness,
-		Mode:        mode,
-		Status:      domain.RunQueued,
+		WorkspaceID:      workspace,
+		MemberID:         member,
+		Task:             task,
+		Harness:          harness,
+		Mode:             mode,
+		Status:           domain.RunQueued,
+		HarnessSessionID: session,
 	}
 	if err := s.cfg.Store.CreateRun(ctx, run); err != nil {
 		return nil, err

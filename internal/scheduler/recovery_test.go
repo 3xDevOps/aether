@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -545,17 +547,30 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 }
 
 // TestRelaunchResumesTheHarnessSession pins the failure table's server
-// reboot row down to the argv: relaunching a run the reboot interrupted
-// asks the harness to continue its own session, while relaunching a run
-// that simply finished starts a fresh one. The registry's claude profile
-// is used directly because a Config.Harnesses override deliberately drops
-// the registry's flags - nothing checks the override is still that CLI.
+// reboot row down to the argv: a launch names its own conversation with
+// --session-id, relaunching a run the reboot interrupted resumes that exact
+// ID, and relaunching a run that simply finished starts a fresh one. The
+// registry's claude profile is used directly because a Config.Harnesses
+// override deliberately drops the registry's flags - nothing checks the
+// override is still that CLI.
 func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	e := newTestEnv(t, nil)
 
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
+	}
+	session := run.HarnessSessionID
+	if _, perr := uuid.Parse(session); perr != nil {
+		t.Fatalf("launch pinned session %q is not a UUID: %v", session, perr)
+	}
+	launched := e.rt.byName(string(run.ID))
+	if launched == nil {
+		t.Fatal("no container for the launched run")
+	}
+	wantLaunch := []string{"claude", "--session-id", session, "--dangerously-skip-permissions", "resume me"}
+	if !slices.Equal(launched.spec.Command, wantLaunch) {
+		t.Fatalf("launch argv = %v, want the pinned session: %v", launched.spec.Command, wantLaunch)
 	}
 	if cerr := e.sched.Close(); cerr != nil {
 		t.Fatalf("Close: %v", cerr)
@@ -576,13 +591,16 @@ func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	if c == nil {
 		t.Fatal("no container for the relaunched run")
 	}
-	want := []string{"claude", "--continue", "--dangerously-skip-permissions", "resume me"}
+	want := []string{"claude", "--resume", session, "--dangerously-skip-permissions", "resume me"}
 	if !slices.Equal(c.spec.Command, want) {
-		t.Fatalf("relaunch of an interrupted run = %v, want the resume flag: %v", c.spec.Command, want)
+		t.Fatalf("relaunch of an interrupted run = %v, want %v", c.spec.Command, want)
+	}
+	if next.HarnessSessionID != session {
+		t.Fatalf("relaunched run session = %q, want the resumed one %q", next.HarnessSessionID, session)
 	}
 
-	// A run that reached a terminal state on its own has no session to
-	// resume, so its relaunch starts the agent fresh.
+	// A run that reached a terminal state on its own has no conversation to
+	// resume, so its relaunch starts the agent fresh on a session of its own.
 	c.exitNow(0)
 	e.waitStoreStatus(t, next.ID, domain.RunNeedsAttention)
 	if cerr := s2.CloseRun(t.Context(), next.ID, e.member.ID, domain.RunMerged); cerr != nil {
@@ -596,7 +614,51 @@ func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	if fresh == nil {
 		t.Fatal("no container for the second relaunch")
 	}
-	if slices.Contains(fresh.spec.Command, "--continue") {
+	if slices.Contains(fresh.spec.Command, "--resume") || slices.Contains(fresh.spec.Command, "--continue") {
 		t.Fatalf("relaunch of a merged run = %v, want no resume flag", fresh.spec.Command)
+	}
+	if after.HarnessSessionID == "" || after.HarnessSessionID == session {
+		t.Fatalf("relaunch of a merged run session = %q, want a new one", after.HarnessSessionID)
+	}
+}
+
+// TestRelaunchWithoutAPinnedSessionFallsBackToContinue covers the rows that
+// predate session pinning: they carry no session ID, so the relaunch keeps
+// the documented best-effort behavior instead of dropping resume entirely.
+func TestRelaunchWithoutAPinnedSessionFallsBackToContinue(t *testing.T) {
+	e := newTestEnv(t, nil)
+
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	// Age the row back to what a pre-pinning launch wrote.
+	run.HarnessSessionID = ""
+	if uerr := e.db.UpdateRun(t.Context(), run); uerr != nil {
+		t.Fatalf("clear pinned session: %v", uerr)
+	}
+	if cerr := e.sched.Close(); cerr != nil {
+		t.Fatalf("Close: %v", cerr)
+	}
+
+	rt2 := newFakeRuntime()
+	s2 := e.newScheduler(t, rt2, newFakePTY())
+	startScheduler(t, s2)
+	e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
+
+	next, err := s2.Relaunch(t.Context(), run.ID, e.member.ID)
+	if err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+	c := rt2.byName(string(next.ID))
+	if c == nil {
+		t.Fatal("no container for the relaunched run")
+	}
+	want := []string{"claude", "--continue", "--dangerously-skip-permissions", "resume me"}
+	if !slices.Equal(c.spec.Command, want) {
+		t.Fatalf("relaunch without a pinned session = %v, want %v", c.spec.Command, want)
+	}
+	if next.HarnessSessionID != "" {
+		t.Fatalf("--continue relaunch recorded session %q, want none to pin", next.HarnessSessionID)
 	}
 }

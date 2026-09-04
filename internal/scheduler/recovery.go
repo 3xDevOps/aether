@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -46,9 +45,12 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	// A run the reboot interrupted still has the agent's own harness
 	// session behind it, so the relaunch continues it where the harness
 	// can (failure table, "Server reboot"). A run that finished on its own
-	// has nothing to resume and starts fresh.
+	// has nothing to resume and starts fresh, with a session of its own.
+	var session string
 	if old.Status == domain.RunInterrupted {
-		argv = harness.ResumeArgv(argv, profile.ResumeFlag)
+		argv, session = resumeSession(argv, profile, old.HarnessSessionID)
+	} else {
+		argv, session = pinSession(argv, profile)
 	}
 	m, err := s.cfg.Store.GetMember(ctx, actor)
 	if err != nil {
@@ -66,12 +68,13 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, fmt.Errorf("%w: %s", ErrInvalidTransition, relaunchRequiresCheckout)
 	}
 	next := &domain.Run{
-		WorkspaceID: old.WorkspaceID,
-		MemberID:    actor,
-		Task:        old.Task,
-		Harness:     old.Harness,
-		Mode:        old.Mode,
-		Status:      domain.RunQueued,
+		WorkspaceID:      old.WorkspaceID,
+		MemberID:         actor,
+		Task:             old.Task,
+		Harness:          old.Harness,
+		Mode:             old.Mode,
+		Status:           domain.RunQueued,
+		HarnessSessionID: session,
 	}
 	// Checking for an active run in the same checkout and creating the new
 	// row under one critical section serializes concurrent relaunches of

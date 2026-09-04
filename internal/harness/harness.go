@@ -183,11 +183,24 @@ type Profile struct {
 	// configured user is named rather than numeric; empty resolves from
 	// the image (see ResolveUser).
 	User string
+	// SessionFlag pins the harness's conversation identity at launch
+	// (Claude Code's "--session-id <uuid>"). The server generates one UUID
+	// per run and records it on the run row, so relaunching that run names
+	// the exact conversation instead of guessing. Empty means the harness
+	// cannot pin a session and relaunch falls back to ResumeFlag.
+	SessionFlag string
+	// SessionResumeFlag resumes a pinned conversation by ID (Claude Code's
+	// "--resume <uuid>"). It names the conversation outright, so it is
+	// unaffected by every run mounting its checkout at the same container
+	// path and sharing one credential home per member. Set it only
+	// together with SessionFlag.
+	SessionResumeFlag string
 	// ResumeFlag is the harness's flag for continuing the conversation it
-	// last had in the working directory, used when a run interrupted by a
-	// server reboot is relaunched. Empty means the harness has no such
-	// flag and a relaunch starts the agent fresh - the failure table's
-	// "where the adapter supports them".
+	// last had in the working directory. It is the fallback a relaunch
+	// uses when no pinned session is available: a harness with no
+	// SessionFlag, or a run row created before pinning existed. Empty
+	// means the harness has no such flag and a relaunch starts the agent
+	// fresh.
 	//
 	// The flag names no session. Every run mounts its checkout at the same
 	// container path and shares one credential home per member, so what is
@@ -220,9 +233,14 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".claude"},
 		LocalRoot:       ".claude",
 		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},
-		ResumeFlag:      "--continue",
-		MCPConfigFlag:   "--mcp-config",
-		InstallScript:   "curl -fsSL https://claude.ai/install.sh | bash",
+		// claude --session-id refuses an ID that already names a
+		// conversation ("Session ID <id> is already in use."), so it is a
+		// launch-only flag and --resume replaces it on relaunch.
+		SessionFlag:       "--session-id",
+		SessionResumeFlag: "--resume",
+		ResumeFlag:        "--continue",
+		MCPConfigFlag:     "--mcp-config",
+		InstallScript:     "curl -fsSL https://claude.ai/install.sh | bash",
 	},
 	"codex": {
 		Name:            "codex",
@@ -248,7 +266,9 @@ var profiles = map[string]Profile{
 		// pi stores provider keys and OAuth tokens under ~/.pi/agent/.
 		DenyNames: []string{"auth.json", "oauth.json"},
 		// pi -c continues the most recent session; sessions are organized
-		// by working directory, matching the claude resume semantics.
+		// by working directory. pi has no launch-time session ID, so a
+		// relaunch keeps the best-effort behavior: it resumes whichever of
+		// the member's conversations at that path spoke last.
 		ResumeFlag: "--continue",
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
@@ -332,17 +352,20 @@ func Argv(template []string, task string) []string {
 	return out
 }
 
-// ResumeArgv returns argv with the harness's resume flag inserted directly
-// behind the executable, which is where every CLI that has one accepts it.
-// An empty flag or an empty argv returns argv unchanged: a harness with no
-// resume support relaunches from scratch rather than being handed a flag it
-// does not know.
-func ResumeArgv(argv []string, flag string) []string {
+// WithFlag returns argv with flag - and value behind it, when value is not
+// empty - inserted directly behind the executable, which is where every CLI
+// that has one accepts it. An empty flag or an empty argv returns argv
+// unchanged: a harness with no such flag is launched exactly as before
+// rather than being handed a flag it does not know.
+func WithFlag(argv []string, flag, value string) []string {
 	if flag == "" || len(argv) == 0 {
 		return argv
 	}
-	out := make([]string, 0, len(argv)+1)
+	out := make([]string, 0, len(argv)+2)
 	out = append(out, argv[0], flag)
+	if value != "" {
+		out = append(out, value)
+	}
 	return append(out, argv[1:]...)
 }
 
