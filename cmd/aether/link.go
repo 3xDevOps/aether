@@ -52,11 +52,48 @@ func normalizeAddr(addr string) string {
 	return net.JoinHostPort(host, defaultSSHPort)
 }
 
+// savedKey is the private key a previous link left in effect for this
+// profile. A recorded profile choice wins; legacy or new profiles without
+// one inherit the top-level choice.
+func savedKey(prev cli.Config, name string) string {
+	if name == "" {
+		return prev.Key
+	}
+	named, ok := prev.Named(name)
+	if ok {
+		return named.Key
+	}
+	return prev.Key
+}
+
+// autoKey clears a saved choice so the link returns to automatic discovery.
+const autoKey = "auto"
+
+// linkKey resolves a key choice for a link. Explicit paths are validated
+// before dialing; "auto" clears a saved choice.
+func linkKey(choice string, prev cli.Config, name string) (string, error) {
+	switch choice {
+	case "":
+		return savedKey(prev, name), nil
+	case autoKey:
+		return "", nil
+	}
+	path, err := filepath.Abs(choice)
+	if err != nil {
+		return "", err
+	}
+	if err := cli.CheckKey(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // linkConfig is the config `aether link` saves: the fresh link cfg
 // carrying forward previously saved profiles - Save overwrites the whole
 // file - plus, when name is non-empty, a snapshot of cfg upserted under
 // that name. Without a name the top-level fields change exactly as before
-// profiles existed.
+// profiles existed. A named link records whether it used automatic
+// discovery so a later default-link key never narrows that profile.
 func linkConfig(cfg, prev cli.Config, name string) cli.Config {
 	cfg.Links = prev.Links
 	if name == "" {
@@ -67,6 +104,7 @@ func linkConfig(cfg, prev cli.Config, name string) cli.Config {
 		Addr:       cfg.Addr,
 		User:       cfg.User,
 		Key:        cfg.Key,
+		AutoKey:    cfg.Key == "",
 		Repo:       cfg.Repo,
 		KnownHosts: cfg.KnownHosts,
 	})
@@ -85,6 +123,7 @@ func absolutePath(path string) (string, error) {
 // link will dial with and save, plus the flags that steer the run itself.
 type linkOptions struct {
 	cfg       cli.Config
+	key       string
 	invite    string
 	name      string
 	workspace string
@@ -105,36 +144,29 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 	if err != nil {
 		return linkOptions{}, err
 	}
-	keyPath, err := absolutePath(*key)
-	if err != nil {
-		return linkOptions{}, err
-	}
-	// Fail on the path the user typed, before a handshake turns it into
-	// an authentication failure that names no file.
-	if keyPath != "" {
-		if _, err := os.Stat(keyPath); err != nil {
-			return linkOptions{}, fmt.Errorf("link --key: %w", err)
+	keyChoice := *key
+	var keyPath string
+	if keyChoice != autoKey {
+		keyPath, err = absolutePath(keyChoice)
+		if err != nil {
+			return linkOptions{}, err
+		}
+		// Fail on the path the user typed, before a handshake turns it into
+		// an authentication failure that names no file.
+		if keyPath != "" {
+			if _, err := os.Stat(keyPath); err != nil {
+				return linkOptions{}, fmt.Errorf("link --key: %w", err)
+			}
 		}
 	}
 	return linkOptions{
 		cfg:       cli.Config{Addr: normalizeAddr(addr), Repo: repoPath, Key: keyPath, User: "aether"},
+		key:       keyChoice,
 		invite:    *invite,
 		name:      *name,
 		workspace: *workspace,
 	}, nil
-}
 
-// savedKey is the key path a re-link without --key keeps using: the one
-// already stored for this profile, else the default link's. Named
-// overlays the top-level fields, so an unset profile key falls back on
-// its own.
-func savedKey(prev cli.Config, name string) string {
-	if name != "" {
-		if named, ok := prev.Named(name); ok {
-			return named.Key
-		}
-	}
-	return prev.Key
 }
 
 func runLink(args []string) error {
@@ -147,8 +179,8 @@ func runLink(args []string) error {
 		prev = cli.Config{}
 	}
 	cfg := opts.cfg
-	if cfg.Key == "" {
-		cfg.Key = savedKey(prev, opts.name)
+	if cfg.Key, err = linkKey(opts.key, prev, opts.name); err != nil {
+		return err
 	}
 	var conn *cli.Conn
 	if opts.invite != "" {

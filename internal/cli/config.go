@@ -12,8 +12,13 @@ import (
 
 // Config is the local linked-server configuration written by `aether link`.
 type Config struct {
-	Addr       string `json:"addr"`
-	User       string `json:"user,omitempty"`
+	Addr string `json:"addr"`
+	User string `json:"user,omitempty"`
+	// Key is the private-key file chosen with `aether link --key`. Empty
+	// means automatic discovery: the SSH agent, then the default files
+	// under ~/.ssh (see ResolveAuth). `--key auto` clears it. Only
+	// Aether's own SSH connections use it; git commands run the system
+	// git over OpenSSH, which picks its own keys.
 	Key        string `json:"key,omitempty"`
 	Repo       string `json:"repo,omitempty"`
 	KnownHosts string `json:"known_hosts,omitempty"`
@@ -30,10 +35,19 @@ type Config struct {
 // NamedLink is one saved server profile. Empty fields fall back to the
 // top-level defaults when the profile is selected.
 type NamedLink struct {
-	Name       string `json:"name"`
-	Addr       string `json:"addr"`
-	User       string `json:"user,omitempty"`
-	Key        string `json:"key,omitempty"`
+	Name string `json:"name"`
+	Addr string `json:"addr"`
+	User string `json:"user,omitempty"`
+	// Key is the private-key file this profile was linked with. Empty
+	// without AutoKey is a profile written before `aether link` recorded
+	// a key choice; it inherits the top-level Key like every other empty
+	// field, so those files keep working unchanged.
+	Key string `json:"key,omitempty"`
+	// AutoKey marks a profile linked by automatic discovery (no --key, or
+	// --key auto). Named then ignores the top-level Key: an explicit
+	// default-link key would narrow this profile to one identity its
+	// server may not know.
+	AutoKey    bool   `json:"auto_key,omitempty"`
 	Repo       string `json:"repo,omitempty"`
 	KnownHosts string `json:"known_hosts,omitempty"`
 }
@@ -54,7 +68,10 @@ func (c Config) Named(name string) (Config, bool) {
 		if l.User != "" {
 			out.User = l.User
 		}
-		if l.Key != "" {
+		switch {
+		case l.AutoKey:
+			out.Key = ""
+		case l.Key != "":
 			out.Key = l.Key
 		}
 		if l.Repo != "" {
@@ -91,13 +108,6 @@ func (c Config) user() string {
 	return "aether"
 }
 
-func (c Config) keyPath() string {
-	if c.Key != "" {
-		return c.Key
-	}
-	return defaultPath(".ssh", "id_ed25519")
-}
-
 func (c Config) knownHostsPath() string {
 	if c.KnownHosts != "" {
 		return c.KnownHosts
@@ -105,11 +115,24 @@ func (c Config) knownHostsPath() string {
 	return defaultPath(".ssh", "known_hosts")
 }
 
-// Path is the linked-server config file (~/.config/aether/config.json).
+// ConfigDirEnv names the directory that holds config.json when set,
+// ahead of the platform lookup. It is one variable on every platform,
+// where os.UserConfigDir reads HOME on macOS, XDG_CONFIG_HOME on Linux,
+// and AppData on Windows; tests set it so the file they write never
+// depends on which of those their platform consults.
+const ConfigDirEnv = "AETHER_CONFIG_DIR"
+
+// Path is the linked-server config file: $AETHER_CONFIG_DIR/aether/config.json
+// when that variable is set, otherwise ~/.config/aether/config.json on
+// Linux, ~/Library/Application Support/aether/config.json on macOS, and
+// %AppData%\aether\config.json on Windows.
 func Path() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("cli: config dir: %w", err)
+	dir := os.Getenv(ConfigDirEnv)
+	if dir == "" {
+		var err error
+		if dir, err = os.UserConfigDir(); err != nil {
+			return "", fmt.Errorf("cli: config dir: %w", err)
+		}
 	}
 	return filepath.Join(dir, "aether", "config.json"), nil
 }

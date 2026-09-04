@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 // TestLoadOldFormat proves a config file written before Links existed
@@ -88,7 +91,9 @@ func TestLinksRoundTrip(t *testing.T) {
 }
 
 // TestNamedOverlay proves Named overlays only the profile's non-empty
-// fields on the top-level defaults and sets Active.
+// fields on the top-level defaults and sets Active. A profile with no key
+// and no AutoKey marker predates per-profile keys and inherits the
+// top-level one like every other empty field.
 func TestNamedOverlay(t *testing.T) {
 	cfg := Config{
 		Addr:       "default:2222",
@@ -126,6 +131,59 @@ func TestNamedOverlay(t *testing.T) {
 	}
 }
 
+// TestNamedKeyChoice covers the three key states a profile can be saved
+// in and what each resolves to against an explicit default-link key: a
+// legacy profile (no key, no marker) inherits it, an AutoKey profile
+// ignores it and discovers, and an explicit profile uses its own file.
+// The same file is pushed through JSON to prove the marker persists and
+// that legacy and explicit profiles serialize exactly as before.
+func TestNamedKeyChoice(t *testing.T) {
+	cfg := Config{
+		Addr: "default:2222",
+		Key:  "/default/key",
+		Links: []NamedLink{
+			{Name: "legacy", Addr: "legacy:2222"},
+			{Name: "auto", Addr: "auto:2222", AutoKey: true},
+			{Name: "explicit", Addr: "explicit:2222", Key: "/explicit/key"},
+		},
+	}
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loaded Config
+	if err := json.Unmarshal(body, &loaded); err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Links []map[string]json.RawMessage `json:"links"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []bool{false, true, false} {
+		if _, ok := raw.Links[i]["auto_key"]; ok != want {
+			t.Errorf("profile %d auto_key present = %v, want %v: %s", i, ok, want, body)
+		}
+	}
+
+	for name, want := range map[string]string{
+		"legacy":   "/default/key",
+		"auto":     "",
+		"explicit": "/explicit/key",
+	} {
+		for label, c := range map[string]Config{"in memory": cfg, "after json": loaded} {
+			got, ok := c.Named(name)
+			if !ok {
+				t.Fatalf("Named(%s) %s = false", name, label)
+			}
+			if got.Key != want {
+				t.Errorf("Named(%s) %s key = %q, want %q", name, label, got.Key, want)
+			}
+		}
+	}
+}
+
 // TestUpsertLink proves insert, replace-by-name, and that the original
 // slice is never mutated.
 func TestUpsertLink(t *testing.T) {
@@ -147,13 +205,42 @@ func TestUpsertLink(t *testing.T) {
 	}
 }
 
-// useTempConfigDir points os.UserConfigDir at a scratch directory. It has
-// to set both variables: os.UserConfigDir reads XDG_CONFIG_HOME on unix
-// and %AppData% on windows, so setting only the former would leave a
-// windows run writing into the real user profile.
+// useTempConfigDir isolates the config path and proves it landed inside
+// the scratch directory: testhome.Isolate sets AETHER_CONFIG_DIR, which
+// Path reads ahead of any platform lookup.
 func useTempConfigDir(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("AppData", dir)
+	dir := testhome.Isolate(t)
+	path, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel, err := filepath.Rel(dir, path); err != nil || strings.HasPrefix(rel, "..") {
+		t.Fatalf("config path %s escaped %s", path, dir)
+	}
+}
+
+// TestConfigDirEnvWinsOverPlatformLookup proves AETHER_CONFIG_DIR decides
+// the config path whatever HOME, XDG_CONFIG_HOME, and AppData say, and
+// that clearing it hands the decision back to the platform lookup.
+func TestConfigDirEnvWinsOverPlatformLookup(t *testing.T) {
+	home := testhome.Isolate(t)
+	pin := filepath.Join(home, "pinned")
+	t.Setenv(ConfigDirEnv, pin)
+	other := filepath.Join(home, "other")
+	t.Setenv("HOME", other)
+	t.Setenv("USERPROFILE", other)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(other, ".config"))
+	t.Setenv("AppData", filepath.Join(other, "AppData", "Roaming"))
+	if got, err := Path(); err != nil || got != filepath.Join(pin, "aether", "config.json") {
+		t.Fatalf("Path with %s = %q, %v; want the pin", ConfigDirEnv, got, err)
+	}
+	t.Setenv(ConfigDirEnv, "")
+	got, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got, other) {
+		t.Fatalf("Path without %s = %q, want one under %s", ConfigDirEnv, got, other)
+	}
 }
