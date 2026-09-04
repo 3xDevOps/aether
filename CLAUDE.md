@@ -56,11 +56,65 @@ bun run test
 
 ## Code style
 
+- Write only the code the change needs. No dead code, single-use helpers,
+  flags nobody sets, branches for cases that cannot happen, or "while I'm
+  here" edits.
+- Comment only when the code cannot say it: a constraint, an invariant, or a
+  reason that is not obvious from the diff. Never restate what the code does.
+  How something works, why it is designed that way, and how to operate it
+  belong in `docs/`, not in comments.
 - Keep Go files below 1000 lines where practical.
 - Return errors with context; do not log and swallow them.
-- Comments explain constraints that the code cannot express.
 - Avoid speculative configuration, abstractions, and compatibility paths.
 - Keep public examples safe to copy and free of credential-shaped values.
+
+## Commits
+
+Commit messages and pull request titles follow
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). Pull
+requests are squash-merged, so the PR title becomes the commit on `main` and
+must follow the same rules.
+
+```
+type(scope): summary
+
+What was wrong before, what happens now, and why this approach.
+
+Fixes #123
+```
+
+Header:
+
+- `type` is one of `feat` (new user-visible capability), `fix` (corrects
+  wrong behavior), `docs`, `refactor` (no behavior change), `perf`, `test`,
+  `build` (Makefile, `go.mod`, packaging, desktop shell), `ci`, `chore`
+  (housekeeping that ships no code change), or `revert`.
+- `scope` names what changed: `cli`, `server`, `dashboard`, `desktop`,
+  `docs`, or an `internal/` package such as `scheduler` or `syncd`. Omit it
+  when the change spans the repository.
+- The summary is imperative and lowercase, has no trailing period, and fits
+  in 72 characters. It completes the sentence "this commit will ...". Say
+  what the user gets, not which files moved.
+- Mark a breaking change with `!` before the colon and a `BREAKING CHANGE:`
+  footer that states the migration.
+
+Body and footer:
+
+- Add a body whenever the summary alone does not explain why. Wrap it at 72
+  characters. Leave out how; the diff shows that.
+- Reference issues with `Fixes #n` or `Closes #n`. A revert uses
+  `revert: <original header>` and `This reverts commit <sha>.` in the body.
+
+One commit, one type. A summary that needs "and" is two commits. Never
+`wip`, `update`, `fix stuff`, `misc`, or emoji.
+
+```
+feat(cli): add aether gui build to package the desktop app
+fix(scheduler): reattach to surviving containers after a server restart
+docs(quickstart): explain how to get the desktop app
+refactor(store): collapse sessions into workspaces
+feat(cli)!: drop the aether dash command
+```
 
 ## Repository shape
 
