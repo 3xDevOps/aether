@@ -103,8 +103,9 @@ describe('command palette', () => {
   })
 
   it('offers neither pause nor resume while the paused state is unknown', async () => {
-    // Nothing seeds pausedRuns at hydration, so after a reload the client
-    // cannot tell which verb the server would accept.
+    // Hydration seeds pausedRuns from the run list's `paused` field, but a
+    // legacy gateway sends none: with no entry the client cannot tell which
+    // verb the server would accept, so it offers neither.
     useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     open()
 
