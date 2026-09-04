@@ -3,6 +3,8 @@
 package gitengine
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,21 +12,33 @@ import (
 	"testing"
 )
 
-// listTree lists every entry under dir, one relative path per line.
+// listTree lists every entry under dir, one line per path, each file's
+// content digested alongside it. The digest is the point: a rendering that
+// rewrote a file in place - .git/index above all, which git rewrites
+// wholesale rather than adding to - would leave the path list identical.
 func listTree(t *testing.T, dir string) string {
 	t.Helper()
-	var paths []string
-	err := filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
+	var lines []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		paths = append(paths, strings.TrimPrefix(path, dir))
+		rel := strings.TrimPrefix(path, dir)
+		if d.IsDir() {
+			lines = append(lines, rel+"/")
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		lines = append(lines, fmt.Sprintf("%s %x", rel, sha256.Sum256(body)))
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk %s: %v", dir, err)
 	}
-	return strings.Join(paths, "\n")
+	return strings.Join(lines, "\n")
 }
 
 // TestRunPatchRendersWorkingDiff is the diff timeline's server half: what a
@@ -75,7 +89,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 	}
 	objectsBefore := listTree(t, filepath.Join(checkout, ".git", "objects"))
 
-	patch, err := e.RunPatch(ctx, "run1", 0)
+	patch, err := e.RunPatch(ctx, "run1", PatchRequest{})
 	if err != nil {
 		t.Fatalf("RunPatch: %v", err)
 	}
@@ -121,7 +135,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 	}
 
 	// The byte ceiling truncates at a line boundary rather than mid-hunk.
-	capped, err := e.RunPatch(ctx, "run1", 40)
+	capped, err := e.RunPatch(ctx, "run1", PatchRequest{MaxBytes: 40})
 	if err != nil {
 		t.Fatalf("capped RunPatch: %v", err)
 	}
@@ -132,7 +146,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 		t.Errorf("truncated patch ends mid-line: %q", capped.Text)
 	}
 
-	if _, err := e.RunPatch(ctx, "run-unknown", 0); err == nil {
+	if _, err := e.RunPatch(ctx, "run-unknown", PatchRequest{}); err == nil {
 		t.Error("RunPatch on a run with no checkout should fail")
 	}
 }
@@ -161,7 +175,7 @@ func TestRunPatchColonInDataDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	patch, err := e.RunPatch(ctx, "run1", 0)
+	patch, err := e.RunPatch(ctx, "run1", PatchRequest{})
 	if err != nil {
 		t.Fatalf("RunPatch under a colon data dir: %v", err)
 	}

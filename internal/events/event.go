@@ -113,6 +113,14 @@ type FileDiffStat struct {
 // against its base, taken on file-change quiescence.
 type RunDiffPayload struct {
 	Files []FileDiffStat `json:"files"`
+	// Tree is the git tree recorded for this snapshot: the whole worktree's
+	// content at that instant. Empty when the tree could not be written, or
+	// on events from a server that predates snapshot trees.
+	Tree string `json:"tree,omitempty"`
+	// ParentTree is the previous snapshot's tree, or the run's fork-point
+	// tree for the first snapshot. Diffing ParentTree to Tree is what this
+	// interval changed.
+	ParentTree string `json:"parent_tree,omitempty"`
 }
 
 func (RunDiffPayload) EventType() Type { return TypeRunDiff }

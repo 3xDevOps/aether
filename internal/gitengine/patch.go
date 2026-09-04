@@ -16,39 +16,47 @@ import (
 // limit of its own.
 const DefaultPatchBytes = 1 << 20
 
-// Patch is a run checkout's diff against the fork point recorded at
-// creation, as unified patch text.
+// Patch is one rendered diff of a run checkout, as unified patch text.
 type Patch struct {
-	// Base is the fork-point commit the diff is taken against.
+	// Base is what the diff is taken against: the recorded fork point for a
+	// cumulative render, the from tree for an interval render.
 	Base string
-	// Text is the unified diff, empty when the checkout matches Base.
+	// Text is the unified diff, empty when nothing changed against Base.
 	Text string
 	// Truncated reports that the diff outgrew the byte limit and Text ends
 	// early, at the last whole line that fit.
 	Truncated bool
 }
 
-// RunPatch renders the run checkout's diff against its recorded fork point,
-// covering committed work, uncommitted edits, and untracked files alike -
-// the same set of changes the run.diff snapshots count. Text is capped at
-// maxBytes (DefaultPatchBytes when not positive).
+// PatchRequest names one rendering. From and To are empty for the run's
+// current diff against its fork point; set to snapshot trees recorded by
+// run.diff events they render what one interval changed. MaxBytes caps the
+// patch text (DefaultPatchBytes when not positive).
+type PatchRequest struct {
+	From     string
+	To       string
+	MaxBytes int
+}
+
+// RunPatch renders a run checkout's diff.
+//
+// With an empty range it covers committed work, uncommitted edits, and
+// untracked files alike against the recorded fork point - the same set of
+// changes the run.diff snapshots count. With both ends of the range set it
+// renders one snapshot tree against another, which is what a single diff
+// interval changed; one end alone is ErrInvalidObjectID because a range
+// needs both.
 //
 // It is read-only from the agent's point of view: the worktree is staged
 // into a scratch index, and the blobs staging hashes go to a scratch object
 // directory beside it, with the checkout's own objects readable as an
-// alternate. Nothing under the checkout's .git is written - crucial because
-// run provisioning chowned it to the run's user, and objects or fan-out
-// directories created here as the server user would leave the agent unable
-// to commit.
-func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, maxBytes int) (Patch, error) {
+// alternate. Nothing under the checkout's .git is written.
+func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchRequest) (Patch, error) {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return Patch{}, err
 	}
-	meta, err := e.readRunMeta(run)
-	if err != nil {
-		return Patch{}, err
-	}
+	maxBytes := req.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = DefaultPatchBytes
 	}
@@ -59,33 +67,22 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, maxBytes int) (
 	ctx, cancel := context.WithTimeout(ctx, snapshotTimeout)
 	defer cancel()
 
+	if req.From != "" || req.To != "" {
+		return e.rangePatch(ctx, run, checkout, req.From, req.To, maxBytes)
+	}
+
+	meta, err := e.readRunMeta(run)
+	if err != nil {
+		return Patch{}, err
+	}
 	dir, err := os.MkdirTemp("", "aether-patch-")
 	if err != nil {
 		return Patch{}, fmt.Errorf("gitengine: scratch index for run %s: %w", run, err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	index := filepath.Join(dir, "index")
-	// Repo discovery checks that the overriding object directory exists.
-	objects := filepath.Join(dir, "objects")
-	if mkErr := os.MkdirAll(filepath.Join(objects, "info"), 0o700); mkErr != nil {
-		return Patch{}, fmt.Errorf("gitengine: scratch objects for run %s: %w", run, mkErr)
-	}
-	// The checkout's database is linked in through the scratch directory's
-	// alternates file, not GIT_ALTERNATE_OBJECT_DIRECTORIES: that env var is
-	// colon-split with no quoting, so a data dir containing ':' would break
-	// it apart.
-	alternates := filepath.Join(objects, "info", "alternates")
-	if wErr := os.WriteFile(alternates, []byte(filepath.Join(checkout, ".git", "objects")+"\n"), 0o600); wErr != nil {
-		return Patch{}, fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, wErr)
-	}
-
-	// Seeding the scratch index from the checkout's own carries git's stat
-	// cache over, so staging costs a scan of the worktree rather than a
-	// rehash of every tracked file. A checkout without one still works.
-	if data, readErr := os.ReadFile(filepath.Join(checkout, ".git", "index")); readErr == nil {
-		if writeErr := os.WriteFile(index, data, 0o600); writeErr != nil {
-			return Patch{}, fmt.Errorf("gitengine: seed scratch index for run %s: %w", run, writeErr)
-		}
+	index, err := scratchIndex(dir, checkout, run)
+	if err != nil {
+		return Patch{}, err
 	}
 	if _, _, addErr := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); addErr != nil {
 		return Patch{}, addErr
@@ -95,12 +92,63 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, maxBytes int) (
 	if err != nil {
 		return Patch{}, err
 	}
-	if truncated {
-		if i := strings.LastIndexByte(text, '\n'); i >= 0 {
-			text = text[:i+1]
+	return Patch{Base: meta.Base, Text: trimToLastLine(text, truncated), Truncated: truncated}, nil
+}
+
+// rangePatch renders one snapshot tree against another out of the run's own
+// snapshot store. A client-supplied id has to be a full object id, has to
+// resolve against this run's own object database and no other, and has to
+// name a tree: a committish would otherwise peel to its tree and render a
+// diff the timeline never offered.
+func (e *Engine) rangePatch(ctx context.Context, run domain.RunID, checkout, from, to string, maxBytes int) (Patch, error) {
+	if from == "" || to == "" {
+		return Patch{}, fmt.Errorf("%w: a snapshot range needs both ends", ErrInvalidObjectID)
+	}
+	for _, id := range []string{from, to} {
+		if !validObjectID(id) {
+			return Patch{}, fmt.Errorf("%w: %q", ErrInvalidObjectID, id)
 		}
 	}
-	return Patch{Base: meta.Base, Text: text, Truncated: truncated}, nil
+	store, err := e.snapshotStorePath(run)
+	if err != nil {
+		return Patch{}, err
+	}
+	// Rendering is a read: it never brings a store into being. A request
+	// racing RemoveRunCheckout would otherwise recreate the directory the
+	// removal had just deleted, and nothing would ever reclaim it.
+	if _, statErr := os.Stat(store); statErr != nil {
+		return Patch{}, fmt.Errorf("%w: run %s has no snapshot store", ErrSnapshotTreeMissing, run)
+	}
+	// A tree-to-tree diff reads objects and never stages, so the store's
+	// index is named for GIT_INDEX_FILE but neither seeded nor written -
+	// which also keeps a read clear of the lock the watch's staging takes.
+	index, err := scratchObjects(store, checkout, run)
+	if err != nil {
+		return Patch{}, err
+	}
+	for _, id := range []string{from, to} {
+		if resolveErr := e.requireSnapshotTree(ctx, checkout, index, id); resolveErr != nil {
+			return Patch{}, resolveErr
+		}
+	}
+	text, truncated, err := e.gitStaged(ctx, checkout, index, maxBytes,
+		"diff", "--no-color", "--no-renames", from, to)
+	if err != nil {
+		return Patch{}, err
+	}
+	return Patch{Base: from, Text: trimToLastLine(text, truncated), Truncated: truncated}, nil
+}
+
+// trimToLastLine cuts truncated patch text back to its last whole line, so
+// a reader never sees half a hunk header.
+func trimToLastLine(text string, truncated bool) string {
+	if !truncated {
+		return text
+	}
+	if i := strings.LastIndexByte(text, '\n'); i >= 0 {
+		return text[:i+1]
+	}
+	return text
 }
 
 // gitStaged runs a git command in a run checkout against a scratch index

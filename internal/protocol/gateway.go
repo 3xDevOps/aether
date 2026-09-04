@@ -10,11 +10,22 @@ const (
 	MethodServerDisk = "server.disk"
 )
 
+// RunPatchParams asks for one run's patch. From and To are snapshot
+// trees from run.diff events; both empty asks for the run's current
+// diff against its fork point.
+type RunPatchParams struct {
+	RunID string `json:"run_id"`
+	From  string `json:"from,omitempty"`
+	To    string `json:"to,omitempty"`
+}
+
 // RunPatchResult is the reply to run.patch: the run's unified diff against
-// the fork-point commit recorded at checkout creation.
+// the fork-point commit recorded at checkout creation, or against the from
+// tree when a snapshot range was asked for.
 type RunPatchResult struct {
 	RunID string `json:"run_id"`
-	// Base is the fork-point commit the diff is taken against.
+	// Base is what the diff is taken against: the fork-point commit for a
+	// cumulative render, the requested from tree for an interval render.
 	Base string `json:"base"`
 	// Patch is the unified diff text, empty when nothing changed.
 	Patch string `json:"patch"`

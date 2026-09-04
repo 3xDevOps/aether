@@ -65,7 +65,8 @@ against the runtime's actual containers:
 
 - **The container survived** (the server died, the container did not):
   supervision reattaches to it, the PTY session is re-adopted, the diff
-  watch restarts, and the run stays `running`. Attaches, injects and the
+  watch restarts from the tree its last snapshot wrote so the next interval
+  continues the chain, and the run stays `running`. Attaches, injects and the
   eventual exit all work as if nothing happened. A kill that was accepted
   before the crash is re-issued.
 - **The container is gone**: the partial work is committed as `wip:`, the

@@ -173,12 +173,17 @@ export async function applyEvent(
       break
     }
     case 'run.diff': {
-      // A snapshot carries per-file stats only. It is the timeline entry the
-      // Diff tab lists, and the signal that its patch text is behind.
+      // A snapshot carries per-file stats and the two trees bounding the
+      // interval it ended. It is the timeline entry the Diff tab lists, the
+      // range that tab asks for, and the signal that the run's cumulative
+      // patch text is behind.
       const p = ev.payload as RunDiffPayload
-      store
-        .getState()
-        .noteDiffSnapshot(ev.run_id, { time: ev.time, files: p.files ?? [] })
+      store.getState().noteDiffSnapshot(ev.run_id, {
+        time: ev.time,
+        files: p.files ?? [],
+        tree: p.tree,
+        parentTree: p.parent_tree,
+      })
       break
     }
     case 'git.branch': {

@@ -215,6 +215,14 @@ export interface FileDiffStat {
 
 export interface RunDiffPayload {
   files: FileDiffStat[]
+  /** The git tree of the whole worktree at this snapshot. */
+  tree?: string
+  /**
+   * The previous snapshot's tree, or the run's fork-point tree for the first
+   * snapshot. Diffing `parent_tree` to `tree` is what this interval changed.
+   * Both are absent on events from a server that predates per-snapshot trees.
+   */
+  parent_tree?: string
 }
 
 /** One other active run touching files a run also touches. */

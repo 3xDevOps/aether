@@ -29,6 +29,12 @@ import (
 var (
 	ErrRepoNotFound     = errors.New("gitengine: workspace repo not found")
 	ErrCheckoutNotFound = errors.New("gitengine: run checkout not found")
+	// ErrInvalidObjectID reports a patch range end that is not a full git
+	// object id, or a range with only one end set.
+	ErrInvalidObjectID = errors.New("gitengine: not a git object id")
+	// ErrSnapshotTreeMissing reports a well-formed tree id that the run's
+	// snapshot store no longer holds.
+	ErrSnapshotTreeMissing = errors.New("gitengine: snapshot tree not found")
 )
 
 // Config configures an Engine. ReposDir and CheckoutsDir are required; the

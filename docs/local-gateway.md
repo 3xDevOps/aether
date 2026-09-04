@@ -153,18 +153,27 @@ answers for the server. Both are absent on a gateway that predates them.
 ### `GET /api/v1/run/<run_id>/patch`
 
 Not an RPC method, because patch text is a read of a working tree rather
-than a control-channel call. `run.diff` events carry per-file stats only and
-no patch text is stored anywhere in the server, so the diff timeline reads
-the text here and uses those events to know when to ask again.
+than a control-channel call. `run.diff` events carry per-file stats and the
+tree each snapshot wrote, never patch text, and no patch text is stored
+anywhere in the server, so the diff timeline reads the text here and uses
+those events to know when to ask again and which interval to ask for.
 
-The server renders the run checkout's whole diff against the fork point its
-identity record pins (the `aether.base` commit), covering committed work,
-uncommitted edits and untracked files alike - the same set of changes a
-`run.diff` snapshot counts. Rendering leaves the checkout alone: the worktree
-is staged into a scratch index with its own scratch object directory, so
-nothing under the checkout's `.git` - not even the loose objects staging
-hashes - is ever written, and the scratch files are deleted once the patch
-is rendered.
+With no query params the server renders the run checkout's whole diff against
+the fork point its identity record pins (the `aether.base` commit), covering
+committed work, uncommitted edits and untracked files alike - the same set of
+changes a `run.diff` snapshot counts. Rendering leaves the checkout alone: the
+worktree is staged into a scratch index with its own scratch object directory,
+so nothing under the checkout's `.git` - not even the loose objects staging
+hashes - is ever written, and the scratch files are deleted once the patch is
+rendered.
+
+`from` and `to` render one interval instead. Both take a snapshot tree id off
+a `run.diff` event - its `parent_tree` and its `tree` - and the answer is the
+diff between those two trees, which is what the run changed in that interval.
+Passing one without the other is an invalid-params error. An id has to be a
+full object id, has to resolve against that run's own object database and no
+other, and has to name a tree: a commit id would otherwise peel to its tree
+and render a diff the timeline never offered.
 
 ```json
 {"run_id":"run_01H...","base":"9f2c1e...","patch":"diff --git a/main.go b/main.go\n...","truncated":false}
@@ -173,11 +182,15 @@ is rendered.
 - Visibility is `run.get`'s, applied by calling it: a member who could not
   read the run over the control channel gets that method's refusal here,
   unchanged.
+- `base` is what the patch is measured from: the fork-point commit on a
+  cumulative render, the `from` tree on an interval one.
 - `truncated` reports that the diff outgrew the 512 KiB ceiling; `patch` then
   ends at the last whole line that fit. Read the run branch over git for the
   rest - the dashboard renders diffs, it does not serve repositories.
 - `503` with `-32004` when the server has no git engine wired, when the run
-  has no checkout left to diff (it finished and was cleaned up), or when
+  has no checkout left to diff (it finished and was cleaned up), when a
+  requested tree is no longer on disk - a run's snapshot objects are removed
+  with its checkout, so its intervals go when the checkout does - or when
   rendering ran past the engine's 30s ceiling - the same bound a diff
   snapshot's git work gets, because staging re-hashes every untracked file
   and a worktree holding a large un-ignored tree would otherwise be
@@ -237,7 +250,7 @@ SSH and needs these reads without a listener on the server.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `run.patch` | `RunIDParams` (`{"run_id":"..."}`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
+| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
 | `files.tree` | `FilesTreeParams` (`{"workspace_id":"...","run_id":"...","path":"src"}`; `run_id` optional) | `FilesTreeResult` - immediate file and directory entries |
 | `files.read` | `FilesReadParams` (`{"workspace_id":"...","run_id":"...","path":"README.md"}`; `run_id` optional) | `FilesReadResult` - read-only content, size, binary, and truncation |
@@ -246,14 +259,17 @@ SSH and needs these reads without a listener on the server.
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
-  that the patch ends at the last whole line that fit.
+  that the patch ends at the last whole line that fit. `from` and `to` select
+  one interval here exactly as they do on the `GET`.
 - The read methods answer `-32004` (unavailable) when the read cannot be
-  served: `run.patch` when diff rendering is not enabled (no git engine wired)
-  or the run has no checkout left to diff, `server.disk` when the server was
-  not told where the data directory is or the filesystem holding it could not
-  be read, and `files.tree`, `files.read`, or `files.diff` when their
-  checkout or repository is unavailable. All three files methods also answer
-  `-32602` for a rejected path. The underlying errors name server-side paths,
+  served: `run.patch` when diff rendering is not enabled (no git engine
+  wired), when the run has no checkout left to diff, or when a requested tree
+  is gone (`run.patch: that snapshot's tree is no longer on disk`),
+  `server.disk` when the server was not told where the data directory is or
+  the filesystem holding it could not be read, and `files.tree`,
+  `files.read`, or `files.diff` when their checkout or repository is
+  unavailable. All three files methods also answer `-32602` for a rejected
+  path. The underlying errors name server-side paths,
   so they are not echoed to the client.
 
 ## `/local/v1` verbs

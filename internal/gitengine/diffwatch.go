@@ -54,8 +54,10 @@ type diffWatch struct {
 	lastSnap         time.Time
 	lastHead         string
 	lastFiles        []events.FileDiffStat
+	lastTree         string
 	lastSnapshotWarn time.Time
 	lastPublishWarn  time.Time
+	lastTreeWarn     time.Time
 }
 
 // StartDiffWatch begins diff-snapshot watching for a run's checkout,
@@ -75,6 +77,13 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	head, err := e.git(ctx, checkout, "rev-parse", "HEAD")
 	if err != nil {
 		slog.Warn("gitengine: diff snapshot failed", "run", string(run), "error", err)
+	}
+	// The first interval of a fresh run is measured from the fork-point
+	// tree; a run whose store already records a snapshot resumes its chain,
+	// so a watch or server restart does not lose an interval boundary.
+	lastTree := e.lastSnapshotTree(run)
+	if lastTree == "" {
+		lastTree, _ = e.git(ctx, checkout, "rev-parse", meta.Base+"^{tree}")
 	}
 
 	e.mu.Lock()
@@ -105,6 +114,7 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 		// delay the first snapshot: only QuietPeriod gates it.
 		lastSnap: time.Now().Add(-e.cfg.MinInterval),
 		lastHead: head,
+		lastTree: lastTree,
 	}
 	if err := w.addRecursive(checkout); err != nil {
 		_ = watcher.Close()
@@ -339,8 +349,9 @@ func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
 	timer.Reset(d)
 }
 
-// snapshot captures the checkout's diff against its recorded base and
-// publishes run.diff when the stat set changed since the last snapshot.
+// snapshot records the checkout's content as a git tree, captures its diff
+// stats against the recorded base, and publishes run.diff when either moved
+// since the last snapshot.
 func (w *diffWatch) snapshot() {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 	defer cancel()
@@ -350,8 +361,27 @@ func (w *diffWatch) snapshot() {
 		w.warnSnapshot(err)
 		return
 	}
-	if !slices.Equal(files, w.lastFiles) {
+	tree, treeErr := w.e.writeSnapshotTree(ctx, w.run, w.checkout)
+	if treeErr != nil {
+		w.warnTree(treeErr)
+	}
+	// The tree decides, with the stat set as the fallback for a store that
+	// cannot be written. The tree is the stricter gate - an edit that keeps
+	// the line counts identical moves the tree but not the stats - and it is
+	// also the only one that holds across a restart, where lastTree is
+	// restored from the store but lastFiles starts empty: ORing the two
+	// would publish an interval whose ends are the same tree.
+	changed := tree != w.lastTree
+	if treeErr != nil {
+		changed = !slices.Equal(files, w.lastFiles)
+	}
+	if changed {
 		w.lastFiles = files
+		payload := events.RunDiffPayload{Files: files}
+		if treeErr == nil {
+			payload.Tree = tree
+			payload.ParentTree = w.lastTree
+		}
 		if w.e.cfg.Bus != nil {
 			// The registry entry outlives the watch, so the workspace scope
 			// is read from it rather than duplicated onto the watch.
@@ -361,8 +391,15 @@ func (w *diffWatch) snapshot() {
 			_, _ = w.e.cfg.Bus.Publish(ctx, events.Event{
 				WorkspaceID: workspace,
 				RunID:       w.run,
-				Payload:     events.RunDiffPayload{Files: files},
+				Payload:     payload,
 			})
+		}
+		if treeErr == nil {
+			w.lastTree = tree
+			if err := w.e.setLastSnapshotTree(w.run, tree); err != nil {
+				slog.Warn("gitengine: snapshot tree not recorded; a restart will diff from the fork point",
+					"run", string(w.run), "error", err)
+			}
 		}
 	}
 	w.checkHead(ctx)
@@ -403,6 +440,19 @@ func (w *diffWatch) warnPublish(err error) {
 	}
 	w.lastPublishWarn = now
 	slog.Warn("gitengine: publish run branch failed", "run", string(w.run), "error", err)
+}
+
+// warnTree reports a snapshot whose tree could not be written. The stat set
+// still publishes, so the timeline survives; what is lost is the interval
+// diff behind that row.
+func (w *diffWatch) warnTree(err error) {
+	now := time.Now()
+	if !w.lastTreeWarn.IsZero() && now.Sub(w.lastTreeWarn) < diffWarnInterval {
+		return
+	}
+	w.lastTreeWarn = now
+	slog.Warn("gitengine: diff snapshot tree could not be written; this interval has no per-interval diff",
+		"run", string(w.run), "error", err)
 }
 
 // diffStats builds the snapshot stat set: numstat against base for tracked
