@@ -41,7 +41,7 @@ Scenarios:
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
 | `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: both binds realized and read-only, the staged binary executed as `/opt/aether/aether-server mcp` by a non-root agent, and a status/send/inbox round trip between two overlapping runs |
 | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootLostContainer` (`chaos_reboot_integration_test.go`) | The server SIGKILLed mid-run: supervision reattaches to a surviving container (steer and finalize both still work) or, when the container went with it, commits `wip:`, publishes the branch, marks the run interrupted and relaunches it. SQLite and git are read back after the kill |
-| `TestIntegrationChaosDiskPressure`, `TestIntegrationChaosStallUX` (`chaos_pressure_integration_test.go`) | Worktree TTL GC under load with the branches surviving, the gauge's three-way breakdown following the reclaim, new runs refused below the free-space floor, and a silent agent parking at needs-attention and coming back |
+| `TestIntegrationChaosDiskPressure`, `TestIntegrationChaosStallUX` (`chaos_pressure_integration_test.go`) | Worktree TTL GC under load with the branches surviving, the gauge's three-way breakdown following the reclaim, new runs refused below the free-space floor, and a silent agent parking at needs-attention, coming back when the agent answers a steer, and staying parked when it does not |
 
 ### The chaos scenarios
 
@@ -119,7 +119,7 @@ layer that owns them.
 
 | Failure | Covered by |
 | --- | --- |
-| Agent crashes or hangs | Multi-member E2E (crash -> `failed`, `wip:` commit); stall chaos E2E (park at needs-attention with a `stalled:` reason, surfaced on the run listing, then back to running when steered); stall detection matrix in `internal/scheduler` unit tests; the dashboard badge in `web`'s sidebar tests |
+| Agent crashes or hangs | Multi-member E2E (crash -> `failed`, `wip:` commit); stall chaos E2E (park at needs-attention with a `stalled:` reason, surfaced on the run listing, then back to running when the steered agent answers, and still parked when it does not); stall detection matrix in `internal/scheduler` unit tests; the dashboard badge in `web`'s sidebar tests |
 | Server reboot | Both reboot chaos E2Es (SIGKILL mid-run, surviving and lost container); coordination kill-switch E2E (restart with surviving containers); recovery matrix in `internal/scheduler`, plus the launch-to-relaunch session pin there (`--session-id` at launch, `--resume <uuid>` on the relaunch, `--continue` for a row that predates pinning); the argv construction itself in `internal/harness` |
 | Laptop offline | `internal/syncd` daemon tests (refs-only catch-up) |
 | SSH drop mid-attach | Solo E2E detach/reattach; `FuzzAttachDropMidInput`, the post-unwind straggler test and the reattach-leak test in `internal/ptyhost` |

@@ -28,8 +28,15 @@ import (
 // still there afterwards to be killed - an agent that exits on the steer
 // would finalize the run instead of coming back to running. "finish" is the
 // disk scenario's way of ending a run cleanly.
+//
+// The run's task arrives as $1, and deafTask selects the hung agent the
+// stall scenario's second half needs: it never reads stdin and never
+// writes, so a steer lands on a process that cannot answer.
 const pressureAgent = `sleep 1
 echo agent-ready
+if [ "$1" = "hang on me" ]; then
+  while :; do sleep 60; done
+fi
 while read line; do
   echo "got:$line"
   if [ "$line" = "finish" ]; then
@@ -38,6 +45,10 @@ while read line; do
   fi
 done
 `
+
+// deafTask is the task string pressureAgent dispatches its hung agent on;
+// it doubles as the fallback runtime's script key.
+const deafTask = "hang on me"
 
 // TestIntegrationChaosDiskPressure drives the failure table's "Disk
 // pressure" row on the surfaces an operator actually sees: finished-run
@@ -171,13 +182,15 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 // TestIntegrationChaosStallUX drives the failure table's "Agent crashes or
 // hangs" row down its notification path: a silent agent parks the run at
 // needs-attention with a reason that says why, the transition reaches the
-// dashboard on the SPA's own event wire and the CLI's own run listing, and
-// steering the run brings it back to running.
+// dashboard on the SPA's own event wire and the CLI's own run listing,
+// steering an agent that answers brings it back to running, and steering
+// one that does not leaves it parked.
 func TestIntegrationChaosStallUX(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
+	const stallThreshold = 2 * time.Second
 	env := newPressureEnv(ctx, t, Config{
-		StallThreshold: 2 * time.Second,
+		StallThreshold: stallThreshold,
 		PollInterval:   250 * time.Millisecond,
 	})
 	const stallTask = "stall me"
@@ -243,6 +256,40 @@ func TestIntegrationChaosStallUX(t *testing.T) {
 		t.Fatalf("run.kill: %v", err)
 	}
 	env.waitStatus(t, string(runID), domain.RunAbandoned)
+
+	// The companion case: an agent that never answers. A steer puts the
+	// banner, and the terminal's echo of the steered line, on the same PTY
+	// stream the stall detector watches - counting either as agent output
+	// would flip the run back to running and hide the hang for another
+	// whole threshold.
+	env.hangOnSteer(t, deafTask)
+	var deaf protocol.RunResult
+	if err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+		WorkspaceID: string(env.ws.ID), Task: deafTask, Harness: "fake",
+	}, &deaf); err != nil {
+		t.Fatalf("run.launch hung agent: %v", err)
+	}
+	deafID := domain.RunID(deaf.Run.ID)
+	waitEvent(t, sub, &seen, "hung run.status needs-attention", func(e events.Event) bool {
+		p, ok := e.Payload.(events.RunStatusPayload)
+		return ok && e.RunID == deafID && p.To == domain.RunNeedsAttention
+	})
+	// A multi-line steer, which is what the dashboard's textarea sends: the
+	// line discipline echoes every newline back as CRLF, so the expectation
+	// has to cover the interior one as well as the trailing carriage return.
+	if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: string(deafID), Message: "wake\nup",
+	}, nil); err != nil {
+		t.Fatalf("run.inject hung agent: %v", err)
+	}
+	// Watch for longer than the threshold, so the window covers both the
+	// poll right after the steer and a full re-stall cycle after it.
+	env.expectStillParked(t, sub, &seen, deafID, 3*stallThreshold)
+
+	if err := env.ctrl.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: string(deafID)}, nil); err != nil {
+		t.Fatalf("run.kill hung agent: %v", err)
+	}
+	env.waitStatus(t, string(deafID), domain.RunAbandoned)
 }
 
 // pressureEnv is an in-process server on a stable data directory that the
@@ -352,6 +399,52 @@ func (e *pressureEnv) parkOnStdin(t *testing.T, task string) {
 			c.output("got:" + line + "\r\n")
 		}
 	})
+}
+
+// hangOnSteer teaches the fallback runtime the hung agent pressureAgent's
+// deafTask branch gives the real one: a steer reaches it and it answers
+// nothing, so the run has no output and no file change to un-park it. It
+// drains stdin where the real script ignores it, because the fake's stdin
+// is an io.Pipe that blocks the writer until someone reads - a real PTY
+// buffers instead. A no-op on the Docker path.
+func (e *pressureEnv) hangOnSteer(t *testing.T, task string) {
+	t.Helper()
+	fake, ok := e.rt.(*e2eRuntime)
+	if !ok {
+		return
+	}
+	fake.script(task, func(c *e2eContainer) {
+		for {
+			if _, ok := c.readStdinLine(); !ok {
+				return
+			}
+		}
+	})
+}
+
+// expectStillParked fails if run leaves needs-attention inside window. The
+// stall loop is the only thing that would move it, so a transition here
+// means something the agent never wrote counted as its output.
+func (e *pressureEnv) expectStillParked(t *testing.T, sub events.Subscription, seen *[]events.Event, run domain.RunID, window time.Duration) {
+	t.Helper()
+	deadline := time.After(window)
+	for {
+		select {
+		case ev, ok := <-sub.Events():
+			if !ok {
+				t.Fatalf("bus subscription closed watching run %s: %v", run, sub.Err())
+			}
+			*seen = append(*seen, ev)
+			p, isStatus := ev.Payload.(events.RunStatusPayload)
+			if isStatus && ev.RunID == run && p.From == domain.RunNeedsAttention {
+				t.Fatalf("run %s went %s -> %s (%q) after a steer its agent never answered; "+
+					"the banner and its echo are the server's bytes, not the agent's",
+					run, p.From, p.To, p.Reason)
+			}
+		case <-deadline:
+			return
+		}
+	}
 }
 
 func (e *pressureEnv) restart(t *testing.T, cfg Config) {

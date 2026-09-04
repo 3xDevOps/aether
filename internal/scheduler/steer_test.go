@@ -254,8 +254,9 @@ func TestCloseRunStopsStalledContainer(t *testing.T) {
 }
 
 func TestInjectLiveStalledNeedsAttention(t *testing.T) {
+	const stallThreshold = 40 * time.Millisecond
 	e := newTestEnv(t, func(cfg *Config) {
-		cfg.StallThreshold = 40 * time.Millisecond
+		cfg.StallThreshold = stallThreshold
 		cfg.PollInterval = 10 * time.Millisecond
 	})
 	sub := e.subscribe(t)
@@ -270,7 +271,7 @@ func TestInjectLiveStalledNeedsAttention(t *testing.T) {
 	}()
 	t.Cleanup(func() { cancel(); <-startDone })
 
-	run, _ := e.launchFake(t, "task")
+	run, c := e.launchFake(t, "task")
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 
 	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "keep going"); err != nil {
@@ -281,6 +282,41 @@ func TestInjectLiveStalledNeedsAttention(t *testing.T) {
 		t.Fatalf("injects = %+v", inj)
 	}
 	waitTimelineEvent(t, sub, run.ID, events.TimelineSteer)
+
+	// The steer by itself does not clear the stall. Its banner is the
+	// server's own output, and this agent never answers, so unparking here
+	// would hide the hang for another whole threshold.
+	quiet := time.After(5 * stallThreshold)
+	for watching := true; watching; {
+		select {
+		case ev, ok := <-sub.Events():
+			if !ok {
+				t.Fatal("event stream closed while watching the stalled run")
+			}
+			p, isStatus := ev.Payload.(events.RunStatusPayload)
+			if isStatus && ev.RunID == run.ID && p.To == domain.RunRunning {
+				t.Fatalf("steer alone returned the run to running (%q); only the agent's own output should",
+					p.Reason)
+			}
+		case <-quiet:
+			watching = false
+		}
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+
+	// The agent answering is what returns it to running.
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(10 * time.Millisecond):
+				c.output("got:keep going\r\n")
+			}
+		}
+	}()
 	resumed := waitStatusEvent(t, sub, run.ID, domain.RunRunning)
 	if p := resumed.Payload.(events.RunStatusPayload); p.Reason != "activity resumed" {
 		t.Fatalf("resume reason = %q", p.Reason)

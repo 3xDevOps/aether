@@ -13,7 +13,7 @@ means "use the default"; a negative value turns a guard off.
 
 | Flag | Default | What it controls |
 | --- | --- | --- |
-| `--stall-threshold` | `10m` | How long a run may go with no PTY output and no file changes before it parks at needs-attention. |
+| `--stall-threshold` | `10m` | How long a run may go with no agent output and no file changes before it parks at needs-attention. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
@@ -40,7 +40,19 @@ plenty, and polling faster than that just wakes the scheduler up more often.
 
 Parking is not terminal. A stalled run whose agent starts producing output
 again returns to running on the next poll, and steering it (`aether inject`,
-or typing on an attach) is usually what wakes it.
+or typing on an attach) is usually what gets it talking.
+
+Steering is not itself that output. A steer's attributed banner is the
+server's own, and so is the terminal's echo of the steered line - or of
+keystrokes typed on an attach - which comes back even when the agent never
+reads its input. The server discounts what it wrote, so poking a hung agent
+does not hide the hang for another threshold. That discount is best effort:
+an unusually configured terminal, a steer over 8 KiB, or an echo that takes
+more than a second to come back falls through to counting the bytes, and the
+run then takes one more threshold to park again. What the agent puts on the
+stream itself always counts: a full-screen agent that repaints its UI in
+response is producing real output and clears its stall, which is the point.
+The run parks on silence from the agent, not on silence from the stream.
 
 ### Picking a disk floor
 
@@ -158,7 +170,7 @@ exists to stop a disk from filling, not to stop the server.
 
 ### Agent stall or crash
 
-No PTY output and no file changes past `--stall-threshold` parks the run at
+No agent output and no file changes past `--stall-threshold` parks the run at
 `needs-attention` with a reason that leads with `stalled:`. A crash marks it
 `failed`. Either way the worktree and transcript are preserved and the
 partial work is committed as `wip:`.
