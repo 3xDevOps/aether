@@ -252,39 +252,6 @@ func (c *Conn) Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error)
 	return out, err
 }
 
-// WorkspaceShellStream opens the unified workspace-shell subsystem for req
-// and returns the resizable terminal stream alongside the server's ack. A
-// refused ack is returned with the error so callers can forward its code.
-func (c *Conn) WorkspaceShellStream(req protocol.WorkspaceShellRequest) (*TerminalStream, protocol.WorkspaceShellResponse, error) {
-	var ack protocol.WorkspaceShellResponse
-	out, err := c.openStream(protocol.SubsystemWorkspaceShell, &ptyGeometry{cols: req.Cols, rows: req.Rows}, req, "workspace shell", &ack)
-	if err != nil {
-		return nil, ack, err
-	}
-	if !ack.OK {
-		_ = out.Close()
-		return nil, ack, workspaceShellAckError(ack)
-	}
-	return &TerminalStream{bufferedStream: out}, ack, nil
-}
-
-// WorkspaceShell opens the unified workspace-shell subsystem for bootstrap
-// tools or harness login and returns the raw terminal stream after its ack.
-func (c *Conn) WorkspaceShell(req protocol.WorkspaceShellRequest) (io.ReadWriteCloser, error) {
-	stream, _, err := c.WorkspaceShellStream(req)
-	if err != nil {
-		return nil, err
-	}
-	return stream, nil
-}
-
-func workspaceShellAckError(ack protocol.WorkspaceShellResponse) error {
-	if ack.Code != 0 {
-		return fmt.Errorf("cli: workspace shell: %s (code %d)", ack.Error, ack.Code)
-	}
-	return fmt.Errorf("cli: workspace shell: %s", ack.Error)
-}
-
 // bufferedStream keeps leftover bytes from the ack-line bufio.Reader so
 // they are not lost to the raw PTY/setup stream.
 type bufferedStream struct {

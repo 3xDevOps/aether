@@ -30,9 +30,6 @@ const (
 	// immediate 4000 resubscribe; replay with after_seq still recovers a
 	// true backlog drop, just a beat slower.
 	statusStreamEnded = websocket.StatusServiceRestart
-	// statusDirtyExit tells a shell client the remote command ended with
-	// a nonzero exit status, distinct from a clean 1000 close.
-	statusDirtyExit = 4001
 	// defaultCols/defaultRows are the geometry of a terminal whose header
 	// carries none.
 	defaultCols = 80

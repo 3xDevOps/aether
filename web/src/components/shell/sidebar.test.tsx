@@ -179,7 +179,7 @@ describe('Sidebar', () => {
       capabilities: {
         gateway: 'local',
         methods: ['*'],
-        ws: ['events', 'attach', 'shell'],
+        ws: ['events', 'attach'],
         local: ['link.status', 'daemon.status', 'pull'],
       },
     })

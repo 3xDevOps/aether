@@ -449,12 +449,9 @@ are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 
 - **Linux.** Windows and macOS are client platforms.
 - **Docker**, running, with the server's user able to reach its socket. Every
-  bootstrap shell, login shell, and run is a container.
+  environment terminal and run is a container. Agent installation happens in
+  the member's environment terminal.
 - **git** on the host. Bare repos, run checkouts, and diffs are real git.
-- **A server-owned neutral image** is selected automatically when a workspace
-  has no custom image. An administrator may configure a custom image when
-  system dependencies are required. Agent installation can instead happen in
-  the workspace bootstrap shell; it is not a prerequisite for every image.
 - Optionally **Tailscale**, which is the recommended way to make the SSH port
   reachable and the recommended identity layer. See
   [networking.md](networking.md).
@@ -462,23 +459,15 @@ are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 ## Images and containers
 
 An image is a read-only package used to create containers. A container is one
-runtime instance of that image and is discarded after a run or shell session.
-The server opens shells only inside containers, never on the host. Aether never
-mounts the Docker socket into a workspace container. How workspace images are
-chosen and built is covered in [environments.md](environments.md).
+runtime instance of that image and is discarded after a run or terminal
+session. The server opens terminals only inside containers, never on the host.
+Aether never mounts the Docker socket into a workspace container. How workspace
+images are chosen and built is covered in [environments.md](environments.md).
 
-When a workspace has no custom image, the server selects the neutral bootstrap
-image:
-
-```
-ghcr.io/3xdevops/aether-bootstrap:<release-tag>
-```
-
-It contains a shell, certificates, curl, Git, and common file-search tools. It
-does not contain an agent vendor or execute a vendor installer. A member can
-install an executable into `~/.local` with
-`aether workspace bootstrap <name> --command <executable>`. Those files are
-captured in a per-member, per-workspace immutable tool snapshot.
+When a workspace has no custom image, the server selects its configured neutral
+image. It contains a shell, certificates, curl, Git, and common file-search
+tools. It does not contain a vendor agent. Install agents in the member home
+with `aether terminal`; the installed files persist across containers.
 
 A release also publishes a prebuilt standard environment image:
 
@@ -494,7 +483,7 @@ workspace created with this image keeps its exact ref until an explicit image
 change. Both images are tagged with the release tag, the commit hash, and
 `latest`.
 
-User-installed tools under `~/.local` persist across containers. System packages
+Files installed in the member home persist across containers. System packages
 installed into `/usr` or `/etc`, edits elsewhere in the container filesystem,
 and container process state do not persist. Put required system dependencies in
 an administrator-approved custom image.
@@ -502,18 +491,18 @@ an administrator-approved custom image.
 Use `aether workspace init <name>` for the neutral default, or
 `aether workspace init <name> --image <image>` when the project needs system
 dependencies that the neutral image does not provide. Workspace image
-references are administrator-owned configuration, not input to a shell session.
+references are administrator-owned configuration, not member input.
 
 Workspaces can also carry a server-built environment image: an admin-saved
 Dockerfile the server builds, verifies, and swaps in (see
-[bootstrap.md](bootstrap.md)). These images live only in the server's Docker
-daemon as `aether/ws-<workspace-id>:<version>` tags and are never pushed to
-or pulled from a registry. Retention keeps two tags per workspace - the
-active version and the most recent previously active one - and removes older
-tags after a successful swap. `aether env rollback` re-activates the
-previous version, rebuilding its image from the stored Dockerfile if
-retention already removed the tag, so disk usage stays bounded at roughly
-two images per workspace.
+[environments.md](environments.md)). These images live only in the server's
+Docker daemon as `aether/ws-<workspace-id>:<version>` tags and are never pushed
+to or pulled from a registry. Retention keeps two tags per workspace, the
+active version and the most recent previously active one, and removes older
+tags after a successful swap. `aether env rollback` re-activates the previous
+version, rebuilding its image from the stored Dockerfile if retention already
+removed the tag, so disk usage stays bounded at roughly two images per
+workspace.
 
 To prepare a normal Dockerfile and optional standard Dev Container metadata for
 review and later image publication:
@@ -577,7 +566,7 @@ Serve options, which are also the config-file keys:
 | --- | --- | --- |
 | `--data-dir` | `/var/lib/aether` | Everything the server owns. |
 | `--addr` | `:2222` | The SSH listener. This is the only port that must be reachable. |
-| `--neutral-image` | `ghcr.io/3xdevops/aether-bootstrap:<build-version>` | Server-owned image selected for workspaces without a custom image. A release build defaults to the image published with that release; a dev build tracks `latest`. Set this to a pinned deployment-approved image to override it. |
+| `--neutral-image` | server-configured neutral image | Server-owned image selected for workspaces without a custom image. Set this to a pinned deployment-approved image to override it. |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard environment image that clients recommend at workspace creation; `server.info` reports it alongside the neutral image. Same tagging rules as `--neutral-image`. |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key. |
@@ -620,9 +609,8 @@ from `/etc/aether/aether-server.env`, which the unit loads if it exists. Provide
 those values through your deployment's secret manager; do not commit them or
 paste them into public configuration examples.
 
-Subscription logins do **not** go there. They live in the per-member,
-per-harness server-side home that `aether agent add` (or `aether setup`)
-writes. See
+Subscription logins do **not** go there. They live in the member's persistent
+home, which `aether terminal` uses after `aether agent add`. See
 [harnesses.md](harnesses.md).
 
 ## The client-side sync daemon
@@ -650,34 +638,26 @@ turns that half off.
 
 | Path | Contents |
 | --- | --- |
-| `aether.db` | SQLite: members, workspaces, runs, event log, and snapshot metadata. |
+| `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
 | `ssh/` | The server's SSH host key. |
 | `repos/` | One bare git repo per workspace. |
 | `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. |
 | `transcripts/` | Per-run PTY recordings (asciicast v2). |
-| `homes/<member>/<harness>/` | Per-member, per-harness login state. |
+| `homes/<member>/` | One persistent environment home per member. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
-| `toolenv/staging/` | Pending per-member, per-workspace bootstrap staging. |
-| `toolenv/snapshots/` | Immutable per-member, per-workspace tool snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run conflict-coordination sockets, recreated each run. |
 | `env-edits/` | Per-edit scratch output of environment edit agents, removed when each edit ends. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. |
 
-Tool snapshots and pending staging are server-owned state. Back up the database
-and `toolenv/` when recovery of installed workspace tools matters. Pending
-staging can be resumed after a client disconnect, while stale unreferenced
-staging is removed by the server's bounded cleanup policy. Active snapshots and
-snapshots pinned by running work remain available. See
-[bootstrap.md](bootstrap.md) for rollback, reset, and the read-only normal-run
-mount.
+Member homes are server-owned state. Back up the database, `homes/`, and
+`profiles/` when recovery of installed agents, login state, and synced profiles
+matters. Each member home is mounted only in that member's containers.
 
 Three consequences worth knowing:
 
-- **Back up `aether.db`, `repos/`, `toolenv/`, and the homes you need to
-  recover.** The database and git repos are core state. Tool snapshots,
-  profile snapshots, and per-member login homes are also persistent workspace
-  state.
+- **Back up `aether.db`, `repos/`, `homes/`, and `profiles/` to recover core
+  state, installed agents, login state, and profile snapshots.**
 - **Three of these grow without bound**: `checkouts/` (reclaimed by the TTL
   GC), `transcripts/`, and `aether.db` (the event log). The dashboard's disk
   gauge breaks the data directory down across exactly those three, and new
@@ -710,7 +690,8 @@ sudo systemctl daemon-reload
 
 # 2. Containers. Stopping the server does NOT remove them.
 sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)
-sudo docker rmi $(sudo docker images -q ghcr.io/3xdevops/aether-bootstrap)
+# Remove deployment-specific neutral and standard images according to your
+# Docker image retention policy.
 
 # 3. State, config, binary.
 sudo rm -rf /var/lib/aether /etc/aether

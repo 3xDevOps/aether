@@ -1,26 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { ToolSnapshot } from '@/lib/types'
 import { WorkspacesRoute } from '@/routes/workspaces'
 import { useStore, type RootState } from '@/store'
 import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
-
-const snapshot: ToolSnapshot = {
-  id: 'snapshot_1',
-  workspace_id: workspace.id,
-  member_id: alice.id,
-  digest: 'sha256deadbeefcafe',
-  created_at: '2026-08-14T09:30:00Z',
-  manifest: { executable: 'omp' },
-  active: true,
-}
-
-const older: ToolSnapshot = {
-  ...snapshot,
-  id: 'snapshot_0',
-  digest: 'sha256feedfacebead',
-  created_at: '2026-08-14T09:10:00Z',
-  active: false,
-}
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
@@ -28,8 +9,8 @@ function seed(extra: Partial<RootState> = {}) {
     activeWorkspace: '',
     members: { [alice.id]: alice },
     info: serverInfo,
-    // workspace.add and the tools verbs are capability-gated; an upgraded
-    // gateway advertising every method renders the admin forms.
+    // workspace.add is capability-gated; an upgraded gateway advertising
+    // every method renders the admin form.
     capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
     hydrated: true,
     hydrationError: null,
@@ -70,7 +51,6 @@ describe('workspaces view', () => {
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => [workspace]),
       workspaceAdd: vi.fn(async () => workspace),
-      toolsList: vi.fn(async () => []),
     })
     seed()
     render(<WorkspacesRoute params={{}} client={client} />)
@@ -125,7 +105,6 @@ describe('workspaces view', () => {
     const restricted = { ...workspace, steer_others: 'admins_only' }
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => [restricted]),
-      toolsList: vi.fn(async () => []),
     })
     seed()
     render(<WorkspacesRoute params={{}} client={client} />)
@@ -137,7 +116,6 @@ describe('workspaces view', () => {
   it('wraps workspace metadata and actions without crowding', async () => {
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => [workspace]),
-      toolsList: vi.fn(async () => []),
     })
     seed()
     render(<WorkspacesRoute params={{}} client={client} />)
@@ -149,7 +127,6 @@ describe('workspaces view', () => {
   it('opens a workspace by making it the active scope', async () => {
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => [workspace]),
-      toolsList: vi.fn(async () => []),
     })
     seed()
     render(<WorkspacesRoute params={{}} client={client} />)
@@ -167,31 +144,4 @@ describe('workspaces view', () => {
     })
   })
 
-  it('renders the tools table and rolls back after the confirm dialog', async () => {
-    const client = fakeApi({
-      workspaceListFull: vi.fn(async () => [workspace]),
-      toolsList: vi.fn(async () => [snapshot, older]),
-      toolsRollback: vi.fn(async () => ({})),
-    })
-    seed()
-    render(<WorkspacesRoute params={{}} client={client} />)
-
-    // Digests render as short hashes; only the active snapshot is badged.
-    expect(await screen.findByText('sha256deadbe')).toBeDefined()
-    expect(screen.getByText('sha256feedfa')).toBeDefined()
-    expect(screen.getByText('active')).toBeDefined()
-
-    // Rollback is offered only for inactive snapshots, and asks first.
-    fireEvent.click(screen.getByRole('button', { name: 'Rollback' }))
-    expect(await screen.findByText('Roll back to sha256feedfa?')).toBeDefined()
-    expect(client.toolsRollback).not.toHaveBeenCalled()
-
-    fireEvent.click(
-      within(screen.getByRole('dialog')).getByRole('button', { name: 'Rollback' }),
-    )
-    expect(client.toolsRollback).toHaveBeenCalledWith(
-      { id: workspace.id },
-      older.id,
-    )
-  })
 })

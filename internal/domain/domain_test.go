@@ -2,7 +2,6 @@ package domain
 
 import (
 	"testing"
-	"time"
 )
 
 func TestRunStatusTerminal(t *testing.T) {
@@ -107,94 +106,5 @@ func TestWorkspaceEnvironmentValidation(t *testing.T) {
 				t.Fatalf("Valid() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestWorkspaceShellModeValid(t *testing.T) {
-	if !WorkspaceShellBootstrapTools.Valid() || !WorkspaceShellHarnessLogin.Valid() || !WorkspaceShellAgentSetup.Valid() {
-		t.Fatal("defined workspace shell modes must be valid")
-	}
-	if WorkspaceShellMode("invalid").Valid() {
-		t.Fatal("invalid workspace shell mode must be rejected")
-	}
-}
-
-func TestWorkspaceShellRequestAgentSetup(t *testing.T) {
-	valid := WorkspaceShellRequest{
-		Workspace: WorkspaceSelector{ID: "ws_1"},
-		Mode:      WorkspaceShellAgentSetup,
-		Harness:   "omp",
-		TUIArgs:   []string{"omp", "{task}"},
-	}
-	if err := valid.Validate(); err != nil {
-		t.Fatalf("valid agent-setup request rejected: %v", err)
-	}
-	for name, req := range map[string]WorkspaceShellRequest{
-		"missing harness": {
-			Workspace: WorkspaceSelector{ID: "ws_1"},
-			Mode:      WorkspaceShellAgentSetup,
-		},
-		"argv proposal outside agent-setup": {
-			Workspace: WorkspaceSelector{ID: "ws_1"},
-			Mode:      WorkspaceShellHarnessLogin,
-			Harness:   "claude",
-			TUIArgs:   []string{"claude", "{task}"},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := req.Validate(); err == nil {
-				t.Fatal("invalid request accepted")
-			}
-		})
-	}
-}
-
-func TestWorkspaceShellRequestValidatesWorkspaceSelector(t *testing.T) {
-	base := WorkspaceShellRequest{
-		Workspace: WorkspaceSelector{ID: "ws_1"},
-		Mode:      WorkspaceShellBootstrapTools,
-		Cols:      80,
-		Rows:      24,
-	}
-	if err := base.Validate(); err != nil {
-		t.Fatalf("valid request rejected: %v", err)
-	}
-	for name, req := range map[string]WorkspaceShellRequest{
-		"missing selector": {Mode: WorkspaceShellBootstrapTools},
-		"both selector forms": {
-			Workspace: WorkspaceSelector{ID: "ws_1", Name: "project"},
-			Mode:      WorkspaceShellBootstrapTools,
-		},
-		"invalid mode": {
-			Workspace: WorkspaceSelector{ID: "ws_1"},
-			Mode:      WorkspaceShellMode("invalid"),
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := req.Validate(); err == nil {
-				t.Fatal("invalid request accepted")
-			}
-		})
-	}
-}
-
-func TestToolSnapshotMetadataIsStable(t *testing.T) {
-	created := time.Date(2026, 8, 19, 10, 11, 12, 0, time.UTC)
-	snapshot := ToolSnapshot{
-		ID:          "snapshot_1",
-		WorkspaceID: "ws_1",
-		MemberID:    "member_1",
-		Digest:      "sha256:abc",
-		Manifest: ToolManifest{
-			Executable: "omp",
-			Version:    "1.2.3",
-			Metadata:   map[string]string{"source": "bootstrap"},
-		},
-		CreatedAt: created,
-	}
-	if snapshot.ID == "" || snapshot.WorkspaceID == "" || snapshot.MemberID == "" ||
-		snapshot.Digest == "" || snapshot.Manifest.Executable != "omp" ||
-		snapshot.Manifest.Version != "1.2.3" || !snapshot.CreatedAt.Equal(created) {
-		t.Fatalf("snapshot metadata was not retained: %+v", snapshot)
 	}
 }

@@ -46,8 +46,6 @@ type Backend interface {
 	Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error)
 	// Attach opens the attach subsystem for one run's PTY.
 	Attach(req protocol.AttachRequest) (cli.Terminal, protocol.AttachResponse, error)
-	// Shell opens the unified workspace-shell subsystem.
-	Shell(req protocol.WorkspaceShellRequest) (cli.Terminal, protocol.WorkspaceShellResponse, error)
 	// Sync opens the sync subsystem's raw mutagen endpoint stream.
 	Sync(runID string, force bool) (io.ReadWriteCloser, error)
 }
@@ -135,7 +133,6 @@ func New(cfg Config) (*Gateway, error) {
 	g.mux.HandleFunc("GET /api/v1/capabilities", g.handleCapabilities)
 	g.mux.HandleFunc("GET /ws/events", g.handleEvents)
 	g.mux.HandleFunc("GET /ws/attach/{run}", g.handleAttach)
-	g.mux.HandleFunc("GET /ws/shell", g.handleShell)
 	g.mux.HandleFunc("GET /ws/envscan", g.handleEnvScan)
 	g.mux.HandleFunc("POST /local/v1/{verb}", g.handleLocal)
 	static := webgate.StaticHandler(cfg.Static)

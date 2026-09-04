@@ -161,31 +161,27 @@ have `push.followTags` set.
 
 ## 5. Set up your agent
 
-One command installs the agent, logs it in, and registers it:
+Choose an agent once:
 
 ```sh
-aether agent add claude --workspace myproject
+aether agent add claude
 ```
 
-For a shipped agent (claude, codex, pi, amp, opencode) the vendor's installer runs
-automatically, then you land in a shell **inside a server-created container**
-with the agent on PATH: run its login flow (pick a device-code or headless
-option, the container has no browser) and `exit` cleanly.
+For a shipped agent, the command shows its vendor install script. Open the
+environment terminal, run the script, install into `~/.local/bin`, and complete
+the vendor login there:
 
-For a name Aether does not ship it first asks how to launch the agent, Enter
-accepting the defaults (`omp {task}` and `omp -p {task}`) and `--tui` /
-`--headless` flags skipping the questions. The shell opens without an
-installer: install the executable into `~/.local/bin` per the vendor's docs,
-then log in and exit as above.
+```sh
+aether terminal
+```
 
-On exit Aether snapshots `~/.local`, persists the login state, and registers
-the agent under your membership. Shipped agents skip the questions and the
-registration. Only `~/.local` and login state persist across containers.
+For a name Aether does not ship, the command first asks for interactive and
+headless launch templates. Install that executable into `~/.local/bin` using
+the vendor's instructions, then complete its login in the environment
+terminal. Return to the dashboard when finished.
 
-If the connection drops before you exit, resume with
-`aether workspace bootstrap myproject --resume`. The individual steps
-(re-install tools, re-run a login, manage snapshots) are in
-[bootstrap.md](bootstrap.md) and [harnesses.md](harnesses.md).
+The member home persists the executable, login state, and synced profile files
+across containers. The terminal command ships in this release series.
 
 Your own agent configuration - skills, custom commands, standing
 instructions like `CLAUDE.md`, settings, plugins - is separate from the
@@ -217,9 +213,7 @@ refuses the push and names the file so you can fix it locally.
 aether run "add a health check endpoint" --agent claude
 ```
 
-The run pins the complete environment plan, including the active tool
-snapshot. Later bootstrap or rollback operations affect later runs, not this
-one.
+The run gets its own container and checkout while using your persistent home.
 
 ```
 run 01m04mhf114eap4k85n2mgcped running
@@ -387,14 +381,13 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | Symptom | Cause |
 | --- | --- |
 | `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`%AppData%\aether\config.json` on Windows) on this machine yet. |
-| `no Aether member for this key` | The server already has an admin, so you are not bootstrapping. Get an invite: [teams.md](teams.md). |
+| `no Aether member for this key` | The server already has an admin, so you are not the first member. Get an invite: [teams.md](teams.md). |
 | `unable to authenticate, attempted methods [none]` | The CLI found no usable key: none at `~/.ssh/id_ed25519`, no ssh-agent, or a passphrase-protected key with no agent to unlock it. Run `ssh-add`, or generate an unencrypted key. On Windows, check `Get-Service ssh-agent` and look for the key at `%USERPROFILE%\.ssh\id_ed25519`. |
 | `host key mismatch` / `REMOTE HOST IDENTIFICATION HAS CHANGED` on `aether link` | The server was reinstalled and generated a new host key, but your `known_hosts` still trusts the old one. Clear it: `ssh-keygen -R '[<server-host>]:2222'`. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
 | `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |
-| `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether agent add`, or select one explicitly for bootstrap and tools commands. |
-| `workspace tools verify` reports failure | The active snapshot does not contain the requested executable, or it is not executable. Bootstrap again with `--command <executable>`. |
+| `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether link` or another command that accepts a workspace selector. Agent setup is member-scoped. |
 | Run reaches `failed` immediately | The agent started and exited. `aether timeline --run <run-id>` shows the exit code; `aether attach` only works while a run is alive. |
 | `self-update is not supported on Windows` | Expected. Re-download the release binary: [install.md](install.md#manual-install). |
 
@@ -411,8 +404,8 @@ go or the next `aether link` fails.
 
 - [install.md](install.md) - systemd, upgrades, data layout
 - [environments.md](environments.md) - agent-built workspace images, verification, rollback
-- [bootstrap.md](bootstrap.md) - bootstrap shells, snapshots, and recovery
+- [environment-home.md](environment-home.md) - member home, installed agents, and migration
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
 - [teams.md](teams.md) - joining, roles, workspaces
-- [harnesses.md](harnesses.md) - login, profile sync, tool snapshots, and launch definitions
+- [harnesses.md](harnesses.md) - login, profile sync, and launch definitions
 - [security.md](security.md) - what the container boundary does and does not do

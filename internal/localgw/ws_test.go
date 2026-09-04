@@ -24,16 +24,12 @@ type wsStubBackend struct {
 	mu        sync.Mutex
 	eventsReq protocol.SubscribeRequest
 	attachReq protocol.AttachRequest
-	shellReq  protocol.WorkspaceShellRequest
 
 	eventsStream io.ReadWriteCloser
 	eventsErr    error
 	attachTerm   cli.Terminal
 	attachAck    protocol.AttachResponse
 	attachErr    error
-	shellTerm    cli.Terminal
-	shellAck     protocol.WorkspaceShellResponse
-	shellErr     error
 }
 
 func (b *wsStubBackend) Call(context.Context, string, json.RawMessage) (json.RawMessage, *protocol.Error) {
@@ -52,13 +48,6 @@ func (b *wsStubBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protoc
 	b.attachReq = req
 	b.mu.Unlock()
 	return b.attachTerm, b.attachAck, b.attachErr
-}
-
-func (b *wsStubBackend) Shell(req protocol.WorkspaceShellRequest) (cli.Terminal, protocol.WorkspaceShellResponse, error) {
-	b.mu.Lock()
-	b.shellReq = req
-	b.mu.Unlock()
-	return b.shellTerm, b.shellAck, b.shellErr
 }
 
 func (b *wsStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
@@ -400,77 +389,4 @@ func TestAttachRefusalForwardsAck(t *testing.T) {
 	if reason := expectClose(t, conn, websocket.StatusPolicyViolation); reason != "attach refused" {
 		t.Fatalf("close reason = %q, want attach refused", reason)
 	}
-}
-
-// TestShellCleanExit covers the shell happy path: valid header, ack echo,
-// output, input, resize honored, and clean EOF as 1000 "shell exited".
-func TestShellCleanExit(t *testing.T) {
-	term := newWSStubTerminal(io.EOF)
-	b := &wsStubBackend{shellTerm: term, shellAck: protocol.WorkspaceShellResponse{OK: true, Cols: 90, Rows: 30}}
-	g, base := newWSGateway(t, b)
-	conn := wsDial(t, base, "/ws/shell", g.Token())
-
-	writeWSJSON(t, conn, protocol.WorkspaceShellRequest{
-		Workspace: protocol.WorkspaceSelector{Name: "dev"},
-		Mode:      protocol.WorkspaceShellBootstrapTools,
-		Cols:      90, Rows: 30,
-	})
-	if ack := readWSJSON[protocol.WorkspaceShellResponse](t, conn); !ack.OK || ack.Cols != 90 {
-		t.Fatalf("ack = %+v", ack)
-	}
-
-	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachResize, Cols: 132, Rows: 43})
-	select {
-	case rs := <-term.resizeCh:
-		if rs != [2]uint{132, 43} {
-			t.Fatalf("resize = %v, want [132 43]", rs)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("resize never reached terminal")
-	}
-
-	term.finish()
-	if reason := expectClose(t, conn, websocket.StatusNormalClosure); reason != "shell exited" {
-		t.Fatalf("close reason = %q, want shell exited", reason)
-	}
-}
-
-// TestShellDirtyExitCloses4001: a terminal read error carrying the remote
-// exit status closes 4001 with the error text as the reason.
-func TestShellDirtyExitCloses4001(t *testing.T) {
-	term := newWSStubTerminal(errors.New("cli: remote exited with status 3"))
-	b := &wsStubBackend{shellTerm: term, shellAck: protocol.WorkspaceShellResponse{OK: true}}
-	g, base := newWSGateway(t, b)
-	conn := wsDial(t, base, "/ws/shell", g.Token())
-
-	writeWSJSON(t, conn, protocol.WorkspaceShellRequest{
-		Workspace: protocol.WorkspaceSelector{Name: "dev"},
-		Mode:      protocol.WorkspaceShellBootstrapTools,
-	})
-	if ack := readWSJSON[protocol.WorkspaceShellResponse](t, conn); !ack.OK {
-		t.Fatalf("ack = %+v", ack)
-	}
-
-	term.emit([]byte("boom")) // some output before the dirty end
-	term.finish()
-	reason := expectClose(t, conn, websocket.StatusCode(statusDirtyExit))
-	if !strings.Contains(reason, "status 3") {
-		t.Fatalf("close reason = %q, want remote exit status", reason)
-	}
-}
-
-// TestShellInvalidHeaderRefusedWithInvalidParams: a header that fails
-// Validate is refused with -32602 before the backend is dialed.
-func TestShellInvalidHeaderRefusedWithInvalidParams(t *testing.T) {
-	b := &wsStubBackend{}
-	g, base := newWSGateway(t, b)
-	conn := wsDial(t, base, "/ws/shell", g.Token())
-
-	// No workspace selector: Validate fails.
-	writeWSJSON(t, conn, protocol.WorkspaceShellRequest{Mode: protocol.WorkspaceShellBootstrapTools})
-	ack := readWSJSON[protocol.WorkspaceShellResponse](t, conn)
-	if ack.OK || ack.Code != protocol.CodeInvalidParams {
-		t.Fatalf("ack = %+v, want code %d", ack, protocol.CodeInvalidParams)
-	}
-	expectClose(t, conn, websocket.StatusPolicyViolation)
 }

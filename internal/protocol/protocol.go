@@ -14,7 +14,7 @@ import (
 const (
 	// Version is the protocol version reported by server.info; the CLI
 	// refuses to talk to a server with a different one.
-	Version = "2"
+	Version = "3"
 
 	// SubsystemControl is the JSON-RPC control channel.
 	SubsystemControl = "aether-control"
@@ -22,9 +22,6 @@ const (
 	SubsystemEvents = "aether-events"
 	// SubsystemAttach is the raw PTY attach channel.
 	SubsystemAttach = "aether-attach"
-	// SubsystemWorkspaceShell is the unified bootstrap and harness-login
-	// channel.
-	SubsystemWorkspaceShell = "aether-workspace-shell"
 	// SubsystemSync is the live file-overlay channel: one mutagen remote
 	// endpoint stream bridging a member's local directory to a run
 	// worktree.
@@ -58,14 +55,6 @@ const (
 	MethodRunRelaunch   = "run.relaunch"
 	MethodRunHandoff    = "run.handoff"
 	MethodRunPull       = "run.pull"
-)
-
-// Workspace tool snapshot control methods.
-const (
-	MethodWorkspaceToolsList     = "workspace.tools.list"
-	MethodWorkspaceToolsVerify   = "workspace.tools.verify"
-	MethodWorkspaceToolsRollback = "workspace.tools.rollback"
-	MethodWorkspaceToolsReset    = "workspace.tools.reset"
 )
 
 // Custom agent (harness) onboarding methods.

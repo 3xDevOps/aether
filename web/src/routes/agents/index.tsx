@@ -1,7 +1,5 @@
-// The agents surface: what harnesses this server can run (shipped and
-// member-registered), and `agent add` as a wizard around the agent-setup
-// shell. Registration is entirely server-side - a clean shell exit - so the
-// list refetches on that signal rather than being written optimistically.
+// The agents surface lists shipped and member-registered harnesses. Adding an
+// agent records a member definition after setup in the environment terminal.
 
 import { useCallback, useEffect, useState } from 'react'
 import { message } from '@/lib/format'
@@ -72,10 +70,7 @@ function AgentsView() {
             onCancel={() => setAdding(false)}
           />
         ) : (
-          // agent.register lands with the shell's clean exit, and the setup
-          // shell itself rides /ws/shell - both must be on this gateway.
-          caps.hasMethod('agent.register') &&
-          caps.hasWS('shell') && (
+          caps.hasMethod('agent.register') && (
             <div>
               <Button size="sm" onClick={() => setAdding(true)}>
                 Add agent

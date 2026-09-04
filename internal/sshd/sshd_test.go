@@ -168,11 +168,10 @@ func (p *fakePTY) setErr(err error) {
 
 // fakeRuns records RunController calls and returns the configured error.
 type fakeRuns struct {
-	mu        sync.Mutex
-	err       error
-	calls     []string
-	paused    map[domain.RunID]bool
-	setupHook func(conn io.ReadWriter) error
+	mu     sync.Mutex
+	err    error
+	calls  []string
+	paused map[domain.RunID]bool
 }
 
 func (f *fakeRuns) record(call string) error {
@@ -253,22 +252,6 @@ func (f *fakeRuns) Relaunch(_ context.Context, run domain.RunID, actor domain.Me
 
 func (f *fakeRuns) EnsureRunShellTab(_ context.Context, run domain.RunID, tab string, cols, rows uint) error {
 	return f.record(fmt.Sprintf("run-shell:%s:%s:%d:%d", run, tab, cols, rows))
-}
-func (f *fakeRuns) WorkspaceShell(_ context.Context, member domain.MemberID, req domain.WorkspaceShellRequest, cols, rows uint, conn io.ReadWriter, _ <-chan [2]uint) error {
-	if err := f.record(fmt.Sprintf("workspace-shell:%s:%s:%s:%d:%d", member, req.Mode, req.Harness, cols, rows)); err != nil {
-		return err
-	}
-	if _, err := conn.Write([]byte("workspace-shell-ready\n")); err != nil {
-		return err
-	}
-	f.mu.Lock()
-	hook := f.setupHook
-	f.mu.Unlock()
-	if hook != nil {
-		return hook(conn)
-	}
-	_, _ = io.Copy(io.Discard, conn)
-	return nil
 }
 
 type testEnv struct {

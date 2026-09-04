@@ -329,255 +329,6 @@ func (d *DB) SetWorkspaceSteerOthers(ctx context.Context, id domain.WorkspaceID,
 	return err
 }
 
-// Tool snapshots
-
-func (d *DB) CreateToolSnapshot(ctx context.Context, s *domain.ToolSnapshot) error {
-	id, ts, err := prepareCreate(s.CreatedAt)
-	if err != nil {
-		return err
-	}
-	if s.ID != "" {
-		id = string(s.ID)
-	}
-	manifest, err := json.Marshal(s.Manifest)
-	if err != nil {
-		return fmt.Errorf("store: encode tool manifest: %w", err)
-	}
-	createdAt, err := encodeTime(ts)
-	if err != nil {
-		return fmt.Errorf("store: create tool snapshot: %w", err)
-	}
-	_, err = d.db.ExecContext(ctx, `INSERT INTO tool_snapshots
-		(id, workspace_id, member_id, digest, manifest, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		id, s.WorkspaceID, s.MemberID, s.Digest, string(manifest), createdAt)
-	if err != nil {
-		return fmt.Errorf("store: create tool snapshot: %w", mapConstraint(err, ErrNotFound))
-	}
-	s.ID, s.CreatedAt = domain.ToolSnapshotID(id), ts
-	return nil
-}
-
-func scanToolSnapshot(row interface{ Scan(...any) error }) (*domain.ToolSnapshot, error) {
-	var s domain.ToolSnapshot
-	var manifest string
-	var createdAt int64
-	if err := row.Scan(&s.ID, &s.WorkspaceID, &s.MemberID, &s.Digest, &manifest, &createdAt); err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal([]byte(manifest), &s.Manifest); err != nil {
-		return nil, fmt.Errorf("store: decode tool manifest: %w", err)
-	}
-	s.CreatedAt = decodeTime(createdAt)
-	return &s, nil
-}
-
-const toolSnapshotCols = `id, workspace_id, member_id, digest, manifest, created_at`
-
-func (d *DB) GetToolSnapshot(ctx context.Context, id domain.ToolSnapshotID) (*domain.ToolSnapshot, error) {
-	s, err := scanToolSnapshot(d.db.QueryRowContext(ctx,
-		`SELECT `+toolSnapshotCols+` FROM tool_snapshots WHERE id = ?`, id))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get tool snapshot: %w", err)
-	}
-	return s, nil
-}
-
-func (d *DB) ListToolSnapshots(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) ([]*domain.ToolSnapshot, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT `+toolSnapshotCols+`
-		FROM tool_snapshots WHERE member_id = ? AND workspace_id = ?
-		ORDER BY created_at DESC, id DESC`, member, workspace)
-	if err != nil {
-		return nil, fmt.Errorf("store: list tool snapshots: %w", err)
-	}
-	return collect(rows, scanToolSnapshot)
-}
-
-func (d *DB) DeleteToolSnapshot(ctx context.Context, id domain.ToolSnapshotID) error {
-	var active, pending, live int
-	if err := d.db.QueryRowContext(ctx, `SELECT EXISTS(
-		SELECT 1 FROM tool_heads WHERE snapshot_id = ?)`, id).Scan(&active); err != nil {
-		return fmt.Errorf("store: check active tool snapshot: %w", err)
-	}
-	if err := d.db.QueryRowContext(ctx, `SELECT EXISTS(
-		SELECT 1 FROM pending_workspace_shells WHERE snapshot_id = ?)`, id).Scan(&pending); err != nil {
-		return fmt.Errorf("store: check pending tool snapshot: %w", err)
-	}
-	var liveStatuses []string
-	for _, status := range domain.AllRunStatuses {
-		if !status.Terminal() {
-			liveStatuses = append(liveStatuses, "?")
-		}
-	}
-	args := []any{id}
-	for _, status := range domain.AllRunStatuses {
-		if !status.Terminal() {
-			args = append(args, status)
-		}
-	}
-	if err := d.db.QueryRowContext(ctx, `SELECT EXISTS(
-		SELECT 1 FROM runs WHERE tool_snapshot_id = ? AND status IN (`+
-		strings.Join(liveStatuses, ", ")+`))`, args...).Scan(&live); err != nil {
-		return fmt.Errorf("store: check live tool snapshot runs: %w", err)
-	}
-	if active != 0 || pending != 0 || live != 0 {
-		return fmt.Errorf("store: delete tool snapshot: %w", ErrInUse)
-	}
-	return d.execDelete(ctx, "delete tool snapshot",
-		`DELETE FROM tool_snapshots WHERE id = ?`, id)
-}
-
-func (d *DB) SetToolHead(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, id domain.ToolSnapshotID) error {
-	if id == "" {
-		_, err := d.db.ExecContext(ctx, `DELETE FROM tool_heads
-			WHERE member_id = ? AND workspace_id = ?`, member, workspace)
-		return err
-	}
-	var exists int
-	if err := d.db.QueryRowContext(ctx, `SELECT 1 FROM tool_snapshots
-		WHERE id = ? AND member_id = ? AND workspace_id = ?`, id, member, workspace).Scan(&exists); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		return fmt.Errorf("store: validate tool head: %w", err)
-	}
-	_, err := d.db.ExecContext(ctx, `INSERT INTO tool_heads
-		(member_id, workspace_id, snapshot_id) VALUES (?, ?, ?)
-		ON CONFLICT(member_id, workspace_id) DO UPDATE SET snapshot_id = excluded.snapshot_id`,
-		member, workspace, id)
-	if err != nil {
-		return fmt.Errorf("store: set tool head: %w", mapConstraint(err, ErrNotFound))
-	}
-	return nil
-}
-
-func (d *DB) GetToolHead(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) (*domain.ToolSnapshot, error) {
-	s, err := scanToolSnapshot(d.db.QueryRowContext(ctx, `SELECT
-		s.id, s.workspace_id, s.member_id, s.digest, s.manifest, s.created_at
-		FROM tool_snapshots s JOIN tool_heads h ON h.snapshot_id = s.id
-		WHERE h.member_id = ? AND h.workspace_id = ?`, member, workspace))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get tool head: %w", err)
-	}
-	return s, nil
-}
-
-func (d *DB) SetActiveToolSnapshot(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, id domain.ToolSnapshotID) error {
-	return d.SetToolHead(ctx, member, workspace, id)
-}
-
-func (d *DB) GetActiveToolSnapshot(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) (*domain.ToolSnapshot, error) {
-	return d.GetToolHead(ctx, member, workspace)
-}
-
-func (d *DB) PruneToolSnapshots(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID, keep int) error {
-	if keep < 0 {
-		return fmt.Errorf("store: prune tool snapshots: negative keep")
-	}
-	rows, err := d.ListToolSnapshots(ctx, member, workspace)
-	if err != nil {
-		return err
-	}
-	for i, s := range rows {
-		if i < keep {
-			continue
-		}
-		if err := d.DeleteToolSnapshot(ctx, s.ID); err != nil && !errors.Is(err, ErrInUse) {
-			return err
-		}
-	}
-	return nil
-}
-
-// Pending workspace shells
-
-func (d *DB) CreatePendingWorkspaceShell(ctx context.Context, s *PendingWorkspaceShell) error {
-	id, ts, err := prepareCreate(s.CreatedAt)
-	if err != nil {
-		return err
-	}
-	updated := s.UpdatedAt
-	if updated.IsZero() {
-		updated = ts
-	}
-	updatedAt, err := encodeTime(updated)
-	if err != nil {
-		return fmt.Errorf("store: create pending shell: %w", err)
-	}
-	createdAt, err := encodeTime(ts)
-	if err != nil {
-		return fmt.Errorf("store: create pending shell: %w", err)
-	}
-	if _, err := d.db.ExecContext(ctx, `INSERT INTO pending_workspace_shells
-		(id, workspace_id, member_id, snapshot_id, staging_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, id, s.WorkspaceID, s.MemberID, s.SnapshotID,
-		s.StagingID, createdAt, updatedAt); err != nil {
-		return fmt.Errorf("store: create pending shell: %w", mapConstraint(err, ErrNotFound))
-	}
-	s.ID, s.CreatedAt, s.UpdatedAt = id, ts, updated
-	return nil
-}
-
-func scanPendingWorkspaceShell(row interface{ Scan(...any) error }) (*PendingWorkspaceShell, error) {
-	var s PendingWorkspaceShell
-	var createdAt, updatedAt int64
-	if err := row.Scan(&s.ID, &s.WorkspaceID, &s.MemberID, &s.SnapshotID,
-		&s.StagingID, &createdAt, &updatedAt); err != nil {
-		return nil, err
-	}
-	s.CreatedAt, s.UpdatedAt = decodeTime(createdAt), decodeTime(updatedAt)
-	return &s, nil
-}
-
-const pendingWorkspaceShellCols = `id, workspace_id, member_id, snapshot_id, staging_id, created_at, updated_at`
-
-func (d *DB) GetPendingWorkspaceShell(ctx context.Context, id string) (*PendingWorkspaceShell, error) {
-	s, err := scanPendingWorkspaceShell(d.db.QueryRowContext(ctx,
-		`SELECT `+pendingWorkspaceShellCols+` FROM pending_workspace_shells WHERE id = ?`, id))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get pending shell: %w", err)
-	}
-	return s, nil
-}
-
-// ListPendingWorkspaceShellsBefore returns a bounded batch of stale shells.
-func (d *DB) ListPendingWorkspaceShellsBefore(ctx context.Context, before time.Time, limit int) ([]*PendingWorkspaceShell, error) {
-	if limit <= 0 {
-		return nil, nil
-	}
-	rows, err := d.db.QueryContext(ctx, `SELECT `+pendingWorkspaceShellCols+`
-		FROM pending_workspace_shells WHERE updated_at < ? ORDER BY updated_at LIMIT ?`,
-		before.UTC().UnixNano(), limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return collect(rows, scanPendingWorkspaceShell)
-}
-func (d *DB) ListPendingWorkspaceShells(ctx context.Context, member domain.MemberID, workspace domain.WorkspaceID) ([]*PendingWorkspaceShell, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT `+pendingWorkspaceShellCols+`
-		FROM pending_workspace_shells WHERE member_id = ? AND workspace_id = ? ORDER BY id`,
-		member, workspace)
-	if err != nil {
-		return nil, fmt.Errorf("store: list pending shells: %w", err)
-	}
-	return collect(rows, scanPendingWorkspaceShell)
-}
-
-func (d *DB) DeletePendingWorkspaceShell(ctx context.Context, id string) error {
-	return d.execDelete(ctx, "delete pending shell",
-		`DELETE FROM pending_workspace_shells WHERE id = ?`, id)
-}
-
 // Harness definitions
 
 const harnessDefinitionCols = `member_id, name, definition, created_at, updated_at`
@@ -833,11 +584,11 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 	if _, err := d.db.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
-		                   finished_at, profile_snapshot_id, tool_snapshot_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   finished_at, profile_snapshot_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.ToolSnapshotID,
+		r.ProfileSnapshotID,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -853,7 +604,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
-		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.ToolSnapshotID); err != nil {
+		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
@@ -863,7 +614,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 }
 
 const runCols = `id, workspace_id, member_id, task, harness, mode, status,
-	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id, tool_snapshot_id`
+	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id`
 
 func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 	r, err := scanRun(d.db.QueryRowContext(ctx,
@@ -933,11 +684,11 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		`UPDATE runs SET workspace_id = ?, member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
-		     profile_snapshot_id = ?, tool_snapshot_id = ?
+		     profile_snapshot_id = ?
 		 WHERE id = ?`,
 		r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.ToolSnapshotID, r.ID))
+		r.ProfileSnapshotID, r.ID))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -979,44 +730,6 @@ func (d *DB) TransferRun(ctx context.Context, id domain.RunID, to domain.MemberI
 		err = fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
 	}
 	return err
-}
-
-// SetRunToolSnapshot updates only the run's tool snapshot pin. A non-empty
-// snapshot must belong to the run's current member and workspace, and the
-// ownership check is part of the update so a concurrent handoff cannot be
-// overwritten by a stale run object.
-func (d *DB) SetRunToolSnapshot(ctx context.Context, id domain.RunID, snapshot domain.ToolSnapshotID) error {
-	var (
-		res sql.Result
-		err error
-	)
-	if snapshot == "" {
-		res, err = d.db.ExecContext(ctx,
-			`UPDATE runs SET tool_snapshot_id = '' WHERE id = ?`, id)
-	} else {
-		res, err = d.db.ExecContext(ctx, `
-			UPDATE runs
-			SET tool_snapshot_id = ?
-			WHERE id = ?
-			  AND EXISTS (
-				SELECT 1
-				FROM tool_snapshots ts
-				WHERE ts.id = ?
-				  AND ts.member_id = runs.member_id
-				  AND ts.workspace_id = runs.workspace_id
-			  )`, snapshot, id, snapshot)
-	}
-	if err != nil {
-		return fmt.Errorf("store: set run tool snapshot: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("store: set run tool snapshot: %w", err)
-	}
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 func (d *DB) SetRunProtected(ctx context.Context, id domain.RunID, protected bool) error {

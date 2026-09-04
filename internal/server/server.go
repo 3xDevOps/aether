@@ -18,6 +18,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/adapter"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/gitengine"
+	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/reachability"
@@ -26,7 +28,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/toolenv"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -205,31 +206,51 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}); err != nil {
 		return nil, err
 	}
-	profDir := filepath.Join(cfg.DataDir, "profiles")
-	prof, perr := profile.New(s.db, profDir)
+	prof, perr := profile.New(s.db)
 	if perr != nil {
 		return nil, perr
 	}
-	tools, terr := toolenv.NewManager(filepath.Join(cfg.DataDir, "toolenv"), s.db)
-	if terr != nil {
-		return nil, terr
+	homesRoot := filepath.Join(cfg.DataDir, "homes")
+	homes, herr := memberhome.New(homesRoot)
+	if herr != nil {
+		return nil, fmt.Errorf("server: create member homes: %w", herr)
+	}
+	names := make([]string, 0, len(harness.Profiles()))
+	for _, p := range harness.Profiles() {
+		names = append(names, p.Name)
+	}
+	members, merr := s.db.ListMembers(ctx)
+	if merr != nil {
+		return nil, fmt.Errorf("server: list members for home migration: %w", merr)
+	}
+	for _, member := range members {
+		definitions, derr := s.db.ListHarnessDefinitions(ctx, member.ID)
+		if derr != nil {
+			return nil, fmt.Errorf("server: list harness definitions for member %q: %w", member.ID, derr)
+		}
+		for _, definition := range definitions {
+			names = append(names, definition.Name)
+		}
+	}
+	if merr := memberhome.MigrateLegacyHomes(homesRoot, names); merr != nil {
+		return nil, fmt.Errorf("server: migrate legacy homes: %w", merr)
+	}
+	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
+		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
 	if s.sched, err = scheduler.New(scheduler.Config{
-		Store:        s.db,
-		Runtime:      s.rt,
-		Bus:          s.bus,
-		Git:          lazyGit{s.git},
-		PTY:          s.pty,
-		StateDir:     filepath.Join(cfg.DataDir, "scheduler"),
-		HomesDir:     filepath.Join(cfg.DataDir, "homes"),
-		ReposDir:     filepath.Join(cfg.DataDir, "repos"),
-		ProfilesDir:  profDir,
-		Profiles:     prof,
-		Toolenv:      tools,
-		EnvEditDir:   filepath.Join(cfg.DataDir, "env-edits"),
-		NeutralImage: cfg.NeutralImage,
-		Harnesses:    cfg.Harnesses,
-
+		Store:          s.db,
+		Runtime:        s.rt,
+		Bus:            s.bus,
+		Git:            lazyGit{s.git},
+		PTY:            s.pty,
+		StateDir:       filepath.Join(cfg.DataDir, "scheduler"),
+		Homes:          homes,
+		ReposDir:       filepath.Join(cfg.DataDir, "repos"),
+		Profiles:       prof,
+		EnvEditDir:     filepath.Join(cfg.DataDir, "env-edits"),
+		NeutralImage:   cfg.NeutralImage,
+		Harnesses:      cfg.Harnesses,
 		StallThreshold: cfg.StallThreshold,
 		PollInterval:   cfg.PollInterval,
 		CheckoutTTL:    cfg.CheckoutTTL,
@@ -258,7 +279,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Git:               lazyGit{s.git},
 		PTY:               s.pty,
 		Runs:              s.sched,
-		Toolenv:           tools,
+		Homes:             homes,
 		WhoIs:             whois,
 		TailnetAutoJoin:   cfg.TailnetAutoJoin,
 		TailnetRequireKey: cfg.TailnetRequireKey,

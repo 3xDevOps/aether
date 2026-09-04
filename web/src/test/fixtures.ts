@@ -21,7 +21,6 @@ import type {
   ServerInfo,
   ServerUpdateStatus,
   Template,
-  ToolSnapshot,
   UpdateStatus,
   Workspace,
 } from '@/lib/types'
@@ -131,21 +130,14 @@ export function schedule(over: Partial<Schedule> = {}): Schedule {
   }
 }
 
-export function toolSnapshot(over: Partial<ToolSnapshot> = {}): ToolSnapshot {
-  return {
-    id: 'tsn_1',
-    workspace_id: workspace.id,
-    member_id: alice.id,
-    digest: 'sha256:abcd1234',
-    manifest: { executable: 'claude', version: '1.0.0' },
-    created_at: '2026-08-14T08:30:00Z',
-    active: true,
-    ...over,
-  }
-}
 
 export function agentInfo(over: Partial<AgentInfo> = {}): AgentInfo {
-  return { name: 'claude', source: 'shipped', ...over }
+  return {
+    name: 'claude',
+    source: 'shipped',
+    install_script: 'curl -fsSL https://claude.ai/install.sh | bash',
+    ...over,
+  }
 }
 
 export function budget(
@@ -381,7 +373,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       (runID: string, tab: string) =>
         `ws://localhost/ws/attach/${runID}?shell=${encodeURIComponent(tab)}`,
     ),
-    shellSocket: vi.fn(() => 'ws://localhost/ws/shell'),
     memberInvite: vi.fn(async () => ({
       code: 'inv-code-1',
       expires_at: '2026-08-15T10:00:00Z',
@@ -393,10 +384,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceSettings: vi.fn(async () => workspace),
-    toolsList: vi.fn(async () => [toolSnapshot()]),
-    toolsVerify: vi.fn(async () => ({ verified: true })),
-    toolsRollback: vi.fn(async () => ({})),
-    toolsReset: vi.fn(async () => ({ reset: true })),
     budgetSet: vi.fn(async () => budget(workspace.id)),
     templateSave: vi.fn(async () => template),
     templateDelete: vi.fn(async () => ({})),
@@ -442,7 +429,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     agentList: vi.fn(async () => [
       agentInfo(),
-      agentInfo({ name: 'myagent', source: 'member' }),
+      agentInfo({ name: 'myagent', source: 'member', install_script: undefined }),
     ]),
     agentRegister: vi.fn(async () => ({})),
     runProtect: vi.fn(async () => ({})),

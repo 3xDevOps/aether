@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -30,6 +32,7 @@ type ProfileService interface {
 	Latest(ctx context.Context, member, harness string) (domain.ProfileSnapshot, error)
 	List(ctx context.Context, member, harness string) ([]domain.ProfileSnapshot, error)
 	Rollback(ctx context.Context, member, harness string, id domain.ProfileSnapshotID) error
+	Materialize(ctx context.Context, id domain.ProfileSnapshotID, destDir string) error
 }
 
 func (s *Server) profilePush(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -67,6 +70,10 @@ func (s *Server) profilePush(ctx context.Context, member domain.MemberID, params
 	}
 	snap, err := s.cfg.Profiles.Put(ctx, string(member), p.Harness, files)
 	if err != nil {
+		return nil, profileError(err)
+	}
+
+	if err := s.materializeProfile(ctx, member, p.Harness, snap); err != nil {
 		return nil, profileError(err)
 	}
 	if p.WorkspaceID != "" && len(p.AllowSecret) > 0 {
@@ -148,9 +155,42 @@ func (s *Server) profileRollback(ctx context.Context, member domain.MemberID, pa
 	if err != nil {
 		return nil, profileError(err)
 	}
+	if err := s.materializeProfile(ctx, member, p.Harness, head); err != nil {
+		return nil, profileError(err)
+	}
 	return protocol.ProfileRollbackResult{Snapshot: protocol.ProfileSnapshotFromDomain(head)}, nil
 }
 
+func (s *Server) materializeProfile(ctx context.Context, member domain.MemberID, harnessName string, snap domain.ProfileSnapshot) error {
+	if s.cfg.Homes == nil {
+		return nil
+	}
+	profileDef, shipped := harness.Lookup(harnessName)
+	if !shipped {
+		row, err := s.cfg.Store.GetHarnessDefinition(ctx, member, harnessName)
+		if err != nil {
+			return fmt.Errorf("resolve harness %q: %w", harnessName, err)
+		}
+		var definition harness.Definition
+		if err := json.Unmarshal(row.Definition, &definition); err != nil {
+			return fmt.Errorf("decode harness %q definition: %w", harnessName, err)
+		}
+		profileDef = definition.Profile()
+	}
+	if profileDef.LocalRoot == "" {
+		return nil
+	}
+	homePath, err := s.cfg.Homes.Path(member)
+	if err != nil {
+		return fmt.Errorf("resolve home for member %q: %w", member, err)
+	}
+	destDir := filepath.Join(homePath, filepath.FromSlash(harness.HomeRelative(profileDef.LocalRoot)))
+	if err := s.cfg.Profiles.Materialize(ctx, snap.ID, destDir); err != nil {
+		return fmt.Errorf("materialize profile %s into %s: %w", snap.ID, destDir, err)
+	}
+	return nil
+
+}
 func assemblePushFiles(ctx context.Context, svc ProfileService, member string, p protocol.ProfilePushParams) ([]profile.File, error) {
 	if len(p.Files) > 0 {
 		out := make([]profile.File, 0, len(p.Files))

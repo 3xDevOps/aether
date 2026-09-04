@@ -106,8 +106,6 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 				handler = func() { s.serveEvents(ctx, member, ch) }
 			case protocol.SubsystemAttach:
 				handler = func() { s.serveAttach(ctx, member, st, ch) }
-			case protocol.SubsystemWorkspaceShell:
-				handler = func() { s.serveWorkspaceShell(ctx, member, st, ch) }
 			case protocol.SubsystemSync:
 				handler = func() { s.serveSync(ctx, member, ch) }
 			}

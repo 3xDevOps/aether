@@ -14,10 +14,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -25,10 +23,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/toolenv"
 )
 
 // ErrInvalidTransition is returned when a steering call or lifecycle step
@@ -53,13 +51,11 @@ type Config struct {
 	Git           GitEngine
 	PTY           PTYHost
 	StateDir      string
-	HomesDir      string
-	ProfilesDir   string
+	Homes         *memberhome.Manager
 	Profiles      profileService
 	ReposDir      string
 	WorktreeMount string
 	NeutralImage  string
-	Toolenv       *toolenv.Manager
 	// EnvEditDir is the server-owned scratch root for environment edit
 	// runs: each edit gets its own 0700 directory under it for the
 	// agent's output pair, removed when the edit ends. Empty refuses
@@ -73,19 +69,15 @@ type Config struct {
 	// would start below it is refused with ErrDiskFull rather than filling
 	// the disk out from under the runs already on it. Runs already
 	// provisioned are never touched - the branch is the artifact and a
-	// half-written checkout is worse than a refused one. Zero applies
-	// DefaultMinFreeBytes; negative disables the floor.
+	// half-written checkout is worse than a refused one.
 	MinFreeBytes int64
 	// Harnesses overrides or extends the shipped harness registry
 	// (internal/harness: claude, codex, pi, amp, opencode, custom); "fake"
 	// (the deterministic e2e agent) is registered here by default. An
-	// override replaces the registry argv but keeps the registry
-	// profile's credential paths, env passthrough, and user mapping -
-	// this is also how a deployment supplies the "custom" command. The
-	// registry's MCP registration and resume flags belong to the CLI it
-	// ships with, so an overridden harness never has either appended: its
-	// conflict coordination degrades to the overlap notice, and a relaunch
-	// starts the agent fresh.
+	// override replaces the registry argv but retains the profile's user,
+	// environment passthrough, resume, and coordination settings. Member
+	// definitions shape argv inside that member's own container and do not
+	// leak across members.
 	Harnesses map[string]HarnessSpec
 }
 
@@ -133,10 +125,6 @@ type Scheduler struct {
 	// Entries are created on first use and kept for the scheduler's life.
 	runShellLocks   map[domain.RunID]*sync.Mutex
 	credentialUsers map[*credentialUserReservation]struct{}
-	// agentSetups serializes agent-setup shells per member+harness: the
-	// exit-time pair of writes (tool promotion, definition upsert) must
-	// not interleave between two sessions.
-	agentSetups map[string]struct{}
 	// envBuildLocks serializes environment builds (and rollbacks) per
 	// workspace: one build at a time per workspace, later callers wait.
 	// Entries are created on first use and kept for the scheduler's life.
@@ -154,12 +142,11 @@ type Scheduler struct {
 	shells int
 }
 
-// credentialUserReservation protects one writable member+harness
-// credential home from ownership changes while its container is live.
-// Root containers do not need a reservation because they skip chown.
+// credentialUserReservation protects one writable member home from
+// ownership changes while its container is live. Root containers do not
+// need a reservation because they skip chown.
 type credentialUserReservation struct {
 	memberID domain.MemberID
-	harness  string
 	user     string
 	owner    string
 	run      *supervised
@@ -171,12 +158,10 @@ type supervised struct {
 	workspaceID domain.WorkspaceID
 	containerID runtime.ID
 	task        string
-	// memberID and harness identify the credential home
-	// (<homes>/<member>/<harness>) the run's mounts share with every
-	// other live run of the same pair.
+	// memberID identifies the persistent home shared by every live run
+	// belonging to the member.
 	memberID domain.MemberID
 	harness  string
-
 	// Mutated only under Scheduler.mu.
 	status        domain.RunStatus
 	startedAt     time.Time
@@ -241,12 +226,9 @@ func New(cfg Config) (*Scheduler, error) {
 	if cfg.MinFreeBytes == 0 {
 		cfg.MinFreeBytes = DefaultMinFreeBytes
 	}
-	if cfg.HomesDir != "" && cfg.ProfilesDir == "" {
-		cfg.ProfilesDir = filepath.Join(filepath.Dir(cfg.HomesDir), "profiles")
-	}
-	if cfg.Profiles == nil && cfg.HomesDir != "" {
+	if cfg.Profiles == nil {
 		if db, ok := cfg.Store.(*store.DB); ok {
-			svc, err := profile.New(db, cfg.ProfilesDir)
+			svc, err := profile.New(db)
 			if err != nil {
 				return nil, fmt.Errorf("scheduler: profile service: %w", err)
 			}
@@ -255,11 +237,6 @@ func New(cfg Config) (*Scheduler, error) {
 	}
 	if err := os.MkdirAll(cfg.StateDir, 0o755); err != nil {
 		return nil, fmt.Errorf("scheduler: create state dir: %w", err)
-	}
-	if cfg.ProfilesDir != "" {
-		if err := os.MkdirAll(filepath.Join(cfg.ProfilesDir, "runs"), 0o755); err != nil {
-			return nil, fmt.Errorf("scheduler: create profiles dir: %w", err)
-		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Scheduler{
@@ -277,18 +254,6 @@ func New(cfg Config) (*Scheduler, error) {
 // checkout-GC loops until ctx is done or Close is called. Shutting down
 // never stops containers; supervision simply ends.
 func (s *Scheduler) Start(ctx context.Context) error {
-	if s.cfg.Toolenv != nil {
-		if removed, err := s.cfg.Toolenv.CleanupPending(ctx, 24*time.Hour, 128); err != nil {
-			slog.Warn("scheduler: pending bootstrap cleanup failed", "error", err)
-		} else if removed > 0 {
-			slog.Info("scheduler: stale bootstrap sessions cleaned", "count", removed)
-		}
-		if removed, err := s.cfg.Toolenv.CleanupAbandonedStaging(ctx, 24*time.Hour, 128); err != nil {
-			slog.Warn("scheduler: staging cleanup failed", "error", err)
-		} else if removed > 0 {
-			slog.Info("scheduler: stale staging cleaned", "count", removed)
-		}
-	}
 	if err := s.recoverRuns(ctx); err != nil {
 		return err
 	}

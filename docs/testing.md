@@ -33,9 +33,9 @@ container surfaces from the test process. Scenarios:
 | Test | Scenario |
 | --- | --- |
 | `TestIntegrationEndToEnd` (`integration_test.go`) | Solo lifecycle, the acceptance gate: seed over git push -> launch -> attach -> detach -> reattach -> steer -> finish -> pull, with the bus traffic checked against the Wave 1 contract |
-| Gateway (`internal/localgw`) | The `aether gui` HTTP/WS surface, covered by unit tests against a stub backend rather than a server E2E: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror, steer, and shell channels (`ws_test.go`) |
-| `TestIntegrationMultiMember` (`multimember_integration_test.go`) | Three clients: tailnet bootstrap/pending/approve and invite-code key joins, WhoIs-down fallback with banner, remote administration, steering another member's run, presence roster, handoff, approval inbox, budget cap and override, agent crash -> `failed` + `wip:` commit |
-| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Profile sync and harness logins: a login in the setup shell persists into two runs, push -> next run sees it, mid-run push never touches a running agent, denylisted credential names refused from pushes (Docker only - it needs a real shell) |
+| Gateway (`internal/localgw`) | The `aether gui` HTTP/WS surface, covered by unit tests against a stub backend rather than a server E2E: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror and steer channels (`ws_test.go`) |
+| `TestIntegrationMultiMember` (`multimember_integration_test.go`) | Three clients: tailnet initial join and invite-code key joins, WhoIs-down fallback with banner, remote administration, steering another member's run, presence roster, handoff, approval inbox, budget cap and override, agent crash -> `failed` + `wip:` commit |
+| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Profile sync and harness logins: a login in the environment terminal persists into two runs, push -> next run sees it, mid-run push never touches a running agent, denylisted credential names refused from pushes (Docker only - it needs a real terminal) |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
 | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootLostContainer` (`chaos_reboot_integration_test.go`) | The server SIGKILLed mid-run: supervision reattaches to a surviving container (steer and finalize both still work) or, when the container went with it, commits `wip:`, publishes the branch, marks the run interrupted and relaunches it. SQLite and git are read back after the kill |
 | `TestIntegrationChaosDiskPressure`, `TestIntegrationChaosStallUX` (`chaos_pressure_integration_test.go`) | Worktree TTL GC under load with the branches surviving, the gauge's three-way breakdown following the reclaim, new runs refused below the free-space floor, and a silent agent parking at needs-attention and coming back |
@@ -47,9 +47,8 @@ container surfaces from the test process. Scenarios:
 SIGKILLed, and the whole point of that row is that nothing on the shutdown
 path runs: the next boot only sees what SQLite and git had already made
 durable. The child binary is built once per test binary, the store is seeded
-directly before the first boot (a child has no bootstrap path a test can
-drive), and it binds a reserved loopback port so a restart can claim the
-same address. It always builds its own Docker runtime, so those two
+before startup, and it binds a reserved loopback port so a restart can claim
+the same address. It always builds its own Docker runtime, so those two
 scenarios skip without a reachable daemon rather than falling back, and they
 address containers by the name the runtime derives from the run ID.
 

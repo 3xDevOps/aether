@@ -265,29 +265,13 @@ export interface WorkspaceSelector {
   name?: string
 }
 
-/** Stable executable metadata; never a server filesystem path. */
-export interface ToolManifest {
-  executable?: string
-  version?: string
-  metadata?: Record<string, string>
-}
-
-/** Immutable member/workspace tool snapshot (internal/protocol/tools.go). */
-export interface ToolSnapshot {
-  id: string
-  workspace_id: string
-  member_id: string
-  digest: string
-  manifest: ToolManifest
-  created_at: string
-  /** Set on the snapshot currently active for the workspace. */
-  active?: boolean
-}
 
 /** One entry of agent.list; source is who supplied the harness. */
 export interface AgentInfo {
   name: string
   source: 'shipped' | 'member'
+  /** Vendor installer command for shipped harnesses, when available. */
+  install_script?: string
 }
 
 /** A member-supplied custom harness launch definition (agent.register). */
