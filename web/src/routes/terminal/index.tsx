@@ -47,6 +47,7 @@ function TerminalView({ params }: RouteProps) {
     writeRef.current = initialTerminal.write
 
     const attachment = connectAttach(() => api.attachSocket(runID), {
+      onData: (chunk) => terminal.write(chunk),
       // Every attach starts with the server's transcript replay, so the pane
       // is never blank - and clearing first keeps a reconnect from stacking a
       // second copy of the scrollback under the first.
