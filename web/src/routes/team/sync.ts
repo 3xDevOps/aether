@@ -85,6 +85,25 @@ export async function heartbeat(store: RootStore, client: Api = api): Promise<vo
 }
 
 /**
+ * Every field the gauge reads. The totals move the bar and the components
+ * fill the tooltip, so comparing the totals alone would pin a stale
+ * breakdown - a server that starts reporting a new component while its
+ * totals sit still would never reach the tooltip.
+ */
+function sameDisk(a: DiskUsage | undefined, b: DiskUsage): boolean {
+  return (
+    a !== undefined &&
+    a.used_bytes === b.used_bytes &&
+    a.total_bytes === b.total_bytes &&
+    a.free_bytes === b.free_bytes &&
+    a.worktree_bytes === b.worktree_bytes &&
+    a.transcript_bytes === b.transcript_bytes &&
+    a.database_bytes === b.database_bytes &&
+    a.repo_bytes === b.repo_bytes
+  )
+}
+
+/**
  * Disk usage rides on `server.info` even though it arrives on its own
  * route: the status bar's gauge is the client's one reader of it, and the
  * shared `server.info` result cannot carry it. Only a real change is
@@ -92,13 +111,7 @@ export async function heartbeat(store: RootStore, client: Api = api): Promise<vo
  */
 function rememberDisk(disk: DiskUsage): void {
   const s = useStore.getState()
-  if (
-    !s.info ||
-    (s.info.disk?.used_bytes === disk.used_bytes &&
-      s.info.disk?.total_bytes === disk.total_bytes)
-  ) {
-    return
-  }
+  if (!s.info || sameDisk(s.info.disk, disk)) return
   s.setInfo({ ...s.info, disk })
 }
 

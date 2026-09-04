@@ -1,7 +1,6 @@
 package disk
 
 import (
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -47,12 +46,7 @@ func (c *Cache) Usage() (Usage, error) {
 	if err != nil {
 		return Usage{}, err
 	}
-	sizes := c.sizesNow()
-	u.WorktreeBytes = sizes.WorktreeBytes
-	u.TranscriptBytes = sizes.TranscriptBytes
-	u.DatabaseBytes = sizes.DatabaseBytes
-	u.RepoBytes = sizes.RepoBytes
-	return u, nil
+	return u.withComponents(c.sizesNow()), nil
 }
 
 // sizesNow returns the cached walk, refreshing it when it has expired. The
@@ -63,12 +57,7 @@ func (c *Cache) sizesNow() Usage {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if now := c.now(); !c.walked || now.Sub(c.at) >= c.ttl {
-		c.sizes = Usage{
-			WorktreeBytes:   treeBytes(filepath.Join(c.dataDir, checkoutsDir)),
-			TranscriptBytes: treeBytes(filepath.Join(c.dataDir, transcriptsDir)),
-			DatabaseBytes:   databaseBytes(filepath.Join(c.dataDir, databaseFile)),
-			RepoBytes:       treeBytes(filepath.Join(c.dataDir, reposDir)),
-		}
+		c.sizes = components(c.dataDir)
 		c.at, c.walked = now, true
 	}
 	return c.sizes

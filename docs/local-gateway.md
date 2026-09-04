@@ -207,7 +207,15 @@ no file of its own to measure, so the database line covers both. The bare
 repos keep every push, every run branch and the reflogs `internal/gitengine`
 turns on, and nothing reclaims them. `repo_bytes` is absent on servers
 predating the component, and the dashboard drops the line rather than
-showing a zero. A component that cannot be read contributes zero rather
+showing a zero.
+
+The components do not overlap. A run checkout is a `git clone --local` of
+its workspace repo, so its object files are hard links to bytes already in
+`repos/`: the walk indexes by device+inode and charges each one to the
+first tree that reaches it, walking `repos/` first. `repo_bytes` therefore
+holds the shared objects, and `worktree_bytes` is what reclaiming that
+checkout would actually free. A component that cannot be read contributes
+zero rather
 than failing the whole reading. Measurement lives in `internal/disk`, shared
 with the scheduler's floor so the gauge and the refusal can never disagree
 about the same disk.

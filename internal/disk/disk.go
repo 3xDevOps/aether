@@ -29,7 +29,9 @@ type Usage struct {
 	UsedBytes  uint64
 	TotalBytes uint64
 	// WorktreeBytes is <data>/checkouts: the run worktrees the scheduler
-	// garbage-collects after their TTL.
+	// garbage-collects after their TTL, counting only the bytes reclaiming
+	// one would actually give back - the objects it shares with the bare
+	// repo are charged to RepoBytes.
 	WorktreeBytes uint64
 	// TranscriptBytes is <data>/transcripts: kept for the life of the run
 	// row, never GC'd.
@@ -42,7 +44,8 @@ type Usage struct {
 	// RepoBytes is <data>/repos: the bare repo behind each workspace. It
 	// keeps every push, every run branch, and the reflogs the engine turns
 	// on, and nothing reclaims it, so on a long-lived server it is often
-	// the component holding the most.
+	// the component holding the most. Objects a run checkout hardlinks to
+	// are counted here, once.
 	RepoBytes uint64
 }
 
@@ -65,11 +68,38 @@ func Measure(dataDir string) (Usage, error) {
 	if err != nil {
 		return Usage{}, err
 	}
-	u.WorktreeBytes = treeBytes(filepath.Join(dataDir, checkoutsDir))
-	u.TranscriptBytes = treeBytes(filepath.Join(dataDir, transcriptsDir))
-	u.DatabaseBytes = databaseBytes(filepath.Join(dataDir, databaseFile))
-	u.RepoBytes = treeBytes(filepath.Join(dataDir, reposDir))
-	return u, nil
+	return u.withComponents(components(dataDir)), nil
+}
+
+// components walks the data directory and returns a Usage carrying only
+// the component fields. Both readers - Measure and Cache - assemble a
+// reading from it, so there is one list of what the gauge accounts for.
+//
+// Repos is walked first because run checkouts are `git clone --local`
+// hardlink clones of the bare repo: a checkout's object files are the bare
+// repo's inodes under a second pathname. One shared inode set spans the
+// two walks and the first tree to reach an object owns it, so the bytes
+// land on the repo, which is where they stay after the checkout is
+// reclaimed. Summing both pathnames would report a repo and its one clone
+// as twice the space they occupy.
+func components(dataDir string) Usage {
+	counted := newSeen()
+	return Usage{
+		RepoBytes:       treeBytes(filepath.Join(dataDir, reposDir), counted),
+		WorktreeBytes:   treeBytes(filepath.Join(dataDir, checkoutsDir), counted),
+		TranscriptBytes: treeBytes(filepath.Join(dataDir, transcriptsDir), counted),
+		DatabaseBytes:   databaseBytes(filepath.Join(dataDir, databaseFile)),
+	}
+}
+
+// withComponents returns u with the component fields taken from c and its
+// own filesystem reading left alone.
+func (u Usage) withComponents(c Usage) Usage {
+	u.WorktreeBytes = c.WorktreeBytes
+	u.TranscriptBytes = c.TranscriptBytes
+	u.DatabaseBytes = c.DatabaseBytes
+	u.RepoBytes = c.RepoBytes
+	return u
 }
 
 // Free reports the bytes an unprivileged writer can still claim on the
@@ -83,10 +113,10 @@ func Free(path string) (uint64, error) {
 	return u.FreeBytes, nil
 }
 
-// treeBytes sums the apparent size of every regular file under root.
-// Directories the walk cannot enter are skipped: a partially readable
-// answer is the honest one.
-func treeBytes(root string) uint64 {
+// treeBytes sums the apparent size of every regular file under root that
+// counted has not already charged to an earlier tree. Directories the walk
+// cannot enter are skipped: a partially readable answer is the honest one.
+func treeBytes(root string, counted seen) uint64 {
 	var total uint64
 	_ = filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -95,7 +125,7 @@ func treeBytes(root string) uint64 {
 		if d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}
-		if info, ierr := d.Info(); ierr == nil {
+		if info, ierr := d.Info(); ierr == nil && counted.claim(info) {
 			total += uint64(info.Size())
 		}
 		return nil
