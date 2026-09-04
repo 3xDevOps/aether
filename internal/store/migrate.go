@@ -621,6 +621,12 @@ ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN last_commit TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN last_commit_at INTEGER;
 `,
+	// v18: the harness conversation ID pinned at launch, so a relaunch
+	// resumes the interrupted run's own conversation by name. Empty on
+	// every existing row: those relaunch with the old best-effort flag.
+	`
+ALTER TABLE runs ADD COLUMN harness_session_id TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

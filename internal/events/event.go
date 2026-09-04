@@ -208,9 +208,10 @@ const (
 	AgentSubagent AgentEventKind = "subagent"
 	// AgentPause is the agent pausing for plan review or approval.
 	AgentPause AgentEventKind = "pause"
-	// AgentSession carries the harness-native session identifier that
-	// makes the run resumable after an interruption (e.g. relaunching
-	// with claude --resume <id>).
+	// AgentSession carries the harness-native session identifier the
+	// agent reports for itself - for claude, the one the launch pinned
+	// with --session-id. It is a timeline record for the operator; a
+	// relaunch resumes from domain.Run.HarnessSessionID.
 	AgentSession AgentEventKind = "session"
 )
 

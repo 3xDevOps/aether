@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -45,10 +44,14 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	}
 	// A run the reboot interrupted still has the agent's own harness
 	// session behind it, so the relaunch continues it where the harness
-	// can (failure table, "Server reboot"). A run that finished on its own
-	// has nothing to resume and starts fresh.
+	// can (docs/failure-handling.md, "Server reboot"). A run that finished
+	// on its own has nothing to resume and starts fresh, with a session of
+	// its own.
+	var session string
 	if old.Status == domain.RunInterrupted {
-		argv = harness.ResumeArgv(argv, profile.ResumeFlag)
+		argv, session = resumeSession(argv, profile, old, actor)
+	} else {
+		argv, session = pinSession(argv, profile)
 	}
 	m, err := s.cfg.Store.GetMember(ctx, actor)
 	if err != nil {
@@ -66,24 +69,34 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, fmt.Errorf("%w: %s", ErrInvalidTransition, relaunchRequiresCheckout)
 	}
 	next := &domain.Run{
-		WorkspaceID: old.WorkspaceID,
-		MemberID:    actor,
-		Task:        old.Task,
-		Harness:     old.Harness,
-		Mode:        old.Mode,
-		Status:      domain.RunQueued,
+		WorkspaceID:      old.WorkspaceID,
+		MemberID:         actor,
+		Task:             old.Task,
+		Harness:          old.Harness,
+		Mode:             old.Mode,
+		Status:           domain.RunQueued,
+		HarnessSessionID: session,
 	}
 	// Checking for an active run in the same checkout and creating the new
 	// row under one critical section serializes concurrent relaunches of
 	// a still-in-use old tree. After the per-run-ID checkout fix two
 	// actives never share a tree, but the guard still rejects a leftover
-	// shared path.
+	// shared path. The new row is created under the same lock, so the
+	// session guard below sees the row an in-flight relaunch just made.
 	s.mu.Lock()
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
 	if err == nil {
 		for _, a := range active {
 			if a.Worktree != "" && a.Worktree == old.Worktree {
 				err = fmt.Errorf("%w: checkout already in use by active run %s", ErrInvalidTransition, a.ID)
+				break
+			}
+			// Relaunching one interrupted row twice would leave two agents
+			// resuming one conversation, appending to a single transcript.
+			// The checkout guard never catches it: every relaunch gets a
+			// checkout of its own.
+			if session != "" && a.HarnessSessionID == session {
+				err = fmt.Errorf("%w: agent conversation already resumed by active run %s", ErrInvalidTransition, a.ID)
 				break
 			}
 		}

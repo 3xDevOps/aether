@@ -19,9 +19,9 @@ Two rules shape everything below:
 
 | `--agent` | CLI | Login state | Profile sync root | API key env | MCP | Resume | Env setup |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | yes (`--mcp-config`) | yes (`--continue`) | yes |
+| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | yes (`--mcp-config`) | by session ID (`--session-id`, `--resume`) | yes |
 | `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | no | no | yes |
-| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | yes (`--continue`) | yes |
+| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | best effort (`--continue`) | yes |
 | `amp` | Amp | `~/.config/amp`, `~/.local/share/amp` | `~/.config/amp` | `AMP_API_KEY` | no | no | yes |
 | `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | no | no |
 | `fake` | a script you name | - | - | - | no | no | no |
@@ -44,16 +44,28 @@ Claude Code and degrades to the advisory overlap notice for the rest. See
 [coordination.md](coordination.md).
 
 The **Resume** column is what a relaunch uses when a server reboot
-interrupted the run: the flag rides directly behind the executable and asks
-the harness to continue the conversation it last had in the working
-directory. It names no conversation. Every run mounts its checkout at the same
-container path and shares one credential home per member, so what is resumed
-is that member's *most recent* conversation at that path - which is not
-necessarily the interrupted run's own, and not necessarily one from the same
-workspace. A harness without a resume flag starts fresh, and a
-deployment-supplied argv override never has one appended - nothing checks the
-override is still that CLI. Relaunching a run that finished on its own never
-resumes. See [failure-handling.md](failure-handling.md).
+interrupted the run. The flags ride directly behind the executable.
+
+**By session ID** is exact. The server generates one UUID per run and
+launches with `claude --session-id <uuid>`, recording it on the run row; the
+relaunch runs `claude --resume <uuid>`, which names that conversation
+outright. `--session-id` is launch-only - Claude Code refuses an ID that
+already names a conversation ("Session ID `<id>` is already in use.") - so
+the two flags never appear together.
+
+**Best effort** is `--continue`, which names no conversation: it continues
+whichever conversation the harness spoke last in the working directory.
+Every run mounts its checkout at the same container path and shares one
+credential home per member, so what comes back is that member's *most
+recent* conversation at that path - not necessarily the interrupted run's
+own, and not necessarily one from the same workspace. `pi` has no
+launch-time session ID, so it stays here, and so does any run row created
+before session pinning existed.
+
+A harness with neither starts fresh, and a deployment-supplied argv override
+never has any of these appended - nothing checks the override is still that
+CLI. Relaunching a run that finished on its own never resumes; it gets a
+session of its own. See [failure-handling.md](failure-handling.md).
 
 Only `claude` has a **structured-output adapter** today, so its headless runs
 produce typed tool-call and token events. Everything else degrades to the PTY
@@ -334,6 +346,6 @@ command next to each such file.
 ## Adding a harness
 
 The registry is one map entry: argv templates for both modes, credential paths,
-profile root, denylist, API key passthrough, and the optional MCP and resume
-flags. An adapter is a separate, optional file. Both are covered in
+profile root, denylist, API key passthrough, and the optional MCP, session,
+and resume flags. An adapter is a separate, optional file. Both are covered in
 [adapters.md](adapters.md).

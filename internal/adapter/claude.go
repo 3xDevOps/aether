@@ -68,8 +68,10 @@ func (claude) ConsumeLine(line string) []events.Payload {
 	switch msg.Type {
 	case "system":
 		if msg.Subtype == "init" && msg.SessionID != "" {
-			// Resume metadata: relaunching with
-			// claude --resume <session_id> continues this session.
+			// Claude echoing the session the launch pinned with
+			// --session-id, which the relaunch names back with
+			// --resume. A timeline record for the operator; the
+			// resume authority is the run row's own session ID.
 			return []events.Payload{events.AgentEventPayload{
 				Kind:             events.AgentSession,
 				HarnessSessionID: msg.SessionID,

@@ -303,6 +303,13 @@ type Run struct {
 	// ProfileSnapshotID is the immutable agent-profile snapshot pinned at
 	// provisioning. Zero (empty) means unpinned / no snapshot.
 	ProfileSnapshotID ProfileSnapshotID
+	// HarnessSessionID is the harness-native conversation ID pinned at
+	// launch, so relaunching an interrupted run resumes this run's own
+	// conversation by name. Empty means the harness cannot pin one, or the
+	// row predates pinning; a relaunch then falls back to the harness's
+	// "continue the most recent conversation here" flag. See
+	// docs/failure-handling.md.
+	HarnessSessionID string
 }
 
 // ServerBusy reports what is keeping a server from being idle, which is

@@ -26,7 +26,9 @@ one entry to the `profiles` map:
 | `DenyNames` | Basenames profile sync always excludes - credential files, token caches, keychains. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
 | `MCPConfigFlag` | The CLI's flag for a server-supplied MCP server config, if it has one. Set it and the run is wired to the coordination bridge; leave it empty and coordination degrades to the overlap notice. |
-| `ResumeFlag` | The CLI's flag for continuing the conversation it last had in the working directory (Claude Code's `--continue`). Set it and relaunching an interrupted run asks the agent to carry on; leave it empty and the relaunch starts fresh. See [failure-handling.md](failure-handling.md). |
+| `SessionFlag` | The CLI's flag for naming a conversation at launch (Claude Code's `--session-id <uuid>`). Set it and every run is launched with a UUID of its own, recorded on the run row. |
+| `SessionResumeFlag` | The CLI's flag for resuming a named conversation (Claude Code's `--resume <uuid>`). Set it only together with `SessionFlag`; relaunching an interrupted run then continues that exact conversation. |
+| `ResumeFlag` | The CLI's flag for continuing the conversation it last had in the working directory (`--continue`). It is the fallback when no session was pinned: a harness with no `SessionFlag`, or a run row created before pinning. Leave all three empty and the relaunch starts fresh. See [failure-handling.md](failure-handling.md). |
 
 Rules that are easy to get wrong:
 
@@ -39,9 +41,9 @@ Rules that are easy to get wrong:
 - **Nothing under `LocalRoot` may be a secret.** Everything there is uploaded
   from the member's laptop. If the harness mixes config and tokens in one
   directory, the token filenames belong in `DenyNames`.
-- **The MCP and resume flags belong to the CLI they ship with.** A deployment
-  that overrides a harness's argv gets neither appended, because nothing checks
-  that the override is still that CLI.
+- **The MCP, session, and resume flags belong to the CLI they ship with.** A
+  deployment that overrides a harness's argv gets none of them appended,
+  because nothing checks that the override is still that CLI.
 
 Then add coverage in `internal/harness/harness_test.go` alongside the existing
 table-driven cases, and a row in the tables in
@@ -108,11 +110,12 @@ usage leaves its runs marked unmetered, which `aether cost` and `aether budget`
 both say out loud.
 
 `AgentSession` carries the harness's own conversation ID, which is unrelated
-to any Aether scope. It is a timeline record, not the resume mechanism:
-relaunching an interrupted run uses the profile's `ResumeFlag`, which names no
-conversation - see [failure-handling.md](failure-handling.md). Nothing reads `HarnessSessionID`
-back today; emit it because it is what an operator needs to find the
-conversation in the harness's own tooling.
+to any Aether scope. It is a timeline record, not the resume mechanism: the
+resume authority is the session the server pinned at launch and stored on
+the run row, which exists for TUI runs too, where no adapter ever runs. The
+streamed ID is the harness confirming the one it was given. Emit it anyway -
+it is what an operator needs to find the conversation in the harness's own
+tooling. See [failure-handling.md](failure-handling.md).
 
 ### Testing
 

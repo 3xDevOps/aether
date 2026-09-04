@@ -80,19 +80,53 @@ against the runtime's actual containers:
 An interrupted run relaunches in one click (`aether relaunch <run>`, or the
 run card). The relaunch is a new run cloned from the published branch, and
 where the harness supports it the agent is asked to continue its own
-conversation: Claude Code gets `--continue`. A harness with no resume flag starts fresh,
-and a deployment-supplied argv override never has one appended - nothing
-checks the override is still that CLI. See [harnesses.md](harnesses.md).
+conversation. A harness with no resume flag starts fresh, and a
+deployment-supplied argv override never has one appended - nothing checks
+the override is still that CLI. See [harnesses.md](harnesses.md).
 
-`--continue` names no conversation. Every run mounts its checkout at the
-same container path and shares one credential home per member, so it resumes
-that member's most recent conversation at that path - which after a reboot that
-interrupted several of their runs is not necessarily this one, and not
-necessarily one from this workspace. Treat the resume as a convenience, not
-a guarantee, and read the agent's first turn before steering it.
+For a harness that can name a conversation, the run's identity is pinned at
+launch: the server generates one UUID per run, launches with
+`claude --session-id <uuid>`, and records it on the run row. The relaunch
+then runs `claude --resume <uuid>`, which names that exact conversation. It
+is unaffected by every run mounting its checkout at the same container path
+and sharing one credential home per member, so a reboot that interrupted
+several of a member's runs still relaunches each one into its own
+conversation.
+
+Three cases never resume the pinned conversation, because the relaunch
+could not read the transcript behind it. `claude --resume` on an ID it
+cannot find prints `No conversation found with session ID: <id>` and exits
+1, which would fail the relaunch outright.
+
+The first two open a fresh conversation instead:
+
+- The run was interrupted before its agent ever started (a `queued` or
+  `provisioning` row). The ID is stamped when the row is created, so it
+  names a conversation the harness never opened.
+- The relaunch is by someone other than the run's owner. Steering others is
+  allowed by default and a handoff transfers the run, but the container
+  mounts the actor's credential home while the transcript lives in the
+  owner's.
+
+The third is refused: relaunching one interrupted row twice while the first
+relaunch is still active fails with `agent conversation already resumed by
+active run <id>`. Two agents appending to one transcript is not a
+recoverable state, and the checkout guard never catches it because every
+relaunch gets a checkout of its own. Once the first relaunch reaches a
+terminal state, relaunching the original row resumes the conversation
+again.
+
+A run whose harness cannot pin a session (`pi`) falls back to `--continue`,
+and so does a run row created before pinning existed. `--continue` names no
+conversation: it resumes that member's most recent conversation at that
+container path, which is not necessarily this run's own and not necessarily
+one from this workspace. Treat that fallback as a convenience, not a
+guarantee, and read the agent's first turn before steering it. The fallback
+is sticky - a row that has no pinned ID never acquires one, because there is
+no earlier conversation to name.
 
 Relaunching a run that finished on its own does *not* resume: there is no
-interrupted conversation behind it.
+interrupted conversation behind it. It gets a session of its own instead.
 
 ### Disk pressure
 
