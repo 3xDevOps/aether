@@ -48,6 +48,33 @@ func (b *apiStubBackend) Attach(protocol.AttachRequest) (cli.Terminal, protocol.
 func (b *apiStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
 	panic("not reached")
 }
+func (b *apiStubBackend) Close() error { return nil }
+
+type closeBackend struct {
+	apiStubBackend
+	closed chan struct{}
+}
+
+func (b *closeBackend) Close() error {
+	close(b.closed)
+	return nil
+}
+
+func TestGatewayCloseClosesBackend(t *testing.T) {
+	backend := &closeBackend{
+		apiStubBackend: apiStubBackend{results: map[string]json.RawMessage{}},
+		closed:         make(chan struct{}),
+	}
+	g := newTestGateway(t, backend)
+	if err := g.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case <-backend.closed:
+	default:
+		t.Fatal("gateway close did not close backend")
+	}
+}
 
 // newTestGateway builds a gateway around the stub without binding a port;
 // requests go straight at the mux.

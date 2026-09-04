@@ -124,29 +124,38 @@ func (r *roster) beat(member domain.MemberID, workspace domain.WorkspaceID) bool
 }
 
 // watch records member as watching run, which also counts as a heartbeat.
+// A member with no live connection is ignored.
 func (r *roster) watch(member domain.MemberID, workspace domain.WorkspaceID, run domain.RunID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.conns[member] == 0 {
+		return
+	}
 	e, _ := r.entry(member, workspace)
 	e.watching[run]++
 }
 
-// unwatch releases one attach on run, keeping the member online. The run
-// stays watched while any of their other attaches on it is still live.
-func (r *roster) unwatch(member domain.MemberID, workspace domain.WorkspaceID, run domain.RunID) {
+// unwatch releases one attach on run. The run stays watched while any of
+// their other attaches on it is still live. It returns rows that became
+// offline when the last attach ended after their last connection closed.
+func (r *roster) unwatch(member domain.MemberID, workspace domain.WorkspaceID, run domain.RunID) []Presence {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := rosterKey{member: member, workspace: workspace}
 	e, ok := r.members[k]
 	if !ok {
-		return
+		return nil
 	}
 	e.lastSeen = r.now()
-	if e.watching[run] <= 1 {
-		delete(e.watching, run)
-		return
+	if e.watching[run] > 1 {
+		e.watching[run]--
+		return nil
 	}
-	e.watching[run]--
+	delete(e.watching, run)
+	if len(e.watching) == 0 && r.conns[member] == 0 {
+		return r.expireMemberLocked(member)
+	}
+	return nil
 }
 
 // expire removes members whose heartbeat went stale and who hold no

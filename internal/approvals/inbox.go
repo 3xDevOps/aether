@@ -221,7 +221,9 @@ func (s *Service) handle(ctx context.Context, e events.Event) {
 		case events.PresenceOnline:
 			// The SSH server publishes this when an attach ends; the
 			// member is still connected, just no longer watching.
-			s.roster.unwatch(e.ActorID, e.WorkspaceID, e.RunID)
+			for _, gone := range s.roster.unwatch(e.ActorID, e.WorkspaceID, e.RunID) {
+				s.publishPresence(ctx, gone.Member, gone.Workspace, events.PresenceOffline)
+			}
 		}
 	}
 	s.mu.Lock()

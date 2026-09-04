@@ -53,6 +53,7 @@ func (b *wsStubBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protoc
 func (b *wsStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
 	return nil, errors.New("not implemented")
 }
+func (b *wsStubBackend) Close() error { return nil }
 
 func (b *wsStubBackend) recordedAttach() protocol.AttachRequest {
 	b.mu.Lock()

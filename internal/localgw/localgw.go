@@ -49,6 +49,8 @@ type Backend interface {
 	Attach(req protocol.AttachRequest) (cli.Terminal, protocol.AttachResponse, error)
 	// Sync opens the sync subsystem's raw mutagen endpoint stream.
 	Sync(runID string, force bool) (io.ReadWriteCloser, error)
+	// Close releases the backend's shared connection.
+	Close() error
 }
 
 // Config wires the local gateway to its backend and static assets.
@@ -257,13 +259,14 @@ func (g *Gateway) requestExit(code int) {
 	})
 }
 
-// Close stops serving, draining in-flight requests briefly before cutting
-// them off, and stops the background work the gateway owns. Safe before
-// Start, and safe to call twice.
+// Close releases the backend connection, stops serving, and drains in-flight
+// requests briefly before cutting them off. It also stops the background work
+// the gateway owns. Safe before Start, and safe to call twice.
 func (g *Gateway) Close() error {
 	g.cancel()
+	backendErr := g.cfg.Backend.Close()
 	if g.ln == nil {
-		return nil
+		return backendErr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
@@ -283,5 +286,5 @@ func (g *Gateway) Close() error {
 	case <-built:
 	case <-ctx.Done():
 	}
-	return err
+	return errors.Join(backendErr, err)
 }

@@ -56,9 +56,9 @@ func runGUI(args []string) error {
 		}
 		cfg = named
 	}
-	// NotifyContext lets termination signals take the same graceful path as
-	// the desktop sidecar's normal shutdown, closing the gateway before the
-	// process exits.
+	// NotifyContext lets termination signals take the same cleanup path as
+	// desktop sidecar shutdown. The deferred gateway close releases SSH
+	// before draining HTTP handlers.
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		append([]os.Signal{syscall.SIGHUP}, terminationSignals...)...,
