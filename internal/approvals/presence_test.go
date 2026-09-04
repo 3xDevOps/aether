@@ -27,6 +27,9 @@ func (nopStore) DecideApproval(context.Context, string, string, domain.MemberID,
 	return nil
 }
 
+// testMember is the single member every presence-transition test drives.
+const testMember = domain.MemberID("ada")
+
 // A member who stops heartbeating falls offline, while one holding an
 // attach stays: the live channel is its own heartbeat, and the SSH server
 // publishes the closing event when it drops.
@@ -166,8 +169,8 @@ func TestConnectionClosedPublishesOfflineWhenLastConnectionCloses(t *testing.T) 
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := svc.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	if startErr := svc.Start(ctx); startErr != nil {
+		t.Fatalf("Start: %v", startErr)
 	}
 	defer func() { _ = svc.Close() }()
 
@@ -179,16 +182,16 @@ func TestConnectionClosedPublishesOfflineWhenLastConnectionCloses(t *testing.T) 
 	}
 	defer func() { _ = presence.Close() }()
 
-	const member = domain.MemberID("ada")
+	const member = testMember
 	const workspace = domain.WorkspaceID("ws")
 	svc.ConnectionOpened(member)
 	if err := svc.Heartbeat(ctx, member, workspace); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
-	waitPresenceState(t, presence, member, events.PresenceOnline)
+	waitPresenceStateWithin(t, presence, events.PresenceOnline, 5*time.Second)
 
 	svc.ConnectionClosed(member)
-	waitPresenceState(t, presence, member, events.PresenceOffline)
+	waitPresenceStateWithin(t, presence, events.PresenceOffline, 5*time.Second)
 	if got := svc.Roster(workspace, ""); len(got) != 0 {
 		t.Fatalf("roster after close = %+v, want empty", got)
 	}
@@ -206,8 +209,8 @@ func TestSecondConnectionKeepsMemberOnline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := svc.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	if startErr := svc.Start(ctx); startErr != nil {
+		t.Fatalf("Start: %v", startErr)
 	}
 	defer func() { _ = svc.Close() }()
 
@@ -219,21 +222,21 @@ func TestSecondConnectionKeepsMemberOnline(t *testing.T) {
 	}
 	defer func() { _ = presence.Close() }()
 
-	const member = domain.MemberID("ada")
+	const member = testMember
 	const workspace = domain.WorkspaceID("ws")
 	svc.ConnectionOpened(member)
 	svc.ConnectionOpened(member)
 	if err := svc.Heartbeat(ctx, member, workspace); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
-	waitPresenceState(t, presence, member, events.PresenceOnline)
+	waitPresenceStateWithin(t, presence, events.PresenceOnline, 5*time.Second)
 
 	svc.ConnectionClosed(member)
 	if got := svc.Roster(workspace, ""); len(got) != 1 || got[0].State != events.PresenceOnline {
 		t.Fatalf("roster after first close = %+v, want online", got)
 	}
 	svc.ConnectionClosed(member)
-	waitPresenceState(t, presence, member, events.PresenceOffline)
+	waitPresenceStateWithin(t, presence, events.PresenceOffline, 5*time.Second)
 }
 
 func TestHeartbeatWithNoConnectionIsIgnored(t *testing.T) {
@@ -268,8 +271,8 @@ func TestLastConnectionCloseWithLiveWatcherUnwatchPublishesOffline(t *testing.T)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := svc.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	if startErr := svc.Start(ctx); startErr != nil {
+		t.Fatalf("Start: %v", startErr)
 	}
 	defer func() { _ = svc.Close() }()
 
@@ -281,7 +284,7 @@ func TestLastConnectionCloseWithLiveWatcherUnwatchPublishesOffline(t *testing.T)
 	}
 	defer func() { _ = presence.Close() }()
 
-	const member = domain.MemberID("ada")
+	const member = testMember
 	const workspace = domain.WorkspaceID("ws")
 	const run = domain.RunID("run")
 	svc.ConnectionOpened(member)
@@ -307,7 +310,7 @@ func TestLastConnectionCloseWithLiveWatcherUnwatchPublishesOffline(t *testing.T)
 	}); err != nil {
 		t.Fatalf("publish unwatch: %v", err)
 	}
-	waitPresenceStateWithin(t, presence, member, events.PresenceOffline, time.Second)
+	waitPresenceStateWithin(t, presence, events.PresenceOffline, time.Second)
 	if got := svc.Roster(workspace, ""); len(got) != 0 {
 		t.Fatalf("roster after unwatch = %+v, want empty", got)
 	}
@@ -325,8 +328,8 @@ func TestLateWatchAfterConnectionClosedDoesNotResurrectMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := svc.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	if startErr := svc.Start(ctx); startErr != nil {
+		t.Fatalf("Start: %v", startErr)
 	}
 	defer func() { _ = svc.Close() }()
 
@@ -338,16 +341,16 @@ func TestLateWatchAfterConnectionClosedDoesNotResurrectMember(t *testing.T) {
 	}
 	defer func() { _ = presence.Close() }()
 
-	const member = domain.MemberID("ada")
+	const member = testMember
 	const workspace = domain.WorkspaceID("ws")
 	const run = domain.RunID("run")
 	svc.ConnectionOpened(member)
 	if err := svc.Heartbeat(ctx, member, workspace); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
-	waitPresenceState(t, presence, member, events.PresenceOnline)
+	waitPresenceStateWithin(t, presence, events.PresenceOnline, 5*time.Second)
 	svc.ConnectionClosed(member)
-	waitPresenceState(t, presence, member, events.PresenceOffline)
+	waitPresenceStateWithin(t, presence, events.PresenceOffline, 5*time.Second)
 
 	if _, err := bus.Publish(ctx, events.Event{
 		WorkspaceID: workspace,
@@ -357,7 +360,7 @@ func TestLateWatchAfterConnectionClosedDoesNotResurrectMember(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish late watching: %v", err)
 	}
-	waitPresenceStateWithin(t, presence, member, events.PresenceWatching, time.Second)
+	waitPresenceStateWithin(t, presence, events.PresenceWatching, time.Second)
 
 	deadline := time.After(250 * time.Millisecond)
 	for {
@@ -388,23 +391,17 @@ func waitRosterState(t *testing.T, svc *Service, workspace domain.WorkspaceID, r
 	}
 }
 
-func waitPresenceStateWithin(t *testing.T, sub events.Subscription, member domain.MemberID, want events.PresenceState, timeout time.Duration) {
+func waitPresenceStateWithin(t *testing.T, sub events.Subscription, want events.PresenceState, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
 		select {
 		case ev := <-sub.Events():
-			if ev.ActorID == member && ev.Payload.(events.PresencePayload).State == want {
+			if ev.ActorID == testMember && ev.Payload.(events.PresencePayload).State == want {
 				return
 			}
 		case <-deadline:
 			t.Fatalf("timed out waiting for %s presence", want)
 		}
 	}
-}
-
-// waitPresenceState waits up to five seconds for one member's transition.
-func waitPresenceState(t *testing.T, sub events.Subscription, member domain.MemberID, want events.PresenceState) {
-	t.Helper()
-	waitPresenceStateWithin(t, sub, member, want, 5*time.Second)
 }
