@@ -15,6 +15,7 @@ export interface DockProps {
   activeTab: string
   onSelectTab: (id: string) => void
   onAddTab?: () => void
+  addDisabled?: boolean
   onCloseTab?: (id: string) => void
   height: number
   onHeightChange: (height: number) => void
@@ -35,6 +36,7 @@ export function Dock({
   activeTab,
   onSelectTab,
   onAddTab,
+  addDisabled = false,
   onCloseTab,
   height,
   onHeightChange,
@@ -119,6 +121,8 @@ export function Dock({
               variant="ghost"
               size="icon"
               aria-label="Add terminal tab"
+              title={addDisabled ? 'At most 4 tabs' : undefined}
+              disabled={addDisabled}
               onClick={onAddTab}
             >
               <Plus />

@@ -4,7 +4,6 @@ import type { Api } from '@/lib/api'
 import type { AetherDesktop } from '@/components/shell/title-bar'
 import type {
   Event,
-  GatewayCapabilities,
   Member,
   Run,
   ServerUpdatePayload,
@@ -12,8 +11,6 @@ import type {
 } from '@/lib/types'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
-import type { UpdateKind } from '@/store/ui'
-import { StubSocket } from '@/test/stub-socket'
 import {
   alice,
   bob,
@@ -25,42 +22,13 @@ import {
   vera,
   workspace,
 } from '@/test/fixtures'
+import { StubSocket } from '@/test/stub-socket'
+import { caps, seed } from '@/test/update-banner-harness'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const shellWindow = window as Window & { aetherDesktop?: AetherDesktop }
 
-/** The desktop gateway's descriptor, carrying the update verbs. */
-function caps(over: Partial<GatewayCapabilities> = {}): GatewayCapabilities {
-  return {
-    gateway: 'local',
-    methods: ['*'],
-    ws: ['events', 'attach'],
-    local: ['link.status', 'update.check', 'update.apply'],
-    version: 'v1.2.3',
-    ...over,
-  }
-}
-
-function seed(
-  over: {
-    self?: Member
-    capabilities?: GatewayCapabilities
-    dismissedUpdates?: Record<UpdateKind, string>
-  } = {},
-) {
-  useStore.setState({
-    info: { ...serverInfo, member: over.self ?? alice },
-    capabilities: over.capabilities ?? caps(),
-    dismissedUpdates: over.dismissedUpdates ?? { cli: '', server: '', shell: '' },
-    update: null,
-    serverUpdate: null,
-    serverUpdateProgress: null,
-    members: { [alice.id]: alice, [bob.id]: bob },
-    hydrated: true,
-    gatewayRestarting: false,
-  })
-}
 
 /** Opens the newest stub socket and acknowledges the subscription on it. */
 async function subscribe() {
@@ -105,118 +73,6 @@ test('renders nothing where the gateway does not serve update.check', async () =
 
   await waitFor(() => expect(client.localUpdateCheck).not.toHaveBeenCalled())
   expect(screen.queryByText(/is available/)).toBeNull()
-})
-
-// The binary is on the member's own machine, so the CLI prompt is not an
-// admin affordance: a collaborator updates their own copy.
-test('shows the CLI banner to a collaborator when the CLI is behind', async () => {
-  const client = fakeApi()
-  seed({ self: bob })
-  render(<UpdateBanners client={client} />)
-
-  expect(await screen.findByText('Aether v1.3.0 is available.')).toBeTruthy()
-  expect(screen.getByText(/You are running v1\.2\.3/)).toBeTruthy()
-  // The copy names what the restart costs: the gateway holds the attach
-  // sockets and the sync sessions, and they go with it.
-  expect(screen.getByText(/Attached terminals and any running file sync stop/)).toBeTruthy()
-  const notes = screen.getByRole('link', { name: 'Release notes' })
-  expect(notes.getAttribute('href')).toBe(
-    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
-  )
-  expect(notes.getAttribute('target')).toBe('_blank')
-  expect(client.localUpdateCheck).toHaveBeenCalledTimes(1)
-})
-
-// Windows cannot replace a running binary, so the button would only ever
-// fail: the banner names the release page instead.
-test('offers no button where the CLI cannot update itself', async () => {
-  const status = updateStatus()
-  const client = fakeApi({
-    localUpdateCheck: vi.fn(async () => ({
-      ...status,
-      cli: { ...status.cli, can_self_update: false },
-    })),
-  })
-  seed()
-  render(<UpdateBanners client={client} />)
-
-  expect(await screen.findByText(/Self-update is not supported/)).toBeTruthy()
-  expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
-  expect(screen.getByRole('link', { name: 'Release notes' })).toBeTruthy()
-})
-
-test('the Update button applies and the banner says it is restarting', async () => {
-  const client = fakeApi()
-  seed()
-  render(<UpdateBanners client={client} />)
-
-  fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
-
-  expect(await screen.findByText(/Restarting the dashboard/)).toBeTruthy()
-  expect(client.localUpdateApply).toHaveBeenCalledTimes(1)
-  expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
-})
-
-// A single-box install swaps aether-server beside the CLI, and that server
-// keeps running the old code until its unit is restarted. `aether update`
-// prints the command; the banner has to as well.
-test('the done state names the replaced binaries and the server restart', async () => {
-  const client = fakeApi({
-    localUpdateApply: vi.fn(async () => ({
-      updated: ['/usr/local/bin/aether', '/usr/local/bin/aether-server'],
-      version: 'v1.3.0',
-      restarting: false,
-      rebuilding: false,
-      note: 'rerun aether gui to use the new binary',
-      restart_command: 'sudo systemctl restart aether-server',
-    })),
-  })
-  seed()
-  render(<UpdateBanners client={client} />)
-
-  fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
-
-  expect(await screen.findByText(/Updated to v1\.3\.0/)).toBeTruthy()
-  expect(
-    screen.getByText('/usr/local/bin/aether, /usr/local/bin/aether-server'),
-  ).toBeTruthy()
-  expect(screen.getByText('sudo systemctl restart aether-server')).toBeTruthy()
-})
-
-// A client machine has no server binary beside the CLI, so there is no
-// unit to restart and the banner must not invent one.
-test('the done state says nothing about a server that was not replaced', async () => {
-  const client = fakeApi()
-  seed()
-  render(<UpdateBanners client={client} />)
-
-  fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
-
-  await screen.findByText(/Restarting the dashboard/)
-  expect(screen.queryByText(/systemctl restart/)).toBeNull()
-})
-
-// The gateway names the directory and the exact sudo command; a friendlier
-// substitute would drop the only part the member can act on.
-test('a failed apply shows the gateway message and leaves the button usable', async () => {
-  const client = fakeApi({
-    localUpdateApply: vi.fn(async () => {
-      throw new Error(
-        '/usr/local/bin is not writable: rerun as sudo aether update',
-      )
-    }),
-  })
-  seed()
-  render(<UpdateBanners client={client} />)
-
-  fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
-
-  expect(
-    await screen.findByText(
-      '/usr/local/bin is not writable: rerun as sudo aether update',
-    ),
-  ).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
 })
 
 // Capability is half the gate and the role is the other half: the local
@@ -578,208 +434,6 @@ describe('the server update banner', () => {
       ),
     ).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Update when idle' })).toBeTruthy()
-  })
-})
-
-// Dismissing records the version, not a flag: the next release is a new
-// prompt, and silencing v1.3.0 must not silence v1.3.1.
-test('a dismissal hides that version and a newer release comes back', async () => {
-  const client = fakeApi()
-  seed()
-  const first = render(<UpdateBanners client={client} />)
-
-  fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
-  expect(useStore.getState().dismissedUpdates.cli).toBe('v1.3.0')
-  expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
-  first.unmount()
-
-  // The same dismissal, the same release: still silent.
-  useStore.setState({ update: null })
-  const again = render(<UpdateBanners client={client} />)
-  await waitFor(() => expect(useStore.getState().update).not.toBeNull())
-  expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
-  again.unmount()
-
-  const newer = fakeApi({
-    localUpdateCheck: vi.fn(async () => {
-      const status = updateStatus()
-      return { ...status, cli: { ...status.cli, latest: 'v1.3.1' } }
-    }),
-  })
-  useStore.setState({ update: null })
-  render(<UpdateBanners client={newer} />)
-  expect(await screen.findByText('Aether v1.3.1 is available.')).toBeTruthy()
-})
-
-// update.apply can start a background rebuild of the desktop app after
-// swapping the CLI binary. The banner polls update.status for its progress
-// while the Update button stays disabled through the whole thing.
-describe('the desktop-app rebuild the Update button waits on', () => {
-  function rebuildApply() {
-    return vi.fn(async () => ({
-      updated: ['/usr/local/bin/aether'],
-      version: 'v1.3.0',
-      restarting: true,
-      rebuilding: true,
-    }))
-  }
-
-  test('walks the phases while the button stays disabled, then relaunches', async () => {
-    vi.useFakeTimers()
-    const client = fakeApi({
-      localUpdateApply: rebuildApply(),
-      localUpdateStatus: vi
-        .fn()
-        .mockResolvedValueOnce({ phase: 'installing dependencies' })
-        .mockResolvedValue({ phase: 'done' }),
-    })
-    seed()
-    render(<UpdateBanners client={client} />)
-
-    // Let the initial update.check settle - a plain microtask, no timer.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
-    expect(screen.getByText('Updating the CLI...')).toBeTruthy()
-    expect(
-      (screen.getByRole('button', { name: 'Updating...' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
-
-    // update.apply resolves.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-    expect(
-      screen.getByText(
-        'Rebuilding the app (about a minute; the first time also fetches Node)...',
-      ),
-    ).toBeTruthy()
-    expect(
-      (screen.getByRole('button', { name: 'Rebuilding...' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
-
-    // First update.status poll: still building, and names the phase.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000)
-    })
-    expect(screen.getByText('installing dependencies')).toBeTruthy()
-    expect(
-      (screen.getByRole('button', { name: 'Rebuilding...' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
-
-    // Second poll: the build is done and the apply said it would restart.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000)
-    })
-    expect(screen.getByText('Relaunching')).toBeTruthy()
-    expect(
-      (screen.getByRole('button', { name: 'Relaunching...' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
-    expect(client.localUpdateStatus).toHaveBeenCalledTimes(2)
-  })
-
-  test('a failed rebuild shows the real error and the manual command', async () => {
-    vi.useFakeTimers()
-    const client = fakeApi({
-      localUpdateApply: rebuildApply(),
-      localUpdateStatus: vi.fn(async () => ({
-        phase: 'error' as const,
-        error: 'npm install: exit status 1',
-      })),
-    })
-    seed()
-    render(<UpdateBanners client={client} />)
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000)
-    })
-
-    expect(screen.getByText('npm install: exit status 1')).toBeTruthy()
-    expect(screen.getByText('aether gui build')).toBeTruthy()
-    // The polling loop stops itself once the phase is terminal.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000)
-    })
-    expect(client.localUpdateStatus).toHaveBeenCalledTimes(1)
-  })
-
-  test('sets gatewayRestarting as soon as the apply says the gateway is going away', async () => {
-    const client = fakeApi({ localUpdateApply: rebuildApply() })
-    seed()
-    render(<UpdateBanners client={client} />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
-    await waitFor(() => expect(useStore.getState().gatewayRestarting).toBe(true))
-  })
-
-  // An unsupervised gateway - `aether gui` in a browser tab - rebuilds the
-  // app and deliberately keeps serving. The flag is never cleared, so
-  // setting it here would hide a genuine disconnect in that tab for good.
-  test('leaves gatewayRestarting alone when only a rebuild is running', async () => {
-    const client = fakeApi({
-      localUpdateApply: vi.fn(async () => ({
-        updated: ['/usr/local/bin/aether'],
-        version: 'v1.3.0',
-        restarting: false,
-        rebuilding: true,
-        note: 'rebuilding the desktop app; restart it when the rebuild finishes',
-      })),
-    })
-    seed()
-    render(<UpdateBanners client={client} />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
-    await screen.findByText(
-      'Rebuilding the app (about a minute; the first time also fetches Node)...',
-    )
-    expect(useStore.getState().gatewayRestarting).toBe(false)
-  })
-
-  // The gateway's note says what it was about to do. Once the build is over
-  // the banner has to stop saying a finished rebuild is still running.
-  test('says the rebuild finished on a gateway that is not going away', async () => {
-    vi.useFakeTimers()
-    const client = fakeApi({
-      localUpdateApply: vi.fn(async () => ({
-        updated: ['/usr/local/bin/aether'],
-        version: 'v1.3.0',
-        restarting: false,
-        rebuilding: true,
-        note: 'rebuilding the desktop app; restart it when the rebuild finishes',
-      })),
-      localUpdateStatus: vi.fn(async () => ({ phase: 'done' as const })),
-    })
-    seed()
-    render(<UpdateBanners client={client} />)
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000)
-    })
-
-    expect(
-      screen.getByText(
-        /Updated to v1\.3\.0\. The app was rebuilt; restart it to use the new version\./,
-      ),
-    ).toBeTruthy()
-    expect(screen.queryByText(/restart it when the rebuild finishes/)).toBeNull()
-    // Nothing left for the button to do.
-    expect(screen.queryByRole('button', { name: /Update|Rebuild|Relaunch/ })).toBeNull()
   })
 })
 

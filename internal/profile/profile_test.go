@@ -35,7 +35,7 @@ func testService(t *testing.T) (*Service, *store.DB, *domain.Member) {
 	if err = db.CreateMember(context.Background(), m); err != nil {
 		t.Fatalf("CreateMember: %v", err)
 	}
-	svc, err := New(db, filepath.Join(t.TempDir(), "snapshots"))
+	svc, err := New(db)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

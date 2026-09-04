@@ -178,7 +178,7 @@ func waitingLine(w *protocol.ServerUpdateWaiting) string {
 		parts = append(parts, plural(w.Runs, "run")+" still working")
 	}
 	if w.Shells > 0 {
-		parts = append(parts, plural(w.Shells, "workspace shell")+" open")
+		parts = append(parts, plural(w.Shells, "attached terminal")+" open")
 	}
 	if w.Paused > 0 {
 		// Named because a paused run shows as running in `aether runs`;
@@ -214,7 +214,7 @@ func serverUpdateIdle(version string) error {
 		if err := c.Call(protocol.MethodServerUpdate, protocol.ServerUpdateParams{Version: version, When: protocol.ServerUpdateIdle}, &res); err != nil {
 			return err
 		}
-		fmt.Printf("scheduled %s; it applies when no run is working and no workspace shell is open\n", res.Version)
+		fmt.Printf("scheduled %s; it applies when no run is working and no terminal is attached\n", res.Version)
 		return nil
 	})
 }

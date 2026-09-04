@@ -31,9 +31,21 @@ func NewSSHBackend(cfg cli.Config) Backend {
 	return &sshBackend{cfg: cfg}
 }
 
+// Close releases the shared SSH connection, if it has been opened.
+func (b *sshBackend) Close() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn == nil {
+		return nil
+	}
+	conn := b.conn
+	b.conn = nil
+	return conn.Close()
+}
+
 // live returns the shared connection, dialing when there is none yet. A
 // dial failure comes back already classified so every surface that dials
-// (Call, Events, Attach, Shell, Sync) reports it identically.
+// (Call, Events, Attach, Terminal, Sync) reports it identically.
 func (b *sshBackend) live() (*cli.Conn, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -195,11 +207,11 @@ func alive(conn *cli.Conn) bool {
 
 // stream opens one subsystem channel on the shared connection, dialing
 // when needed. A failure the server answered - a *protocol.Error, or any
-// error on a connection that still answers a keepalive (attach/shell/sync
-// ack refusals are untyped) - passes through untouched. Only a dead
-// connection is invalidated (a no-op when a concurrent caller already
-// replaced it; a conn that is no longer the cached one is never closed),
-// then redialed once and the open retried once.
+// error on a connection that still answers a keepalive (attach/sync ack
+// refusals are untyped) - passes through untouched. Only a dead connection
+// is invalidated (a no-op when a concurrent caller already replaced it; a
+// conn that is no longer the cached one is never closed), then redialed once
+// and the open retried once.
 func stream[T any](b *sshBackend, open func(*cli.Conn) (T, error)) (T, error) {
 	conn, err := b.live()
 	if err != nil {
@@ -236,14 +248,14 @@ func (b *sshBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protocol.
 	return out.term, out.ack, err
 }
 
-func (b *sshBackend) Shell(req protocol.WorkspaceShellRequest) (cli.Terminal, protocol.WorkspaceShellResponse, error) {
-	type shellResult struct {
+func (b *sshBackend) Terminal(req protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error) {
+	type terminalResult struct {
 		term cli.Terminal
-		ack  protocol.WorkspaceShellResponse
+		ack  protocol.TerminalResponse
 	}
-	out, err := stream(b, func(c *cli.Conn) (shellResult, error) {
-		term, ack, err := c.WorkspaceShellStream(req)
-		return shellResult{term: term, ack: ack}, err
+	out, err := stream(b, func(c *cli.Conn) (terminalResult, error) {
+		term, ack, err := c.TerminalStream(req)
+		return terminalResult{term: term, ack: ack}, err
 	})
 	return out.term, out.ack, err
 }

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/distribution/reference"
 )
 
@@ -71,5 +73,30 @@ func TestReleaseImageTag(t *testing.T) {
 		if got := releaseImageTag(tc.version); got != tc.want {
 			t.Errorf("releaseImageTag(%q) = %q, want %q", tc.version, got, tc.want)
 		}
+	}
+}
+
+type runTitleSetterSpy struct {
+	run   domain.RunID
+	title string
+	calls int
+}
+
+func (s *runTitleSetterSpy) SetRunTitle(run domain.RunID, title string) {
+	s.run = run
+	s.title = title
+	s.calls++
+}
+
+func TestForwardRunTitleIgnoresNonRunSession(t *testing.T) {
+	spy := &runTitleSetterSpy{}
+	forwardRunTitle(spy, ptyhost.TerminalSession("member-1", "main"), "terminal title")
+	if spy.calls != 0 {
+		t.Fatalf("terminal title forwarded %d times, want 0", spy.calls)
+	}
+
+	forwardRunTitle(spy, ptyhost.RunSession("run-1"), "run title")
+	if spy.calls != 1 || spy.run != "run-1" || spy.title != "run title" {
+		t.Fatalf("run title forwarding = %#v, want one call for run-1", spy)
 	}
 }

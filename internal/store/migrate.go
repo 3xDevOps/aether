@@ -595,6 +595,26 @@ CREATE TABLE server_update_state (
 	last_at              INTEGER NOT NULL DEFAULT 0
 );
 `,
+	// v15: one persistent home per member supersedes workspace tool
+	// snapshots and pending workspace shells. tool_heads references
+	// tool_snapshots, so the child table drops first: DROP TABLE runs an
+	// implicit DELETE and the FK would otherwise reject the parent drop.
+	`
+DROP TABLE tool_heads;
+DROP TABLE pending_workspace_shells;
+DROP TABLE tool_snapshots;
+ALTER TABLE runs DROP COLUMN tool_snapshot_id;
+CREATE TABLE member_terminals (
+	member_id    TEXT PRIMARY KEY,
+	container_id TEXT NOT NULL,
+	image        TEXT NOT NULL,
+	started_at   INTEGER NOT NULL
+);
+`,
+	// v16: runs gain the latest title reported by the agent's terminal.
+	`
+ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

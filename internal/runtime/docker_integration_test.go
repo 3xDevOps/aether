@@ -803,3 +803,70 @@ func TestDockerImageUser(t *testing.T) {
 		t.Fatalf("ImageUser(%s) = %q, want empty (root)", testImage, user)
 	}
 }
+
+// TestDockerExecTTY exercises the run-shell seam against real Docker: an
+// extra TTY process inside a running container, interactive stdin, resize,
+// and the ExecExitError contract for a missing shell (exit 127).
+func TestDockerExecTTY(t *testing.T) {
+	t.Parallel()
+	d := newTestDocker(t)
+
+	worktree := t.TempDir()
+	spec := Spec{
+		Name:              fmt.Sprintf("it-exectty-%d", time.Now().UnixNano()),
+		Image:             testImage,
+		TTY:               true,
+		WorktreeHostPath:  worktree,
+		WorktreeMountPath: "/workspace",
+		Command:           []string{"/bin/sh", "-c", "sleep 60"},
+	}
+	id := createContainer(t, d, spec)
+	if err := d.Start(t.Context(), id); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+
+	att, err := d.ExecTTY(t.Context(), id, []string{"/bin/sh", "-l"}, "/workspace", 100, 30)
+	if err != nil {
+		t.Fatalf("ExecTTY() error: %v", err)
+	}
+	defer att.Close()
+	lines := readLines(att)
+
+	if _, err := att.Stdin().Write([]byte("pwd\n")); err != nil {
+		t.Fatalf("stdin write: %v", err)
+	}
+	waitLine(t, lines, 10*time.Second, "/workspace")
+
+	if err := att.Resize(t.Context(), 120, 40); err != nil {
+		t.Fatalf("Resize() error: %v", err)
+	}
+	if _, err := att.Stdin().Write([]byte("stty size\n")); err != nil {
+		t.Fatalf("stdin write: %v", err)
+	}
+	waitLine(t, lines, 10*time.Second, "40 120")
+
+	// The shell exiting ends the exec stream.
+	if _, err := att.Stdin().Write([]byte("exit\n")); err != nil {
+		t.Fatalf("stdin write: %v", err)
+	}
+	deadline := time.After(10 * time.Second)
+	for open := true; open; {
+		select {
+		case _, ok := <-lines:
+			open = ok
+		case <-deadline:
+			t.Fatal("exec stream did not end after the shell exited")
+		}
+	}
+
+	// A missing executable must surface as ExecExitError so callers can
+	// retry with /bin/sh.
+	_, err = d.ExecTTY(t.Context(), id, []string{"/bin/bash", "-l"}, "/workspace", 80, 24)
+	var exitErr *ExecExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("ExecTTY(missing bash) = %v, want *ExecExitError", err)
+	}
+	if exitErr.Code != 126 && exitErr.Code != 127 {
+		t.Fatalf("ExecExitError.Code = %d, want 126 or 127", exitErr.Code)
+	}
+}

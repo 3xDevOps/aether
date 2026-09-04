@@ -77,9 +77,10 @@ func TestBusyDoesNotCountAPausedRun(t *testing.T) {
 	}
 }
 
-// A workspace shell has no container to reattach to after a restart, so it
-// holds an update back the way a working run does.
-func TestBusyCountsAnOpenWorkspaceShell(t *testing.T) {
+// An interactive shell has no container to reattach to after a restart, so
+// it holds an update back the way a working run does. The counter's next
+// producer is the member terminal (Step 2); workspace shells are gone.
+func TestBusyCountsAnOpenInteractiveShell(t *testing.T) {
 	e := newTestEnv(t, nil)
 	release := e.sched.holdShell()
 	got := e.sched.Busy(t.Context())

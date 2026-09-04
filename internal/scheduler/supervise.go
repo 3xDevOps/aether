@@ -63,7 +63,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if err := s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(entry.runID)); err != nil {
 		slog.Warn("scheduler: stop pty session", "run", entry.runID, "error", err)
 	}
-	s.cfg.PTY.StopSessionsWithPrefix(ctx, "run-shell:"+string(entry.runID)+":")
+	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
 
 	s.mu.Lock()
 	killed, killActor := entry.killRequested, entry.killActor

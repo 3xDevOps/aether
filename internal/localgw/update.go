@@ -8,13 +8,21 @@ import (
 	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/localops"
+	"github.com/3xDevOps/Aether/internal/macinstall"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
-// applyUpdate is selfupdate.Update behind a variable because it replaces
-// the running executable, which a test process must never do to itself.
-var applyUpdate = selfupdate.Update
+// applyUpdate is selfupdate.UpdateWithAuthorization behind a variable
+// because it replaces the running executable, which a test process must
+// never do to itself. The authorized variant because a dashboard click is
+// a GUI action: on macOS a binary this user cannot write goes through the
+// system's administrator dialog instead of a refusal.
+var applyUpdate = selfupdate.UpdateWithAuthorization
+
+// probeAccess is selfupdate.Probe behind a variable so tests can describe
+// a binary that is not the test process.
+var probeAccess = selfupdate.Probe
 
 // localUpdateCheck reports the CLI's release check beside the linked
 // server's version, so the dashboard can tell the user which half of the
@@ -40,7 +48,17 @@ func (g *Gateway) localUpdateCheck(r *http.Request, _ []byte) (any, *protocol.Er
 		// CLI, so this gateway reads the record it left behind: without it
 		// the app would just look stale, with no sign of what went wrong.
 		ShellBuildError string `json:"shell_build_error,omitempty"`
+		// CLIPath is the binary update.apply replaces, symlinks resolved,
+		// and InstallMethod how: "direct" with no questions asked,
+		// "admin-prompt" through the macOS administrator dialog, or
+		// "manual" with the command the banner shows. Both are empty when
+		// the probe itself failed; the click then reports that error.
+		CLIPath       string            `json:"cli_path,omitempty"`
+		InstallMethod selfupdate.Method `json:"install_method,omitempty"`
 	}{CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError()}
+	if access, err := probeAccess(); err == nil {
+		out.CLIPath, out.InstallMethod = access.Path, access.Method
+	}
 
 	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerInfo, nil)
 	if perr != nil {
@@ -57,14 +75,30 @@ func (g *Gateway) localUpdateCheck(r *http.Request, _ []byte) (any, *protocol.Er
 	return out, nil
 }
 
-// localUpdateApply installs the newest release over this CLI. It never
-// escalates privileges: a binary the user cannot write is a refusal that
-// names the command to run in a terminal instead.
+// localUpdateApply installs the newest release over this CLI. This
+// process never gains privileges: on macOS a binary the user cannot write
+// is installed by the system's administrator dialog, one fixed command
+// run by root outside this process; elsewhere it is a refusal that names
+// the command to run in a terminal instead.
+//
+// The call waits on the request context alone while the dialog is up.
+// There is no timer to add here, and the http.Server in localgw.go must
+// keep having no WriteTimeout: a native authorization dialog has no
+// timeout, and one that closes the request under the user would leave the
+// dialog on screen with the password authorizing nothing. Closing the tab
+// or the app cancels the request, which kills the wait.
 func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Error) {
 	check, perr := g.checkRelease(r)
 	if perr != nil {
 		return nil, perr
 	}
+	// One install at a time: a second click from another tab while the
+	// dialog is up would stack a second dialog and a second copy.
+	if !g.updating.CompareAndSwap(false, true) {
+		return nil, &protocol.Error{Code: protocol.CodeConflict,
+			Message: "an update is already running in this gateway"}
+	}
+	defer g.updating.Store(false)
 	switch {
 	case check.Dev:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
@@ -82,26 +116,38 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 			Message: "already on " + check.Latest + ", the newest release"}
 	}
 
-	updated, err := applyUpdate(r.Context(), g.cfg.Update.BaseURL(), check.Latest)
-	if err != nil {
-		if errors.Is(err, os.ErrPermission) {
-			return nil, &protocol.Error{Code: protocol.CodeInvalidState,
-				Message: err.Error() + " (the dashboard never escalates privileges)"}
+	// A release this process already installed is on disk; only the
+	// rebuild or the restart is still to happen. Swapping it again would
+	// cost a download and, on macOS, a second password dialog for the
+	// same bytes, so the answer picks up after the swap instead.
+	var updated []string
+	if done := g.installed.Load(); done != nil && done.tag == check.Latest {
+		updated = done.paths
+	} else {
+		var err error
+		updated, err = applyUpdate(r.Context(), g.cfg.Update.BaseURL(), check.Latest)
+		if err != nil {
+			return nil, applyError(err, check.Latest)
 		}
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "install " + check.Latest + ": " + err.Error()}
+		g.installed.Store(&installedRelease{tag: check.Latest, paths: updated})
 	}
 
 	// The CLI is swapped; the Electron shell around the dashboard is not,
 	// and it is built from the sources inside the binary that just landed.
-	// updated[0] is that binary, symlinks already resolved.
+	// updated[0] is that binary, symlinks already resolved. A rebuild this
+	// process already finished is not run again for a repeat click: the
+	// app on disk is new, and only the restart is left.
 	outcome := rebuildNone
-	if len(updated) > 0 {
+	rebuilt := g.rebuild.snapshot().Phase == localops.PhaseDone
+	if len(updated) > 0 && !rebuilt {
 		outcome = g.startAppRebuild(updated[0])
 	}
 	rebuilding := outcome != rebuildNone
 
 	note := "rerun aether gui to use the new binary"
 	switch {
+	case rebuilt:
+		note = "the desktop app was rebuilt; restart it to use the new version"
 	case outcome == rebuildBusy:
 		// A second apply - another tab, or the app beside a browser tab.
 		// Saying a rebuild is running is the honest answer, and it must
@@ -116,7 +162,7 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	case g.cfg.Supervised:
 		note = "the desktop app restarts with the new binary"
 	}
-	if g.cfg.Supervised && outcome == rebuildNone {
+	if g.cfg.Supervised && outcome == rebuildNone && !rebuilt {
 		// Close after the handler returns and Shutdown drains it: the
 		// command waiting on Exit calls Close, which lets this response
 		// finish writing before the process goes away. With a rebuild
@@ -137,6 +183,30 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 		Rebuilding: rebuilding, Note: note,
 		RestartCommand: restartCommand(updated),
 	}, nil
+}
+
+// applyError maps what the install returned to the answer the banner
+// acts on. Each carries the underlying message verbatim: osascript's own
+// line for the dialog, CheckWritable's sudo command for a refusal.
+func applyError(err error, latest string) *protocol.Error {
+	switch {
+	case errors.Is(err, macinstall.ErrCanceled):
+		// The user dismissed the dialog, or macOS gave up on the password.
+		// Not a failure of the install: nothing was downloaded over
+		// anything, and the button is worth another click.
+		return &protocol.Error{Code: protocol.CodeDenied,
+			Message: "nothing was changed: " + err.Error()}
+	case errors.Is(err, macinstall.ErrNoSession):
+		// A gateway with no window server - started over SSH - has no way
+		// to show the dialog; the terminal it was started from does have
+		// sudo.
+		return &protocol.Error{Code: protocol.CodeInvalidState,
+			Message: err.Error() + "; run `sudo aether update` in a terminal on this Mac"}
+	case errors.Is(err, os.ErrPermission):
+		// Linux: the message already ends with the sudo command.
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	}
+	return &protocol.Error{Code: protocol.CodeUnavailable, Message: "install " + latest + ": " + err.Error()}
 }
 
 // localUpdateStatus reports the desktop-app rebuild update.apply started,

@@ -252,9 +252,9 @@ func TestStagingIsFailClosed(t *testing.T) {
 }
 
 // TestCoordinationOffLeavesContainersAlone covers both directions of the
-// kill switch: with it off nothing is staged, mounted, or collected, and
-// turning it on afterwards does not pretend a container that was created
-// without the mounts has them.
+// kill switch: with it off no coordination assets are staged or mounted,
+// and turning it on afterwards does not pretend an existing container has
+// them.
 func TestCoordinationOffLeavesContainersAlone(t *testing.T) {
 	fakeServerBinary(t, "current build")
 	e := newTestEnv(t, nil)
@@ -269,8 +269,8 @@ func TestCoordinationOffLeavesContainersAlone(t *testing.T) {
 	}
 
 	run, container := e.launchFake(t, "add OAuth login")
-	if len(container.spec.Mounts) != 0 {
-		t.Fatalf("coordination is off but the container got mounts: %+v", container.spec.Mounts)
+	if len(container.spec.Mounts) != 1 || container.spec.Mounts[0].ContainerPath != "/root" {
+		t.Fatalf("coordination is off but the container got non-home mounts: %+v", container.spec.Mounts)
 	}
 	if _, err := os.Stat(old); err != nil {
 		t.Fatalf("an old staged build was touched with coordination off: %v", err)
@@ -285,8 +285,8 @@ func TestCoordinationOffLeavesContainersAlone(t *testing.T) {
 
 	// Off -> on. The container already exists; nothing retrofits it.
 	coord, _ := withCoordination(t, e)
-	if len(container.spec.Mounts) != 0 {
-		t.Fatalf("an existing container gained mounts: %+v", container.spec.Mounts)
+	if len(container.spec.Mounts) != 1 || container.spec.Mounts[0].ContainerPath != "/root" {
+		t.Fatalf("an existing container gained coordination mounts: %+v", container.spec.Mounts)
 	}
 	if released := coord.releasedRuns(); len(released) != 0 {
 		t.Fatalf("a run that was never provisioned was released: %v", released)

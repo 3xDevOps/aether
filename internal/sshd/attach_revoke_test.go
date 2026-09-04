@@ -3,7 +3,9 @@ package sshd
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +32,7 @@ type rawAttachConn struct {
 	exit <-chan uint32
 }
 
-func rawAttach(t *testing.T, e *testEnv, signer ssh.Signer, run domain.RunID, withPTY bool) (rawAttachConn, protocol.AttachResponse) {
+func rawAttach(t *testing.T, e *testEnv, signer ssh.Signer, run domain.RunID, withPTY bool, shell ...string) (rawAttachConn, protocol.AttachResponse) {
 	t.Helper()
 	client, err := e.dialWith(signer, nil)
 	if err != nil {
@@ -75,10 +77,70 @@ func rawAttach(t *testing.T, e *testEnv, signer ssh.Signer, run domain.RunID, wi
 		t.Fatalf("subsystem: ok=%v err=%v", ok, rerr)
 	}
 	r := bufio.NewReader(ch)
-	if _, err := ch.Write([]byte(`{"run_id":"` + string(run) + `"}` + "\n")); err != nil {
+	header := `{"run_id":"` + string(run) + `"}`
+	if len(shell) > 0 {
+		header = `{"run_id":"` + string(run) + `","shell":"` + shell[0] + `"}`
+	}
+	if _, err := ch.Write([]byte(header + "\n")); err != nil {
 		t.Fatalf("write header: %v", err)
 	}
 	var ack protocol.AttachResponse
+	readJSONLine(t, r, &ack)
+	return rawAttachConn{ch: ch, r: r, exit: exitCh}, ack
+}
+func rawTerminal(t *testing.T, e *testEnv, signer ssh.Signer, withPTY bool, tab string) (rawAttachConn, protocol.TerminalResponse) {
+	t.Helper()
+	client, err := e.dialWith(signer, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	ch, reqs, err := client.OpenChannel("session", nil)
+	if err != nil {
+		t.Fatalf("open channel: %v", err)
+	}
+	t.Cleanup(func() { _ = ch.Close() })
+	exitCh := make(chan uint32, 1)
+	go func() {
+		defer close(exitCh)
+		for req := range reqs {
+			if req.Type == "exit-status" {
+				var p struct{ Status uint32 }
+				if ssh.Unmarshal(req.Payload, &p) == nil {
+					select {
+					case exitCh <- p.Status:
+					default:
+					}
+				}
+			}
+			if req.WantReply {
+				_ = req.Reply(false, nil)
+			}
+		}
+	}()
+	if withPTY {
+		ptyReq := struct {
+			Term          string
+			Cols, Rows    uint32
+			Width, Height uint32
+			Modes         string
+		}{Term: "xterm", Cols: 80, Rows: 24}
+		if ok, rerr := ch.SendRequest("pty-req", true, ssh.Marshal(&ptyReq)); rerr != nil || !ok {
+			t.Fatalf("pty-req: ok=%v err=%v", ok, rerr)
+		}
+	}
+	if ok, rerr := ch.SendRequest("subsystem", true, ssh.Marshal(&struct{ Name string }{protocol.SubsystemTerminal})); rerr != nil || !ok {
+		t.Fatalf("subsystem: ok=%v err=%v", ok, rerr)
+	}
+	r := bufio.NewReader(ch)
+	header, err := json.Marshal(protocol.TerminalRequest{Tab: tab})
+	if err != nil {
+		t.Fatalf("marshal header: %v", err)
+	}
+	if _, err := ch.Write(append(header, '\n')); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	var ack protocol.TerminalResponse
 	readJSONLine(t, r, &ack)
 	return rawAttachConn{ch: ch, r: r, exit: exitCh}, ack
 }
@@ -137,6 +199,62 @@ func (c rawAttachConn) expectOpen(t *testing.T, d time.Duration) {
 		t.Fatalf("attach ended (exit-status %d, sent %v), want it kept open", st, ok)
 	case <-time.After(d):
 	}
+}
+
+func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
+	t.Run("steer", func(t *testing.T) {
+		e := revocableEnv(t)
+		collab, _ := addMember(t, e, "Shell collaborator", domain.RoleCollaborator, false)
+		c, ack := rawAttach(t, e, collab, e.run.ID, true, "shell")
+		if !ack.OK {
+			t.Fatalf("ack = %+v, want ok", ack)
+		}
+		calls := e.runs.Calls()
+		if len(calls) == 0 || !strings.HasPrefix(calls[len(calls)-1], "run-shell:"+string(e.run.ID)+":shell:") {
+			t.Fatalf("RunController calls = %v, want run shell ensure", calls)
+		}
+		c.expectOpen(t, 4*e.srv.cfg.revalidateInterval)
+		e.run.Protected = true
+		if err := e.store.UpdateRun(context.Background(), e.run); err != nil {
+			t.Fatalf("protect run: %v", err)
+		}
+		c.expectExit(t, protocol.AttachExitSteerRevoked)
+	})
+
+	t.Run("membership", func(t *testing.T) {
+		e := revocableEnv(t)
+		collab, cm := addMember(t, e, "Shell viewer", domain.RoleCollaborator, false)
+		c, ack := rawAttach(t, e, collab, e.run.ID, true, "shell")
+		if !ack.OK {
+			t.Fatalf("ack = %+v, want ok", ack)
+		}
+		if err := e.store.DeleteMember(context.Background(), cm.ID); err != nil {
+			t.Fatalf("delete member: %v", err)
+		}
+		c.expectExit(t, protocol.AttachExitMembershipRevoked)
+	})
+}
+
+// A member removed while using their environment terminal loses the socket
+// and receives the membership-revoked exit status.
+func TestTerminalDropsOnMembershipRevocation(t *testing.T) {
+	e := revocableEnv(t)
+	// A fresh collaborator with no runs: deleting the run owner would trip
+	// the runs foreign key, and revocation is about membership, not runs.
+	collab, cm := addMember(t, e, "Terminal user", domain.RoleCollaborator, false)
+	c, ack := rawTerminal(t, e, collab, true, "main")
+	if !ack.OK || ack.Tab != "main" || ack.Cols != 80 || ack.Rows != 24 {
+		t.Fatalf("terminal ack = %+v, want main 80x24", ack)
+	}
+	if calls := e.runs.Calls(); len(calls) < 2 ||
+		calls[len(calls)-2] != "terminal:"+string(cm.ID) ||
+		calls[len(calls)-1] != "terminal-tab:"+string(cm.ID)+":main:80:24" {
+		t.Fatalf("RunController calls = %v, want terminal and main tab", calls)
+	}
+	if err := e.store.DeleteMember(context.Background(), cm.ID); err != nil {
+		t.Fatalf("delete member: %v", err)
+	}
+	c.expectExit(t, protocol.AttachExitMembershipRevoked)
 }
 
 // A collaborator typing into a teammate's terminal is demoted to viewer

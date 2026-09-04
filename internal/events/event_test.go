@@ -12,8 +12,9 @@ import (
 func TestPayloadCodecRoundtrip(t *testing.T) {
 	payloads := []Payload{
 		RunStatusPayload{From: domain.RunRunning, To: domain.RunFailed, Reason: "agent exited 1"},
-		RunDiffPayload{Files: []FileDiffStat{{Path: "main.go", Additions: 10, Deletions: 2}}},
+		RunTitlePayload{Title: "Fixing the login bug"},
 		RunCostPayload{InputTokens: 1200, OutputTokens: 340, CostUSD: 0.42, Metered: true},
+		RunDiffPayload{Files: []FileDiffStat{{Path: "main.go", Additions: 10, Deletions: 2}}},
 		PresencePayload{State: PresenceWatching},
 		ApprovalPayload{RequestID: "req_1", Action: "rm -rf build", Decision: ApprovalDenied},
 		TimelinePayload{Kind: TimelineSteer, Message: "focus on the failing test"},

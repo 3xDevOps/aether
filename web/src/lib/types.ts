@@ -16,6 +16,8 @@ export interface Run {
   workspace_id: string
   member_id: string
   task: string
+  /** Latest terminal title, omitted by older servers and for empty titles. */
+  title?: string
   harness: string
   mode: string
   status: RunStatus
@@ -89,6 +91,15 @@ export interface GatewayCapabilities {
   commit?: string
 }
 
+/** The member's persistent environment terminal status. */
+export interface TerminalStatusResult {
+  running: boolean
+  image?: string
+  started_at?: string
+  tabs?: string[]
+}
+
+
 export interface Event {
   id: string
   seq: number
@@ -104,6 +115,10 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
+}
+
+export interface RunTitlePayload {
+  title: string
 }
 
 // Team surfaces: the approval inbox, the presence roster, cost and budgets,
@@ -290,29 +305,13 @@ export interface WorkspaceSelector {
   name?: string
 }
 
-/** Stable executable metadata; never a server filesystem path. */
-export interface ToolManifest {
-  executable?: string
-  version?: string
-  metadata?: Record<string, string>
-}
-
-/** Immutable member/workspace tool snapshot (internal/protocol/tools.go). */
-export interface ToolSnapshot {
-  id: string
-  workspace_id: string
-  member_id: string
-  digest: string
-  manifest: ToolManifest
-  created_at: string
-  /** Set on the snapshot currently active for the workspace. */
-  active?: boolean
-}
 
 /** One entry of agent.list; source is who supplied the harness. */
 export interface AgentInfo {
   name: string
   source: 'shipped' | 'member'
+  /** Vendor installer command for shipped harnesses, when available. */
+  install_script?: string
 }
 
 /** A member-supplied custom harness launch definition (agent.register). */
@@ -555,6 +554,17 @@ export interface UpdateStatus {
    * has run.
    */
   shell_build_error?: string
+  /** The binary update.apply replaces, symlinks resolved. Absent when the
+   * gateway could not probe it; install_method is absent with it. */
+  cli_path?: string
+  /**
+   * How update.apply gets to write cli_path. `direct`: its directory is
+   * writable and the update just happens. `admin-prompt`: macOS shows its
+   * administrator password dialog first. `manual`: the gateway cannot
+   * replace it (a root-owned directory on Linux, or Windows), so the member
+   * runs `sudo aether update` in a terminal. Absent when the probe failed.
+   */
+  install_method?: 'direct' | 'admin-prompt' | 'manual'
 }
 
 /** update.apply: what the self-update replaced and what happens next. */

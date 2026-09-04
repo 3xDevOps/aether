@@ -52,7 +52,7 @@ export function Sidebar() {
 
   if (collapsed) {
     return (
-      <aside className="flex w-10 shrink-0 flex-col items-center border-r py-2">
+      <aside className="flex w-10 shrink-0 flex-col items-center border-r bg-sidebar py-2">
         <Button
           variant="ghost"
           size="icon"
@@ -67,7 +67,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className="relative flex shrink-0 flex-col border-r"
+      className="relative flex shrink-0 flex-col border-r bg-sidebar"
       style={{ width }}
       aria-label="Runs"
     >
@@ -285,8 +285,8 @@ function NavSection() {
           type="button"
           onClick={() => navigate(name)}
           className={cn(
-            'flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-accent/60',
-            route.name === name && 'bg-accent',
+            'flex w-full items-center gap-2 border-l-2 border-transparent px-2 py-1 text-left text-sm hover:bg-accent/60',
+            route.name === name && 'bg-accent border-primary',
           )}
         >
           <Icon className="size-3.5 text-muted-foreground" />

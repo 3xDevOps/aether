@@ -240,7 +240,7 @@ func TestWaitingLine(t *testing.T) {
 		{
 			name: "runs and shells",
 			in:   &protocol.ServerUpdateWaiting{Runs: 2, Shells: 3},
-			want: "waiting: 2 runs are still working, 3 workspace shells are open",
+			want: "waiting: 2 runs are still working, 3 attached terminals are open",
 		},
 		{
 			// A paused run looks running in `aether runs`, so it is named

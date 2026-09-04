@@ -36,11 +36,23 @@ type fakeRuntime struct {
 	// startHook runs in its own goroutine once a container starts; tests
 	// use it to script the container's output and exit.
 	startHook func(c *fakeContainer)
-	attaches  int
-	builds    int
+	// execTTYHook overrides ExecTTY for tests that need to model an
+	// immediate shell-executable failure.
+	execTTYHook func(context.Context, runtime.ID, []string, string, uint, uint) (runtime.Attachment, error)
+	execCalls   []fakeExecTTYCall
+	attaches    int
+	builds      int
 	// images maps built tags to their Dockerfile text, lazily allocated
 	// by BuildImage.
 	images map[string]string
+}
+
+type fakeExecTTYCall struct {
+	id      runtime.ID
+	argv    []string
+	workDir string
+	cols    uint
+	rows    uint
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -217,7 +229,20 @@ func (r *fakeRuntime) Attach(_ context.Context, id runtime.ID) (runtime.Attachme
 	c.atts = append(c.atts, a)
 	return a, nil
 }
-func (r *fakeRuntime) ExecTTY(ctx context.Context, id runtime.ID, _ []string, _ string, cols, rows uint) (runtime.Attachment, error) {
+func (r *fakeRuntime) ExecTTY(ctx context.Context, id runtime.ID, argv []string, workDir string, cols, rows uint) (runtime.Attachment, error) {
+	r.mu.Lock()
+	r.execCalls = append(r.execCalls, fakeExecTTYCall{
+		id: id, argv: slices.Clone(argv), workDir: workDir, cols: cols, rows: rows,
+	})
+	hook := r.execTTYHook
+	r.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, id, argv, workDir, cols, rows)
+	}
+	return r.attachForExec(ctx, id, argv, workDir, cols, rows)
+}
+
+func (r *fakeRuntime) attachForExec(ctx context.Context, id runtime.ID, _ []string, _ string, cols, rows uint) (runtime.Attachment, error) {
 	att, err := r.Attach(ctx, id)
 	if err != nil {
 		return nil, err
@@ -229,6 +254,12 @@ func (r *fakeRuntime) ExecTTY(ctx context.Context, id runtime.ID, _ []string, _ 
 		}
 	}
 	return att, nil
+}
+
+func (r *fakeRuntime) execTTYCalls() []fakeExecTTYCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.execCalls)
 }
 
 func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
@@ -547,9 +578,10 @@ func (g *fakeGit) checkoutCount() int {
 // ownership of the attachment and pumps its Stdout, recording the time of
 // the last byte read.
 type fakePTY struct {
-	mu       sync.Mutex
-	sessions map[ptyhost.SessionKey]*fakePTYSession
-	injects  []fakeInject
+	mu              sync.Mutex
+	sessions        map[ptyhost.SessionKey]*fakePTYSession
+	injects         []fakeInject
+	stoppedPrefixes []string
 }
 
 type fakePTYSession struct {
@@ -609,8 +641,28 @@ func (p *fakePTY) StopSession(_ context.Context, key ptyhost.SessionKey) error {
 	}
 	return sess.att.Close()
 }
+func (p *fakePTY) ActiveSessions(prefix string) []ptyhost.SessionKey {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	active := make([]ptyhost.SessionKey, 0)
+	for key, sess := range p.sessions {
+		if !strings.HasPrefix(string(key), prefix) {
+			continue
+		}
+		sess.mu.Lock()
+		ended := sess.ended
+		sess.mu.Unlock()
+		if !ended {
+			active = append(active, key)
+		}
+	}
+	slices.Sort(active)
+	return active
+}
+
 func (p *fakePTY) StopSessionsWithPrefix(_ context.Context, prefix string) {
 	p.mu.Lock()
+	p.stoppedPrefixes = append(p.stoppedPrefixes, prefix)
 	sessions := make([]*fakePTYSession, 0)
 	for key, sess := range p.sessions {
 		if strings.HasPrefix(string(key), prefix) {
@@ -621,6 +673,12 @@ func (p *fakePTY) StopSessionsWithPrefix(_ context.Context, prefix string) {
 	for _, sess := range sessions {
 		_ = sess.att.Close()
 	}
+}
+
+func (p *fakePTY) stoppedPrefixesSnapshot() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.stoppedPrefixes)
 }
 
 func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {

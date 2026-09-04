@@ -1,12 +1,13 @@
-// `agent add` as a wizard: name and argv templates, then the agent-setup
-// shell embedded right here (registration happens when that shell exits
-// cleanly, so the wizard never navigates away from it), then the result.
+// `agent add` as a wizard: collect the name and launch templates, then give
+// concise instructions for setup in the member's persistent environment home.
 
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { api, type Api } from '@/lib/api'
+import { TerminalDock } from '@/routes/board/terminal-dock'
 import type { AgentInfo } from '@/lib/types'
-import { ShellPane } from '@/routes/shell/pane'
-import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
@@ -20,94 +21,81 @@ export function splitArgv(template: string): string[] {
   return template.split(' ').filter((w) => w !== '')
 }
 
-type Step = 'form' | 'shell' | 'done'
+type Step = 'form' | 'instructions' | 'done'
 
 export function AgentWizard({
   agents,
   harness,
-  workspaceId,
   onRegistered,
   onCancel,
+  client = api,
 }: {
-  /** The current list, for shipped-name detection and duplicate hints. */
+  /** The current list, for shipped-name detection and installer details. */
   agents: AgentInfo[]
   /** The harness to set up, when the caller already knows it (onboarding).
-   * With workspaceId set too, the form has nothing left to ask and the
-   * setup shell opens on mount. */
+   * The form is skipped and the setup instructions show straight away. */
   harness?: string
-  /** The workspace to set the agent up in; without it the member picks. */
-  workspaceId?: string
-  /** A clean shell exit registered the agent; the caller refetches. */
+  /** The setup confirmation registered the agent; the caller refetches. */
   onRegistered: () => void
   onCancel: () => void
+  /** API client used by an embedded wizard or test fixture. */
+  client?: Api
 }) {
-  const workspaces = useStore((s) => s.workspaces)
-  const activeWorkspace = useStore((s) => s.activeWorkspace)
-  const openShell = useStore((s) => s.openShell)
-  const shellRequest = useStore((s) => s.shellRequest)
-
-  const [step, setStep] = useState<Step>('form')
+  const [step, setStep] = useState<Step>(harness ? 'instructions' : 'form')
   const [name, setName] = useState(harness ?? '')
-  // Empty until the member picks one, so the sidebar's choice keeps
-  // following them until they mean to set up an agent somewhere else.
-  const [picked, setPicked] = useState(workspaceId ?? '')
   // Argv templates follow the name until the user edits them.
   const [tui, setTui] = useState<string | null>(null)
   const [headless, setHeadless] = useState<string | null>(null)
-
-  const choices = Object.values(workspaces)
-  const workspaceID = picked || activeWorkspace || choices[0]?.id || ''
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const caps = useCapability()
 
   const trimmed = name.trim()
-  const shipped = agents.some((a) => a.name === trimmed && a.source === 'shipped')
-  // The CLI's argv template defaults (cmd/aether/agent.go): `{task}` is the
-  // placeholder the server substitutes at launch.
+  const selected = agents.find((a) => a.name === trimmed)
+  const shipped = selected?.source === 'shipped'
+  const installScript =
+    selected?.install_script || `install ${trimmed || 'the agent'} into ~/.local/bin`
+  // The CLI's argv template defaults: `{task}` is the placeholder the server
+  // substitutes at launch.
+  const hasTerminal = caps.hasWS('terminal')
   const base = trimmed || 'agent'
   const tuiValue = tui ?? `${base} {task}`
   const headlessValue = headless ?? `${base} -p {task}`
 
   const start = () => {
-    if (!trimmed || !workspaceID) return
-    // A refusal (unknown workspace, name collision) comes back on the
-    // socket's ack and renders verbatim in the pane; nothing is predicted
-    // here.
-    openShell({
-      workspace: { id: workspaceID },
-      mode: 'agent-setup',
-      harness: trimmed,
-      // Shipped agents carry their own argv templates server-side; only a
-      // member-defined name proposes them.
-      ...(shipped
-        ? {}
-        : {
-            tui_args: splitArgv(tuiValue),
-            headless_args: splitArgv(headlessValue),
-          }),
-    })
-    setStep('shell')
+    if (!trimmed) return
+    setError(null)
+    setStep('instructions')
   }
 
-  // Onboarding drives the wizard with both answers in hand, so there is no
-  // form to show: open the setup shell straight away. The standalone page
-  // passes neither prop and is untouched.
-  const driven = Boolean(harness && workspaceId)
-  const started = useRef(false)
-  useEffect(() => {
-    if (!driven || started.current) return
-    started.current = true
-    // start() reads only state seeded from these props, so one run on
-    // mount is the whole contract; the ref keeps a re-render from opening
-    // a second shell.
-    start()
-  }, [driven])
+  const finish = async () => {
+    if (!trimmed || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      if (!shipped) {
+        await client.agentRegister({
+          name: trimmed,
+          executable: trimmed,
+          tui_args: splitArgv(tuiValue),
+          headless_args: splitArgv(headlessValue),
+        })
+      }
+      onRegistered()
+      setStep('done')
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   if (step === 'done') {
     return (
       <div className="space-y-3 rounded-md border p-4">
         <p className="text-sm font-medium">Agent registered</p>
         <p className="text-sm text-muted-foreground">
-          {trimmed} is set up: the login is persisted and the workspace tools
-          are snapshotted.
+          {trimmed} is ready. Its login and user-local files persist in your member home.
         </p>
         <Button size="sm" onClick={onCancel}>
           Close
@@ -116,30 +104,64 @@ export function AgentWizard({
     )
   }
 
-  if (step === 'shell' && shellRequest) {
+  if (step === 'instructions') {
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-2">
-        <p className="px-1 text-xs text-muted-foreground">
-          Install and log in to {trimmed} below. A dirty exit offers resume
-          and reset right in the pane.
-        </p>
-        <div className="min-h-0 flex-1">
-          <ShellPane
-            req={shellRequest}
-            onExit={(clean) => {
-              if (!clean) return
-              onRegistered()
-              setStep('done')
-            }}
-          />
+      <div
+        className={
+          hasTerminal
+            ? 'space-y-3 rounded-md border p-4'
+            : 'max-w-md space-y-3 rounded-md border p-4'
+        }
+      >
+        <p className="text-sm font-medium">Set up {trimmed}</p>
+        {hasTerminal ? (
+          <>
+            <p className="text-sm text-muted-foreground">
+              The install command is ready in your environment terminal:
+            </p>
+            <TerminalDock client={client} openOnMount initialLine={installScript} />
+            <p className="text-sm text-muted-foreground">
+              Complete the vendor login in that terminal, then return here.
+            </p>
+            <code className="block rounded-md bg-muted px-2 py-1 font-mono text-xs">
+              {installScript}
+            </code>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Open your environment terminal and run the install command there:
+            </p>
+            <code className="block rounded-md bg-muted px-2 py-1 font-mono text-xs">
+              aether terminal
+            </code>
+            <pre className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs">
+              {installScript}
+            </pre>
+            <p className="text-sm text-muted-foreground">
+              Complete the vendor login in that terminal, then return here.
+            </p>
+          </>
+        )}
+        {error && <p className="text-xs text-state-failed">{error}</p>}
+        <div className="flex gap-2">
+          <Button type="button" size="sm" onClick={() => void finish()} disabled={busy}>
+            {busy ? 'Registering...' : "I've installed and logged in"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => (harness ? onCancel() : setStep('form'))}
+            disabled={busy}
+          >
+            Back
+          </Button>
         </div>
+        {/* Step 2 replaces these instructions with the terminal dock. */}
       </div>
     )
   }
-
-  // The driven wizard never shows its form; the mount effect above is
-  // opening the shell.
-  if (driven) return null
 
   return (
     <form
@@ -159,20 +181,6 @@ export function AgentWizard({
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
-      </label>
-      <label className="block space-y-1 text-sm">
-        Workspace
-        <select
-          className={field}
-          value={workspaceID}
-          onChange={(e) => setPicked(e.target.value)}
-        >
-          {choices.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-        </select>
       </label>
       {!shipped && (
         <>
@@ -198,8 +206,8 @@ export function AgentWizard({
         </>
       )}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={!trimmed || !workspaceID}>
-          Open setup shell
+        <Button type="submit" size="sm" disabled={!trimmed}>
+          Continue
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={onCancel}>
           Cancel

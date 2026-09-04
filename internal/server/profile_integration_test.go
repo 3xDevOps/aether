@@ -3,9 +3,7 @@
 package server
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,11 +36,9 @@ cat "$HOME/.claude/.credentials.json" > cred-seen.txt 2>/dev/null
 `
 
 // TestIntegrationProfileSyncAndLogins is the profile-sync lifecycle over
-// the wired server: one interactive setup session persists login state
-// that two later runs both see; a pushed profile edit reaches the next
-// run but never a running one (runs pin their snapshot); and a push
-// carrying a denylisted credential name is refused, so the login file a
-// container sees can only come from the member's login home. It drives a
+// the wired server: a profile push is materialized into the member's
+// persistent home, a pushed profile edit reaches every run using that home,
+// and a push carrying a denylisted credential name is refused. It drives a
 // registered harness ("claude" - profile root and credential paths intact)
 // whose argv is overridden to the scripted agent, and needs a real shell
 // in the container, so it runs against Docker only.
@@ -115,18 +111,16 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	client := dialSSH(t, addr, signer)
 	ctrl := openControl(t, client)
 
-	// Harness login, once, natively: an interactive setup container with
-	// the member's login home mounted. Aether is only a terminal surface;
-	// the "login flow" here writes the credential file the harness would.
-	setup := openSetup(t, client, string(ws.ID), "claude")
-	setup.write(t, "printf 'tok-1' > \"$HOME/.claude/.credentials.json\" && echo \"SETUP-\"OK\n")
-	setup.waitOutput(t, "SETUP-OK")
-	setup.detach(t)
-	setup.waitEnd(t)
-
 	// Profile v1 goes up over the control channel; a push naming a
 	// denylisted credential file is refused outright.
 	pushProfile(t, ctrl, "skill-v1\n")
+	memberHome := filepath.Join(dataDir, "homes", string(member.ID), ".claude")
+	if err := os.MkdirAll(memberHome, 0o700); err != nil {
+		t.Fatalf("create member profile home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(memberHome, ".credentials.json"), []byte("tok-1"), 0o600); err != nil {
+		t.Fatalf("seed member login state: %v", err)
+	}
 	denyErr := ctrl.Call(protocol.MethodProfilePush, protocol.ProfilePushParams{
 		Harness: "claude",
 		Files: []protocol.ProfileFile{
@@ -148,22 +142,21 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 		t.Fatalf("snapshot files = %+v, want [skill.md]", status.Files)
 	}
 
-	// Run 1 pins snapshot v1 and parks on stdin. Its materialization holds
-	// the pushed skill; the denylisted names appear only as the empty
-	// mount points Docker creates for the login-home overlays, never with
-	// content from a push.
+	// Run 1 uses the member's persistent home, which contains the pushed
+	// profile and the seeded login state.
 	run1 := launchRun(t, ctrl, string(ws.ID), "wait", "claude")
 	att1 := openAttach(t, client, run1.ID)
 	att1.waitOutput(t, "agent-ready")
-	materialized := filepath.Join(dataDir, "profiles", "runs", run1.ID)
+	materialized := filepath.Join(dataDir, "homes", string(member.ID), ".claude")
 	if got, rerr := os.ReadFile(filepath.Join(materialized, "skill.md")); rerr != nil || string(got) != "skill-v1\n" {
 		t.Fatalf("materialized skill.md = %q (err %v), want the pushed v1", got, rerr)
 	}
-	if info, serr := os.Stat(filepath.Join(materialized, ".credentials.json")); serr == nil && info.Size() != 0 {
-		t.Fatal("credential content reached the materialized profile")
+	if got, rerr := os.ReadFile(filepath.Join(materialized, ".credentials.json")); rerr != nil || string(got) != "tok-1" {
+		t.Fatalf("member login state = %q (err %v), want the seeded token", got, rerr)
 	}
 
-	// A mid-run push: the next run picks it up, the running one must not.
+	// A mid-run push updates the persistent home; the next run and the
+	// running run both see the latest profile contents.
 	pushProfile(t, ctrl, "skill-v2\n")
 
 	run2 := launchRun(t, ctrl, string(ws.ID), "now", "claude")
@@ -180,18 +173,18 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 		t.Fatalf("run 2 saw login state %q, want the setup session's token", got2["cred-seen.txt"])
 	}
 
-	// Run 1 reads its config only now - after the v2 push - and still sees
-	// the snapshot it pinned at provisioning.
+	// Run 1 reads its config only now - after the v2 push - from the same
+	// persistent home as run 2.
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: run1.ID, Message: "go"}, nil); err != nil {
 		t.Fatalf("run.inject: %v", err)
 	}
 	waitRunStatus(t, sub, &seen, run1.ID, domain.RunNeedsAttention)
 	got1 := fetchRunFiles(t, ctrl, seedDir, gitEnv, repoURL, run1.ID)
-	if got1["skill-seen.txt"] != "skill-v1\n" {
-		t.Fatalf("run 1 saw profile %q after the mid-run push, want its pinned v1", got1["skill-seen.txt"])
+	if got1["skill-seen.txt"] != "skill-v2\n" {
+		t.Fatalf("run 1 saw profile %q after the mid-run push, want current v2", got1["skill-seen.txt"])
 	}
 	if got1["cred-seen.txt"] != "tok-1" {
-		t.Fatalf("run 1 saw login state %q, want the setup session's token", got1["cred-seen.txt"])
+		t.Fatalf("run 1 saw login state %q, want the member home token", got1["cred-seen.txt"])
 	}
 	if !strings.Contains(got1["claude-ls.txt"], "skill.md") {
 		t.Fatalf("run 1's config listing = %q, want the synced skill", got1["claude-ls.txt"])
@@ -263,68 +256,4 @@ func fetchRunFiles(t *testing.T, ctrl *protocol.Client, dir string, env []string
 		out[name] = runGit(t, dir, env, "show", "FETCH_HEAD:"+name)
 	}
 	return out
-}
-
-// openSetup opens the unified workspace-shell subsystem for a harness login
-// session and reads its ack; the returned attachConn is the interactive terminal.
-func openSetup(t *testing.T, client *ssh.Client, workspaceID, harnessName string) *attachConn {
-	t.Helper()
-	sess, err := client.NewSession()
-	if err != nil {
-		t.Fatalf("setup session: %v", err)
-	}
-	t.Cleanup(func() { _ = sess.Close() })
-	stdin, err := sess.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := sess.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.RequestSubsystem(protocol.SubsystemWorkspaceShell); err != nil {
-		t.Fatalf("workspace-shell subsystem: %v", err)
-	}
-	header, err := json.Marshal(protocol.WorkspaceShellRequest{
-		Workspace: protocol.WorkspaceSelector{ID: workspaceID},
-		Mode:      protocol.WorkspaceShellModeHarnessLogin,
-		Harness:   harnessName,
-		Cols:      120,
-		Rows:      30,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = stdin.Write(append(header, '\n')); err != nil {
-		t.Fatalf("write workspace shell header: %v", err)
-	}
-	r := bufio.NewReader(stdout)
-	line, err := protocol.ReadLine(r)
-	if err != nil {
-		t.Fatalf("read workspace shell ack: %v", err)
-	}
-	var ack protocol.WorkspaceShellResponse
-	if err := json.Unmarshal(line, &ack); err != nil || !ack.OK {
-		t.Fatalf("workspace shell ack = %s (err %v)", line, err)
-	}
-	a := &attachConn{sess: sess, stdin: stdin}
-	go a.pump(r)
-	return a
-}
-
-// write sends terminal input to the interactive session.
-func (a *attachConn) write(t *testing.T, s string) {
-	t.Helper()
-	if _, err := a.stdin.Write([]byte(s)); err != nil {
-		t.Fatalf("write terminal input: %v", err)
-	}
-}
-
-// detach closes the input side, which ends a setup session (the server
-// tears the login container down and reports exit status).
-func (a *attachConn) detach(t *testing.T) {
-	t.Helper()
-	if err := a.stdin.Close(); err != nil {
-		t.Fatalf("close terminal input: %v", err)
-	}
 }

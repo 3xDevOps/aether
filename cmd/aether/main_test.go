@@ -16,7 +16,7 @@ func TestDispatchHelp(t *testing.T) {
 		t.Fatalf("bare aether: %v", err)
 	}
 	help := helpText()
-	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "runs", "pull", "setup", "workspace", "image", "member", "invite", "gui", "gui build", "profile", "kill", "pause", "resume", "inject", "close", "relaunch", "inbox", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
+	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "terminal", "runs", "pull", "workspace", "image", "member", "invite", "gui", "gui build", "profile", "kill", "pause", "resume", "inject", "close", "relaunch", "inbox", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
 		if !strings.Contains(help, name) {
 			t.Errorf("help missing %q:\n%s", name, help)
 		}
@@ -220,57 +220,4 @@ func (r *blockingReadCloser) Read([]byte) (int, error) {
 func (r *blockingReadCloser) Close() error {
 	close(r.closed)
 	return r.closeErr
-}
-func TestParseWorkspaceBootstrapOptions(t *testing.T) {
-	got, err := parseWorkspaceBootstrap([]string{"demo", "--command", "omp", "--resume"})
-	if err != nil {
-		t.Fatalf("parseWorkspaceBootstrap: %v", err)
-	}
-	if got.workspace != "demo" || got.command != "omp" || !got.resume || got.reset {
-		t.Fatalf("options = %+v", got)
-	}
-}
-
-func TestParseWorkspaceBootstrapRejectsResumeAndReset(t *testing.T) {
-	if _, err := parseWorkspaceBootstrap([]string{"demo", "--resume", "--reset"}); err == nil {
-		t.Fatal("resume and reset were accepted")
-	}
-}
-
-func TestParseSetupOptionsRequiresHarnessAndAllowsWorkspace(t *testing.T) {
-	got, err := parseSetup([]string{"omp", "--workspace", "demo"})
-	if err != nil {
-		t.Fatalf("parseSetup: %v", err)
-	}
-	if got.harness != "omp" || got.workspace != "demo" {
-		t.Fatalf("options = %+v", got)
-	}
-	if _, err := parseSetup(nil); err == nil {
-		t.Fatal("missing harness was accepted")
-	}
-}
-
-func TestParseWorkspaceToolsCommands(t *testing.T) {
-	tests := []struct {
-		args []string
-		op   string
-	}{
-		{[]string{"list", "demo"}, "list"},
-		{[]string{"verify", "demo", "--command", "omp"}, "verify"},
-		{[]string{"rollback", "demo", "snap-1"}, "rollback"},
-		{[]string{"reset", "demo", "--confirm"}, "reset"},
-	}
-	for _, tc := range tests {
-		got, err := parseWorkspaceTools(tc.args)
-		if err != nil {
-			t.Errorf("%v: %v", tc.args, err)
-			continue
-		}
-		if got.operation != tc.op {
-			t.Errorf("%v: operation = %q, want %q", tc.args, got.operation, tc.op)
-		}
-	}
-	if _, err := parseWorkspaceTools([]string{"nope", "demo"}); err == nil {
-		t.Fatal("invalid tools operation was accepted")
-	}
 }

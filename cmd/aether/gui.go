@@ -56,6 +56,15 @@ func runGUI(args []string) error {
 		}
 		cfg = named
 	}
+	// NotifyContext lets termination signals take the same cleanup path as
+	// desktop sidecar shutdown. The deferred gateway close releases SSH
+	// before draining HTTP handlers.
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		append([]os.Signal{syscall.SIGHUP}, terminationSignals...)...,
+	)
+	defer stop()
+
 	// One checker serves both the startup nudge and the update verbs, so
 	// the dashboard reads the answer the banner already paid for.
 	checker := selfupdate.DefaultChecker()
@@ -71,7 +80,7 @@ func runGUI(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := gw.Start(context.Background()); err != nil {
+	if err := gw.Start(ctx); err != nil {
 		return err
 	}
 	defer func() { _ = gw.Close() }()
@@ -95,7 +104,7 @@ func runGUI(args []string) error {
 		}
 	}
 	go nudgeUpdate(checker)
-	waitForExit(gw.Exit())
+	waitForExit(ctx, gw.Exit())
 	if code := gw.ExitCode(); code != 0 {
 		// localgw.ExitRelaunch: update.apply rebuilt the desktop app, so
 		// the shell has to relaunch itself instead of respawning this
@@ -122,16 +131,12 @@ func nudgeUpdate(c *selfupdate.Checker) {
 	fmt.Fprintf(os.Stderr, "update available: %s (running %s); run: aether update\n", check.Latest, check.Version)
 }
 
-// waitForExit blocks until the process is told to stop. SIGTERM belongs
-// here with Ctrl-C: without it a `kill` or a systemd stop skips the
-// deferred gateway shutdown and leaves the listener live. SIGHUP covers
-// a closed terminal window the same way. The gateway asks for the same
-// stop through exit after update.apply replaces this binary.
-func waitForExit(exit <-chan struct{}) {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, append([]os.Signal{syscall.SIGHUP}, terminationSignals...)...)
+// waitForExit blocks until the process is told to stop. The caller's
+// NotifyContext handles SIGTERM, SIGINT, and SIGHUP; the gateway asks for the
+// same stop through exit after update.apply replaces this binary.
+func waitForExit(ctx context.Context, exit <-chan struct{}) {
 	select {
-	case <-ch:
+	case <-ctx.Done():
 	case <-exit:
 	}
 }

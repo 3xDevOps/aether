@@ -10,8 +10,8 @@ import type { DiskUsage, TimelineQuery } from '@/lib/types'
 import { useStore, type RootState, type RootStore } from '@/store'
 import type { FeedFilters } from '@/store/timeline'
 
-/** Presence expires after 90s server-side; a third of it keeps us online. */
-const heartbeatMs = 30_000
+/** Presence expires after 45s server-side; a third of it keeps us online. */
+const heartbeatMs = 15_000
 /**
  * Bursts of events coalesce into one refresh at most this often. Most
  * events change none of these reads - a diff snapshot moves the cursor

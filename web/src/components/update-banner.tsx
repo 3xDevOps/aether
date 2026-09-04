@@ -1,13 +1,14 @@
-// The two update prompts, above everything the shell renders: the CLI on
-// this machine is behind, or the server it talks to is. The CLI half comes
-// from one `update.check` call to the local gateway; the server half comes
-// from `server.update_status`, which any member may read and which says
-// whether the server can replace its own binaries. A server that cannot -
-// the documented unprivileged install - still gets the two commands to run
-// on its host rather than a button that could not work.
+// The update prompts, above everything the shell renders: the CLI on this
+// machine is behind (cli-update-banner.tsx), the desktop app around the
+// dashboard is stale, or the server it talks to is behind. The CLI half
+// comes from one `update.check` call to the local gateway; the server half
+// comes from `server.update_status`, which any member may read and which
+// says whether the server can replace its own binaries. A server that
+// cannot - the documented unprivileged install - still gets the two
+// commands to run on its host rather than a button that could not work.
 
-import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { CliBanner } from '@/components/cli-update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { desktopBridge } from '@/components/shell/title-bar'
 import { Button } from '@/components/ui/button'
@@ -19,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { banner, Dismiss } from '@/components/update-banner-shared'
 import { api, type Api } from '@/lib/api'
 import { bareVersion, message } from '@/lib/format'
 import type {
@@ -26,17 +28,10 @@ import type {
   ServerUpdateStatus,
   ServerUpdateWaiting,
   ServerUpdateWhen,
-  UpdateApplyResult,
-  UpdateBuildStatus,
-  UpdateStatus,
 } from '@/lib/types'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
-import type { UpdateKind } from '@/store/ui'
-
-const banner =
-  'flex flex-wrap items-start gap-x-3 gap-y-1 border-b bg-card px-3 py-2 text-sm'
 
 /**
  * Whether the desktop app was built by a different CLI than the one serving
@@ -48,22 +43,6 @@ function shellIsStale(cliVersion: string | undefined): boolean {
   const shell = desktopBridge()?.shellVersion
   if (!shell || !cliVersion) return false
   return bareVersion(shell) !== bareVersion(cliVersion)
-}
-
-/** The dismiss control both banners carry. */
-function Dismiss({ kind, version }: { kind: UpdateKind; version: string }) {
-  const dismiss = useStore((s) => s.dismissUpdate)
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="ml-auto size-6"
-      aria-label="Dismiss"
-      onClick={() => dismiss(kind, version)}
-    >
-      <X className="size-3.5" aria-hidden />
-    </Button>
-  )
 }
 
 /**
@@ -187,231 +166,6 @@ function ShellBanner() {
         <CopyableCommand command="aether gui build" />
       </div>
       <Dismiss kind="shell" version={cliVersion} />
-    </div>
-  )
-}
-
-type ApplyState =
-  | { name: 'idle' }
-  | { name: 'applying' }
-  | { name: 'done'; result: UpdateApplyResult }
-  | { name: 'failed'; detail: string }
-
-/**
- * What the button, and everything above it, show. Derived from the apply
- * result and the update.status polls that follow it when the gateway
- * started a desktop-app rebuild - never stored directly, so the two never
- * drift out of sync with each other.
- */
-type Flow =
-  | { name: 'idle' }
-  | { name: 'applying' }
-  | { name: 'applyFailed'; detail: string }
-  // update.apply answered and there is no rebuild to wait on: today's flow,
-  // unchanged.
-  | { name: 'applied'; result: UpdateApplyResult }
-  | { name: 'rebuilding'; result: UpdateApplyResult; phase?: string }
-  // The rebuild finished on a gateway that is not going away - a browser
-  // tab - so the app on disk is new and only the window is old.
-  | { name: 'rebuilt'; result: UpdateApplyResult }
-  | { name: 'relaunching' }
-  | { name: 'rebuildFailed'; error: string }
-
-function deriveFlow(apply: ApplyState, build: UpdateBuildStatus | null): Flow {
-  if (apply.name === 'idle') return { name: 'idle' }
-  if (apply.name === 'applying') return { name: 'applying' }
-  if (apply.name === 'failed') return { name: 'applyFailed', detail: apply.detail }
-  const { result } = apply
-  if (!result.rebuilding) return { name: 'applied', result }
-  if (build?.phase === 'error') {
-    return { name: 'rebuildFailed', error: build.error ?? 'the rebuild failed' }
-  }
-  if (build?.phase === 'done') {
-    return result.restarting ? { name: 'relaunching' } : { name: 'rebuilt', result }
-  }
-  return { name: 'rebuilding', result, phase: build?.phase }
-}
-
-/**
- * What the update replaced and what is left to do. The paths are named
- * because a single-box install swaps `aether-server` beside the CLI, and
- * that server keeps running the old code until its unit is restarted - so
- * the command the gateway sends back is shown rather than left to the
- * operator to remember.
- */
-function Applied({ result, note }: { result: UpdateApplyResult; note?: string }) {
-  // The gateway's note describes what it was about to do. Once that work
-  // is over the caller passes what actually happened instead, so the
-  // banner does not keep saying a finished rebuild is still running.
-  const trailing =
-    note ?? (result.restarting ? 'Restarting the dashboard.' : result.note ?? '')
-  return (
-    <div className="space-y-1 text-muted-foreground">
-      <p>
-        Updated to {result.version}.{trailing ? ` ${trailing}` : ''}
-      </p>
-      <p className="font-mono text-[11px]">{result.updated.join(', ')}</p>
-      {result.restart_command && (
-        <>
-          <p>The server binary beside it was replaced too. Restart the unit:</p>
-          <CopyableCommand command={result.restart_command} />
-        </>
-      )}
-    </div>
-  )
-}
-
-/**
- * The CLI is behind. Every member sees this: the binary is on their own
- * machine, so no role gates it.
- */
-function CliBanner({ update, client }: { update: UpdateStatus; client: Api }) {
-  const latest = update.cli.latest ?? ''
-  const dismissed = useStore((s) => s.dismissedUpdates.cli)
-  const setGatewayRestarting = useStore((s) => s.setGatewayRestarting)
-  const [apply, setApply] = useState<ApplyState>({ name: 'idle' })
-  const [build, setBuild] = useState<UpdateBuildStatus | null>(null)
-
-  // Polls update.status while a rebuild the apply started is in flight.
-  // Self-contained: it starts once `apply` becomes the rebuilding `done`
-  // state and stops itself, from inside the tick that sees a terminal
-  // phase, without depending on `build` and thereby restarting the clock
-  // on every poll.
-  useEffect(() => {
-    if (apply.name !== 'done') return
-    if (!apply.result.rebuilding) return
-    let cancelled = false
-    const timer = setInterval(() => {
-      void (async () => {
-        try {
-          const status = await client.localUpdateStatus()
-          if (cancelled) return
-          setBuild(status)
-          if (status.phase === 'done' || status.phase === 'error') {
-            clearInterval(timer)
-          }
-        } catch {
-          // A failed poll is transient; the next tick retries.
-        }
-      })()
-    }, 1000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [apply, client])
-
-  if (!update.cli.update_available || !latest || dismissed === latest) return null
-
-  const run = async () => {
-    setApply({ name: 'applying' })
-    setBuild(null)
-    try {
-      const result = await client.localUpdateApply()
-      // The page must stop showing the connection-error screen while the
-      // gateway is deliberately going away. `restarting` is exactly that
-      // claim; a rebuild on an unsupervised gateway is not - that tab keeps
-      // its gateway, and suppressing the page there would hide a real
-      // disconnect later, because the flag is never cleared.
-      if (result.restarting) setGatewayRestarting(true)
-      setApply({ name: 'done', result })
-    } catch (err) {
-      // The gateway's own message, verbatim: it names the directory and the
-      // exact sudo command when the binary is not writable.
-      setApply({ name: 'failed', detail: message(err) })
-    }
-  }
-
-  const flow = deriveFlow(apply, build)
-  // Nothing is left for the button to do once the CLI is swapped: a second
-  // apply would only answer that this is already the newest release, and a
-  // failed rebuild is fixed by the command the banner already shows.
-  const offerButton =
-    update.cli.can_self_update &&
-    flow.name !== 'applied' &&
-    flow.name !== 'rebuilt' &&
-    flow.name !== 'rebuildFailed'
-  const busy =
-    flow.name === 'applying' || flow.name === 'rebuilding' || flow.name === 'relaunching'
-  const buttonLabel =
-    flow.name === 'applying'
-      ? 'Updating...'
-      : flow.name === 'rebuilding'
-        ? 'Rebuilding...'
-        : flow.name === 'relaunching'
-          ? 'Relaunching...'
-          : 'Update now'
-
-  return (
-    <div role="status" className={banner}>
-      <div className="min-w-0 space-y-1">
-        <p>
-          <span className="font-medium">Aether {latest} is available.</span> You
-          are running {update.cli.version}.
-        </p>
-        {update.cli.can_self_update ? (
-          <p className="text-muted-foreground">
-            Updating replaces the aether binary on this machine and restarts
-            the dashboard. Attached terminals and any running file sync stop
-            with it; the runs themselves keep going on the server.
-          </p>
-        ) : (
-          <p className="text-muted-foreground">
-            Self-update is not supported on Windows. Download {latest} from the
-            release page and replace the binary yourself.
-          </p>
-        )}
-        {flow.name === 'applying' && (
-          <p className="text-muted-foreground">Updating the CLI...</p>
-        )}
-        {flow.name === 'applied' && <Applied result={flow.result} />}
-        {flow.name === 'rebuilt' && (
-          <Applied
-            result={flow.result}
-            note="The app was rebuilt; restart it to use the new version."
-          />
-        )}
-        {flow.name === 'applyFailed' && (
-          <p className="font-mono text-xs text-state-failed">{flow.detail}</p>
-        )}
-        {flow.name === 'rebuilding' && (
-          <div className="text-muted-foreground">
-            <p>
-              Rebuilding the app (about a minute; the first time also fetches
-              Node)...
-            </p>
-            {flow.phase && <p className="font-mono text-[11px]">{flow.phase}</p>}
-          </div>
-        )}
-        {flow.name === 'relaunching' && (
-          <p className="text-muted-foreground">Relaunching</p>
-        )}
-        {flow.name === 'rebuildFailed' && (
-          <div className="space-y-1">
-            <p className="font-mono text-xs text-state-failed">{flow.error}</p>
-            <p className="text-muted-foreground">Rebuild it yourself:</p>
-            <CopyableCommand command="aether gui build" />
-          </div>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        {offerButton && (
-          <Button size="sm" disabled={busy} onClick={() => void run()}>
-            {buttonLabel}
-          </Button>
-        )}
-        {update.cli.release_url && (
-          <a
-            href={update.cli.release_url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs underline underline-offset-2 hover:text-foreground"
-          >
-            Release notes
-          </a>
-        )}
-      </div>
-      <Dismiss kind="cli" version={latest} />
     </div>
   )
 }

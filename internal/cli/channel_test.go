@@ -100,17 +100,17 @@ func (w *trackingWriteCloser) Close() error {
 	w.closeCalls++
 	return nil
 }
-func TestWorkspaceShellResponseKeepsAckErrorAndLeftoverBytes(t *testing.T) {
+func TestAttachResponseKeepsAckErrorAndLeftoverBytes(t *testing.T) {
 	stream := &sessionStream{
-		Reader: strings.NewReader(`{"ok":false,"code":-32000,"error":"workspace denied"}` + "\n" + "terminal output"),
+		Reader: strings.NewReader(`{"ok":false,"code":-32000,"error":"attach denied"}` + "\n" + "terminal output"),
 		stdin:  &trackingWriteCloser{},
 	}
-	var ack protocol.WorkspaceShellResponse
+	var ack protocol.AttachResponse
 	out, err := readAck(stream, &ack)
 	if err != nil {
 		t.Fatalf("readAck: %v", err)
 	}
-	if ack.OK || ack.Code != -32000 || ack.Error != "workspace denied" {
+	if ack.OK || ack.Code != -32000 || ack.Error != "attach denied" {
 		t.Fatalf("ack = %+v", ack)
 	}
 	body, err := io.ReadAll(out)
@@ -121,9 +121,25 @@ func TestWorkspaceShellResponseKeepsAckErrorAndLeftoverBytes(t *testing.T) {
 		t.Fatalf("leftover = %q, want terminal output", body)
 	}
 }
-func TestWorkspaceShellAckErrorIncludesCodeAndMessage(t *testing.T) {
-	err := workspaceShellAckError(protocol.WorkspaceShellResponse{Code: -32001, Error: "launch denied"})
-	if err == nil || !strings.Contains(err.Error(), "-32001") || !strings.Contains(err.Error(), "launch denied") {
-		t.Fatalf("error = %v, want code and message", err)
+
+func TestTerminalResponseKeepsAckErrorAndLeftoverBytes(t *testing.T) {
+	stream := &sessionStream{
+		Reader: strings.NewReader(`{"ok":true,"tab":"main","cols":80,"rows":24}` + "\n" + "terminal output"),
+		stdin:  &trackingWriteCloser{},
+	}
+	var ack protocol.TerminalResponse
+	out, err := readAck(stream, &ack)
+	if err != nil {
+		t.Fatalf("readAck: %v", err)
+	}
+	if !ack.OK || ack.Tab != "main" || ack.Cols != 80 || ack.Rows != 24 {
+		t.Fatalf("ack = %+v", ack)
+	}
+	body, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatalf("read leftover: %v", err)
+	}
+	if string(body) != "terminal output" {
+		t.Fatalf("leftover = %q, want terminal output", body)
 	}
 }

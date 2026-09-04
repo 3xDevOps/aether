@@ -82,8 +82,8 @@ feed without being able to start, steer, or kill anything.
 other's agents with zero setup; every privileged act is attributed in the
 workspace timeline instead of being prevented.
 
-The bootstrap identity is the admin and everyone who joins afterwards is a
-collaborator, but an admin can change that:
+The first identity to link a fresh server becomes the admin and everyone who
+joins afterwards is a collaborator, but an admin can change that:
 
 ```sh
 aether member role 01m04mqes1z7wsdk4s90tx0pgg viewer
@@ -261,12 +261,11 @@ so explicitly, and the totals are a floor rather than the real spend.
 
 ## Agent setup is per person
 
-Logins never move between people. Each member runs `aether agent add <name>`
-once (`aether setup <harness>` re-runs just the login later),
-completes the vendor's own login flow in the container Aether hands them,
-and their login state lives in a per-member server-side home mounted into
-their runs. All of one member's runs share one login; nobody else's do. See
-[harnesses.md](harnesses.md).
+Each member runs `aether agent add <name>` once, then opens `aether terminal`
+to install the agent and complete the vendor login. The member's server-side
+home is mounted into every container that person receives, so all their runs
+share the same login and installed files. No member can see another member's
+home. See [harnesses.md](harnesses.md).
 
 Agent *configuration* - skills, plugins, custom commands - syncs one way from
 each member's laptop with `aether profile push` (and automatically, if the

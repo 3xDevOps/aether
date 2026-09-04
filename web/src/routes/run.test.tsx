@@ -37,4 +37,16 @@ describe('run view environment banner', () => {
       expect(screen.queryByText(/environment is still building/)).toBeNull(),
     )
   })
+
+  it('falls back to the branch subtitle for titled TUI runs without a task', () => {
+    seed()
+    useStore.setState({
+      runs: {
+        run_1: toRecord(run({ task: '', title: 'Terminal title' })),
+      },
+    })
+    render(<RunView params={{ runId: 'run_1' }} />)
+
+    expect(screen.getByText('aether/run-1-checkout')).toBeDefined()
+  })
 })

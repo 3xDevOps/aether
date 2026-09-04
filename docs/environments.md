@@ -1,10 +1,10 @@
 # Workspace environments
 
-Every workspace runs its agents inside one image. This guide covers where
-that image comes from: the prebuilt options, the coding-agent flows that
-build one for you, verification, rollback, and changing the environment
-later. Tool snapshots and login state are separate and live in
-[bootstrap.md](bootstrap.md).
+Every workspace runs its agents inside one image. This guide covers where that
+image comes from: the prebuilt options, the coding-agent flows that build one
+for you, verification, rollback, and changing the environment later. Each
+member's home, login state, and installed user-local executables persist
+separately in [environment-home.md](environment-home.md).
 
 ## Choosing an environment at creation
 

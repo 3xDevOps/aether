@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"testing"
@@ -300,5 +301,87 @@ func TestSessionCollapseMigrationWithoutEventLog(t *testing.T) {
 	// branch rather than an empty one.
 	if ws.BaseBranch != "main" {
 		t.Errorf("workspace base branch = %q, want main", ws.BaseBranch)
+	}
+}
+func TestMemberHomeMigrationDropsLegacyTables(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, 13)
+	if _, err := raw.Exec(`
+		INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at)
+			VALUES ('m1', 'Ada', '', 'ada@example.com', 0, '#e6194b', 'admin', 1);
+		INSERT INTO workspaces (id, name, image, env, setup_script, environment, base_branch, steer_others, created_at)
+			VALUES ('w1', 'proj', '', '{}', '', '{"neutral_image":true,"variables":{},"setup_policy":{"script":""}}', 'main', '', 1);
+		INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status, reason,
+		                  branch, worktree, protected, profile_snapshot_id, tool_snapshot_id,
+		                  created_at, started_at, finished_at)
+			VALUES ('r1', 'w1', 'm1', 'task', 'claude', 'tui', 'running', '',
+			        'branch', 'worktree', 0, '', 'tools-1', 1, NULL, NULL);
+		INSERT INTO tool_snapshots (id, workspace_id, member_id, digest, manifest, created_at)
+			VALUES ('tools-1', 'w1', 'm1', 'sha256:test', '{}', 1);
+		INSERT INTO tool_heads (member_id, workspace_id, snapshot_id)
+			VALUES ('m1', 'w1', 'tools-1');
+		INSERT INTO pending_workspace_shells (id, workspace_id, member_id, snapshot_id, staging_id, created_at, updated_at)
+			VALUES ('p1', 'w1', 'm1', 'tools-1', '', 1, 1);
+	`); err != nil {
+		t.Fatalf("seed v13 rows: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open (v14 migration): %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	var version string
+	if err := db.db.QueryRowContext(ctx, `SELECT sqlite_version()`).Scan(&version); err != nil {
+		t.Fatalf("read sqlite version: %v", err)
+	}
+	var major, minor int
+	if _, err := fmt.Sscanf(version, "%d.%d", &major, &minor); err != nil ||
+		major < 3 || (major == 3 && minor < 35) {
+		t.Fatalf("sqlite version = %s, want at least 3.35", version)
+	}
+
+	var runID, snapshotID string
+	if err := db.db.QueryRowContext(ctx,
+		`SELECT id, profile_snapshot_id FROM runs WHERE id = 'r1'`,
+	).Scan(&runID, &snapshotID); err != nil {
+		t.Fatalf("read migrated run: %v", err)
+	}
+	if runID != "r1" || snapshotID != "" {
+		t.Fatalf("migrated run = id %q, profile snapshot %q", runID, snapshotID)
+	}
+	var toolColumn int
+	if err := db.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM pragma_table_info('runs') WHERE name = 'tool_snapshot_id'`,
+	).Scan(&toolColumn); err != nil {
+		t.Fatalf("inspect runs columns: %v", err)
+	}
+	if toolColumn != 0 {
+		t.Fatal("runs.tool_snapshot_id survived migration")
+	}
+	for _, table := range []string{"tool_snapshots", "tool_heads", "pending_workspace_shells"} {
+		var count int
+		if err := db.db.QueryRowContext(ctx,
+			`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table,
+		).Scan(&count); err != nil {
+			t.Fatalf("inspect %s table: %v", table, err)
+		}
+		if count != 0 {
+			t.Errorf("%s table survived migration", table)
+		}
+	}
+	var terminals int
+	if err := db.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'member_terminals'`,
+	).Scan(&terminals); err != nil {
+		t.Fatalf("inspect member_terminals table: %v", err)
+	}
+	if terminals != 1 {
+		t.Fatal("member_terminals table missing after migration")
 	}
 }

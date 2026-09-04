@@ -446,9 +446,8 @@ func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir stri
 	}
 	resp, err := d.cli.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{Tty: true})
 	if err != nil {
-		ins, inspectErr := d.cli.ContainerExecInspect(ctx, created.ID)
-		if inspectErr == nil && !ins.Running && (ins.ExitCode == 126 || ins.ExitCode == 127) {
-			return nil, &ExecExitError{Code: ins.ExitCode}
+		if exitErr := d.execExitError(ctx, created.ID); exitErr != nil {
+			return nil, exitErr
 		}
 		return nil, fmt.Errorf("runtime: exec attach: %w", err)
 	}
@@ -456,10 +455,28 @@ func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir stri
 	if cols != 0 && rows != 0 {
 		if err := att.Resize(ctx, cols, rows); err != nil {
 			_ = att.Close()
+			// The daemon accepts the attach even when the executable is
+			// missing; the immediate exit only surfaces here.
+			if exitErr := d.execExitError(ctx, created.ID); exitErr != nil {
+				return nil, exitErr
+			}
 			return nil, err
 		}
 	}
 	return att, nil
+}
+
+// execExitError reports an exec that already exited with a
+// missing-executable status (126/127), or nil.
+func (d *Docker) execExitError(ctx context.Context, execID string) error {
+	ins, err := d.cli.ContainerExecInspect(ctx, execID)
+	if err != nil || ins.Running {
+		return nil
+	}
+	if ins.ExitCode == 126 || ins.ExitCode == 127 {
+		return &ExecExitError{Code: ins.ExitCode}
+	}
+	return nil
 }
 
 // Wait implements Runtime. A container that has never been started waits

@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { clampDockHeight } from '@/components/dock'
+import { createElement } from 'react'
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { Dock, clampDockHeight } from '@/components/dock'
 
 describe('clampDockHeight', () => {
   it('keeps dock heights between 120px and the viewport limit', () => {
@@ -17,5 +19,26 @@ describe('clampDockHeight', () => {
       configurable: true,
       value: originalHeight,
     })
+  })
+})
+describe('Dock controls', () => {
+  it('disables the add control when the caller reaches its cap', () => {
+    render(
+      createElement(Dock, {
+        tabs: [],
+        activeTab: '',
+        onSelectTab: vi.fn(),
+        onAddTab: vi.fn(),
+        addDisabled: true,
+        height: 240,
+        onHeightChange: vi.fn(),
+        collapsed: false,
+        onToggleCollapse: vi.fn(),
+        children: createElement('div'),
+      }),
+    )
+    expect((screen.getByRole('button', { name: 'Add terminal tab' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
   })
 })
