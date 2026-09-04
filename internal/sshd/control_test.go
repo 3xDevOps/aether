@@ -110,7 +110,15 @@ func TestControlListsAndGets(t *testing.T) {
 		t.Fatalf("run.list: %v", err)
 	}
 	if len(rl.Runs) != 1 {
-		t.Errorf("run.list = %+v, want one run", rl.Runs)
+		t.Fatalf("run.list = %+v, want one run", rl.Runs)
+	}
+	// run.list is what a reloaded dashboard hydrates from, so the reason
+	// and the paused flag have to survive it, not just run.get.
+	if rl.Runs[0].Reason != "stalled: no output" {
+		t.Errorf("run.list reason = %q, want %q", rl.Runs[0].Reason, "stalled: no output")
+	}
+	if !rl.Runs[0].Paused {
+		t.Error("run.list did not carry paused")
 	}
 	if err := c.Call(protocol.MethodRunList, protocol.RunListParams{MemberID: "m_nobody"}, &rl); err != nil {
 		t.Fatalf("run.list filtered: %v", err)
