@@ -91,6 +91,7 @@ func TestServerDiskRoundTripsUsage(t *testing.T) {
 		WorktreeBytes:   4,
 		TranscriptBytes: 5,
 		DatabaseBytes:   6,
+		RepoBytes:       7,
 	}}
 	e := newTestEnv(t, func(c *Config) { c.Services.Disk = reader })
 	c := controlClient(t, e)
@@ -101,7 +102,7 @@ func TestServerDiskRoundTripsUsage(t *testing.T) {
 	}
 	want := protocol.ServerDiskResult{
 		UsedBytes: 2, TotalBytes: 3, FreeBytes: 1,
-		WorktreeBytes: 4, TranscriptBytes: 5, DatabaseBytes: 6,
+		WorktreeBytes: 4, TranscriptBytes: 5, DatabaseBytes: 6, RepoBytes: 7,
 	}
 	if got != want {
 		t.Errorf("server.disk = %+v, want %+v", got, want)

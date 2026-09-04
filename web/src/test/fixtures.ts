@@ -91,6 +91,7 @@ export const serverInfo: ServerInfo = {
     worktree_bytes: 256 * 1024 * 1024,
     transcript_bytes: 128 * 1024 * 1024,
     database_bytes: 64 * 1024 * 1024,
+    repo_bytes: 512 * 1024 * 1024,
   },
 }
 
@@ -366,6 +367,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       worktree_bytes: 256 * 1024 * 1024,
       transcript_bytes: 128 * 1024 * 1024,
       database_bytes: 64 * 1024 * 1024,
+      repo_bytes: 512 * 1024 * 1024,
     })),
     capabilities: vi.fn(async () => ({
       gateway: 'remote',

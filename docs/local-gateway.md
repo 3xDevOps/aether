@@ -190,7 +190,8 @@ bar's disk gauge:
 
 ```json
 {"used_bytes":21474836480,"total_bytes":107374182400,"free_bytes":85899345920,
- "worktree_bytes":3221225472,"transcript_bytes":104857600,"database_bytes":52428800}
+ "worktree_bytes":3221225472,"transcript_bytes":104857600,"database_bytes":52428800,
+ "repo_bytes":8589934592}
 ```
 
 `used_bytes` and `total_bytes` describe the whole filesystem - the gauge
@@ -199,11 +200,23 @@ footprint. `free_bytes` is what an unprivileged writer can still claim, which
 is the number the scheduler's free-space floor is checked against, and is
 smaller than `total - used` wherever the filesystem reserves blocks.
 
-The last three are the directories that grow without bound and are the only
+The last four are the directories that grow without bound and are the only
 part an operator can act on: run checkouts (garbage-collected after their
-TTL), transcripts, and the SQLite file the persisted event log shares with
-the store. The event log has no file of its own to measure, so the database
-line covers both. A component that cannot be read contributes zero rather
+TTL), transcripts, the SQLite file the persisted event log shares with the
+store, and `repos/`, the bare repo behind each workspace. The event log has
+no file of its own to measure, so the database line covers both. The bare
+repos keep every push, every run branch and the reflogs `internal/gitengine`
+turns on, and nothing reclaims them. `repo_bytes` is absent on servers
+predating the component, and the dashboard drops the line rather than
+showing a zero.
+
+The components do not overlap. A run checkout is a `git clone --local` of
+its workspace repo, so its object files are hard links to bytes already in
+`repos/`: the walk indexes by device+inode and charges each one to the
+first tree that reaches it, walking `repos/` first. `repo_bytes` therefore
+holds the shared objects, and `worktree_bytes` is what reclaiming that
+checkout would actually free. A component that cannot be read contributes
+zero rather
 than failing the whole reading. Measurement lives in `internal/disk`, shared
 with the scheduler's floor so the gauge and the refusal can never disagree
 about the same disk.

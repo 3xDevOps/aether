@@ -72,10 +72,12 @@ export interface DiskUsage {
   total_bytes: number
   /** What an unprivileged writer can still claim; the scheduler's floor. */
   free_bytes: number
-  /** The three directories that grow without bound. */
+  /** The four directories that grow without bound. */
   worktree_bytes: number
   transcript_bytes: number
   database_bytes: number
+  /** The bare workspace repos; absent on servers predating the component. */
+  repo_bytes?: number
 }
 
 /**

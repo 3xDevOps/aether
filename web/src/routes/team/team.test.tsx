@@ -230,12 +230,34 @@ describe('team status bar', () => {
       await refreshTeam(useStore, client)
     })
 
-    // The three directories that grow without bound; a bare filesystem
+    // The four directories that grow without bound; a bare filesystem
     // total says the disk is filling but not what is filling it.
     const detail = screen.getByLabelText('Disk usage').getAttribute('title')
     expect(detail).toContain('Worktrees 256 MB')
     expect(detail).toContain('Transcripts 128 MB')
     expect(detail).toContain('Database 64 MB')
+    expect(detail).toContain('Repos 512 MB')
+  })
+
+  // An upgraded server starts reporting a component while the filesystem
+  // totals sit unchanged. Comparing only the totals would keep the stored
+  // reading and leave the tooltip a component short until the disk moved.
+  it('takes a new breakdown even when the totals have not moved', async () => {
+    const client = fakeApi()
+    const stale = await client.disk()
+    seed({ info: { ...serverInfo, disk: { ...stale, repo_bytes: undefined } } })
+    render(<StatusBar />)
+    expect(
+      screen.getByLabelText('Disk usage').getAttribute('title'),
+    ).not.toContain('Repos')
+
+    await act(async () => {
+      await refreshTeam(useStore, client)
+    })
+
+    expect(screen.getByLabelText('Disk usage').getAttribute('title')).toContain(
+      'Repos 512 MB',
+    )
   })
 })
 

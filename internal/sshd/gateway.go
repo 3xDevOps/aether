@@ -75,5 +75,6 @@ func (s *Server) serverDisk(_ context.Context, _ domain.MemberID, _ json.RawMess
 		WorktreeBytes:   usage.WorktreeBytes,
 		TranscriptBytes: usage.TranscriptBytes,
 		DatabaseBytes:   usage.DatabaseBytes,
+		RepoBytes:       usage.RepoBytes,
 	}, nil
 }

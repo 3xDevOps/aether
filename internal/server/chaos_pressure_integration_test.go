@@ -79,9 +79,9 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		done = append(done, finished{launched.Run.ID, launched.Run.Branch})
 	}
 
-	// The gauge has to see the three directories that grow without bound,
-	// not just the filesystem total: worktrees, transcripts, and the
-	// persisted event log's database.
+	// The gauge has to see the four directories that grow without bound,
+	// not just the filesystem total: worktrees, transcripts, the persisted
+	// event log's database, and the bare workspace repos.
 	before := env.disk(t)
 	if before.TotalBytes == 0 {
 		t.Fatal("disk gauge reports no filesystem total")
@@ -97,6 +97,10 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 	if before.DatabaseBytes == 0 {
 		t.Error("disk gauge reports no database bytes; the persisted event log grows unbounded and " +
 			"the gauge must cover it")
+	}
+	if before.RepoBytes == 0 {
+		t.Error("disk gauge reports no repo bytes after four runs; the bare workspace repos keep " +
+			"every push and run branch and nothing reclaims them, so the gauge must cover them")
 	}
 
 	for _, f := range done {

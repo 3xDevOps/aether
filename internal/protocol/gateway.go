@@ -33,6 +33,7 @@ type ServerDiskResult struct {
 	WorktreeBytes   uint64 `json:"worktree_bytes"`
 	TranscriptBytes uint64 `json:"transcript_bytes"`
 	DatabaseBytes   uint64 `json:"database_bytes"`
+	RepoBytes       uint64 `json:"repo_bytes"`
 }
 
 // GatewayCapabilities describes what one gateway deployment can do, so a
