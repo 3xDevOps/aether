@@ -339,6 +339,33 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.title).toBe('Fixing the login bug')
     expect(store.getState().lastSeq).toBe(6)
   })
+  it('removes a run when the server publishes its deletion', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    expect(await applyEvent(
+      store,
+      statusEvent({ seq: 7, type: 'run.deleted', payload: {} }),
+      fakeApi(),
+    )).toBe(true)
+
+    expect(store.getState().runs.run_1).toBeUndefined()
+    expect(store.getState().lastSeq).toBe(7)
+  })
+  it('accepts a stale status event after local deletion', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().removeRun('run_1')
+    const client = fakeApi({
+      runGet: vi.fn(async () => {
+        throw new ApiError(404, 'run.get: not found')
+      }),
+    })
+
+    expect(await applyEvent(store, statusEvent({ seq: 8 }), client)).toBe(true)
+    expect(client.runGet).toHaveBeenCalledWith('run_1')
+    expect(store.getState().lastSeq).toBe(8)
+  })
 
   it('ignores an event already applied, so replay is idempotent', async () => {
     const store = createRootStore()

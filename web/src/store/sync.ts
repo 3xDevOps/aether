@@ -143,6 +143,9 @@ export async function applyEvent(
   }
 
   switch (ev.type) {
+    case 'run.deleted':
+      store.getState().removeRun(ev.run_id)
+      break
     case 'run.status': {
       const p = ev.payload as RunStatusPayload
       if (!store.getState().runs[ev.run_id]) {
@@ -152,8 +155,12 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err))
-          return false
+          // A live delete publishes its final status before run.deleted, so
+          // the local removal can make this status fetch return 404.
+          if (!(err instanceof ApiError && err.status === 404)) {
+            store.getState().setUnreachable(classifyUnreachable(err))
+            return false
+          }
         }
       }
       store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time)

@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // startScheduler runs sched.Start in the background for the duration of
@@ -273,6 +274,60 @@ func TestRelaunchFromInterrupted(t *testing.T) {
 	}
 	c.exitNow(0)
 	e.waitStoreStatus(t, next.ID, domain.RunNeedsAttention)
+}
+
+func TestDeleteRunWaitsForRelaunchCheckout(t *testing.T) {
+	e := newTestEnv(t, nil)
+	old, oldContainer := e.launchFake(t, "delete relaunch")
+	oldContainer.exitNow(0)
+	e.waitStoreStatus(t, old.ID, domain.RunNeedsAttention)
+	if err := e.sched.CloseRun(t.Context(), old.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+
+	created := make(chan domain.RunID, 1)
+	release := make(chan struct{})
+	e.git.createHook = func(run domain.RunID) {
+		created <- run
+		<-release
+	}
+	relaunched := make(chan *domain.Run, 1)
+	relaunchErr := make(chan error, 1)
+	go func() {
+		next, err := e.sched.Relaunch(t.Context(), old.ID, e.member.ID)
+		relaunched <- next
+		relaunchErr <- err
+	}()
+
+	runID := <-created
+	deleted := make(chan error, 1)
+	go func() {
+		deleted <- e.sched.DeleteRun(t.Context(), runID, e.member.ID)
+	}()
+	select {
+	case err := <-deleted:
+		close(release)
+		t.Fatalf("DeleteRun returned before relaunch checkout completed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	next := <-relaunched
+	if err := <-relaunchErr; err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+	if next.ID != runID {
+		t.Fatalf("relaunch ID = %s, want %s", next.ID, runID)
+	}
+	if err := <-deleted; err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	if _, err := os.Stat(e.git.checkoutPath(runID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checkout after delete: %v", err)
+	}
+	if _, err := e.db.GetRun(t.Context(), runID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("run after delete: %v", err)
+	}
 }
 
 func TestRelaunchRejectsUnpublishedBranch(t *testing.T) {

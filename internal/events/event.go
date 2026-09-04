@@ -23,6 +23,8 @@ type Type string
 const (
 	// TypeRunStatus signals a run lifecycle transition.
 	TypeRunStatus Type = "run.status"
+	// TypeRunDeleted tells clients that a run's durable record was removed.
+	TypeRunDeleted Type = "run.deleted"
 	// TypeRunTitle carries the latest terminal title for a run.
 	TypeRunTitle Type = "run.title"
 	// TypeRunDiff carries a periodic diff snapshot of a run's worktree.
@@ -92,6 +94,11 @@ type RunStatusPayload struct {
 	// Reason is an optional human-readable cause, e.g. "agent exited 1".
 	Reason string `json:"reason,omitempty"`
 }
+
+// RunDeletedPayload signals that a run's durable record was removed.
+type RunDeletedPayload struct{}
+
+func (RunDeletedPayload) EventType() Type { return TypeRunDeleted }
 
 // RunTitlePayload reports the latest terminal title for a run.
 type RunTitlePayload struct {
@@ -290,6 +297,7 @@ func decodeAs[P Payload](data []byte) (Payload, error) {
 
 var payloadCodecs = map[Type]func([]byte) (Payload, error){
 	TypeRunStatus:    decodeAs[RunStatusPayload],
+	TypeRunDeleted:   decodeAs[RunDeletedPayload],
 	TypeRunTitle:     decodeAs[RunTitlePayload],
 	TypeRunDiff:      decodeAs[RunDiffPayload],
 	TypeRunCost:      decodeAs[RunCostPayload],

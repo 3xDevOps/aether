@@ -135,6 +135,11 @@ type Scheduler struct {
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
+	// pending marks runs whose row exists but whose checkout/provisioning
+	// handoff has not reached runs yet. Delete waits for this short window so
+	// it cannot remove a row while its checkout is still being created; Kill
+	// records its request for the handoff to transfer into supervision.
+	pending map[domain.RunID]*pendingRun
 	// runShellLocks serializes shell-tab creation per run so the tab cap
 	// cannot be raced past; a hung exec on one run never blocks another.
 	// Entries are created on first use and kept for the scheduler's life.
@@ -205,6 +210,45 @@ type supervised struct {
 	coordDir     string
 }
 
+type pendingRun struct {
+	done          chan struct{}
+	killRequested bool
+	killActor     domain.MemberID
+}
+
+func (s *Scheduler) beginPending(run domain.RunID) *pendingRun {
+	pending := &pendingRun{done: make(chan struct{})}
+	s.mu.Lock()
+	s.pending[run] = pending
+	s.mu.Unlock()
+	return pending
+}
+
+func (s *Scheduler) finishPending(run domain.RunID, pending *pendingRun) {
+	s.mu.Lock()
+	if s.pending[run] == pending {
+		delete(s.pending, run)
+		close(pending.done)
+	}
+	s.mu.Unlock()
+}
+
+func (s *Scheduler) waitPending(ctx context.Context, run domain.RunID) error {
+	for {
+		s.mu.Lock()
+		pending := s.pending[run]
+		s.mu.Unlock()
+		if pending == nil {
+			return nil
+		}
+		select {
+		case <-pending.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // New validates cfg, applies defaults, and prepares the state directory.
 func New(cfg Config) (*Scheduler, error) {
 	switch {
@@ -268,6 +312,7 @@ func New(cfg Config) (*Scheduler, error) {
 		superCtx:        ctx,
 		superCancel:     cancel,
 		runs:            make(map[domain.RunID]*supervised),
+		pending:         make(map[domain.RunID]*pendingRun),
 		runShellLocks:   make(map[domain.RunID]*sync.Mutex),
 		terminalLocks:   make(map[domain.MemberID]*sync.Mutex),
 		terminals:       make(map[domain.MemberID]*terminalSupervision),
