@@ -3,10 +3,10 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -55,6 +55,9 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 	if auth.close != nil {
 		defer auth.close()
 	}
+	if auth.fatal {
+		return nil, auth.reason()
+	}
 	if requireAuth {
 		if err := auth.require(); err != nil {
 			return nil, err
@@ -80,9 +83,9 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 		_ = nc.Close()
 		return nil, auth.explain(fmt.Errorf("cli: ssh handshake with %s: %w", cfg.Addr, err))
 	}
-	// The handshake got through without the unusable methods, so they are
-	// a warning here rather than the failure: the next dial may need them.
-	auth.warn(os.Stderr)
+	// A handshake that got through says nothing was missing: an agent
+	// holding no keys is the normal state on a desktop, and every command
+	// redials, so a diagnostic here would be noise on every run.
 	return &Conn{client: ssh.NewClient(cc, chans, reqs), cfg: cfg}, nil
 }
 
@@ -98,15 +101,23 @@ type sshAuth struct {
 	methods []ssh.AuthMethod
 	close   func()
 	// problem is why a configured method is unusable - an agent that
-	// cannot be reached, a key file that cannot be read or decrypted. It
-	// is a warning while another method remains and the whole failure
-	// when none does. errors.Join carries both causes at once.
+	// cannot be reached, a key file that cannot be read or decrypted.
+	// errors.Join carries both causes at once. It is only ever reported
+	// on a dial that fails: a handshake that succeeds needed neither.
+	// Causes carry no "cli: " prefix; the callers that surface them add
+	// one for the whole line.
 	problem error
+	// fatal marks a key the user named that could not be read at all. No
+	// other method stands in for it: dialing on would authenticate as
+	// some other key and bury the wrong path in silence.
+	fatal bool
 }
 
 // loadAuth collects the agent and key-file methods for cfg. Neither source
-// is required: an unconfigured agent and an absent key file are not
-// problems, an unusable one is.
+// is required: an unconfigured agent and an absent default key file are
+// not problems, an unusable one is. A key path the user chose is
+// different: a missing file there is always an error, because the choice
+// would otherwise be dropped in silence.
 func loadAuth(cfg Config) sshAuth {
 	var a sshAuth
 	method, closeAgent, agentErr := agentAuthMethod()
@@ -114,9 +125,19 @@ func loadAuth(cfg Config) sshAuth {
 		a.methods = append(a.methods, method)
 	}
 	a.close = closeAgent
-	keyMethod, keyErr := keyAuthMethod(cfg.keyPath())
-	if keyMethod != nil {
-		a.methods = append(a.methods, keyMethod)
+
+	var keyErr error
+	path, chosen := cfg.keyPath(), cfg.Key != ""
+	raw, readErr := readKeyFile(path, chosen)
+	switch {
+	case readErr != nil:
+		keyErr, a.fatal = readErr, chosen
+	case raw != nil:
+		var keyMethod ssh.AuthMethod
+		keyMethod, keyErr = keySigner(raw, path)
+		if keyMethod != nil {
+			a.methods = append(a.methods, keyMethod)
+		}
 	}
 	a.problem = errors.Join(agentErr, keyErr)
 	return a
@@ -127,17 +148,19 @@ func (a sshAuth) require() error {
 	if len(a.methods) > 0 {
 		return nil
 	}
-	if a.problem != nil {
-		return a.problem
+	if a.problem == nil {
+		return errors.New("cli: no SSH key or agent available")
 	}
-	return errors.New("cli: no SSH key or agent available")
+	return a.reason()
 }
 
-// warn prints each unusable method on its own line.
-func (a sshAuth) warn(w io.Writer) {
+// reason states every unusable method as one line.
+func (a sshAuth) reason() error {
+	reasons := make([]string, 0, 2)
 	for _, cause := range causes(a.problem) {
-		_, _ = fmt.Fprintf(w, "aether: %v\n", cause)
+		reasons = append(reasons, cause.Error())
 	}
+	return fmt.Errorf("cli: %s", strings.Join(reasons, "; "))
 }
 
 // explain appends the unusable methods to a handshake failure, so a
@@ -150,8 +173,8 @@ func (a sshAuth) explain(err error) error {
 	return err
 }
 
-// causes splits an errors.Join result into its parts so each prints on its
-// own line rather than as one embedded newline.
+// causes splits an errors.Join result into its parts so each reads as its
+// own clause rather than as one embedded newline.
 func causes(err error) []error {
 	if err == nil {
 		return nil
@@ -162,29 +185,36 @@ func causes(err error) []error {
 	return []error{err}
 }
 
-// keyAuthMethod loads the private key at path. A nil method with a nil
-// error means there is no key file there, which is not a failure: agent
-// auth may still succeed.
-func keyAuthMethod(path string) (ssh.AuthMethod, error) {
+// readKeyFile reads the private key at path. Nil bytes with a nil error
+// mean the default key simply is not there, which is not a failure: agent
+// auth may still succeed. With chosen set the caller named this path, so
+// even a missing file is reported.
+func readKeyFile(path string, chosen bool) ([]byte, error) {
 	if path == "" {
 		return nil, nil
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) && !chosen {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("cli: read ssh key %s: %w", path, err)
+		return nil, fmt.Errorf("ssh key %s: %w", path, err)
 	}
+	return raw, nil
+}
+
+// keySigner turns a private key file into an auth method, naming the
+// remedy for the two ways a real key file still cannot be used.
+func keySigner(raw []byte, path string) (ssh.AuthMethod, error) {
 	signer, err := ssh.ParsePrivateKey(raw)
 	if err != nil {
 		var locked *ssh.PassphraseMissingError
 		if errors.As(err, &locked) {
 			return nil, fmt.Errorf(
-				"cli: %s is passphrase-protected; add it to ssh-agent (ssh-add %s) or pass --key <unencrypted key>: %w",
+				"%s is passphrase-protected; add it to ssh-agent (ssh-add %s) or pass --key <unencrypted key>: %w",
 				path, path, err)
 		}
-		return nil, fmt.Errorf("cli: parse ssh key %s: %w", path, err)
+		return nil, fmt.Errorf("parse ssh key %s: %w", path, err)
 	}
 	return ssh.PublicKeys(signer), nil
 }
@@ -195,7 +225,7 @@ func keyAuthMethod(path string) (ssh.AuthMethod, error) {
 func agentAuthMethod() (ssh.AuthMethod, func(), error) {
 	conn, err := dialAgent(sshAgentTimeout)
 	if err != nil {
-		return nil, nil, fmt.Errorf("cli: connect ssh agent: %w", err)
+		return nil, nil, fmt.Errorf("connect ssh agent: %w", err)
 	}
 	if conn == nil {
 		return nil, nil, nil
@@ -204,20 +234,20 @@ func agentAuthMethod() (ssh.AuthMethod, func(), error) {
 	// connection and then never answers.
 	if err = conn.SetDeadline(time.Now().Add(sshAgentTimeout)); err != nil {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("cli: set ssh agent deadline: %w", err)
+		return nil, nil, fmt.Errorf("set ssh agent deadline: %w", err)
 	}
 	signers, err := agent.NewClient(conn).Signers()
 	if err != nil {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("cli: load ssh agent keys: %w", err)
+		return nil, nil, fmt.Errorf("load ssh agent keys: %w", err)
 	}
 	if len(signers) == 0 {
 		_ = conn.Close()
-		return nil, nil, errors.New("cli: SSH agent has no signing keys")
+		return nil, nil, errors.New("SSH agent has no signing keys")
 	}
 	if err = conn.SetDeadline(time.Time{}); err != nil {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("cli: clear ssh agent deadline: %w", err)
+		return nil, nil, fmt.Errorf("clear ssh agent deadline: %w", err)
 	}
 	return ssh.PublicKeys(signers...), func() { _ = conn.Close() }, nil
 }

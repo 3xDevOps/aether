@@ -72,14 +72,16 @@ func InstallDaemonUnit(cfg syncd.Config, noProfileSync bool) (path, activate str
 
 // InstallDaemon is the /local/v1 daemon.install core: it installs the
 // sync-daemon service unit for server and repo with every other option at
-// its default and returns the unit path plus the activation note.
-func InstallDaemon(server, repo string) (unitPath, note string, err error) {
+// its default and returns the unit path plus the activation note. keyPath
+// is the linked SSH key; empty leaves the daemon on ~/.ssh/id_ed25519.
+func InstallDaemon(server, repo, keyPath string) (unitPath, note string, err error) {
 	if repo == "" {
 		repo = "."
 	}
 	path, activate, err := InstallDaemonUnit(syncd.Config{
 		Server:     server,
 		RepoPath:   repo,
+		KeyPath:    keyPath,
 		User:       "aether",
 		Remote:     "aether",
 		BaseBranch: "main",

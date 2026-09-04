@@ -440,14 +440,18 @@ func (g *Gateway) localDaemonInstall(_ *http.Request, body []byte) (any, *protoc
 	if params.Server == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "server is required"}
 	}
+	linked := g.local.snapshot()
 	repo := params.Repo
 	if repo == "" {
-		repo = g.local.snapshot().Repo
+		repo = linked.Repo
 	}
 	if repo == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "repo is required (none linked)"}
 	}
-	unitPath, note, err := localops.InstallDaemon(params.Server, repo)
+	// The daemon dials the same server as this gateway, so it needs the
+	// key `aether link --key` chose; without it the unit falls back to
+	// ~/.ssh/id_ed25519 and cannot authenticate.
+	unitPath, note, err := localops.InstallDaemon(params.Server, repo, linked.Key)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}

@@ -109,6 +109,13 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 	if err != nil {
 		return linkOptions{}, err
 	}
+	// Fail on the path the user typed, before a handshake turns it into
+	// an authentication failure that names no file.
+	if keyPath != "" {
+		if _, err := os.Stat(keyPath); err != nil {
+			return linkOptions{}, fmt.Errorf("link --key: %w", err)
+		}
+	}
 	return linkOptions{
 		cfg:       cli.Config{Addr: normalizeAddr(addr), Repo: repoPath, Key: keyPath, User: "aether"},
 		invite:    *invite,
@@ -117,12 +124,32 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 	}, nil
 }
 
+// savedKey is the key path a re-link without --key keeps using: the one
+// already stored for this profile, else the default link's. Named
+// overlays the top-level fields, so an unset profile key falls back on
+// its own.
+func savedKey(prev cli.Config, name string) string {
+	if name != "" {
+		if named, ok := prev.Named(name); ok {
+			return named.Key
+		}
+	}
+	return prev.Key
+}
+
 func runLink(args []string) error {
 	opts, err := parseLinkArgs(args)
 	if err != nil {
 		return err
 	}
+	prev, loadErr := cli.Load()
+	if loadErr != nil {
+		prev = cli.Config{}
+	}
 	cfg := opts.cfg
+	if cfg.Key == "" {
+		cfg.Key = savedKey(prev, opts.name)
+	}
 	var conn *cli.Conn
 	if opts.invite != "" {
 		conn, err = cli.DialInvite(cfg, opts.invite, opts.name)
@@ -148,10 +175,6 @@ func runLink(args []string) error {
 		return fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
 	}
 
-	prev, loadErr := cli.Load()
-	if loadErr != nil {
-		prev = cli.Config{}
-	}
 	if err = cli.Save(linkConfig(cfg, prev, opts.name)); err != nil {
 		return err
 	}

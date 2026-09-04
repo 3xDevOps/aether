@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 func TestDialAllowsKeylessNoneAuthenticationWithInvalidKey(t *testing.T) {
@@ -104,6 +106,7 @@ func TestDialContinuesWithoutUnresponsiveAgent(t *testing.T) {
 	}()
 
 	dir := t.TempDir()
+	noKeyFile(t)
 	type dialResult struct {
 		conn *Conn
 		err  error
@@ -112,7 +115,6 @@ func TestDialContinuesWithoutUnresponsiveAgent(t *testing.T) {
 	go func() {
 		conn, err := Dial(Config{
 			Addr:       listener.Addr().String(),
-			Key:        filepath.Join(dir, "missing-key"),
 			KnownHosts: filepath.Join(dir, "known_hosts"),
 		})
 		result <- dialResult{conn: conn, err: err}
@@ -207,11 +209,11 @@ func TestDialAnnouncesNewlyPinnedHostKey(t *testing.T) {
 	}()
 
 	dir := t.TempDir()
+	noKeyFile(t)
 	knownHosts := filepath.Join(dir, "known_hosts")
 	stderr := captureStderr(t)
 	conn, err := Dial(Config{
 		Addr:       listener.Addr().String(),
-		Key:        filepath.Join(dir, "missing-key"),
 		KnownHosts: knownHosts,
 	})
 	if err != nil {
@@ -230,7 +232,8 @@ func TestDialAnnouncesNewlyPinnedHostKey(t *testing.T) {
 
 func TestRequireWithoutAgentOrKey(t *testing.T) {
 	setDialAgent(t, func(time.Duration) (net.Conn, error) { return nil, nil })
-	auth := loadAuth(Config{Key: filepath.Join(t.TempDir(), "missing-key")})
+	noKeyFile(t)
+	auth := loadAuth(Config{})
 	if auth.close != nil {
 		auth.close()
 	}
@@ -258,7 +261,8 @@ func TestBrokenAgentIsReported(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SSH_AUTH_SOCK", notASocket)
-	auth := loadAuth(Config{Key: filepath.Join(dir, "missing-key")})
+	noKeyFile(t)
+	auth := loadAuth(Config{})
 	if auth.close != nil {
 		auth.close()
 	}
@@ -308,49 +312,12 @@ func TestDialNamesPassphraseProtectedKey(t *testing.T) {
 // must be offered to the server.
 func TestDialOffersConfiguredKey(t *testing.T) {
 	disableAgent(t)
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signer, err := ssh.NewSignerFromKey(privateKey)
-	if err != nil {
-		t.Fatal(err)
-	}
 	dir := t.TempDir()
-	block, err := ssh.MarshalPrivateKey(privateKey, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	keyPath := filepath.Join(dir, "chosen-key")
-	if writeErr := os.WriteFile(keyPath, pem.EncodeToMemory(block), 0o600); writeErr != nil {
-		t.Fatal(writeErr)
-	}
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	offered := make(chan string, 1)
-	go func() {
-		conn, acceptErr := listener.Accept()
-		if acceptErr != nil {
-			return
-		}
-		serverConfig := &ssh.ServerConfig{
-			PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-				offered <- ssh.FingerprintSHA256(key)
-				return &ssh.Permissions{}, nil
-			},
-		}
-		serverConfig.AddHostKey(signer)
-		if serverConn, _, _, hsErr := ssh.NewServerConn(conn, serverConfig); hsErr == nil {
-			_ = serverConn.Close()
-		}
-	}()
+	keyPath, signer := writeKey(t, dir)
+	addr, _, offered := startAcceptingServer(t)
 
 	conn, err := Dial(Config{
-		Addr:       listener.Addr().String(),
+		Addr:       addr,
 		Key:        keyPath,
 		KnownHosts: filepath.Join(dir, "known_hosts"),
 	})
@@ -365,6 +332,61 @@ func TestDialOffersConfiguredKey(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("server never saw the configured key")
+	}
+}
+
+// A key path the user chose that is not there must fail on the path, not
+// fall back to whatever the agent happens to hold: the wrong path would
+// otherwise sit in the config unnoticed. The agent here has keys, so the
+// dial would have gone through without the check.
+func TestDialRejectsMissingChosenKey(t *testing.T) {
+	dir := t.TempDir()
+	keyPath, signer := writeKey(t, dir)
+	setDialAgent(t, keyringAgent(t, signer))
+	missing := filepath.Join(dir, "not-here")
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	addr, _, _ := startAcceptingServer(t)
+
+	_, err := Dial(Config{
+		Addr:       addr,
+		Key:        missing,
+		KnownHosts: filepath.Join(dir, "known_hosts"),
+	})
+	if err == nil {
+		t.Fatal("Dial succeeded, want the missing key to fail the dial")
+	}
+	if got := err.Error(); !strings.Contains(got, "ssh key "+missing) {
+		t.Errorf("Dial error = %q, want it to name %s", got, missing)
+	}
+}
+
+// An agent that is running but holds no keys is the normal desktop state.
+// Every command redials, so a dial that authenticates with the key file
+// must say nothing at all.
+func TestDialWithEmptyAgentIsQuiet(t *testing.T) {
+	setDialAgent(t, keyringAgent(t))
+	dir := t.TempDir()
+	keyPath, _ := writeKey(t, dir)
+	addr, hostKey, _ := startAcceptingServer(t)
+	// Trust the host up front so nothing but a diagnostic could reach
+	// stderr.
+	knownHosts := filepath.Join(dir, "known_hosts")
+	line := knownhosts.Line([]string{addr}, hostKey) + "\n"
+	if err := os.WriteFile(knownHosts, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stderr := captureStderr(t)
+	conn, err := Dial(Config{Addr: addr, Key: keyPath, KnownHosts: knownHosts})
+	if err != nil {
+		stderr()
+		t.Fatalf("Dial with an empty agent: %v", err)
+	}
+	_ = conn.Close()
+	if got := stderr(); got != "" {
+		t.Errorf("stderr = %q, want nothing on a successful dial", got)
 	}
 }
 
@@ -385,6 +407,96 @@ func writeEncryptedKey(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// noKeyFile points the default key path at an empty scratch home: it is
+// how a test says "this machine has no key file" without reading the
+// developer's own ~/.ssh.
+func noKeyFile(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+}
+
+// writeKey writes an unencrypted ed25519 key into dir and returns its
+// path with the matching signer.
+func writeKey(t *testing.T, dir string) (string, ssh.Signer) {
+	t.Helper()
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(privateKey, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "chosen-key")
+	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, signer
+}
+
+// keyringAgent stands in for a real SSH agent holding exactly the given
+// signers - none of them for the empty agent every desktop runs.
+func keyringAgent(t *testing.T, signers ...ssh.Signer) func(time.Duration) (net.Conn, error) {
+	t.Helper()
+	return func(time.Duration) (net.Conn, error) {
+		client, server := net.Pipe()
+		keyring := agent.NewKeyring()
+		for _, signer := range signers {
+			if err := keyring.Add(agent.AddedKey{PrivateKey: signer}); err != nil {
+				return nil, err
+			}
+		}
+		go func() { _ = agent.ServeAgent(keyring, server) }()
+		return client, nil
+	}
+}
+
+// startAcceptingServer serves one SSH handshake that accepts any key and
+// reports the fingerprint it was offered.
+func startAcceptingServer(t *testing.T) (string, ssh.PublicKey, <-chan string) {
+	t.Helper()
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostKey, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	offered := make(chan string, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		serverConfig := &ssh.ServerConfig{
+			PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+				select {
+				case offered <- ssh.FingerprintSHA256(key):
+				default:
+				}
+				return &ssh.Permissions{}, nil
+			},
+		}
+		serverConfig.AddHostKey(hostKey)
+		if serverConn, _, _, hsErr := ssh.NewServerConn(conn, serverConfig); hsErr == nil {
+			_ = serverConn.Close()
+		}
+	}()
+	return listener.Addr().String(), hostKey.PublicKey(), offered
 }
 
 // startRejectingServer serves one SSH handshake that refuses every key,
