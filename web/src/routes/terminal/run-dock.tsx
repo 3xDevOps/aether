@@ -49,8 +49,8 @@ export function RunDock({ runID }: { runID: string }) {
     if (!activeTab || !terminal || dock.refusedMessage !== null) return
 
     const socketKey = activeTab
-    const refuse = () => {
-      setShellRefused(runID, shellRefusal)
+    const refuse = (message: string) => {
+      setShellRefused(runID, message)
       unregisterShellSocket(runID, socketKey)
     }
     const existing = getShellSocket(runID, socketKey)
@@ -59,14 +59,18 @@ export function RunDock({ runID }: { runID: string }) {
       attachment = connectAttach(() => api.attachShellSocket(runID, socketKey), {
         onData: (chunk) => emitShellSocketData(runID, socketKey, chunk),
         onAttached: () => {
-          // Reattach replay restores the active tab's full history, so a tab
-          // switch may remount its xterm instead of preserving old instances.
-          terminalRef.current?.reset()
+          // Reattach replay restores the tab's full history, so a tab switch
+          // may remount its xterm instead of preserving old instances. A
+          // background tab reconnecting must never wipe the active tab.
+          if (activeTabRef.current === socketKey) terminalRef.current?.reset()
           setShellRefused(runID, null)
         },
         onState: () => {},
+        // The server's message names the actual limit (steer, tab cap,
+        // paused run); a lost steer capability always means the fixed
+        // refusal sentence.
         onRefused: refuse,
-        onWriteDenied: refuse,
+        onWriteDenied: () => refuse(shellRefusal),
         onExit: () => removeShellTab(runID, socketKey),
         geometry: () => ({
           cols: terminalRef.current?.cols ?? 80,
@@ -102,7 +106,7 @@ export function RunDock({ runID }: { runID: string }) {
       onToggleCollapse={() => setDockCollapsed(runID, !dock.collapsed)}
     >
       {dock.refusedMessage !== null ? (
-        <div className="p-3 text-sm text-muted-foreground">{shellRefusal}</div>
+        <div className="p-3 text-sm text-muted-foreground">{dock.refusedMessage}</div>
       ) : activeTab === null ? (
         <div className="p-3">
           <Button type="button" size="sm" onClick={open}>

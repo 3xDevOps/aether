@@ -900,3 +900,48 @@ func TestTranscriptPathReplacesSessionKeySeparators(t *testing.T) {
 		t.Fatalf("transcript path = %q, want %q", got, want)
 	}
 }
+
+// TestStartSessionReplacesEndedSession: a run-shell tab whose shell exited
+// must be reopenable under the same key, and the fresh session must not
+// replay the dead shell's transcript.
+func TestStartSessionReplacesEndedSession(t *testing.T) {
+	h, _ := newTestHost(t)
+	key := RunShellSession("r1", "t1")
+	first := newFakeAtt()
+	if err := h.StartSession(context.Background(), key, first); err != nil {
+		t.Fatalf("first StartSession: %v", err)
+	}
+	first.writeOutput(t, "old shell output\n")
+	waitFor(t, "first output recorded", func() bool {
+		ts, ok := h.LastOutput(key)
+		return ok && !ts.IsZero()
+	})
+	if err := first.outW.Close(); err != nil {
+		t.Fatalf("end first shell: %v", err)
+	}
+	waitFor(t, "first session ended", func() bool {
+		return !h.lookup(key).isActive()
+	})
+
+	second := newFakeAtt()
+	if err := h.StartSession(context.Background(), key, second); err != nil {
+		t.Fatalf("reopen StartSession: %v", err)
+	}
+	second.writeOutput(t, "new shell\n")
+	out := &sink{}
+	kr, kw := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- h.Attach(context.Background(), key, "m1", 120, 30, false, &testConn{r: kr, w: out}, nil)
+	}()
+	t.Cleanup(func() {
+		_ = kw.Close()
+		_ = kr.Close()
+	})
+	waitFor(t, "replay of the new shell only", func() bool {
+		return strings.Contains(out.String(), "new shell")
+	})
+	if got := out.String(); strings.Contains(got, "old shell output") {
+		t.Fatalf("replay contains the dead shell's output: %q", got)
+	}
+}

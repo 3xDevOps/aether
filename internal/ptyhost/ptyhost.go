@@ -124,10 +124,16 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	if err := h.reserve(key); err != nil {
 		return err
 	}
+	// Replace a session that ended (its process exited) so a fresh process
+	// can reuse the key: a run-shell tab whose shell exited must be
+	// reopenable. stop() is idempotent and closes the old attachment.
+	if prev := h.lookup(key); prev != nil {
+		prev.stop()
+	}
 	path := h.transcriptPath(key)
 	var err error
 	var seed []byte
-	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 {
+	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && key.seedsReplay() {
 		seed, err = readCastTail(path, h.cfg.ReplayBytes)
 		if err != nil {
 			slog.Warn("ptyhost: seed replay from transcript", "path", path, "error", err)
@@ -311,7 +317,9 @@ func (h *Host) reserve(key SessionKey) error {
 	if _, ok := h.starting[key]; ok {
 		return fmt.Errorf("ptyhost: session already started for key %s", key)
 	}
-	if prev, ok := h.sessions[key]; ok && !prev.isStopped() {
+	// An ended session (its process exited) does not block the key: the
+	// restart in StartSession stops and replaces it.
+	if prev, ok := h.sessions[key]; ok && prev.isActive() {
 		return fmt.Errorf("ptyhost: session already started for key %s", key)
 	}
 	h.starting[key] = struct{}{}

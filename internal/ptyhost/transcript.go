@@ -145,6 +145,11 @@ func readCastTail(path string, maxBytes int) ([]byte, error) {
 	}
 	if len(out) > maxBytes {
 		out = out[len(out)-maxBytes:]
+		// The cut can land mid-escape-sequence or mid-rune; replay must
+		// start on a line boundary, the same rule the replay ring applies.
+		if i := bytes.IndexByte(out, '\n'); i >= 0 {
+			out = out[i+1:]
+		}
 	}
 	return out, nil
 }

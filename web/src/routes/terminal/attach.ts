@@ -140,9 +140,12 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     }
     ws.onclose = (ev) => {
       socket = null
-      if (ev.code === 1000) {
+      // 1000 is the terminal process ending. A caller that owns tab
+      // lifecycle (the shell dock) takes over; everyone else reconnects
+      // and gets the server's refusal message, as before.
+      if (ev.code === 1000 && h.onExit) {
         refused = true
-        h.onExit?.()
+        h.onExit()
         h.onState('offline')
         return
       }

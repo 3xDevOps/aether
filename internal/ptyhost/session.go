@@ -120,12 +120,6 @@ func (s *session) stop() {
 	_ = s.att.Close()
 }
 
-func (s *session) isStopped() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.stopped
-}
-
 func (s *session) isActive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

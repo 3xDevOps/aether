@@ -490,7 +490,10 @@ requires **steer** permission and ignores the `write` value in the header;
 there is no read-only shell mode. Tab names must match
 `^[a-z0-9-]{1,32}$`, and each run can have at most four active shell tabs.
 The shell starts in `/workspace`. When it exits, the socket closes normally
-with **1000**; closing the socket only detaches the tab.
+with **1000** and the tab name is free to reopen with a fresh shell.
+Closing the socket only detaches: the shell keeps running, still counts
+toward the four-tab cap, and reconnecting the same tab name reattaches to
+it. Every shell ends with the run's container.
 
 ### `GET /ws/shell`
 

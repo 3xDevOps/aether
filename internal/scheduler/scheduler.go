@@ -126,9 +126,12 @@ type Scheduler struct {
 	superCancel context.CancelFunc
 	wg          sync.WaitGroup
 
-	mu              sync.Mutex
-	runs            map[domain.RunID]*supervised
-	runShellMu      sync.Mutex
+	mu   sync.Mutex
+	runs map[domain.RunID]*supervised
+	// runShellLocks serializes shell-tab creation per run so the tab cap
+	// cannot be raced past; a hung exec on one run never blocks another.
+	// Entries are created on first use and kept for the scheduler's life.
+	runShellLocks   map[domain.RunID]*sync.Mutex
 	credentialUsers map[*credentialUserReservation]struct{}
 	// agentSetups serializes agent-setup shells per member+harness: the
 	// exit-time pair of writes (tool promotion, definition upsert) must
@@ -265,6 +268,7 @@ func New(cfg Config) (*Scheduler, error) {
 		superCtx:        ctx,
 		superCancel:     cancel,
 		runs:            make(map[domain.RunID]*supervised),
+		runShellLocks:   make(map[domain.RunID]*sync.Mutex),
 		credentialUsers: make(map[*credentialUserReservation]struct{}),
 	}, nil
 }

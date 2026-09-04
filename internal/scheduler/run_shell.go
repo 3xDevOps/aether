@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -28,10 +29,14 @@ func (s *Scheduler) EnsureRunShellTab(ctx context.Context, run domain.RunID, tab
 		return fmt.Errorf("%w: %q must match ^[a-z0-9-]{1,32}$", ErrInvalidRunShellTab, tab)
 	}
 
-	s.runShellMu.Lock()
-	defer s.runShellMu.Unlock()
-
+	// A per-run lock serializes tab creation so the cap cannot be raced
+	// past, without one hung exec blocking every other run's shells.
 	s.mu.Lock()
+	lock := s.runShellLocks[run]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.runShellLocks[run] = lock
+	}
 	entry := s.runs[run]
 	if entry == nil || entry.status != domain.RunRunning || entry.paused || entry.containerID == "" {
 		s.mu.Unlock()
@@ -39,6 +44,8 @@ func (s *Scheduler) EnsureRunShellTab(ctx context.Context, run domain.RunID, tab
 	}
 	containerID := entry.containerID
 	s.mu.Unlock()
+	lock.Lock()
+	defer lock.Unlock()
 
 	key := ptyhost.RunShellSession(run, tab)
 	active := s.cfg.PTY.ActiveSessions(string(ptyhost.RunShellSession(run, "")))

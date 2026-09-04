@@ -229,8 +229,8 @@ func TestReadCastTailDecodesOutputAndIgnoresOtherEvents(t *testing.T) {
 	w.output([]byte("one\n"))
 	w.marker("not terminal output")
 	w.output([]byte("two\n"))
-	if err := w.close(); err != nil {
-		t.Fatalf("close: %v", err)
+	if cerr := w.close(); cerr != nil {
+		t.Fatalf("close: %v", cerr)
 	}
 	got, err := readCastTail(path, 6)
 	if err != nil {
