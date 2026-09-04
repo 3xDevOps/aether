@@ -89,8 +89,12 @@ type Gateway struct {
 	// before exit closes and read only after. ExitRelaunch tells the
 	// desktop shell to relaunch itself rather than respawn the sidecar.
 	exitCode int
-	// rebuild tracks the desktop-app build update.apply starts.
+	// rebuild tracks the desktop-app build update.apply starts, and
+	// builds counts the goroutine running it, so Close can wait for the
+	// killed child to be reaped and its outcome recorded before the
+	// process, or a test, moves on.
 	rebuild *rebuildState
+	builds  sync.WaitGroup
 	// updating is set while one update.apply is swapping the binary, so
 	// a second cannot start another swap - or a second administrator
 	// dialog - under it.
@@ -269,6 +273,18 @@ func (g *Gateway) Close() error {
 	err := g.srv.Shutdown(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = g.srv.Close()
+	}
+	// The cancelled context has killed any rebuild; its goroutine still
+	// has to reap the child and record why it stopped. Waiting here keeps
+	// that record with this gateway rather than whatever comes after it.
+	built := make(chan struct{})
+	go func() {
+		g.builds.Wait()
+		close(built)
+	}()
+	select {
+	case <-built:
+	case <-ctx.Done():
 	}
 	return err
 }
