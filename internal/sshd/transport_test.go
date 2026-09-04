@@ -434,3 +434,60 @@ func TestWindowChangeFeedsResize(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// TestAttachReplaysFinishedRun pins the replay path: a run the PTY host
+// has no session for but whose transcript was recorded - which is every
+// finished run - attaches as a read-only stream of the recorded output
+// and ends cleanly, instead of a refusal the dashboard can only retry
+// forever.
+func TestAttachReplaysFinishedRun(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.pty.setErr(errNoSession)
+	e.pty.setTranscript(e.run.ID, []byte("recorded output"))
+	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunNeedsAttention, "", nil, nil); err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+
+	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
+	r := bufio.NewReader(pipe)
+	if _, err := pipe.Write([]byte(`{"run_id":"` + string(e.run.ID) + `"}` + "\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var ack protocol.AttachResponse
+	readJSONLine(t, r, &ack)
+	if !ack.OK || ack.Cols != 80 || ack.Rows != 24 {
+		t.Fatalf("ack = %+v, want ok with default geometry", ack)
+	}
+	buf := make([]byte, len("recorded output"))
+	if _, err := io.ReadFull(r, buf); err != nil {
+		t.Fatalf("read replay: %v", err)
+	}
+	if string(buf) != "recorded output" {
+		t.Fatalf("replay = %q", buf)
+	}
+	if _, err := r.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("after replay read = %v, want EOF", err)
+	}
+}
+
+// TestAttachFinishedRunWithoutTranscriptStillRefuses pins the fallback: a
+// finished run whose transcript predates recording keeps the no-session
+// refusal instead of a bogus empty replay.
+func TestAttachFinishedRunWithoutTranscriptStillRefuses(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.pty.setErr(errNoSession)
+	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunNeedsAttention, "", nil, nil); err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+
+	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
+	r := bufio.NewReader(pipe)
+	if _, err := pipe.Write([]byte(`{"run_id":"` + string(e.run.ID) + `"}` + "\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var ack protocol.AttachResponse
+	readJSONLine(t, r, &ack)
+	if ack.OK || ack.Code != protocol.CodeUnavailable {
+		t.Fatalf("ack = %+v, want unavailable", ack)
+	}
+}

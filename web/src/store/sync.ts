@@ -79,6 +79,18 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     )
     s.setOverlaps(overlaps)
     s.setCapabilities(capabilities)
+    // The status bar's link chip reads linkStatus, and nothing else
+    // fetches it until the settings or onboarding view opens - so without
+    // this, a linked machine launches looking unlinked and the chip points
+    // at onboarding on every start. Local gateways only, and isolated: a
+    // failed poll must not fail the hydration.
+    if (store.getState().capabilities?.local?.includes('link.status')) {
+      try {
+        s.setLinkStatus(await client.localLinkStatus())
+      } catch {
+        ignore()
+      }
+    }
     s.setHydrated(true)
     if (
       !store.getState().onboarded &&

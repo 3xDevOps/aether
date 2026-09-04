@@ -140,12 +140,19 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     }
     ws.onclose = (ev) => {
       socket = null
-      // 1000 is the terminal process ending. A caller that owns tab
-      // lifecycle (the shell dock) takes over; everyone else reconnects
-      // and gets the server's refusal message, as before.
+// 1000 is the terminal process ending. A caller that owns tab
+      // lifecycle (the shell dock) takes over; everyone else who gets the
+      // gateway's named "session ended" close - the agent exited, or a
+      // replay of a finished run's transcript drained - stays put, since a
+      // reconnect could only replay the same bytes again. Any other close
+      // reconnects and gets the server's refusal message, as before.
       if (ev.code === 1000 && h.onExit) {
         refused = true
         h.onExit()
+        h.onState('offline')
+        return
+      }
+      if (attached && ev.reason === 'session ended') {
         h.onState('offline')
         return
       }

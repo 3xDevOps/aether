@@ -17,6 +17,9 @@ type GitTransport interface {
 // PTYAttacher is the SSH server's view of the PTY host (*ptyhost.Host).
 type PTYAttacher interface {
 	Attach(ctx context.Context, key ptyhost.SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error
+	// Replay streams a run's recorded transcript as raw terminal bytes;
+	// os.ErrNotExist when the run never recorded one.
+	Replay(run domain.RunID) (io.ReadCloser, error)
 }
 
 // RunController is the SSH server's view of the scheduler (*scheduler.Scheduler).

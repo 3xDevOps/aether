@@ -442,15 +442,18 @@ host and relies on transcript replay to restore its content.
 
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
-  terminal and event stream reconnect on the same jittered schedule, and it
+terminal and event stream reconnect on the same jittered schedule, and it
   splits large input (a paste) into several ordered frames under the gateway's
   64 KiB frame cap, never splitting a surrogate pair.
 - **Mirror by default for the agent.** The agent header carries no `write` key
   unless the user asks to steer; the toggle reattaches rather than upgrading
   in place. Whether the member may steer is the server's answer, never the
   client's guess: a `-32001` refusal drops the request back to a mirror and
-  disables the toggle. Every other refusal (unknown run, no live terminal)
-  stops the reconnect loop and offers a retry.
+  disables the toggle. A finished run attaches as a read-only replay of its
+  recorded transcript, which ends with a 1000 close, reason `session ended` -
+  the signal to stop reconnecting rather than loop replay -> EOF -> replay.
+  Every other refusal (unknown run, transiently missing terminal) stops the
+  reconnect loop and offers a retry.
 - **Run-shell tabs always write.** The `+` control opens names `t1`, `t2`,
   `t3`, and `t4`; four is the per-run limit and the disabled control says
   `At most 4 tabs`. Each shell attach uses

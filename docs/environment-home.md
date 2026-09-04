@@ -14,7 +14,9 @@ The home is the member's durable environment:
 - Profile files synced with `aether profile push`
 
 Container files outside the home are temporary. System packages belong in an
-administrator-approved image. A member's home is mounted only in that member's
+administrator-approved image. Containers run as root by default and the
+shipped images include `sudo`, so vendor install scripts work exactly as
+their docs describe. A member's home is mounted only in that member's
 containers, never in another member's.
 
 ## Setting up an agent

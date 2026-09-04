@@ -318,6 +318,23 @@ describe('connectAttach', () => {
 
     expect(exited).toBe(true)
     expect(StubSocket.opened).toHaveLength(1)
+
+  it('stops without reconnecting when the server ends the session', () => {
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack()
+    StubSocket.last().onmessage?.({
+      data: new TextEncoder().encode('replayed history').buffer,
+    })
+
+    // The gateway names a clean session end; a reconnect could only replay
+    // the same bytes again.
+    StubSocket.last().onclose?.({ code: 1000, reason: 'session ended' })
+    vi.advanceTimersByTime(5000)
+
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(states[states.length - 1]).toBe('offline')
+    expect(refusal).toBeNull()
     a.close()
   })
 })

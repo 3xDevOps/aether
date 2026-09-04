@@ -10,6 +10,7 @@ RUN apt-get update \
         findutils \
         git \
         grep \
+        sudo \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

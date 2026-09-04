@@ -337,6 +337,25 @@ func TestAttachMirrorHeaderMapsToReadOnly(t *testing.T) {
 	}
 }
 
+// TestAttachSessionEndNamesTheReason: a terminal ending with a clean EOF is
+// the run's session ending, so the close frame says so and the dashboard
+// can stop reconnecting instead of retrying a session that is over.
+func TestAttachSessionEndNamesTheReason(t *testing.T) {
+	term := newWSStubTerminal(io.EOF)
+	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Cols: 80, Rows: 24}}
+	g, base := newWSGateway(t, b)
+	conn := wsDial(t, base, "/ws/attach/run-1", g.Token())
+
+	writeWSJSON(t, conn, protocol.DashAttachRequest{Write: false})
+	if ack := readWSJSON[protocol.AttachResponse](t, conn); !ack.OK {
+		t.Fatalf("ack = %+v, want ok", ack)
+	}
+	term.finish()
+	if reason := expectClose(t, conn, websocket.StatusNormalClosure); reason != "session ended" {
+		t.Fatalf("close reason = %q, want session ended", reason)
+	}
+}
+
 // TestAttachForwardsOutputInputAndResize covers a write attach end to end:
 // terminal output as binary frames, input and resize control frames
 // forwarded to the terminal, clean EOF as 1000.

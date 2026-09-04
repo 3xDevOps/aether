@@ -406,3 +406,63 @@ func hex4(tok []byte, at int) (rune, error) {
 	}
 	return r, nil
 }
+
+// replayReader decodes a transcript cast file back into the raw terminal
+// bytes: each [time,"o",<string>] line yields the exact bytes
+// appendCastString recorded; the header, resize, and marker events are
+// skipped. Decoding is line-incremental so a large transcript streams
+// instead of loading whole.
+type replayReader struct {
+	f   *os.File
+	br  *bufio.Reader
+	buf []byte
+	err error
+}
+
+func (r *replayReader) Read(p []byte) (int, error) {
+	for len(r.buf) == 0 && r.err == nil {
+		r.err = r.next()
+	}
+	if len(r.buf) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.buf)
+	r.buf = r.buf[n:]
+	return n, nil
+}
+
+// next decodes the next event line into r.buf (empty for non-output
+// events), returning io.EOF once the transcript is exhausted.
+func (r *replayReader) next() error {
+	line, err := r.br.ReadBytes('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("ptyhost: read transcript: %w", err)
+	}
+	atEnd := errors.Is(err, io.EOF)
+	done := func() error {
+		if atEnd {
+			return io.EOF
+		}
+		return nil
+	}
+	line = bytes.TrimSpace(line)
+	// Blank tail or the cast v2 header object: nothing to emit.
+	if len(line) == 0 || line[0] == '{' {
+		return done()
+	}
+	var event []json.RawMessage
+	if uerr := json.Unmarshal(line, &event); uerr != nil || len(event) < 3 {
+		return fmt.Errorf("ptyhost: malformed transcript event: %w", errBadCastString)
+	}
+	if string(event[1]) != `"o"` {
+		return done()
+	}
+	data, derr := decodeCastString(event[2])
+	if derr != nil {
+		return fmt.Errorf("ptyhost: decode transcript output: %w", derr)
+	}
+	r.buf = data
+	return done()
+}
+
+func (r *replayReader) Close() error { return r.f.Close() }
