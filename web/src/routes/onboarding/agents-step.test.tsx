@@ -385,6 +385,41 @@ describe('agents step', () => {
     expect(client.localProfilePush).not.toHaveBeenCalled()
   })
 
+  it('names a plugin-cache finding as third-party and still imports', async () => {
+    // A marketplace plugin ships its own test fixtures, and one of them
+    // holding a secret-shaped string is nothing the user can fix. The
+    // gateway drops that file rather than blocking, and the row has to
+    // say whose content it was.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: 'plugins/cache/claude-plugins-official/notes-toolkit/6.3.0/tests/brainstorm-server/ws-protocol.test.js',
+                  reason: 'vendored-secret',
+                  detail:
+                    'secret detected (aws-access-key) in third-party plugin content; this file is left out and the rest of the profile still syncs at line 52',
+                },
+              ],
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(
+      await screen.findByText(/1 file inside an installed plugin/),
+    ).toBeDefined()
+    // The harness is still importable: the checkbox is there, and no
+    // --allow-secret command is offered.
+    expect(
+      screen.getByRole('checkbox', { name: 'Bring Claude Code configuration' }),
+    ).toBeDefined()
+    expect(screen.queryByText(/--allow-secret/)).toBeNull()
+  })
+
   it('renders a push refusal on its own row and still runs the others', async () => {
     const client = fakeApi({
       localProfilePreview: bothPresent(),

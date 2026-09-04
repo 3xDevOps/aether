@@ -315,7 +315,10 @@ authority.
   `plugins`, `other`. `paths` is capped at 200 entries per category, with
   `truncated` set when it was cut; `files` and `bytes` stay exact.
   `reason` on an exclusion is `credential` (a denylisted basename),
-  `secret` (a content-scanner finding), `ignored` (an
+  `secret` (a content-scanner finding in a file the user wrote),
+  `vendored-secret` (a finding inside third-party content the harness
+  installed, such as claude's `plugins/cache/` - that file is dropped and
+  the push still runs), `ignored` (an
   `.aether-profile-ignore` match, or one of the per-harness defaults in
   [harnesses.md](harnesses.md)), `symlink` (a link out of the profile
   root, skipped rather than followed - its target is never opened),
@@ -341,9 +344,9 @@ authority.
   partially carried. A `secret` is the only such condition: it is the one
   thing whose fix has to happen on this machine, and the one with a CLI
   override. `blocked_reason`, `blocked_path` and `blocked_detail` name it.
-  Every other exclusion - symlink escapes and both size caps - lets the
-  push succeed carrying what is left, and `profile.push` answers with a
-  `skipped` list naming what it dropped.
+  Every other exclusion - symlink escapes, `vendored-secret`, and both
+  size caps - lets the push succeed carrying what is left, and
+  `profile.push` answers with a `skipped` list naming what it dropped.
 - `present:false` - this machine has no profile root for that harness -
   is a normal answer with zero counts, not an error. A harness name the
   registry does not know, or one with no profile sync, answers `-32602`.

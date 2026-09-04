@@ -282,6 +282,14 @@ stopped.
   not followed. Symlinking `skills/` entries into a shared directory is an
   ordinary setup; the link is left behind and everything else still syncs.
   The target is never opened, so nothing outside the root is uploaded.
+- **Third-party plugin content.** `claude` installs marketplace plugins under
+  `plugins/cache/<marketplace>/<plugin>/<version>/`, and a plugin often ships
+  its own test suite. A scanner finding in there is a string in somebody
+  else's package, not a secret you can remove, so it drops that one file and
+  reports it as `vendored-secret` - the rest of the plugin, and the rest of
+  your profile, still sync. It is matched on the `plugins/cache/` prefix
+  alone, so a plugin update that moves the version segment changes nothing.
+  Everywhere else, a finding still refuses the push.
 - **Default excludes.** Aether skips what a harness writes for itself as it
   runs - transcripts, telemetry, scratch trees - rather than anything you
   configured:
@@ -296,9 +304,11 @@ stopped.
   line `!projects/` in it syncs the directory anyway.
 
 `--allow-secret` has no dashboard equivalent, deliberately. A scanner finding
-refuses the push there and names the file and the line: the fix is on the
-machine the file lives on. Overriding a false positive stays a CLI act, where
-`--workspace` records who overrode what, and on which timeline.
+in a file you wrote refuses the push there and names the file and the line:
+the fix is on the machine the file lives on. Overriding a false positive stays
+a CLI act, where `--workspace` records who overrode what, and on which
+timeline. `--allow-secret` also carries a file the plugin-cache rule dropped,
+if you want that one on the server.
 
 - The synced directory is the harness's profile root from the table above.
 - A run **pins** the latest snapshot when it is provisioned. Pushing mid-run
@@ -309,10 +319,12 @@ machine the file lives on. Overriding a false positive stays a CLI act, where
 - **Secrets never sync.** Two independent guards, both on by default: a
   per-harness credential denylist (`.credentials.json`, `auth.json`,
   `.claude.json`, ...) and a client-side content scan that blocks any push
-  containing key material, naming the file and the match. `--allow-secret
-  <file>` overrides a false positive and records the override on the workspace
-  timeline. It requires `--workspace` outright - no single-workspace default -
-  so the override always names the timeline it is attributable on.
+  containing key material, naming the file and the match. A flagged file is
+  never uploaded, whether the finding refuses the push or - inside
+  `plugins/cache/` - only drops that file. `--allow-secret <file>` overrides a
+  false positive and records the override on the workspace timeline. It
+  requires `--workspace` outright - no single-workspace default - so the
+  override always names the timeline it is attributable on.
 
 ## Adding a harness
 

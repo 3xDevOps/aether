@@ -402,3 +402,69 @@ func TestLocalProfilePushReportsSkipped(t *testing.T) {
 		}
 	}
 }
+
+// The dashboard path end to end for a marketplace plugin's own test
+// fixture: the preview stays importable and names the file as
+// third-party, the push succeeds without it, and the fixture never
+// reaches the wire. The user cannot edit that file, and its path carries
+// the plugin version, so blocking the import made the whole feature wait
+// on a third party's next release.
+func TestLocalProfileVendoredPluginFixtureDoesNotBlock(t *testing.T) {
+	secret, err := os.ReadFile(filepath.Join("..", "cli", "profile", "testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := "plugins/cache/claude-plugins-official/notes-toolkit/6.3.0/tests/brainstorm-server/ws-protocol.test.js"
+	profileHome(t, map[string]string{
+		"CLAUDE.md": "# standing instructions\n",
+		fixture:     string(secret),
+	})
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
+		results: map[string]json.RawMessage{protocol.MethodProfilePush: pushResultJSON(t, "sha1")},
+	}}
+	g := newVerbGateway(t, backend, cli.Config{})
+
+	rec := do(g, http.MethodPost, "/local/v1/profile.preview", `{"harness":"claude"}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("profile.preview = %d: %s", rec.Code, rec.Body)
+	}
+	var preview profilePreviewBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.Blocked {
+		t.Fatalf("a plugin's own test fixture blocked the preview: %+v", preview)
+	}
+	if len(preview.Excluded) != 1 || preview.Excluded[0].Path != fixture ||
+		preview.Excluded[0].Reason != profile.ExcludeVendoredSecret {
+		t.Fatalf("excluded = %+v", preview.Excluded)
+	}
+
+	rec = do(g, http.MethodPost, "/local/v1/profile.push", `{"harness":"claude"}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("profile.push = %d: %s", rec.Code, rec.Body)
+	}
+	var pushed struct {
+		Files   int `json:"files"`
+		Skipped []struct {
+			Path   string `json:"path"`
+			Reason string `json:"reason"`
+			Detail string `json:"detail"`
+		} `json:"skipped"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &pushed); err != nil {
+		t.Fatal(err)
+	}
+	if pushed.Files != 1 {
+		t.Errorf("files = %d, want the one clean file", pushed.Files)
+	}
+	if len(pushed.Skipped) != 1 || pushed.Skipped[0].Path != fixture ||
+		!strings.Contains(pushed.Skipped[0].Detail, "third-party plugin content") {
+		t.Fatalf("skipped = %+v", pushed.Skipped)
+	}
+	for _, call := range backend.recorded() {
+		if call.method == protocol.MethodProfilePush && strings.Contains(call.params, "ws-protocol") {
+			t.Fatalf("the flagged fixture was sent: %s", call.params)
+		}
+	}
+}

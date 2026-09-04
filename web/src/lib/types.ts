@@ -333,10 +333,13 @@ export interface ProfilePreviewCategory {
 
 /** Why a file was left out of a profile push. `too-large` and
  * `over-budget` are the server's size caps, applied before the file is
- * ever read. */
+ * ever read. `secret` is a scanner finding in a file the user wrote and
+ * refuses the push; `vendored-secret` is one inside third-party content
+ * the harness installed, which drops that file and lets the rest sync. */
 export type ProfileExcludeReason =
   | 'credential'
   | 'secret'
+  | 'vendored-secret'
   | 'ignored'
   | 'symlink'
   | 'too-large'

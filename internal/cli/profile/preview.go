@@ -113,8 +113,9 @@ type Preview struct {
 // blocksPush reports whether an exclusion reason is one discoverRoot
 // aborts on rather than skips. It is the single place the two agree, so
 // adding an aborting reason to the walk cannot leave the preview behind.
-// A scanner finding is the only one: everything else, symlink escapes
-// included, is carried in the skipped list instead.
+// A scanner finding in a file the user wrote is the only one: everything
+// else - symlink escapes, and findings in vendored third-party content -
+// is carried in the skipped list instead.
 func blocksPush(reason string) bool {
 	return reason == ExcludeSecret
 }
@@ -155,7 +156,7 @@ func Inventory(ctx context.Context, harnessName string) (Preview, error) {
 	walkErr := walkRoot(ctx, root, prof, nil, func(f visited) error {
 		if f.Reason != "" {
 			detail := f.Detail
-			if f.Reason == ExcludeSecret && f.Finding.Location != "" {
+			if f.Finding.Location != "" {
 				detail += " at " + f.Finding.Location
 			}
 			preview.Excluded = append(preview.Excluded, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: detail})
