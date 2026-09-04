@@ -203,8 +203,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 			if s.sched == nil {
 				return
 			}
-			if err := s.sched.RecordCommit(context.Background(), run, commit, at); err != nil {
-				slog.Warn("server: record run commit failed", "run", run, "error", err)
+			if recordErr := s.sched.RecordCommit(context.Background(), run, commit, at); recordErr != nil {
+				slog.Warn("server: record run commit failed", "run", run, "error", recordErr)
 			}
 		},
 	}); err != nil {

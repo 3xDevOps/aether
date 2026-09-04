@@ -160,7 +160,7 @@ func TestRunCommitMigrationAddsColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PRAGMA table_info(runs): %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type column struct {
 		typ     string

@@ -115,7 +115,9 @@ func TestPullFastForwardsCurrentBranchAndReportsDirty(t *testing.T) {
 	first := git(t, remote, "rev-parse", "run-branch")
 	git(t, local, "fetch", remote, "run-branch:refs/heads/run-branch")
 	git(t, local, "switch", "run-branch")
-	writeTestFile(filepath.Join(remote, "second.txt"), "second\n")
+	if err := writeTestFile(filepath.Join(remote, "second.txt"), "second\n"); err != nil {
+		t.Fatal(err)
+	}
 	git(t, remote, "add", "second.txt")
 	git(t, remote, "commit", "-m", "second")
 	second := git(t, remote, "rev-parse", "run-branch")
@@ -134,8 +136,8 @@ func TestPullFastForwardsCurrentBranchAndReportsDirty(t *testing.T) {
 		t.Fatalf("current branch tip = %s, want %s", got, second)
 	}
 
-	if err := writeTestFile(filepath.Join(local, "uncommitted.txt"), "dirty\n"); err != nil {
-		t.Fatal(err)
+	if writeErr := writeTestFile(filepath.Join(local, "uncommitted.txt"), "dirty\n"); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	result, err = pull(local, remote, "run-branch")
 	if err != nil {

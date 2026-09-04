@@ -140,8 +140,8 @@ func TestPublishBranchUsesRunMetadataWithoutRegistry(t *testing.T) {
 		workspace domain.WorkspaceID = "ws1"
 		commit                       = "0123456789abcdef"
 	)
-	if err := e.writeRunMeta(run, runMeta{Base: "main", Branch: branch, Workspace: workspace}); err != nil {
-		t.Fatal(err)
+	if metaErr := e.writeRunMeta(run, runMeta{Base: "main", Branch: branch, Workspace: workspace}); metaErr != nil {
+		t.Fatal(metaErr)
 	}
 	sub, err := bus.Subscribe(t.Context(), events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeGitBranch}}})
 	if err != nil {

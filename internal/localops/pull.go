@@ -53,11 +53,7 @@ func pull(repo, url, branch string) (PullResult, error) {
 		return result, err
 	}
 
-	current, err := currentBranch(repo)
-	if err != nil {
-		return result, err
-	}
-	result.Current = current == branch
+	result.Current = currentBranch(repo) == branch
 
 	var opOutput []byte
 	if result.Current {
@@ -116,12 +112,12 @@ func SwitchPull(repo, branch string) error {
 	return nil
 }
 
-func currentBranch(repo string) (string, error) {
+func currentBranch(repo string) string {
 	out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD").CombinedOutput()
 	if err != nil {
-		return "", nil // A detached HEAD is not the run branch.
+		return "" // A detached HEAD is not the run branch.
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(out))
 }
 
 func worktreeDirty(repo string) (bool, error) {
