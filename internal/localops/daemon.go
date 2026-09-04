@@ -48,6 +48,9 @@ func InstallDaemonUnit(cfg syncd.Config, noProfileSync bool) (path, activate str
 	if cfg.WorkspaceID != "" {
 		runArgs = append(runArgs, "--workspace", cfg.WorkspaceID)
 	}
+	if cfg.SyncOrigin {
+		runArgs = append(runArgs, "--sync-origin")
+	}
 	if noProfileSync {
 		runArgs = append(runArgs, "--no-profile-sync")
 	}

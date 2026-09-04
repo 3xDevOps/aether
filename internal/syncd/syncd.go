@@ -58,6 +58,12 @@ type Config struct {
 	Remote string
 	// BaseBranch is the local branch pushed up to the server.
 	BaseBranch string
+	// SyncOrigin, when set, fast-forwards the server's base branch to
+	// this repo's origin remote on every catch-up pass, so runs branched
+	// server-side start from upstream's current tip. The local branch and
+	// the working tree are never touched: origin's tip is pushed straight
+	// from its remote-tracking ref, fast-forward-only.
+	SyncOrigin bool
 	// WorkspaceID, when set, restricts event-driven fetches to git.branch
 	// events of that workspace; empty reacts to all of them.
 	WorkspaceID string
@@ -73,10 +79,12 @@ type Config struct {
 type Daemon struct {
 	cfg Config
 
-	// fetch and push are the sync actions; function fields so tests can
-	// observe decisions without a git binary or an SSH server.
-	fetch func(ctx context.Context) error
-	push  func(ctx context.Context) error
+	// fetch, push, and syncOrigin are the sync actions; function fields
+	// so tests can observe decisions without a git binary or an SSH
+	// server.
+	fetch      func(ctx context.Context) error
+	push       func(ctx context.Context) error
+	syncOrigin func(ctx context.Context) error
 
 	lastSeq    uint64 // event-stream resume cursor, touched only in runSession
 	lastPushed string // base tip last pushed, touched only in pushBase
@@ -114,6 +122,7 @@ func New(cfg Config) (*Daemon, error) {
 	d := &Daemon{cfg: cfg}
 	d.fetch = d.fetchRuns
 	d.push = d.pushBase
+	d.syncOrigin = d.forwardOriginBase
 	return d, nil
 }
 

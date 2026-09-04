@@ -140,12 +140,21 @@ func wantsFetch(ev protocol.Event, workspaceID string) bool {
 	return string(p.WorkspaceID) == workspaceID
 }
 
-// syncAll is one full catch-up pass: fetch every run branch, push the base.
+// syncAll is one full catch-up pass: fetch every run branch, push the
+// local base, and advance the server's base branch to origin's tip when
+// origin syncing is on. Origin runs after the push so a stale local base
+// never blocks it and a member's unpublished local work always wins over
+// a rewrite of the server's base.
 func (d *Daemon) syncAll(ctx context.Context) {
 	if err := d.fetch(ctx); err != nil {
 		slog.Warn("syncd: catch-up fetch", "error", err)
 	}
 	if err := d.push(ctx); err != nil {
 		slog.Warn("syncd: catch-up push", "error", err)
+	}
+	if d.cfg.SyncOrigin {
+		if err := d.syncOrigin(ctx); err != nil {
+			slog.Warn("syncd: origin sync", "error", err)
+		}
 	}
 }

@@ -163,6 +163,33 @@ func newTestDaemon(t *testing.T, workspace string) (*Daemon, *atomic.Int64, *ato
 	return d, &fetches, &pushes
 }
 
+// TestSyncAllRunsOriginSyncOnlyWhenEnabled pins the catch-up pass
+// contract: origin syncing is opt-in. Enabled, it runs after the
+// catch-up fetch and push; disabled, it never runs.
+func TestSyncAllRunsOriginSyncOnlyWhenEnabled(t *testing.T) {
+	d, fetches, pushes := newTestDaemon(t, "")
+	var originSyncs atomic.Int64
+	d.syncOrigin = func(context.Context) error { originSyncs.Add(1); return nil }
+
+	d.syncAll(context.Background())
+	if originSyncs.Load() != 0 {
+		t.Fatalf("syncAll without SyncOrigin ran the origin sync %d times, want 0", originSyncs.Load())
+	}
+
+	d.cfg.SyncOrigin = true
+	d.syncAll(context.Background())
+	waitCount(t, &originSyncs, 1, "origin syncs")
+	if fetches.Load() != 2 {
+		t.Errorf("fetches = %d, want one per catch-up pass", fetches.Load())
+	}
+	if pushes.Load() != 2 {
+		t.Errorf("pushes = %d, want one per catch-up pass", pushes.Load())
+	}
+	if originSyncs.Load() != 1 {
+		t.Errorf("origin syncs = %d, want 1", originSyncs.Load())
+	}
+}
+
 func gitBranchEvent(seq uint64, workspace string) protocol.Event {
 	return protocol.Event{
 		ID: "ev", Seq: seq, Type: "git.branch",

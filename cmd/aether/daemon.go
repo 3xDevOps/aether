@@ -40,6 +40,7 @@ func daemonFlags(fs *flag.FlagSet) (*syncd.Config, *bool) {
 	fs.StringVar(&cfg.Remote, "remote", "aether", "git remote name for the server")
 	fs.StringVar(&cfg.BaseBranch, "base", "main", "local base branch pushed to the server")
 	fs.StringVar(&cfg.WorkspaceID, "workspace", "", "only react to branch events of this workspace (default all)")
+	fs.BoolVar(&cfg.SyncOrigin, "sync-origin", false, "fast-forward the server's base branch to this repo's origin remote on every catch-up pass, so runs start from upstream's current tip")
 	noProfileSync := fs.Bool("no-profile-sync", false, "disable automatic profile discovery, watching, and reconnect catch-up")
 	return cfg, noProfileSync
 }
