@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"testing"
 	"time"
@@ -38,14 +37,21 @@ import (
 // the shipped claude profile in real containers and makes each agent settle
 // the overlap through the staged bridge as the image's non-root user.
 func TestIntegrationCoordinationInContainer(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	requireBinary(t, "docker")
-	docker, _, ok := dockerRuntime(t)
-	if !ok {
+	if !dockerReachable(t) {
 		t.Skip("the container coordination scenario needs a reachable Docker daemon")
 	}
+	// Before the runtime, so that its cleanup runs after the runtime's
+	// container sweep: cleanups run last-in-first-out, and removing an
+	// image a live container still holds only untags it, leaving the layers
+	// behind on every run.
 	image, user := buildCoordAgentImage(t)
+	docker, _, ok := dockerRuntime(t)
+	if !ok {
+		t.Fatal("the Docker daemon went away after the image was built")
+	}
 
 	e := &coordEnv{rt: docker, image: image, serverBinary: buildServerBinary(t)}
 	srv := e.seed(ctx, t, false)
@@ -69,18 +75,21 @@ func TestIntegrationCoordinationInContainer(t *testing.T) {
 	}
 
 	// The agent's side, reported from inside the container: the argument it
-	// was launched with, the user it runs as, the coordination directory it
-	// traverses, the config and socket modes it finds there, both mounts
-	// refusing writes, and the staged binary it executes as the bridge.
+	// was launched with, the user it runs as, both binds read-only in the
+	// kernel's own mount table, the coordination directory it traverses
+	// with the config and socket modes it finds there, that directory
+	// refusing a write with EROFS, and the staged binary it executes as the
+	// bridge.
 	for _, att := range []*attachConn{attA, attB} {
 		att.waitOutput(t, "--mcp-config "+mcpConfigTarget)
 		att.waitOutput(t, "user:"+user)
 		att.waitOutput(t, "mode:"+mcpbridge.MountDir+"=0755")
 		att.waitOutput(t, coord.ConfigName+"=0444")
 		att.waitOutput(t, coord.SocketName+"=0666")
+		att.waitOutput(t, "mount:"+mcpbridge.MountDir+"=ro")
 		att.waitOutput(t, "readonly:"+mcpbridge.MountDir)
 		att.waitOutput(t, "mode:"+mcpbridge.BinaryPath+"=0555")
-		att.waitOutput(t, "readonly:"+path.Dir(mcpbridge.BinaryPath))
+		att.waitOutput(t, "mount:"+mcpbridge.BinaryPath+"=ro")
 		att.waitOutput(t, "bridge:"+mcpbridge.BinaryPath+" mcp")
 	}
 

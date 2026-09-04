@@ -298,17 +298,14 @@ func pickRuntime(t *testing.T) (runtime.Runtime, string, func(*testing.T)) {
 // unreachable, which is what lets a scenario fall back or skip.
 func dockerRuntime(t *testing.T) (rt *runtime.Docker, verifyNoLeaks func(*testing.T), ok bool) {
 	t.Helper()
+	if !dockerReachable(t) {
+		return nil, nil, false
+	}
 	docker, err := runtime.NewDocker(
 		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
 		runtime.WithNetworkMode("none"),
 	)
 	if err != nil {
-		return nil, nil, false
-	}
-	probeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if perr := docker.Destroy(probeCtx, "aether-e2e-daemon-probe"); perr != nil {
-		_ = docker.Close()
 		return nil, nil, false
 	}
 	t.Cleanup(func() { _ = docker.Close() })
@@ -326,6 +323,21 @@ func dockerRuntime(t *testing.T) (rt *runtime.Docker, verifyNoLeaks func(*testin
 			t.Errorf("containers leaked after clean shutdown: %v", leaked)
 		}
 	}, true
+}
+
+// dockerReachable probes the daemon and registers no cleanup, so a caller
+// can decide to skip - or to build something whose own cleanup must outlive
+// the runtime's - before anything with a cleanup exists.
+func dockerReachable(t *testing.T) bool {
+	t.Helper()
+	docker, err := runtime.NewDocker()
+	if err != nil {
+		return false
+	}
+	defer func() { _ = docker.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return docker.Destroy(ctx, "aether-e2e-daemon-probe") == nil
 }
 
 func newDockerCLI(t *testing.T) *client.Client {

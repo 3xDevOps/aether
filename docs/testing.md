@@ -100,10 +100,11 @@ registration with it. So the scenario builds a run image whose `claude`
 executable is the fixture agent in `internal/server/testdata/coordagent`,
 running as a non-root user. The fixture knows no Aether paths: it takes the
 coordination directory from the `--mcp-config` it was handed and the bridge
-command from that config, the way a real harness would, and reports every
-mode, refused write, and tool result on its terminal, where the test reads
-them over a real attach. The daemon's own view of the two binds is checked
-beside them.
+command from that config, the way a real harness would. What it found goes
+on its terminal, where the test reads it over a real attach: the modes,
+both binds read-only in the kernel's own mount table, a write the
+coordination directory refuses with EROFS, and every tool result. The
+daemon's own view of the two binds is checked beside it.
 
 The container user is the test process's own uid:gid unless that is root:
 the scheduler chowns the run checkout and the member home to the container

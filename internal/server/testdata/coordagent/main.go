@@ -17,12 +17,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -44,15 +46,22 @@ const shared = "shared.txt"
 // poll bounds the waits on the radar and on the inbox.
 const poll = 2 * time.Minute
 
+// retouch is how often the shared file is rewritten while the agent waits
+// for a peer. The diff watch snapshots on quiescence - a couple of seconds
+// after the last change, and never more often than its own floor - so
+// rewriting on every poll would be sustained churn that holds off the very
+// snapshot the radar is waiting for. One write, then quiet.
+const retouch = 10 * time.Second
+
 func main() {
 	// The overlap notice arrives on stdin and the write carrying it blocks
 	// until it is read, so drain for the whole life of the run.
 	go drainStdin()
-	// Nothing is said before the supervisor has attached this terminal and
-	// registered its diff watch, both of which happen just after the
-	// container starts: output the terminal never carried is output no test
-	// can read, and a write the watch never saw is a run the conflict radar
-	// never hears about.
+	// The supervisor attaches this terminal just after the container
+	// starts, and output the terminal never carried is output no test can
+	// read. Waiting is only ever a head start, never a guarantee: what has
+	// to survive a miss - the edit the conflict radar watches for - is
+	// repeated below rather than said once here.
 	time.Sleep(2 * time.Second)
 	say("argv:%s", strings.Join(os.Args, " "))
 	say("user:%d:%d", os.Getuid(), os.Getgid())
@@ -78,6 +87,9 @@ func coordinate(ctx context.Context) error {
 	if err := reportDir(dir); err != nil {
 		return err
 	}
+	if err := reportMount(dir); err != nil {
+		return err
+	}
 	if err := reportReadOnly(dir); err != nil {
 		return err
 	}
@@ -92,11 +104,8 @@ func coordinate(ctx context.Context) error {
 	if err := reportMode(command); err != nil {
 		return err
 	}
-	if err := reportReadOnly(filepath.Dir(command)); err != nil {
+	if err := reportMount(command); err != nil {
 		return err
-	}
-	if err := os.WriteFile(shared, []byte("edited by "+os.Getenv("AETHER_RUN_ID")+"\n"), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", shared, err)
 	}
 
 	say("bridge:%s %s", command, strings.Join(args, " "))
@@ -180,7 +189,7 @@ func reportDir(dir string) error {
 		}
 		modes = append(modes, fmt.Sprintf("%s=%04o", entry.Name(), info.Mode().Perm()))
 	}
-	sort.Strings(modes)
+	slices.Sort(modes)
 	say("entries:%s", strings.Join(modes, " "))
 	return nil
 }
@@ -194,23 +203,81 @@ func reportMode(path string) error {
 	return nil
 }
 
-// reportReadOnly proves the bind mount is read-only from inside: a write
-// into it must be refused whatever the mode bits say.
+// reportMount proves the target is a mount of its own and a read-only one,
+// out of the kernel's own record of it. This is the fact the container half
+// rests on, and the only form of it a mode bit cannot imitate.
+func reportMount(target string) error {
+	options, err := mountOptions(target)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(options, "ro") {
+		return fmt.Errorf("%s is mounted %s, want ro", target, strings.Join(options, ","))
+	}
+	say("mount:%s=ro", target)
+	return nil
+}
+
+// mountOptions returns the per-mount options the kernel records for target
+// in /proc/self/mountinfo: id, parent, device, root, mount point, options.
+// A path that is not a mount point of its own has no line there at all,
+// which is the other half of what reportMount proves.
+func mountOptions(target string) ([]string, error) {
+	raw, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return nil, fmt.Errorf("read mountinfo: %w", err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if fields := strings.Fields(line); len(fields) >= 6 && fields[4] == target {
+			return strings.Split(fields[5], ","), nil
+		}
+	}
+	return nil, fmt.Errorf("%s is not a mount point", target)
+}
+
+// reportReadOnly is the same refusal an agent would actually run into, and
+// it has to be EROFS: an EACCES would say nothing about how the path was
+// mounted. Only the coordination directory is probed this way. The staged
+// binary is 0555, so a non-root write to it is refused either way and the
+// mount record above is the only thing that can tell the two apart.
 func reportReadOnly(dir string) error {
-	path := filepath.Join(dir, "agent-probe")
-	err := os.WriteFile(path, []byte("probe\n"), 0o600)
+	probe := filepath.Join(dir, "agent-probe")
+	err := os.WriteFile(probe, []byte("probe\n"), 0o600)
 	if err == nil {
-		_ = os.Remove(path)
-		return fmt.Errorf("%s accepted a write", dir)
+		_ = os.Remove(probe)
+	}
+	if !errors.Is(err, syscall.EROFS) {
+		return fmt.Errorf("write to %s: %v, want %v", probe, err, syscall.EROFS)
 	}
 	say("readonly:%s", dir)
+	return nil
+}
+
+// touchShared rewrites the file every coordination run edits, which is what
+// puts the runs in the conflict radar's overlap set.
+func touchShared() error {
+	if err := os.WriteFile(shared, []byte("edited by "+os.Getenv("AETHER_RUN_ID")+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", shared, err)
+	}
 	return nil
 }
 
 // waitPeer polls aether_status until the radar authorizes a peer.
 func waitPeer(ctx context.Context, cs *mcp.ClientSession) (protocol.CoordStatusResult, protocol.CoordPeer, error) {
 	deadline := time.Now().Add(poll)
+	var touched time.Time
 	for {
+		// The diff watch is fsnotify-driven and registered just after the
+		// container is attached, so an edit made before it exists is an
+		// edit the radar never hears about - and the run then waits out
+		// the poll for a peer that will never be authorized. Rewriting the
+		// file makes a missed event cost one interval, not the scenario.
+		if time.Since(touched) >= retouch {
+			if err := touchShared(); err != nil {
+				return protocol.CoordStatusResult{}, protocol.CoordPeer{}, err
+			}
+			touched = time.Now()
+		}
 		var status protocol.CoordStatusResult
 		if err := call(ctx, cs, toolStatus, nil, &status); err != nil {
 			return status, protocol.CoordPeer{}, err
