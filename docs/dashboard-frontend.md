@@ -810,7 +810,7 @@ wherever the member is an admin.
     that banner from `update.check`'s `server_behind`, and says only what it
     knows - "The dashboard cannot update the server."
   - The scheduled state also names what the update is still waiting for
-    (`status.waiting`), because an open workspace shell holds it back the
+    (`status.waiting`), because a live terminal attach holds it back the
     same way a working run does.
 - **The phases come off the feed.** `server.update` events land on the
   `server` slice through `applyEvent`, once per workspace and once more from

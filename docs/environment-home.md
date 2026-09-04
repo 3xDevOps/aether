@@ -26,8 +26,8 @@ Choose an agent once:
 aether agent add <name>
 ```
 
-The command tells you what to run. Open the environment terminal, install the
-agent into `~/.local/bin`, and complete the vendor login there:
+The command tells you what to run. Open the [environment terminal](terminal.md),
+install the agent into `~/.local/bin`, and complete the vendor login there:
 
 ```sh
 aether terminal

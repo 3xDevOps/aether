@@ -250,6 +250,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Profiles:       prof,
 		EnvEditDir:     filepath.Join(cfg.DataDir, "env-edits"),
 		NeutralImage:   cfg.NeutralImage,
+		StandardImage:  cfg.StandardImage,
 		Harnesses:      cfg.Harnesses,
 		StallThreshold: cfg.StallThreshold,
 		PollInterval:   cfg.PollInterval,

@@ -2,7 +2,20 @@ package domain
 
 import (
 	"testing"
+	"time"
 )
+
+func TestTerminalTypes(t *testing.T) {
+	started := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	terminal := Terminal{Member: MemberID("member-1"), ContainerID: "container-1", Image: "standard:latest", StartedAt: started}
+	if terminal.Member != "member-1" || terminal.ContainerID != "container-1" || terminal.Image != "standard:latest" || !terminal.StartedAt.Equal(started) {
+		t.Fatalf("terminal = %+v", terminal)
+	}
+	status := TerminalStatus{Running: true, Image: terminal.Image, StartedAt: started, Tabs: []string{"main", "t2"}}
+	if !status.Running || status.Image != terminal.Image || !status.StartedAt.Equal(started) || len(status.Tabs) != 2 {
+		t.Fatalf("status = %+v", status)
+	}
+}
 
 func TestRunStatusTerminal(t *testing.T) {
 	terminal := []RunStatus{RunMerged, RunAbandoned, RunFailed, RunInterrupted}
@@ -85,7 +98,7 @@ func TestWorkspaceEnvironmentRepresentsMigrationFields(t *testing.T) {
 		t.Fatalf("environment variables were not retained: %+v", w.Environment.Variables)
 	}
 	if w.Environment.SetupPolicy.Script != "echo setup" {
-		t.Fatalf("setup policy was not retained: %+v", w.Environment.SetupPolicy)
+		t.Fatalf("workspace environment was not retained: %+v", w.Environment.SetupPolicy)
 	}
 }
 

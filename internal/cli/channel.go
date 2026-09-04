@@ -199,6 +199,22 @@ func (c *Conn) AttachStream(req protocol.AttachRequest) (*TerminalStream, protoc
 	return &TerminalStream{bufferedStream: out}, ack, nil
 }
 
+// TerminalStream opens the member's persistent terminal subsystem and
+// returns its acknowledged PTY stream. The requested geometry is sent as an
+// SSH pty-req before the JSON header, matching AttachStream.
+func (c *Conn) TerminalStream(req protocol.TerminalRequest) (*TerminalStream, protocol.TerminalResponse, error) {
+	var ack protocol.TerminalResponse
+	out, err := c.openStream(protocol.SubsystemTerminal, &ptyGeometry{cols: req.Cols, rows: req.Rows}, req, "terminal", &ack)
+	if err != nil {
+		return nil, ack, err
+	}
+	if !ack.OK {
+		_ = out.Close()
+		return nil, ack, fmt.Errorf("cli: terminal: %s", ack.Error)
+	}
+	return &TerminalStream{bufferedStream: out}, ack, nil
+}
+
 // Attach opens the attach subsystem for runID with the given geometry and
 // returns the raw PTY stream after a successful ack.
 func (c *Conn) Attach(runID string, cols, rows uint) (io.ReadWriteCloser, error) {

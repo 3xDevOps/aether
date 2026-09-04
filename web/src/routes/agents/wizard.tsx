@@ -4,8 +4,10 @@
 import { useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
-import { api } from '@/lib/api'
+import { api, type Api } from '@/lib/api'
+import { TerminalDock } from '@/routes/board/terminal-dock'
 import type { AgentInfo } from '@/lib/types'
+import { useCapability } from '@/store/hooks'
 
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
@@ -26,6 +28,7 @@ export function AgentWizard({
   harness,
   onRegistered,
   onCancel,
+  client = api,
 }: {
   /** The current list, for shipped-name detection and installer details. */
   agents: AgentInfo[]
@@ -35,6 +38,8 @@ export function AgentWizard({
   /** The setup confirmation registered the agent; the caller refetches. */
   onRegistered: () => void
   onCancel: () => void
+  /** API client used by an embedded wizard or test fixture. */
+  client?: Api
 }) {
   const [step, setStep] = useState<Step>(harness ? 'instructions' : 'form')
   const [name, setName] = useState(harness ?? '')
@@ -43,6 +48,7 @@ export function AgentWizard({
   const [headless, setHeadless] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const caps = useCapability()
 
   const trimmed = name.trim()
   const selected = agents.find((a) => a.name === trimmed)
@@ -51,6 +57,7 @@ export function AgentWizard({
     selected?.install_script || `install ${trimmed || 'the agent'} into ~/.local/bin`
   // The CLI's argv template defaults: `{task}` is the placeholder the server
   // substitutes at launch.
+  const hasTerminal = caps.hasWS('terminal')
   const base = trimmed || 'agent'
   const tuiValue = tui ?? `${base} {task}`
   const headlessValue = headless ?? `${base} -p {task}`
@@ -67,7 +74,7 @@ export function AgentWizard({
     setError(null)
     try {
       if (!shipped) {
-        await api.agentRegister({
+        await client.agentRegister({
           name: trimmed,
           executable: trimmed,
           tui_args: splitArgv(tuiValue),
@@ -99,20 +106,43 @@ export function AgentWizard({
 
   if (step === 'instructions') {
     return (
-      <div className="max-w-md space-y-3 rounded-md border p-4">
+      <div
+        className={
+          hasTerminal
+            ? 'space-y-3 rounded-md border p-4'
+            : 'max-w-md space-y-3 rounded-md border p-4'
+        }
+      >
         <p className="text-sm font-medium">Set up {trimmed}</p>
-        <p className="text-sm text-muted-foreground">
-          Open your environment terminal and run the install command there:
-        </p>
-        <code className="block rounded-md bg-muted px-2 py-1 font-mono text-xs">
-          aether terminal
-        </code>
-        <pre className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs">
-          {installScript}
-        </pre>
-        <p className="text-sm text-muted-foreground">
-          Complete the vendor login in that terminal, then return here.
-        </p>
+        {hasTerminal ? (
+          <>
+            <p className="text-sm text-muted-foreground">
+              The install command is ready in your environment terminal:
+            </p>
+            <TerminalDock client={client} openOnMount initialLine={installScript} />
+            <p className="text-sm text-muted-foreground">
+              Complete the vendor login in that terminal, then return here.
+            </p>
+            <code className="block rounded-md bg-muted px-2 py-1 font-mono text-xs">
+              {installScript}
+            </code>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Open your environment terminal and run the install command there:
+            </p>
+            <code className="block rounded-md bg-muted px-2 py-1 font-mono text-xs">
+              aether terminal
+            </code>
+            <pre className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs">
+              {installScript}
+            </pre>
+            <p className="text-sm text-muted-foreground">
+              Complete the vendor login in that terminal, then return here.
+            </p>
+          </>
+        )}
         {error && <p className="text-xs text-state-failed">{error}</p>}
         <div className="flex gap-2">
           <Button type="button" size="sm" onClick={() => void finish()} disabled={busy}>

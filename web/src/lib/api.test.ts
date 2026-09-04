@@ -63,6 +63,31 @@ describe('token bootstrap', () => {
   })
 })
 
+describe('environment terminal methods', () => {
+  beforeEach(() => {
+    window.sessionStorage.setItem('aether.token', 'tok_terminal')
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    window.sessionStorage.clear()
+  })
+
+  it('posts status and stop RPCs and builds an encoded terminal socket URL', async () => {
+    const fetchSpy = fakeFetch({ running: false, tabs: [] })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await api.terminalStatus()
+    await api.terminalStop()
+
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/terminal.status')
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({})
+    expect(fetchSpy.mock.calls[1][0]).toBe('/api/v1/terminal.stop')
+    expect(api.terminalSocket('t 2')).toContain(
+      '/ws/terminal?tab=t+2&token=tok_terminal',
+    )
+  })
+})
+
 describe('environment methods', () => {
   beforeEach(() => {
     window.sessionStorage.setItem('aether.token', 'tok_stored')

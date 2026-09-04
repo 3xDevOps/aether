@@ -29,7 +29,7 @@ import { StubSocket } from '@/test/stub-socket'
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
-  ws: ['events', 'attach', 'envscan'],
+  ws: ['events', 'attach', 'terminal', 'envscan'],
   local: [
     'link.status',
     'link.repo',
@@ -225,7 +225,7 @@ describe('agents step', () => {
     expect(client.localProfilePreview).not.toHaveBeenCalled()
   })
 
-  it('shows the setup instructions inline and marks the harness ready on confirmation', async () => {
+  it('shows the live terminal dock and marks the harness ready on confirmation', async () => {
     const client = fakeApi()
     const { onReady } = renderStep(client)
 
@@ -234,9 +234,7 @@ describe('agents step', () => {
     )
     await act(async () => {})
 
-    // The same environment-terminal instructions the Agents page shows,
-    // with the shipped installer script - no second form.
-    expect(screen.getByText('aether terminal')).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
     expect(screen.getByText(/claude.ai\/install.sh/)).toBeDefined()
 
     const listCalls = vi.mocked(client.agentList).mock.calls.length
@@ -245,8 +243,6 @@ describe('agents step', () => {
     )
     await act(async () => {})
 
-    // A shipped name needs no registration call: confirming refetches and
-    // carries the harness to the first run.
     expect(screen.getByText('Agent registered')).toBeDefined()
     expect(vi.mocked(client.agentList).mock.calls.length).toBe(listCalls + 1)
     expect(onReady).toHaveBeenCalledWith('claude')
@@ -255,6 +251,23 @@ describe('agents step', () => {
     expect(
       await screen.findByText(/Set up in this session/),
     ).toBeDefined()
+  })
+
+  it('keeps static terminal instructions on a gateway without the terminal socket', async () => {
+    const client = fakeApi()
+    const { onReady } = renderStep(client, {
+      ...localCaps,
+      ws: ['events', 'attach', 'envscan'],
+    })
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Set up Claude Code' }),
+    )
+    await act(async () => {})
+
+    expect(screen.getByText('aether terminal')).toBeDefined()
+    expect(screen.getByText(/claude.ai\/install.sh/)).toBeDefined()
+    expect(onReady).not.toHaveBeenCalled()
   })
 
   it('hides Set up where the gateway cannot register agents', async () => {

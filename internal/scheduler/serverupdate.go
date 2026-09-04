@@ -40,10 +40,10 @@ func (s *Scheduler) tickUpdates(ctx context.Context) {
 }
 
 // Busy reports what this server is doing, which is what a scheduled
-// self-update waits for. Restarting is safe for the runs either way - the
-// scheduler reattaches to live containers on boot - but it drops attached
-// terminals, and the interactive shells have no container to reattach to
-// at all.
+// self-update waits for. Restarting is safe for the runs and terminal
+// containers either way - the scheduler reattaches to live containers on
+// boot - but it drops the streams of anyone attached, so live interactive
+// terminal attaches hold the update back too.
 //
 // Two kinds of run are not counted as working. A run parked at
 // needs-attention is waiting on a person; a paused run is a frozen
@@ -76,8 +76,16 @@ func (s *Scheduler) Busy(ctx context.Context) domain.ServerBusy {
 	return out
 }
 
-// holdShell counts one open workspace shell for the idle check and returns
-// its release.
+// HoldShell counts one live interactive terminal attach for the idle
+// check and returns its release. A restart is safe for the terminal
+// container itself (it is re-adopted on boot), but it drops the attached
+// stream under the person typing into it, so a scheduled update waits.
+func (s *Scheduler) HoldShell() func() {
+	return s.holdShell()
+}
+
+// holdShell counts one open interactive shell for the idle check and
+// returns its release.
 func (s *Scheduler) holdShell() func() {
 	s.mu.Lock()
 	s.shells++

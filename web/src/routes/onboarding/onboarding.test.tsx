@@ -23,7 +23,7 @@ import {
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
-  ws: ['events', 'attach'],
+  ws: ['events', 'attach', 'terminal'],
   local: ['link.status', 'link.repo', 'pull', 'repo.push', 'daemon.status'],
 }
 
