@@ -555,9 +555,27 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	if ev.WorkspaceID != "ws1" || ev.RunID != "run1" {
 		t.Fatalf("event scope = %s/%s", ev.WorkspaceID, ev.RunID)
 	}
-	files := ev.Payload.(events.RunDiffPayload).Files
+	first := ev.Payload.(events.RunDiffPayload)
+	files := first.Files
 	if len(files) != 1 || files[0] != (events.FileDiffStat{Path: "notes.txt", Additions: 2}) {
 		t.Fatalf("diff files = %+v", files)
+	}
+	// Every snapshot records a tree, and the first one's parent is the
+	// fork-point tree: diffing parent to tree is what this interval changed.
+	if !validObjectID(first.Tree) {
+		t.Fatalf("first snapshot tree = %q, want an object id", first.Tree)
+	}
+	forkTree, err := e.git(ctx, checkout, "rev-parse", bareRevParse(t, e, "ws1", "refs/heads/main")+"^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ParentTree != forkTree {
+		t.Errorf("first parent tree = %q, want the fork-point tree %q", first.ParentTree, forkTree)
+	}
+	if p, err := e.RunPatch(ctx, "run1", PatchRequest{From: first.ParentTree, To: first.Tree}); err != nil {
+		t.Errorf("RunPatch over the first interval: %v", err)
+	} else if !strings.Contains(p.Text, "+a") {
+		t.Errorf("first interval patch is missing the write:\n%s", p.Text)
 	}
 	if when, changed := e.LastFileChange("run1"); !changed || time.Since(when) > time.Minute {
 		t.Fatalf("LastFileChange = %v, %v", when, changed)
@@ -581,14 +599,26 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	// The writes may land in one snapshot or several; the last event before
 	// the tree goes quiet must reflect the final state.
 	var got map[string]events.FileDiffStat
+	prevTree := first.Tree
 	deadline := time.Now().Add(5 * time.Second)
 	for len(got) != 3 && time.Now().Before(deadline) {
 		ev, ok = nextEvent(t, diffs, 2*time.Second)
 		if !ok {
 			break
 		}
+		payload := ev.Payload.(events.RunDiffPayload)
+		// The chain is unbroken: each snapshot's parent is the tree the
+		// previous snapshot recorded, so consecutive events bound one
+		// interval exactly.
+		if payload.ParentTree != prevTree {
+			t.Errorf("snapshot parent tree = %q, want the previous snapshot's tree %q", payload.ParentTree, prevTree)
+		}
+		if !validObjectID(payload.Tree) {
+			t.Errorf("snapshot tree = %q, want an object id", payload.Tree)
+		}
+		prevTree = payload.Tree
 		got = map[string]events.FileDiffStat{}
-		for _, f := range ev.Payload.(events.RunDiffPayload).Files {
+		for _, f := range payload.Files {
 			got[f.Path] = f
 		}
 	}

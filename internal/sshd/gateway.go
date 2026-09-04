@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -15,10 +16,10 @@ func init() {
 	registerMethod(protocol.MethodServerDisk, (*Server).serverDisk)
 }
 
-// RunPatcher renders a run checkout's diff against its recorded fork
-// point. The git engine implements it.
+// RunPatcher renders a run checkout's diff: against its recorded fork
+// point, or between two diff-snapshot trees. The git engine implements it.
 type RunPatcher interface {
-	RunPatch(ctx context.Context, run domain.RunID, maxBytes int) (gitengine.Patch, error)
+	RunPatch(ctx context.Context, run domain.RunID, req gitengine.PatchRequest) (gitengine.Patch, error)
 }
 
 // DiskReader reads the data directory's disk usage. disk.Cache implements
@@ -36,15 +37,28 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	if patcher == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: diff rendering is not enabled"}
 	}
-	id, perr := runIDParams(params)
+	req, perr := decodeParams[protocol.RunPatchParams](params)
 	if perr != nil {
 		return nil, perr
 	}
+	if req.RunID == "" {
+		return nil, invalidParams("run_id is required")
+	}
+	id := domain.RunID(req.RunID)
 	if _, err := s.cfg.Store.GetRun(ctx, id); err != nil {
 		return nil, rpcError(err)
 	}
-	p, err := patcher.RunPatch(ctx, id, runPatchMaxBytes)
-	if err != nil {
+	p, err := patcher.RunPatch(ctx, id, gitengine.PatchRequest{
+		From:     req.From,
+		To:       req.To,
+		MaxBytes: runPatchMaxBytes,
+	})
+	switch {
+	case errors.Is(err, gitengine.ErrInvalidObjectID):
+		return nil, invalidParams("run.patch: from and to must both be snapshot tree ids (40 or 64 lowercase hex) taken from a run.diff event, or both empty")
+	case errors.Is(err, gitengine.ErrSnapshotTreeMissing):
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: that snapshot's tree is no longer on disk"}
+	case err != nil:
 		// The wrapped error names checkout paths on the server, so it is
 		// not echoed to the client.
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: this run has no checkout to diff"}

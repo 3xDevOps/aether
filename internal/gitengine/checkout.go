@@ -291,9 +291,13 @@ func (e *Engine) PublishRunBranch(ctx context.Context, run domain.RunID) (commit
 	return after, nil
 }
 
-// RemoveRunCheckout deletes the run's checkout directory and its identity
-// sidecar. It never touches the branch in the bare repo - the branch is the
-// artifact. Idempotent on missing paths.
+// RemoveRunCheckout deletes the run's checkout directory, its identity
+// sidecar, and its diff-snapshot store. It never touches the branch in the
+// bare repo - the branch is the artifact. Idempotent on missing paths.
+//
+// The snapshot store lives exactly as long as the checkout, so per-interval
+// diffs are reclaimed by the same scheduler GC that reclaims checkouts and
+// nothing accrues once a run is cleaned up.
 func (e *Engine) RemoveRunCheckout(ctx context.Context, run domain.RunID) error {
 	checkout, err := e.checkoutPath(run)
 	if err != nil {
@@ -310,5 +314,5 @@ func (e *Engine) RemoveRunCheckout(ctx context.Context, run domain.RunID) error 
 	if err := os.Remove(meta); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("gitengine: remove run metadata for %s: %w", run, err)
 	}
-	return nil
+	return e.removeSnapshotStore(run)
 }

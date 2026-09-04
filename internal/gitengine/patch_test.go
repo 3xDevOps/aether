@@ -75,7 +75,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 	}
 	objectsBefore := listTree(t, filepath.Join(checkout, ".git", "objects"))
 
-	patch, err := e.RunPatch(ctx, "run1", 0)
+	patch, err := e.RunPatch(ctx, "run1", PatchRequest{})
 	if err != nil {
 		t.Fatalf("RunPatch: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 	}
 
 	// The byte ceiling truncates at a line boundary rather than mid-hunk.
-	capped, err := e.RunPatch(ctx, "run1", 40)
+	capped, err := e.RunPatch(ctx, "run1", PatchRequest{MaxBytes: 40})
 	if err != nil {
 		t.Fatalf("capped RunPatch: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 		t.Errorf("truncated patch ends mid-line: %q", capped.Text)
 	}
 
-	if _, err := e.RunPatch(ctx, "run-unknown", 0); err == nil {
+	if _, err := e.RunPatch(ctx, "run-unknown", PatchRequest{}); err == nil {
 		t.Error("RunPatch on a run with no checkout should fail")
 	}
 }
@@ -161,7 +161,7 @@ func TestRunPatchColonInDataDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	patch, err := e.RunPatch(ctx, "run1", 0)
+	patch, err := e.RunPatch(ctx, "run1", PatchRequest{})
 	if err != nil {
 		t.Fatalf("RunPatch under a colon data dir: %v", err)
 	}

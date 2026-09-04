@@ -500,8 +500,14 @@ export const api = {
   // The two endpoints that are not RPC methods: patch text is a read of a
   // working tree, and disk usage has no place on the frozen server.info
   // result. See docs/local-gateway.md.
-  runPatch: (runID: string) =>
-    get<RunPatch>(`/run/${encodeURIComponent(runID)}/patch`),
+  // Without a range this is the cumulative diff against the fork point; with
+  // one it is the diff between two trees the server recorded, whose `base` is
+  // then the `from` tree rather than the fork point.
+  runPatch: (runID: string, range?: { from: string; to: string }) =>
+    get<RunPatch>(
+      `/run/${encodeURIComponent(runID)}/patch` +
+        (range ? `?${new URLSearchParams(range).toString()}` : ''),
+    ),
   filesTree: (params: { workspace_id: string; run_id?: string; path: string }) =>
     call<FilesTreeResult>('files.tree', params),
   filesRead: (params: { workspace_id: string; run_id?: string; path: string }) =>

@@ -687,7 +687,7 @@ turns that half off.
 | `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
 | `ssh/` | The server's SSH host key. |
 | `repos/` | One bare git repo per workspace. |
-| `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. |
+| `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. |
 | `transcripts/` | Per-run PTY recordings (asciicast v2). |
 | `homes/<member>/` | One persistent environment home per member. |
 | `profiles/` | Content-addressed agent-profile snapshots. |

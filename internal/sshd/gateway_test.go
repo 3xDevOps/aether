@@ -12,13 +12,16 @@ import (
 )
 
 // fakePatcher answers RunPatch from a canned patch, or an error naming a
-// server path - which must never reach the client.
+// server path - which must never reach the client. It records the last
+// request so the snapshot range's trip through the wire can be checked.
 type fakePatcher struct {
 	patch gitengine.Patch
 	err   error
+	got   gitengine.PatchRequest
 }
 
-func (f *fakePatcher) RunPatch(context.Context, domain.RunID, int) (gitengine.Patch, error) {
+func (f *fakePatcher) RunPatch(_ context.Context, _ domain.RunID, req gitengine.PatchRequest) (gitengine.Patch, error) {
+	f.got = req
 	return f.patch, f.err
 }
 
@@ -71,6 +74,42 @@ func TestRunPatchReturnsDiffAndTruncation(t *testing.T) {
 	}
 	if pe.Message != "run.patch: this run has no checkout to diff" {
 		t.Errorf("no-checkout message = %q, must not echo server paths", pe.Message)
+	}
+}
+
+// TestRunPatchSnapshotRange covers the per-interval render: the range
+// reaches the engine, and the two ways it can fail are told apart on the
+// wire so the dashboard can say which one happened.
+func TestRunPatchSnapshotRange(t *testing.T) {
+	patcher := &fakePatcher{patch: gitengine.Patch{Base: "aaa", Text: "diff --git a/x b/x\n"}}
+	e := newTestEnv(t, func(c *Config) { c.Services.Patch = patcher })
+	c := controlClient(t, e)
+
+	params := protocol.RunPatchParams{RunID: string(e.run.ID), From: "aaa", To: "bbb"}
+	var got protocol.RunPatchResult
+	if err := c.Call(protocol.MethodRunPatch, params, &got); err != nil {
+		t.Fatalf("run.patch with a range: %v", err)
+	}
+	if patcher.got.From != "aaa" || patcher.got.To != "bbb" {
+		t.Errorf("engine saw range %+v, want aaa..bbb", patcher.got)
+	}
+	if got.Base != "aaa" {
+		t.Errorf("base = %q, want the from tree", got.Base)
+	}
+
+	patcher.err = gitengine.ErrInvalidObjectID
+	pe := wireErrOf(t, c.Call(protocol.MethodRunPatch, params, nil))
+	if pe.Code != protocol.CodeInvalidParams {
+		t.Errorf("bad object id code = %d, want %d", pe.Code, protocol.CodeInvalidParams)
+	}
+
+	patcher.err = gitengine.ErrSnapshotTreeMissing
+	pe = wireErrOf(t, c.Call(protocol.MethodRunPatch, params, nil))
+	if pe.Code != protocol.CodeUnavailable {
+		t.Errorf("missing tree code = %d, want %d", pe.Code, protocol.CodeUnavailable)
+	}
+	if pe.Message != "run.patch: that snapshot's tree is no longer on disk" {
+		t.Errorf("missing tree message = %q", pe.Message)
 	}
 }
 

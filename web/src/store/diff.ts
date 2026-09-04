@@ -3,13 +3,38 @@ import type { SliceCreator } from '@/store/slice'
 
 /**
  * One `run.diff` event: the stat set of a run's worktree at the moment the
- * server took the snapshot. The server keeps no patch history, so this list
- * is the timeline - what changed, and when - and the patch text beside it is
- * always the current diff against the fork point.
+ * server took the snapshot, plus the trees bounding the interval it ended.
+ * The list is the timeline - what changed, and when - and the patch text
+ * beside it is the current diff against the fork point.
  */
 export interface DiffSnapshot {
   time: string
   files: FileDiffStat[]
+  /** The worktree's git tree at this snapshot. */
+  tree?: string
+  /**
+   * The tree the previous snapshot ended at, or the fork point for the first.
+   * Both are absent on a server that predates per-snapshot trees, and the
+   * interval such a snapshot ended cannot be shown.
+   */
+  parentTree?: string
+}
+
+/**
+ * The diff of one interval: `from` tree to `to` tree. It is addressed by two
+ * tree ids, so its text can never go stale and is fetched once.
+ */
+export interface IntervalPatch {
+  patch: string
+  truncated: boolean
+  /** Loaded, loading, or the message from the attempt that failed. */
+  status: 'loading' | 'ready' | 'error'
+  error?: string
+}
+
+/** The cache key for one interval. */
+export function intervalKey(from: string, to: string): string {
+  return `${from}..${to}`
 }
 
 /** What the Diff tab knows about one run. */
@@ -20,6 +45,12 @@ export interface RunDiffState {
   /** Loaded, loading, or the message from the attempt that failed. */
   status: 'loading' | 'ready' | 'error'
   error?: string
+  /**
+   * Interval patches by `intervalKey`. Only the snapshots in `snapshots` name
+   * a key, so a run's cache is bounded by `maxSnapshots` and needs no
+   * eviction of its own.
+   */
+  intervals: Record<string, IntervalPatch>
   /**
    * Bumped by every snapshot. The patch is behind whenever this has moved
    * past `fetched`, which is what a counter buys over a stale flag: a
@@ -37,6 +68,7 @@ export const initialDiff: RunDiffState = {
   patch: '',
   truncated: false,
   status: 'loading',
+  intervals: {},
   revision: 0,
   fetched: -1,
   snapshots: [],
@@ -55,6 +87,7 @@ export interface DiffSlice {
   overlaps: Record<string, OverlapPeer[]>
   setDiff: (runID: string, patch: Partial<RunDiffState>) => void
   applyPatch: (patch: RunPatch, revision: number) => void
+  setIntervalPatch: (runID: string, key: string, entry: IntervalPatch) => void
   noteDiffSnapshot: (runID: string, snapshot: DiffSnapshot) => void
   refreshDiff: (runID: string) => void
   setOverlaps: (overlaps: Overlap[]) => void
@@ -83,6 +116,19 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
         },
       },
     })),
+  // An interval patch answers for two tree ids, so it is written once and
+  // never invalidated: the cumulative patch's revision machinery does not
+  // apply to it.
+  setIntervalPatch: (runID, key, entry) =>
+    set((s) => {
+      const current = s.diffs[runID] ?? initialDiff
+      return {
+        diffs: {
+          ...s.diffs,
+          [runID]: { ...current, intervals: { ...current.intervals, [key]: entry } },
+        },
+      }
+    }),
   noteDiffSnapshot: (runID, snapshot) => {
     get().invalidateRun(runID)
     set((s) => {

@@ -15,14 +15,21 @@ import { ReviewCommands } from '@/routes/diff/review-commands'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
-import { initialDiff, type DiffSnapshot } from '@/store/diff'
+import {
+  initialDiff,
+  intervalKey,
+  type DiffSnapshot,
+  type IntervalPatch,
+  type RunDiffState,
+} from '@/store/diff'
 
 /**
  * The run-detail Diff tab: the run's current diff against its fork point,
- * plus the times its files changed. It is not a per-interval delta - nothing
- * records a tree per snapshot, so selecting a snapshot narrows the current
- * diff to that snapshot's files rather than replaying that interval. The
- * labels say so;  is the server work that would make it one.
+ * plus the times its files changed. The server records a git tree per
+ * snapshot, so selecting one shows the diff between the tree before it and
+ * the tree at it - what that interval alone changed, not a filter over the
+ * current diff. A snapshot from a server that recorded no tree cannot be
+ * shown that way, and is not selectable.
  */
 function DiffView({ params }: RouteProps) {
   const runID = params.runId
@@ -33,14 +40,19 @@ function DiffView({ params }: RouteProps) {
   const [selected, setSelected] = useState<string | null>(null)
   usePatch(run ? runID : '')
 
-  const files = useMemo(() => parsePatch(state.patch), [state.patch])
   const snapshot =
     selected === null
       ? null
       : (state.snapshots.find((s) => s.time === selected) ?? null)
-  const shown = snapshot
-    ? files.filter((f) => snapshot.files.some((s) => s.path === f.path))
-    : files
+  const interval = useInterval(run ? runID : '', snapshot)
+  const cumulative = useMemo(() => parsePatch(state.patch), [state.patch])
+  const changed = useMemo(() => parsePatch(interval?.patch ?? ''), [interval?.patch])
+
+  const shown = snapshot ? changed : cumulative
+  const error = snapshot ? interval?.error : state.error
+  const failed = snapshot ? interval?.status === 'error' : state.status === 'error'
+  const truncated = snapshot ? (interval?.truncated ?? false) : state.truncated
+  const note = emptyNote(snapshot, interval, state)
 
   if (!run) {
     return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
@@ -59,16 +71,19 @@ function DiffView({ params }: RouteProps) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground">
-        <span>
-          Current diff against{' '}
-          <code title={state.base}>{state.base.slice(0, 8) || 'the fork point'}</code>
-        </span>
+        {snapshot ? (
+          <span>What changed {timeAgo(snapshot.time)}</span>
+        ) : (
+          <span>
+            Current diff against{' '}
+            <code title={state.base}>{state.base.slice(0, 8) || 'the fork point'}</code>
+          </span>
+        )}
         <span>
           {shown.length} file{shown.length === 1 ? '' : 's'}
         </span>
         <span className="text-state-done">+{total(shown, 'additions')}</span>
         <span className="text-destructive">-{total(shown, 'deletions')}</span>
-        {snapshot && <span>narrowed to what changed {timeAgo(snapshot.time)}</span>}
         <ConflictChips run={run} />
         <Button
           variant="ghost"
@@ -82,12 +97,12 @@ function DiffView({ params }: RouteProps) {
         <ReviewCommands run={run} />
       </div>
 
-      {state.status === 'error' && (
+      {failed && (
         <p className="border-b bg-destructive/10 px-4 py-1.5 text-xs">
-          {state.error ?? 'The diff could not be loaded.'}
+          {error ?? 'The diff could not be loaded.'}
         </p>
       )}
-      {state.truncated && (
+      {truncated && (
         <p className="border-b bg-state-waiting/10 px-4 py-1.5 text-xs">
           This diff is too large to render in full; everything below the cut is
           missing. Fetch the run branch to read it whole.
@@ -104,14 +119,8 @@ function DiffView({ params }: RouteProps) {
           {shown.map((file) => (
             <FilePatch key={file.path} file={file} />
           ))}
-          {shown.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              {state.status === 'loading'
-                ? 'Loading the diff...'
-                : snapshot
-                  ? 'None of those files are in the current diff any more: changed again since, or reverted.'
-                  : 'Nothing has changed against the fork point yet.'}
-            </p>
+          {shown.length === 0 && note && (
+            <p className="text-sm text-muted-foreground">{note}</p>
           )}
         </div>
       </div>
@@ -119,8 +128,38 @@ function DiffView({ params }: RouteProps) {
   )
 }
 
-/** When files changed: one entry per diff snapshot the server took. Each is a
- * filter over the current diff, not the diff of that interval. */
+/** What to say when there is nothing to render. A failed fetch says nothing
+ * here: the banner above already carries the server's own message. */
+function emptyNote(
+  snapshot: DiffSnapshot | null,
+  interval: IntervalPatch | undefined,
+  state: RunDiffState,
+): string | null {
+  if (snapshot) {
+    if (!interval || interval.status === 'loading') return 'Loading what changed then...'
+    if (interval.status === 'error') return null
+    return 'That interval recorded no textual change.'
+  }
+  if (state.status === 'loading') return 'Loading the diff...'
+  if (state.status === 'error') return null
+  return 'Nothing has changed against the fork point yet.'
+}
+
+/** Why a snapshot cannot be opened. Shown on the row itself, since there is
+ * nothing to select. */
+const noTree =
+  'This server did not record a tree for this snapshot, so what changed ' +
+  'then cannot be shown.'
+
+/** The trees bounding the interval a snapshot ended, or null when the server
+ * that sent it recorded none. */
+function range(snapshot: DiffSnapshot): { from: string; to: string } | null {
+  if (!snapshot.tree || !snapshot.parentTree) return null
+  return { from: snapshot.parentTree, to: snapshot.tree }
+}
+
+/** When files changed: one entry per diff snapshot the server took. Selecting
+ * one shows the diff of that interval. */
 function Timeline({
   snapshots,
   selected,
@@ -138,30 +177,36 @@ function Timeline({
       <p className="px-3 py-1 text-xs text-muted-foreground">
         {snapshots.length === 0
           ? 'Nothing since you opened the dashboard.'
-          : 'Selecting one narrows the diff to the files that changed then.'}
+          : 'Selecting one shows what that interval changed.'}
       </p>
       <ul>
-        {snapshots.map((snap, i) => (
-          <li key={snap.time + i}>
-            <button
-              type="button"
-              onClick={() => onSelect(snap.time)}
-              aria-pressed={selected === snap.time}
-              className={cn(
-                'w-full px-3 py-1.5 text-left text-xs hover:bg-accent/50',
-                selected === snap.time && 'bg-accent',
-              )}
-            >
-              <span className="block">{timeAgo(snap.time)}</span>
-              <span className="block text-muted-foreground">
-                {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
-                {' · '}
-                <span className="text-state-done">+{total(snap.files, 'additions')}</span>{' '}
-                <span className="text-destructive">-{total(snap.files, 'deletions')}</span>
-              </span>
-            </button>
-          </li>
-        ))}
+        {snapshots.map((snap, i) => {
+          const shownable = range(snap) !== null
+          return (
+            <li key={snap.time + i}>
+              <button
+                type="button"
+                disabled={!shownable}
+                title={shownable ? undefined : noTree}
+                onClick={() => onSelect(snap.time)}
+                aria-pressed={selected === snap.time}
+                className={cn(
+                  'w-full px-3 py-1.5 text-left text-xs hover:bg-accent/50',
+                  selected === snap.time && 'bg-accent',
+                  !shownable && 'cursor-not-allowed opacity-60 hover:bg-transparent',
+                )}
+              >
+                <span className="block">{timeAgo(snap.time)}</span>
+                <span className="block text-muted-foreground">
+                  {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
+                  {' · '}
+                  <span className="text-state-done">+{total(snap.files, 'additions')}</span>{' '}
+                  <span className="text-destructive">-{total(snap.files, 'deletions')}</span>
+                </span>
+              </button>
+            </li>
+          )
+        })}
       </ul>
     </aside>
   )
@@ -210,6 +255,52 @@ function usePatch(runID: string): void {
         })
       })
   }, [runID, revision, fetched])
+}
+
+/**
+ * The selected snapshot's interval patch, fetched the first time it is asked
+ * for. The two trees name the answer, so a cached entry - a failure included
+ * - is never refetched; the run's cumulative patch is what Refresh reloads.
+ * The interval response's `base` is the `from` tree, so it is deliberately
+ * not written into the run's `base`, which names the fork point.
+ */
+function useInterval(
+  runID: string,
+  snapshot: DiffSnapshot | null,
+): IntervalPatch | undefined {
+  const at = snapshot ? range(snapshot) : null
+  const from = at?.from ?? ''
+  const to = at?.to ?? ''
+  const key = at ? intervalKey(from, to) : ''
+  const entry = useStore((s) => (key ? s.diffs[runID]?.intervals[key] : undefined))
+
+  useEffect(() => {
+    if (!runID || !key) return
+    const store = useStore.getState()
+    // Read through the store rather than the rendered entry: the write below
+    // is what stops a second fetch, and only the store has it immediately.
+    if (store.diffs[runID]?.intervals[key]) return
+    store.setIntervalPatch(runID, key, { patch: '', truncated: false, status: 'loading' })
+    api
+      .runPatch(runID, { from, to })
+      .then((patch) => {
+        useStore.getState().setIntervalPatch(runID, key, {
+          patch: patch.patch,
+          truncated: patch.truncated,
+          status: 'ready',
+        })
+      })
+      .catch((err: unknown) => {
+        useStore.getState().setIntervalPatch(runID, key, {
+          patch: '',
+          truncated: false,
+          status: 'error',
+          error: err instanceof Error ? err.message : String(err),
+        })
+      })
+  }, [runID, key, from, to])
+
+  return entry
 }
 
 registerRoute('diff', DiffView)

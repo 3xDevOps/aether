@@ -47,13 +47,20 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 
 // handlePatch serves GET /api/v1/run/{run}/patch by proxying run.patch;
 // protocol.RunPatchResult's JSON tags match what the SPA decodes, so the
-// result bytes pass through verbatim.
+// result bytes pass through verbatim. The optional from and to query
+// parameters name diff-snapshot trees and render that interval instead of
+// the run's whole diff.
 func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 	if !g.authorized(r, false) {
 		g.deny(w)
 		return
 	}
-	params, err := json.Marshal(protocol.RunIDParams{RunID: r.PathValue("run")})
+	query := r.URL.Query()
+	params, err := json.Marshal(protocol.RunPatchParams{
+		RunID: r.PathValue("run"),
+		From:  query.Get("from"),
+		To:    query.Get("to"),
+	})
 	if err != nil {
 		webgate.WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()})
 		return

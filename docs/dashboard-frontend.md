@@ -506,23 +506,29 @@ opens with whatever it had chosen.
 both what it renders and the overlap set the conflict chips read.
 
 - **The patch is fetched, the events only say when.** `run.diff` carries
-  per-file stats and no text, so a snapshot bumps the run's `revision` and the
-  tab re-fetches `GET /api/v1/run/<id>/patch` (`docs/local-gateway.md`)
-  whenever that has moved past the `fetched` revision the stored patch answers
-  for. Counters rather than a stale flag, because a snapshot landing *during*
-  a request would write true over true and then be cleared by the response:
-  the answer records the revision it was issued at, and anything newer asks
-  again instead of showing a diff that is behind while calling itself fresh.
+  per-file stats and no patch text, so a snapshot bumps the run's `revision`
+  and the tab re-fetches the current diff from `GET /api/v1/run/<id>/patch`
+  (`docs/local-gateway.md`) whenever that has moved past the `fetched`
+  revision the stored patch answers for. Counters rather than a stale flag,
+  because a snapshot landing *during* a request would write true over true
+  and then be cleared by the response: the answer records the revision it was
+  issued at, and anything newer asks again instead of showing a diff that is
+  behind while calling itself fresh.
   A failure records the revision too, so it cannot spin; the next snapshot or
   the Refresh button asks again.
-- **The snapshots say when files changed, not what each interval changed.**
-  The chronological list is the `run.diff` events themselves - time, file
-  count, totals - and the patch beside it is always the run's current diff
-  against the fork point. Selecting a snapshot narrows that patch to the files
-  the snapshot touched; the selection keys on the snapshot's timestamp, so a
-  new snapshot prepending to the list never retargets it. The list is capped
-  at 40 per run and starts empty on
-  every page load, because there is no history to replay. See the gap below.
+- **Selecting a snapshot renders that interval.** The chronological list is
+  the `run.diff` events themselves - time, file count, totals - and each one
+  also carries the tree it wrote and the tree before it. Selecting a snapshot
+  fetches `GET /api/v1/run/<id>/patch?from=<parent_tree>&to=<tree>`, the diff
+  between those two trees, which is what the run changed in that interval;
+  clearing the selection goes back to the current diff against the fork point.
+  An interval is addressed by two tree ids and so can never change: the tab
+  keeps each one it has fetched and never asks again, and the revision
+  counters above are only for the cumulative patch, which does move. The
+  selection keys on the snapshot's timestamp, so a new snapshot prepending to
+  the list never retargets it. A snapshot carrying no tree - one from a server
+  that predates them - is not selectable. The list is capped at 40 per run and
+  starts empty on every page load, because there is no history to replay.
 - **Colour is the whole of the highlighting.** `parse.ts` splits the unified
   diff into files, hunks and line kinds; `patch-view.tsx` paints those kinds.
   The dashboard never edits code, so there is no editor and no language
@@ -544,22 +550,6 @@ both what it renders and the overlap set the conflict chips read.
   and navigates to their run. The event payload names peer runs but not their
   owners, so attribution comes from the runs the store already holds; an
   empty peer list means the overlap cleared and the chip goes.
-
-### One gap, waiting on the wire
-
-**There is no per-interval diff, so the tab does not claim one.** The GUI spec
-describes this surface as a chronological list of unified diffs - "what
-changed in the last five minutes". What can be built today is one patch, the
-whole diff against the fork point, filtered by a snapshot's file list: a file
-edited at snapshot 1 and again at snapshot 3 shows its state now under either,
-and a file that was reverted drops out of the current diff altogether. The
-delta per interval is unobtainable from what the server records - `run.diff`
-carries numstat stats and nothing else, and no tree is kept per snapshot - so
-closing it means the diff snapshot engine writing a tree (or a patch) per
-snapshot and an endpoint to read one back. Filed as the related issue. Until then the
-header reads "Current diff against `<base>`" and the list is headed "When
-files changed", because a label that promised the interval would be the actual
-defect.
 
 ## Team surfaces
 
@@ -961,6 +951,8 @@ and clearing on active in both the First-run step and the run view, and a
 verification failure offering the repair scan and the dismissal. The diff tab covers the parser on the
 shapes that would break it - a deletion, a new file, a removed line that reads
 exactly like a file marker - then the fetch, the truncation notice, a snapshot
-refetching and narrowing the patch, and a conflict chip naming its member and
-opening their run. Full end-to-end coverage of the dashboard belongs to the
-E2E harness driving the real gateway.
+rendering its own interval and only that change, deselecting returning to the
+cumulative patch without a refetch, a snapshot carrying no tree staying
+unselectable, and a conflict chip naming its member and opening their run.
+Full end-to-end coverage of the dashboard belongs to the E2E harness driving
+the real gateway.

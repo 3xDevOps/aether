@@ -5,7 +5,7 @@ import { parsePatch } from '@/routes/diff/parse'
 import '@/routes/diff'
 import { lookupRoute } from '@/routes/registry'
 import { useStore } from '@/store'
-import { initialDiff, type RunDiffState } from '@/store/diff'
+import { initialDiff, type DiffSnapshot, type RunDiffState } from '@/store/diff'
 import { toRecord } from '@/store/runs'
 import type { RunPatch } from '@/lib/types'
 import { alice, bob, run, workspace } from '@/test/fixtures'
@@ -66,6 +66,17 @@ function seed(diff?: Partial<RunDiffState>) {
   })
 }
 
+/** A timeline entry the server recorded trees for. `snapshots` is newest
+ * first, the order `noteDiffSnapshot` builds. */
+function snapshot(time: string, parentTree: string, tree: string): DiffSnapshot {
+  return {
+    time,
+    files: [{ path: 'notes.md', additions: 1, deletions: 1 }],
+    tree,
+    parentTree,
+  }
+}
+
 const DiffView = lookupRoute('diff')!
 
 function renderDiff() {
@@ -122,18 +133,177 @@ test('a diff snapshot refetches the patch and joins the timeline', async () => {
     patch,
     truncated: false,
   })
-  useStore.getState().noteDiffSnapshot(active.id, {
-    time: new Date().toISOString(),
-    files: [{ path: 'notes.md', additions: 1, deletions: 0 }],
-  })
+  act(() =>
+    useStore.getState().noteDiffSnapshot(active.id, {
+      time: new Date().toISOString(),
+      files: [{ path: 'notes.md', additions: 1, deletions: 0 }],
+      tree: 'tree1',
+      parentTree: 'tree0',
+    }),
+  )
 
   await waitFor(() => expect(api.runPatch).toHaveBeenCalledTimes(1))
+  expect(api.runPatch).toHaveBeenCalledWith(active.id)
   const timeline = screen.getByRole('complementary')
-  fireEvent.click(within(timeline).getByRole('button'))
+  expect(within(timeline).getByRole('button').textContent).toContain('1 file')
+})
 
-  // Selecting a snapshot narrows the patch to the files it touched.
-  expect(screen.getByText('notes.md')).toBeTruthy()
+// The point of a per-snapshot tree: the tab asks for that one interval, not a
+// filter over the current diff.
+test('selecting a snapshot fetches its interval and shows only that change', async () => {
+  seed({
+    status: 'ready',
+    base: 'abcdef12',
+    patch,
+    revision: 0,
+    fetched: 0,
+    snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
+  })
+  vi.mocked(api.runPatch).mockResolvedValue({
+    run_id: active.id,
+    base: 'tree1',
+    patch: newFile,
+    truncated: false,
+  })
+  renderDiff()
+
+  fireEvent.click(within(screen.getByRole('complementary')).getByRole('button'))
+
+  expect(await screen.findByText('newer.txt')).toBeTruthy()
+  expect(api.runPatch).toHaveBeenCalledWith(active.id, { from: 'tree0', to: 'tree1' })
+  // Only the interval's file, and the header no longer claims a fork-point
+  // diff. The fork point the run's base names is untouched.
   expect(screen.queryByText('cmd/main.go')).toBeNull()
+  expect(screen.getByText(/What changed/)).toBeTruthy()
+  expect(useStore.getState().diffs[active.id].base).toBe('abcdef12')
+})
+
+// A file edited twice shows its second change alone, which the old filter
+// over the cumulative diff could not do.
+test('a second snapshot of the same file shows only the second change', async () => {
+  const first = [
+    'diff --git a/notes.md b/notes.md',
+    '--- a/notes.md',
+    '+++ b/notes.md',
+    '@@ -1 +1 @@',
+    '-hello',
+    '+first edit',
+    '',
+  ].join('\n')
+  const second = [
+    'diff --git a/notes.md b/notes.md',
+    '--- a/notes.md',
+    '+++ b/notes.md',
+    '@@ -1 +1 @@',
+    '-first edit',
+    '+second edit',
+    '',
+  ].join('\n')
+  seed({
+    status: 'ready',
+    base: 'abcdef12',
+    patch,
+    revision: 0,
+    fetched: 0,
+    snapshots: [
+      snapshot('2026-08-14T10:04:00Z', 'tree1', 'tree2'),
+      snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1'),
+    ],
+  })
+  vi.mocked(api.runPatch).mockImplementation(async (_runID, range) => ({
+    run_id: active.id,
+    base: range?.from ?? 'abcdef12',
+    patch: range?.to === 'tree2' ? second : range ? first : patch,
+    truncated: false,
+  }))
+  renderDiff()
+
+  // Newest first: the second snapshot is the first row.
+  const rows = within(screen.getByRole('complementary')).getAllByRole('button')
+  fireEvent.click(rows[0])
+
+  expect(await screen.findByText('+second edit')).toBeTruthy()
+  expect(screen.queryByText('+first edit')).toBeNull()
+
+  fireEvent.click(rows[1])
+  expect(await screen.findByText('+first edit')).toBeTruthy()
+  expect(screen.queryByText('+second edit')).toBeNull()
+})
+
+// An interval patch answers for two tree ids and the cumulative patch is
+// already in the store, so going back to it asks the server for nothing.
+test('deselecting returns to the cumulative patch without refetching', async () => {
+  seed({
+    status: 'ready',
+    base: 'abcdef12',
+    patch,
+    revision: 0,
+    fetched: 0,
+    snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
+  })
+  vi.mocked(api.runPatch).mockResolvedValue({
+    run_id: active.id,
+    base: 'tree1',
+    patch: newFile,
+    truncated: false,
+  })
+  renderDiff()
+
+  const row = within(screen.getByRole('complementary')).getByRole('button')
+  fireEvent.click(row)
+  expect(await screen.findByText('newer.txt')).toBeTruthy()
+  expect(api.runPatch).toHaveBeenCalledTimes(1)
+
+  fireEvent.click(row)
+  expect(await screen.findByText('cmd/main.go')).toBeTruthy()
+  expect(screen.getByText('abcdef12')).toBeTruthy()
+  expect(api.runPatch).toHaveBeenCalledTimes(1)
+})
+
+// The server says why an interval cannot be shown - a tree it no longer has
+// on disk, say. That message is what the tab shows.
+test('an interval that fails shows the server message', async () => {
+  seed({
+    status: 'ready',
+    base: 'abcdef12',
+    patch,
+    revision: 0,
+    fetched: 0,
+    snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
+  })
+  vi.mocked(api.runPatch).mockRejectedValue(
+    new Error("run.patch: that snapshot's tree is no longer on disk"),
+  )
+  renderDiff()
+
+  fireEvent.click(within(screen.getByRole('complementary')).getByRole('button'))
+
+  expect(
+    await screen.findByText("run.patch: that snapshot's tree is no longer on disk"),
+  ).toBeTruthy()
+})
+
+// A server that predates per-snapshot trees sends no tree, and there is no
+// honest way to show that interval - so the row says so instead of falling
+// back to a filter.
+test('a snapshot without a tree is not selectable', async () => {
+  seed({
+    status: 'ready',
+    base: 'abcdef12',
+    patch,
+    revision: 0,
+    fetched: 0,
+    snapshots: [{ time: '2026-08-14T10:03:00Z', files: [] }],
+  })
+  renderDiff()
+
+  const row = within(screen.getByRole('complementary')).getByRole('button')
+  expect(row.hasAttribute('disabled')).toBe(true)
+  expect(row.getAttribute('title')).toContain('did not record a tree')
+
+  fireEvent.click(row)
+  expect(screen.getByText('cmd/main.go')).toBeTruthy()
+  expect(api.runPatch).not.toHaveBeenCalled()
 })
 
 // A slow request must not swallow the snapshot that lands while it is in
