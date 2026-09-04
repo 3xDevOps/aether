@@ -230,6 +230,23 @@ describe('workspace activity feed', () => {
     )
   })
 
+  it('filters run title events', async () => {
+    const client = feedApi()
+    seed()
+    render(<TimelineFeed params={{}} client={client} />)
+    await screen.findByText(/waiting on a question/)
+
+    fireEvent.change(screen.getByLabelText('Type'), {
+      target: { value: 'run.title' },
+    })
+
+    await vi.waitFor(() =>
+      expect(client.workspaceTimeline).toHaveBeenCalledWith(
+        expect.objectContaining({ types: ['run.title'] }),
+      ),
+    )
+  })
+
   it('puts the floor back when a load-older read fails, so a retry fills the gap', async () => {
     const client = feedApi()
     seed()

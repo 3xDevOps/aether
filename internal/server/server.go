@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/adapter"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -148,6 +149,18 @@ type Server struct {
 	closeErr  error
 }
 
+type runTitleSetter interface {
+	SetRunTitle(domain.RunID, string)
+}
+
+func forwardRunTitle(setter runTitleSetter, key ptyhost.SessionKey, title string) {
+	run, ok := key.Run()
+	if !ok || setter == nil {
+		return
+	}
+	setter.SetRunTitle(run, title)
+}
+
 // New constructs every component from cfg, fanning the data directory out
 // per the Wave 1 contract's layout. The PTY write gate enforces the Wave 3
 // permission model (steer capability) against the store.
@@ -204,9 +217,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		TranscriptDir: filepath.Join(cfg.DataDir, "transcripts"),
 		Gate:          sshd.NewWriteGate(s.db),
 		OnTitle: func(key ptyhost.SessionKey, title string) {
-			if run, ok := key.Run(); ok && s.sched != nil {
-				s.sched.SetRunTitle(run, title)
-			}
+			forwardRunTitle(s.sched, key, title)
 		},
 	}); err != nil {
 		return nil, err

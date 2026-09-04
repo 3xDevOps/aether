@@ -38,8 +38,8 @@ type Config struct {
 	DefaultCols   uint      // 120
 	DefaultRows   uint      // 30
 	Gate          WriteGate // nil = allow
-// OnTitle is declared for the title scanner and never called yet.
-OnTitle func(key SessionKey, title string)
+	// OnTitle is declared for the title scanner and never called yet.
+	OnTitle func(key SessionKey, title string)
 }
 
 const (

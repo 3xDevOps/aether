@@ -588,7 +588,7 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.Title
+		r.ProfileSnapshotID, r.Title,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -615,6 +615,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 
 const runCols = `id, workspace_id, member_id, task, harness, mode, status,
 	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id, title`
+
 func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 	r, err := scanRun(d.db.QueryRowContext(ctx,
 		`SELECT `+runCols+` FROM runs WHERE id = ?`, id))
