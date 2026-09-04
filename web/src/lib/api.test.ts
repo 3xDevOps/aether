@@ -194,6 +194,7 @@ describe('environment methods', () => {
   it('reads the detected harnesses over the local gateway', async () => {
     const fetchSpy = fakeFetch({
       harnesses: [{ name: 'claude', installed: true }],
+      searched: ['/usr/local/bin'],
       repo_path: '/src/repo',
     })
     vi.stubGlobal('fetch', fetchSpy)
@@ -203,6 +204,7 @@ describe('environment methods', () => {
     expect(fetchSpy.mock.calls[0][0]).toBe('/local/v1/env.harnesses')
     expect(detected).toEqual({
       harnesses: [{ name: 'claude', installed: true }],
+      searched: ['/usr/local/bin'],
       repo_path: '/src/repo',
     })
   })
@@ -241,6 +243,7 @@ describe('environment methods', () => {
       'pi',
       'amp',
     ])
+    expect(detected.searched.length).toBeGreaterThan(0)
     expect(detected.repo_path).toBe('/src/repo')
 
     const results: EnvScanResult[] = []

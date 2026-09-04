@@ -556,15 +556,37 @@ func (g *Gateway) localDaemonStatus(*http.Request, []byte) (any, *protocol.Error
 	}{Installed: installed, UnitPath: unitPath}, nil
 }
 
+// loginPathTimeout bounds the login shell asked for its PATH before a
+// harness lookup or scan; an rc file that hangs must not hold either back.
+const loginPathTimeout = 5 * time.Second
+
 // localEnvHarnesses reports which setup-capable harnesses are installed
-// on this machine, for the onboarding wizard's harness picker, plus the
-// one repository folder the saved link config knows (when exactly one
-// is known) so the wizard can prefill the from-repo folder input.
-func (g *Gateway) localEnvHarnesses(*http.Request, []byte) (any, *protocol.Error) {
+// on this machine, for the onboarding wizard's harness picker. PATH is
+// widened from the login shell first, so an agent installed through a
+// shell profile, or since the gateway started, is found; a failed probe
+// becomes the warning and only the standard folders are checked. The
+// folders searched let the wizard say where it looked when nothing is
+// found, and repo_path is the one repository folder the saved link config
+// knows (when exactly one is known) so the wizard can prefill the
+// from-repo folder input.
+func (g *Gateway) localEnvHarnesses(r *http.Request, _ []byte) (any, *protocol.Error) {
+	ctx, cancel := context.WithTimeout(r.Context(), loginPathTimeout)
+	defer cancel()
+	var warning string
+	if _, err := localops.AdoptLoginPath(ctx); err != nil {
+		warning = err.Error()
+	}
 	return struct {
 		Harnesses []localops.HarnessStatus `json:"harnesses"`
+		Searched  []string                 `json:"searched"`
+		Warning   string                   `json:"warning,omitempty"`
 		RepoPath  string                   `json:"repo_path,omitempty"`
-	}{Harnesses: localops.DetectHarnesses(), RepoPath: suggestedRepo(g.local.snapshot())}, nil
+	}{
+		Harnesses: localops.DetectHarnesses(),
+		Searched:  localops.SearchedDirs(),
+		Warning:   warning,
+		RepoPath:  suggestedRepo(g.local.snapshot()),
+	}, nil
 }
 
 // suggestedRepo returns the single repository folder the link config

@@ -19,7 +19,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { api, type Api, type EnvScanSession } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
 import { removeManifestItem } from '@/lib/manifest'
-import type { EnvScanStatus, HarnessStatus, ManifestItem } from '@/lib/types'
+import type {
+  EnvHarnessesResult,
+  EnvScanStatus,
+  ManifestItem,
+} from '@/lib/types'
 import { useStore } from '@/store'
 import { useIsAdmin } from '@/store/hooks'
 
@@ -84,7 +88,7 @@ export function EnvironmentStep({
 }) {
   const isAdmin = useIsAdmin()
   const [choice, setChoice] = useState<'mirror' | 'repo' | 'keep'>('mirror')
-  const [harnesses, setHarnesses] = useState<HarnessStatus[] | null>(null)
+  const [detected, setDetected] = useState<EnvHarnessesResult | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [harness, setHarness] = useState('')
   const [repoPath, setRepoPath] = useState('')
@@ -95,14 +99,16 @@ export function EnvironmentStep({
   const group = useId()
 
   const load = useCallback(() => {
-    // A failed listing keeps harnesses null: unknown is not "none found",
+    // A failed listing keeps the result null: unknown is not "none found",
     // so the render shows the error with a retry, and the keep card stays
-    // the way on.
+    // the way on. A re-check clears the last result first so the notice
+    // never shows next to the error.
+    setDetected(null)
     setListError(null)
     client
       .envHarnesses()
       .then((result) => {
-        setHarnesses(result.harnesses)
+        setDetected(result)
         const first = result.harnesses.find((h) => h.installed)
         if (first) setHarness((prev) => prev || first.name)
         const suggested = result.repo_path
@@ -120,7 +126,7 @@ export function EnvironmentStep({
   useEffect(() => () => session.current?.close(), [])
 
   const listLoading = useDelayed(
-    isAdmin && choice !== 'keep' && harnesses === null && listError === null,
+    isAdmin && choice !== 'keep' && detected === null && listError === null,
   )
 
   const start = (mode: ScanMode) => {
@@ -239,7 +245,7 @@ export function EnvironmentStep({
     )
   }
 
-  const installed = (harnesses ?? []).filter((h) => h.installed)
+  const installed = detected ? detected.harnesses.filter((h) => h.installed) : []
 
   return (
     <section aria-label="Environment" className="space-y-3">
@@ -321,12 +327,32 @@ export function EnvironmentStep({
               </Button>
             </div>
           )}
-          {harnesses !== null && installed.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No supported coding agent was found on this machine. Install
-              Claude Code, Codex, pi, or Amp and come back, or keep the
-              standard environment to continue now.
-            </p>
+          {detected !== null && installed.length === 0 && (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                No supported coding agent was found on this machine. Install
+                Claude Code, Codex, pi, or Amp and come back, or keep the
+                standard environment to continue now.
+              </p>
+              {detected.searched.length > 0 && (
+                <p className="text-xs text-muted-foreground break-all">
+                  Aether looked in: {detected.searched.join(', ')}
+                </p>
+              )}
+              {detected.warning && (
+                <p className="text-xs text-muted-foreground break-all">
+                  Aether could not read your shell's PATH ({detected.warning}),
+                  so only the standard folders were checked.
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                If your agent is installed somewhere else, add that folder to
+                your shell PATH, then check again.
+              </p>
+              <Button size="sm" variant="outline" onClick={load}>
+                Check again
+              </Button>
+            </div>
           )}
           {installed.length > 0 && (
             <>

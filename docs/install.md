@@ -469,7 +469,15 @@ only reachable through a shell profile entry (a Go bin directory, a version
 manager shim) may work in the terminal and still fail from the menu;
 `aether gui build` warns when it finds `aether` that way. If launch fails with
 "aether CLI not found", install the CLI into `/usr/local/bin` or
-`~/.local/bin`, or set `AETHER_BIN` to the binary's full path.
+`~/.local/bin`, or set `AETHER_BIN` to the binary's full path. That lookup is
+the launcher's job alone: once the app is running, the dashboard's harness
+detection and scans widen `PATH` from your login shell each time they look,
+so coding agents installed through a shell profile are found from the
+application menu too, and "Check again" picks up a fresh install without a
+relaunch. The probe runs `$SHELL -l -i` with `AETHER_RESOLVING_PATH=1` set,
+so a shell rc file can skip work meant for a real terminal (an `exec tmux`,
+a prompt) when that variable is set. Windows apps already get your user
+`PATH`, so nothing changes there.
 
 On Linux the launcher passes `--no-sandbox`, the same default electron-builder
 gives its AppImages: an unpacked Electron cannot use its SUID sandbox helper

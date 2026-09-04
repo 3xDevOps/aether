@@ -148,6 +148,12 @@ func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
 	if writeFrame(ctx, conn, envScanFrame{Type: envScanFrameStatus, Status: envScanStatusDetecting}) != nil {
 		return
 	}
+	// The agent may live in a folder only the login shell lists, or have
+	// been installed since the gateway started. A failed probe has no
+	// reader here: the scan's own error names a still-missing executable.
+	widenCtx, widenDone := context.WithTimeout(ctx, loginPathTimeout)
+	_, _ = localops.AdoptLoginPath(widenCtx)
+	widenDone()
 	// A profile scan answers a recommendation instead of an image pair,
 	// so it runs its own branch over the same socket and the same slot.
 	if req.Mode == localops.ScanModeProfile {

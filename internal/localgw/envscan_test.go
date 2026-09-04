@@ -104,8 +104,42 @@ func readUntilTerminal(t *testing.T, conn *websocket.Conn) (terminal scanFrame, 
 	return
 }
 
-func TestLocalEnvHarnesses(t *testing.T) {
-	bin := t.TempDir()
+// stubLoginShell replaces the login shell the harness verb and the scan
+// handler ask for PATH with a script running body, so no test runs the
+// developer's real shell or inherits its PATH; PATH is re-set so the
+// widening the handler writes is undone after the test. Windows
+// never asks a shell, so nothing is stubbed there.
+func stubLoginShell(t *testing.T, body string) {
+	t.Helper()
+	if goruntime.GOOS == "windows" {
+		return
+	}
+	shell := filepath.Join(t.TempDir(), "shell.sh")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shell)
+	t.Setenv("PATH", os.Getenv("PATH"))
+}
+
+// loginShellAnswer is a stub shell body that answers the PATH probe the
+// way a working login shell does, with one folder of its own.
+const loginShellAnswer = "printf '__AETHER_PATH_BEGIN__%s__AETHER_PATH_END__\\n' /stub/login\n"
+
+// envHarnessesResult decodes the env.harnesses answer.
+type envHarnessesResult struct {
+	Harnesses []localops.HarnessStatus `json:"harnesses"`
+	Searched  []string                 `json:"searched"`
+	Warning   string                   `json:"warning"`
+}
+
+// callEnvHarnesses answers env.harnesses on a fresh gateway with a stub
+// claude executable in a folder of its own on PATH and an empty HOME, so
+// no per-user fallback folder joins the search.
+func callEnvHarnesses(t *testing.T) (bin string, got envHarnessesResult) {
+	t.Helper()
+	bin = t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	// Windows PATH lookup only finds files with an executable extension,
 	// so the stub carries one there.
 	stub := "claude"
@@ -122,25 +156,63 @@ func TestLocalEnvHarnesses(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("env.harnesses = %d: %s", rec.Code, rec.Body)
 	}
-	var got struct {
-		Harnesses []localops.HarnessStatus `json:"harnesses"`
-	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := []localops.HarnessStatus{
-		{Name: "claude", Installed: true},
-		{Name: "codex", Installed: false},
-		{Name: "pi", Installed: false},
-		{Name: "amp", Installed: false},
+	return bin, got
+}
+
+// TestLocalEnvHarnesses: the verb widens PATH from the login shell before
+// looking, reports the folders it searched with the shell's entries
+// first, and finds the stub claude. The other harnesses' state depends on
+// the machine's own /usr/local/bin and /opt/homebrew/bin, which the
+// widening always adds when they exist, so only the names are checked.
+func TestLocalEnvHarnesses(t *testing.T) {
+	stubLoginShell(t, loginShellAnswer)
+	bin, got := callEnvHarnesses(t)
+
+	wantSearched := []string{"/stub/login", bin}
+	if goruntime.GOOS == "windows" {
+		wantSearched = []string{bin}
 	}
-	if len(got.Harnesses) != len(want) {
-		t.Fatalf("harnesses = %+v, want %+v", got.Harnesses, want)
+	if len(got.Searched) < len(wantSearched) || fmt.Sprint(got.Searched[:len(wantSearched)]) != fmt.Sprint(wantSearched) {
+		t.Errorf("searched = %v, want it to start with %v", got.Searched, wantSearched)
 	}
-	for i := range want {
-		if got.Harnesses[i] != want[i] {
-			t.Errorf("harness %d = %+v, want %+v", i, got.Harnesses[i], want[i])
+	if got.Warning != "" {
+		t.Errorf("warning = %q, want none", got.Warning)
+	}
+	wantNames := []string{"claude", "codex", "pi", "amp"}
+	if len(got.Harnesses) != len(wantNames) {
+		t.Fatalf("harnesses = %+v, want %v", got.Harnesses, wantNames)
+	}
+	for i, name := range wantNames {
+		if got.Harnesses[i].Name != name {
+			t.Errorf("harness %d = %+v, want %s", i, got.Harnesses[i], name)
 		}
+	}
+	if !got.Harnesses[0].Installed {
+		t.Errorf("claude = %+v, want installed from %s", got.Harnesses[0], bin)
+	}
+}
+
+// TestLocalEnvHarnessesShellWarning: a login shell that fails still
+// answers the harness list, checked against the standard folders, and
+// names the failed run in warning so the wizard can show it.
+func TestLocalEnvHarnessesShellWarning(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("Windows never asks a login shell")
+	}
+	stubLoginShell(t, "exit 1\n")
+	bin, got := callEnvHarnesses(t)
+
+	if !strings.Contains(got.Warning, "read PATH from the login shell") || !strings.Contains(got.Warning, "-l -i -c: exit status 1") {
+		t.Errorf("warning = %q, want the failed login shell run named", got.Warning)
+	}
+	if len(got.Searched) == 0 || got.Searched[0] != bin {
+		t.Errorf("searched = %v, want it to start with %s", got.Searched, bin)
+	}
+	if len(got.Harnesses) == 0 || !got.Harnesses[0].Installed {
+		t.Errorf("harnesses = %+v, want claude installed from %s", got.Harnesses, bin)
 	}
 }
 
@@ -149,6 +221,7 @@ func TestLocalEnvHarnesses(t *testing.T) {
 // prefill the from-repo folder input; several distinct folders or none
 // mean no safe guess and the key is omitted.
 func TestLocalEnvHarnessesRepoSuggestion(t *testing.T) {
+	stubLoginShell(t, loginShellAnswer)
 	cases := map[string]struct {
 		cfg  cli.Config
 		want string
@@ -221,6 +294,7 @@ EOF
 `, envScanTestDockerfile, envScanTestManifest))
 
 	g, base := newWSGateway(t, &wsStubBackend{})
+	stubLoginShell(t, loginShellAnswer)
 	g.local.setScanArgv(argv)
 	conn := wsDial(t, base, "/ws/envscan", g.Token())
 
@@ -260,6 +334,7 @@ func TestEnvScanFailureSendsErrorFrame(t *testing.T) {
 	argv := writeScanStub(t, "echo agent broke\nexit 3\n")
 
 	g, base := newWSGateway(t, &wsStubBackend{})
+	stubLoginShell(t, loginShellAnswer)
 	g.local.setScanArgv(argv)
 	conn := wsDial(t, base, "/ws/envscan", g.Token())
 
@@ -287,6 +362,7 @@ func TestEnvScanRepoModeStreamsStubScan(t *testing.T) {
 		cwdLog, envScanTestDockerfile, envScanTestManifest))
 
 	g, base := newWSGateway(t, &wsStubBackend{})
+	stubLoginShell(t, loginShellAnswer)
 	g.local.setScanArgv(argv)
 	conn := wsDial(t, base, "/ws/envscan", g.Token())
 
@@ -338,6 +414,7 @@ func TestEnvScanRepoPathErrorFrame(t *testing.T) {
 	}
 	for name, tc := range cases {
 		g, base := newWSGateway(t, &wsStubBackend{})
+		stubLoginShell(t, loginShellAnswer)
 		g.local.setScanArgv(writeScanStub(t, "exit 0\n"))
 		conn := wsDial(t, base, "/ws/envscan", g.Token())
 
@@ -364,6 +441,7 @@ func TestEnvScanEarlyCloseCancels(t *testing.T) {
 	argv := writeScanStub(t, fmt.Sprintf("touch %q\nsleep 60\n", started))
 
 	g, base := newWSGateway(t, &wsStubBackend{})
+	stubLoginShell(t, loginShellAnswer)
 	g.local.setScanArgv(argv)
 	conn := wsDial(t, base, "/ws/envscan", g.Token())
 
@@ -394,6 +472,7 @@ func TestEnvScanRefusesConcurrentScan(t *testing.T) {
 	argv := writeScanStub(t, fmt.Sprintf("touch %q\nsleep 60\n", started))
 
 	g, base := newWSGateway(t, &wsStubBackend{})
+	stubLoginShell(t, loginShellAnswer)
 	g.local.setScanArgv(argv)
 	first := wsDial(t, base, "/ws/envscan", g.Token())
 	writeWSJSON(t, first, map[string]string{"harness": "claude", "mode": localops.ScanModeInventory})

@@ -93,6 +93,7 @@ printf '%%s' "$1" > %q
 `+profileScanStubOutput, promptLog, profileScanTestJSON))
 
 	g, base := newWSGateway(t, &wsStubBackend{})
+	stubLoginShell(t, loginShellAnswer)
 	g.local.setScanArgv(argv)
 	conn := wsDial(t, base, "/ws/envscan", g.Token())
 
@@ -136,6 +137,7 @@ func TestProfileScanEmptyMachine(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 
 	g, base := newWSGateway(t, &wsStubBackend{})
+	stubLoginShell(t, loginShellAnswer)
 	conn := wsDial(t, base, "/ws/envscan", g.Token())
 
 	writeWSJSON(t, conn, map[string]string{"harness": "claude", "mode": localops.ScanModeProfile})
@@ -157,6 +159,7 @@ func TestProfileScanRefusesConcurrentScan(t *testing.T) {
 	argv := writeScanStub(t, fmt.Sprintf("touch %q\nsleep 60\n", started))
 
 	g, base := newWSGateway(t, &wsStubBackend{})
+	stubLoginShell(t, loginShellAnswer)
 	g.local.setScanArgv(argv)
 	first := wsDial(t, base, "/ws/envscan", g.Token())
 	writeWSJSON(t, first, map[string]string{"harness": "claude", "mode": localops.ScanModeProfile})
