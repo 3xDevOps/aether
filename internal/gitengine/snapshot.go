@@ -1,6 +1,7 @@
 package gitengine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -183,7 +184,28 @@ func scratchObjects(dir, checkout string, run domain.RunID) (string, error) {
 		return "", fmt.Errorf("gitengine: scratch objects for run %s: %w", run, err)
 	}
 	alternates := filepath.Join(objects, "info", "alternates")
-	if err := os.WriteFile(alternates, []byte(filepath.Join(checkout, ".git", "objects")+"\n"), 0o600); err != nil {
+	want := []byte(filepath.Join(checkout, ".git", "objects") + "\n")
+	// Checked before writing, and installed by rename when it has to be
+	// written: a persistent store is read by patch requests while the watch
+	// goroutine is staging into it, and a git that opened the file mid
+	// O_TRUNC would see no alternate at all and report the run's own trees
+	// as gone.
+	if cur, readErr := os.ReadFile(alternates); readErr == nil && bytes.Equal(cur, want) {
+		return filepath.Join(dir, "index"), nil
+	}
+	tmp, err := os.CreateTemp(filepath.Join(objects, "info"), "alternates-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(want); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
+	}
+	if err := os.Rename(tmp.Name(), alternates); err != nil {
 		return "", fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
 	}
 	return filepath.Join(dir, "index"), nil

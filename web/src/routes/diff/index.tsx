@@ -259,10 +259,11 @@ function usePatch(runID: string): void {
 
 /**
  * The selected snapshot's interval patch, fetched the first time it is asked
- * for. The two trees name the answer, so a cached entry - a failure included
- * - is never refetched; the run's cumulative patch is what Refresh reloads.
- * The interval response's `base` is the `from` tree, so it is deliberately
- * not written into the run's `base`, which names the fork point.
+ * for. The two trees name the answer, so an interval that loaded is never
+ * refetched. Refresh drops the failed ones, which is what lets a fetch that
+ * failed be tried again. The interval response's `base` is the `from` tree,
+ * so it is deliberately not written into the run's `base`, which names the
+ * fork point.
  */
 function useInterval(
   runID: string,
@@ -273,6 +274,9 @@ function useInterval(
   const to = at?.to ?? ''
   const key = at ? intervalKey(from, to) : ''
   const entry = useStore((s) => (key ? s.diffs[runID]?.intervals[key] : undefined))
+  // Not the entry itself: only its presence decides whether to ask, and
+  // depending on the object would re-run the effect on every write to it.
+  const cached = entry !== undefined
 
   useEffect(() => {
     if (!runID || !key) return
@@ -298,7 +302,7 @@ function useInterval(
           error: err instanceof Error ? err.message : String(err),
         })
       })
-  }, [runID, key, from, to])
+  }, [runID, key, from, to, cached])
 
   return entry
 }

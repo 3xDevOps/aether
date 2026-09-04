@@ -5,7 +5,7 @@ import { parsePatch } from '@/routes/diff/parse'
 import '@/routes/diff'
 import { lookupRoute } from '@/routes/registry'
 import { useStore } from '@/store'
-import { initialDiff, type DiffSnapshot, type RunDiffState } from '@/store/diff'
+import { initialDiff, intervalKey, type DiffSnapshot, type RunDiffState } from '@/store/diff'
 import { toRecord } from '@/store/runs'
 import type { RunPatch } from '@/lib/types'
 import { alice, bob, run, workspace } from '@/test/fixtures'
@@ -281,6 +281,49 @@ test('an interval that fails shows the server message', async () => {
   expect(
     await screen.findByText("run.patch: that snapshot's tree is no longer on disk"),
   ).toBeTruthy()
+
+  // An interval that answered is immutable and never refetched, but a
+  // failure has to be retryable or it is the one thing on the tab no button
+  // can recover.
+  vi.mocked(api.runPatch).mockResolvedValue({
+    run_id: active.id,
+    base: 'tree0',
+    patch: newFile,
+    truncated: false,
+  })
+  fireEvent.click(screen.getByRole('button', { name: /Refresh/ }))
+
+  expect(await screen.findByText('newer.txt')).toBeTruthy()
+})
+
+// The cache is keyed by two tree ids, so nothing invalidates an entry; a
+// long-lived run would grow one patch per interval it ever rendered unless
+// the trim that drops old snapshots drops their patches too.
+test('snapshots falling off the timeline take their cached intervals with them', () => {
+  const snapshots = Array.from({ length: 40 }, (_, i) =>
+    snapshot(`2026-08-14T10:${String(i).padStart(2, '0')}:00Z`, `tree${i}`, `tree${i + 1}`),
+  )
+  const oldest = snapshots[snapshots.length - 1]
+  seed({
+    status: 'ready',
+    snapshots,
+    intervals: {
+      [intervalKey(oldest.parentTree!, oldest.tree!)]: {
+        patch: newFile,
+        truncated: false,
+        status: 'ready',
+      },
+    },
+  })
+
+  act(() =>
+    useStore.getState().noteDiffSnapshot(active.id, snapshot('2026-08-14T11:00:00Z', 'treeX', 'treeY')),
+  )
+
+  const state = useStore.getState().diffs[active.id]
+  expect(state.snapshots).toHaveLength(40)
+  expect(state.snapshots.some((s) => s.time === oldest.time)).toBe(false)
+  expect(state.intervals).toEqual({})
 })
 
 // A server that predates per-snapshot trees sends no tree, and there is no

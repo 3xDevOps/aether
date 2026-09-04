@@ -37,6 +37,18 @@ export function intervalKey(from: string, to: string): string {
   return `${from}..${to}`
 }
 
+/** The cached intervals the given snapshots can still ask for. */
+function keptIntervals(
+  intervals: Record<string, IntervalPatch>,
+  snapshots: DiffSnapshot[],
+): Record<string, IntervalPatch> {
+  const live = new Set<string>()
+  for (const snap of snapshots) {
+    if (snap.tree && snap.parentTree) live.add(intervalKey(snap.parentTree, snap.tree))
+  }
+  return Object.fromEntries(Object.entries(intervals).filter(([key]) => live.has(key)))
+}
+
 /** What the Diff tab knows about one run. */
 export interface RunDiffState {
   base: string
@@ -46,9 +58,9 @@ export interface RunDiffState {
   status: 'loading' | 'ready' | 'error'
   error?: string
   /**
-   * Interval patches by `intervalKey`. Only the snapshots in `snapshots` name
-   * a key, so a run's cache is bounded by `maxSnapshots` and needs no
-   * eviction of its own.
+   * Interval patches by `intervalKey`, pruned to the keys the surviving
+   * snapshots name whenever the list is trimmed, so the cache stays bounded
+   * by `maxSnapshots` rather than by how long the run has been open.
    */
   intervals: Record<string, IntervalPatch>
   /**
@@ -133,24 +145,38 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
     get().invalidateRun(runID)
     set((s) => {
       const current = s.diffs[runID] ?? initialDiff
+      const snapshots = [snapshot, ...current.snapshots].slice(0, maxSnapshots)
       return {
         diffs: {
           ...s.diffs,
           [runID]: {
             ...current,
             revision: current.revision + 1,
-            snapshots: [snapshot, ...current.snapshots].slice(0, maxSnapshots),
+            snapshots,
+            // A snapshot that fell off the end can never be selected again,
+            // so its patch is dead weight: a long run would otherwise
+            // accumulate every interval it ever rendered.
+            intervals: keptIntervals(current.intervals, snapshots),
           },
         },
       }
     })
   },
   // Refresh asks again by declaring the current patch one revision behind.
+  // Failed intervals are dropped with it: an interval that answered is
+  // immutable and stays, but a cached failure would otherwise be the one
+  // thing on this tab that no button can retry.
   refreshDiff: (runID) =>
     set((s) => {
       const current = s.diffs[runID] ?? initialDiff
+      const intervals = Object.fromEntries(
+        Object.entries(current.intervals).filter(([, entry]) => entry.status !== 'error'),
+      )
       return {
-        diffs: { ...s.diffs, [runID]: { ...current, fetched: current.revision - 1 } },
+        diffs: {
+          ...s.diffs,
+          [runID]: { ...current, fetched: current.revision - 1, intervals },
+        },
       }
     }),
   setOverlaps: (overlaps) =>

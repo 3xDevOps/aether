@@ -113,6 +113,12 @@ func (e *Engine) rangePatch(ctx context.Context, run domain.RunID, checkout, fro
 	if err != nil {
 		return Patch{}, err
 	}
+	// Rendering is a read: it never brings a store into being. A request
+	// racing RemoveRunCheckout would otherwise recreate the directory the
+	// removal had just deleted, and nothing would ever reclaim it.
+	if _, statErr := os.Stat(store); statErr != nil {
+		return Patch{}, fmt.Errorf("%w: run %s has no snapshot store", ErrSnapshotTreeMissing, run)
+	}
 	// A tree-to-tree diff reads objects and never stages, so the store's
 	// index is named for GIT_INDEX_FILE but neither seeded nor written -
 	// which also keeps a read clear of the lock the watch's staging takes.

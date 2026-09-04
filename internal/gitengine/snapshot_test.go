@@ -259,6 +259,23 @@ func TestRangePatchRefusesACommitID(t *testing.T) {
 	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: head, To: tree}); !errors.Is(err, ErrInvalidObjectID) {
 		t.Errorf("commit id as a range end = %v, want ErrInvalidObjectID", err)
 	}
+
+	// Rendering is a read: a request that arrives after the store was
+	// reclaimed says so rather than laying the store down again, which
+	// would leave a directory nothing ever collects.
+	store, err := e.snapshotStorePath("run1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: tree, To: tree}); !errors.Is(err, ErrSnapshotTreeMissing) {
+		t.Errorf("range against a reclaimed store = %v, want ErrSnapshotTreeMissing", err)
+	}
+	if _, err := os.Stat(store); !os.IsNotExist(err) {
+		t.Errorf("a read recreated the snapshot store: %v", err)
+	}
 }
 
 // TestDiffWatchResumesItsIntervalChainAfterARestart covers what
