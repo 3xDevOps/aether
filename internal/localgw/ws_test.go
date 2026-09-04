@@ -161,7 +161,11 @@ func newWSGateway(t *testing.T, b Backend) (*Gateway, string) {
 
 func wsDial(t *testing.T, base, path, token string) *websocket.Conn {
 	t.Helper()
-	url := "ws" + strings.TrimPrefix(base, "http") + path + "?token=" + token
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	url := "ws" + strings.TrimPrefix(base, "http") + path + sep + "token=" + token
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, url, nil)
@@ -256,6 +260,43 @@ func TestEventsRefusalForwardsCode(t *testing.T) {
 		t.Fatalf("ack = %+v", ack)
 	}
 	expectClose(t, conn, websocket.StatusPolicyViolation)
+}
+
+func TestAttachShellQueryForcesWriteAndResize(t *testing.T) {
+	term := newWSStubTerminal(io.EOF)
+	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Cols: 80, Rows: 24}}
+	g, base := newWSGateway(t, b)
+	conn := wsDial(t, base, "/ws/attach/run-1?shell=tab-1", g.Token())
+
+	writeWSJSON(t, conn, protocol.DashAttachRequest{Write: false})
+	if ack := readWSJSON[protocol.AttachResponse](t, conn); !ack.OK {
+		t.Fatalf("ack = %+v, want ok", ack)
+	}
+	req := b.recordedAttach()
+	if req.Shell != "tab-1" || req.ReadOnly || req.Cols != defaultCols || req.Rows != defaultRows {
+		t.Fatalf("attach request = %+v, want writable shell tab-1 %dx%d", req, defaultCols, defaultRows)
+	}
+
+	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "pwd\n"})
+	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachResize, Cols: 132, Rows: 43})
+	select {
+	case in := <-term.inputCh:
+		if string(in) != "pwd\n" {
+			t.Fatalf("input = %q, want pwd\\n", in)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shell input never reached terminal")
+	}
+	select {
+	case rs := <-term.resizeCh:
+		if rs != [2]uint{132, 43} {
+			t.Fatalf("resize = %v, want [132 43]", rs)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shell resize never reached terminal")
+	}
+	term.finish()
+	expectClose(t, conn, websocket.StatusNormalClosure)
 }
 
 // TestAttachMirrorHeaderMapsToReadOnly: write:false must become

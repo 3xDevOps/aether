@@ -120,10 +120,10 @@ func (s *session) stop() {
 	_ = s.att.Close()
 }
 
-func (s *session) isStopped() bool {
+func (s *session) isActive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.stopped
+	return !s.stopped && !s.ended
 }
 
 func (s *session) lastOutput() (time.Time, bool) {
@@ -295,16 +295,23 @@ func renderBanner(actorName, actorColor, message string) []byte {
 
 // ring keeps the last max bytes of raw PTY output for replay-on-attach.
 type ring struct {
-	max int
-	buf []byte
+	max     int
+	buf     []byte
+	dropped bool
 }
 
 func newRing(max int) *ring { return &ring{max: max} }
 
 func (r *ring) write(p []byte) {
 	if len(p) >= r.max {
+		if len(p) > r.max || len(r.buf) > 0 {
+			r.dropped = true
+		}
 		r.buf = append(r.buf[:0], p[len(p)-r.max:]...)
 		return
+	}
+	if len(r.buf)+len(p) > r.max {
+		r.dropped = true
 	}
 	r.buf = append(r.buf, p...)
 	if n := len(r.buf) - r.max; n > 0 {
@@ -312,7 +319,15 @@ func (r *ring) write(p []byte) {
 	}
 }
 
-func (r *ring) bytes() []byte { return append([]byte(nil), r.buf...) }
+func (r *ring) bytes() []byte {
+	start := 0
+	if r.dropped {
+		if i := bytes.IndexByte(r.buf, '\n'); i >= 0 {
+			start = i + 1
+		}
+	}
+	return append([]byte(nil), r.buf[start:]...)
+}
 
 // client is one attachment: an outbound buffer pumped to conn by its own
 // write loop so a slow client can never block the session pump.

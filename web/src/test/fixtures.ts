@@ -377,6 +377,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     eventsSocket: vi.fn(() => 'ws://localhost/ws/events'),
     attachSocket: vi.fn((runID: string) => `ws://localhost/ws/attach/${runID}`),
+    attachShellSocket: vi.fn(
+      (runID: string, tab: string) =>
+        `ws://localhost/ws/attach/${runID}?shell=${encodeURIComponent(tab)}`,
+    ),
     shellSocket: vi.fn(() => 'ws://localhost/ws/shell'),
     memberInvite: vi.fn(async () => ({
       code: 'inv-code-1',

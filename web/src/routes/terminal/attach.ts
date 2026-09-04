@@ -50,6 +50,8 @@ export interface AttachHandlers {
   onRefused: (message: string) => void
   /** The member cannot steer this run. The attach continues as a mirror. */
   onWriteDenied: () => void
+  /** A terminal process exited and the gateway closed the socket normally. */
+  onExit?: () => void
   /** Geometry to ask for, read at every connect. */
   geometry: () => { cols: number; rows: number }
   /** Whether the caller wants to steer, read at every connect. */
@@ -136,9 +138,17 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       h.onRefused(ack.error ?? 'attach refused')
       h.onState('offline')
     }
-    ws.onerror = () => ws.close()
     ws.onclose = (ev) => {
       socket = null
+      // 1000 is the terminal process ending. A caller that owns tab
+      // lifecycle (the shell dock) takes over; everyone else reconnects
+      // and gets the server's refusal message, as before.
+      if (ev.code === 1000 && h.onExit) {
+        refused = true
+        h.onExit()
+        h.onState('offline')
+        return
+      }
       // 1008 with no refusal frame is the gateway's authorization watch.
       // After a successful attach the close reason names which gate fell:
       // a lost steer capability just downgrades to a mirror, while a dead

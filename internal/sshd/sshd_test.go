@@ -251,6 +251,9 @@ func (f *fakeRuns) Relaunch(_ context.Context, run domain.RunID, actor domain.Me
 	}, nil
 }
 
+func (f *fakeRuns) EnsureRunShellTab(_ context.Context, run domain.RunID, tab string, cols, rows uint) error {
+	return f.record(fmt.Sprintf("run-shell:%s:%s:%d:%d", run, tab, cols, rows))
+}
 func (f *fakeRuns) WorkspaceShell(_ context.Context, member domain.MemberID, req domain.WorkspaceShellRequest, cols, rows uint, conn io.ReadWriter, _ <-chan [2]uint) error {
 	if err := f.record(fmt.Sprintf("workspace-shell:%s:%s:%s:%d:%d", member, req.Mode, req.Harness, cols, rows)); err != nil {
 		return err

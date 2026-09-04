@@ -69,6 +69,21 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		cols, rows = 80, 24
 	}
 	readOnly := req.ReadOnly || !hasPTY
+	key := ptyhost.RunSession(run.ID)
+	if req.Shell != "" {
+		if steerErr := checkSteer(ctx, s.cfg.Store, member, run.ID); steerErr != nil {
+			e := rpcError(steerErr)
+			_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
+			return
+		}
+		if ensureErr := s.cfg.Runs.EnsureRunShellTab(ctx, run.ID, req.Shell, cols, rows); ensureErr != nil {
+			e := rpcError(ensureErr)
+			_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
+			return
+		}
+		key = ptyhost.RunShellSession(run.ID, req.Shell)
+		readOnly = false
+	}
 
 	// The attach gets its own cancel so the re-validation below can end it
 	// with a cause; the cause picks the exit status once Attach returns.
@@ -77,7 +92,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	conn := newAttachConn(ch, r, protocol.AttachResponse{OK: true, Cols: cols, Rows: rows})
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.cfg.PTY.Attach(attachCtx, ptyhost.RunSession(run.ID), member, cols, rows, readOnly, conn, st.resize)
+		errCh <- s.cfg.PTY.Attach(attachCtx, key, member, cols, rows, readOnly, conn, st.resize)
 	}()
 
 	var attachErr error

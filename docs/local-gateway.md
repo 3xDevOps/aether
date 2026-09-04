@@ -88,6 +88,7 @@ and prefix as a `POST /api/v1` error.
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
+| `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
 | `GET` | `/ws/shell` | interactive workspace shell (WebSocket) |
 | `GET` | `/ws/envscan` | environment scan on this machine (WebSocket) |
 | `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
@@ -519,6 +520,19 @@ needs.
    terminal session ending closes with **1000**; any other end with **1011**.
 
 Closing the socket detaches; the run is unaffected.
+
+#### Run shell tabs
+
+`GET /ws/attach/<run_id>?shell=<tab>` opens a writable shell tab inside the
+run container instead of attaching to the agent process. A shell tab always
+requires **steer** permission and ignores the `write` value in the header;
+there is no read-only shell mode. Tab names must match
+`^[a-z0-9-]{1,32}$`, and each run can have at most four active shell tabs.
+The shell starts in `/workspace`. When it exits, the socket closes normally
+with **1000** and the tab name is free to reopen with a fresh shell.
+Closing the socket only detaches: the shell keeps running, still counts
+toward the four-tab cap, and reconnecting the same tab name reattaches to
+it. Every shell ends with the run's container.
 
 ### `GET /ws/shell`
 

@@ -59,6 +59,12 @@ func TestTermSizeDefaultsWhenNoConsole(t *testing.T) {
 		t.Fatalf("termSize() = %dx%d, want 80x24", cols, rows)
 	}
 }
+func TestAttachShellFlagUsage(t *testing.T) {
+	err := runAttach([]string{"--shell"})
+	if err == nil || err.Error() != "usage: aether attach [--read-only] [--shell <tab>] <run>" {
+		t.Fatalf("runAttach missing shell value error = %v", err)
+	}
+}
 
 func TestEnableVirtualTerminalOnNonConsole(t *testing.T) {
 	r, w, err := os.Pipe()

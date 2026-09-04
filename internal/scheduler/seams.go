@@ -26,6 +26,7 @@ type PTYHost interface {
 	StartSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error
 	StopSession(ctx context.Context, key ptyhost.SessionKey) error
 	StopSessionsWithPrefix(ctx context.Context, prefix string)
+	ActiveSessions(prefix string) []ptyhost.SessionKey
 	LastOutput(key ptyhost.SessionKey) (time.Time, bool)
 	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error
 }
