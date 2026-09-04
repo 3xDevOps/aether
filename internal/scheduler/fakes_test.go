@@ -444,6 +444,7 @@ type fakeGit struct {
 	publishedBranches map[domain.WorkspaceID]map[string]bool
 	branchLookupErr   error
 	createErr         error
+	createHook        func(run domain.RunID)
 	commitHook        func(run domain.RunID, message string) // runs at the top of CommitAll
 }
 
@@ -466,6 +467,10 @@ func (g *fakeGit) checkoutPath(run domain.RunID) string {
 }
 
 func (g *fakeGit) CreateRunCheckout(_ context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, _ string) (string, string, error) {
+	hook := g.createHook
+	if hook != nil {
+		hook(run)
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.createErr != nil {

@@ -267,6 +267,8 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 	if err := s.cfg.Store.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
+	pending := s.beginPending(run.ID)
+	defer s.finishPending(run.ID, pending)
 	if err := s.provision(ctx, run, ws, m, argv, profile, false); err != nil {
 		return nil, err
 	}
@@ -292,6 +294,10 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		done:        make(chan struct{}),
 	}
 	s.mu.Lock()
+	if pending := s.pending[run.ID]; pending != nil && pending.killRequested {
+		entry.killRequested = true
+		entry.killActor = pending.killActor
+	}
 	err := s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunQueued, domain.RunProvisioning, "", actor)
 	if err == nil {
 		s.runs[run.ID] = entry

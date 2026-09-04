@@ -83,6 +83,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	// actives never share a tree, but the guard still rejects a leftover
 	// shared path. The new row is created under the same lock, so the
 	// session guard below sees the row an in-flight relaunch just made.
+	pending := &pendingRun{done: make(chan struct{})}
 	s.mu.Lock()
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
 	if err == nil {
@@ -103,11 +104,15 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	}
 	if err == nil {
 		err = s.cfg.Store.CreateRun(ctx, next)
+		if err == nil {
+			s.pending[next.ID] = pending
+		}
 	}
 	s.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
+	defer s.finishPending(next.ID, pending)
 	checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, next.ID, old.Branch, next.Task)
 	if err != nil {
 		s.failRelaunch(next, actor, fmt.Errorf("create checkout: %w", err))

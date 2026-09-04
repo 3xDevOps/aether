@@ -209,10 +209,13 @@ run's wire `paused` field, skipping runs that do not carry it.
 - A `run.status` event for a run the client has never seen fetches that run
   before the event is applied, which is what keeps two quick transitions of a
   brand new run in order. If the fetch fails the event is unresolved: the
-  cursor stays put and a fresh snapshot is taken to repair the store. An event
-  naming an unknown workspace re-fetches `workspace.list`, because workspaces
-  arrive only by fetch and a run under an unknown one would render nowhere. An
-  event whose actor is not in the members map re-fetches `member.list` for the
+  cursor stays put and a fresh snapshot is taken to repair the store. A
+  `run.deleted` event removes the run from every connected dashboard; a
+  `run.status` event that raced a local deletion treats a `404` re-fetch as
+  resolved instead of forcing a redundant hydration. An event naming an
+  unknown workspace re-fetches `workspace.list`, because workspaces arrive
+  only by fetch and a run under an unknown one would render nowhere. An event
+  whose actor is not in the members map re-fetches `member.list` for the
   same reason: no `member.*` event exists, so a teammate who joined after
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,

@@ -19,6 +19,12 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	s.mu.Lock()
 	entry := s.runs[run]
 	if entry == nil {
+		if pending := s.pending[run]; pending != nil {
+			pending.killRequested = true
+			pending.killActor = actor
+			s.mu.Unlock()
+			return nil
+		}
 		s.mu.Unlock()
 		return s.killUnsupervised(ctx, run, actor)
 	}
@@ -99,39 +105,54 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 // durable run record and its dependent data. The published branch remains.
 // Terminal runs are deleted directly; deleting never leaves a live container.
 func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
-	s.mu.Lock()
-	entry := s.runs[run]
-	alreadyKilling := entry != nil && entry.killRequested
-	terminal := entry != nil && entry.status.Terminal()
-	var done <-chan struct{}
-	if entry != nil {
-		done = entry.done
-	}
-	s.mu.Unlock()
+	var workspace domain.WorkspaceID
+	for {
+		s.mu.Lock()
+		entry := s.runs[run]
+		pending := s.pending[run]
+		alreadyKilling := entry != nil && entry.killRequested
+		terminal := entry != nil && entry.status.Terminal()
+		var done <-chan struct{}
+		if entry != nil {
+			done = entry.done
+			workspace = entry.workspaceID
+		}
+		s.mu.Unlock()
 
-	if entry != nil {
-		if !terminal && !alreadyKilling {
-			if err := s.Kill(ctx, run, actor); err != nil {
+		if entry == nil && pending != nil {
+			if err := s.waitPending(ctx, run); err != nil {
 				return err
 			}
+			continue
 		}
-		if done != nil {
-			select {
-			case <-done:
-			case <-ctx.Done():
-				return ctx.Err()
+		if entry != nil {
+			if !terminal && !alreadyKilling {
+				if err := s.Kill(ctx, run, actor); err != nil {
+					return err
+				}
 			}
+			if done != nil {
+				select {
+				case <-done:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			break
 		}
-	} else {
+
 		current, err := s.cfg.Store.GetRun(ctx, run)
 		if err != nil {
 			return err
 		}
+		workspace = current.WorkspaceID
 		if !current.Status.Terminal() {
 			if err := s.Kill(ctx, run, actor); err != nil {
 				return err
 			}
+			continue
 		}
+		break
 	}
 
 	if err := s.cfg.Git.RemoveRunCheckout(ctx, run); err != nil {
@@ -140,7 +161,16 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 	if err := s.cfg.PTY.RemoveRunTranscripts(ctx, run); err != nil {
 		return fmt.Errorf("scheduler: delete run transcripts: %w", err)
 	}
-	return s.cfg.Store.DeleteRun(ctx, run)
+	if err := s.cfg.Store.DeleteRun(ctx, run); err != nil {
+		return err
+	}
+	s.publish(ctx, events.Event{
+		WorkspaceID: workspace,
+		RunID:       run,
+		ActorID:     actor,
+		Payload:     events.RunDeletedPayload{},
+	})
+	return nil
 }
 
 // Pause freezes a supervised run's container (SIGSTOP semantics). Status

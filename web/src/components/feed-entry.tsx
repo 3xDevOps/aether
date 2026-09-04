@@ -45,6 +45,8 @@ function describe(event: Event): string {
   switch (event.type) {
     case 'run.status':
       return join([p.to, p.reason])
+    case 'run.deleted':
+      return 'run deleted'
     case 'run.title':
       return String(p.title ?? '')
     case 'run.agent':

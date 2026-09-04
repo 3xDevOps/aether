@@ -165,37 +165,42 @@
   }
 }
 
-/* Use the same restrained, translucent controls on Chromium and Firefox. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+/* Chromium uses the pseudo-elements for the rounded treatment. Firefox does
+   not implement them, so it gets the standard scrollbar properties instead. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
 }
 
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
+@supports selector(::-webkit-scrollbar) {
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
 
-*::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-  border-radius: 999px;
-}
+  *::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+    border-radius: 999px;
+  }
 
-*::-webkit-scrollbar-thumb {
-  min-height: 36px;
-  border: 3px solid transparent;
-  border-radius: 999px;
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
-}
+  *::-webkit-scrollbar-thumb {
+    min-height: 36px;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
 
-*::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-  background-clip: padding-box;
-}
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
 
-*::-webkit-scrollbar-corner {
-  background: transparent;
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 @layer components {
   .launch-splash {

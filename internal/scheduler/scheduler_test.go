@@ -751,6 +751,35 @@ func TestDeleteRunStopsActiveRunBeforeRemovingIt(t *testing.T) {
 	}
 }
 
+func TestDeleteRunPublishesDeletedEvent(t *testing.T) {
+	e := newTestEnv(t, nil)
+	sub := e.subscribe(t)
+	run := &domain.Run{
+		WorkspaceID: e.ws.ID,
+		MemberID:    e.member.ID,
+		Task:        "publish deletion",
+		Harness:     "claude",
+		Mode:        domain.LaunchTUI,
+		Status:      domain.RunFailed,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := e.db.CreateRun(t.Context(), run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := e.sched.DeleteRun(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+
+	select {
+	case ev := <-sub.Events():
+		if ev.Type != events.TypeRunDeleted || ev.RunID != run.ID {
+			t.Fatalf("deletion event = %#v, want run.deleted for %s", ev, run.ID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("DeleteRun published no deletion event")
+	}
+}
+
 func TestTaskLine(t *testing.T) {
 	if got := taskLine("short"); got != "short" {
 		t.Fatalf("taskLine short = %q", got)
