@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/events"
 )
 
 // TestRunPatchRendersSnapshotInterval is the per-interval diff's server
@@ -138,5 +141,205 @@ func TestRunPatchRendersSnapshotInterval(t *testing.T) {
 	}
 	if _, err := os.Stat(store); !os.IsNotExist(err) {
 		t.Errorf("snapshot store survived RemoveRunCheckout: %v", err)
+	}
+}
+
+// TestSnapshotStoreSurvivesAStaleIndexLock covers the store's one failure
+// mode with no self-repair: git killed at the snapshot timeout, or a server
+// that died mid-staging, leaves index.lock behind, and a persistent index
+// means every later snapshot would hit it. The store is single-writer, so a
+// lock found here is stale by construction and clearing it is safe.
+func TestSnapshotStoreSurvivesAStaleIndexLock(t *testing.T) {
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "stale lock")
+	if err != nil {
+		t.Fatalf("CreateRunCheckout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := e.writeSnapshotTree(ctx, "run1", checkout)
+	if err != nil {
+		t.Fatalf("writeSnapshotTree: %v", err)
+	}
+
+	store, err := e.snapshotStorePath("run1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock := filepath.Join(store, "index.lock")
+	if err := os.WriteFile(lock, []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.writeSnapshotTree(ctx, "run1", checkout)
+	if err != nil {
+		t.Fatalf("writeSnapshotTree over a stale lock: %v", err)
+	}
+	if second == first {
+		t.Error("the snapshot after the stale lock did not see the edit")
+	}
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Errorf("index.lock survived the snapshot: %v", err)
+	}
+}
+
+// TestSnapshotLeavesTheCheckoutGitAlone is the ownership constraint the
+// whole scratch-store design exists for: run provisioning chowns the
+// checkout's .git to the run's user, so an object or fan-out directory
+// written there by the server would leave the agent unable to commit. The
+// cumulative render is covered in patch_test.go; this is the snapshot path,
+// which writes far more often.
+func TestSnapshotLeavesTheCheckoutGitAlone(t *testing.T) {
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "read only git")
+	if err != nil {
+		t.Fatalf("CreateRunCheckout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitDir := filepath.Join(checkout, ".git")
+	before := listTree(t, gitDir)
+
+	trees := make([]string, 0, 2)
+	for _, body := range []string{"one\ntwo\n", "one\ntwo\nthree\n"} {
+		if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+		if err != nil {
+			t.Fatalf("writeSnapshotTree: %v", err)
+		}
+		trees = append(trees, tree)
+	}
+	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: trees[0], To: trees[1]}); err != nil {
+		t.Fatalf("interval RunPatch: %v", err)
+	}
+	if after := listTree(t, gitDir); after != before {
+		t.Errorf("the checkout's .git changed:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// TestRangePatchRefusesACommitID keeps the range ends to what the timeline
+// actually offered. The store's alternates reach the checkout's whole
+// object database, so a commit id from the cloned history resolves there; a
+// peeled committish would render a diff no run.diff event ever named.
+func TestRangePatchRefusesACommitID(t *testing.T) {
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "commit ids")
+	if err != nil {
+		t.Fatalf("CreateRunCheckout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+	if err != nil {
+		t.Fatalf("writeSnapshotTree: %v", err)
+	}
+	head, err := e.git(ctx, checkout, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: head, To: tree}); !errors.Is(err, ErrInvalidObjectID) {
+		t.Errorf("commit id as a range end = %v, want ErrInvalidObjectID", err)
+	}
+}
+
+// TestDiffWatchResumesItsIntervalChainAfterARestart covers what
+// docs/failure-handling.md promises about a server that came back: the watch
+// picks the chain up from the tree its last snapshot wrote, so the next
+// interval starts where the previous one ended. It is also the case that
+// forces the tree, not the stat set, to be the publication gate - a fresh
+// watch has no stat set to compare against, so a stats-based gate would open
+// with an interval whose two ends are the same tree.
+func TestDiffWatchResumesItsIntervalChainAfterARestart(t *testing.T) {
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newTestEngine(t, bus)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "restart")
+	if err != nil {
+		t.Fatalf("CreateRunCheckout: %v", err)
+	}
+	notes := filepath.Join(checkout, "notes.txt")
+	diffs := subscribeTypes(t, bus, events.TypeRunDiff)
+	if err := e.StartDiffWatch(ctx, "ws1", "run1"); err != nil {
+		t.Fatalf("StartDiffWatch: %v", err)
+	}
+
+	if err := os.WriteFile(notes, []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := nextEvent(t, diffs, 5*time.Second)
+	if !ok {
+		t.Fatal("no run.diff event after the first write")
+	}
+	first := ev.Payload.(events.RunDiffPayload)
+	if first.Tree == "" {
+		t.Fatal("the first snapshot recorded no tree")
+	}
+	baseTree, err := e.git(ctx, checkout, "rev-parse", bareRevParse(t, e, "ws1", "refs/heads/main")+"^{tree}")
+	if err != nil {
+		t.Fatalf("rev-parse base tree: %v", err)
+	}
+	if first.ParentTree != baseTree {
+		t.Errorf("first parent tree = %q, want the fork-point tree %q", first.ParentTree, baseTree)
+	}
+	if got := e.lastSnapshotTree("run1"); got != first.Tree {
+		t.Errorf("recorded tree = %q, want the published one %q", got, first.Tree)
+	}
+
+	e.StopDiffWatch("run1")
+	if err := e.StartDiffWatch(ctx, "ws1", "run1"); err != nil {
+		t.Fatalf("StartDiffWatch after the restart: %v", err)
+	}
+
+	// Rewriting the same bytes wakes the watch but moves no tree, and the
+	// restarted watch has no stat set to compare against.
+	if err := os.WriteFile(notes, []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if extra, more := nextEvent(t, diffs, 2*time.Second); more {
+		p := extra.Payload.(events.RunDiffPayload)
+		t.Fatalf("a restart published an unchanged interval: %s..%s", p.ParentTree, p.Tree)
+	}
+
+	// A real edit publishes, and its interval starts at the tree the previous
+	// watch left behind rather than back at the fork point.
+	if err := os.WriteFile(notes, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ev, ok = nextEvent(t, diffs, 5*time.Second)
+	if !ok {
+		t.Fatal("no run.diff event after the post-restart edit")
+	}
+	second := ev.Payload.(events.RunDiffPayload)
+	if second.ParentTree != first.Tree {
+		t.Errorf("resumed parent tree = %q, want the pre-restart tree %q", second.ParentTree, first.Tree)
+	}
+	if second.Tree == first.Tree {
+		t.Error("the post-restart edit produced the same tree")
 	}
 }

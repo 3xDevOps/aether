@@ -170,10 +170,10 @@ rendered.
 `from` and `to` render one interval instead. Both take a snapshot tree id off
 a `run.diff` event - its `parent_tree` and its `tree` - and the answer is the
 diff between those two trees, which is what the run changed in that interval.
-Passing one without the other is an invalid-params error. The ids are checked
-as object ids and resolved only in that run's own snapshot object store, so an
-id a client supplies cannot reach another run's objects or anything else on
-disk.
+Passing one without the other is an invalid-params error. An id has to be a
+full object id, has to resolve against that run's own object database and no
+other, and has to name a tree: a commit id would otherwise peel to its tree
+and render a diff the timeline never offered.
 
 ```json
 {"run_id":"run_01H...","base":"9f2c1e...","patch":"diff --git a/main.go b/main.go\n...","truncated":false}

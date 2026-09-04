@@ -47,6 +47,15 @@ func (e *Engine) writeSnapshotTree(ctx context.Context, run domain.RunID, checko
 	if err != nil {
 		return "", err
 	}
+	// The store is single-writer: one watch goroutine stages into it, and
+	// RemoveRunCheckout stops that watch before deleting the store. A lock
+	// file here is therefore stale by construction - left by a git killed at
+	// the snapshot timeout, or by a server crash - and leaving it would fail
+	// every later staging with "Unable to create index.lock: File exists",
+	// killing this run's per-interval diffs until checkout GC.
+	if rmErr := os.Remove(index + ".lock"); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		return "", fmt.Errorf("gitengine: clear stale index lock for run %s: %w", run, rmErr)
+	}
 	if _, _, addErr := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); addErr != nil {
 		return "", addErr
 	}
@@ -88,8 +97,22 @@ func (e *Engine) setLastSnapshotTree(run domain.RunID, tree string) error {
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(store, lastTreeFile)
-	if err := os.WriteFile(path, []byte(tree+"\n"), 0o600); err != nil {
+	// Written through a temporary file so a crash mid-write leaves the
+	// previous record intact rather than a truncated id that reads as
+	// "unknown" and costs the run an interval boundary.
+	tmp, err := os.CreateTemp(store, lastTreeFile+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("gitengine: record snapshot tree for run %s: %w", run, err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.WriteString(tree + "\n"); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("gitengine: record snapshot tree for run %s: %w", run, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("gitengine: record snapshot tree for run %s: %w", run, err)
+	}
+	if err := os.Rename(tmp.Name(), filepath.Join(store, lastTreeFile)); err != nil {
 		return fmt.Errorf("gitengine: record snapshot tree for run %s: %w", run, err)
 	}
 	return nil
@@ -108,28 +131,43 @@ func (e *Engine) removeSnapshotStore(run domain.RunID) error {
 	return nil
 }
 
-// snapshotTreeExists reports whether id names a tree the run's snapshot
-// store can resolve. An id the store no longer holds - or one that is not a
-// tree - is ErrSnapshotTreeMissing: git rev-parse --verify --quiet exits 1
-// for that, which is an answer, not a failure. cat-file is not used here
-// because it exits 128 on a missing object, indistinguishable from a real
-// git failure.
-func (e *Engine) snapshotTreeExists(ctx context.Context, checkout, index, id string) error {
-	_, _, err := e.gitStaged(ctx, checkout, index, 0, "rev-parse", "--verify", "--quiet", id+"^{tree}")
-	if err == nil {
-		return nil
+// requireSnapshotTree checks that id names a tree object the run's snapshot
+// store can resolve. An id the store no longer holds is
+// ErrSnapshotTreeMissing: git rev-parse --verify --quiet exits 1 for that,
+// which is an answer, not a failure, so it is not confused with a git that
+// broke. An id that resolves to something else - a commit from the history
+// the checkout was cloned with, say - is ErrInvalidObjectID: the ends of a
+// range are snapshot trees off run.diff events, and peeling a committish
+// here would render diffs the timeline never offered. cat-file cannot carry
+// the existence check on its own; it exits 128 on a missing object, which
+// is indistinguishable from a real git failure.
+func (e *Engine) requireSnapshotTree(ctx context.Context, checkout, index, id string) error {
+	// The ^{object} peel is what forces the lookup: rev-parse --verify on a
+	// bare full-length id echoes it back without asking the database
+	// anything, so the all-zero id would sail through.
+	if _, _, err := e.gitStaged(ctx, checkout, index, 0, "rev-parse", "--verify", "--quiet", id+"^{object}"); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return fmt.Errorf("%w: %s", ErrSnapshotTreeMissing, id)
+		}
+		return err
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-		return fmt.Errorf("%w: %s", ErrSnapshotTreeMissing, id)
+	out, _, err := e.gitStaged(ctx, checkout, index, 64, "cat-file", "-t", id)
+	if err != nil {
+		return err
 	}
-	return err
+	if kind := strings.TrimSpace(out); kind != "tree" {
+		return fmt.Errorf("%w: %s is a %s, not a snapshot tree", ErrInvalidObjectID, id, kind)
+	}
+	return nil
 }
 
-// scratchIndex lays out a git scratch object store at dir for the given
-// checkout and returns the index file inside it, creating what is missing.
-// Both the patch renderer's temporary store and a run's persistent snapshot
-// store use this layout.
+// scratchObjects lays out a git scratch object store at dir for the given
+// checkout and returns the index path inside it, which callers pass to
+// gitStaged as GIT_INDEX_FILE. The file itself is not created: a command
+// that only reads objects (a tree-to-tree diff, an object-type check) never
+// touches it. Both the patch renderer's temporary store and a run's
+// persistent snapshot store use this layout.
 //
 // The checkout's own database is linked in through the scratch directory's
 // alternates file, not GIT_ALTERNATE_OBJECT_DIRECTORIES: that env var is
@@ -138,7 +176,7 @@ func (e *Engine) snapshotTreeExists(ctx context.Context, checkout, index, id str
 // provisioning chowned it to the run's user, and objects or fan-out
 // directories created here as the server user would leave the agent unable
 // to commit.
-func scratchIndex(dir, checkout string, run domain.RunID) (string, error) {
+func scratchObjects(dir, checkout string, run domain.RunID) (string, error) {
 	// Repo discovery checks that the overriding object directory exists.
 	objects := filepath.Join(dir, "objects")
 	if err := os.MkdirAll(filepath.Join(objects, "info"), 0o700); err != nil {
@@ -148,8 +186,17 @@ func scratchIndex(dir, checkout string, run domain.RunID) (string, error) {
 	if err := os.WriteFile(alternates, []byte(filepath.Join(checkout, ".git", "objects")+"\n"), 0o600); err != nil {
 		return "", fmt.Errorf("gitengine: scratch alternates for run %s: %w", run, err)
 	}
-	index := filepath.Join(dir, "index")
-	if _, err := os.Stat(index); err == nil {
+	return filepath.Join(dir, "index"), nil
+}
+
+// scratchIndex is scratchObjects plus a staging index, for the commands
+// that write one.
+func scratchIndex(dir, checkout string, run domain.RunID) (string, error) {
+	index, err := scratchObjects(dir, checkout, run)
+	if err != nil {
+		return "", err
+	}
+	if _, statErr := os.Stat(index); statErr == nil {
 		// A persistent store keeps its own index: re-seeding would throw
 		// away the stat cache every snapshot has been refreshing.
 		return index, nil

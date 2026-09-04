@@ -55,7 +55,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	})
 	switch {
 	case errors.Is(err, gitengine.ErrInvalidObjectID):
-		return nil, invalidParams("run.patch: from and to must both be snapshot tree ids (40 or 64 lowercase hex) taken from a run.diff event, or both empty")
+		return nil, invalidParams("run.patch: from and to must both be tree ids taken from a run.diff event (full lowercase hex, naming a tree and not a commit), or both empty")
 	case errors.Is(err, gitengine.ErrSnapshotTreeMissing):
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: that snapshot's tree is no longer on disk"}
 	case err != nil:

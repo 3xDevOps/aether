@@ -365,12 +365,15 @@ func (w *diffWatch) snapshot() {
 	if treeErr != nil {
 		w.warnTree(treeErr)
 	}
-	// The tree is the stricter gate: an edit that keeps the line counts
-	// identical moves the tree but not the stat set. Stats stay as the
-	// fallback so the timeline survives a store that cannot be written.
-	changed := !slices.Equal(files, w.lastFiles)
-	if treeErr == nil && tree != w.lastTree {
-		changed = true
+	// The tree decides, with the stat set as the fallback for a store that
+	// cannot be written. The tree is the stricter gate - an edit that keeps
+	// the line counts identical moves the tree but not the stats - and it is
+	// also the only one that holds across a restart, where lastTree is
+	// restored from the store but lastFiles starts empty: ORing the two
+	// would publish an interval whose ends are the same tree.
+	changed := tree != w.lastTree
+	if treeErr != nil {
+		changed = !slices.Equal(files, w.lastFiles)
 	}
 	if changed {
 		w.lastFiles = files

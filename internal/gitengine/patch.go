@@ -96,9 +96,10 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 }
 
 // rangePatch renders one snapshot tree against another out of the run's own
-// snapshot store. Validating both ids and resolving them only inside that
-// store is what keeps a client-supplied id from reaching anything but this
-// run's objects.
+// snapshot store. A client-supplied id has to be a full object id, has to
+// resolve against this run's own object database and no other, and has to
+// name a tree: a committish would otherwise peel to its tree and render a
+// diff the timeline never offered.
 func (e *Engine) rangePatch(ctx context.Context, run domain.RunID, checkout, from, to string, maxBytes int) (Patch, error) {
 	if from == "" || to == "" {
 		return Patch{}, fmt.Errorf("%w: a snapshot range needs both ends", ErrInvalidObjectID)
@@ -112,12 +113,15 @@ func (e *Engine) rangePatch(ctx context.Context, run domain.RunID, checkout, fro
 	if err != nil {
 		return Patch{}, err
 	}
-	index, err := scratchIndex(store, checkout, run)
+	// A tree-to-tree diff reads objects and never stages, so the store's
+	// index is named for GIT_INDEX_FILE but neither seeded nor written -
+	// which also keeps a read clear of the lock the watch's staging takes.
+	index, err := scratchObjects(store, checkout, run)
 	if err != nil {
 		return Patch{}, err
 	}
 	for _, id := range []string{from, to} {
-		if resolveErr := e.snapshotTreeExists(ctx, checkout, index, id); resolveErr != nil {
+		if resolveErr := e.requireSnapshotTree(ctx, checkout, index, id); resolveErr != nil {
 			return Patch{}, resolveErr
 		}
 	}
