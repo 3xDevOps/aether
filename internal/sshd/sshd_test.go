@@ -253,6 +253,29 @@ func (f *fakeRuns) Relaunch(_ context.Context, run domain.RunID, actor domain.Me
 func (f *fakeRuns) EnsureRunShellTab(_ context.Context, run domain.RunID, tab string, cols, rows uint) error {
 	return f.record(fmt.Sprintf("run-shell:%s:%s:%d:%d", run, tab, cols, rows))
 }
+func (f *fakeRuns) EnsureTerminal(_ context.Context, member domain.MemberID) (*domain.Terminal, error) {
+	if err := f.record(fmt.Sprintf("terminal:%s", member)); err != nil {
+		return nil, err
+	}
+	return &domain.Terminal{Member: member, ContainerID: "terminal-container", Image: "standard", StartedAt: time.Now().UTC()}, nil
+}
+
+func (f *fakeRuns) EnsureTerminalTab(_ context.Context, member domain.MemberID, tab string, cols, rows uint) error {
+	return f.record(fmt.Sprintf("terminal-tab:%s:%s:%d:%d", member, tab, cols, rows))
+}
+
+func (f *fakeRuns) StopTerminal(_ context.Context, member domain.MemberID) error {
+	return f.record(fmt.Sprintf("terminal-stop:%s", member))
+}
+
+func (f *fakeRuns) TerminalStatus(_ context.Context, member domain.MemberID) (domain.TerminalStatus, error) {
+	if err := f.record(fmt.Sprintf("terminal-status:%s", member)); err != nil {
+		return domain.TerminalStatus{}, err
+	}
+	return domain.TerminalStatus{}, nil
+}
+
+func (f *fakeRuns) HoldShell() func() { return func() {} }
 
 type testEnv struct {
 	srv         *Server

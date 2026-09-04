@@ -89,6 +89,15 @@ export interface GatewayCapabilities {
   commit?: string
 }
 
+/** The member's persistent environment terminal status. */
+export interface TerminalStatusResult {
+  running: boolean
+  image?: string
+  started_at?: string
+  tabs?: string[]
+}
+
+
 export interface Event {
   id: string
   seq: number

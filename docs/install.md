@@ -235,7 +235,7 @@ not come back. If the re-exec itself fails under systemd, the server falls
 back to `systemctl restart aether-server`.
 
 `--when idle` instead records one pending update, applied the first time no
-run is working and no workspace shell is open. Two kinds of run do not hold
+run is working and no terminal is attached. Two kinds of run do not hold
 it back: one parked at `needs-attention`, waiting on a person, and one
 paused with `aether pause`, whose container is frozen. Neither has anything
 running inside it and both survive the restart like any other run. A second

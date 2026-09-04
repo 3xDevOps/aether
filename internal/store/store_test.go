@@ -1077,3 +1077,46 @@ func TestListHarnessDefinitionsScopedAndSorted(t *testing.T) {
 		t.Fatalf("list unknown member = %+v, want empty", empty)
 	}
 }
+
+func TestTerminalPersistence(t *testing.T) {
+	db := openTestDB(t)
+	member := mustCreateMember(t, db)
+	started := time.Date(2026, 9, 3, 12, 0, 7, 123, time.UTC)
+	terminal := &domain.Terminal{
+		Member:      member.ID,
+		ContainerID: "container-1",
+		Image:       "standard:latest",
+		StartedAt:   started,
+	}
+	ctx := context.Background()
+	if err := db.PutTerminal(ctx, terminal); err != nil {
+		t.Fatalf("PutTerminal: %v", err)
+	}
+	got, err := db.GetTerminal(ctx, member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal: %v", err)
+	}
+	if got.Member != terminal.Member || got.ContainerID != terminal.ContainerID || got.Image != terminal.Image || got.StartedAt.Unix() != started.Unix() {
+		t.Fatalf("terminal = %+v, want fields from %+v", got, terminal)
+	}
+	terminal.ContainerID = "container-2"
+	if updateErr := db.PutTerminal(ctx, terminal); updateErr != nil {
+		t.Fatalf("PutTerminal update: %v", updateErr)
+	}
+	got, err = db.GetTerminal(ctx, member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal after update: %v", err)
+	}
+	if got.ContainerID != terminal.ContainerID {
+		t.Fatalf("container ID = %q, want %q", got.ContainerID, terminal.ContainerID)
+	}
+	if err := db.DeleteTerminal(ctx, member.ID); err != nil {
+		t.Fatalf("DeleteTerminal: %v", err)
+	}
+	if err := db.DeleteTerminal(ctx, member.ID); err != nil {
+		t.Fatalf("DeleteTerminal missing: %v", err)
+	}
+	if _, err := db.GetTerminal(ctx, member.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetTerminal after delete error = %v, want ErrNotFound", err)
+	}
+}

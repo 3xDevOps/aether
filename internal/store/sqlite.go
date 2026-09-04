@@ -549,6 +549,49 @@ func (d *DB) DeleteMember(ctx context.Context, id domain.MemberID) error {
 	return d.execDelete(ctx, "delete member", `DELETE FROM members WHERE id = ?`, id)
 }
 
+func (d *DB) GetTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
+	var terminal domain.Terminal
+	var startedAt int64
+	err := d.db.QueryRowContext(ctx,
+		`SELECT member_id, container_id, image, started_at
+		 FROM member_terminals WHERE member_id = ?`, member).
+		Scan(&terminal.Member, &terminal.ContainerID, &terminal.Image, &startedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get terminal: %w", err)
+	}
+	terminal.StartedAt = time.Unix(startedAt, 0).UTC()
+	return &terminal, nil
+}
+
+func (d *DB) PutTerminal(ctx context.Context, terminal *domain.Terminal) error {
+	if terminal == nil {
+		return fmt.Errorf("store: put terminal: terminal is nil")
+	}
+	_, err := d.db.ExecContext(ctx,
+		`INSERT INTO member_terminals (member_id, container_id, image, started_at)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(member_id) DO UPDATE SET
+		   container_id = excluded.container_id,
+		   image = excluded.image,
+		   started_at = excluded.started_at`,
+		terminal.Member, terminal.ContainerID, terminal.Image, terminal.StartedAt.Unix())
+	if err != nil {
+		return fmt.Errorf("store: put terminal: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) DeleteTerminal(ctx context.Context, member domain.MemberID) error {
+	if _, err := d.db.ExecContext(ctx,
+		`DELETE FROM member_terminals WHERE member_id = ?`, member); err != nil {
+		return fmt.Errorf("store: delete terminal: %w", err)
+	}
+	return nil
+}
+
 // Runs
 
 func validateRun(r *domain.Run, op string) error {

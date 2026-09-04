@@ -246,6 +246,22 @@ type Member struct {
 	CreatedAt time.Time
 }
 
+// Terminal is the persistent per-member environment container.
+type Terminal struct {
+	Member      MemberID
+	ContainerID string
+	Image       string
+	StartedAt   time.Time
+}
+
+// TerminalStatus describes the running state and live tabs of a member terminal.
+type TerminalStatus struct {
+	Running   bool
+	Image     string
+	StartedAt time.Time
+	Tabs      []string
+}
+
 // Run is one agent execution: a task, an isolated worktree and branch, a
 // container, and a PTY transcript, owned by one member within one
 // workspace.
@@ -301,8 +317,9 @@ type ServerBusy struct {
 	Runs int
 	// Paused is how many runs are paused. They do not hold an update back.
 	Paused int
-	// Shells is how many workspace shells are open. They have no container
-	// to reattach to after a restart, so each one holds an update back.
+	// Shells is how many interactive terminal attaches are live. A restart
+	// would drop each stream under the person typing into it, so each one
+	// holds an update back.
 	Shells int
 }
 

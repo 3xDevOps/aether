@@ -60,6 +60,10 @@ type Store interface {
 	UpdateMember(ctx context.Context, m *domain.Member) error
 	DeleteMember(ctx context.Context, id domain.MemberID) error
 
+	GetTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
+	PutTerminal(ctx context.Context, terminal *domain.Terminal) error
+	DeleteTerminal(ctx context.Context, member domain.MemberID) error
+
 	CreateRun(ctx context.Context, r *domain.Run) error
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Run, error)

@@ -12,7 +12,7 @@ import { alice, fakeApi, run, serverInfo, workspace } from '@/test/fixtures'
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
-  ws: ['events', 'attach'],
+  ws: ['events', 'attach', 'terminal'],
   local: ['link.status', 'sync.start', 'sync.stop', 'sync.status', 'daemon.status'],
 }
 

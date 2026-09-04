@@ -21,15 +21,19 @@ import (
 // wsStubBackend records the requests the WS handlers hand it and answers
 // with configured streams, terminals, and acks.
 type wsStubBackend struct {
-	mu        sync.Mutex
-	eventsReq protocol.SubscribeRequest
-	attachReq protocol.AttachRequest
+	mu          sync.Mutex
+	eventsReq   protocol.SubscribeRequest
+	attachReq   protocol.AttachRequest
+	terminalReq protocol.TerminalRequest
 
 	eventsStream io.ReadWriteCloser
 	eventsErr    error
 	attachTerm   cli.Terminal
 	attachAck    protocol.AttachResponse
 	attachErr    error
+	terminalTerm cli.Terminal
+	terminalAck  protocol.TerminalResponse
+	terminalErr  error
 }
 
 func (b *wsStubBackend) Call(context.Context, string, json.RawMessage) (json.RawMessage, *protocol.Error) {
@@ -42,7 +46,6 @@ func (b *wsStubBackend) Events(req protocol.SubscribeRequest) (io.ReadWriteClose
 	b.mu.Unlock()
 	return b.eventsStream, b.eventsErr
 }
-
 func (b *wsStubBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protocol.AttachResponse, error) {
 	b.mu.Lock()
 	b.attachReq = req
@@ -50,6 +53,12 @@ func (b *wsStubBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protoc
 	return b.attachTerm, b.attachAck, b.attachErr
 }
 
+func (b *wsStubBackend) Terminal(req protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error) {
+	b.mu.Lock()
+	b.terminalReq = req
+	b.mu.Unlock()
+	return b.terminalTerm, b.terminalAck, b.terminalErr
+}
 func (b *wsStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
 	return nil, errors.New("not implemented")
 }
@@ -58,6 +67,11 @@ func (b *wsStubBackend) recordedAttach() protocol.AttachRequest {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.attachReq
+}
+func (b *wsStubBackend) recordedTerminal() protocol.TerminalRequest {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.terminalReq
 }
 
 func (b *wsStubBackend) recordedEvents() protocol.SubscribeRequest {
@@ -378,6 +392,7 @@ func TestAttachRefusalForwardsAck(t *testing.T) {
 		attachAck: protocol.AttachResponse{OK: false, Code: protocol.CodeNotFound, Error: "run not found"},
 		attachErr: errors.New("cli: attach: run not found"),
 	}
+
 	g, base := newWSGateway(t, b)
 	conn := wsDial(t, base, "/ws/attach/run-x", g.Token())
 
@@ -389,4 +404,61 @@ func TestAttachRefusalForwardsAck(t *testing.T) {
 	if reason := expectClose(t, conn, websocket.StatusPolicyViolation); reason != "attach refused" {
 		t.Fatalf("close reason = %q, want attach refused", reason)
 	}
+}
+func TestTerminalForwardsOutputInputResizeAndClosesCleanly(t *testing.T) {
+	term := newWSStubTerminal(io.EOF)
+	b := &wsStubBackend{terminalTerm: term, terminalAck: protocol.TerminalResponse{OK: true, Tab: "dev", Cols: 100, Rows: 40}}
+	g, base := newWSGateway(t, b)
+	conn := wsDial(t, base, "/ws/terminal?tab=dev", g.Token())
+
+	writeWSJSON(t, conn, protocol.DashAttachRequest{Cols: 100, Rows: 40})
+	ack := readWSJSON[protocol.TerminalResponse](t, conn)
+	if !ack.OK || ack.Tab != "dev" || ack.Cols != 100 || ack.Rows != 40 {
+		t.Fatalf("ack = %+v", ack)
+	}
+	req := b.recordedTerminal()
+	if req.Tab != "dev" || req.Cols != 100 || req.Rows != 40 {
+		t.Fatalf("terminal request = %+v", req)
+	}
+
+	term.emit([]byte("hello"))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	typ, data, err := conn.Read(ctx)
+	cancel()
+	if err != nil || typ != websocket.MessageBinary || string(data) != "hello" {
+		t.Fatalf("output frame = %v %q (%v), want binary hello", typ, data, err)
+	}
+
+	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "pwd\n"})
+	select {
+	case in := <-term.inputCh:
+		if string(in) != "pwd\n" {
+			t.Fatalf("input = %q, want pwd\\n", in)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("input never reached terminal")
+	}
+	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachResize, Cols: 132, Rows: 43})
+	select {
+	case rs := <-term.resizeCh:
+		if rs != [2]uint{132, 43} {
+			t.Fatalf("resize = %v, want [132 43]", rs)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("resize never reached terminal")
+	}
+
+	term.finish()
+	expectClose(t, conn, websocket.StatusNormalClosure)
+}
+
+func TestTerminalRejectsInvalidTab(t *testing.T) {
+	b := &wsStubBackend{}
+	g, base := newWSGateway(t, b)
+	conn := wsDial(t, base, "/ws/terminal?tab=bad_tab", g.Token())
+	ack := readWSJSON[protocol.TerminalResponse](t, conn)
+	if ack.OK || ack.Code != protocol.CodeInvalidParams {
+		t.Fatalf("ack = %+v, want invalid params", ack)
+	}
+	expectClose(t, conn, websocket.StatusPolicyViolation)
 }

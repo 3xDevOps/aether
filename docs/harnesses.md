@@ -97,8 +97,8 @@ Once per person, per agent:
 aether agent add <name>
 ```
 
-For a shipped name, the command shows the vendor's install script. Open the
-environment terminal and run it:
+For a shipped name, the dashboard's Agents step opens the live environment
+terminal dock and types the vendor install script for you. In the CLI, run:
 
 ```sh
 aether terminal

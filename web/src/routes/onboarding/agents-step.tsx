@@ -119,6 +119,7 @@ export function AgentsStep({
         <AgentWizard
           agents={agents ?? []}
           harness={setup}
+          client={client}
           onRegistered={() => {
             setDone((prev) =>
               prev.includes(setup) ? prev : [...prev, setup],
