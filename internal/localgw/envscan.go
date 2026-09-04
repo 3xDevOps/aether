@@ -8,6 +8,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"github.com/3xDevOps/Aether/internal/cli/profile"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/localops"
 )
@@ -54,6 +55,8 @@ type envScanFrame struct {
 	Dockerfile   string                `json:"dockerfile,omitempty"`
 	ManifestJSON string                `json:"manifest_json,omitempty"`
 	Manifest     []domain.ManifestItem `json:"manifest,omitempty"`
+	// Result frame of a profile scan: which configurations to import.
+	Recommendation *profile.Recommendation `json:"recommendation,omitempty"`
 	// Error frame: what went wrong and the last agent output for diagnosis.
 	Detail     string `json:"detail,omitempty"`
 	OutputTail string `json:"output_tail,omitempty"`
@@ -143,6 +146,12 @@ func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if writeFrame(ctx, conn, envScanFrame{Type: envScanFrameStatus, Status: envScanStatusDetecting}) != nil {
+		return
+	}
+	// A profile scan answers a recommendation instead of an image pair,
+	// so it runs its own branch over the same socket and the same slot.
+	if req.Mode == localops.ScanModeProfile {
+		g.runProfileScan(ctx, conn, req)
 		return
 	}
 	result, err := localops.RunScan(ctx, localops.ScanOptions{

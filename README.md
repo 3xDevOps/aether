@@ -31,9 +31,12 @@ aether run "fix the flaky auth test" --agent claude
 ```
 
 That is the shape of it, not the full setup - a workspace, a repo push, and
-an agent login come first. The [quickstart](docs/quickstart.md) is the real
-path. The install script covers Linux and macOS; Windows clients download the
-release binary ([install.md](docs/install.md#manual-install)).
+an agent login come first. The install script asks whether the machine is your
+server or a client and finishes that side's setup before handing the prompt
+back, so the first line does more than download. The
+[quickstart](docs/quickstart.md) is the real path. The install script covers
+Linux and macOS; Windows clients download the release binary
+([install.md](docs/install.md#manual-install)).
 
 [10-minute quickstart →](docs/quickstart.md)
 

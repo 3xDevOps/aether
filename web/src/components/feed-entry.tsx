@@ -45,6 +45,8 @@ function describe(event: Event): string {
   switch (event.type) {
     case 'run.status':
       return join([p.to, p.reason])
+    case 'run.title':
+      return String(p.title ?? '')
     case 'run.agent':
       return join([p.kind, p.tool, p.detail])
     case 'run.diff':
@@ -59,6 +61,8 @@ function describe(event: Event): string {
       return `${p.input_tokens} in, ${p.output_tokens} out`
     case 'git.branch':
       return join([p.branch, p.commit])
+    case 'server.update':
+      return join([p.phase, p.version, p.detail])
     default:
       return ''
   }

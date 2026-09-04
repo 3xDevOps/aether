@@ -70,7 +70,7 @@ func (s *Scheduler) editEnvironment(ctx context.Context, workspaceID domain.Work
 	if err != nil {
 		return 0, fmt.Errorf("scheduler: load member for environment edit: %w", err)
 	}
-	if err = s.checkEnvironmentEditAgent(ctx, member, ws, harnessName); err != nil {
+	if err = s.checkEnvironmentEditAgent(ctx, member, harnessName); err != nil {
 		return 0, err
 	}
 	// The build lock serializes edits against builds and rollbacks: the
@@ -108,13 +108,9 @@ func (s *Scheduler) editEnvironment(ctx context.Context, workspaceID domain.Work
 }
 
 // checkEnvironmentEditAgent refuses an edit that could only fail inside a
-// container: the harness must be setup-capable and the member must have
-// login state for it on this server (a non-empty credential home or a
-// registered member definition). checkAgentInstalled cannot cover this -
-// it skips custom-image workspaces, and an edit workspace usually runs a
-// custom image. The fake harness never launches a vendor CLI, so it
-// skips the check.
-func (s *Scheduler) checkEnvironmentEditAgent(ctx context.Context, member domain.MemberID, ws *domain.Workspace, harnessName string) error {
+// container: the harness must be setup-capable and its executable must be
+// present in the member's persistent home.
+func (s *Scheduler) checkEnvironmentEditAgent(ctx context.Context, member domain.MemberID, harnessName string) error {
 	if harnessName == "fake" {
 		return nil
 	}
@@ -126,24 +122,34 @@ func (s *Scheduler) checkEnvironmentEditAgent(ctx context.Context, member domain
 		}
 	}
 	if !setupCapable {
-		return fmt.Errorf("%w: %q cannot edit environments; pick claude, codex, pi, or amp and register it with: aether agent add <agent> --workspace %s",
-			ErrEnvironmentEditPreflight, harnessName, ws.Name)
+		return fmt.Errorf("%w: %q cannot edit environments; pick claude, codex, pi, or amp and register it with: aether agent add %s",
+			ErrEnvironmentEditPreflight, harnessName, harnessName)
 	}
-	if s.cfg.HomesDir != "" {
-		home := filepath.Join(s.cfg.HomesDir, string(member), harnessName)
-		if entries, err := os.ReadDir(home); err == nil && len(entries) > 0 {
+	argv, _, err := s.command(ctx, member, harnessName, domain.LaunchHeadless, "")
+	if err != nil {
+		return fmt.Errorf("scheduler: resolve environment edit agent: %w", err)
+	}
+	if len(argv) == 0 {
+		return fmt.Errorf("scheduler: resolve environment edit agent %q: no executable", harnessName)
+	}
+	if s.cfg.Homes != nil {
+		present, presenceErr := s.memberHomeExecutable(member, argv[0])
+		if presenceErr != nil {
+			return presenceErr
+		}
+		if present {
 			return nil
 		}
 	}
-	_, err := s.cfg.Store.GetHarnessDefinition(ctx, member, harnessName)
+	_, err = s.cfg.Store.GetHarnessDefinition(ctx, member, harnessName)
 	if err == nil {
 		return nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("scheduler: load member harness definition: %w", err)
 	}
-	return fmt.Errorf("%w: %s has no login on this server; register it with: aether agent add %s --workspace %s",
-		ErrEnvironmentEditPreflight, harnessName, harnessName, ws.Name)
+	return fmt.Errorf("%w: %s has no login on this server; register it with: aether agent add %s",
+		ErrEnvironmentEditPreflight, harnessName, harnessName)
 }
 
 // environmentEditBase picks the definition an edit revises: the active
@@ -224,14 +230,13 @@ func (s *Scheduler) environmentEditAttempt(ctx context.Context, ws *domain.Works
 	if err != nil {
 		return nil, err, false
 	}
-	// The run-purpose plan brings exactly what a run gets and nothing
-	// more: the member's credential mounts and read-only tool snapshot on
-	// the workspace's effective image. No aether secrets.
-	plan, err := s.BuildEnvironmentPlan(ctx, nil, ws, member, profile, EnvironmentPurposeRun, "")
+	// The run-purpose plan brings exactly what a run gets: the member's
+	// persistent home on the workspace's effective image. No aether secrets.
+	plan, err := s.BuildEnvironmentPlan(ctx, nil, ws, member, profile, EnvironmentPurposeRun)
 	if err != nil {
 		return nil, err, false
 	}
-	reservation, err := s.reserveCredentialUser(member.ID, harnessName, plan.User, len(plan.Mounts) > 0, "environment edit", nil)
+	reservation, err := s.reserveCredentialUser(member.ID, plan.User, len(plan.Mounts) > 0, "environment edit", nil)
 	if err != nil {
 		return nil, err, false
 	}

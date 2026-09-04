@@ -25,15 +25,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/mcpbridge"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// The conflict-coordination E2E. It drives the whole wired server over
-// real SSH - control channel, attach, event bus, radar, coordination
-// sockets - against the in-process runtime rather than Docker, because the
-// agent has to reach the surfaces its container was given and the staged
-// bridge under `go test` is the test binary, which has no mcp subcommand.
-// Everything else on the path is the real thing.
+// The host half of the conflict-coordination E2E. Both scenarios drive the
+// whole wired server over real SSH - control channel, attach, event bus,
+// radar, coordination sockets - against the in-process runtime rather than
+// Docker, because their agents reach the surfaces a container was given
+// from the test process. Everything else on the path is the real thing.
+// The container half is coordination_container_integration_test.go.
 
 // mcpConfigTarget is where a registered harness is told to read its MCP
 // config, inside the container.
@@ -60,9 +61,9 @@ func TestIntegrationCoordinationEndToEnd(t *testing.T) {
 		bodyA = "rewriting login(); done in ~10 min"
 		bodyB = "only adding an import - going ahead"
 	)
-	e.rt.script(taskA, func(c *e2eContainer) { coordAgent{peer: taskB, body: bodyA, release: release}.run(ctx, c) })
-	e.rt.script(taskB, func(c *e2eContainer) { coordAgent{peer: taskA, body: bodyB, release: release}.run(ctx, c) })
-	e.rt.script(taskC, func(c *e2eContainer) { coordAgent{release: release}.run(ctx, c) })
+	e.e2e(t).script(taskA, func(c *e2eContainer) { coordAgent{peer: taskB, body: bodyA, release: release}.run(ctx, c) })
+	e.e2e(t).script(taskB, func(c *e2eContainer) { coordAgent{peer: taskA, body: bodyB, release: release}.run(ctx, c) })
+	e.e2e(t).script(taskC, func(c *e2eContainer) { coordAgent{release: release}.run(ctx, c) })
 
 	sub := srv.subscribe(ctx, t)
 	var seen []events.Event
@@ -123,7 +124,7 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 
 	const taskA, taskB, taskC = "kill switch A", "kill switch B", "kill switch C"
 	for _, task := range []string{taskA, taskB, taskC} {
-		e.rt.script(task, func(c *e2eContainer) { coordAgent{release: release}.run(ctx, c) })
+		e.e2e(t).script(task, func(c *e2eContainer) { coordAgent{release: release}.run(ctx, c) })
 	}
 
 	sub := srv.subscribe(ctx, t)
@@ -209,13 +210,19 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	waitOverlap(t, adaCtrl, runC.ID, runA.ID)
 }
 
-// coordEnv is the fixture both tests share: one data directory and one
-// in-process runtime, so the server can be restarted with the kill switch
-// in a different position while the containers it left behind stay alive.
+// coordEnv is the fixture the coordination scenarios share: one data
+// directory and one runtime, so the server can be restarted with the kill
+// switch in a different position while the containers it left behind stay
+// alive.
 type coordEnv struct {
-	rt      *e2eRuntime
-	dataDir string
-	keyPath string
+	rt    runtime.Runtime
+	image string
+	// serverBinary is what the scheduler stages as the in-container bridge;
+	// empty stages the running binary, which under `go test` is the test
+	// binary and has no mcp subcommand.
+	serverBinary string
+	dataDir      string
+	keyPath      string
 
 	ws  *domain.Workspace
 	ada coordMember
@@ -236,10 +243,21 @@ type coordServer struct {
 	stop func()
 }
 
+// newCoordEnv seeds the fixture on the in-process runtime, which the two
+// scenarios below force because their agents reach container surfaces from
+// the test process.
 func newCoordEnv(ctx context.Context, t *testing.T, disabled bool) (*coordEnv, *coordServer) {
 	t.Helper()
+	e := &coordEnv{rt: newE2ERuntime(), image: "e2e/fake"}
+	return e, e.seed(ctx, t, disabled)
+}
+
+// seed brings the server up on a fresh data directory and gives it two
+// members, a workspace, and a base branch pushed over the SSH transport.
+func (e *coordEnv) seed(ctx context.Context, t *testing.T, disabled bool) *coordServer {
+	t.Helper()
 	requireBinary(t, "git")
-	e := &coordEnv{rt: newE2ERuntime(), dataDir: filepath.Join(t.TempDir(), "data")}
+	e.dataDir = filepath.Join(t.TempDir(), "data")
 	srv := e.start(ctx, t, disabled)
 
 	adaPath, adaKey := writeClientKey(t)
@@ -250,14 +268,14 @@ func newCoordEnv(ctx context.Context, t *testing.T, disabled bool) (*coordEnv, *
 
 	e.ws = &domain.Workspace{
 		Name:        "coord",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "e2e/fake"},
+		Environment: domain.WorkspaceEnvironment{CustomImage: e.image},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err := srv.srv.Store().CreateWorkspace(ctx, e.ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	e.seedRepo(t, srv.addr)
-	return e, srv
+	return srv
 }
 
 func (e *coordEnv) seedMember(ctx context.Context, t *testing.T, srv *coordServer, name, color string, key ssh.Signer) domain.MemberID {
@@ -301,6 +319,7 @@ func (e *coordEnv) start(ctx context.Context, t *testing.T, disabled bool) *coor
 		Addr:                 "127.0.0.1:0",
 		Runtime:              e.rt,
 		CoordinationDisabled: disabled,
+		ServerBinary:         e.serverBinary,
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -358,9 +377,20 @@ func (e *coordEnv) coordDir(run string) string {
 	return filepath.Join(e.dataDir, "coord", run)
 }
 
+// e2e is the in-process runtime, which only the scenarios that force it
+// may reach.
+func (e *coordEnv) e2e(t *testing.T) *e2eRuntime {
+	t.Helper()
+	rt, ok := e.rt.(*e2eRuntime)
+	if !ok {
+		t.Fatalf("this scenario needs the in-process runtime, not %T", e.rt)
+	}
+	return rt
+}
+
 func (e *coordEnv) container(t *testing.T, run string) *e2eContainer {
 	t.Helper()
-	c := e.rt.container(run)
+	c := e.e2e(t).container(run)
 	if c == nil {
 		t.Fatalf("no container for run %s", run)
 	}

@@ -580,6 +580,47 @@ CREATE TABLE environment_definitions (
 CREATE UNIQUE INDEX idx_environment_definitions_active
 	ON environment_definitions(workspace_id) WHERE status = 'active';
 `,
+	// v14: the server's own update state. One row, id 1: at most one
+	// pending self-update (a second request replaces it) plus the outcome
+	// of the last attempt, so both survive the restart the update causes.
+	`
+CREATE TABLE server_update_state (
+	id                   INTEGER PRIMARY KEY CHECK (id = 1),
+	pending_version      TEXT NOT NULL DEFAULT '',
+	pending_requested_by TEXT NOT NULL DEFAULT '',
+	pending_requested_at INTEGER NOT NULL DEFAULT 0,
+	last_version         TEXT NOT NULL DEFAULT '',
+	last_outcome         TEXT NOT NULL DEFAULT '',
+	last_detail          TEXT NOT NULL DEFAULT '',
+	last_at              INTEGER NOT NULL DEFAULT 0
+);
+`,
+	// v15: one persistent home per member supersedes workspace tool
+	// snapshots and pending workspace shells. tool_heads references
+	// tool_snapshots, so the child table drops first: DROP TABLE runs an
+	// implicit DELETE and the FK would otherwise reject the parent drop.
+	`
+DROP TABLE tool_heads;
+DROP TABLE pending_workspace_shells;
+DROP TABLE tool_snapshots;
+ALTER TABLE runs DROP COLUMN tool_snapshot_id;
+CREATE TABLE member_terminals (
+	member_id    TEXT PRIMARY KEY,
+	container_id TEXT NOT NULL,
+	image        TEXT NOT NULL,
+	started_at   INTEGER NOT NULL
+);
+`,
+	// v16: runs gain the latest title reported by the agent's terminal.
+	`
+ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT '';
+`,
+	// v17: published run commit metadata. The SHA is empty until the first
+	// branch publication; the timestamp remains nullable for that state.
+	`
+ALTER TABLE runs ADD COLUMN last_commit TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN last_commit_at INTEGER;
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

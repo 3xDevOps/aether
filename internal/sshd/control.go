@@ -57,18 +57,62 @@ func (s *Server) serveControl(ctx context.Context, member domain.MemberID, ch ss
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		resp := s.handleRequest(ctx, member, line)
+		slot := &afterResponse{}
+		resp := s.handleRequest(context.WithValue(ctx, afterResponseKey{}, slot), member, line)
 		// A canceled serve context means the server is shutting down (or
 		// the channel is tearing down): the connection must die, not
 		// answer - a canceled-context store lookup must never surface to
-		// the client as an internal rpc error.
+		// the client as an internal rpc error. Any deferred work is
+		// dropped with it, which is right for the one caller: a
+		// self-update that swapped the binaries has already recorded
+		// that, and re-executing a server somebody just asked to stop
+		// would be the wrong way to honor it. The new binary starts on
+		// the next start.
 		if ctx.Err() != nil {
 			return
 		}
-		if writeJSONLine(ch, resp) != nil {
+		if respond(ch, resp, slot) != nil {
 			return
 		}
 	}
+}
+
+// respond writes one response and then runs whatever the handler deferred,
+// in that order.
+//
+// The deferred work runs even when the write failed. Its only user is the
+// server self-update, which has already replaced the binaries by the time
+// it gets here: a client that vanished mid-call would otherwise leave the
+// server running the old image, reporting the update as applied, and
+// holding its one update slot for the rest of the process's life. The
+// client can reconnect; a swap with no restart cannot fix itself.
+func respond(w io.Writer, resp protocol.Response, slot *afterResponse) error {
+	err := writeJSONLine(w, resp)
+	if slot.fn != nil {
+		slot.fn()
+	}
+	return err
+}
+
+// afterResponse is one request's slot for work that must not run until the
+// server has tried to write its response. Only the server self-update uses
+// it: it re-executes the binary, and a client that never saw the result
+// could not tell a restart from a dropped connection.
+type afterResponse struct{ fn func() }
+
+type afterResponseKey struct{}
+
+// deferUntilResponded registers fn to run once this request's response has
+// been written, reporting whether there was a slot to register it in. A
+// handler reached from anywhere but the control loop gets false and
+// decides for itself.
+func deferUntilResponded(ctx context.Context, fn func()) bool {
+	slot, ok := ctx.Value(afterResponseKey{}).(*afterResponse)
+	if !ok {
+		return false
+	}
+	slot.fn = fn
+	return true
 }
 
 func writeJSONLine(w io.Writer, v any) error {

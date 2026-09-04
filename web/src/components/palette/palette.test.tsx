@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { CommandPalette } from '@/components/palette'
+import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
@@ -44,7 +45,14 @@ beforeEach(() => {
 })
 
 function open() {
-  render(<CommandPalette />)
+  // The launch and inject forms are the shell's, not the palette's; render
+  // the host beside it the way AppShell does.
+  render(
+    <>
+      <CommandPalette />
+      <PaletteDialogs />
+    </>,
+  )
   fireEvent.keyDown(window, { key: 'k', metaKey: true })
 }
 
@@ -95,8 +103,9 @@ describe('command palette', () => {
   })
 
   it('offers neither pause nor resume while the paused state is unknown', async () => {
-    // Nothing seeds pausedRuns at hydration, so after a reload the client
-    // cannot tell which verb the server would accept.
+    // Hydration seeds pausedRuns from the run list's `paused` field, but a
+    // legacy gateway sends none: with no entry the client cannot tell which
+    // verb the server would accept, so it offers neither.
     useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     open()
 
@@ -171,7 +180,7 @@ describe('command palette', () => {
       capabilities: {
         gateway: 'local',
         methods: ['*'],
-        ws: ['events', 'attach', 'shell'],
+        ws: ['events', 'attach', 'terminal'],
         local: ['link.status', 'daemon.status', 'pull'],
       },
     })
@@ -216,11 +225,12 @@ describe('command palette', () => {
 
   it('pulls the focused run branch through the local gateway', async () => {
     useStore.setState({
+      runs: { [active.id]: toRecord(run({ last_commit: 'abc1234' })) },
       route: { name: 'run', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',
         methods: ['*'],
-        ws: ['events', 'attach', 'shell'],
+        ws: ['events', 'attach', 'terminal'],
         local: ['pull'],
       },
     })
@@ -255,7 +265,7 @@ describe('command palette', () => {
       capabilities: {
         gateway: 'local',
         methods: ['*'],
-        ws: ['events', 'attach', 'shell'],
+        ws: ['events', 'attach', 'terminal'],
         local: [],
       },
     })

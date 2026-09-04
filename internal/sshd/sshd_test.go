@@ -92,7 +92,7 @@ type fakePTY struct {
 	resizes  [][2]uint
 }
 
-func (p *fakePTY) Attach(ctx context.Context, run domain.RunID, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error {
+func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error {
 	p.mu.Lock()
 	if p.err != nil {
 		err, delay := p.err, p.errDelay
@@ -105,7 +105,7 @@ func (p *fakePTY) Attach(ctx context.Context, run domain.RunID, member domain.Me
 	// Mirror ptyhost.Host.Attach: the gate runs for write-mode attaches
 	// only and its denial is wrapped in ErrWriteDenied.
 	if !readOnly && gate != nil {
-		if gerr := gate(ctx, member, run); gerr != nil {
+		if gerr := gate(ctx, member, key); gerr != nil {
 			return fmt.Errorf("%w: %v", errWriteDenied, gerr)
 		}
 	}
@@ -168,11 +168,10 @@ func (p *fakePTY) setErr(err error) {
 
 // fakeRuns records RunController calls and returns the configured error.
 type fakeRuns struct {
-	mu        sync.Mutex
-	err       error
-	calls     []string
-	paused    map[domain.RunID]bool
-	setupHook func(conn io.ReadWriter) error
+	mu     sync.Mutex
+	err    error
+	calls  []string
+	paused map[domain.RunID]bool
 }
 
 func (f *fakeRuns) record(call string) error {
@@ -251,22 +250,32 @@ func (f *fakeRuns) Relaunch(_ context.Context, run domain.RunID, actor domain.Me
 	}, nil
 }
 
-func (f *fakeRuns) WorkspaceShell(_ context.Context, member domain.MemberID, req domain.WorkspaceShellRequest, cols, rows uint, conn io.ReadWriter, _ <-chan [2]uint) error {
-	if err := f.record(fmt.Sprintf("workspace-shell:%s:%s:%s:%d:%d", member, req.Mode, req.Harness, cols, rows)); err != nil {
-		return err
-	}
-	if _, err := conn.Write([]byte("workspace-shell-ready\n")); err != nil {
-		return err
-	}
-	f.mu.Lock()
-	hook := f.setupHook
-	f.mu.Unlock()
-	if hook != nil {
-		return hook(conn)
-	}
-	_, _ = io.Copy(io.Discard, conn)
-	return nil
+func (f *fakeRuns) EnsureRunShellTab(_ context.Context, run domain.RunID, tab string, cols, rows uint) error {
+	return f.record(fmt.Sprintf("run-shell:%s:%s:%d:%d", run, tab, cols, rows))
 }
+func (f *fakeRuns) EnsureTerminal(_ context.Context, member domain.MemberID) (*domain.Terminal, error) {
+	if err := f.record(fmt.Sprintf("terminal:%s", member)); err != nil {
+		return nil, err
+	}
+	return &domain.Terminal{Member: member, ContainerID: "terminal-container", Image: "standard", StartedAt: time.Now().UTC()}, nil
+}
+
+func (f *fakeRuns) EnsureTerminalTab(_ context.Context, member domain.MemberID, tab string, cols, rows uint) error {
+	return f.record(fmt.Sprintf("terminal-tab:%s:%s:%d:%d", member, tab, cols, rows))
+}
+
+func (f *fakeRuns) StopTerminal(_ context.Context, member domain.MemberID) error {
+	return f.record(fmt.Sprintf("terminal-stop:%s", member))
+}
+
+func (f *fakeRuns) TerminalStatus(_ context.Context, member domain.MemberID) (domain.TerminalStatus, error) {
+	if err := f.record(fmt.Sprintf("terminal-status:%s", member)); err != nil {
+		return domain.TerminalStatus{}, err
+	}
+	return domain.TerminalStatus{}, nil
+}
+
+func (f *fakeRuns) HoldShell() func() { return func() {} }
 
 type testEnv struct {
 	srv         *Server
@@ -463,4 +472,13 @@ func openSubsystem(t *testing.T, client *ssh.Client, name string, setup func(*ss
 	p := &subsystemPipe{Reader: stdout, stdin: stdin, sess: sess}
 	t.Cleanup(func() { _ = p.Close() })
 	return p
+}
+func TestWriteGateAllowsNonRunSessionKeys(t *testing.T) {
+	gate := NewWriteGate(nil)
+	if err := gate(t.Context(), "member", ptyhost.TerminalSession("member", "main")); err != nil {
+		t.Fatalf("terminal session gate = %v, want nil", err)
+	}
+	if err := gate(t.Context(), "member", ptyhost.RunShellSession("run", "shell")); err != nil {
+		t.Fatalf("run-shell session gate = %v, want nil", err)
+	}
 }

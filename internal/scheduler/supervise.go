@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -59,9 +60,10 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	defer cancel()
 
 	s.cfg.Git.StopDiffWatch(entry.runID)
-	if err := s.cfg.PTY.StopSession(ctx, entry.runID); err != nil {
+	if err := s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(entry.runID)); err != nil {
 		slog.Warn("scheduler: stop pty session", "run", entry.runID, "error", err)
 	}
+	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
 
 	s.mu.Lock()
 	killed, killActor := entry.killRequested, entry.killActor
@@ -133,7 +135,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			continue
 		}
 		activity := started
-		if t, ok := s.cfg.PTY.LastOutput(e.runID); ok && t.After(activity) {
+		if t, ok := s.cfg.PTY.LastOutput(ptyhost.RunSession(e.runID)); ok && t.After(activity) {
 			activity = t
 		}
 		if t, ok := s.cfg.Git.LastFileChange(e.runID); ok && t.After(activity) {

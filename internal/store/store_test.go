@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -152,6 +151,42 @@ func TestMigrationIdempotency(t *testing.T) {
 	}
 	if count != len(migrations) {
 		t.Fatalf("schema_migrations rows = %d, want %d", count, len(migrations))
+	}
+}
+
+func TestRunCommitMigrationAddsColumns(t *testing.T) {
+	db := openTestDB(t)
+	rows, err := db.db.Query(`PRAGMA table_info(runs)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(runs): %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type column struct {
+		typ     string
+		notNull int
+		defVal  sql.NullString
+	}
+	columns := make(map[string]column)
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var defVal sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defVal, &pk); err != nil {
+			t.Fatalf("scan runs column: %v", err)
+		}
+		columns[name] = column{typ: typ, notNull: notNull, defVal: defVal}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate runs columns: %v", err)
+	}
+	if got := columns["last_commit"]; got.typ != "TEXT" || got.notNull != 1 ||
+		!got.defVal.Valid || got.defVal.String != "''" {
+		t.Fatalf("last_commit column = %+v, want TEXT NOT NULL DEFAULT ''", got)
+	}
+	if got := columns["last_commit_at"]; got.typ != "INTEGER" || got.notNull != 0 ||
+		got.defVal.Valid {
+		t.Fatalf("last_commit_at column = %+v, want nullable INTEGER", got)
 	}
 }
 
@@ -554,8 +589,11 @@ func TestRunCRUDRoundTripsEveryField(t *testing.T) {
 	}
 	r.Branch = "aether/run-" + string(r.ID) + "-auth-fix"
 	r.Worktree = "/var/lib/aether/worktrees/" + string(r.ID)
+	r.LastCommit = strings.Repeat("a", 40)
+	lastCommitAt := time.Date(2026, 8, 9, 10, 31, 0, 123456789, time.UTC)
+	r.LastCommitAt = lastCommitAt
 	if err := db.UpdateRun(ctx, r); err != nil {
-		t.Fatalf("UpdateRun (branch/worktree): %v", err)
+		t.Fatalf("UpdateRun (branch/worktree/commit): %v", err)
 	}
 
 	got, err := db.GetRun(ctx, r.ID)
@@ -574,7 +612,6 @@ func TestRunCRUDRoundTripsEveryField(t *testing.T) {
 	r.Task = "updated task"
 	r.Protected = true
 	r.Harness = "codex"
-	r.ToolSnapshotID = "tools-123"
 	r.StartedAt = &started
 	r.FinishedAt = &finished
 	if uerr := db.UpdateRun(ctx, r); uerr != nil {
@@ -921,7 +958,8 @@ func assertRunEqual(t *testing.T, want, got *domain.Run) {
 	if got.ID != want.ID || got.WorkspaceID != want.WorkspaceID || got.MemberID != want.MemberID ||
 		got.Task != want.Task || got.Harness != want.Harness || got.Mode != want.Mode ||
 		got.Status != want.Status || got.Branch != want.Branch || got.Worktree != want.Worktree ||
-		got.ProfileSnapshotID != want.ProfileSnapshotID || got.ToolSnapshotID != want.ToolSnapshotID ||
+		got.ProfileSnapshotID != want.ProfileSnapshotID ||
+		got.LastCommit != want.LastCommit || !got.LastCommitAt.Equal(want.LastCommitAt) ||
 		got.Protected != want.Protected ||
 		!got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("run round-trip: got %+v, want %+v", got, want)
@@ -939,46 +977,6 @@ func timePtrEqual(a, b *time.Time) bool {
 		return a == b
 	}
 	return a.Equal(*b)
-}
-
-func TestToolSnapshotCRUDAndDeletionProtection(t *testing.T) {
-	db := openTestDB(t)
-	ctx := context.Background()
-	w := mustCreateWorkspace(t, db)
-	m := mustCreateMember(t, db)
-	s := &domain.ToolSnapshot{
-		WorkspaceID: w.ID,
-		MemberID:    m.ID,
-		Digest:      "sha256:first",
-		Manifest:    domain.ToolManifest{Executable: "tool", Version: "1"},
-	}
-	if err := db.CreateToolSnapshot(ctx, s); err != nil {
-		t.Fatalf("CreateToolSnapshot: %v", err)
-	}
-	if err := db.SetToolHead(ctx, m.ID, w.ID, s.ID); err != nil {
-		t.Fatalf("SetToolHead: %v", err)
-	}
-	if err := db.DeleteToolSnapshot(ctx, s.ID); !errors.Is(err, ErrInUse) {
-		t.Fatalf("delete active snapshot = %v, want ErrInUse", err)
-	}
-	if err := db.SetToolHead(ctx, m.ID, w.ID, ""); err != nil {
-		t.Fatalf("clear head: %v", err)
-	}
-	pending := &PendingWorkspaceShell{
-		WorkspaceID: w.ID, MemberID: m.ID, SnapshotID: s.ID, StagingID: "staging-1",
-	}
-	if err := db.CreatePendingWorkspaceShell(ctx, pending); err != nil {
-		t.Fatalf("CreatePendingWorkspaceShell: %v", err)
-	}
-	if err := db.DeleteToolSnapshot(ctx, s.ID); !errors.Is(err, ErrInUse) {
-		t.Fatalf("delete pending snapshot = %v, want ErrInUse", err)
-	}
-	if err := db.DeletePendingWorkspaceShell(ctx, pending.ID); err != nil {
-		t.Fatalf("DeletePendingWorkspaceShell: %v", err)
-	}
-	if err := db.DeleteToolSnapshot(ctx, s.ID); err != nil {
-		t.Fatalf("delete unreferenced snapshot: %v", err)
-	}
 }
 
 func TestWorkspaceEnvironmentUsesFirstClassRepresentation(t *testing.T) {
@@ -1009,110 +1007,6 @@ func TestWorkspaceEnvironmentUsesFirstClassRepresentation(t *testing.T) {
 	if !got.Environment.NeutralImage || got.Environment.Variables["A"] != "1" ||
 		got.Environment.SetupPolicy.Script != "echo setup" {
 		t.Fatalf("environment = %+v", got.Environment)
-	}
-}
-
-func TestDeleteToolSnapshotProtectsLiveRunReferences(t *testing.T) {
-	db := openTestDB(t)
-	ctx := context.Background()
-	w := mustCreateWorkspace(t, db)
-	m := mustCreateMember(t, db)
-
-	for i, status := range []domain.RunStatus{
-		domain.RunQueued,
-		domain.RunProvisioning,
-		domain.RunRunning,
-		domain.RunNeedsAttention,
-	} {
-		snapshot := &domain.ToolSnapshot{
-			WorkspaceID: w.ID,
-			MemberID:    m.ID,
-			Digest:      fmt.Sprintf("sha256:live-%d", i),
-			Manifest:    domain.ToolManifest{Executable: "tool"},
-		}
-		if err := db.CreateToolSnapshot(ctx, snapshot); err != nil {
-			t.Fatalf("CreateToolSnapshot(%s): %v", status, err)
-		}
-		run := &domain.Run{
-			WorkspaceID:    w.ID,
-			MemberID:       m.ID,
-			Task:           "task",
-			Harness:        "claude",
-			Mode:           domain.LaunchTUI,
-			Status:         status,
-			ToolSnapshotID: snapshot.ID,
-		}
-		if err := db.CreateRun(ctx, run); err != nil {
-			t.Fatalf("CreateRun(%s): %v", status, err)
-		}
-		if err := db.DeleteToolSnapshot(ctx, snapshot.ID); !errors.Is(err, ErrInUse) {
-			t.Fatalf("delete %s snapshot = %v, want ErrInUse", status, err)
-		}
-		if err := db.UpdateRunStatus(ctx, run.ID, domain.RunMerged, "", nil, nil); err != nil {
-			t.Fatalf("finish %s run: %v", status, err)
-		}
-		if err := db.DeleteToolSnapshot(ctx, snapshot.ID); err != nil {
-			t.Fatalf("delete terminal %s snapshot: %v", status, err)
-		}
-	}
-}
-
-func TestSetRunToolSnapshotPreservesHandoffFields(t *testing.T) {
-	db := openTestDB(t)
-	ctx := context.Background()
-	w := mustCreateWorkspace(t, db)
-	owner := mustCreateMember(t, db)
-	handoff := mustCreateMember(t, db)
-	run := mustCreateRun(t, db, w.ID, owner.ID, domain.RunQueued)
-	run.Branch = "handoff-branch"
-	if err := db.UpdateRun(ctx, run); err != nil {
-		t.Fatalf("set branch: %v", err)
-	}
-
-	ownerSnapshot := &domain.ToolSnapshot{
-		WorkspaceID: w.ID,
-		MemberID:    owner.ID,
-		Digest:      "sha256:owner",
-		Manifest:    domain.ToolManifest{Executable: "tool"},
-	}
-	handoffSnapshot := &domain.ToolSnapshot{
-		WorkspaceID: w.ID,
-		MemberID:    handoff.ID,
-		Digest:      "sha256:handoff",
-		Manifest:    domain.ToolManifest{Executable: "tool"},
-	}
-	otherWorkspace := mustCreateWorkspace(t, db)
-	wrongWorkspaceSnapshot := &domain.ToolSnapshot{
-		WorkspaceID: otherWorkspace.ID,
-		MemberID:    handoff.ID,
-		Digest:      "sha256:other-workspace",
-		Manifest:    domain.ToolManifest{Executable: "tool"},
-	}
-	for _, snapshot := range []*domain.ToolSnapshot{ownerSnapshot, handoffSnapshot, wrongWorkspaceSnapshot} {
-		if err := db.CreateToolSnapshot(ctx, snapshot); err != nil {
-			t.Fatalf("CreateToolSnapshot: %v", err)
-		}
-	}
-
-	if err := db.TransferRun(ctx, run.ID, handoff.ID); err != nil {
-		t.Fatalf("TransferRun: %v", err)
-	}
-	if err := db.SetRunToolSnapshot(ctx, run.ID, wrongWorkspaceSnapshot.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("pin snapshot from another workspace = %v, want ErrNotFound", err)
-	}
-	if err := db.SetRunToolSnapshot(ctx, run.ID, ownerSnapshot.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("pin snapshot from prior owner = %v, want ErrNotFound", err)
-	}
-	if err := db.SetRunToolSnapshot(ctx, run.ID, handoffSnapshot.ID); err != nil {
-		t.Fatalf("pin handoff snapshot: %v", err)
-	}
-	got, err := db.GetRun(ctx, run.ID)
-	if err != nil {
-		t.Fatalf("GetRun: %v", err)
-	}
-	if got.MemberID != handoff.ID || got.Branch != "handoff-branch" ||
-		got.ToolSnapshotID != handoffSnapshot.ID {
-		t.Fatalf("run after pin = %+v, handoff/branch/tool fields were not preserved", got)
 	}
 }
 
@@ -1222,5 +1116,48 @@ func TestListHarnessDefinitionsScopedAndSorted(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Fatalf("list unknown member = %+v, want empty", empty)
+	}
+}
+
+func TestTerminalPersistence(t *testing.T) {
+	db := openTestDB(t)
+	member := mustCreateMember(t, db)
+	started := time.Date(2026, 9, 3, 12, 0, 7, 123, time.UTC)
+	terminal := &domain.Terminal{
+		Member:      member.ID,
+		ContainerID: "container-1",
+		Image:       "standard:latest",
+		StartedAt:   started,
+	}
+	ctx := context.Background()
+	if err := db.PutTerminal(ctx, terminal); err != nil {
+		t.Fatalf("PutTerminal: %v", err)
+	}
+	got, err := db.GetTerminal(ctx, member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal: %v", err)
+	}
+	if got.Member != terminal.Member || got.ContainerID != terminal.ContainerID || got.Image != terminal.Image || got.StartedAt.Unix() != started.Unix() {
+		t.Fatalf("terminal = %+v, want fields from %+v", got, terminal)
+	}
+	terminal.ContainerID = "container-2"
+	if updateErr := db.PutTerminal(ctx, terminal); updateErr != nil {
+		t.Fatalf("PutTerminal update: %v", updateErr)
+	}
+	got, err = db.GetTerminal(ctx, member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal after update: %v", err)
+	}
+	if got.ContainerID != terminal.ContainerID {
+		t.Fatalf("container ID = %q, want %q", got.ContainerID, terminal.ContainerID)
+	}
+	if err := db.DeleteTerminal(ctx, member.ID); err != nil {
+		t.Fatalf("DeleteTerminal: %v", err)
+	}
+	if err := db.DeleteTerminal(ctx, member.ID); err != nil {
+		t.Fatalf("DeleteTerminal missing: %v", err)
+	}
+	if _, err := db.GetTerminal(ctx, member.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetTerminal after delete error = %v, want ErrNotFound", err)
 	}
 }

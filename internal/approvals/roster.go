@@ -20,9 +20,8 @@ type Presence struct {
 }
 
 // roster is the in-memory presence table. Members enter it by heartbeat
-// or by attaching, and leave it when their heartbeat goes stale - unless
-// they still hold an attach, which is itself proof of a live connection
-// (the SSH server publishes the closing presence event when it drops).
+// or by attaching, and leave it when their heartbeat goes stale or their
+// last connection closes. A watched row remains until its attach ends.
 //
 // Presence is per workspace: the same member can be attached in two
 // workspaces at once, so each (member, workspace) pair carries its own row.
@@ -31,6 +30,7 @@ type roster struct {
 	ttl     time.Duration
 	now     func() time.Time
 	members map[rosterKey]*rosterEntry
+	conns   map[domain.MemberID]int
 }
 
 type rosterKey struct {
@@ -47,7 +47,58 @@ type rosterEntry struct {
 }
 
 func newRoster(ttl time.Duration, now func() time.Time) *roster {
-	return &roster{ttl: ttl, now: now, members: map[rosterKey]*rosterEntry{}}
+	return &roster{
+		ttl:     ttl,
+		now:     now,
+		members: map[rosterKey]*rosterEntry{},
+		conns:   map[domain.MemberID]int{},
+	}
+}
+
+// connectionOpened records one authenticated SSH connection for member.
+func (r *roster) connectionOpened(member domain.MemberID) {
+	if member == "" {
+		return
+	}
+	r.mu.Lock()
+	r.conns[member]++
+	r.mu.Unlock()
+}
+
+// connectionClosed releases one authenticated SSH connection and returns
+// presence rows that can no longer be live. Callers publish the transitions.
+func (r *roster) connectionClosed(member domain.MemberID) []Presence {
+	if member == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := r.conns[member]
+	if count <= 0 {
+		return nil
+	}
+	if count > 1 {
+		r.conns[member] = count - 1
+		return nil
+	}
+	delete(r.conns, member)
+	return r.expireMemberLocked(member)
+}
+
+func (r *roster) expireMemberLocked(member domain.MemberID) []Presence {
+	var gone []Presence
+	for k, e := range r.members {
+		if k.member != member || len(e.watching) > 0 {
+			continue
+		}
+		gone = append(gone, Presence{
+			Member: k.member, Workspace: k.workspace,
+			State: events.PresenceOffline, LastSeen: e.lastSeen,
+		})
+		delete(r.members, k)
+	}
+	sort.Slice(gone, func(i, j int) bool { return less(gone[i], gone[j]) })
+	return gone
 }
 
 // entry returns the member's row in workspace, creating it. Callers hold mu.
@@ -62,34 +113,49 @@ func (r *roster) entry(member domain.MemberID, workspace domain.WorkspaceID) (*r
 	return e, !ok
 }
 
-// beat refreshes a member's heartbeat, reporting whether they were absent
-// (a transition to online worth publishing).
 func (r *roster) beat(member domain.MemberID, workspace domain.WorkspaceID) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.conns[member] == 0 {
+		return false
+	}
 	_, fresh := r.entry(member, workspace)
 	return fresh
 }
 
 // watch records member as watching run, which also counts as a heartbeat.
+// A member with no live connection is ignored.
 func (r *roster) watch(member domain.MemberID, workspace domain.WorkspaceID, run domain.RunID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.conns[member] == 0 {
+		return
+	}
 	e, _ := r.entry(member, workspace)
 	e.watching[run]++
 }
 
-// unwatch releases one attach on run, keeping the member online. The run
-// stays watched while any of their other attaches on it is still live.
-func (r *roster) unwatch(member domain.MemberID, workspace domain.WorkspaceID, run domain.RunID) {
+// unwatch releases one attach on run. The run stays watched while any of
+// their other attaches on it is still live. It returns rows that became
+// offline when the last attach ended after their last connection closed.
+func (r *roster) unwatch(member domain.MemberID, workspace domain.WorkspaceID, run domain.RunID) []Presence {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	e, _ := r.entry(member, workspace)
-	if e.watching[run] <= 1 {
-		delete(e.watching, run)
-		return
+	k := rosterKey{member: member, workspace: workspace}
+	e, ok := r.members[k]
+	if !ok {
+		return nil
 	}
-	e.watching[run]--
+	e.lastSeen = r.now()
+	if e.watching[run] > 1 {
+		e.watching[run]--
+		return nil
+	}
+	delete(e.watching, run)
+	if len(e.watching) == 0 && r.conns[member] == 0 {
+		return r.expireMemberLocked(member)
+	}
+	return nil
 }
 
 // expire removes members whose heartbeat went stale and who hold no

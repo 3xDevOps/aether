@@ -8,11 +8,11 @@ Two machines are involved, though they can be the same one:
 - **your machine** - Linux, macOS, or Windows. Where you type.
 
 Your machine needs git and, unless both machines are on a tailnet
-(see [step 3](#3-link-from-your-machine)), an SSH key. Aether offers the keys
-in your ssh-agent, then `~/.ssh/id_ed25519`, `id_ecdsa`, and `id_rsa`;
-`ssh-add` a passphrase-protected key first, or pick a file with
-`aether link --key <private-key>`. Windows paths and the OpenSSH agent
-service are in [install.md](install.md#the-windows-client).
+(see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
+`~/.ssh/id_ed25519` and your ssh-agent. For a key somewhere else, pass
+`aether link --key <path>`; for a passphrase-protected one, `ssh-add` it
+first. Windows paths and the OpenSSH agent service are in
+[install.md](install.md#the-windows-client).
 
 ---
 
@@ -24,8 +24,21 @@ On the server box and on a Linux or macOS machine:
 curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
 ```
 
-On Linux that installs `aether` and `aether-server`; on macOS just `aether`
-(the server is Linux-only). Later, `aether update` upgrades both.
+The script asks what this machine is. Answer **server** on the server box and
+**client** on your own machine; Enter takes the sensible default.
+
+That answer decides what you get. A server gets `aether` and `aether-server`
+in `/usr/local/bin`, with `sudo`. A client gets the `aether` CLI alone in
+`~/.local/bin`, without `sudo`, so the desktop app can replace it when it
+updates; if that directory is not on your `PATH`, the script prints the one
+line that adds it, and the app finds it either way. macOS is a client
+platform, so it only ever gets `aether`. Later, `aether update` upgrades
+whatever is installed.
+
+It then finishes that side's setup: [step 2](#2-start-the-server) on the
+server, the desktop app ([step 7](#prefer-a-native-window)) on a client. To
+install the binaries and stop there, add `--role none`; see
+[install.md](install.md#the-install-script).
 
 On **Windows** the client is a manual download - three PowerShell commands in
 [install.md](install.md#manual-install). Everything else there is optional:
@@ -33,8 +46,10 @@ pinning a version, the data layout, the desktop app.
 
 ## 2. Start the server
 
-On the server box, one command writes the systemd unit and config and prints
-how to start it:
+Answering **server** in step 1 already ran the command below on the server
+box. It writes the config and the systemd unit but deliberately starts
+nothing, so the activation line it printed is still yours to run. Run setup by
+hand if you skipped the question:
 
 ```sh
 sudo aether-server setup
@@ -69,10 +84,8 @@ linked to <server-host>:2222 as admin (admin)
 
 **The first identity to link a fresh server becomes the admin.** That is the
 whole account setup - there is no signup, no password, no config file to edit.
-The link is saved to `~/.config/aether/config.json` on Linux,
-`~/Library/Application Support/aether/config.json` on macOS, or
-`%AppData%\aether\config.json` on Windows; set `AETHER_CONFIG_DIR` to keep
-it somewhere else. (Joining over a tailnet,
+The link is saved to `~/.config/aether/config.json`, or
+`%AppData%\aether\config.json` on Windows. (Joining over a tailnet,
 the display name comes from your tailnet login instead of the literal
 `admin`; the role is the same. Change any display color with
 `aether member color <#rrggbb>`.)
@@ -82,9 +95,8 @@ How you were identified depends on the network:
 - **On a tailnet:** Tailscale already knows who you are and the server asks it.
   No SSH key, no invite code, nothing to copy. See
   [networking.md](networking.md).
-- **Anywhere else:** the public half of your SSH key (from your ssh-agent,
-  or `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa`, or the file you pass with
-  `--key`) is registered as the admin's key. Generate one first with
+- **Anywhere else:** your SSH public key (`~/.ssh/id_ed25519`, or any key in
+  your ssh-agent) is registered as the admin's key. Generate one first with
   `ssh-keygen -t ed25519` if you do not have one. On Windows that is
   `%USERPROFILE%\.ssh\id_ed25519` and the OpenSSH agent service; `ssh-keygen`
   ships with Windows OpenSSH.
@@ -113,7 +125,8 @@ and build what the project needs. The
 agent proposes a list of tools, you review and approve it, and the image
 builds in the background while you finish onboarding - until it is ready,
 runs use the image the workspace was created with and the dashboard shows a
-banner saying so.
+banner saying so. An Agents step follows the Repository step and covers
+step 5 below.
 
 To change the environment later, open the workspace page in the dashboard.
 Its Environment panel shows what is installed, keeps every previous version
@@ -137,38 +150,67 @@ git push -u aether main
 
 `link --repo` adds an `aether` git remote - a normal git remote over the same
 SSH port, no separate credentials. With multiple workspaces, add
-`--workspace <name-or-id>` (`aether workspace list` shows them). Git runs
-over OpenSSH with its own key choice, so a key you picked with
-`aether link --key` needs `ssh-add` or an `IdentityFile` line in
-`~/.ssh/config` before `git push` uses it.
+`--workspace <name-or-id>` (`aether workspace list` shows them). The push
+sends the workspace's base branch; replace `main` if you created the
+workspace with `--base`.
+
+In the dashboard, the onboarding wizard's Repository step does both for
+you: it adds the remote, then its **Push now** button runs that push in
+your clone and keeps git's own output on the page. It runs the same push
+with `--no-follow-tags`, so the command above also sends your tags if you
+have `push.followTags` set.
 
 ## 5. Set up your agent
 
-One command installs the agent, logs it in, and registers it:
+Choose an agent once:
 
 ```sh
-aether agent add claude --workspace myproject
+aether agent add claude
 ```
 
-For a shipped agent (claude, codex, pi, amp, opencode) the vendor's installer runs
-automatically, then you land in a shell **inside a server-created container**
-with the agent on PATH: run its login flow (pick a device-code or headless
-option, the container has no browser) and `exit` cleanly.
+For a shipped agent, the dashboard's Agents step opens the live environment
+terminal dock and types its vendor install script. From the CLI, open the
+terminal, run the script, install into `~/.local/bin`, and complete the vendor
+login there:
 
-For a name Aether does not ship it first asks how to launch the agent, Enter
-accepting the defaults (`omp {task}` and `omp -p {task}`) and `--tui` /
-`--headless` flags skipping the questions. The shell opens without an
-installer: install the executable into `~/.local/bin` per the vendor's docs,
-then log in and exit as above.
+```sh
+aether terminal
+```
 
-On exit Aether snapshots `~/.local`, persists the login state, and registers
-the agent under your membership. Shipped agents skip the questions and the
-registration. Only `~/.local` and login state persist across containers.
+For a name Aether does not ship, the command first asks for interactive and
+headless launch templates. Install that executable into `~/.local/bin` using
+the vendor's instructions, then complete its login in the environment terminal.
+Return to the dashboard when finished.
 
-If the connection drops before you exit, resume with
-`aether workspace bootstrap myproject --resume`. The individual steps
-(re-install tools, re-run a login, manage snapshots) are in
-[bootstrap.md](bootstrap.md) and [harnesses.md](harnesses.md).
+The member home persists the executable, login state, and synced profile files
+across containers. See [the environment terminal guide](terminal.md) for tab
+and stop behavior.
+
+Your own agent configuration - skills, custom commands, standing
+instructions like `CLAUDE.md`, settings, plugins - is separate from the
+login and syncs one way from your machine:
+
+```sh
+aether profile push --agent claude
+```
+
+The dashboard does both without a separate terminal window. Its onboarding
+wizard's **Agents** step opens the same setup dock in the page, types the
+install command, and then shows what a profile push would carry from each agent
+grouped as skills, commands, memory, settings, MCP config and plugins, with
+every file the credential denylist or the secret scanner left behind and
+why. Check the agents you want and approve. Where a setup-capable agent is
+installed on your machine you can also let one read the inventory and
+recommend what is worth bringing, with a sentence of reasoning per agent;
+the recommendation is a checklist you edit, never something that acts on
+its own. Both parts are optional - **Skip for now** moves on.
+
+Secrets never sync, and the dashboard has no override: a scanner finding in
+a file you wrote refuses the push and names the file so you can fix it
+locally. One inside an installed plugin drops that file and imports the
+rest, since there is nothing to fix in your own configuration.
+[harnesses.md](harnesses.md) has the full rules, including the CLI-only
+`--allow-secret`.
 
 ## 6. Launch a run
 
@@ -176,9 +218,7 @@ If the connection drops before you exit, resume with
 aether run "add a health check endpoint" --agent claude
 ```
 
-The run pins the complete environment plan, including the active tool
-snapshot. Later bootstrap or rollback operations affect later runs, not this
-one.
+The run gets its own container and checkout while using your persistent home.
 
 ```
 run 01m04mhf114eap4k85n2mgcped running
@@ -206,14 +246,17 @@ browser. See [local-gateway.md](local-gateway.md).
 `aether gui` in a browser tab is the whole dashboard. If you would rather it
 lived in its own window - with desktop notifications and a dock badge when a
 run parks in `needs-attention`, plus `aether://run/<id>` deep links - build
-the desktop app. It needs Node.js 22+ and takes a minute:
+the desktop app. Answering **client** in step 1 already did this. Nothing has
+to be installed first - the CLI fetches its own Node.js copy when the machine
+has none, which makes the first build longer:
 
 ```sh
 aether gui build
 ```
 
-That installs Aether into your application menu (Linux), `~/Applications`
-(macOS), or the Start Menu (Windows). Open it like any other app.
+That installs Aether into your application menu (Linux), your Applications
+folder (macOS; `~/Applications` without administrator rights, and the command
+prints the path), or the Start Menu (Windows). Open it like any other app.
 
 Two things to know:
 
@@ -246,32 +289,40 @@ everyone watching sees who said it.
 
 ## 8. Pull the result
 
-When the agent exits, its work is already committed to the run's branch and the
+When the agent exits, its latest work is committed to the run's branch and the
 run parks in `needs-attention`.
 
 ```sh
 aether pull <run-id>
 ```
 
+If your checkout is already on the run branch, Aether fast-forwards it. If not,
+Aether creates or updates the local run branch without switching your checkout:
+
 ```
-fetched aether/run-add-a-health-check-endpoint-mgcped into refs/remotes/aether/aether/run-add-a-health-check-endpoint-mgcped (not merged)
+Branch aether/run-add-a-health-check-endpoint-mgcped is ready. Switch with: git switch aether/run-add-a-health-check-endpoint-mgcped
 ```
 
-A run branch is named `aether/run-<slug>-<short-id>`: the task slugified,
-then the last six characters of the run ID. The branch is now in your local
-clone as a remote-tracking ref. Review it, diff it, merge it - by hand.
-**Aether never merges anything for you.**
+The branch name is `aether/run-<slug>-<short-id>`: the task slugified, then the
+last six characters of the run ID. Aether never switches branches or merges
+the run into your base branch. Review it, diff it, then merge it by hand:
 
 ```sh
-git log --oneline aether/aether/run-add-a-health-check-endpoint-mgcped
-git diff main...aether/aether/run-add-a-health-check-endpoint-mgcped
+git log --oneline aether/run-add-a-health-check-endpoint-mgcped
+git diff main...aether/run-add-a-health-check-endpoint-mgcped
 ```
+
+If the local checkout has uncommitted changes, the pull still fetches the run
+branch and reports that the checkout is dirty. Commit or stash those changes
+before switching to the run branch.
 
 Then close the run out so it leaves the attention board:
 
 ```sh
+git switch aether/run-add-a-health-check-endpoint-mgcped
 aether close <run-id> --outcome merged      # or --outcome abandoned
 ```
+
 
 
 To stop pulling by hand, run the local sync daemon - it fetches run branches as
@@ -342,17 +393,17 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 
 | Symptom | Cause |
 | --- | --- |
-| `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`~/Library/Application Support/aether/config.json` on macOS, `%AppData%\aether\config.json` on Windows) on this machine yet. |
-| `no Aether member for this key` | The server already has an admin, so you are not bootstrapping. Get an invite: [teams.md](teams.md). |
-| `unable to authenticate` followed by `the server wants an SSH key; tried:` | The lines under `tried:` say what happened to the ssh-agent and each default key file, and `server said:` repeats the server's reason. A `passphrase protected` key needs `ssh-add <key>`; a key at another path needs `aether link <addr> --key <private-key>`; a saved `--key` the server no longer knows goes away with `aether link <addr> --key auto`. On Windows, check `Get-Service ssh-agent`. |
-| `no Aether member for this key` under `server said:` | Your key reached the server but is not registered. The server already has an admin, so get an invite: [teams.md](teams.md). |
-| `is a public key; --key takes the private key` | You passed the `.pub` file. Drop the suffix. |
+| `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`%AppData%\aether\config.json` on Windows) on this machine yet. |
+| `no Aether member for this key` | The server already has an admin, so you are not the first member. Get an invite: [teams.md](teams.md). |
+| `unable to authenticate, attempted methods [none]` | The CLI had no key to offer: none at `~/.ssh/id_ed25519` and no ssh-agent. The same error names the key when one was found but could not be used - read the rest of the line. On Windows, check `Get-Service ssh-agent` and look for the key at `%USERPROFILE%\.ssh\id_ed25519`. |
+| `<path> is passphrase-protected; add it to ssh-agent (ssh-add <path>) or pass --key <unencrypted key>` | The key exists but the CLI cannot decrypt it; it does not prompt for a passphrase. Run `ssh-add <path>`, or point at an unencrypted key with `aether link <addr> --key <path>`. |
+| `parse ssh key <path>` | The file at that path is not an SSH private key (a public key, or a truncated file). Pass the private key with `aether link <addr> --key <path>`. |
+| `link --key: stat <path>` / `ssh key <path>: open <path>: no such file` | The key path you chose is not there. A chosen key is never skipped in favor of the agent, so re-link with the right `--key`. Re-linking without `--key` keeps the saved one; to go back to `~/.ssh/id_ed25519`, delete the `key` line from `~/.config/aether/config.json`. |
 | `host key mismatch` / `REMOTE HOST IDENTIFICATION HAS CHANGED` on `aether link` | The server was reinstalled and generated a new host key, but your `known_hosts` still trusts the old one. Clear it: `ssh-keygen -R '[<server-host>]:2222'`. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
 | `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |
-| `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether agent add`, or select one explicitly for bootstrap and tools commands. |
-| `workspace tools verify` reports failure | The active snapshot does not contain the requested executable, or it is not executable. Bootstrap again with `--command <executable>`. |
+| `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether link` or another command that accepts a workspace selector. Agent setup is member-scoped. |
 | Run reaches `failed` immediately | The agent started and exited. `aether timeline --run <run-id>` shows the exit code; `aether attach` only works while a run is alive. |
 | `self-update is not supported on Windows` | Expected. Re-download the release binary: [install.md](install.md#manual-install). |
 
@@ -369,8 +420,8 @@ go or the next `aether link` fails.
 
 - [install.md](install.md) - systemd, upgrades, data layout
 - [environments.md](environments.md) - agent-built workspace images, verification, rollback
-- [bootstrap.md](bootstrap.md) - bootstrap shells, snapshots, and recovery
+- [environment-home.md](environment-home.md) - member home, installed agents, and migration
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
 - [teams.md](teams.md) - joining, roles, workspaces
-- [harnesses.md](harnesses.md) - login, profile sync, tool snapshots, and launch definitions
+- [harnesses.md](harnesses.md) - login, profile sync, and launch definitions
 - [security.md](security.md) - what the container boundary does and does not do

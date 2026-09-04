@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 
@@ -55,9 +56,22 @@ func profilePush(args []string) error {
 	if len(allow) > 0 && *workspace == "" {
 		return fmt.Errorf("profile push: --allow-secret requires --workspace")
 	}
-	files, err := cliprofile.Discover(*agent, allow)
+	files, skipped, err := cliprofile.DiscoverFiles(context.Background(), *agent, allow)
 	if err != nil {
 		return err
+	}
+	// A file left out for its size would otherwise land on the server, so
+	// say which ones did not and why, before the snapshot line.
+	for _, s := range skipped {
+		fmt.Printf("skipped %s: %s\n", s.Path, s.Detail)
+		// docs/harnesses.md promises --allow-secret still carries a file
+		// the plugin rule dropped. The path is long and carries a plugin
+		// version, so print the command rather than leave it to be
+		// retyped.
+		if s.Reason == cliprofile.ExcludeVendoredSecret {
+			fmt.Printf("  to send it anyway: aether profile push --agent %s --allow-secret %s --workspace <workspace>\n",
+				*agent, s.Path)
+		}
 	}
 	return withControl(func(c *protocol.Client) error {
 		snap, err := cliprofile.Push(c, *agent, files, allow, *workspace)

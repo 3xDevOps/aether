@@ -27,16 +27,19 @@ end-to-end suite: every scenario drives the fully wired server
 (`server.New`) over real SSH, real git transport, and - when the daemon
 is reachable - real Docker containers. `pickRuntime` falls back to the
 in-process `e2eRuntime` (`e2eruntime_test.go`) on hosts without Docker;
-the coordination scenarios force it because their agents must reach
-container surfaces from the test process. Scenarios:
+the two host-half coordination scenarios force it because their agents must
+reach container surfaces from the test process, and the container
+coordination scenario skips without a daemon rather than falling back.
+Scenarios:
 
 | Test | Scenario |
 | --- | --- |
 | `TestIntegrationEndToEnd` (`integration_test.go`) | Solo lifecycle, the acceptance gate: seed over git push -> launch -> attach -> detach -> reattach -> steer -> finish -> pull, with the bus traffic checked against the Wave 1 contract |
-| Gateway (`internal/localgw`) | The `aether gui` HTTP/WS surface, covered by unit tests against a stub backend rather than a server E2E: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror, steer, and shell channels (`ws_test.go`) |
-| `TestIntegrationMultiMember` (`multimember_integration_test.go`) | Three clients: tailnet bootstrap/pending/approve and invite-code key joins, WhoIs-down fallback with banner, remote administration, steering another member's run, presence roster, handoff, approval inbox, budget cap and override, agent crash -> `failed` + `wip:` commit |
-| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Profile sync and harness logins: a login in the setup shell persists into two runs, push -> next run sees it, mid-run push never touches a running agent, denylisted credential names refused from pushes (Docker only - it needs a real shell) |
+| Gateway (`internal/localgw`) | The `aether gui` HTTP/WS surface, covered by unit tests against a stub backend rather than a server E2E: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror and steer channels (`ws_test.go`) |
+| `TestIntegrationMultiMember` (`multimember_integration_test.go`) | Three clients: tailnet initial join and invite-code key joins, WhoIs-down fallback with banner, remote administration, steering another member's run, presence roster, handoff, approval inbox, budget cap and override, agent crash -> `failed` + `wip:` commit |
+| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Profile sync and harness logins: a login in the environment terminal persists into two runs, push -> next run sees it, mid-run push never touches a running agent, denylisted credential names refused from pushes (Docker only - it needs a real terminal) |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
+| `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: both binds realized and read-only, the staged binary executed as `/opt/aether/aether-server mcp` by a non-root agent, and a status/send/inbox round trip between two overlapping runs |
 | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootLostContainer` (`chaos_reboot_integration_test.go`) | The server SIGKILLed mid-run: supervision reattaches to a surviving container (steer and finalize both still work) or, when the container went with it, commits `wip:`, publishes the branch, marks the run interrupted and relaunches it. SQLite and git are read back after the kill |
 | `TestIntegrationChaosDiskPressure`, `TestIntegrationChaosStallUX` (`chaos_pressure_integration_test.go`) | Worktree TTL GC under load with the branches surviving, the gauge's three-way breakdown following the reclaim, new runs refused below the free-space floor, and a silent agent parking at needs-attention and coming back |
 
@@ -47,9 +50,8 @@ container surfaces from the test process. Scenarios:
 SIGKILLed, and the whole point of that row is that nothing on the shutdown
 path runs: the next boot only sees what SQLite and git had already made
 durable. The child binary is built once per test binary, the store is seeded
-directly before the first boot (a child has no bootstrap path a test can
-drive), and it binds a reserved loopback port so a restart can claim the
-same address. It always builds its own Docker runtime, so those two
+before startup, and it binds a reserved loopback port so a restart can claim
+the same address. It always builds its own Docker runtime, so those two
 scenarios skip without a reachable daemon rather than falling back, and they
 address containers by the name the runtime derives from the run ID.
 
@@ -73,22 +75,41 @@ comes from `AETHER_FAKE_AGENT` at launch (typically
 repo and dispatching on the task). On the fallback runtime the same
 behaviours are registered per task key via `e2eRuntime.script`.
 
-Client tests that read or write the linked-server config or look for keys
-under `~/.ssh` call `testhome.Isolate` (`internal/testhome`), which points
-every platform's home and config lookup at a scratch directory and fails
-the test if `os.UserConfigDir` still resolves outside it. It also sets
-`AETHER_CONFIG_DIR`, which `cli.Path` reads ahead of every platform lookup,
-so the file a test writes through `cli.Save` never depends on which
-variable its platform consults. Setting `XDG_CONFIG_HOME` alone is not
-enough: macOS ignores it and a test would overwrite the developer's real
-`config.json`; `TestLinkRepoLeavesRealConfigAlone` guards that path. The
-same package writes throwaway SSH keys for the auth tests.
+Three `server.Config` fields exist for this suite: `WhoIs` overrides
+tailnet identity resolution so join and fallback scenarios need no real
+tailnet, `Harnesses` overrides registry argv templates so a registered
+harness (with its real profile root and credential mounts) can run a
+scripted agent - the first two double as deployment wiring - and
+`ServerBinary` names the binary staged as the in-container MCP bridge.
 
-Two `server.Config` fields exist for this suite (and double as
-deployment wiring): `WhoIs` overrides tailnet identity resolution so
-join and fallback scenarios need no real tailnet, and `Harnesses`
-overrides registry argv templates so a registered harness (with its real
-profile root and credential mounts) can run a scripted agent.
+### The container coordination scenario
+
+`coordination_container_integration_test.go` proves the half of
+docs/mcp-bridge.md that an assertion on a container spec cannot: that the
+mounts a run is given are real, and that the agent holding them can use
+them. Two things make it possible.
+
+The staged bridge has to be a binary that has the `mcp` subcommand, which
+under `go test` `/proc/self/exe` is not. So the scenario points
+`ServerBinary` at an `aether-server` it builds - the same one the chaos
+scenarios run as a child process.
+
+The agent has to be launched by the shipped `claude` profile, because a
+`Harnesses` argv override is respected verbatim and takes the MCP
+registration with it. So the scenario builds a run image whose `claude`
+executable is the fixture agent in `internal/server/testdata/coordagent`,
+running as a non-root user. The fixture knows no Aether paths: it takes the
+coordination directory from the `--mcp-config` it was handed and the bridge
+command from that config, the way a real harness would. What it found goes
+on its terminal, where the test reads it over a real attach: the modes,
+both binds read-only in the kernel's own mount table, a write the
+coordination directory refuses with EROFS, and every tool result. The
+daemon's own view of the two binds is checked beside it.
+
+The container user is the test process's own uid:gid unless that is root:
+the scheduler chowns the run checkout and the member home to the container
+user before creating the container, and an unprivileged test process can
+only chown to itself.
 
 ## Failure-table coverage
 
@@ -118,3 +139,16 @@ layer that owns them.
 - Keep the suite fast enough to gate merges: agents are scripted and
   deterministic, containers are seconds-lived, and every test sweeps and
   checks for leaked containers via its `aether.test` label.
+- Never let a test depend on real time passing. A cache or a deadline takes
+  an injectable clock the test winds by hand; a sleep or a tiny TTL is a
+  test that fails on whichever platform has the coarsest timer, and
+  Windows' is coarse enough that two reads of the clock can return the same
+  instant.
+- Behaviour that differs by platform gets a test per platform, not one that
+  skips. The client packages run on a Windows runner too
+  (`.github/workflows/ci.yml`), so a test whose subject refuses on Windows -
+  the self-update swap, say - goes in a `//go:build !windows` file with a
+  `_windows_test.go` counterpart asserting the refusal. Assert the status
+  before the body: an error envelope decodes into a result struct just as
+  happily, and a test that reads only the body can pass on the platform
+  that refused.

@@ -1,6 +1,7 @@
 package localops
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -84,15 +85,121 @@ func TestDesktopLayoutHonorsXDGDataHome(t *testing.T) {
 	}
 }
 
-func TestDesktopLayoutDarwinIsTheBundle(t *testing.T) {
+func TestDesktopLayoutDarwinPrefersSystemApplications(t *testing.T) {
+	system := t.TempDir()
+	setMacSystemApplications(t, system)
+	app, err := desktopLayout("darwin", "/Users/u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(system, "Aether.app")
+	if app.App != want || app.Launcher != want || app.Superseded != filepath.Join("/Users/u", "Applications", "Aether.app") {
+		t.Fatalf("layout = %+v, want %s", app, want)
+	}
+	if entries, _ := os.ReadDir(system); len(entries) != 0 {
+		t.Fatalf("probe left %v behind", entries)
+	}
+}
+
+func TestDesktopLayoutDarwinFallsBackToHomeApplications(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory modes are not enforced on windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("root writes anywhere")
+	}
+	system := t.TempDir()
+	if err := os.Chmod(system, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(system, 0o755) })
+	setMacSystemApplications(t, system)
 	app, err := desktopLayout("darwin", "/Users/u")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := filepath.Join("/Users/u", "Applications", "Aether.app")
-	if app.App != want || app.Launcher != want {
+	if app.App != want || app.Launcher != want || app.Superseded != filepath.Join(system, "Aether.app") {
 		t.Fatalf("layout = %+v, want %s", app, want)
 	}
+}
+
+// builtBundle is a minimal .app for InstallDesktop to copy.
+func builtBundle(t *testing.T) string {
+	t.Helper()
+	built := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(built, "Contents", "MacOS"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(built, "Contents", "MacOS", "Aether"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return built
+}
+
+func TestInstallDesktopDarwinReplacesTheHomeCopy(t *testing.T) {
+	system := t.TempDir()
+	setMacSystemApplications(t, system)
+	home := t.TempDir()
+	stale := filepath.Join(home, "Applications", "Aether.app", "Contents", "old")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	app, err := InstallDesktop("darwin", home, builtBundle(t), nil)
+	if err != nil {
+		t.Fatalf("InstallDesktop: %v", err)
+	}
+	if want := filepath.Join(system, "Aether.app"); app.App != want {
+		t.Fatalf("App = %q, want %q", app.App, want)
+	}
+	if _, statErr := os.Stat(filepath.Join(app.App, "Contents", "MacOS", "Aether")); statErr != nil {
+		t.Fatal(statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "Applications", "Aether.app")); !os.IsNotExist(statErr) {
+		t.Fatalf("the ~/Applications copy survived: %v", statErr)
+	}
+}
+
+func TestInstallDesktopDarwinReportsAnUnremovableSystemCopy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory modes are not enforced on windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("root writes anywhere")
+	}
+	system := t.TempDir()
+	stale := filepath.Join(system, "Aether.app")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(system, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(system, 0o755) })
+	setMacSystemApplications(t, system)
+	home := t.TempDir()
+
+	_, err := InstallDesktop("darwin", home, builtBundle(t), nil)
+	if err == nil {
+		t.Fatal("a surviving second Aether.app was not reported")
+	}
+	for _, want := range []string{stale, "sudo rm -rf"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+	// The install itself went through: the fallback bundle is complete.
+	if _, statErr := os.Stat(filepath.Join(home, "Applications", "Aether.app", "Contents", "MacOS", "Aether")); statErr != nil {
+		t.Fatal(statErr)
+	}
+}
+
+func setMacSystemApplications(t *testing.T, dir string) {
+	t.Helper()
+	previous := macSystemApplications
+	macSystemApplications = dir
+	t.Cleanup(func() { macSystemApplications = previous })
 }
 
 func TestDesktopLayoutRejectsUnknownOS(t *testing.T) {
@@ -171,5 +278,52 @@ func TestWriteTreeOverwritesExistingSources(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "build", "icons", "16.png")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStampShellVersion(t *testing.T) {
+	manifest := `{"name":"aether-desktop","version":"0.1.0","main":"main.js"}`
+	read := func(t *testing.T, dir string) map[string]any {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(dir, "package.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("parse stamped manifest: %v", err)
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name    string
+		cli     string
+		version string
+	}{
+		{"release tag", "v1.2.3", "1.2.3"},
+		{"prerelease tag", "v1.2.3-rc1", "1.2.3-rc1"},
+		// A dev build has no version electron-builder would accept, so the
+		// manifest keeps its own 0.1.0. The dashboard then reads a shell
+		// stamped 0.1.0 against whatever CLI serves it, which is what a
+		// shell built by a dev CLI is: stale as soon as a release runs it.
+		{"dev build", "dev", "0.1.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := stampShellVersion(dir, tc.cli); err != nil {
+				t.Fatalf("stampShellVersion: %v", err)
+			}
+			got := read(t, dir)
+			if got["version"] != tc.version {
+				t.Fatalf("version = %v, want %s", got["version"], tc.version)
+			}
+			if got["main"] != "main.js" {
+				t.Fatalf("main = %v, want main.js (other fields must survive)", got["main"])
+			}
+		})
 	}
 }

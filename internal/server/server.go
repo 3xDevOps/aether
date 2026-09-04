@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,16 +17,19 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/adapter"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/gitengine"
+	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/toolenv"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -101,10 +105,22 @@ type Config struct {
 	// (the local tailscaled socket when present). The E2E suite stubs it
 	// so join and fallback scenarios need no real tailnet.
 	WhoIs sshd.WhoIsResolver
+	// SelfUpdate overrides the server self-update service's release feed
+	// and restart mechanics; the zero value is the pinned GitHub releases
+	// and a real re-exec of this binary. Store and Bus are the server's
+	// own and are ignored here. The E2E suite sets it so an update runs
+	// against a stub release server and never replaces a real binary.
+	SelfUpdate serverupdate.Config
 	// Harnesses are server-owned, administrator-supplied launch definitions.
 	// They are validated before the scheduler starts; ordinary workspace
 	// members have no request field that can alter them.
 	Harnesses map[string]scheduler.HarnessSpec
+	// ServerBinary overrides the binary staged into run containers to
+	// serve the MCP bridge; empty stages this running server
+	// (scheduler.DefaultServerBinary). The E2E suite points it at a
+	// binary it built, because under `go test` /proc/self/exe is the test
+	// binary and has no mcp subcommand.
+	ServerBinary string
 
 	// The failure-handling tuning knobs, all passed through to the
 	// scheduler and all documented in docs/failure-handling.md. Zero means
@@ -138,6 +154,18 @@ type Server struct {
 
 	closeOnce sync.Once
 	closeErr  error
+}
+
+type runTitleSetter interface {
+	SetRunTitle(domain.RunID, string)
+}
+
+func forwardRunTitle(setter runTitleSetter, key ptyhost.SessionKey, title string) {
+	run, ok := key.Run()
+	if !ok || setter == nil {
+		return
+	}
+	setter.SetRunTitle(run, title)
 }
 
 // New constructs every component from cfg, fanning the data directory out
@@ -189,44 +217,77 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		ReposDir:     filepath.Join(cfg.DataDir, "repos"),
 		CheckoutsDir: filepath.Join(cfg.DataDir, "checkouts"),
 		Bus:          s.bus,
+		OnBranchPublished: func(run domain.RunID, commit string, at time.Time) {
+			if s.sched == nil {
+				return
+			}
+			if recordErr := s.sched.RecordCommit(context.Background(), run, commit, at); recordErr != nil {
+				slog.Warn("server: record run commit failed", "run", run, "error", recordErr)
+			}
+		},
 	}); err != nil {
 		return nil, err
 	}
 	if s.pty, err = ptyhost.New(ptyhost.Config{
 		TranscriptDir: filepath.Join(cfg.DataDir, "transcripts"),
 		Gate:          sshd.NewWriteGate(s.db),
+		OnTitle: func(key ptyhost.SessionKey, title string) {
+			forwardRunTitle(s.sched, key, title)
+		},
 	}); err != nil {
 		return nil, err
 	}
-	profDir := filepath.Join(cfg.DataDir, "profiles")
-	prof, perr := profile.New(s.db, profDir)
+	prof, perr := profile.New(s.db)
 	if perr != nil {
 		return nil, perr
 	}
-	tools, terr := toolenv.NewManager(filepath.Join(cfg.DataDir, "toolenv"), s.db)
-	if terr != nil {
-		return nil, terr
+	homesRoot := filepath.Join(cfg.DataDir, "homes")
+	homes, herr := memberhome.New(homesRoot)
+	if herr != nil {
+		return nil, fmt.Errorf("server: create member homes: %w", herr)
+	}
+	names := make([]string, 0, len(harness.Profiles()))
+	for _, p := range harness.Profiles() {
+		names = append(names, p.Name)
+	}
+	members, merr := s.db.ListMembers(ctx)
+	if merr != nil {
+		return nil, fmt.Errorf("server: list members for home migration: %w", merr)
+	}
+	for _, member := range members {
+		definitions, derr := s.db.ListHarnessDefinitions(ctx, member.ID)
+		if derr != nil {
+			return nil, fmt.Errorf("server: list harness definitions for member %q: %w", member.ID, derr)
+		}
+		for _, definition := range definitions {
+			names = append(names, definition.Name)
+		}
+	}
+	if merr := memberhome.MigrateLegacyHomes(homesRoot, names); merr != nil {
+		return nil, fmt.Errorf("server: migrate legacy homes: %w", merr)
+	}
+	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
+		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
 	if s.sched, err = scheduler.New(scheduler.Config{
-		Store:        s.db,
-		Runtime:      s.rt,
-		Bus:          s.bus,
-		Git:          lazyGit{s.git},
-		PTY:          s.pty,
-		StateDir:     filepath.Join(cfg.DataDir, "scheduler"),
-		HomesDir:     filepath.Join(cfg.DataDir, "homes"),
-		ReposDir:     filepath.Join(cfg.DataDir, "repos"),
-		ProfilesDir:  profDir,
-		Profiles:     prof,
-		Toolenv:      tools,
-		EnvEditDir:   filepath.Join(cfg.DataDir, "env-edits"),
-		NeutralImage: cfg.NeutralImage,
-		Harnesses:    cfg.Harnesses,
-
+		Store:          s.db,
+		Runtime:        s.rt,
+		Bus:            s.bus,
+		Git:            lazyGit{s.git},
+		PTY:            s.pty,
+		StateDir:       filepath.Join(cfg.DataDir, "scheduler"),
+		Homes:          homes,
+		ReposDir:       filepath.Join(cfg.DataDir, "repos"),
+		Profiles:       prof,
+		EnvEditDir:     filepath.Join(cfg.DataDir, "env-edits"),
+		NeutralImage:   cfg.NeutralImage,
+		StandardImage:  cfg.StandardImage,
+		Harnesses:      cfg.Harnesses,
 		StallThreshold: cfg.StallThreshold,
 		PollInterval:   cfg.PollInterval,
 		CheckoutTTL:    cfg.CheckoutTTL,
 		MinFreeBytes:   cfg.MinFreeDiskBytes,
+		ServerBinary:   cfg.ServerBinary,
 	}); err != nil {
 		return nil, err
 	}
@@ -251,7 +312,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Git:               lazyGit{s.git},
 		PTY:               s.pty,
 		Runs:              s.sched,
-		Toolenv:           tools,
+		Homes:             homes,
 		WhoIs:             whois,
 		TailnetAutoJoin:   cfg.TailnetAutoJoin,
 		TailnetRequireKey: cfg.TailnetRequireKey,

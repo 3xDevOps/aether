@@ -1,10 +1,10 @@
 # Workspace environments
 
-Every workspace runs its agents inside one image. This guide covers where
-that image comes from: the prebuilt options, the coding-agent flows that
-build one for you, verification, rollback, and changing the environment
-later. Tool snapshots and login state are separate and live in
-[bootstrap.md](bootstrap.md).
+Every workspace runs its agents inside one image. This guide covers where that
+image comes from: the prebuilt options, the coding-agent flows that build one
+for you, verification, rollback, and changing the environment later. Each
+member's home, login state, and installed user-local executables persist
+separately in [environment-home.md](environment-home.md).
 
 ## Choosing an environment at creation
 
@@ -51,6 +51,15 @@ The agent runs headless with a fixed prompt and must produce exactly a
 Dockerfile lines that install it, and a check command. Raw agent output
 streams behind a collapsed "View process" expander. Malformed output gets
 one automatic retry; scans time out after ten minutes.
+
+The same headless machinery runs one more scan, in the wizard's Agents
+step: a `profile` scan reads what each coding agent on your machine is
+configured with - paths and counts only, never file contents and never
+anything the credential denylist or the secret scanner flagged - and
+recommends which of it is worth importing into Aether, one sentence of
+reasoning per harness. The recommendation is a checklist you edit and
+approve; importing itself is profile sync, described in
+[harnesses.md](harnesses.md).
 
 You then review the result as a plain list: remove items, ask for changes
 in your own words (the agent re-runs with your note), or approve. Approval

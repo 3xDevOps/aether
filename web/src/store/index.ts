@@ -4,7 +4,9 @@ import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
 import { createCostSlice, type CostSlice } from '@/store/cost'
 import { createDiffSlice, type DiffSlice } from '@/store/diff'
+import { createFilesSlice, type FilesSlice } from '@/store/files'
 import { createEnvironmentSlice, type EnvironmentSlice } from '@/store/environment'
+import { createEnvTerminalSlice, type EnvTerminalSlice } from '@/store/env-terminal'
 import { createLocalSlice, type LocalSlice } from '@/store/local'
 import { createMembersSlice, type MembersSlice } from '@/store/members'
 import { createPaletteSlice, type PaletteSlice } from '@/store/palette'
@@ -12,7 +14,6 @@ import { createPresenceSlice, type PresenceSlice } from '@/store/presence'
 import { createRunsSlice, type RunsSlice } from '@/store/runs'
 import { createServerSlice, type ServerSlice } from '@/store/server'
 import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
-import { createShellSlice, type ShellSlice } from '@/store/shell'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createUiSlice, type UiSlice } from '@/store/ui'
@@ -22,14 +23,15 @@ export type RootState = ServerSlice &
   RunsSlice &
   MembersSlice &
   TerminalSlice &
+  EnvTerminalSlice &
   BoardSlice &
   PaletteSlice &
   ApprovalsSlice &
   PresenceSlice &
   CostSlice &
   TimelineSlice &
+  FilesSlice &
   DiffSlice &
-  ShellSlice &
   LocalSlice &
   EnvironmentSlice &
   UiSlice
@@ -46,6 +48,7 @@ export function createRootStore() {
         ...createWorkspacesSlice(...a),
         ...createRunsSlice(...a),
         ...createMembersSlice(...a),
+        ...createEnvTerminalSlice(...a),
         ...createTerminalSlice(...a),
         ...createBoardSlice(...a),
         ...createPaletteSlice(...a),
@@ -54,7 +57,7 @@ export function createRootStore() {
         ...createCostSlice(...a),
         ...createTimelineSlice(...a),
         ...createDiffSlice(...a),
-        ...createShellSlice(...a),
+        ...createFilesSlice(...a),
         ...createLocalSlice(...a),
         ...createEnvironmentSlice(...a),
         ...createUiSlice(...a),
@@ -66,8 +69,14 @@ export function createRootStore() {
           theme: s.theme,
           sidebarWidth: s.sidebarWidth,
           sidebarCollapsed: s.sidebarCollapsed,
+          terminalDockHeight: s.terminalDockHeight,
+          runDockHeight: s.runDockHeight,
           activeWorkspace: s.activeWorkspace,
           groupBy: s.groupBy,
+          dismissedUpdates: s.dismissedUpdates,
+          onboarded: s.onboarded,
+          onboardingStep: s.onboardingStep,
+          onboardingWorkspace: s.onboardingWorkspace,
         }),
       },
     ),

@@ -1,9 +1,9 @@
-// The /ws/attach/{run} socket: one attach per mounted terminal, jittered
-// reconnect, read-only mirror unless the caller asks to steer. The contract is
-// docs/local-gateway.md - one text header frame, one text ack, terminal output
-// as binary frames, input and resizes as text control frames.
+// Terminal sockets can be /ws/attach/<run>, /ws/attach/<run>?shell=<tab>, or
+// /ws/terminal?tab=<name>. One attach per mounted terminal, with jittered
+// reconnect and a read-only mirror unless the caller asks to steer. The
+// contract is docs/local-gateway.md - one text header frame, one text ack,
+// terminal output as binary frames, input and resizes as text control frames.
 
-import { api } from '@/lib/api'
 import { type ConnectionState, backoff } from '@/lib/stream'
 
 /** JSON-RPC "permission denied": a write attach without the steer capability. */
@@ -38,7 +38,7 @@ interface AttachAck {
 
 export interface AttachHandlers {
   /** Terminal output, in arrival order. */
-  onData: (chunk: Uint8Array) => void
+  onData?: (chunk: Uint8Array) => void
   /**
    * A fresh attach was accepted. The server replays the recent transcript
    * straight after, so the caller clears what it has rather than appending a
@@ -50,6 +50,8 @@ export interface AttachHandlers {
   onRefused: (message: string) => void
   /** The member cannot steer this run. The attach continues as a mirror. */
   onWriteDenied: () => void
+  /** A terminal process exited and the gateway closed the socket normally. */
+  onExit?: () => void
   /** Geometry to ask for, read at every connect. */
   geometry: () => { cols: number; rows: number }
   /** Whether the caller wants to steer, read at every connect. */
@@ -65,7 +67,8 @@ export interface Attachment {
   close: () => void
 }
 
-export function connectAttach(runID: string, h: AttachHandlers): Attachment {
+/** Connect to a terminal socket, re-reading its URL before every reconnect. */
+export function connectAttach(socketURL: () => string, h: AttachHandlers): Attachment {
   let socket: WebSocket | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
@@ -82,7 +85,7 @@ export function connectAttach(runID: string, h: AttachHandlers): Attachment {
     h.onState(attempt === 0 ? 'connecting' : 'reconnecting')
     let ws: WebSocket
     try {
-      ws = new WebSocket(api.attachSocket(runID))
+      ws = new WebSocket(socketURL())
     } catch {
       retry()
       return
@@ -104,7 +107,7 @@ export function connectAttach(runID: string, h: AttachHandlers): Attachment {
     }
     ws.onmessage = (msg) => {
       if (typeof msg.data !== 'string') {
-        h.onData(new Uint8Array(msg.data as ArrayBuffer))
+        h.onData?.(new Uint8Array(msg.data as ArrayBuffer))
         return
       }
       let ack: AttachAck
@@ -135,9 +138,17 @@ export function connectAttach(runID: string, h: AttachHandlers): Attachment {
       h.onRefused(ack.error ?? 'attach refused')
       h.onState('offline')
     }
-    ws.onerror = () => ws.close()
     ws.onclose = (ev) => {
       socket = null
+      // 1000 is the terminal process ending. A caller that owns tab
+      // lifecycle (the shell dock) takes over; everyone else reconnects
+      // and gets the server's refusal message, as before.
+      if (ev.code === 1000 && h.onExit) {
+        refused = true
+        h.onExit()
+        h.onState('offline')
+        return
+      }
       // 1008 with no refusal frame is the gateway's authorization watch.
       // After a successful attach the close reason names which gate fell:
       // a lost steer capability just downgrades to a mirror, while a dead

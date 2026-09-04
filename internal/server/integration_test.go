@@ -281,41 +281,63 @@ func slicesContains(states []events.PresenceState, want events.PresenceState) bo
 }
 
 // pickRuntime prefers the real Docker daemon, falling back to the
-// in-process e2eRuntime when it is unreachable. On the real path it also
-// returns a leak check asserting no container labeled for this test
-// survives the run, and sweeps orphans a previously interrupted test
-// process may have left behind.
+// in-process e2eRuntime when it is unreachable.
 func pickRuntime(t *testing.T) (runtime.Runtime, string, func(*testing.T)) {
 	t.Helper()
+	if docker, verify, ok := dockerRuntime(t); ok {
+		return docker, "busybox", verify
+	}
+	t.Log("Docker daemon unreachable; using in-process e2e runtime")
+	return newE2ERuntime(), "e2e/fake", func(*testing.T) {}
+}
+
+// dockerRuntime builds a Docker runtime labeled for this test. It also
+// returns a leak check asserting no container labeled for this test
+// survives the run, and sweeps orphans a previously interrupted test
+// process may have left behind. ok is false when the daemon is
+// unreachable, which is what lets a scenario fall back or skip.
+func dockerRuntime(t *testing.T) (rt *runtime.Docker, verifyNoLeaks func(*testing.T), ok bool) {
+	t.Helper()
+	if !dockerReachable(t) {
+		return nil, nil, false
+	}
 	docker, err := runtime.NewDocker(
 		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
 		runtime.WithNetworkMode("none"),
 	)
-	if err == nil {
-		probeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if perr := docker.Destroy(probeCtx, "aether-e2e-daemon-probe"); perr == nil {
-			t.Cleanup(func() { _ = docker.Close() })
-			t.Log("using real Docker runtime")
-			cli := newDockerCLI(t)
-			label := "aether.test=" + t.Name()
-			// A killed test process leaves nothing alive to Destroy its
-			// container and the temp data dir defeats reboot recovery, so
-			// self-heal any leak from a prior interrupted invocation.
-			removeLabeledContainers(t, cli, label)
-			t.Cleanup(func() { removeLabeledContainers(t, cli, label) })
-			verify := func(t *testing.T) {
-				t.Helper()
-				if leaked := labeledContainers(t, cli, label); len(leaked) > 0 {
-					t.Errorf("containers leaked after clean shutdown: %v", leaked)
-				}
-			}
-			return docker, "busybox", verify
-		}
-		_ = docker.Close()
+	if err != nil {
+		return nil, nil, false
 	}
-	t.Log("Docker daemon unreachable; using in-process e2e runtime")
-	return newE2ERuntime(), "e2e/fake", func(*testing.T) {}
+	t.Cleanup(func() { _ = docker.Close() })
+	t.Log("using real Docker runtime")
+	cli := newDockerCLI(t)
+	label := "aether.test=" + t.Name()
+	// A killed test process leaves nothing alive to Destroy its container
+	// and the temp data dir defeats reboot recovery, so self-heal any leak
+	// from a prior interrupted invocation.
+	removeLabeledContainers(t, cli, label)
+	t.Cleanup(func() { removeLabeledContainers(t, cli, label) })
+	return docker, func(t *testing.T) {
+		t.Helper()
+		if leaked := labeledContainers(t, cli, label); len(leaked) > 0 {
+			t.Errorf("containers leaked after clean shutdown: %v", leaked)
+		}
+	}, true
+}
+
+// dockerReachable probes the daemon and registers no cleanup, so a caller
+// can decide to skip - or to build something whose own cleanup must outlive
+// the runtime's - before anything with a cleanup exists.
+func dockerReachable(t *testing.T) bool {
+	t.Helper()
+	docker, err := runtime.NewDocker()
+	if err != nil {
+		return false
+	}
+	defer func() { _ = docker.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return docker.Destroy(ctx, "aether-e2e-daemon-probe") == nil
 }
 
 func newDockerCLI(t *testing.T) *client.Client {

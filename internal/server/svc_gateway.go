@@ -12,6 +12,7 @@ func init() {
 	registerService("gateway", func(d Deps) (Service, error) {
 		if d.Git != nil {
 			d.SSH.Services.Patch = d.Git
+			d.SSH.Services.Files = d.Git
 		}
 		if d.DataDir != "" {
 			d.SSH.Services.Disk = disk.NewCache(d.DataDir, 0)

@@ -199,6 +199,22 @@ func (c *Conn) AttachStream(req protocol.AttachRequest) (*TerminalStream, protoc
 	return &TerminalStream{bufferedStream: out}, ack, nil
 }
 
+// TerminalStream opens the member's persistent terminal subsystem and
+// returns its acknowledged PTY stream. The requested geometry is sent as an
+// SSH pty-req before the JSON header, matching AttachStream.
+func (c *Conn) TerminalStream(req protocol.TerminalRequest) (*TerminalStream, protocol.TerminalResponse, error) {
+	var ack protocol.TerminalResponse
+	out, err := c.openStream(protocol.SubsystemTerminal, &ptyGeometry{cols: req.Cols, rows: req.Rows}, req, "terminal", &ack)
+	if err != nil {
+		return nil, ack, err
+	}
+	if !ack.OK {
+		_ = out.Close()
+		return nil, ack, fmt.Errorf("cli: terminal: %s", ack.Error)
+	}
+	return &TerminalStream{bufferedStream: out}, ack, nil
+}
+
 // Attach opens the attach subsystem for runID with the given geometry and
 // returns the raw PTY stream after a successful ack.
 func (c *Conn) Attach(runID string, cols, rows uint) (io.ReadWriteCloser, error) {
@@ -250,39 +266,6 @@ func (c *Conn) Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error)
 		return nil, fmt.Errorf("cli: subscribe: %s", perr.Message)
 	}
 	return out, err
-}
-
-// WorkspaceShellStream opens the unified workspace-shell subsystem for req
-// and returns the resizable terminal stream alongside the server's ack. A
-// refused ack is returned with the error so callers can forward its code.
-func (c *Conn) WorkspaceShellStream(req protocol.WorkspaceShellRequest) (*TerminalStream, protocol.WorkspaceShellResponse, error) {
-	var ack protocol.WorkspaceShellResponse
-	out, err := c.openStream(protocol.SubsystemWorkspaceShell, &ptyGeometry{cols: req.Cols, rows: req.Rows}, req, "workspace shell", &ack)
-	if err != nil {
-		return nil, ack, err
-	}
-	if !ack.OK {
-		_ = out.Close()
-		return nil, ack, workspaceShellAckError(ack)
-	}
-	return &TerminalStream{bufferedStream: out}, ack, nil
-}
-
-// WorkspaceShell opens the unified workspace-shell subsystem for bootstrap
-// tools or harness login and returns the raw terminal stream after its ack.
-func (c *Conn) WorkspaceShell(req protocol.WorkspaceShellRequest) (io.ReadWriteCloser, error) {
-	stream, _, err := c.WorkspaceShellStream(req)
-	if err != nil {
-		return nil, err
-	}
-	return stream, nil
-}
-
-func workspaceShellAckError(ack protocol.WorkspaceShellResponse) error {
-	if ack.Code != 0 {
-		return fmt.Errorf("cli: workspace shell: %s (code %d)", ack.Error, ack.Code)
-	}
-	return fmt.Errorf("cli: workspace shell: %s", ack.Error)
 }
 
 // bufferedStream keeps leftover bytes from the ack-line bufio.Reader so

@@ -8,11 +8,19 @@
 #
 # Flags (or the matching environment variables):
 #   --version <tag>   AETHER_VERSION      release tag; default: latest
-#   --bin-dir <dir>   AETHER_BIN_DIR      install directory; default: /usr/local/bin
+#   --bin-dir <dir>   AETHER_BIN_DIR      install directory; default: /usr/local/bin,
+#                                         or ~/.local/bin for the client role
 #   --client          AETHER_COMPONENTS=client   CLI only
 #   --server          AETHER_COMPONENTS=server   server only
+#   --role <role>     AETHER_ROLE         server | client | none
 #
 # The server binary is Linux-only by design. On macOS this installs the CLI.
+#
+# The script asks whether this machine is the server or a client. The answer
+# picks what is installed and where: a client gets the CLI alone in
+# ~/.local/bin, which the desktop app can replace on update without sudo. It
+# then finishes that role's setup: `aether-server setup` on a server,
+# `aether gui build` on a client. Pass --role none to skip both.
 
 set -eu
 
@@ -21,6 +29,25 @@ BASE_URL="${AETHER_BASE_URL:-https://github.com/${REPO}/releases/download}"
 VERSION="${AETHER_VERSION:-}"
 BIN_DIR="${AETHER_BIN_DIR:-}"
 COMPONENTS="${AETHER_COMPONENTS:-}"
+ROLE="${AETHER_ROLE:-}"
+
+# An explicit component choice - a flag, or AETHER_COMPONENTS - also answers
+# the role question. The platform default must not: macOS gets the client
+# binary automatically and is still asked, with client as the answer Enter
+# takes.
+COMPONENTS_CHOSEN=no
+[ -z "$COMPONENTS" ] || COMPONENTS_CHOSEN=yes
+
+# Test seams. install-test.sh points these at a fake terminal and a fake unit
+# file so the question and the post-setup check are covered without a pty or
+# a writable /etc. They are not documented options.
+TTY_PATH="${AETHER_TTY:-/dev/tty}"
+UNIT_PATH="${AETHER_UNIT_PATH:-/etc/systemd/system/aether-server.service}"
+SYSTEM_BIN_DIR="${AETHER_SYSTEM_BIN_DIR:-/usr/local/bin}"
+
+# Where the client CLI goes, and where the desktop launcher looks for it on
+# its own (internal/localops/desktop.go).
+USER_BIN_DIR="${HOME:-}/.local/bin"
 
 die() {
 	echo "aether install: $*" >&2
@@ -45,29 +72,53 @@ while [ $# -gt 0 ]; do
 		;;
 	--client)
 		COMPONENTS="client"
+		COMPONENTS_CHOSEN=yes
 		shift
 		;;
 	--server)
 		COMPONENTS="server"
+		COMPONENTS_CHOSEN=yes
 		shift
+		;;
+	--role)
+		[ $# -ge 2 ] || die "--role needs a value"
+		ROLE="$2"
+		shift 2
 		;;
 	-h | --help)
 		cat <<'EOF'
 usage: install.sh [--version <tag>] [--bin-dir <dir>] [--client | --server]
+                  [--role server|client|none]
 
   --version   release tag to install (default: the latest release)
-  --bin-dir   where to put the binaries (default: /usr/local/bin)
+  --bin-dir   where to put the binaries (default: /usr/local/bin, or
+              ~/.local/bin when the role is client)
   --client    install the aether CLI only
   --server    install the aether-server binary only (Linux)
+  --role      what this machine is, skipping the question:
+                server  both binaries into /usr/local/bin, then
+                        `aether-server setup`
+                client  the CLI alone into ~/.local/bin, then
+                        `aether gui build`
+                none    install into /usr/local/bin and stop
+
+Without --role the script asks, and answers the question itself when there is
+no terminal to ask on (any non-interactive run behaves like --role none).
 
 Environment equivalents: AETHER_VERSION, AETHER_BIN_DIR, AETHER_COMPONENTS
-(client|server|both), AETHER_REPO, AETHER_BASE_URL.
+(client|server|both), AETHER_ROLE, AETHER_REPO, AETHER_BASE_URL.
 EOF
 		exit 0
 		;;
 	*) die "unknown option $1" ;;
 	esac
 done
+
+ROLE="$(printf '%s' "$ROLE" | tr '[:upper:]' '[:lower:]')"
+case "$ROLE" in
+"" | server | client | none) ;;
+*) die "unknown role ${ROLE} (use server, client, or none)" ;;
+esac
 
 # --- fetch helpers -----------------------------------------------------
 
@@ -129,28 +180,138 @@ if [ -z "$VERSION" ]; then
 fi
 say "installing ${VERSION} for ${os}/${arch}"
 
+# --- which role does this machine play? --------------------------------
+
+# This script is normally piped into sh, so stdin is the script itself: a
+# prompt that read stdin would swallow the rest of the installer. Every
+# question and every interactive child therefore uses the terminal directly.
+# The open is attempted rather than tested with `-r`: /dev/tty exists and
+# looks readable inside a container or a cron job that has no controlling
+# terminal, and only opening it says so. It is opened once, on fd 3, because
+# reopening it per read would restart a non-terminal source from the top.
+have_tty=no
+if (exec 3<"$TTY_PATH") 2>/dev/null; then
+	exec 3<"$TTY_PATH"
+	have_tty=yes
+fi
+
+# Questions go to the terminal rather than stdout, so a run whose output is
+# redirected to a file still shows what it is waiting for.
+if [ "$have_tty" = yes ] && [ -c "$TTY_PATH" ] && (exec 4>"$TTY_PATH") 2>/dev/null; then
+	exec 4>"$TTY_PATH"
+else
+	exec 4>&1
+fi
+
+ask() { echo "$*" >&4; }
+
+# Runs a command with its stdin on the terminal - never on the script's own
+# stdin, which is the script itself when this arrives through a pipe.
+run_interactive() {
+	if [ "$have_tty" = yes ]; then
+		"$@" <&3
+	else
+		"$@" </dev/null
+	fi
+}
+
+# An explicit --client or --server, or AETHER_COMPONENTS, already answered
+# the question. The platform default did not, so macOS is still asked.
+if [ -z "$ROLE" ] && [ "$COMPONENTS_CHOSEN" = yes ]; then
+	case "$COMPONENTS" in
+	client) ROLE="client" ;;
+	server) ROLE="server" ;;
+	esac
+fi
+
+if [ -z "$ROLE" ] && [ "$have_tty" = no ]; then
+	# No terminal to ask on: CI, a provisioning script, a Dockerfile. Install
+	# and stop, exactly as this script has always done.
+	ROLE="none"
+fi
+
+if [ -z "$ROLE" ]; then
+	if [ "$COMPONENTS" != "client" ] && [ "$os" = "linux" ]; then
+		role_default="server"
+	else
+		role_default="client"
+	fi
+	ask ""
+	ask "What is this machine?"
+	ask "  server   agents run here, each in its own container on this box"
+	ask "  client   you work here and connect to a server"
+	ask "  none     just the binaries; set the rest up yourself"
+	while [ -z "$ROLE" ]; do
+		printf 'role [%s]: ' "$role_default" >&4
+		if IFS= read -r reply <&3; then :; else
+			# Terminal closed mid-question; take the default rather than spin.
+			reply=""
+			ask ""
+		fi
+		case "$(printf '%s' "$reply" | tr '[:upper:]' '[:lower:]')" in
+		"") ROLE="$role_default" ;;
+		s | server) ROLE="server" ;;
+		c | client) ROLE="client" ;;
+		n | none) ROLE="none" ;;
+		*) ask "  answer server, client, or none" ;;
+		esac
+	done
+fi
+
+# The platform default asked for both binaries before the role was known. A
+# client answer makes aether-server irrelevant, and worse than useless next to
+# the CLI: `aether update` treats it as proof this box is a server, so every
+# update pulls a server binary this machine never runs and the dashboard asks
+# for a `systemctl restart aether-server` that no unit backs. An explicit
+# --client, --server or AETHER_COMPONENTS still decides for itself.
+if [ "$ROLE" = client ] && [ "$COMPONENTS_CHOSEN" = no ]; then
+	COMPONENTS="client"
+fi
+
 # --- destination -------------------------------------------------------
 
+# A trailing slash would make the PATH check miss and the shadow check below
+# compare the install directory against itself.
+while [ "$BIN_DIR" != "/" ] && [ "${BIN_DIR%/}" != "$BIN_DIR" ]; do
+	BIN_DIR="${BIN_DIR%/}"
+done
+
 sudo=""
-if [ -z "$BIN_DIR" ]; then
-	BIN_DIR="/usr/local/bin"
+if [ -n "$BIN_DIR" ]; then
+	# An explicit --bin-dir or AETHER_BIN_DIR wins over the role.
+	if [ ! -w "$BIN_DIR" ] && [ -d "$BIN_DIR" ] && command -v sudo >/dev/null 2>&1; then
+		sudo="sudo"
+	fi
+elif [ "$ROLE" = client ]; then
+	# The desktop app's Update button replaces this binary from the gateway,
+	# which runs as you. A root-owned binary in /usr/local/bin turns that
+	# button into "run `sudo aether update`" on every default Linux install.
+	[ -n "${HOME:-}" ] || die "HOME is not set; pass --bin-dir <dir>"
+	BIN_DIR="$USER_BIN_DIR"
+else
+	BIN_DIR="$SYSTEM_BIN_DIR"
 	if [ ! -w "$BIN_DIR" ]; then
 		if command -v sudo >/dev/null 2>&1; then
 			sudo="sudo"
 		else
-			BIN_DIR="$HOME/.local/bin"
-			say "no write access to /usr/local/bin and no sudo; using ${BIN_DIR}"
+			[ -n "${HOME:-}" ] ||
+				die "no write access to ${SYSTEM_BIN_DIR}, no sudo, and HOME is not set; pass --bin-dir <dir>"
+			BIN_DIR="$USER_BIN_DIR"
+			say "no write access to ${SYSTEM_BIN_DIR} and no sudo; using ${BIN_DIR}"
 		fi
 	fi
-elif [ ! -w "$BIN_DIR" ] && [ -d "$BIN_DIR" ] && command -v sudo >/dev/null 2>&1; then
-	sudo="sudo"
 fi
 $sudo mkdir -p "$BIN_DIR" || die "cannot create ${BIN_DIR}"
 
 # --- download and verify -----------------------------------------------
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT INT TERM
+# A bare INT trap would clean up and then resume the script, which used to be
+# harmless because nothing followed the downloads. Now a cancelled setup or
+# desktop build would fall through to advice the user did not ask for.
+trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"; exit 130' INT
+trap 'rm -rf "$tmp"; exit 143' TERM
 
 fetch "${BASE_URL}/${VERSION}/checksums.txt" "$tmp/checksums.txt" ||
 	die "cannot download checksums.txt for ${VERSION}"
@@ -184,17 +345,148 @@ both)
 *) die "unknown component set ${COMPONENTS}" ;;
 esac
 
+# --- finish that role's setup ------------------------------------------
+
+setup_ran=no
+gui_built=no
+
+# `aether-server setup` asks its own questions and prints the systemd
+# activation line, so this script must not repeat any of that.
+run_server_setup() {
+	if [ ! -x "${BIN_DIR}/aether-server" ]; then
+		say "aether-server was not installed here, so there is nothing to set up"
+		return 1
+	fi
+	setup_sudo=""
+	if [ "$(id -u)" -ne 0 ]; then
+		if command -v sudo >/dev/null 2>&1; then
+			setup_sudo="sudo"
+		else
+			say "server setup must run as root and sudo is not installed"
+			return 1
+		fi
+	fi
+	echo
+	say "running aether-server setup"
+	run_interactive $setup_sudo "${BIN_DIR}/aether-server" setup || return 1
+	# Declining setup's summary is a clean exit that writes nothing, so the
+	# exit status alone cannot say whether there is a service to activate.
+	# The systemd unit can: setup rewrites it whenever it writes anything,
+	# and if one is already there the activation line is the right next
+	# command regardless. The config file is the wrong signal, because
+	# `aether-server config set` creates one without a unit.
+	[ -f "$UNIT_PATH" ]
+}
+
+# The CLI is for agents to steer Aether; people should get the desktop app.
+# electron-builder needs Node, and the CLI supplies it: a machine without
+# Node 22+ gets a private copy downloaded into the user cache directory, so
+# there is nothing to check for here.
+run_gui_build() {
+	if [ ! -x "${BIN_DIR}/aether" ]; then
+		say "the aether CLI was not installed here, so there is no app to build"
+		return 1
+	fi
+	echo
+	say "building the desktop app - this downloads Electron and takes a few minutes"
+	run_interactive "${BIN_DIR}/aether" gui build || return 1
+}
+
+case "$ROLE" in
+server) run_server_setup && setup_ran=yes || true ;;
+client) run_gui_build && gui_built=yes || true ;;
+esac
+
+# --- PATH, and an older CLI that would shadow this one -----------------
+
+# The one line that adds BIN_DIR to PATH for the login shell in $SHELL.
+# Nothing here edits a profile; the user runs it. SHELL is unset in
+# containers, cron jobs and most CI runners - exactly the machines that take
+# this branch - so an unset or unrecognised shell gets the generic export
+# rather than a "parameter not set" error under `set -u`.
+path_line() {
+	shell_name="${SHELL:-}"
+	shell_name="${shell_name##*/}"
+	case "$shell_name" in
+	fish) echo "fish_add_path ${BIN_DIR}   # run this one in fish" ;;
+	zsh) echo "echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ~/.zshrc" ;;
+	bash)
+		if [ "$os" = darwin ]; then
+			echo "echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ~/.bash_profile"
+		else
+			echo "echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ~/.bashrc"
+		fi
+		;;
+	*) echo "export PATH=\"${BIN_DIR}:\$PATH\"   # add this to your shell profile" ;;
+	esac
+}
+
+warned=no
 case ":${PATH}:" in
 *":${BIN_DIR}:"*) ;;
-*) say "warning: ${BIN_DIR} is not on your PATH" ;;
+*)
+	echo
+	warned=yes
+	say "warning: ${BIN_DIR} is not on your PATH. Add it, then open a new shell:"
+	echo "  $(path_line)"
+	if [ "$BIN_DIR" = "$USER_BIN_DIR" ]; then
+		say "the desktop app looks in ~/.local/bin itself, so it starts either way."
+	fi
+	;;
+esac
+
+# An older CLI in /usr/local/bin comes first on most PATHs, so it would run
+# instead of the one just installed.
+if [ "$BIN_DIR" != "$SYSTEM_BIN_DIR" ] && [ "$COMPONENTS" != server ] &&
+	[ -e "${SYSTEM_BIN_DIR}/aether" ]; then
+	[ "$warned" = yes ] || echo
+	say "warning: an older ${SYSTEM_BIN_DIR}/aether would shadow ${BIN_DIR}/aether. Remove it:"
+	echo "  sudo rm -f ${SYSTEM_BIN_DIR}/aether"
+fi
+
+# --- what happened, what is next, and the guide ------------------------
+
+echo
+case "$ROLE" in
+server)
+	echo "This machine is your Aether server: agents run here."
+	echo
+	echo "next:"
+	if [ "$setup_ran" = yes ]; then
+		echo "  systemctl daemon-reload && systemctl enable --now aether-server"
+		echo "  aether link <this-host>:2222    # from your own machine; the first link becomes admin"
+	else
+		echo "  sudo aether-server setup       # config, systemd unit, and how to start it"
+		echo "  aether link <this-host>:2222   # from your own machine; the first link becomes admin"
+	fi
+	;;
+client)
+	echo "This machine is a client: you work here and connect to a server."
+	if [ "$gui_built" != yes ]; then
+		echo "The desktop app was not built; the message above says why."
+	fi
+	echo
+	echo "next:"
+	echo "  aether link <server-host>:2222  # the first link on a fresh server becomes admin"
+	if [ "$gui_built" != yes ]; then
+		echo "  aether gui build               # the desktop app, or run \`aether gui\` for a browser tab"
+	fi
+	;;
+*)
+	echo "The binaries are installed. Nothing else was set up on this machine."
+	echo
+	echo "next:"
+	if [ "$COMPONENTS" != "client" ]; then
+		echo "  sudo aether-server setup       # on the server box: config, systemd unit, activation line"
+	fi
+	echo "  aether link <server>:2222      # from a client; the first link becomes admin"
+	;;
 esac
 
 echo
-echo "next:"
-if [ "$COMPONENTS" != "client" ]; then
-	echo "  aether init                 # prepare /var/lib/aether and report the tailnet name"
-	echo "  aether-server serve --data-dir /var/lib/aether --addr :2222"
-fi
-echo "  aether link <server>:2222   # first link on a fresh server becomes admin"
+echo "Read the quickstart before going further. It is ten minutes to a finished agent"
+echo "run, and skipping it is how people end up stuck."
 echo
-echo "10-minute quickstart: https://github.com/${REPO}/blob/main/docs/quickstart.md"
+echo "  https://github.com/${REPO}/blob/main/docs/quickstart.md"
+echo
+echo "Install reference: https://github.com/${REPO}/blob/main/docs/install.md"

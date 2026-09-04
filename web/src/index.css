@@ -46,7 +46,7 @@
    / failed / done / idle) get their own tokens alongside the shadcn neutral
    base so the status vocabulary stays one edit wide. */
 :root {
-  --radius: 0.5rem;
+  --radius: 0.25rem;
   --font-pixel: 'VT323', monospace;
 
   --background: oklch(1 0 0);
@@ -55,8 +55,9 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.55 0.11 175);
   --primary-foreground: oklch(0.985 0 0);
+  --sidebar: oklch(0.97 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
@@ -67,7 +68,7 @@
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.55 0.11 175);
 
   --state-working: oklch(0.62 0.15 250);
   --state-waiting: oklch(0.72 0.13 85);
@@ -78,25 +79,26 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: #05070f;
+  --foreground: #dce6f2;
+  --card: #070b16;
+  --card-foreground: #dce6f2;
+  --popover: #070b16;
+  --popover-foreground: #dce6f2;
+  --primary: #6ee7d6;
+  --primary-foreground: #05070f;
+  --sidebar: #0b1120;
+  --secondary: #0b1120;
+  --secondary-foreground: #dce6f2;
+  --muted: #0b1120;
+  --muted-foreground: rgb(220 230 242 / 0.62);
+  --accent: #0b1120;
+  --accent-foreground: #dce6f2;
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --border: rgb(74 111 165 / 0.28);
+  --input: rgb(74 111 165 / 0.36);
+  --ring: #6ee7d6;
 
   --state-working: oklch(0.7 0.14 250);
   --state-waiting: oklch(0.8 0.12 85);
@@ -119,6 +121,7 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-sidebar: var(--sidebar);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);

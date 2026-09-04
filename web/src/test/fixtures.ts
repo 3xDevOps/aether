@@ -1,4 +1,10 @@
-import type { Api, EnvScanHandlers, EnvScanSession } from '@/lib/api'
+import type {
+  Api,
+  EnvScanHandlers,
+  EnvScanSession,
+  ProfileScanHandlers,
+  ProfileScanRequest,
+} from '@/lib/api'
 import type {
   AgentInfo,
   Approval,
@@ -9,11 +15,13 @@ import type {
   EnvironmentVersion,
   ManifestItem,
   Member,
+  ProfilePreview,
   Run,
   Schedule,
   ServerInfo,
+  ServerUpdateStatus,
   Template,
-  ToolSnapshot,
+  UpdateStatus,
   Workspace,
 } from '@/lib/types'
 
@@ -83,6 +91,7 @@ export const serverInfo: ServerInfo = {
     worktree_bytes: 256 * 1024 * 1024,
     transcript_bytes: 128 * 1024 * 1024,
     database_bytes: 64 * 1024 * 1024,
+    repo_bytes: 512 * 1024 * 1024,
   },
 }
 
@@ -122,21 +131,14 @@ export function schedule(over: Partial<Schedule> = {}): Schedule {
   }
 }
 
-export function toolSnapshot(over: Partial<ToolSnapshot> = {}): ToolSnapshot {
-  return {
-    id: 'tsn_1',
-    workspace_id: workspace.id,
-    member_id: alice.id,
-    digest: 'sha256:abcd1234',
-    manifest: { executable: 'claude', version: '1.0.0' },
-    created_at: '2026-08-14T08:30:00Z',
-    active: true,
-    ...over,
-  }
-}
 
 export function agentInfo(over: Partial<AgentInfo> = {}): AgentInfo {
-  return { name: 'claude', source: 'shipped', ...over }
+  return {
+    name: 'claude',
+    source: 'shipped',
+    install_script: 'curl -fsSL https://claude.ai/install.sh | bash',
+    ...over,
+  }
 }
 
 export function budget(
@@ -166,6 +168,46 @@ export function manifestItem(over: Partial<ManifestItem> = {}): ManifestItem {
     start_line: 3,
     end_line: 5,
     check_command: 'jq --version',
+    ...over,
+  }
+}
+
+/** What profile.preview answers for the harness this machine configured.
+ * The other setup-capable harnesses answer present:false, which is a
+ * normal answer rather than an error. */
+export function profilePreview(
+  over: Partial<ProfilePreview> = {},
+): ProfilePreview {
+  return {
+    harness: 'claude',
+    root: '/home/alice/.claude',
+    present: true,
+    files: 42,
+    bytes: 183422,
+    categories: [
+      {
+        category: 'skills',
+        files: 12,
+        bytes: 40201,
+        paths: ['skills/pdf/SKILL.md'],
+        truncated: false,
+      },
+      {
+        category: 'commands',
+        files: 4,
+        bytes: 8120,
+        paths: ['commands/review.md'],
+        truncated: false,
+      },
+    ],
+    excluded: [
+      {
+        path: '.credentials.json',
+        reason: 'credential',
+        detail: 'credential file excluded for claude',
+      },
+    ],
+    blocked: false,
     ...over,
   }
 }
@@ -240,6 +282,44 @@ export function envGetResult(over: Partial<EnvGetResult> = {}): EnvGetResult {
   }
 }
 
+/** One update.check answer: a CLI a release behind, a current server. */
+export function updateStatus(over: Partial<UpdateStatus> = {}): UpdateStatus {
+  return {
+    cli: {
+      version: 'v1.2.3',
+      commit: 'abc1234',
+      latest: 'v1.3.0',
+      update_available: true,
+      asset: 'aether-linux-amd64',
+      release_url: 'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+      dev: false,
+      disabled: false,
+      can_self_update: true,
+      checked_at: '2026-08-14T10:00:00Z',
+    },
+    server_version: 'v1.3.0',
+    server_behind: false,
+    supervised: true,
+    cli_path: '/home/user/.local/bin/aether',
+    install_method: 'direct',
+    ...over,
+  }
+}
+
+/** One server.update_status answer: a current server that could replace
+ * its own binaries if it had to. The banner tests override it. */
+export function serverUpdateStatus(
+  over: Partial<ServerUpdateStatus> = {},
+): ServerUpdateStatus {
+  return {
+    server_version: 'v1.2.3',
+    latest: 'v1.3.0',
+    update_available: false,
+    capable: true,
+    ...over,
+  }
+}
+
 /** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
   return {
@@ -277,6 +357,9 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       patch: '',
       truncated: false,
     })),
+    filesTree: vi.fn(async () => ({ entries: [] })),
+    filesRead: vi.fn(async () => ({ content: '', truncated: false, binary: false, size: 0 })),
+    filesDiff: vi.fn(async () => ({ patch: '', truncated: false })),
     disk: vi.fn(async () => ({
       used_bytes: 512 * 1024 * 1024,
       total_bytes: 2 * 1024 * 1024 * 1024,
@@ -284,15 +367,24 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       worktree_bytes: 256 * 1024 * 1024,
       transcript_bytes: 128 * 1024 * 1024,
       database_bytes: 64 * 1024 * 1024,
+      repo_bytes: 512 * 1024 * 1024,
     })),
     capabilities: vi.fn(async () => ({
       gateway: 'remote',
       methods: ['*'],
-      ws: ['events', 'attach'],
+      ws: ['events', 'attach', 'terminal'],
     })),
     eventsSocket: vi.fn(() => 'ws://localhost/ws/events'),
     attachSocket: vi.fn((runID: string) => `ws://localhost/ws/attach/${runID}`),
-    shellSocket: vi.fn(() => 'ws://localhost/ws/shell'),
+    attachShellSocket: vi.fn(
+      (runID: string, tab: string) =>
+        `ws://localhost/ws/attach/${runID}?shell=${encodeURIComponent(tab)}`,
+    ),
+    terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
+    terminalStop: vi.fn(async () => ({})),
+    terminalSocket: vi.fn(
+      (tab: string) => `ws://localhost/ws/terminal?tab=${encodeURIComponent(tab)}`,
+    ),
     memberInvite: vi.fn(async () => ({
       code: 'inv-code-1',
       expires_at: '2026-08-15T10:00:00Z',
@@ -304,10 +396,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceSettings: vi.fn(async () => workspace),
-    toolsList: vi.fn(async () => [toolSnapshot()]),
-    toolsVerify: vi.fn(async () => ({ verified: true })),
-    toolsRollback: vi.fn(async () => ({})),
-    toolsReset: vi.fn(async () => ({ reset: true })),
     budgetSet: vi.fn(async () => budget(workspace.id)),
     templateSave: vi.fn(async () => template),
     templateDelete: vi.fn(async () => ({})),
@@ -331,14 +419,35 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       ],
     })),
     profileRollback: vi.fn(async () => ({})),
+    localProfilePreview: vi.fn(async (harness: string) =>
+      harness === 'claude'
+        ? profilePreview()
+        : profilePreview({
+            harness,
+            root: `/home/alice/.${harness}`,
+            present: false,
+            files: 0,
+            bytes: 0,
+            categories: [],
+            excluded: [],
+          }),
+    ),
+    localProfilePush: vi.fn(async (harness: string) => ({
+      harness,
+      snapshot_id: 'psn_2',
+      digest: 'sha256:cafe9012',
+      files: 42,
+      bytes: 183422,
+    })),
     agentList: vi.fn(async () => [
       agentInfo(),
-      agentInfo({ name: 'myagent', source: 'member' }),
+      agentInfo({ name: 'myagent', source: 'member', install_script: undefined }),
     ]),
     agentRegister: vi.fn(async () => ({})),
     runProtect: vi.fn(async () => ({})),
     runRelaunch: vi.fn(async () => run({ id: 'run_2' })),
     localLinkStatus: vi.fn(async () => ({
+      server_configured: true,
       linked: true,
       addr: 'host:2222',
       user: 'alice',
@@ -358,6 +467,17 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       branch: 'aether/run-1-checkout',
       ref: 'refs/heads/aether/run-1-checkout',
       output: '',
+      current: false,
+      dirty: false,
+    })),
+    localPullSwitch: vi.fn(async (runID: string) => ({
+      branch: runID,
+    })),
+    localRepoPush: vi.fn(async () => ({
+      branch: 'main',
+      remote: 'aether',
+      output:
+        'To ssh://alice@host:2222/wsp_1\n * [new branch] main -> main',
     })),
     localSyncStart: vi.fn(async (runID: string) => ({
       run_id: runID,
@@ -377,6 +497,21 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       unit_path: '',
     })),
     localImageScaffold: vi.fn(async () => ({ written: ['Dockerfile'] })),
+    localUpdateCheck: vi.fn(async () => updateStatus()),
+    localUpdateApply: vi.fn(async () => ({
+      updated: ['/usr/local/bin/aether'],
+      version: 'v1.3.0',
+      restarting: true,
+      rebuilding: false,
+    })),
+    localUpdateStatus: vi.fn(async () => ({ phase: 'idle' as const })),
+    serverUpdateStatus: vi.fn(async () => serverUpdateStatus()),
+    serverUpdate: vi.fn(async () => ({
+      status: 'scheduled' as const,
+      version: 'v1.3.0',
+      requested_by: alice.id,
+      requested_at: '2026-08-14T10:06:00Z',
+    })),
     envStatus: vi.fn(async () => ({
       versions: [envVersion()],
       active_version: 1,
@@ -408,6 +543,33 @@ export function fakeApi(over: Partial<Api> = {}): Api {
           h.onOutput('fake harness: returning the canned inventory')
           h.onStatus('validating')
           h.onResult(scanResult())
+        })
+        return {
+          close: () => {
+            closed = true
+          },
+        }
+      },
+    ),
+    // A profile scan that recommends the configured harness, like the
+    // gateway's fake harness; tests drive other outcomes by overriding.
+    openProfileScan: vi.fn(
+      (_req: ProfileScanRequest, h: ProfileScanHandlers): EnvScanSession => {
+        let closed = false
+        queueMicrotask(() => {
+          if (closed) return
+          h.onStatus('running')
+          h.onOutput('fake harness: reading the profile inventory')
+          h.onResult({
+            harnesses: [
+              {
+                harness: 'claude',
+                import: true,
+                categories: ['skills', 'commands'],
+                reason: 'your skills and commands match this project',
+              },
+            ],
+          })
         })
         return {
           close: () => {

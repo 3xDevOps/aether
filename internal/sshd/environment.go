@@ -332,3 +332,22 @@ func dockerfileDiff(ctx context.Context, before, after string) (string, error) {
 		return "", fmt.Errorf("sshd: git diff over the Dockerfile pair: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 }
+
+func (s *Server) resolveWorkspaceSelector(ctx context.Context, selector protocol.WorkspaceSelector) (*domain.Workspace, error) {
+	if (selector.ID == "") == (selector.Name == "") {
+		return nil, errors.New("workspace selector must contain exactly one ID or name")
+	}
+	if selector.ID != "" {
+		return s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(selector.ID))
+	}
+	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, ws := range workspaces {
+		if ws.Name == selector.Name {
+			return ws, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}

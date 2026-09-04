@@ -36,6 +36,27 @@ func TestPrintAgentsEmpty(t *testing.T) {
 	}
 }
 
+func TestPrintAgentInstallGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{name: "claude", script: "curl https://example.test/install | sh", want: "curl https://example.test/install | sh"},
+		{name: "myagent", want: "install myagent into ~/.local/bin"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			if err := printAgentInstallGuidance(&out, protocol.AgentInfo{Name: tc.name, InstallScript: tc.script}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "aether terminal") || !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("guidance = %q, want terminal and %q", out.String(), tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveAgentArgs(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -111,14 +132,17 @@ func TestResolveAgentArgs(t *testing.T) {
 }
 
 func TestParseAgentAdd(t *testing.T) {
-	opts, err := parseAgentAdd([]string{"myagent", "--workspace", "ws", "--tui", "myagent {task}"})
+	opts, err := parseAgentAdd([]string{"myagent", "--tui", "myagent {task}"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.name != "myagent" || opts.workspace != "ws" || opts.tui != "myagent {task}" || opts.headless != "" {
+	if opts.name != "myagent" || opts.tui != "myagent {task}" || opts.headless != "" {
 		t.Fatalf("opts = %+v", opts)
 	}
 	if _, err := parseAgentAdd(nil); err == nil || !strings.Contains(err.Error(), "usage: aether agent add") {
 		t.Fatalf("missing name error = %v, want usage", err)
+	}
+	if _, err := parseAgentAdd([]string{"myagent", "--workspace", "ws"}); err == nil {
+		t.Fatal("removed --workspace flag was accepted")
 	}
 }

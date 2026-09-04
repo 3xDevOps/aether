@@ -173,29 +173,29 @@ func TestTranscriptPreservedAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 
 	att1 := newFakeAtt()
-	if err := h.StartSession(ctx, run, att1); err != nil {
+	if err := h.StartSession(ctx, RunSession(run), att1); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	att1.writeOutput(t, "first-life")
 	waitFor(t, "first output recorded", func() bool {
-		ts, ok := h.LastOutput(run)
+		ts, ok := h.LastOutput(RunSession(run))
 		return ok && !ts.IsZero()
 	})
-	if err := h.StopSession(ctx, run); err != nil {
+	if err := h.StopSession(ctx, RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
 
 	// Reboot-recovery restart of the same run must not wipe the transcript.
 	att2 := newFakeAtt()
-	if err := h.StartSession(ctx, run, att2); err != nil {
+	if err := h.StartSession(ctx, RunSession(run), att2); err != nil {
 		t.Fatalf("restart StartSession: %v", err)
 	}
 	att2.writeOutput(t, "second-life")
 	waitFor(t, "second output recorded", func() bool {
-		ts, ok := h.LastOutput(run)
+		ts, ok := h.LastOutput(RunSession(run))
 		return ok && !ts.IsZero()
 	})
-	if err := h.StopSession(ctx, run); err != nil {
+	if err := h.StopSession(ctx, RunSession(run)); err != nil {
 		t.Fatalf("second StopSession: %v", err)
 	}
 
@@ -220,12 +220,72 @@ func TestTranscriptPreservedAcrossRestart(t *testing.T) {
 		t.Fatalf("preserved transcript = %q, want %q", got, "first-life")
 	}
 }
+func TestReadCastTailDecodesOutputAndIgnoresOtherEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tail.cast")
+	w, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatalf("newCastWriter: %v", err)
+	}
+	w.output([]byte("one\n"))
+	w.marker("not terminal output")
+	w.output([]byte("two\n"))
+	if cerr := w.close(); cerr != nil {
+		t.Fatalf("close: %v", cerr)
+	}
+	got, err := readCastTail(path, 6)
+	if err != nil {
+		t.Fatalf("readCastTail: %v", err)
+	}
+	if string(got) != "two\n" {
+		t.Fatalf("readCastTail = %q, want %q", got, "two\n")
+	}
+}
+
+func TestRestartSeedsReplayFromTranscriptTail(t *testing.T) {
+	h, _ := newTestHost(t)
+	run := domain.RunID("run-replay-restart")
+	ctx := context.Background()
+
+	att1 := newFakeAtt()
+	if err := h.StartSession(ctx, RunSession(run), att1); err != nil {
+		t.Fatalf("first StartSession: %v", err)
+	}
+	att1.writeOutput(t, "first-life\n")
+	waitFor(t, "first output recorded", func() bool {
+		ts, ok := h.LastOutput(RunSession(run))
+		return ok && !ts.IsZero()
+	})
+	if err := h.StopSession(ctx, RunSession(run)); err != nil {
+		t.Fatalf("first StopSession: %v", err)
+	}
+
+	att2 := newFakeAtt()
+	if err := h.StartSession(ctx, RunSession(run), att2); err != nil {
+		t.Fatalf("second StartSession: %v", err)
+	}
+	att2.writeOutput(t, "second-life\n")
+	waitFor(t, "second output recorded", func() bool {
+		ts, ok := h.LastOutput(RunSession(run))
+		return ok && !ts.IsZero()
+	})
+	attach := startAttach(t, h, run, "member", 80, 24, false)
+	waitFor(t, "replay output", func() bool {
+		return strings.Contains(attach.out.String(), "first-life\nsecond-life\n")
+	})
+	attach.detach()
+	if err := attach.wait(t); err != nil {
+		t.Fatalf("detach replay client: %v", err)
+	}
+	if err := h.StopSession(ctx, RunSession(run)); err != nil {
+		t.Fatalf("second StopSession: %v", err)
+	}
+}
 
 func TestTranscriptWrittenIncrementally(t *testing.T) {
 	h, dir := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-flush")
-	if err := h.StartSession(context.Background(), run, att); err != nil {
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	att.writeOutput(t, "live-data")

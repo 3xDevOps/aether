@@ -226,6 +226,28 @@ describe('run board', () => {
     expect(result.current).toBe(before)
   })
 
+  it('opens the launch form from the board header', () => {
+    seed([working])
+    render(<Board />)
+
+    fireEvent.click(screen.getByTitle('Launch a run'))
+
+    // The form is hosted app-wide; the board only asks for it.
+    expect(useStore.getState().paletteDialog).toBe('launch')
+  })
+
+  it('offers the way in from an empty workspace, keeping the buckets', () => {
+    seed([])
+    render(<Board />)
+
+    // The columns stay: an empty board is exactly when a new member is
+    // learning that the three buckets exist. The notice above them says what
+    // a run is and offers the one thing left to do.
+    expect(screen.getByRole('region', { name: 'Working' })).toBeDefined()
+    const notice = screen.getByText(/No runs yet/).closest('div') as HTMLElement
+    expect(within(notice).getByTitle('Launch a run')).toBeDefined()
+  })
+
   it('renders what another feature registered into a card slot', () => {
     registerSlot('card:chips', 'test-chip', ({ run: r }) => <span>chip:{r.id}</span>)
     seed([working])

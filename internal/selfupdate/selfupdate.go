@@ -68,49 +68,112 @@ func LatestTag(ctx context.Context, latestURL string) (string, error) {
 // and atomically replaces dst with it. The destination keeps mode 0755; a
 // failure at any point leaves dst untouched.
 func Apply(ctx context.Context, baseURL, asset, dst string) error {
-	sums, err := fetch(ctx, baseURL+"/checksums.txt")
-	if err != nil {
-		return fmt.Errorf("download checksums.txt: %w", err)
-	}
-	want, err := checksumFor(sums, asset)
+	staged, err := Stage(ctx, baseURL, asset, dst)
 	if err != nil {
 		return err
 	}
+	defer staged.Discard()
+	return staged.Commit()
+}
 
-	// Stage in dst's directory so the final rename is atomic (same
-	// filesystem) and never leaves a half-written binary on PATH.
-	dir := filepath.Dir(dst)
+// Staged is one verified release asset written beside its destination and
+// ready to be renamed over it. Splitting the download from the rename is
+// what lets a caller replacing several binaries verify all of them before
+// it replaces any: see UpdateBinaries.
+type Staged struct {
+	// dst is the binary this replaces, tmp the verified file staged for it.
+	dst, tmp string
+	// sum is the hex SHA-256 checksums.txt lists for the asset, which the
+	// staged file was verified against. An authorized install checks the
+	// copy root makes against it a second time.
+	sum string
+	// committed stops Discard from removing a file that is now the
+	// destination.
+	committed bool
+}
+
+// Stage downloads baseURL/<asset>, verifies it against
+// baseURL/checksums.txt, and writes it next to dst with mode 0755. It
+// changes nothing the running system can see; Commit does that. The
+// caller must call Discard (Commit or not) so a staged file never
+// outlives the attempt.
+func Stage(ctx context.Context, baseURL, asset, dst string) (*Staged, error) {
+	// Beside dst, so the final rename is atomic (same filesystem) and
+	// never leaves a half-written binary on PATH.
+	return stageIn(ctx, baseURL, asset, dst, filepath.Dir(dst))
+}
+
+// stageIn is Stage with the staging directory chosen by the caller: dst's
+// own directory when it is writable, a private directory of the user's
+// when root has to make the copy.
+func stageIn(ctx context.Context, baseURL, asset, dst, dir string) (*Staged, error) {
+	sums, err := fetch(ctx, baseURL+"/checksums.txt")
+	if err != nil {
+		return nil, fmt.Errorf("download checksums.txt: %w", err)
+	}
+	want, err := ChecksumFor(sums, asset)
+	if err != nil {
+		return nil, err
+	}
+
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dst)+".update-*")
 	if err != nil {
-		return fmt.Errorf("stage update in %s: %w", dir, err)
+		return nil, fmt.Errorf("stage update in %s: %w", dir, err)
 	}
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-	}()
+	staged := &Staged{dst: dst, tmp: tmp.Name(), sum: want}
 
 	body, err := fetch(ctx, baseURL+"/"+asset)
 	if err != nil {
-		return fmt.Errorf("download %s: %w", asset, err)
+		staged.close(tmp)
+		return nil, fmt.Errorf("download %s: %w", asset, err)
 	}
 	sum := sha256.Sum256(body)
 	if got := hex.EncodeToString(sum[:]); got != want {
-		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", asset, want, got)
+		staged.close(tmp)
+		return nil, fmt.Errorf("checksum mismatch for %s: expected %s, got %s", asset, want, got)
 	}
 	if _, err := tmp.Write(body); err != nil {
-		return fmt.Errorf("write staged binary: %w", err)
+		staged.close(tmp)
+		return nil, fmt.Errorf("write staged binary: %w", err)
 	}
 	if err := tmp.Chmod(0o755); err != nil {
-		return fmt.Errorf("chmod staged binary: %w", err)
+		staged.close(tmp)
+		return nil, fmt.Errorf("chmod staged binary: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close staged binary: %w", err)
+		staged.Discard()
+		return nil, fmt.Errorf("close staged binary: %w", err)
 	}
-	if err := os.Rename(tmp.Name(), dst); err != nil {
-		return fmt.Errorf("replace %s: %w", dst, err)
+	return staged, nil
+}
+
+// close abandons a staged file whose handle is still open.
+func (s *Staged) close(f *os.File) {
+	_ = f.Close()
+	s.Discard()
+}
+
+// Commit renames the staged file over its destination.
+func (s *Staged) Commit() error {
+	if err := os.Rename(s.tmp, s.dst); err != nil {
+		return fmt.Errorf("replace %s: %w", s.dst, err)
 	}
+	s.committed = true
 	return nil
 }
+
+// Discard removes the staged file. It is a no-op after Commit and safe to
+// call more than once.
+func (s *Staged) Discard() {
+	if s.committed || s.tmp == "" {
+		return
+	}
+	_ = os.Remove(s.tmp)
+	s.tmp = ""
+}
+
+// Path is the destination this staged asset replaces.
+func (s *Staged) Path() string { return s.dst }
 
 func fetch(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -132,9 +195,11 @@ func fetch(ctx context.Context, url string) ([]byte, error) {
 	return body, nil
 }
 
-// checksumFor finds asset's digest in sha256sum-format output, accepting the
-// binary-mode "*name" marker.
-func checksumFor(sums []byte, asset string) (string, error) {
+// ChecksumFor finds asset's digest in sha256sum-format output, accepting the
+// binary-mode "*name" marker. This project's checksums.txt and nodejs.org's
+// SHASUMS256.txt are both in that format, so localops verifies its Node.js
+// download with this too.
+func ChecksumFor(sums []byte, asset string) (string, error) {
 	sc := bufio.NewScanner(bytes.NewReader(sums))
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())

@@ -29,6 +29,20 @@ function statusEvent(over: Partial<Event> = {}): Event {
   }
 }
 
+function titleEvent(over: Partial<Event> = {}): Event {
+  return {
+    id: 'evt_title',
+    seq: 6,
+    time: '2026-08-14T11:01:00Z',
+    workspace_id: workspace.id,
+    run_id: 'run_1',
+    actor_id: '',
+    type: 'run.title',
+    payload: { title: 'Fixing the login bug' },
+    ...over,
+  }
+}
+
 describe('hydrate', () => {
   it('fills the store from one round of fetches', async () => {
     const store = createRootStore()
@@ -156,6 +170,30 @@ describe('hydrate', () => {
     expect(c.hasWS('events')).toBe(true)
     expect(c.hasLocal('worktree.open')).toBe(false)
   })
+  it('routes to onboarding only for an unboarded local gateway', async () => {
+    const cases = [
+      { onboarded: false, local: true, onboarding: true },
+      { onboarded: true, local: true, onboarding: false },
+      { onboarded: false, local: false, onboarding: false },
+    ]
+
+    for (const tc of cases) {
+      const store = createRootStore()
+      store.setState({ onboarded: tc.onboarded, route: { name: 'board', params: {} } })
+      const client = fakeApi({
+        capabilities: vi.fn(async () => ({
+          gateway: tc.local ? 'local' : 'remote',
+          methods: ['*'],
+          ws: ['events', 'attach'],
+          ...(tc.local ? { local: ['link.status'] } : {}),
+        })),
+      })
+
+      await hydrate(store, client)
+
+      expect(store.getState().route.name).toBe(tc.onboarding ? 'onboarding' : 'board')
+    }
+  })
 
   it('treats a missing capabilities endpoint as the legacy remote monitor', async () => {
     const store = createRootStore()
@@ -180,7 +218,6 @@ describe('hydrate', () => {
     expect(c.hasMethod('template.save')).toBe(false)
     expect(c.hasMethod('agent.list')).toBe(false)
     expect(c.hasWS('attach')).toBe(true)
-    expect(c.hasWS('shell')).toBe(false)
     expect(c.hasLocal('worktree.open')).toBe(false)
   })
 
@@ -293,6 +330,16 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.finished_at).toBe('2026-08-14T11:00:00Z')
   })
 
+  it('updates a run title from a run.title event', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    await applyEvent(store, titleEvent(), fakeApi())
+
+    expect(store.getState().runs.run_1.title).toBe('Fixing the login bug')
+    expect(store.getState().lastSeq).toBe(6)
+  })
+
   it('ignores an event already applied, so replay is idempotent', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
@@ -397,6 +444,62 @@ describe('applyEvent', () => {
     await applyEvent(store, statusEvent(), client)
 
     expect(store.getState().workspaces[workspace.id]).toBeDefined()
+  })
+
+  it('follows a server update and never moves it backwards', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const updateEvent = (over: Partial<Event> = {}): Event => ({
+      id: 'evt_srv',
+      seq: 6,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: '',
+      actor_id: alice.id,
+      type: 'server.update',
+      payload: { phase: 'applying', version: 'v1.3.0', actor_id: alice.id },
+      ...over,
+    })
+
+    expect(await applyEvent(store, updateEvent(), fakeApi())).toBe(true)
+    expect(store.getState().serverUpdateProgress).toMatchObject({
+      phase: 'applying',
+      version: 'v1.3.0',
+    })
+
+    await applyEvent(
+      store,
+      updateEvent({
+        seq: 7,
+        payload: { phase: 'restarting', version: 'v1.3.0' },
+      }),
+      fakeApi(),
+    )
+    expect(store.getState().serverUpdateProgress?.phase).toBe('restarting')
+
+    // The same phase is published once per workspace, and the RPC result
+    // races the first of them: a late "applying" must not undo the frame
+    // that says the server is already on its way down.
+    await applyEvent(
+      store,
+      updateEvent({ seq: 8, payload: { phase: 'applying', version: 'v1.3.0' } }),
+      fakeApi(),
+    )
+    expect(store.getState().serverUpdateProgress?.phase).toBe('restarting')
+
+    // A failure always wins: it is the end of that update.
+    await applyEvent(
+      store,
+      updateEvent({
+        seq: 9,
+        payload: { phase: 'failed', version: 'v1.3.0', detail: 'checksum mismatch' },
+      }),
+      fakeApi(),
+    )
+    expect(store.getState().serverUpdateProgress).toMatchObject({
+      phase: 'failed',
+      detail: 'checksum mismatch',
+    })
   })
 
   it('drives the environment build slice and ignores frames for older versions', async () => {

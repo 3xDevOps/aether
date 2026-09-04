@@ -168,6 +168,16 @@ type ExitStatus struct {
 	Code int
 }
 
+// ExecExitError reports an immediate exec process exit that prevented
+// attachment. Code 126 and 127 commonly indicate a missing executable.
+type ExecExitError struct {
+	Code int
+}
+
+func (e *ExecExitError) Error() string {
+	return fmt.Sprintf("runtime: exec exited with status %d", e.Code)
+}
+
 // Attachment is a live stdio stream to a container's main process. A
 // container supports any number of sequential attachments: detaching
 // (Close) and re-attaching later is always safe.
@@ -215,6 +225,10 @@ type Runtime interface {
 	Destroy(ctx context.Context, id ID) error
 	// Attach opens a stdio stream to the container's main process.
 	Attach(ctx context.Context, id ID) (Attachment, error)
+	// ExecTTY opens an additional TTY process inside a running container;
+	// exit 126/127 surfaces as *ExecExitError so callers can retry with
+	// /bin/sh -l.
+	ExecTTY(ctx context.Context, id ID, argv []string, workDir string, cols, rows uint) (Attachment, error)
 	// Wait blocks until the main process exits and reports its exit code.
 	Wait(ctx context.Context, id ID) (ExitStatus, error)
 	// FindByCreationKey returns the container created with

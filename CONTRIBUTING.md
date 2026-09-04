@@ -19,7 +19,7 @@ coding agents, built as a Go server, a Go CLI, and an embedded web dashboard.
 | Bun | 1.3+ | Dashboard build and tests |
 | Docker | recent | Integration tests and server runtime |
 | git | recent | Integration tests and workspace transport |
-| Node | 22+ | Desktop shell in `desktop/` (optional) |
+| Node | 22+ | Building desktop installers from `desktop/` by hand (optional) |
 
 SQLite is pure Go and the project builds with `CGO_ENABLED=0`.
 
@@ -40,6 +40,11 @@ make lint
 make test
 make public-audit
 ```
+
+`make lint` runs golangci-lint under the toolchain pinned in `go.mod`, the same
+Go version CI uses. Without that pin, a host whose default Go is newer fails
+with `export data version 4 is greater than maximum supported version 2`
+before linting anything.
 
 The integration suite uses real Docker and git:
 
@@ -62,11 +67,13 @@ dashboard SPA itself is embedded in the `aether` CLI (`web/embed.go`), so this
 package is just a sidecar launcher. Users build and install it with
 `aether gui build`, which unpacks the sources embedded by `desktop/embed.go`
 and runs electron-builder's unpacked target; see
-[docs/install.md](docs/install.md#desktop-app). A new file in `desktop/` that
-the shell needs at runtime must be added to both `desktop/embed.go` and the
-`files` list in `electron-builder.yml`.
+[docs/install.md](docs/install.md#desktop-app). That command needs no Node.js
+on the user's machine - it downloads a pinned copy when there is none. A new
+file in `desktop/` that the shell needs at runtime must be added to both
+`desktop/embed.go` and the `files` list in `electron-builder.yml`.
 
-Installers come from a checkout:
+Installers come from a checkout, which is where Node 22+ on `PATH` is
+required:
 
 ```sh
 cd desktop

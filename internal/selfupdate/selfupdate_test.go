@@ -162,7 +162,7 @@ func TestApplyRejectsMissingAsset(t *testing.T) {
 func TestChecksumForHandlesBinaryModeMarker(t *testing.T) {
 	// sha256sum emits "hash *name" in binary mode; both forms must parse.
 	sums := []byte("aaaa  aether-linux-amd64\nbbbb *aether-linux-arm64\n")
-	got, err := checksumFor(sums, "aether-linux-arm64")
+	got, err := ChecksumFor(sums, "aether-linux-arm64")
 	if err != nil {
 		t.Fatal(err)
 	}

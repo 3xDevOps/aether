@@ -15,6 +15,7 @@ var templateHashes = map[int]string{
 	1: "443382544fa970566cf85f1312f29fa40ffe75e4f71ab599e8fd4cd444ae98be",
 	2: "039d12aac2cbecca59ae17e43b7a4453c913e754c01cc8237ff31a5ef13e18fa",
 	3: "1fac34339b6c0a016a64f153b37d44b028fd3d907bdbbbd09fa2bd28fee82799",
+	4: "3789bd17ba4fec8c2ea5abb671f0e34683d7b93c0cac452bd549fb71c018e29d",
 }
 
 func TestVersionPinsTemplate(t *testing.T) {
@@ -231,6 +232,122 @@ func TestRenderRefineRequiresAllParams(t *testing.T) {
 	} {
 		if _, err := RenderRefine(params); err == nil {
 			t.Errorf("RenderRefine accepted a missing %s", name)
+		}
+	}
+}
+
+// profileClauses are distinctive phrases, one per profile-prompt clause,
+// in the order the template must state them: what is being decided, the
+// embedded inventory, the never-read limits, the judgement rule, the
+// output contract, and the rules that contract enforces.
+var profileClauses = []string{
+	"which of this machine's coding-agent configurations",
+	"<<<INVENTORY",
+	"INVENTORY",
+	"Never open a profile file",
+	"never read credential stores",
+	"carries no file contents",
+	"leaves out every credential file",
+	"the user's own working setup",
+	"nothing but defaults",
+	"Write exactly one file, profile.json, into",
+	"\"harnesses\"",
+	"\"import\"",
+	"\"categories\"",
+	"\"reason\"",
+	"One entry per harness the inventory names",
+	"only category names from that harness's own inventory",
+	"non-empty when \"import\" is true",
+	"one sentence on one line, under 300 characters",
+	"No other keys, and no other files",
+}
+
+// profileTestInventory stands in for one rendered harness inventory.
+const profileTestInventory = `harness: claude
+root: /home/dev/.claude
+files: 3, bytes: 120
+category skills: 2 files, 80 bytes
+  skills/review/SKILL.md
+  skills/ship/SKILL.md`
+
+func TestRenderProfile(t *testing.T) {
+	outputDir := filepath.Join(t.TempDir(), "aether-profilescan-1234")
+	prompt, err := RenderProfile(ProfileParams{
+		Inventory: profileTestInventory,
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		t.Fatalf("RenderProfile: %v", err)
+	}
+	if !strings.Contains(prompt, profileTestInventory) {
+		t.Errorf("profile prompt does not embed the inventory verbatim:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, outputDir) {
+		t.Errorf("profile prompt does not name the output directory %q", outputDir)
+	}
+	if !strings.Contains(prompt, "No repository was given") {
+		t.Errorf("profile prompt without a repository does not say so:\n%s", prompt)
+	}
+	flat := strings.Join(strings.Fields(prompt), " ")
+	pos := 0
+	for _, clause := range profileClauses {
+		at := strings.Index(flat[pos:], clause)
+		if at < 0 {
+			t.Errorf("profile prompt is missing the clause %q after position %d", clause, pos)
+			continue
+		}
+		pos += at
+	}
+	if strings.Contains(prompt, "{{") || strings.Contains(prompt, "}}") {
+		t.Errorf("prompt has unrendered template markers:\n%s", prompt)
+	}
+}
+
+// TestRenderProfileRepoAnchored: a run given a repository names it, says
+// the repository may not be changed, and still sends profile.json to the
+// absolute scratch directory - never to the current directory, which is
+// the repository itself.
+func TestRenderProfileRepoAnchored(t *testing.T) {
+	outputDir := filepath.Join(t.TempDir(), "aether-profilescan-5678")
+	repo := filepath.Join(t.TempDir(), "project")
+	prompt, err := RenderProfile(ProfileParams{
+		Inventory: profileTestInventory,
+		OutputDir: outputDir,
+		RepoPath:  repo,
+	})
+	if err != nil {
+		t.Fatalf("RenderProfile: %v", err)
+	}
+	if !strings.Contains(prompt, repo) {
+		t.Errorf("repo-anchored profile prompt does not name the repository %q", repo)
+	}
+	if !strings.Contains(prompt, outputDir) {
+		t.Errorf("repo-anchored profile prompt does not name the output directory %q", outputDir)
+	}
+	if strings.Contains(prompt, "the current directory") {
+		t.Errorf("repo-anchored profile prompt points at the current directory:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "No repository was given") {
+		t.Errorf("repo-anchored profile prompt still claims no repository:\n%s", prompt)
+	}
+	flat := strings.Join(strings.Fields(prompt), " ")
+	if !strings.Contains(flat, "Never modify, create, or delete repository files") {
+		t.Errorf("repo-anchored profile prompt does not forbid touching repository files:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "{{") || strings.Contains(prompt, "}}") {
+		t.Errorf("prompt has unrendered template markers:\n%s", prompt)
+	}
+}
+
+func TestRenderProfileRequiresParams(t *testing.T) {
+	absOut := filepath.Join(t.TempDir(), "out")
+	for name, params := range map[string]ProfileParams{
+		"inventory":                 {OutputDir: absOut},
+		"output directory":          {Inventory: profileTestInventory},
+		"absolute output directory": {Inventory: profileTestInventory, OutputDir: "relative/out"},
+	} {
+		if _, err := RenderProfile(params); err == nil {
+			t.Errorf("RenderProfile accepted a missing %s", name)
 		}
 	}
 }

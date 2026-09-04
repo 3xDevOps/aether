@@ -70,7 +70,7 @@ and borrows only the identity mechanism.
 
 ### Joining and approval
 
-- **First contact bootstraps the admin.** The first tailnet identity to link a
+- **First contact creates the admin.** The first tailnet identity to link a
   fresh server is registered as an admin, not pending. Solo developers never
   see a join step.
 - **Everyone after that joins pending.** They are registered as collaborators
@@ -138,39 +138,30 @@ ssh-keygen -t ed25519          # if you do not already have a key
 aether link 192.168.1.50:2222
 ```
 
-The first key to link a fresh server is registered as the admin. The CLI
-offers every key in your ssh-agent, then `~/.ssh/id_ed25519`, `id_ecdsa`, and
-`id_rsa` in that order, skipping any file that is missing or
-passphrase-protected. To use one specific key instead, name the private-key
-file:
+The first key to link a fresh server is registered as the admin. The CLI uses
+`~/.ssh/id_ed25519` by default and also offers any key loaded in your ssh-agent.
+For a key at another path:
 
 ```sh
-aether link 192.168.1.50:2222 --key ~/.ssh/work_key
+aether link 192.168.1.50:2222 --key ~/.ssh/aether_ed25519
 ```
 
-`--key` takes the private key, never the `.pub` half, and only that key is
-offered even when the agent holds others. It is saved with the link (per
-profile when you use `--name`) and `aether link` keeps it when you relink
-the same profile without `--key`. To forget it and go back to the
-ssh-agent and default-file order, pass `--key auto`:
+`link` saves that path in `~/.config/aether/config.json`, and re-linking
+without `--key` keeps it. Every command that dials the server's control
+connection - `aether runs`, `attach`, `workspace`, `gui`, and the daemon the
+dashboard installs - reads it from there. Two paths do not:
 
-```sh
-aether link 192.168.1.50:2222 --key auto
-```
+- git. `aether pull` and `git push aether` shell out to the system `ssh`
+  client, which follows `~/.ssh/config`. Point it at the same key with an
+  `IdentityFile` line for the server host.
+- `aether daemon run` and `aether daemon install` on the command line, which
+  take their own `--key` and otherwise default to `~/.ssh/id_ed25519`.
 
-The saved key covers Aether's own SSH connections: every `aether` command
-that talks to the server, `aether gui`, and the sync daemon's event channel
-when you pass the same file to `aether daemon run --key`. It does not reach
-git. `git push aether`, the fetch behind `aether pull`, and the daemon's own
-push and fetch run your system `git` over OpenSSH, which chooses keys from
-your ssh-agent and `~/.ssh/config`. If git is refused while `aether` works,
-`ssh-add` the key or give the server an `IdentityFile` entry in
-`~/.ssh/config`.
-
-A passphrase-protected `--key` works once `ssh-add` has loaded it. When no
-key is accepted the error lists every place the CLI looked and what the
-server said, and ends with the fix: `ssh-add` the key, pass `--key`, or
-`--key auto`.
+A `--key` path that does not exist fails before the dial, rather than falling
+back to the agent. The CLI never prompts for a passphrase: to use a
+passphrase-protected key, `ssh-add` it first. Without a usable key the
+handshake fails with `attempted methods [none]`, followed by the reason the
+key it found was rejected - unreadable, unparseable, or passphrase-protected.
 
 ### Everyone else
 

@@ -17,6 +17,16 @@ const readline = require('node:readline')
 
 const notify = require('./notify')
 
+// The CLI version that built this shell, stamped into package.json by
+// `aether gui build`. It rides down to the renderer as an argv entry the
+// preload reads, so the dashboard can tell a shell built by an older CLI
+// from one built by the CLI now serving the gateway.
+const shellVersion = require('./package.json').version
+
+// The exit status `aether gui --json` uses to say it replaced this app on
+// disk: relaunch the shell, do not respawn the sidecar (localgw.ExitRelaunch).
+const RELAUNCH_EXIT = 75
+
 // --- single instance ----------------------------------------------------
 
 const locked = app.requestSingleInstanceLock()
@@ -161,6 +171,15 @@ function main() {
       child = null
       notify.stop()
       if (quitting) return
+      // The gateway rebuilt this app on disk (`update.apply`) and asked for
+      // a relaunch: respawning the sidecar would leave the user in the old
+      // shell around a new CLI. Everything else keeps the respawn path.
+      if (code === RELAUNCH_EXIT) {
+        quitting = true
+        app.relaunch()
+        app.exit(0)
+        return
+      }
       respawns += 1
       if (respawns > 3) {
         fatal(
@@ -248,12 +267,14 @@ function main() {
         : { frame: false }),
       // Matches the dashboard's --background token, so a frameless window
       // does not flash white before the SPA paints.
-      backgroundColor: '#0a0a0a',
+      backgroundColor: '#05070f',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        backgroundThrottling: false,
         preload: path.join(__dirname, 'preload.js'),
+        additionalArguments: ['--aether-shell-version=' + shellVersion],
       },
     })
 

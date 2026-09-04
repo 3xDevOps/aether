@@ -11,9 +11,11 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localgw"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
 func init() {
@@ -54,15 +56,31 @@ func runGUI(args []string) error {
 		}
 		cfg = named
 	}
+	// NotifyContext lets termination signals take the same cleanup path as
+	// desktop sidecar shutdown. The deferred gateway close releases SSH
+	// before draining HTTP handlers.
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		append([]os.Signal{syscall.SIGHUP}, terminationSignals...)...,
+	)
+	defer stop()
+
+	// One checker serves both the startup nudge and the update verbs, so
+	// the dashboard reads the answer the banner already paid for.
+	checker := selfupdate.DefaultChecker()
 	gw, err := localgw.New(localgw.Config{
 		Port:    *port,
 		Backend: localgw.NewSSHBackend(cfg),
 		CLI:     cfg,
+		Update:  checker,
+		// The desktop shell spawns `aether gui --json` and restarts it,
+		// so an update applied from the dashboard can exit the process.
+		Supervised: *jsonOut,
 	})
 	if err != nil {
 		return err
 	}
-	if err := gw.Start(context.Background()); err != nil {
+	if err := gw.Start(ctx); err != nil {
 		return err
 	}
 	defer func() { _ = gw.Close() }()
@@ -85,18 +103,42 @@ func runGUI(args []string) error {
 			openBrowser(url)
 		}
 	}
-	waitForExit()
+	go nudgeUpdate(checker)
+	waitForExit(ctx, gw.Exit())
+	if code := gw.ExitCode(); code != 0 {
+		// localgw.ExitRelaunch: update.apply rebuilt the desktop app, so
+		// the shell has to relaunch itself instead of respawning this
+		// sidecar into the window running the old app. The deferred Close
+		// does not run past os.Exit, so drain the gateway first.
+		_ = gw.Close()
+		os.Exit(code)
+	}
 	return nil
 }
 
-// waitForExit blocks until the process is told to stop. SIGTERM belongs
-// here with Ctrl-C: without it a `kill` or a systemd stop skips the
-// deferred gateway shutdown and leaves the listener live. SIGHUP covers
-// a closed terminal window the same way.
-func waitForExit() {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, append([]os.Signal{syscall.SIGHUP}, terminationSignals...)...)
-	<-ch
+// nudgeUpdate prints one line naming the command when a newer release
+// exists. It writes to stderr because stdout carries the --json handshake
+// the desktop shell parses. A failed check has no reader to report to and
+// no bearing on serving the dashboard, so it stays silent; `aether update
+// --check` reports the same failure with an exit status.
+func nudgeUpdate(c *selfupdate.Checker) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	check, err := c.Check(ctx)
+	if err != nil || !check.UpdateAvailable {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "update available: %s (running %s); run: aether update\n", check.Latest, check.Version)
+}
+
+// waitForExit blocks until the process is told to stop. The caller's
+// NotifyContext handles SIGTERM, SIGINT, and SIGHUP; the gateway asks for the
+// same stop through exit after update.apply replaces this binary.
+func waitForExit(ctx context.Context, exit <-chan struct{}) {
+	select {
+	case <-ctx.Done():
+	case <-exit:
+	}
 }
 
 func openBrowser(url string) {

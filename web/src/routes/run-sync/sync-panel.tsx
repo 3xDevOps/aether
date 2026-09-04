@@ -5,7 +5,7 @@
 
 import { RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import type { CardSlotProps } from '@/components/slots'
 import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'

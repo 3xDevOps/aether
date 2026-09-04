@@ -16,6 +16,7 @@ import type {
   EnvScanFrame,
   EnvScanRequest,
   EnvScanResult,
+  EnvScanResultFrame,
   EnvScanStatus,
   EnvStatusResult,
   EnvironmentSource,
@@ -27,19 +28,33 @@ import type {
   Member,
   Overlap,
   PresenceEntry,
+  ProfilePreview,
+  ProfilePushResult,
+  ProfileRecommendation,
   ProfileStatus,
   PullResult,
+  PullSwitchResult,
+  RepoPushResult,
   Run,
+  FileDiff,
+  FileRead,
+  FilesTreeResult,
   RunPatch,
   Schedule,
   ServerInfo,
+  ServerUpdateResult,
+  ServerUpdateStatus,
+  ServerUpdateWhen,
   SyncSessionState,
   SyncStatusResult,
+  TerminalStatusResult,
   Template,
   TemplateLaunch,
   TimelinePage,
   TimelineQuery,
-  ToolSnapshot,
+  UpdateApplyResult,
+  UpdateBuildStatus,
+  UpdateStatus,
   Workspace,
   WorkspaceSelector,
 } from '@/lib/types'
@@ -102,7 +117,11 @@ async function get<T>(path: string): Promise<T> {
  * serves these (useCapability's hasLocal says which); failures carry the
  * same JSON-RPC error envelope as the proxied API.
  */
-async function local<T>(verb: string, params: unknown = {}): Promise<T> {
+async function local<T>(
+  verb: string,
+  params: unknown = {},
+  signal?: AbortSignal,
+): Promise<T> {
   const token = bearer()
   const res = await fetch(`/local/v1/${verb}`, {
     method: 'POST',
@@ -111,6 +130,11 @@ async function local<T>(verb: string, params: unknown = {}): Promise<T> {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(params),
+    // Aborting closes the connection, which cancels the request context
+    // on the gateway. A verb that walks the user's whole profile root
+    // needs that: leaving the step must stop the work, not just stop
+    // waiting for it.
+    signal,
   })
   if (!res.ok) throw new ApiError(res.status, `${verb}: ${await failure(res)}`)
   return (await res.json()) as T
@@ -155,15 +179,25 @@ export interface EnvScanSession {
   close: () => void
 }
 
+/** What a /ws/envscan session reports while it runs. The terminal success
+ * frame differs by mode, so the shared framing hands it on whole and each
+ * caller reads the half its mode produces. */
+interface ScanHandlers {
+  onOutput: (line: string) => void
+  onStatus: (status: EnvScanStatus) => void
+  onResult: (frame: EnvScanResultFrame) => void
+  onError: (detail: string, outputTail?: string) => void
+}
+
 /**
- * openEnvScan runs one environment inventory on this machine through the
- * local gateway's /ws/envscan socket: one JSON start frame out, then
- * output and status frames in until a terminal result or error frame.
- * Framing mirrors the shell client (routes/shell/client.ts): a session
- * settles exactly once, and a close the caller asked for is not an
- * outcome.
+ * openScan runs one scan on this machine through the local gateway's
+ * /ws/envscan socket: one JSON start frame out, then output and status
+ * frames in until a terminal result or error frame. Framing mirrors the
+ * attach client: a session settles exactly once, and a close the caller
+ * asked for is not an outcome. Every mode - inventory, repo, refine,
+ * profile - rides this one function.
  */
-function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
+function openScan(req: EnvScanRequest, h: ScanHandlers): EnvScanSession {
   let socket: WebSocket | null = null
   let disposed = false
   let settled = false
@@ -217,9 +251,7 @@ function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
           h.onStatus(frame.status)
           break
         case 'result':
-          settle(() =>
-            h.onResult({ dockerfile: frame.dockerfile, manifest: frame.manifest }),
-          )
+          settle(() => h.onResult(frame))
           break
         case 'error':
           settle(() => h.onError(frame.detail, frame.output_tail))
@@ -245,6 +277,70 @@ function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
       ws.close()
     },
   }
+}
+
+/**
+ * openEnvScan runs one environment scan - inventory, repo, or refine - and
+ * reports the validated Dockerfile and manifest pair.
+ */
+function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
+  return openScan(req, {
+    onOutput: h.onOutput,
+    onStatus: h.onStatus,
+    onResult: (frame) =>
+      frame.recommendation
+        ? h.onError('the scan answered a recommendation, not an environment')
+        : h.onResult({
+            dockerfile: frame.dockerfile,
+            manifest: frame.manifest,
+          }),
+    onError: h.onError,
+  })
+}
+
+/** The start frame of a profile scan: the harness that runs the agent, and
+ * optionally the repository folder so the project can inform the call. */
+export interface ProfileScanRequest {
+  harness: string
+  repo_path?: string
+}
+
+/** A profile scan's frames. Same output and status stream as an
+ * environment scan; the terminal success frame is a recommendation. */
+export interface ProfileScanHandlers {
+  onOutput: (line: string) => void
+  onStatus: (status: EnvScanStatus) => void
+  /** The agent's proposal: which harnesses to import, and why. Nothing is
+   * imported until the user approves and profile.push runs. */
+  onResult: (recommendation: ProfileRecommendation) => void
+  onError: (detail: string, outputTail?: string) => void
+}
+
+/**
+ * openProfileScan asks the chosen harness which of this machine's agent
+ * configuration is worth bringing to the server. The agent sees paths and
+ * category counts only - never file contents.
+ */
+function openProfileScan(
+  req: ProfileScanRequest,
+  h: ProfileScanHandlers,
+): EnvScanSession {
+  return openScan(
+    {
+      harness: req.harness,
+      mode: 'profile',
+      ...(req.repo_path ? { repo_path: req.repo_path } : {}),
+    },
+    {
+      onOutput: h.onOutput,
+      onStatus: h.onStatus,
+      onResult: (frame) =>
+        frame.recommendation
+          ? h.onResult(frame.recommendation)
+          : h.onError('the scan answered an environment, not a recommendation'),
+      onError: h.onError,
+    },
+  )
 }
 
 // Only what the SPA actually calls; the team-feature methods land with the
@@ -301,6 +397,13 @@ export const api = {
     call<TimelinePage>('workspace.timeline', query),
   runOverlaps: () =>
     call<{ overlaps: Overlap[] }>('run.overlaps').then((r) => r.overlaps),
+  /** Whether the server can replace its own binaries, and what update is
+   * in flight. Any member may read it; only an admin may call server.update. */
+  serverUpdateStatus: () => call<ServerUpdateStatus>('server.update_status'),
+  /** Asks the server to update itself to the latest release now, at the
+   * next idle moment, or to cancel the pending one. */
+  serverUpdate: (when: ServerUpdateWhen) =>
+    call<ServerUpdateResult>('server.update', { when }),
   // Admin and membership: invites, approvals, colors, workspaces.
   memberInvite: (ttlSeconds?: number) =>
     call<{ code: string; expires_at: string }>('member.invite', {
@@ -341,21 +444,6 @@ export const api = {
       workspace_id: params.workspace_id,
       steer_others: params.steer_others ?? '',
     }).then((r) => r.workspace),
-  // Workspace tool snapshots. Every method addresses the workspace by
-  // exactly one of id or name, like the protocol's WorkspaceSelector.
-  toolsList: (ws: WorkspaceSelector) =>
-    call<{ snapshots: ToolSnapshot[] }>('workspace.tools.list', {
-      workspace: ws,
-    }).then((r) => r.snapshots),
-  toolsVerify: (ws: WorkspaceSelector) =>
-    call<unknown>('workspace.tools.verify', { workspace: ws }),
-  toolsRollback: (ws: WorkspaceSelector, snapshotID: string) =>
-    call<unknown>('workspace.tools.rollback', {
-      workspace: ws,
-      snapshot_id: snapshotID,
-    }),
-  toolsReset: (ws: WorkspaceSelector) =>
-    call<unknown>('workspace.tools.reset', { workspace: ws, confirm: true }),
   // Budgets: the server clears a budget on a limit of zero or less, so
   // `clear` is spelled here rather than by every caller.
   budgetSet: (params: {
@@ -414,6 +502,12 @@ export const api = {
   // result. See docs/local-gateway.md.
   runPatch: (runID: string) =>
     get<RunPatch>(`/run/${encodeURIComponent(runID)}/patch`),
+  filesTree: (params: { workspace_id: string; run_id?: string; path: string }) =>
+    call<FilesTreeResult>('files.tree', params),
+  filesRead: (params: { workspace_id: string; run_id?: string; path: string }) =>
+    call<FileRead>('files.read', params),
+  filesDiff: (runID: string, path: string) =>
+    call<FileDiff>('files.diff', { run_id: runID, path }),
   disk: () => get<DiskUsage>('/disk'),
   capabilities: () => get<GatewayCapabilities>('/capabilities'),
   // The local gateway's client-machine verbs; see the `local` helper.
@@ -424,6 +518,12 @@ export const api = {
   // process start, so it answers the restart instruction as an error.
   localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
   localPull: (runID: string) => local<PullResult>('pull', { run_id: runID }),
+  localPullSwitch: (runID: string) =>
+    local<PullSwitchResult>('pull.switch', { run_id: runID }),
+  /** Pushes the workspace's base branch to the `aether` remote, seeding a
+   * fresh workspace without leaving the app. */
+  localRepoPush: (workspaceID?: string) =>
+    local<RepoPushResult>('repo.push', { workspace_id: workspaceID }),
   localSyncStart: (runID: string, force?: boolean) =>
     local<SyncSessionState>('sync.start', { run_id: runID, force }),
   localSyncStop: (runID: string) =>
@@ -432,6 +532,13 @@ export const api = {
   localDaemonInstall: (server: string, repo: string) =>
     local<DaemonInstallResult>('daemon.install', { server, repo }),
   localDaemonStatus: () => local<DaemonStatusResult>('daemon.status'),
+  /** Whether the CLI on this machine, and the server it talks to, are
+   * behind the newest release. */
+  localUpdateCheck: () => local<UpdateStatus>('update.check'),
+  /** Replaces the aether binary on this machine with the newest release. */
+  localUpdateApply: () => local<UpdateApplyResult>('update.apply'),
+  /** Progress of a desktop-app rebuild started by update.apply. */
+  localUpdateStatus: () => local<UpdateBuildStatus>('update.status'),
   localImageScaffold: (repo: string, kind: 'dockerfile' | 'devcontainer') =>
     local<ImageScaffoldResult>('image.scaffold', { repo, kind }),
   // Workspace environments: definitions live on the server (admin-guarded
@@ -486,12 +593,29 @@ export const api = {
   /** Which setup-capable harnesses this machine has on PATH, plus the
    * linked repository folder when the gateway knows exactly one. */
   envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
+  /** What `aether profile push --agent <harness>` would carry from this
+   * machine, uploading nothing. It walks the whole profile root, so it
+   * takes a signal: aborting stops the walk on the gateway too. */
+  localProfilePreview: (harness: string, signal?: AbortSignal) =>
+    local<ProfilePreview>('profile.preview', { harness }, signal),
+  /** Pushes this member's configuration for one harness. There is no
+   * allow-secret parameter: a scanner finding refuses the push, and the
+   * override lives on the CLI. */
+  localProfilePush: (harness: string) =>
+    local<ProfilePushResult>('profile.push', { harness }),
+  terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
+  terminalStop: () => call<unknown>('terminal.stop', {}),
+  terminalSocket: (tab: string) =>
+    socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),
   openEnvScan,
+  openProfileScan,
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),
-  /** The unified workspace-shell socket; the header frame picks the mode. */
-  shellSocket: () => socketURL('/ws/shell'),
+  attachShellSocket: (runID: string, tab: string) =>
+    socketURL(
+      `/ws/attach/${encodeURIComponent(runID)}?shell=${encodeURIComponent(tab)}`,
+    ),
 }
 
 export type Api = typeof api

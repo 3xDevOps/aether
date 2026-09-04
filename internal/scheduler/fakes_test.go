@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -34,11 +36,23 @@ type fakeRuntime struct {
 	// startHook runs in its own goroutine once a container starts; tests
 	// use it to script the container's output and exit.
 	startHook func(c *fakeContainer)
-	attaches  int
-	builds    int
+	// execTTYHook overrides ExecTTY for tests that need to model an
+	// immediate shell-executable failure.
+	execTTYHook func(context.Context, runtime.ID, []string, string, uint, uint) (runtime.Attachment, error)
+	execCalls   []fakeExecTTYCall
+	attaches    int
+	builds      int
 	// images maps built tags to their Dockerfile text, lazily allocated
 	// by BuildImage.
 	images map[string]string
+}
+
+type fakeExecTTYCall struct {
+	id      runtime.ID
+	argv    []string
+	workDir string
+	cols    uint
+	rows    uint
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -55,9 +69,6 @@ type fakeContainer struct {
 	stdin bytes.Buffer
 	exit  *runtime.ExitStatus
 	done  chan struct{}
-	// startedWithAttach records whether an attachment existed when Start
-	// ran; interactive shells must attach first or lose the first prompt.
-	startedWithAttach bool
 }
 
 // output emits agent PTY bytes to every open attachment.
@@ -70,9 +81,26 @@ func (c *fakeContainer) output(s string) {
 	}
 }
 
-// exitNow ends the main process with the given code, EOF-ing every
-// attachment. Idempotent.
+// exitNow is the test-facing exit: it ends the main process with the
+// given code. It rejects state "created", the one state Docker can never
+// report as exited, because a container has no process before Start. A
+// forged exit there leaves Attach refusing the container as not running,
+// so a test that beats the code under test to Start reads that refusal
+// instead of the exit code it set.
 func (c *fakeContainer) exitNow(code int) {
+	c.mu.Lock()
+	created := c.state == "created"
+	c.mu.Unlock()
+	if created {
+		panic(fmt.Sprintf("fake runtime: container %s exited before it started; wait for it to be running first", c.id))
+	}
+	c.endProcess(code)
+}
+
+// endProcess records the exit code and EOFs every attachment. Idempotent,
+// and reachable from any state: Stop and Destroy tear down containers
+// that never started.
+func (c *fakeContainer) endProcess(code int) {
 	c.mu.Lock()
 	if c.exit != nil {
 		c.mu.Unlock()
@@ -142,7 +170,6 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 		return fmt.Errorf("fake runtime: start from state %q", c.state)
 	}
 	c.state = "running"
-	c.startedWithAttach = len(c.atts) > 0
 	if r.startHook != nil {
 		go r.startHook(c)
 	}
@@ -182,7 +209,7 @@ func (r *fakeRuntime) Stop(_ context.Context, id runtime.ID, _ time.Duration) er
 	if err != nil {
 		return err
 	}
-	c.exitNow(137)
+	c.endProcess(137)
 	return nil
 }
 
@@ -192,7 +219,7 @@ func (r *fakeRuntime) Destroy(_ context.Context, id runtime.ID) error {
 	delete(r.containers, id)
 	r.mu.Unlock()
 	if ok {
-		c.exitNow(137)
+		c.endProcess(137)
 	}
 	return nil
 }
@@ -214,6 +241,38 @@ func (r *fakeRuntime) Attach(_ context.Context, id runtime.ID) (runtime.Attachme
 	a := &fakeAttachment{c: c, pr: pr, pw: pw}
 	c.atts = append(c.atts, a)
 	return a, nil
+}
+func (r *fakeRuntime) ExecTTY(ctx context.Context, id runtime.ID, argv []string, workDir string, cols, rows uint) (runtime.Attachment, error) {
+	r.mu.Lock()
+	r.execCalls = append(r.execCalls, fakeExecTTYCall{
+		id: id, argv: slices.Clone(argv), workDir: workDir, cols: cols, rows: rows,
+	})
+	hook := r.execTTYHook
+	r.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, id, argv, workDir, cols, rows)
+	}
+	return r.attachForExec(ctx, id, argv, workDir, cols, rows)
+}
+
+func (r *fakeRuntime) attachForExec(ctx context.Context, id runtime.ID, _ []string, _ string, cols, rows uint) (runtime.Attachment, error) {
+	att, err := r.Attach(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if cols != 0 && rows != 0 {
+		if err := att.Resize(ctx, cols, rows); err != nil {
+			_ = att.Close()
+			return nil, err
+		}
+	}
+	return att, nil
+}
+
+func (r *fakeRuntime) execTTYCalls() []fakeExecTTYCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.execCalls)
 }
 
 func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
@@ -532,9 +591,10 @@ func (g *fakeGit) checkoutCount() int {
 // ownership of the attachment and pumps its Stdout, recording the time of
 // the last byte read.
 type fakePTY struct {
-	mu       sync.Mutex
-	sessions map[domain.RunID]*fakePTYSession
-	injects  []fakeInject
+	mu              sync.Mutex
+	sessions        map[ptyhost.SessionKey]*fakePTYSession
+	injects         []fakeInject
+	stoppedPrefixes []string
 }
 
 type fakePTYSession struct {
@@ -556,13 +616,13 @@ type fakeInject struct {
 var errFakeNoSession = errors.New("fake ptyhost: no session for run")
 
 func newFakePTY() *fakePTY {
-	return &fakePTY{sessions: make(map[domain.RunID]*fakePTYSession)}
+	return &fakePTY{sessions: make(map[ptyhost.SessionKey]*fakePTYSession)}
 }
 
-func (p *fakePTY) StartSession(_ context.Context, run domain.RunID, att runtime.Attachment) error {
+func (p *fakePTY) StartSession(_ context.Context, key ptyhost.SessionKey, att runtime.Attachment) error {
 	sess := &fakePTYSession{att: att}
 	p.mu.Lock()
-	p.sessions[run] = sess
+	p.sessions[key] = sess
 	p.mu.Unlock()
 	go func() {
 		buf := make([]byte, 4096)
@@ -585,19 +645,58 @@ func (p *fakePTY) StartSession(_ context.Context, run domain.RunID, att runtime.
 	return nil
 }
 
-func (p *fakePTY) StopSession(_ context.Context, run domain.RunID) error {
+func (p *fakePTY) StopSession(_ context.Context, key ptyhost.SessionKey) error {
 	p.mu.Lock()
-	sess, ok := p.sessions[run]
+	sess, ok := p.sessions[key]
 	p.mu.Unlock()
 	if !ok {
 		return errFakeNoSession
 	}
 	return sess.att.Close()
 }
-
-func (p *fakePTY) LastOutput(run domain.RunID) (time.Time, bool) {
+func (p *fakePTY) ActiveSessions(prefix string) []ptyhost.SessionKey {
 	p.mu.Lock()
-	sess, ok := p.sessions[run]
+	defer p.mu.Unlock()
+	active := make([]ptyhost.SessionKey, 0)
+	for key, sess := range p.sessions {
+		if !strings.HasPrefix(string(key), prefix) {
+			continue
+		}
+		sess.mu.Lock()
+		ended := sess.ended
+		sess.mu.Unlock()
+		if !ended {
+			active = append(active, key)
+		}
+	}
+	slices.Sort(active)
+	return active
+}
+
+func (p *fakePTY) StopSessionsWithPrefix(_ context.Context, prefix string) {
+	p.mu.Lock()
+	p.stoppedPrefixes = append(p.stoppedPrefixes, prefix)
+	sessions := make([]*fakePTYSession, 0)
+	for key, sess := range p.sessions {
+		if strings.HasPrefix(string(key), prefix) {
+			sessions = append(sessions, sess)
+		}
+	}
+	p.mu.Unlock()
+	for _, sess := range sessions {
+		_ = sess.att.Close()
+	}
+}
+
+func (p *fakePTY) stoppedPrefixesSnapshot() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.stoppedPrefixes)
+}
+
+func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {
+	p.mu.Lock()
+	sess, ok := p.sessions[key]
 	p.mu.Unlock()
 	if !ok {
 		return time.Time{}, false
@@ -607,9 +706,10 @@ func (p *fakePTY) LastOutput(run domain.RunID) (time.Time, bool) {
 	return sess.last, true
 }
 
-func (p *fakePTY) Inject(_ context.Context, run domain.RunID, actorName, actorColor, message string) error {
+func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error {
+	run, _ := key.Run()
 	p.mu.Lock()
-	sess, ok := p.sessions[run]
+	sess, ok := p.sessions[key]
 	if ok {
 		p.injects = append(p.injects, fakeInject{run: run, name: actorName, color: actorColor, message: message})
 	}
@@ -627,7 +727,7 @@ func (p *fakePTY) Inject(_ context.Context, run domain.RunID, actorName, actorCo
 func (p *fakePTY) session(run domain.RunID) *fakePTYSession {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.sessions[run]
+	return p.sessions[ptyhost.RunSession(run)]
 }
 
 func (p *fakePTY) injected() []fakeInject {

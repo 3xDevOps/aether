@@ -11,8 +11,8 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/toolenv"
 )
 
 // The pair the scripted edit container writes on the happy path. Valid
@@ -31,34 +31,34 @@ const editedEnvManifestJSON = `[
   }
 ]`
 
-// newEditTestEnv wires a testEnv with everything an environment edit
-// needs: a homes dir for login state, a toolenv manager for tool-snapshot
-// mounts, and the edit scratch root.
+// newEditTestEnv wires a testEnv with the persistent member home and the
+// edit scratch root.
 func newEditTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	dir := t.TempDir()
 	e := newTestEnv(t, func(c *Config) {
-		mgr, err := toolenv.NewManager(filepath.Join(dir, "tools"), c.Store)
-		if err != nil {
-			t.Fatalf("toolenv manager: %v", err)
-		}
-		c.Toolenv = mgr
-		c.HomesDir = filepath.Join(dir, "homes")
-		c.EnvEditDir = filepath.Join(dir, "env-edits")
+		c.EnvEditDir = filepath.Join(t.TempDir(), "env-edits")
 	})
 	return e
 }
 
-// grantLoginState leaves a credential file under the member's harness
-// home, which is what a completed agent-add leaves behind.
+// grantLoginState installs the resolved agent executable in the member's
+// persistent home, which is what a completed terminal setup leaves behind.
 func grantLoginState(t *testing.T, e *testEnv, harnessName string) {
 	t.Helper()
-	home := filepath.Join(e.cfg.HomesDir, string(e.member.ID), harnessName)
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
-		t.Fatalf("create credential home: %v", err)
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatalf("member home: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".claude", "creds"), []byte("x"), 0o600); err != nil {
-		t.Fatalf("write credential file: %v", err)
+	executable := harnessName
+	if p, ok := harness.Lookup(harnessName); ok && len(p.HeadlessArgs) > 0 {
+		executable = p.HeadlessArgs[0]
+	}
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatalf("create agent bin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, executable), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write agent executable: %v", err)
 	}
 }
 
@@ -134,8 +134,8 @@ func TestEditEnvironmentRejectsNonSetupHarness(t *testing.T) {
 	if !errors.Is(err, ErrEnvironmentEditPreflight) {
 		t.Fatalf("error = %v, want ErrEnvironmentEditPreflight", err)
 	}
-	if !strings.Contains(err.Error(), "aether agent add") {
-		t.Errorf("error = %q, want it to name the aether agent add command", err)
+	if want := "aether agent add opencode"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to name %q", err, want)
 	}
 }
 
@@ -148,7 +148,7 @@ func TestEditEnvironmentRequiresLoginState(t *testing.T) {
 	if !errors.Is(err, ErrEnvironmentEditPreflight) {
 		t.Fatalf("error = %v, want ErrEnvironmentEditPreflight", err)
 	}
-	want := "aether agent add claude --workspace ws"
+	want := "aether agent add claude"
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("error = %q, want it to name %q", err, want)
 	}
@@ -165,13 +165,6 @@ func TestEditEnvironmentHappyPath(t *testing.T) {
 	e := newEditTestEnv(t)
 	predecessor := saveMirrorDefinition(t, e)
 	grantLoginState(t, e, "claude")
-	staging, err := e.cfg.Toolenv.CreateStaging(string(e.member.ID), string(e.ws.ID))
-	if err != nil {
-		t.Fatalf("create staging: %v", err)
-	}
-	if _, err = e.cfg.Toolenv.Promote(t.Context(), string(e.member.ID), string(e.ws.ID), staging, domain.ToolManifest{}, nil); err != nil {
-		t.Fatalf("promote tool snapshot: %v", err)
-	}
 
 	var mu sync.Mutex
 	var spec runtime.Spec
@@ -216,11 +209,11 @@ func TestEditEnvironmentHappyPath(t *testing.T) {
 	for _, m := range captured.Mounts {
 		mountsByTarget[m.ContainerPath] = m
 	}
-	if _, ok := mountsByTarget["/root/.claude"]; !ok {
-		t.Errorf("mounts = %v, want the claude credential home at /root/.claude", captured.Mounts)
+	if len(captured.Mounts) != 2 {
+		t.Fatalf("mounts = %v, want home and scratch", captured.Mounts)
 	}
-	if m, ok := mountsByTarget["/root/.local"]; !ok || !m.ReadOnly {
-		t.Errorf("mounts = %v, want the read-only tool snapshot at /root/.local", captured.Mounts)
+	if home, ok := mountsByTarget["/root"]; !ok || home.ReadOnly {
+		t.Errorf("mounts = %v, want the writable member home at /root", captured.Mounts)
 	}
 	if m, ok := mountsByTarget[environmentEditOutputDir]; !ok || m.ReadOnly {
 		t.Errorf("mounts = %v, want a writable scratch mount at %s", captured.Mounts, environmentEditOutputDir)

@@ -2,6 +2,7 @@ package localops
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,7 +23,8 @@ func TestDaemonInstallAndStatus(t *testing.T) {
 		t.Fatal("DaemonStatus returned no unit path")
 	}
 
-	path, note, err := InstallDaemon("host:2222", t.TempDir())
+	keyPath := filepath.Join(t.TempDir(), "aether_ed25519")
+	path, note, err := InstallDaemon("host:2222", t.TempDir(), keyPath)
 	if err != nil {
 		t.Fatalf("InstallDaemon: %v", err)
 	}
@@ -42,6 +44,10 @@ func TestDaemonInstallAndStatus(t *testing.T) {
 	if !strings.Contains(string(body), "host:2222") {
 		t.Fatalf("unit content lacks the server address: %q", body)
 	}
+	// The daemon dials with the linked key, not the default one.
+	if !strings.Contains(string(body), keyPath) {
+		t.Fatalf("unit content lacks the key path %s: %q", keyPath, body)
+	}
 
 	installed, unitPath2, err := DaemonStatus()
 	if err != nil {
@@ -53,7 +59,7 @@ func TestDaemonInstallAndStatus(t *testing.T) {
 }
 
 func TestInstallDaemonRequiresServer(t *testing.T) {
-	if _, _, err := InstallDaemon("", "."); err == nil {
+	if _, _, err := InstallDaemon("", ".", ""); err == nil {
 		t.Fatal("InstallDaemon accepted an empty server")
 	}
 }

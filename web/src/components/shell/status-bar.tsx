@@ -5,7 +5,7 @@ import type { ConnectionState } from '@/lib/stream'
 import type { DiskUsage } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { UnreachableKind } from '@/store/server'
 
 const connectionLabel: Record<ConnectionState, string> = {
@@ -36,9 +36,14 @@ const unreachableLabel: Record<UnreachableKind, string> = {
 /**
  * The gauge's tooltip: what is holding the disk, in the order an operator
  * can act on it. Run checkouts are garbage-collected after their TTL,
- * transcripts live as long as their run rows, and the database is where the
- * event log accumulates. The bar says the disk is filling; this says what
- * is filling it, which is the only version an operator can act on.
+ * transcripts live as long as their run rows, the database is where the
+ * event log accumulates, and the bare workspace repos keep every push and
+ * run branch. The bar says the disk is filling; this says what is filling
+ * it, which is the only version an operator can act on.
+ *
+ * The repos line is dropped rather than shown as zero when the server
+ * predates the component, so an old server reads as silent instead of as a
+ * server with no repositories.
  */
 function diskBreakdown(disk: DiskUsage): string {
   return [
@@ -46,8 +51,40 @@ function diskBreakdown(disk: DiskUsage): string {
     `Worktrees ${formatBytes(disk.worktree_bytes)}`,
     `Transcripts ${formatBytes(disk.transcript_bytes)}`,
     `Database ${formatBytes(disk.database_bytes)}`,
+    ...(disk.repo_bytes === undefined
+      ? []
+      : [`Repos ${formatBytes(disk.repo_bytes)}`]),
     `${formatBytes(disk.free_bytes)} free`,
   ].join(' · ')
+}
+
+/**
+ * What a member who cannot press the update buttons is told while the
+ * server updates itself. Both phases end in the same restart, and a
+ * restart nobody explained looks like an outage; an admin has the banner
+ * instead, which says the same thing with the controls attached.
+ */
+function ServerUpdateNotice() {
+  const isAdmin = useIsAdmin()
+  const progress = useStore((s) => s.serverUpdateProgress)
+  const pending = useStore((s) => s.serverUpdate?.pending)
+  const phase = progress?.phase ?? (pending ? 'scheduled' : undefined)
+  if (isAdmin) return null
+  const notice =
+    phase === 'scheduled'
+      ? 'server update scheduled, terminals will reconnect briefly'
+      : phase === 'applying' || phase === 'restarting'
+        ? 'server update applying, terminals will reconnect briefly'
+        : null
+  if (!notice) return null
+  return (
+    <span
+      role="status"
+      className="rounded-full bg-state-waiting/15 px-2 py-0.5 text-[11px] font-medium"
+    >
+      {notice}
+    </span>
+  )
 }
 
 /**
@@ -81,6 +118,38 @@ function LocalStatus() {
   )
 }
 
+/**
+ * The version label, with a dot when a newer release is out. The banner is
+ * the thing that says what to do about it, so the badge's only job is to
+ * bring a dismissed one back - clicking it clears the dismissals rather than
+ * navigating anywhere.
+ */
+function VersionLabel({ version, protocol }: { version: string; protocol: string }) {
+  const update = useStore((s) => s.update)
+  const isAdmin = useIsAdmin()
+  const clearDismissedUpdates = useStore((s) => s.clearDismissedUpdates)
+  const label = `aether ${version}`
+  const available =
+    update !== null &&
+    (update.cli.update_available || (update.server_behind && isAdmin))
+
+  if (!available) return <span title={`protocol ${protocol}`}>{label}</span>
+
+  const latest = update.cli.latest ?? ''
+  return (
+    <button
+      type="button"
+      onClick={clearDismissedUpdates}
+      aria-label={`Update available: ${latest}`}
+      title={`${latest} is available - show the update banner`}
+      className="flex items-center gap-1.5 rounded px-1 hover:text-foreground"
+    >
+      {label}
+      <span className="size-2 rounded-full bg-state-waiting" aria-hidden />
+    </button>
+  )
+}
+
 export function StatusBar() {
   const connection = useStore((s) => s.connection)
   const unreachable = useStore((s) => s.unreachable)
@@ -105,11 +174,13 @@ export function StatusBar() {
         </span>
       )}
       {info && (
-        <span title={`protocol ${info.protocol_version}`}>
-          aether {info.server_version}
-        </span>
+        <VersionLabel
+          version={info.server_version}
+          protocol={info.protocol_version}
+        />
       )}
       {info && <span>{info.member.display_name}</span>}
+      <ServerUpdateNotice />
       {disk && disk.total_bytes > 0 && (
         <span
           className="flex items-center gap-1.5"

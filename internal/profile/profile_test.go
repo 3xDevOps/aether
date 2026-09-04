@@ -35,7 +35,7 @@ func testService(t *testing.T) (*Service, *store.DB, *domain.Member) {
 	if err = db.CreateMember(context.Background(), m); err != nil {
 		t.Fatalf("CreateMember: %v", err)
 	}
-	svc, err := New(db, filepath.Join(t.TempDir(), "snapshots"))
+	svc, err := New(db)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestPutRejects(t *testing.T) {
 func TestPutSizeCap(t *testing.T) {
 	svc, _, m := testService(t)
 	ctx := context.Background()
-	big := bytes.Repeat([]byte("a"), maxFileBytes+1)
+	big := bytes.Repeat([]byte("a"), MaxFileBytes+1)
 	_, err := svc.Put(ctx, string(m.ID), "claude", []File{{Path: "big.txt", Mode: 0o644, Content: big}})
 	if !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("file cap: %v", err)

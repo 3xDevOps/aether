@@ -419,8 +419,9 @@ func (e *chaosEnv) sweepContainer(t *testing.T, runID string) {
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", containerName(runID)).Run() })
 }
 
-// serverBinary is built once per test binary: every chaos scenario runs the
-// same server the operator installs.
+// serverBinary is built once per test binary: every scenario that needs a
+// real one runs the same server the operator installs, statically linked
+// like the release so a copy of it also runs inside a minimal image.
 var serverBinary struct {
 	sync.Once
 	path string
@@ -438,6 +439,7 @@ func buildServerBinary(t *testing.T) string {
 		path := filepath.Join(dir, "aether-server")
 		cmd := exec.Command("go", "build", "-o", path, "./cmd/aether-server")
 		cmd.Dir = repoRoot(t)
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		out, berr := cmd.CombinedOutput()
 		if berr != nil {
 			serverBinary.err = fmt.Errorf("go build ./cmd/aether-server: %w (%s)", berr, out)

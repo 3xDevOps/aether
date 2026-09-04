@@ -7,13 +7,16 @@ import type {
   EnvironmentBuildPayload,
   EnvironmentEditPayload,
   Event,
+  GitBranchPayload,
   OverlapPayload,
   RunDiffPayload,
   RunStatusPayload,
+  ServerUpdatePayload,
+  RunTitlePayload,
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import { pausedFromTimeline } from '@/store/board'
-import type { UnreachableKind } from '@/store/server'
+import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 
 /**
  * Names the hop that failed. The local gateway reports a dead transport as
@@ -77,6 +80,12 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     s.setOverlaps(overlaps)
     s.setCapabilities(capabilities)
     s.setHydrated(true)
+    if (
+      !store.getState().onboarded &&
+      capabilities?.local?.includes('link.status') === true
+    ) {
+      store.setState({ route: { name: 'onboarding', params: {} } })
+    }
     s.setUnreachable(null)
     return true
   } catch (err) {
@@ -150,6 +159,19 @@ export async function applyEvent(
       store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time)
       break
     }
+    case 'run.title': {
+      const p = ev.payload as RunTitlePayload
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          store.getState().setUnreachable(classifyUnreachable(err))
+          return false
+        }
+      }
+      store.getState().applyRunTitle(ev.run_id, p.title)
+      break
+    }
     case 'run.diff': {
       // A snapshot carries per-file stats only. It is the timeline entry the
       // Diff tab lists, and the signal that its patch text is behind.
@@ -157,6 +179,19 @@ export async function applyEvent(
       store
         .getState()
         .noteDiffSnapshot(ev.run_id, { time: ev.time, files: p.files ?? [] })
+      break
+    }
+    case 'git.branch': {
+      const p = ev.payload as GitBranchPayload
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          store.getState().setUnreachable(classifyUnreachable(err))
+          return false
+        }
+      }
+      if (p.commit) store.getState().applyLastCommit(ev.run_id, p.commit, ev.time)
       break
     }
     case 'run.overlap': {
@@ -197,6 +232,14 @@ export async function applyEvent(
       // view is its reader.
       const p = ev.payload as EnvironmentBuildPayload
       if (ev.workspace_id) store.getState().applyEnvBuild(ev.workspace_id, p)
+      break
+    }
+    case 'server.update': {
+      // The server updating itself. It is published once per workspace,
+      // so the same phase lands several times; the slice keeps the
+      // furthest one. The banner and the status bar read it live, and
+      // `restarting` is the last frame before the socket drops.
+      store.getState().applyServerUpdate(ev.payload as ServerUpdatePayload)
       break
     }
     case 'environment.edit': {
@@ -289,8 +332,15 @@ export function connect(store: RootStore, client: Api = api): () => void {
       }
       if (state !== 'live') return
       // The subscription is installed. Hydrate behind it on the first connect,
-      // and again on a reconnect that has no cursor to replay from.
-      if (!subscribed || store.getState().lastSeq === 0) void load()
+      // and again on a reconnect that has no cursor to replay from - or one
+      // that came while the server was replacing its own binaries, because
+      // that is a server that may have just re-executed on a new version.
+      // Only a fresh server.info says it did, and the update banner and the
+      // notice in the status bar both end on that answer.
+      const s = store.getState()
+      if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress)) {
+        void load()
+      }
       subscribed = true
     },
     onUnreachable: (kind, detail) => {

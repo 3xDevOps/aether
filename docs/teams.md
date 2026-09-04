@@ -72,7 +72,7 @@ approve, pause), **kill** - plus **push** to the workspace repo and
 | --- | --- | --- | --- |
 | viewer | - | view | read the feed |
 | collaborator (default) | everything | view, steer, kill | launch runs, push, use templates |
-| admin | everything | everything | members, workspaces, budgets, templates, settings |
+| admin | everything | everything | members, workspaces, budgets, templates, settings, server self-update |
 
 The viewer row is a real choice, not a placeholder: `aether member role <id>
 viewer` assigns it. It is for the person who should watch the work and read the
@@ -82,8 +82,8 @@ feed without being able to start, steer, or kill anything.
 other's agents with zero setup; every privileged act is attributed in the
 workspace timeline instead of being prevented.
 
-The bootstrap identity is the admin and everyone who joins afterwards is a
-collaborator, but an admin can change that:
+The first identity to link a fresh server becomes the admin and everyone who
+joins afterwards is a collaborator, but an admin can change that:
 
 ```sh
 aether member role 01m04mqes1z7wsdk4s90tx0pgg viewer
@@ -113,6 +113,11 @@ Admin-only commands answer with a clear error otherwise:
 ```
 aether: rpc error -32001: workspace.add requires the admin role
 ```
+
+`aether server update` is gated the same way: `rpc error -32001: server.update
+requires the admin role` for anyone but an admin. Any member can still read
+`aether server update --status`. See [install.md](install.md#upgrading) for
+the command.
 
 ## Workspaces
 
@@ -189,6 +194,7 @@ the artifact. Every other branch behaves like a normal git remote.
 | `aether cost --runs` | Token spend per member and per run. |
 | `aether budget` | The workspace's spend cap and what has been used. |
 | `aether sync --live <local-dir> <run>` | Live-overlay a local directory onto a run's worktree. Local edits that collide are preserved as `*.aether-conflict` files. |
+| `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. |
 
 ### Task templates and schedules
 
@@ -222,8 +228,9 @@ timeline dots, overlapping diff hunks, dashboard cards. "Whose agent is doing
 what" is meant to be answerable at a glance from any screen.
 
 Every privileged act - steer, kill, approve, handoff, settings change - is
-stamped into the workspace timeline with the actor. Permissive by default,
-always attributed.
+stamped into the workspace timeline with the actor. A server update is
+stamped into every workspace's timeline, since it affects all of them.
+Permissive by default, always attributed.
 
 ### Conflict radar
 
@@ -254,12 +261,11 @@ so explicitly, and the totals are a floor rather than the real spend.
 
 ## Agent setup is per person
 
-Logins never move between people. Each member runs `aether agent add <name>`
-once (`aether setup <harness>` re-runs just the login later),
-completes the vendor's own login flow in the container Aether hands them,
-and their login state lives in a per-member server-side home mounted into
-their runs. All of one member's runs share one login; nobody else's do. See
-[harnesses.md](harnesses.md).
+Each member runs `aether agent add <name>` once, then opens `aether terminal`
+to install the agent and complete the vendor login. The member's server-side
+home is mounted into every container that person receives, so all their runs
+share the same login and installed files. No member can see another member's
+home. See [harnesses.md](harnesses.md).
 
 Agent *configuration* - skills, plugins, custom commands - syncs one way from
 each member's laptop with `aether profile push` (and automatically, if the

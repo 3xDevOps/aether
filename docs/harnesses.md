@@ -8,11 +8,9 @@ plugin system.
 
 Two rules shape everything below:
 
-1. **Aether does not run vendor installer logic.** A member can install an agent
-   executable into the workspace's bootstrap staging directory with the
-   vendor's documented procedure. Aether snapshots it under `~/.local` and
-   makes it available to later runs. An administrator may instead choose a
-   custom image that already contains the executable.
+1. **Aether does not install agents for you.** A member runs the displayed
+   vendor install command in their environment terminal. The command should
+   install the executable into `~/.local/bin`.
 2. **Aether never handles your vendor credentials.** Logins happen through the
    vendor's own flow, in a terminal Aether hands you, exactly as on a new
    laptop. Tokens are never extracted, synced, or proxied.
@@ -89,52 +87,40 @@ requires a task.
 These are the vendors' own flags, and vendors rename them. If a launch fails
 with an unknown-flag error, the installed CLI has drifted from the registry.
 Pin it in an administrator-approved custom image or update the registry. A
-CLI installed by bootstrap is selected by the active tool snapshot.
+member's installed CLI lives in that member's environment home.
 
 ## Setting up an agent
 
 Once per person, per agent:
 
 ```sh
-aether agent add <name> --workspace <workspace>
+aether agent add <name>
 ```
 
-This opens the unified workspace shell in agent-setup mode: tool staging is
-mounted writable at `~/.local` and your per-harness credential home is
-mounted writable at `$HOME`. For a shipped name the vendor's documented
-install command runs first (claude and opencode use the official curl
-installers; codex, pi, and amp use npm with `--prefix ~/.local` when the
-image has npm) -
-these are the vendors' own commands and vendors move them, so a failed
-install leaves you in the shell to install into `~/.local/bin` manually. For
-other names, install the executable into `~/.local/bin` with the vendor's
-documented procedure yourself. Then run the vendor's login flow and `exit`
-cleanly. Aether verifies the executable, snapshots the tools (vendor
-installers that symlink `~/.local/bin` entries to absolute paths are
-normalized to relative links), persists the login state, and - for a name
-outside the shipped table - registers a launch definition under your
-membership. `aether agent list` shows shipped and member-registered agents.
+For a shipped name, the dashboard's Agents step opens the live environment
+terminal dock and types the vendor install script for you. In the CLI, run:
 
-Launching a shipped or member-registered agent on a neutral-image workspace
-before this setup exists is refused up front with the `aether agent add`
-command to run, instead of failing inside the run container.
+```sh
+aether terminal
+```
 
-For an unshipped name the command asks for the interactive and headless
-launch templates first (`<name> {task}` and `<name> -p {task}` by default;
-Enter accepts, or pass `--tui` / `--headless`). `{task}` is replaced as one
-argv value, never through a shell. Aether discovers where the login flow
-wrote its state by comparing your credential home before and after the setup
-shell, so the registered definition mounts exactly those paths into later
-runs.
+Install the executable into `~/.local/bin`, complete the vendor login in that
+terminal, and return to the dashboard. The login and executable are in your
+member home, so every container for that member sees them. A member-defined
+name also records a launch definition under that member.
 
-The individual steps remain available when you need only one of them:
+For an unshipped name the command asks for interactive and headless launch
+templates first (`<name> {task}` and `<name> -p {task}` by default). Install the
+executable into `~/.local/bin` using the vendor's documented procedure, then
+complete its login.
 
-- `aether workspace bootstrap <workspace>` re-installs tools without
-  touching login state (`--resume` / `--reset` manage a disconnected
-  shell's pending staging).
-- `aether setup <harness> --workspace <workspace>` re-runs a login without
-  reinstalling. The active tool snapshot is mounted read-only at `~/.local`;
-  the harness credential home is mounted per its definition.
+The environment terminal has no browser. Use the harness's headless or
+device-code login option, which prints a URL and a code to complete in your own
+browser. The terminal command ships in this release series.
+
+### Setup details
+
+The login commands below run in the environment terminal:
 
 Three things to know:
 
@@ -149,7 +135,7 @@ Three things to know:
 
 ### Claude Code
 
-Inside `aether setup claude`, start the CLI and use its `/login` slash command,
+Inside `aether terminal`, start the CLI and use its `/login` slash command,
 which prints a URL to open in your own browser and takes a code back. `/status`
 shows which credential is active. Credentials land in `~/.claude` and are
 excluded from profile sync.
@@ -158,39 +144,36 @@ For an API key instead of a subscription, set `ANTHROPIC_API_KEY` in the
 server's environment (`/etc/aether/aether-server.env` with the shipped systemd
 unit) and skip setup entirely. Note that Aether passes through
 `ANTHROPIC_API_KEY` only; a `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`
-is not in the passthrough list, so use `aether setup` for subscription auth.
+is not in the passthrough list, so use the terminal for subscription auth.
 
 ### Codex
 
-Inside `aether setup codex`, run the CLI's login command and choose the
-device-code option - the container has no browser to hand a redirect to. Codex
-writes `auth.json` under `~/.codex` (its `CODEX_HOME`), which is exactly the
-directory Aether persists and the file profile sync refuses to upload.
+Inside `aether terminal`, run the CLI's login command and choose the
+device-code option. Codex writes `auth.json` under `~/.codex`, which is
+persisted in your member home and excluded from profile sync.
 
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
 ### pi
 
-Inside `aether setup pi`, start the CLI and use its `/login` command to pick
-a provider - the OAuth options print a URL and a code you complete in your
-own browser. Tokens land in `~/.pi/agent/auth.json` under the directory
-Aether persists per member, and the token files are excluded from profile
-sync. `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the server environment is
-the API-key alternative.
+Inside `aether terminal`, start the CLI and use its `/login` command to pick
+a provider. Tokens land in `~/.pi/agent/auth.json` under the member home, and
+the token files are excluded from profile sync. `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY` in the server environment is the API-key alternative.
 
 ### Amp
 
-Inside `aether setup amp`, run `amp login`, which prints a URL to open in
-your own browser. Settings live under `~/.config/amp` and secrets under
-`~/.local/share/amp`; Aether persists both per member and profile sync
+Inside `aether terminal`, run `amp login`, which prints a URL to open in your
+own browser. Settings live under `~/.config/amp` and secrets under
+`~/.local/share/amp`; Aether persists both in the member home and profile sync
 refuses the secret files. `AMP_API_KEY` in the server environment is the
 API-key alternative.
 
 ### opencode
 
-Inside `aether setup opencode`, run `opencode auth login` and pick your
-provider. Credentials are written to
-`~/.local/share/opencode/auth.json`, the directory Aether persists per member.
+Inside `aether terminal`, run `opencode auth login` and pick your provider.
+Credentials are written to `~/.local/share/opencode/auth.json` in the member
+home.
 
 ### `fake`
 
@@ -251,12 +234,11 @@ Aether (a member would instead just run `aether agent add omp`):
 The server validates that the executable is a name rather than a host path,
 that argv starts with that executable, and that profile, credential, and
 deny-name policies are safe. An invalid administrator definition rejects
-server startup; an invalid member registration is refused at the RPC. Tool
+server startup; an invalid member registration is refused at the RPC. Agent
 installation, login state, profile sync, and launch definitions remain
-separate concerns even when `aether agent add` drives them in one shell:
-bootstrap installs the executable, login writes credential state, profile
-push syncs only the declared profile, and the launch definition only
-resolves argv. All shell modes use the `aether-workspace-shell` subsystem.
+separate concerns: installation and login state live in the member home, while
+the definition resolves argv for that member. The terminal is the only setup
+transport.
 
 ## Agent configuration (profile sync)
 
@@ -271,7 +253,66 @@ aether profile rollback --agent claude <snapshot-id>
 ```
 
 The local daemon (`aether daemon run`) does the push automatically on change;
-`--no-profile-sync` opts a machine out.
+`--no-profile-sync` opts a machine out. It logs one line per file it left
+behind, so an unattended push never drops a file silently.
+
+The dashboard does the same push without a terminal. Its onboarding wizard has
+an **Agents** step, and it runs on the same two guards: for each harness
+configured on your machine it shows what a push would carry, grouped as
+memory, skills, commands, settings, MCP config, plugins, and other, plus every
+file the denylist or the scanner left behind and why. You check the harnesses
+you want and approve. Nothing is uploaded to produce that preview, and it
+reads nothing until you ask it to - walking a configuration directory that
+holds months of transcripts is not instant, so it is a button, and it can be
+stopped.
+
+- A push carries at most **1 MiB per file** and **20 MiB per snapshot**.
+  Files over either limit are left behind rather than failing the push, and
+  the preview, `aether profile push`, and the daemon's log name each one.
+  They are decided from the file size alone, so an oversized file is never
+  read.
+- The snapshot budget is spent by category, in this order: memory, skills,
+  commands, settings, MCP config, plugins, then everything else. Directory
+  order would otherwise decide it, and a plugin cache that sorts early would
+  crowd out the skills and commands the sync exists to carry.
+- Only regular files sync. A socket, named pipe, or device node inside a
+  profile root is reported and skipped without being opened - a named pipe
+  would otherwise block the read until something wrote to it.
+- A **symlink pointing out of the profile root** is skipped and reported,
+  not followed. Symlinking `skills/` entries into a shared directory is an
+  ordinary setup; the link is left behind and everything else still syncs.
+  The target is never opened, so nothing outside the root is uploaded.
+- **Third-party plugin content.** `claude` keeps installed plugins in two
+  trees: `plugins/cache/<marketplace>/<plugin>/<version>/` is the installed
+  copy, and `plugins/marketplaces/<marketplace>/` is the clone of the
+  marketplace repository, which carries the plugin sources inline. A plugin
+  often ships its own test suite. A scanner finding in either tree is a
+  string in a package, not a secret you can edit out of your profile root,
+  so it drops that one file and reports it as `vendored-secret` - the rest
+  of the plugin, and the rest of your profile, still sync. Both are matched
+  on the directory prefix alone, so a plugin update that moves the version
+  segment changes nothing. Everywhere else, a finding still refuses the
+  push.
+- **Default excludes.** Aether skips what a harness writes for itself as it
+  runs - transcripts, telemetry, scratch trees - rather than anything you
+  configured:
+
+  | Harness | Skipped by default |
+  | --- | --- |
+  | `claude` | `projects/`, `shell-snapshots/`, `statsig/`, `todos/`, `file-history/`, `history.jsonl`, `daemon/` |
+  | `codex` | `tmp/`, `.tmp/`, `sessions/` |
+
+  A skipped directory is reported once, as the directory. These are applied
+  before your `.aether-profile-ignore`, so that file has the last word: a
+  line `!projects/` in it syncs the directory anyway.
+
+`--allow-secret` has no dashboard equivalent, deliberately. A scanner finding
+in a file you wrote refuses the push there and names the file and the line:
+the fix is on the machine the file lives on. Overriding a false positive stays
+a CLI act, where `--workspace` records who overrode what, and on which
+timeline. `--allow-secret` also carries a file the plugin rule dropped, if
+you want that one on the server; `aether profile push` prints the exact
+command next to each such file.
 
 - The synced directory is the harness's profile root from the table above.
 - A run **pins** the latest snapshot when it is provisioned. Pushing mid-run
@@ -282,10 +323,13 @@ The local daemon (`aether daemon run`) does the push automatically on change;
 - **Secrets never sync.** Two independent guards, both on by default: a
   per-harness credential denylist (`.credentials.json`, `auth.json`,
   `.claude.json`, ...) and a client-side content scan that blocks any push
-  containing key material, naming the file and the match. `--allow-secret
-  <file>` overrides a false positive and records the override on the workspace
-  timeline. It requires `--workspace` outright - no single-workspace default -
-  so the override always names the timeline it is attributable on.
+  containing key material, naming the file and the match. A flagged file is
+  never uploaded, whether the finding refuses the push or - inside
+  `plugins/cache/` and `plugins/marketplaces/` - only drops that file.
+  `--allow-secret <file>` overrides a
+  false positive and records the override on the workspace timeline. It
+  requires `--workspace` outright - no single-workspace default - so the
+  override always names the timeline it is attributable on.
 
 ## Adding a harness
 

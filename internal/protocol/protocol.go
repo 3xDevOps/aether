@@ -14,7 +14,7 @@ import (
 const (
 	// Version is the protocol version reported by server.info; the CLI
 	// refuses to talk to a server with a different one.
-	Version = "2"
+	Version = "3"
 
 	// SubsystemControl is the JSON-RPC control channel.
 	SubsystemControl = "aether-control"
@@ -22,13 +22,12 @@ const (
 	SubsystemEvents = "aether-events"
 	// SubsystemAttach is the raw PTY attach channel.
 	SubsystemAttach = "aether-attach"
-	// SubsystemWorkspaceShell is the unified bootstrap and harness-login
-	// channel.
-	SubsystemWorkspaceShell = "aether-workspace-shell"
 	// SubsystemSync is the live file-overlay channel: one mutagen remote
 	// endpoint stream bridging a member's local directory to a run
 	// worktree.
 	SubsystemSync = "aether-sync"
+	// SubsystemTerminal is the per-member terminal control and PTY channel.
+	SubsystemTerminal = "aether-terminal"
 )
 
 // MaxLineBytes is the maximum length of one NDJSON line, framing included.
@@ -37,35 +36,29 @@ const MaxLineBytes = 32 << 20
 
 // Control-channel method names.
 const (
-	MethodServerInfo    = "server.info"
-	MethodWorkspaceList = "workspace.list"
-	MethodWorkspaceGet  = "workspace.get"
-	MethodMemberList    = "member.list"
-	MethodMemberApprove = "member.approve"
-	MethodMemberInvite  = "member.invite"
-	MethodMemberRemove  = "member.remove"
-	MethodMemberColor   = "member.color"
-	MethodMemberRole    = "member.role"
-	MethodWorkspaceAdd  = "workspace.add"
-	MethodRunLaunch     = "run.launch"
-	MethodRunList       = "run.list"
-	MethodRunGet        = "run.get"
-	MethodRunKill       = "run.kill"
-	MethodRunPause      = "run.pause"
-	MethodRunResume     = "run.resume"
-	MethodRunInject     = "run.inject"
-	MethodRunClose      = "run.close"
-	MethodRunRelaunch   = "run.relaunch"
-	MethodRunHandoff    = "run.handoff"
-	MethodRunPull       = "run.pull"
-)
-
-// Workspace tool snapshot control methods.
-const (
-	MethodWorkspaceToolsList     = "workspace.tools.list"
-	MethodWorkspaceToolsVerify   = "workspace.tools.verify"
-	MethodWorkspaceToolsRollback = "workspace.tools.rollback"
-	MethodWorkspaceToolsReset    = "workspace.tools.reset"
+	MethodServerInfo     = "server.info"
+	MethodWorkspaceList  = "workspace.list"
+	MethodWorkspaceGet   = "workspace.get"
+	MethodMemberList     = "member.list"
+	MethodMemberApprove  = "member.approve"
+	MethodMemberInvite   = "member.invite"
+	MethodMemberRemove   = "member.remove"
+	MethodMemberColor    = "member.color"
+	MethodMemberRole     = "member.role"
+	MethodWorkspaceAdd   = "workspace.add"
+	MethodRunLaunch      = "run.launch"
+	MethodRunList        = "run.list"
+	MethodRunGet         = "run.get"
+	MethodRunKill        = "run.kill"
+	MethodRunPause       = "run.pause"
+	MethodRunResume      = "run.resume"
+	MethodRunInject      = "run.inject"
+	MethodRunClose       = "run.close"
+	MethodRunRelaunch    = "run.relaunch"
+	MethodRunHandoff     = "run.handoff"
+	MethodRunPull        = "run.pull"
+	MethodTerminalStatus = "terminal.status"
+	MethodTerminalStop   = "terminal.stop"
 )
 
 // Custom agent (harness) onboarding methods.

@@ -8,7 +8,7 @@ import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
-  ws: ['events', 'attach', 'shell'],
+  ws: ['events', 'attach', 'terminal'],
   local: [
     'link.status',
     'sync.start',
@@ -78,6 +78,7 @@ describe('settings view', () => {
   it('lists named servers, marks the active one, and shows the switch instruction', async () => {
     const client = fakeApi({
       localLinkStatus: vi.fn(async () => ({
+        server_configured: true,
         linked: true,
         addr: 'host:2222',
         user: 'alice',
@@ -108,5 +109,23 @@ describe('settings view', () => {
       ),
     ).toBeDefined()
     expect(client.localLinkSwitch).toHaveBeenCalledWith('staging')
+  })
+  it('separates a configured server from its missing repository', async () => {
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => ({
+        server_configured: true,
+        linked: false,
+        addr: 'host:2222',
+        user: 'alice',
+        repo: '',
+      })),
+    })
+    seed()
+    render(<SettingsRoute params={{}} client={client} />)
+
+    expect(await screen.findByText('host:2222')).toBeDefined()
+    expect(screen.getByText('alice')).toBeDefined()
+    expect(screen.getByText(/No repository linked/)).toBeDefined()
+    expect(screen.queryByText(/No server configured/)).toBeNull()
   })
 })

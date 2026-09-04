@@ -17,11 +17,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
+// MaxFileBytes and MaxTotalBytes are the size caps a push must satisfy.
+// They are exported so a client can apply the same numbers before
+// uploading anything: a preview that promised a file this rejects would
+// be a promise the server breaks.
 const (
-	maxFileBytes  = 1 << 20  // 1 MiB
-	maxTotalBytes = 20 << 20 // 20 MiB
-	retainLatest  = 10
+	MaxFileBytes  = 1 << 20  // 1 MiB
+	MaxTotalBytes = 20 << 20 // 20 MiB
 )
+
+const retainLatest = 10
 
 // unix file-type bits a client might send as st_mode.
 const (
@@ -62,22 +67,15 @@ type File struct {
 // they skip publish rather than inventing a workspace.
 type Service struct {
 	store store.Store
-	dir   string
 }
 
-// New constructs a Service. snapshotsDir is created if missing; snapshot
-// bytes live in the store (content-addressed blobs), not on this path.
-func New(st store.Store, snapshotsDir string) (*Service, error) {
+// New constructs a Service backed by st. Snapshot bytes live in the store
+// as content-addressed blobs.
+func New(st store.Store) (*Service, error) {
 	if st == nil {
 		return nil, errors.New("profile: store is required")
 	}
-	if snapshotsDir == "" {
-		return nil, errors.New("profile: snapshots dir is required")
-	}
-	if err := os.MkdirAll(snapshotsDir, 0o700); err != nil {
-		return nil, fmt.Errorf("profile: create snapshots dir: %w", err)
-	}
-	return &Service{store: st, dir: snapshotsDir}, nil
+	return &Service{store: st}, nil
 }
 
 // Put validates, stores, and points the member+harness head at the
@@ -226,12 +224,12 @@ func validateFiles(prof harness.Profile, files []File) ([]File, error) {
 			return nil, fmt.Errorf("%w: %s is a credential/token basename", ErrDenied, path.Base(rel))
 		}
 		n := len(f.Content)
-		if n > maxFileBytes {
-			return nil, fmt.Errorf("%w: %s is %d bytes (max %d)", ErrTooLarge, rel, n, maxFileBytes)
+		if n > MaxFileBytes {
+			return nil, fmt.Errorf("%w: %s is %d bytes (max %d)", ErrTooLarge, rel, n, MaxFileBytes)
 		}
 		total += n
-		if total > maxTotalBytes {
-			return nil, fmt.Errorf("%w: snapshot exceeds %d bytes", ErrTooLarge, maxTotalBytes)
+		if total > MaxTotalBytes {
+			return nil, fmt.Errorf("%w: snapshot exceeds %d bytes", ErrTooLarge, MaxTotalBytes)
 		}
 		if _, dup := seen[rel]; dup {
 			return nil, fmt.Errorf("%w: duplicate path %s", ErrDenied, rel)
@@ -307,30 +305,6 @@ func rejectMode(mode uint32) error {
 	default:
 		return errors.New("non-regular file")
 	}
-}
-
-// CredentialFileNames unions harness DenyNames with the server-wide
-// extra credential basenames for overlay mounts. Globs are skipped.
-func CredentialFileNames(denyNames []string) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	add := func(n string) {
-		if n == "" || strings.Contains(n, "/") || strings.Contains(n, "*") {
-			return
-		}
-		if _, ok := seen[n]; ok {
-			return
-		}
-		seen[n] = struct{}{}
-		out = append(out, n)
-	}
-	for _, n := range extraDeniedNames {
-		add(n)
-	}
-	for _, n := range denyNames {
-		add(n)
-	}
-	return out
 }
 
 // DeniedBasename reports whether rel's basename is a credential or token

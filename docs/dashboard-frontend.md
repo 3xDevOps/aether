@@ -58,8 +58,8 @@ one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `local`, `environment`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
-collapse state, `activeWorkspace`, grouping) are persisted; server data is
-always re-fetched.
+collapse state, `activeWorkspace`, grouping, dismissed update versions) are
+persisted; server data is always re-fetched.
 
 **`activeWorkspace` is the scope every surface reads.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,
@@ -120,9 +120,21 @@ and persisted). The only collapse state left is the whole sidebar's.
 - **The attention badge counts, it does not navigate.** The runs below are
   already sorted worst-first, so the number is for a scrolled sidebar or a
   stall that landed while the member was elsewhere in the app.
+- **The header carries the way in.** New run opens the launch form (gated on
+  `canLaunch`), the board button and All runs switch between the two
+  whole-workspace views, and the group-by toggle sits beside them.
 - **Below the runs, the nav links are capability-gated** on the method or local
   verb that powers each view, so a gateway that cannot serve a surface never
-  shows the way in.
+  shows the way in. All runs is the exception: it is a view of the runs the
+  sidebar is already showing, so it needs no gate.
+
+## Files view
+
+`src/routes/files/` is the read-only repository browser. It groups each visible
+workspace's base branch and live run checkouts in a lazy tree, caches each
+directory request in `src/store/files.ts`, and reads file contents through
+`files.read`. Run files can switch to a one-file `files.diff` patch; editing
+stays in the existing local sync and the user's editor.
 
 ## Title bar
 
@@ -206,7 +218,8 @@ run's wire `paused` field, skipping runs that do not carry it.
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
   An `environment.build` event lands in the `environment` slice, which feeds
-  the build banner (see the onboarding wizard section).
+  the build banner (see the onboarding wizard section), and a `server.update`
+  event lands in the `server` slice, which feeds the update prompts.
 
 **The capabilities descriptor is the transport seam.** The store holds the
 `GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, `local`), and
@@ -273,8 +286,9 @@ untinted and the card carries the state colour.
 
 Three buckets, and no Idle column: a card is a run, and no run status maps
 to idle, so an idle column could only ever hold something that is not a card.
-A workspace with nothing running is an empty board under a switcher that names
-it, which says the same thing.
+A workspace with nothing in it says so once rather than as three empty
+columns: what a run is, and the New run button, because an empty board is the
+first thing a new member sees.
 
 Two things the buckets do not come from the run status alone:
 
@@ -314,35 +328,94 @@ oldest pending request's action as the summary.
 wire (above), a reload shows the badge for a run paused earlier, and the
 palette offers the right one of pause/resume. Against a legacy gateway
 whose runs carry no `paused` field the state stays unknown until a live
-`workspace.timeline` pause or resume arrives, and the palette offers
-neither verb rather than the one the server would refuse.
+`workspace.timeline` pause or resume arrives, and neither surface offers a
+verb rather than offering the one the server would refuse.
 
-## Command palette
+## Commands: one list, two ways to reach it
 
-`src/components/palette/` is the cmdk palette: `⌘K`/`Ctrl+K` anywhere, or the
-button it registers into the `statusbar` slot (it has no home of its own in the
-shell, and the dialog portals out of the status bar anyway). It jumps to runs
-and workspaces - opening a workspace also makes it the active scope, so the
-sidebar and the board follow - carries the board's own commands, and steers
-**the run the center view is showing** - any run-detail tab, since it keys on `route.params.runId`
-rather than on a route name. From the board there is none, so reveal a run
-first. The
-two verbs that need prose, launch and inject, open a dialog; the rest call the
-gateway directly and let the event stream report the result, so no palette
-action writes run state into the store. A third dialog launches from a
-template: it lists the active workspace's templates over `template.list` and
-starts the run with `template.launch` (both on `lib/api.ts` like every other
-call), then reveals it. Its open state lives with the dialog host in
-`index.tsx`, not in the store's dialog union.
+`src/lib/commands.ts` holds every verb the dashboard can perform - the run
+verbs (pause/resume, inject, close as merged or abandoned, kill,
+protect/unprotect, relaunch, pull branch, hand off) and the board verbs
+(open the board or the list, launch, launch from a template, mark all seen) -
+as data: an id, a label, an icon, the capability gate, and the call itself.
+`useCommandRunner()` performs one and reports the outcome the same way
+everywhere: the gateway verbs toast their past-tense name or the server's
+refusal verbatim, and nothing writes run state into the store, because the
+event stream is what reports the result.
 
-The launch form lists the harness names from `internal/harness` because there
-is no `harness.list` control-channel method. A name the server does not know
-is refused by the server, not by the form.
+Two surfaces render that one list, so a label or a gate can never drift:
+
+- **The command palette** (`src/components/palette/`) is the cmdk palette:
+  `⌘K`/`Ctrl+K` anywhere, or the button it registers into the `statusbar`
+  slot (it has no home of its own in the shell, and the dialog portals out of
+  the status bar anyway). It jumps to runs and workspaces - opening a
+  workspace also makes it the active scope, so the sidebar and the board
+  follow - and steers **the run the center view is showing**, any run-detail
+  tab, since it keys on `route.params.runId` rather than on a route name.
+  From the board there is none, so reveal a run first.
+- **Visible buttons**, so nothing important is reachable only by a shortcut:
+  New run in the sidebar header, in the board header and in the notice an
+  empty board carries above its columns; All runs in the sidebar nav; and the
+  run action bar (`src/components/run-actions.tsx`) in the header of every
+  run-detail tab, which is where the run verbs live for a member who has not
+  learned `⌘K` yet.
+
+Two things the buttons add. A `Command` carrying a `confirm` field - kill and
+both closes - opens a dialog naming the run before it runs; the palette does
+not ask, because a palette item is already several deliberate steps (open,
+type, select) away from an accident, where a button is one click. And the bar
+locks while a verb is in flight, showing a spinner on the one running: a pull
+shells out to `git fetch` over SSH and takes seconds, and a second click would
+race the first for the same ref. Buttons also take the command's `short` label
+and keep the full sentence as their tooltip, because eight of them share one
+`h-9` header row.
+
+**Who may do what is asked twice.** `src/lib/permissions.ts` mirrors
+`internal/permissions`: the role table, plus the two restrictions on top of it
+(a protected run limits steer and kill to its owner and admins, and a
+workspace with `steer_others=admins_only` does the same for others' runs).
+The server is still the authority and checks every call again, but a button
+one click from a denial is worse than no button, so the command list asks the
+same questions first. A viewer sees nothing that mutates a run; hand off and
+protect need the run's owner or an admin. Before hydration the caller's own
+record has not arrived, and the mirror answers yes rather than making the
+shell's buttons appear a beat late. Pull is the exception that is not a
+question for this policy at all: it is the desktop gateway fetching into the
+repository on this machine, so it answers to `hasLocal('pull')` alone.
+
+### The forms
+
+The three verbs that need prose open a dialog rather than calling straight
+through: launch, inject, and launch from a template. The launch and inject
+forms are a store dialog (`openPaletteDialog` on the `palette` slice) hosted
+by `AppShell` through `components/palette/dialogs.tsx`, so a button on any
+surface opens one by asking the store, with no dependence on the palette or
+the status bar being on screen. The template form's open state lives with
+`CommandPalette` in `index.tsx` instead, because the store's dialog union
+knows only the other two. It lists the active
+workspace's templates over `template.list` and starts the run with
+`template.launch` (both on `lib/api.ts` like every other call), then reveals
+it.
+
+The launch form asks for a task, a harness and a mode. The task is optional in
+interactive mode - a taskless launch drops the member into the agent's TUI
+with no seeded prompt - and required in headless, which has no interactive
+surface, so the form disables Launch and says why rather than sending a
+request the gateway will refuse (`runLaunch` in `internal/sshd/handlers.go` is
+the same rule). Only what was actually chosen goes on the wire: an empty task
+and the default `tui` mode are the server's own defaults. The harness list
+comes from `agent.list`, plus the always-offered `custom` escape hatch; a name
+the server does not know is refused by the server, not by the form.
 
 Neither launch form asks which workspace to launch into: both take
 `activeWorkspace` and say where the run will land, naming the workspace and its
 base branch. The switcher is the picker, so a second one inside the dialog
 would be a place for the two to disagree.
+
+Launching is gated on `run.launch` **and** on the launch permission
+(`canLaunch`). The local gateway advertises every method regardless of who is
+behind it, so capability alone would put the button in front of someone the
+server would refuse.
 
 ## Terminal view
 
@@ -351,48 +424,61 @@ would be a place for the two to disagree.
 tab strip (`tabs.tsx`), so Overview, Terminal, Diff and Events are registry
 routes on the same `runId`.
 
+The Terminal view is a vertical split. The agent terminal keeps the flexible
+space above a `RunDock` below it. The dock has a persisted height
+(`UiSlice.runDockHeight`, default 240px), a collapse toggle, and a resizer.
+Its tab state and socket registry live in `src/store/terminal.ts`, so opening
+Overview, Diff, or Events does not discard run-shell tabs or their attachments.
+Only the selected shell tab mounts an xterm host; switching tabs remounts that
+host and relies on transcript replay to restore its content.
+
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
-  terminal and the event stream reconnect on the same jittered schedule, and
-  it splits large input (a paste) into several ordered frames under the
-  gateway's 64 KiB frame cap, never splitting a surrogate pair.
-- **Mirror by default.** The header frame carries no `write` key unless the
-  user asks to steer; the toggle reattaches rather than upgrading in place.
-  Whether the member may steer is the server's answer, never the client's
-  guess: a `-32001` refusal drops the request back to a mirror and disables the
-  toggle. Every other refusal (unknown run, no live terminal) stops the
-  reconnect loop and offers a retry.
-- **Every attach answers for itself.** The run's slice entry is reset when the
-  view mounts, and a successful attach clears the standing refusal. Otherwise a
-  denial outlives the socket that produced it: leaving the tab and coming back
-  would show a live terminal beside a stale error, with steering greyed out
-  even after `run.handoff` granted it.
+  terminal and event stream reconnect on the same jittered schedule, and it
+  splits large input (a paste) into several ordered frames under the gateway's
+  64 KiB frame cap, never splitting a surrogate pair.
+- **Mirror by default for the agent.** The agent header carries no `write` key
+  unless the user asks to steer; the toggle reattaches rather than upgrading
+  in place. Whether the member may steer is the server's answer, never the
+  client's guess: a `-32001` refusal drops the request back to a mirror and
+  disables the toggle. Every other refusal (unknown run, no live terminal)
+  stops the reconnect loop and offers a retry.
+- **Run-shell tabs always write.** The `+` control opens names `t1`, `t2`,
+  `t3`, and `t4`; four is the per-run limit and the disabled control says
+  `At most 4 tabs`. Each shell attach uses
+  `/ws/attach/<run>?shell=<tab>`, requires write/steer permission, and closes
+  its socket when the tab is closed. A `-32001` response does not reconnect;
+  the dock replaces the terminal with the sentence **You can view this run
+  but not open a shell in it**. A normal `1000` socket close removes the
+  finished tab.
+- **Every attach answers for itself.** The agent run slice is reset when the
+  view mounts, and a successful attach clears the standing refusal. Otherwise
+  a denial outlives the socket that produced it: leaving the tab and coming
+  back would show a live terminal beside a stale error, with steering greyed
+  out even after `run.handoff` granted it.
 - **A 1008 close is read, not guessed at.** The server re-checks a live
   attach's authorization every few seconds, the gateway relays a loss as a
-  1008 close, and the close reason names which gate fell: `steer permission withdrawn` just downgrades - the client
-  reconnects immediately as a read-only mirror - while a dead token or
-  `membership withdrawn` would refuse every reconnect, so those stop the loop
-  and surface the reason. A refusal frame arrives with its own 1008 close,
-  which is why the client reacts to the code only when no refusal preceded it -
-  and a refusal frame that itself names the dead token stops the loop like the
-  close reason would, rather than being read as a steer denial.
-- **Reconnect resumes.** The gateway replays the recent transcript to every
-  attach, so a reconnected pane is never blank; the client clears the buffer
-  first, which is what keeps a reconnect from stacking a second copy of the
-  scrollback under the first.
+  1008 close, and the close reason names which gate fell: `steer permission
+  withdrawn` just downgrades - the client reconnects immediately as a
+  read-only mirror - while a dead token or `membership withdrawn` would refuse
+  every reconnect, so those stop the loop and surface the reason. A refusal
+  frame arrives with its own 1008 close, which is why the client reacts to the
+  code only when no refusal preceded it.
+- **Reconnect resumes with full recent history.** The gateway replays the
+  recent transcript to every attach, and the client clears the buffer first,
+  which keeps a reconnect from stacking a second copy of the scrollback under
+  the first. The shared xterm host uses `scrollback: 50000`; the server replay
+  ring is 1 MiB and is seeded from the cast tail when a session is restarted,
+  so re-attach retains the full recent history rather than only 64 KiB.
 - **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
-  glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038),
-  garbling scrolled rows until a forced refresh; the DOM renderer never
-  desyncs. The terminals render in the shipped JetBrainsMono Nerd Font Mono
+  glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038), garbling
+  scrolled rows until a forced refresh; the DOM renderer never desyncs. The
+  terminals render in the shipped JetBrainsMono Nerd Font Mono
   (`src/lib/term-font.ts`, declared in `src/index.css`), so agent TUIs get
-  their powerline and devicon glyphs at the same advance as text - a
-  symbols-only overlay font renders them full-em wide and xterm's per-cell
-  letter-spacing slices the overhang off. The terminal opens only once
-  regular and bold faces are loaded, because xterm caches glyph metrics
-  synchronously at `open` and would otherwise bake fallback metrics in.
-  The workspace-shell pane (`routes/shell/pane.tsx`) uses the identical
-  renderer and font setup.
-- **Injections need no client work.**  writes the attributed
+  their powerline and devicon glyphs at the same advance as text. The terminal
+  opens only once regular and bold faces are loaded, because xterm caches glyph
+  metrics synchronously at `open` and would otherwise bake fallback metrics in.
+- **Injections need no client work.** The server writes the attributed
   member-coloured banner into the PTY stream itself, so it arrives as ANSI and
   xterm renders it like any other output.
 - Board cards get no live terminal previews in v1 (spec cut-line).
@@ -443,6 +529,14 @@ both what it renders and the overlap set the conflict chips read.
   grammar - the core spec's cut-line, and why neither Monaco nor CodeMirror is
   a dependency. A truncated patch parses to a last file with fewer lines, and
   the view says the diff was cut short rather than failing.
+- **The verbs are not here, the answers are.** The tab keeps what is only
+  about reading the diff - the refresh, the snapshot list, the two copyable
+  `git` commands that review the run branch in the linked repository, and the
+  output of the last pull (`review-commands.tsx`). Fetching the branch and
+  closing the run are verbs, so they sit in the run action bar in the header
+  with every other verb rather than a second time in the tab; the fetch output
+  is an answer rather than a verb, so the pull records it on the `local` slice
+  and the tab shows it where a member reviewing the branch will look.
 - **Conflict chips are advisory.** `conflict-chips.tsx` registers into
   `card:chips` and the Diff tab renders the same component in its header. It
   reads the overlap set the conflict radar reports (`run.overlaps` at
@@ -559,12 +653,34 @@ routes (`approvals`, `timeline`).
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the guided first-run path, five steps: Link,
-Workspace, Environment, Repository, First run. It renders only where the
-gateway serves the client-machine verbs (the capability descriptor lists
+`src/routes/onboarding/` is the guided first-run path, six steps: Link,
+Workspace, Environment, Repository, Agents, First run. It renders only where
+the gateway serves the client-machine verbs (the capability descriptor lists
 `link.status`); a remote monitor gets an explanatory empty state instead of
-a broken wizard. The first four steps' components live in `steps.tsx`; the
-Environment step is `environment-step.tsx`.
+a broken wizard. Link, Workspace, Repository and First run live in
+`steps.tsx`; Environment is `environment-step.tsx`; Agents is
+`agents-step.tsx` with its second half in `profile-import.tsx`.
+
+The Repository step adds the `aether` remote (`link.repo`) and then seeds
+the workspace: where the gateway serves `repo.push` it shows a **Push now**
+button that runs the push in the clone. Success names the branch that
+landed and keeps git's output in a "What git did" panel, open on arrival
+because `Everything up-to-date` and `[new branch]` are both success and
+mean different things; Continue then moves on. A refusal keeps the user on
+the step with git's own output in a monospace block, both retry and the
+copyable command still there. The branch is the workspace's base branch,
+so a workspace created with `--base` seeds the branch its runs fork from.
+An older gateway without the verb shows only the copyable command.
+
+The UI slice persists the current step and selected workspace, and first open
+routes an unboarded local gateway here. Completing the final step or
+navigating elsewhere marks the UI onboarded and clears that wizard state.
+
+The Link step distinguishes no configured server, a server with no repository,
+and a fully linked server. It refreshes on Retry and when the window regains
+focus, so a separate `aether link` command appears without restarting the GUI.
+The first four steps' components live in `steps.tsx`; the Environment step is
+`environment-step.tsx`.
 
 The Environment step offers two cards: mirror this machine (recommended,
 preselected) and keep the standard environment the workspace was created
@@ -577,6 +693,45 @@ card says so and names the four. Cancel and every scan failure land on "try
 again" or "keep the standard environment", so the wizard never dead-ends.
 Non-admin members see only the keep path, because saving an environment is
 an administrator method.
+
+The Agents step has two optional halves and never blocks: **Skip for now**
+is reachable from every state, including an open setup shell and a failed
+scan.
+
+Part A lists the setup-capable harnesses from `env.harnesses` against
+`agent.list`, saying for each whether it is installed on this machine and
+whether the server lists that name. The copy states what those two signals
+actually mean - every shipped harness is on `agent.list` whether or not this
+member has logged one in, so the list is not a "set up" badge - and **Set
+up** embeds the same `AgentWizard` the Agents page uses, driven with the
+harness and workspace already known so it opens the `agent-setup` shell
+without a form. A clean exit refetches `agent.list` and hands the harness to
+the First run step, which preselects it.
+
+Part B (`ProfileImport`) previews each harness configuration on this machine
+with `profile.preview`, showing the category counts and, behind an expander,
+every exclusion with its reason. Previews never run on mount: a profile root
+can hold hundreds of megabytes, so the user presses **Look at what is here**,
+the harnesses are walked one at a time with the current one named, and
+**Stop** aborts the fetch - which cancels the request context and stops the
+walk on the gateway, not just the waiting. A preview that fails shows its
+error on that harness's row; only the `-32602` that means "this harness does
+not sync a profile" is silent, and the "nothing to bring" line renders only
+when every harness answered without one. Checkboxes start unchecked: approving calls
+`profile.push` once per checked harness, one at a time, and a refusal lands
+on its own row while the rest still run. A `blocked` preview gets no
+checkbox at all - the row names the condition from `blocked_reason` and shows
+the flagged file, and offers the `--allow-secret` command only for a scanner
+finding, since a symlink escape has no override. That override is
+deliberately not in the dashboard. A `vendored-secret` exclusion never
+blocks: the row says how many files inside installed plugins tripped the
+scanner and that they are third-party, and the harness stays importable.
+Where a setup-capable harness is installed locally,
+**Ask an agent** runs the `profile` scan over
+`/ws/envscan`, streams the agent's output, and pre-checks what it
+recommended with each one-sentence reason next to its row; the scan is a
+proposal the user edits, and a failure leaves the manual path and both
+buttons live.
 
 The review gate (`EnvironmentReview`, same file) renders the manifest as a
 readable list - name, version, reason - with a per-item remove toggle
@@ -603,12 +758,124 @@ already is the fallback. Nothing in the slice persists: after a reload the
 banner is simply gone, and `aether env show` is where the build's outcome
 can still be read.
 
+## Update prompts
+
+`src/components/update-banner.tsx` is where the dashboard says a binary is out
+of date: it hosts the banners, with the CLI one in
+`src/components/cli-update-banner.tsx` and the pieces they share in
+`src/components/update-banner-shared.tsx`. It is mounted by `AppShell` above
+everything else, because an out-of-date binary is about the whole app rather
+than the view that happens to be open. The CLI and shell prompts need the
+gateway to serve `update.check` - a remote monitor cannot update anything on
+your machine - while the server prompt asks the server about itself and shows
+wherever the member is an admin.
+
+- **Two reads.** The host reads `update.check` once on mount
+  (`docs/local-gateway.md`; the gateway caches the release lookup, so this
+  costs no request to GitHub) and puts the answer on the `local` slice, which
+  is also what the status bar reads. It reads `server.update_status` as well -
+  any member may - and re-reads it on every reconnect and whenever
+  `server.info` names a different version. The reconnect is the one that
+  matters: a server that updates itself re-executes, so the socket drops and
+  comes back, and that fresh status is what ends the banner and the notice.
+  `connect()` re-hydrates on the same signal while an update is in flight,
+  even with a cursor to replay from, because only a fresh `server.info` says
+  the server came back on the new version. A read that fails is recorded, not
+  swallowed: the banner then says it could not read the status, with a
+  **Retry**, rather than claiming the server cannot update itself.
+- **The CLI banner is for everyone.** It names the new version and the running
+  one, says what updating costs - it replaces the `aether` binary on this
+  machine and restarts the dashboard, taking attached terminals and any
+  running sync session with it, while the runs keep going on the server - and
+  offers **Update now**, the release notes, and a dismiss. What the button
+  will do is decided before the click, from `update.check`'s `install_method`
+  (`docs/local-gateway.md`): *direct* offers the button and nothing more;
+  *admin-prompt* (macOS with a GUI session and a `cli_path` in a directory
+  only root can write, such as `/usr/local/bin/aether`) offers the
+  button and says, before the click: *macOS will ask for an administrator
+  password: {cli_path} is in a directory this account cannot write to. The
+  dialog is labelled osascript, the tool Aether asks through. Aether never
+  sees your password.*; *manual* (Linux with a directory this account
+  cannot write, Windows, or a macOS gateway the dialog cannot serve - the
+  rule is in `docs/local-gateway.md`) offers no button and shows the
+  command to run instead - `sudo aether update` with a copy button, or the
+  release link where the platform has no self-update at all. Clicking Update calls
+  `update.apply` and the banner goes to a restarting state; nothing else
+  reconnects, because the existing `ConnectionError` page already owns a
+  gateway that goes away. The done state names every binary the swap replaced
+  and, on a single-box install where `aether-server` was one of them, the
+  `restart_command` the gateway sends back: the server keeps running the old
+  code until its unit restarts, and the CLI prints that same line. A `-32001`
+  (denied) answer is the dialog cancelled or the password refused: the banner
+  shows *Update cancelled, nothing was changed.* muted rather than as a
+  failure, and the button comes back. Any other refusal is rendered verbatim -
+  the gateway's own message, ending in the command to run where there is one -
+  and the button becomes usable again.
+- **The server banner is for admins, and it acts.** Capability is half the
+  gate and the caller's role is the other half, the same rule the admin
+  surfaces follow, so it needs `useIsAdmin()` as well. It shows the server
+  version and the latest release side by side, and what it offers under that
+  comes from `server.update_status`:
+  - *capable*: **Update now** and **Update when idle**. Update now opens a
+    confirm dialog that counts the runs active in this member's own run list -
+    the server's definition of busy, so a paused run and one parked at
+    needs-attention are not counted - and says what the restart costs: the
+    runs keep going because the server reattaches to their containers, and
+    attached terminals reconnect on their own. It then calls `server.update`
+    with `when: "now"`. Update when idle sends `when: "idle"`, and the banner
+    becomes *Update to vX scheduled by <member>, applies when no run is
+    active* with a **Cancel** that sends `when: "cancel"`.
+  - *not capable*: the documented unprivileged install. No buttons: the
+    server's own reason, then the two commands to run on the server host with
+    a copy button, as before. A gateway that does not carry the method keeps
+    that banner from `update.check`'s `server_behind`, and says only what it
+    knows - "The dashboard cannot update the server."
+  - The scheduled state also names what the update is still waiting for
+    (`status.waiting`), because a live terminal attach holds it back the
+    same way a working run does.
+- **The phases come off the feed.** `server.update` events land on the
+  `server` slice through `applyEvent`, once per workspace and once more from
+  the RPC result, so the slice keeps the furthest phase rather than the last
+  one to arrive: *scheduled*, *applying*, *restarting* - the socket drops
+  there, the reconnect re-hydrates and re-reads the status, and a status
+  whose `server_version` is the version the phases were about clears the
+  progress and ends the banner - or *failed*, which shows the server's error
+  verbatim and falls back to the manual commands. Every phase is a row in
+  the activity feed too, filterable as *Server updates*.
+- **Everyone else gets one line.** A member who is not an admin sees
+  *server update scheduled, terminals will reconnect briefly* (or *applying*)
+  in the status bar while one is in flight, so a restart nobody explained
+  does not read as an outage. A server that does not answer costs the CLI
+  banner nothing: `update.check` still returns the CLI half with the failure
+  in `server_error`, because the CLI is a binary on this machine and a dead
+  SSH hop is no reason to hide that it is out of date.
+- **Dismissal is per version and it persists.** `dismissedUpdates` on the `ui`
+  slice records which version was dismissed for each banner and rides the same
+  persisted preferences as the theme and the sidebar, so a dismissal survives a
+  reload and the next release shows the banner again. It silences the offer,
+  not an update already moving: a scheduled or applying server comes back
+  regardless, because that banner is why the server is about to restart.
+- **The status bar carries the badge.** The `aether {version}` label gets a dot
+  when either update is available, and clicking it clears the dismissals so the
+  banner comes back - the label is the only always-visible surface, so it is
+  the way back to a banner someone dismissed by reflex.
+- **The desktop shell has a banner of its own.** The SPA ships inside the CLI,
+  but the Electron shell around it is whatever `aether gui build` last
+  produced. `aether gui build` stamps the CLI version into the shell's
+  `package.json`, `desktop/main.js` hands it to the renderer, and
+  `desktop/preload.js` exposes it as `window.aetherDesktop.shellVersion`. When
+  it differs from the `version` the capabilities descriptor carries, a third
+  banner says the app is out of date and gives `aether gui build`. It is
+  deliberately not nested in the CLI banner and not keyed on
+  `update_available`: the way a shell goes stale is that the CLI *was* just
+  updated, which is the moment no update is available any more, so gating it
+  on one would hide it in the only flow it exists for. It renders on the shell
+  stamp alone, so a browser tab never sees it.
+
 ## Styleguide
 
-- **Tokens only.** Colours live in `src/index.css`: the shadcn neutral base
-  plus `--state-*` tokens for the presentation states. Components use token
-  classes (`bg-state-working`, `text-muted-foreground`); no hex literals. The
-  exception is member attribution colour, which is data from the server and is
+- **Tokens only.** See [styles.md](styles.md) for the landing palette in dark, neutral in light, and `--state-*` tokens; components use token classes and no hex literals.
+  The exception is member attribution colour, which is data from the server and is
   applied inline.
 - **Dark, light, system.** The preference is stored, `system` follows
   `prefers-color-scheme` live.
@@ -646,9 +913,26 @@ off through a real `workspace.timeline` pause and resume run through
 switching the active workspace and opening it, steering from a run-detail tab,
 withholding both pause and resume while the paused state is unknown, launching
 into the active workspace, and offering only members who can own a run as
-handoff targets, never a viewer. The sidebar covers the switcher naming a
-sole workspace instead of offering a picker, a switch rescoping the run list,
-and the attention badge counting. The team surfaces are driven through the same stub
+handoff targets, never a viewer. The buttons that render the same list are
+covered where they live: the run action bar showing pause, resume or neither
+as the pause state is known, asking before a kill and only then killing,
+offering the hand-off targets who may own a run and no button at all when
+there are none, and gating pull and relaunch; the sidebar offering New run to
+a member who may start one and not to a viewer, and All runs opening the flat
+list; the board header opening the launch form and an empty workspace saying
+so once rather than three times; and the launch form refusing a headless run
+with no task while sending nothing the server already defaults. The sidebar
+also covers the switcher naming a sole workspace instead of offering a
+picker, a switch rescoping the run list, and the attention badge counting.
+The permission mirror is exercised through the bar rather than on its own: a
+viewer is offered nothing that mutates a run, a collaborator may steer and
+kill another member's run but not give it away or protect it, and a protected
+run and an `admins_only` workspace both close steering to everyone but the
+owner. Two more cover the shared runner: a refused kill toasts the server's
+message verbatim, and a slow pull locks the whole bar, names the ref it
+fetched and leaves its git output on the store for the diff tab. The shell
+test clicks New run in the sidebar and finds the real form, which is what
+proves the host is the shell's rather than the palette's. The team surfaces are driven through the same stub
 API: the status bar reading roster, queue and budget and rendering all three,
 the approval badge and watcher avatars reaching a real run card, a decision
 going out as `approval.decide` and coming back attributed, a steer refusal

@@ -19,7 +19,7 @@ import (
 // Version identifies the embedded template. Bump it on any change to
 // prompt.tmpl; the package test pins the template's hash to this number,
 // so an edit without a bump fails the build gate.
-const Version = 3
+const Version = 4
 
 //go:embed prompt.tmpl
 var templateText string
@@ -57,6 +57,25 @@ type RefineParams struct {
 	OutputDir string
 }
 
+// ProfileParams parameterizes a profile run: the agent is shown one
+// rendered inventory of this machine's agent configuration directories
+// and writes its import recommendation into OutputDir.
+type ProfileParams struct {
+	// Inventory is the per-harness inventory block, embedded verbatim. It
+	// carries names, paths, counts and sizes only - never file contents,
+	// and never the excluded credential files.
+	Inventory string
+	// OutputDir is the absolute path of the scratch directory profile.json
+	// must land in. It is named even when no repository is given, so a
+	// repo-anchored run is never pointed at its working directory.
+	OutputDir string
+	// RepoPath, when set, anchors the run in a repository: the agent runs
+	// there, may read its files but never change them, and prefers
+	// configuration that matches the project. Empty means the agent
+	// reasons from the inventories alone.
+	RepoPath string
+}
+
 // templateData is the single shape all templates render from.
 type templateData struct {
 	BaseImage    string
@@ -64,6 +83,8 @@ type templateData struct {
 	Dockerfile   string
 	ManifestJSON string
 	Feedback     string
+	Inventory    string
+	RepoPath     string
 }
 
 // RenderInventory returns the full prompt for an inventory run.
@@ -109,6 +130,23 @@ func RenderRefine(params RefineParams) (string, error) {
 		ManifestJSON: params.ManifestJSON,
 		Feedback:     params.Feedback,
 		OutputDir:    params.OutputDir,
+	})
+}
+
+// RenderProfile returns the full prompt for a profile run.
+func RenderProfile(params ProfileParams) (string, error) {
+	switch {
+	case strings.TrimSpace(params.Inventory) == "":
+		return "", errors.New("envprompt: profile prompt needs the harness inventory")
+	case strings.TrimSpace(params.OutputDir) == "":
+		return "", errors.New("envprompt: profile prompt needs an output directory")
+	case !filepath.IsAbs(params.OutputDir):
+		return "", fmt.Errorf("envprompt: profile prompt output directory must be absolute, got %q", params.OutputDir)
+	}
+	return render("profile", templateData{
+		Inventory: params.Inventory,
+		OutputDir: params.OutputDir,
+		RepoPath:  params.RepoPath,
 	})
 }
 

@@ -249,12 +249,19 @@ func defaultPushOne(ctx context.Context, c *protocol.Client, harnessName string)
 	if c == nil {
 		return errors.New("profile sync: no control client")
 	}
-	files, err := Discover(harnessName, nil)
+	files, skipped, err := DiscoverFiles(ctx, harnessName, nil)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
+	}
+	// The daemon pushes unattended, so a file the size caps left behind
+	// would otherwise be absent from the server with nobody told. This
+	// log is the daemon's equivalent of the line `aether profile push`
+	// prints and the `skipped` list the dashboard shows.
+	for _, s := range skipped {
+		slog.Info("profile sync: file not pushed", "harness", harnessName, "path", s.Path, "reason", s.Reason, "detail", s.Detail)
 	}
 	_, err = Push(c, harnessName, files, nil, "")
 	return err

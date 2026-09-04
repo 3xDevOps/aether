@@ -84,3 +84,9 @@ func TestSpecValidateJoinsAllErrors(t *testing.T) {
 		}
 	}
 }
+func TestExecExitError(t *testing.T) {
+	err := &ExecExitError{Code: 127}
+	if got, want := err.Error(), "runtime: exec exited with status 127"; got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}

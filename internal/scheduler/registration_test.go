@@ -39,8 +39,7 @@ func (r *recordingCoordinator) config(run domain.RunID) []byte {
 // naming the staged bridge and the argument pointing at it, and one that
 // does not is launched untouched - notice-only, with no config written.
 func TestHarnessMCPRegistration(t *testing.T) {
-	fakeServerBinary(t, "#!/bin/sh\necho aether\n")
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	dir := t.TempDir()
 	coord := &recordingCoordinator{
 		fakeCoordinator: fakeCoordinator{root: filepath.Join(dir, "coord")},

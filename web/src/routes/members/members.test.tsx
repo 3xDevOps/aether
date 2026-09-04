@@ -58,6 +58,26 @@ describe('members view', () => {
     expect(within(aliceRow).getByText('offline')).toBeDefined()
   })
 
+  it('shows the last-seen time for offline members', async () => {
+    const client = fakeApi({
+      presenceRoster: vi.fn(async () => []),
+    })
+    seed({
+      presence: [
+        {
+          member_id: alice.id,
+          state: 'offline',
+          last_seen: '2026-08-14T10:04:00Z',
+        },
+      ],
+    })
+    render(<MembersRoute params={{}} client={client} />)
+
+    const roster = within(await screen.findByRole('region', { name: 'Roster' }))
+    const aliceRow = roster.getByText('Alice').closest('tr')!
+    expect(within(aliceRow).getByText(/last seen/)).toBeDefined()
+  })
+
   it('approves a pending member through the gateway and refetches', async () => {
     const memberList = vi
       .fn()

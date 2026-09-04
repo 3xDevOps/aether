@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -66,6 +67,30 @@ func newVerbGateway(t *testing.T, backend Backend, cfg cli.Config) *Gateway {
 	return g
 }
 
+// useTempConfigDir points cli.Save/cli.Load at a scratch config directory.
+// Both variables are needed because os.UserConfigDir reads different
+// environment variables on Unix and Windows.
+func useTempConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
+}
+
+func saveConfigAt(t *testing.T, cfg cli.Config, mtime time.Time) {
+	t.Helper()
+	if err := cli.Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	path, err := cli.Path()
+	if err != nil {
+		t.Fatalf("config path: %v", err)
+	}
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatalf("set config mtime: %v", err)
+	}
+}
+
 // localGit runs one git command for the pull test's scratch repos.
 func localGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -117,11 +142,12 @@ func TestLocalLinkStatus(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
 	var got struct {
-		Linked bool   `json:"linked"`
-		Addr   string `json:"addr"`
-		User   string `json:"user"`
-		Repo   string `json:"repo"`
-		Links  []struct {
+		Linked           bool   `json:"linked"`
+		ServerConfigured bool   `json:"server_configured"`
+		Addr             string `json:"addr"`
+		User             string `json:"user"`
+		Repo             string `json:"repo"`
+		Links            []struct {
 			Name string `json:"name"`
 			Addr string `json:"addr"`
 		} `json:"links"`
@@ -130,7 +156,7 @@ func TestLocalLinkStatus(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Linked || got.Addr != "host:2222" || got.User != "alice" || got.Repo != "/src/repo" {
+	if !got.Linked || !got.ServerConfigured || got.Addr != "host:2222" || got.User != "alice" || got.Repo != "/src/repo" {
 		t.Fatalf("link.status = %+v", got)
 	}
 	if got.Active != "prod" {
@@ -151,8 +177,8 @@ func TestLocalLinkStatus(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Linked {
-		t.Fatalf("unlinked gateway reports linked: %+v", got)
+	if got.Linked || got.ServerConfigured {
+		t.Fatalf("unlinked gateway reports configured/linked: %+v", got)
 	}
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &keys); err != nil {
@@ -163,6 +189,132 @@ func TestLocalLinkStatus(t *testing.T) {
 	}
 	if _, ok := keys["active"]; ok {
 		t.Errorf("top-level link.status carries active: %s", rec.Body)
+	}
+}
+func TestLocalSnapshotRefreshesConfigAfterMtimeChange(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{Addr: "host:2222", User: "alice"}
+	initialMtime := time.Unix(1_700_000_000, 0)
+	saveConfigAt(t, initial, initialMtime)
+
+	state := newLocalState(Config{CLI: initial})
+	if got := state.snapshot(); got.Repo != "" {
+		t.Fatalf("initial repo = %q, want empty", got.Repo)
+	}
+
+	updated := cli.Config{
+		Addr: "host:2222",
+		User: "alice",
+		Repo: "/src/repo",
+	}
+	updatedMtime := initialMtime.Add(time.Second)
+	saveConfigAt(t, updated, updatedMtime)
+
+	if got := state.snapshot(); got.Repo != updated.Repo {
+		t.Fatalf("refreshed repo = %q, want %q", got.Repo, updated.Repo)
+	}
+}
+
+func TestLocalSnapshotRefreshesNamedOverlayAfterMtimeChange(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/old"}},
+	}
+	initialMtime := time.Unix(1_700_000_000, 0)
+	saveConfigAt(t, initial, initialMtime)
+	selected, ok := initial.Named("prod")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	state := newLocalState(Config{CLI: selected})
+	if got := state.snapshot(); got.Repo != "/old" {
+		t.Fatalf("initial named repo = %q, want /old", got.Repo)
+	}
+
+	updated := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/new"}},
+	}
+	saveConfigAt(t, updated, initialMtime.Add(time.Second))
+
+	got := state.snapshot()
+	if got.Repo != "/new" || got.Active != "prod" {
+		t.Fatalf("refreshed named config = %+v", got)
+	}
+}
+
+func TestLocalLinkRepoKeepsNewRepoForActiveNamedProfile(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/old"}},
+	}
+	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
+	selected, ok := initial.Named("prod")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	g := newVerbGateway(t, &verbStubBackend{}, selected)
+	// Force the next disk write to be observable without depending on the
+	// filesystem timestamp resolution.
+	g.local.mtime = time.Unix(1, 0)
+	repo := t.TempDir()
+	localGit(t, repo, "init")
+
+	body := `{"repo":` + strconv.Quote(repo) + `,"workspace_id":"ws_1"}`
+	rec := do(g, http.MethodPost, "/local/v1/link.repo", body, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("link.repo = %d: %s", rec.Code, rec.Body)
+	}
+
+	got := g.local.snapshot()
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Repo != abs {
+		t.Fatalf("snapshot repo = %q, want newly linked %q", got.Repo, abs)
+	}
+}
+
+func TestLocalSnapshotKeepsCachedNamedConfigWhenProfileDisappears(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Repo:  "/default",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/prod"}},
+	}
+	initialMtime := time.Unix(1_700_000_000, 0)
+	saveConfigAt(t, initial, initialMtime)
+	selected, ok := initial.Named("prod")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	state := newLocalState(Config{CLI: selected})
+
+	removed := initial
+	removed.Links = nil
+	removedMtime := initialMtime.Add(time.Second)
+	saveConfigAt(t, removed, removedMtime)
+
+	got := state.snapshot()
+	if got.Active != "prod" || got.Addr != "prod:2222" || got.Repo != "/prod" {
+		t.Fatalf("cached named config = %+v", got)
+	}
+	if !state.mtime.Equal(initialMtime) {
+		t.Fatalf("cached mtime = %v, want unchanged %v", state.mtime, initialMtime)
+	}
+
+	restored := initial
+	restored.Links = []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/restored"}}
+	saveConfigAt(t, restored, removedMtime.Add(time.Second))
+	if got := state.snapshot(); got.Repo != "/restored" {
+		t.Fatalf("snapshot did not retry after profile restore: %+v", got)
 	}
 }
 
@@ -212,6 +364,7 @@ func TestLocalPull(t *testing.T) {
 	localGit(t, remote, "commit", "--allow-empty", "-m", "run work")
 	local := t.TempDir()
 	localGit(t, local, "init", "-b", "main")
+	localGit(t, local, "remote", "add", "aether", remote)
 
 	// GitURL renders ssh://alice@host:2222/<ws>.git; a GIT_SSH_COMMAND
 	// shim executes the wrapped git-upload-pack locally instead of
@@ -242,15 +395,20 @@ func TestLocalPull(t *testing.T) {
 		t.Fatalf("pull = %d: %s", rec.Code, rec.Body)
 	}
 	var got struct {
-		Branch string `json:"branch"`
-		Ref    string `json:"ref"`
-		Output string `json:"output"`
+		Branch  string `json:"branch"`
+		Ref     string `json:"ref"`
+		Output  string `json:"output"`
+		Current bool   `json:"current"`
+		Dirty   bool   `json:"dirty"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Branch != "aether/run_1" || got.Ref != "refs/remotes/aether/aether/run_1" {
 		t.Fatalf("pull = %+v", got)
+	}
+	if got.Current || got.Dirty {
+		t.Fatalf("pull state = current %v dirty %v, want false false", got.Current, got.Dirty)
 	}
 	want := localGit(t, remote, "rev-parse", "aether/run_1")
 	if fetched := localGit(t, local, "rev-parse", "refs/remotes/aether/aether/run_1"); fetched != want {
@@ -479,5 +637,215 @@ func TestLocalImageScaffold(t *testing.T) {
 		scaffoldBody(t.TempDir(), "vm"), true)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad kind = %d", rec.Code)
+	}
+}
+
+// sshShim makes ssh:// git URLs resolve to local paths, so a test push
+// really moves objects without dialing anything. Same trick as the pull
+// test: the shim runs the wrapped git-receive-pack itself.
+func sshShim(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("test ssh shim is a POSIX shell script")
+	}
+	shim := filepath.Join(t.TempDir(), "fake-ssh")
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\nfor last; do :; done\neval \"$last\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_SSH_COMMAND", shim)
+	// An unknown GIT_SSH_COMMAND defaults to the "simple" variant, which
+	// refuses the URL's port; declare the OpenSSH argv convention.
+	t.Setenv("GIT_SSH_VARIANT", "ssh")
+}
+
+// pushGateway wires a gateway whose linked repo holds one commit on
+// branch and an `aether` remote pointing, through the ssh shim, at a
+// bare repo standing in for the workspace. The server reports that one
+// workspace with that base branch. It returns the gateway, the bare
+// remote's path, and the workspace ID the remote URL carries.
+func pushGateway(t *testing.T, branch string) (*Gateway, string, string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	sshShim(t)
+
+	// The bare directory carries a .git suffix so the ssh URL's path
+	// resolves to it verbatim.
+	remote := filepath.Join(t.TempDir(), "wsp_1.git")
+	localGit(t, t.TempDir(), "init", "--bare", "-b", branch, remote)
+	wsID := strings.TrimSuffix(strings.TrimPrefix(remote, "/"), ".git")
+
+	local := t.TempDir()
+	localGit(t, local, "init", "-b", branch)
+	if err := os.WriteFile(filepath.Join(local, "README.md"), []byte("# demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	localGit(t, local, "add", "README.md")
+	localGit(t, local, "commit", "-m", "seed")
+	localGit(t, local, "remote", "add", "aether", cli.GitURL("alice", "host:2222", wsID))
+
+	list, err := json.Marshal(protocol.WorkspaceListResult{
+		Workspaces: []protocol.Workspace{{ID: wsID, Name: "myproject", BaseBranch: branch}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
+		results: map[string]json.RawMessage{protocol.MethodWorkspaceList: list},
+	}}
+	g := newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: local})
+	return g, remote, wsID
+}
+
+// pushBody is one repo.push request naming a workspace.
+func pushBody(t *testing.T, wsID string) string {
+	t.Helper()
+	body, err := json.Marshal(struct {
+		WorkspaceID string `json:"workspace_id"`
+	}{wsID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// The seeding push runs the user's base branch, not a hardcoded main.
+func TestLocalRepoPush(t *testing.T) {
+	g, remote, wsID := pushGateway(t, "trunk")
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, wsID), true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("repo.push = %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Branch string `json:"branch"`
+		Remote string `json:"remote"`
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Branch != "trunk" || got.Remote != "aether" {
+		t.Fatalf("repo.push = %+v", got)
+	}
+	if !strings.Contains(got.Output, "trunk") {
+		t.Fatalf("output does not mention the branch: %q", got.Output)
+	}
+	if localGit(t, remote, "rev-parse", "trunk") == "" {
+		t.Fatal("remote has no trunk")
+	}
+}
+
+// A rejected push is the server's word, not the gateway's; the handler
+// answers with git's own text so branch protection reads as itself.
+func TestLocalRepoPushSurfacesGitRefusal(t *testing.T) {
+	g, remote, wsID := pushGateway(t, "main")
+	hook := filepath.Join(remote, "hooks", "pre-receive")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'main is protected' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, wsID), true)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if perr := decodeError(t, rec.Body.Bytes()); !strings.Contains(perr.Message, "main is protected") {
+		t.Fatalf("message = %q", perr.Message)
+	}
+}
+
+// A repository the user has not committed in yet is theirs to fix, so it
+// answers invalid state with the next step rather than a git failure.
+func TestLocalRepoPushRefusesAnEmptyRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	local := t.TempDir()
+	localGit(t, local, "init", "-b", "main")
+	list, err := json.Marshal(protocol.WorkspaceListResult{
+		Workspaces: []protocol.Workspace{{ID: "wsp_1", Name: "myproject", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
+		results: map[string]json.RawMessage{protocol.MethodWorkspaceList: list},
+	}}
+	g := newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: local})
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", `{}`, true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, "no commits yet") {
+		t.Fatalf("error = %+v", perr)
+	}
+}
+
+func TestLocalRepoPushRequiresLinkedRepo(t *testing.T) {
+	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{Addr: "host:2222"})
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", `{}`, true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, "no linked repo") {
+		t.Fatalf("error = %+v", perr)
+	}
+}
+
+// The base branch comes from the named workspace, the push lands wherever
+// the `aether` remote points. When those are two different workspaces the
+// verb refuses instead of reporting a seed it did not perform.
+func TestLocalRepoPushRefusesAWorkspaceTheRemoteDoesNotServe(t *testing.T) {
+	g, remote, wsID := pushGateway(t, "main")
+	// link.repo has since re-pointed the remote at another workspace.
+	other := cli.GitURL("alice", "host:2222", "wsp_other")
+	localGit(t, g.local.snapshot().Repo, "remote", "set-url", "aether", other)
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, wsID), true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, other) {
+		t.Fatalf("error = %+v", perr)
+	}
+	if refs := localGit(t, remote, "for-each-ref"); refs != "" {
+		t.Fatalf("the refused push still wrote refs: %s", refs)
+	}
+}
+
+// The workspace check reads the repository before the push does, so a
+// linked folder the user has since moved must still answer with the
+// preflight's own words, not a bare git exit status from the check.
+func TestLocalRepoPushRefusesALinkedFolderThatIsNotARepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	gone := t.TempDir()
+	list, err := json.Marshal(protocol.WorkspaceListResult{
+		Workspaces: []protocol.Workspace{{ID: "wsp_1", Name: "myproject", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
+		results: map[string]json.RawMessage{protocol.MethodWorkspaceList: list},
+	}}
+	g := newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: gone})
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, "wsp_1"), true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState {
+		t.Fatalf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(perr.Message, gone) || !strings.Contains(perr.Message, "not a git repository") {
+		t.Fatalf("message = %q", perr.Message)
 	}
 }

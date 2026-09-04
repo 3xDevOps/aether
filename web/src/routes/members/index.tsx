@@ -6,7 +6,7 @@
 import { Copy, UserPlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -118,6 +118,11 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   }
 
   const online = new Set(onlineMembers(presence))
+  const lastSeen = new Map(
+    presence
+      .filter((entry) => entry.state === 'offline')
+      .map((entry) => [entry.member_id, entry.last_seen]),
+  )
   const all = Object.values(members)
   const roster = all.filter((m) => !m.pending)
   const pending = all.filter((m) => m.pending)
@@ -214,7 +219,11 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                     )}
                   </td>
                   <td className="py-1.5 pr-2 text-muted-foreground">
-                    {online.has(member.id) ? 'online' : 'offline'}
+                    {online.has(member.id)
+                      ? 'online'
+                      : lastSeen.has(member.id)
+                        ? `offline - last seen ${timeAgo(lastSeen.get(member.id) ?? '')}`
+                        : 'offline'}
                   </td>
                   <td className="py-1.5 text-right">
                     {caps.hasMethod('member.remove') &&

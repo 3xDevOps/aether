@@ -38,14 +38,21 @@ initial browser tab). The printed URL is
 That line is the contract with the desktop shell sidecar, which spawns
 `aether gui --json`, parses the line, and renders the SPA itself.
 
+Exit statuses are the other half of that contract. `aether gui --json`
+exits **75** to tell the shell that `update.apply` rebuilt the desktop app
+on disk: the shell calls `app.relaunch()` rather than respawning the
+sidecar, so the new window and the new gateway come up together. Every
+other exit keeps the shell's respawn-with-backoff behavior, which is what a
+failed rebuild wants - the CLI half of the update did land, and the shell
+should come back on the new binary.
+
 ## Design
 
 The gateway holds no server code: every read and write is a
 control-channel call proxied over one SSH connection to the linked server,
 through the same `internal/cli` client the terminal commands use. One
-`Backend` interface covers the whole surface - `Call` for methods, and a
-fresh subsystem channel per WebSocket for events, attach, shell, and sync
-- so the HTTP handlers never know they are riding SSH.
+fresh subsystem channel per WebSocket for events, attach, terminal, and sync -
+so the HTTP handlers never know they are riding SSH.
 
 The connection is dialed lazily on first use and shared. When a call fails
 on transport (a server restart, a dropped network) the backend redials
@@ -80,7 +87,8 @@ and prefix as a `POST /api/v1` error.
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
-| `GET` | `/ws/shell` | interactive workspace shell (WebSocket) |
+| `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
+| `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
 | `GET` | `/ws/envscan` | environment scan on this machine (WebSocket) |
 | `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
 
@@ -124,10 +132,12 @@ the same capability checks the SSH transport applies.
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","shell","envscan"],
+{"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
-          "link.repo","link.status","link.switch","pull","sync.start",
-          "sync.status","sync.stop"]}
+          "link.repo","link.status","link.switch","profile.preview",
+          "profile.push","pull","pull.switch","repo.push","sync.start","sync.status",
+          "sync.stop","update.apply","update.check","update.status"],
+ "version":"v1.2.3","commit":"abc1234"}
 ```
 
 `methods` is `["*"]` because this gateway forwards every control-channel
@@ -135,6 +145,10 @@ method; `ws` lists the WebSocket surfaces it serves; `local` is the sorted
 `/local/v1` verb list. A client probes this rather than hard-coding what it
 is talking to; the SPA's `useCapability` seam reads it to gate the
 local-only surfaces.
+
+`version` and `commit` are the `aether` build serving this gateway, which is
+the only way the SPA can learn what CLI it is running against - `server.info`
+answers for the server. Both are absent on a gateway that predates them.
 
 ### `GET /api/v1/run/<run_id>/patch`
 
@@ -176,7 +190,8 @@ bar's disk gauge:
 
 ```json
 {"used_bytes":21474836480,"total_bytes":107374182400,"free_bytes":85899345920,
- "worktree_bytes":3221225472,"transcript_bytes":104857600,"database_bytes":52428800}
+ "worktree_bytes":3221225472,"transcript_bytes":104857600,"database_bytes":52428800,
+ "repo_bytes":8589934592}
 ```
 
 `used_bytes` and `total_bytes` describe the whole filesystem - the gauge
@@ -185,11 +200,23 @@ footprint. `free_bytes` is what an unprivileged writer can still claim, which
 is the number the scheduler's free-space floor is checked against, and is
 smaller than `total - used` wherever the filesystem reserves blocks.
 
-The last three are the directories that grow without bound and are the only
+The last four are the directories that grow without bound and are the only
 part an operator can act on: run checkouts (garbage-collected after their
-TTL), transcripts, and the SQLite file the persisted event log shares with
-the store. The event log has no file of its own to measure, so the database
-line covers both. A component that cannot be read contributes zero rather
+TTL), transcripts, the SQLite file the persisted event log shares with the
+store, and `repos/`, the bare repo behind each workspace. The event log has
+no file of its own to measure, so the database line covers both. The bare
+repos keep every push, every run branch and the reflogs `internal/gitengine`
+turns on, and nothing reclaims them. `repo_bytes` is absent on servers
+predating the component, and the dashboard drops the line rather than
+showing a zero.
+
+The components do not overlap. A run checkout is a `git clone --local` of
+its workspace repo, so its object files are hard links to bytes already in
+`repos/`: the walk indexes by device+inode and charges each one to the
+first tree that reaches it, walking `repos/` first. `repo_bytes` therefore
+holds the shared objects, and `worktree_bytes` is what reclaiming that
+checkout would actually free. A component that cannot be read contributes
+zero rather
 than failing the whole reading. Measurement lives in `internal/disk`, shared
 with the scheduler's floor so the gauge and the refusal can never disagree
 about the same disk.
@@ -202,25 +229,32 @@ server was not told where the data directory is, or the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
 zero anywhere else).
 
-### `run.patch` and `server.disk` on the control channel
+### `run.patch`, `server.disk`, and files on the control channel
 
-The two `GET` endpoints above are backed by SSH control-channel methods,
-because this gateway proxies the whole API shape over SSH and needs both
-reads without a listener on the server.
+The two `GET` endpoints above and the files methods below are backed by SSH
+control-channel methods, because this gateway proxies the whole API shape over
+SSH and needs these reads without a listener on the server.
 
 | Method | Params | Result |
 | --- | --- | --- |
 | `run.patch` | `RunIDParams` (`{"run_id":"..."}`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+| `files.tree` | `FilesTreeParams` (`{"workspace_id":"...","run_id":"...","path":"src"}`; `run_id` optional) | `FilesTreeResult` - immediate file and directory entries |
+| `files.read` | `FilesReadParams` (`{"workspace_id":"...","run_id":"...","path":"README.md"}`; `run_id` optional) | `FilesReadResult` - read-only content, size, binary, and truncation |
+| `files.diff` | `FilesDiffParams` (`{"run_id":"...","path":"README.md"}`) | `FilesDiffResult` - one file's patch against the run base |
+| `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its image, start time, and active tabs |
+| `terminal.stop` | none | empty result; stops the member environment and its tabs |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit.
-- Both answer `-32004` (unavailable) when the read cannot be served:
-  `run.patch` when diff rendering is not enabled (no git engine wired) or the
-  run has no checkout left to diff, `server.disk` when the server was not
-  told where the data directory is or the filesystem holding it could not be
-  read. The underlying errors name server-side paths, so they are not echoed
-  to the client.
+- The read methods answer `-32004` (unavailable) when the read cannot be
+  served: `run.patch` when diff rendering is not enabled (no git engine wired)
+  or the run has no checkout left to diff, `server.disk` when the server was
+  not told where the data directory is or the filesystem holding it could not
+  be read, and `files.tree`, `files.read`, or `files.diff` when their
+  checkout or repository is unavailable. All three files methods also answer
+  `-32602` for a rejected path. The underlying errors name server-side paths,
+  so they are not echoed to the client.
 
 ## `/local/v1` verbs
 
@@ -232,17 +266,24 @@ authority.
 
 | Verb | Request | Response |
 | --- | --- | --- |
-| `link.status` | `{}` | `{"linked":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"..."}],"active":"..."}` (`links`/`active` present only with named profiles) |
+| `link.status` | `{}` | `{"server_configured":bool,"linked":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"..."}],"active":"..."}` (`links`/`active` present only with named profiles; `server_configured` reports a configured server even when no repository is linked) |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
-| `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"..."}` |
+| `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
+| `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422,"skipped":[...]}` |
+| `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |
+| `pull.switch` | `{"run_id":"..."}` | `{"branch":"..."}` |
+| `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
 | `sync.stop` | `{"run_id":"..."}` | `{"run_id":"...","state":"stopped"}` |
 | `sync.status` | `{}` | `{"sessions":[{"run_id":"...","state":"...","conflict":"..."\|null}]}` |
-| `daemon.install` | `{"server":"host:port","repo":"..."}` (`repo` defaults to the linked one) | `{"unit_path":"...","note":"..."}` |
+| `daemon.install` | `{"server":"host:port","repo":"..."}` (`repo` defaults to the linked one; the unit gets the linked `--key`) | `{"unit_path":"...","note":"..."}` |
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
 | `image.scaffold` | `{"repo":"...","kind":"dockerfile"\|"devcontainer"}` (`repo` defaults to the linked one) | `{"written":["..."]}` |
 | `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`; `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
+| `update.check` | `{}` | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `cli_path` and `install_method` absent when the binary could not be probed) |
+| `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
+| `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
   must carry (the onboarding wizard sends the one just picked). Without
@@ -250,14 +291,283 @@ authority.
   workspace resolves implicitly; none or several answers `-32002`
   (invalid state) and is resolved server-side or with the CLI's
   `--workspace` flag first.
-- `pull`, `sync.start`, and `sync.stop` refuse with `-32002` when no repo
-  is linked. A sync session's states are `starting` (the overlay is
-  dialing the run worktree), `running`, `stopped`, `conflict` (with the
-  conflict text in `conflict`), and `error`. A conflict is also reported
-  to the server as a `sync.conflict` call so both affected members see
-  the event; `sync.stop` dismisses a standing conflict.
+- `repo.push` seeds the workspace: one
+  `git push --no-follow-tags -u aether refs/heads/<base>:refs/heads/<base>`
+  in the linked repository, where `<base>` is that workspace's base
+  branch. The same sole-workspace rule as `link.repo` applies when
+  `workspace_id` is omitted; unlike `link.repo`, a `workspace_id` no
+  workspace carries is refused. The refspec is fully qualified so the
+  push carries that one branch and nothing else: no force, no second ref,
+  and no tags even where `push.followTags` is set. `output` is everything
+  git printed.
+- `repo.push` refuses with `-32002` (invalid state), naming the next step,
+  when the repository has no commits, has no local branch named `<base>`
+  (the message names the branch that is checked out instead), has no
+  `aether` remote yet, or has an `aether` remote pointing at a different
+  workspace than the one asked for - the branch would come from one
+  workspace and the objects would land in another. A push git ran and the
+  server rejected - branch protection, a missing key - answers `-32603`
+  carrying git's own stderr.
+- `repo.push` is bounded at ten minutes and runs with
+  `GIT_TERMINAL_PROMPT=0`, so git cannot block on its own credential
+  prompt. That does not reach `ssh`: a passphrase-protected key with no
+  agent still waits on ssh's own prompt until the ten minutes are up. Load
+  the key into an agent before pushing from the dashboard.
+- `profile.preview` runs the discovery `aether profile push --agent
+  <harness>` would run and uploads nothing. It reports what a push would
+  carry, grouped into categories a developer recognizes, and everything
+  the guards left behind:
+
+  ```json
+  {"harness":"claude","root":"/home/you/.claude","present":true,
+   "files":42,"bytes":183422,
+   "categories":[{"category":"skills","files":12,"bytes":40201,
+                  "paths":["skills/pdf/SKILL.md"],"truncated":false}],
+   "excluded":[{"path":".credentials.json","reason":"credential",
+                "detail":"credential file excluded for claude"},
+               {"path":"notes/key.txt","reason":"secret",
+                "detail":"secret detected (aws-access-key) at line 3"}],
+   "excluded_total":2,
+   "blocked":false}
+  ```
+
+  Categories, in the order they are reported: `memory` (standing
+  instructions - `CLAUDE.md`, `AGENTS.md`, `memory/`), `skills`,
+  `commands` (`commands/`, and codex's `prompts/`), `settings`, `mcp`,
+  `plugins`, `other`. `paths` is capped at 200 entries per category, with
+  `truncated` set when it was cut; `files` and `bytes` stay exact.
+  `reason` on an exclusion is `credential` (a denylisted basename),
+  `secret` (a content-scanner finding in a file the user wrote),
+  `vendored-secret` (a finding inside a plugin tree the harness installs
+  into - claude's `plugins/cache/` and `plugins/marketplaces/` - where
+  that file is dropped and the push still runs), `ignored` (an
+  `.aether-profile-ignore` match, or one of the per-harness defaults in
+  [harnesses.md](harnesses.md)), `symlink` (a link out of the profile
+  root, skipped rather than followed - its target is never opened),
+  `not-regular` (a socket, named pipe, or device node, refused on its
+  mode without being opened), `too-large` (over the 1 MiB a push allows
+  for one file), or `over-budget` (the 20 MiB a snapshot holds was
+  already filled).
+- An ignored directory is reported once, as the directory, rather than
+  once per file inside it. `excluded` is capped at 200 entries;
+  `excluded_total` is the exact count.
+- The snapshot budget is spent by category priority - memory, skills,
+  commands, settings, mcp, plugins, other - not directory order, so the
+  files this feature exists to carry are not crowded out by whatever
+  sorts first.
+- The two size reasons are decided from the file's stat, before it is
+  opened, so an oversized file is never read and never scanned. That is
+  not only a saving: an agent's configuration directory routinely holds
+  hundreds of megabytes of transcripts, and scanning those would make a
+  preview take minutes. The caps are the server's own
+  (`internal/profile`), so the preview offers exactly the files a push
+  can carry.
+- `blocked` is true when a push would be **refused outright** rather than
+  partially carried. A `secret` is the only such condition: it is the one
+  thing whose fix has to happen on this machine, and the one with a CLI
+  override. `blocked_reason`, `blocked_path` and `blocked_detail` name it.
+  Every other exclusion - symlink escapes, `vendored-secret`, and both
+  size caps - lets the push succeed carrying what is left, and
+  `profile.push` answers with a `skipped` list naming what it dropped.
+- `present:false` - this machine has no profile root for that harness -
+  is a normal answer with zero counts, not an error. A harness name the
+  registry does not know, or one with no profile sync, answers `-32602`.
+- `profile.push` performs the push `aether profile push --agent
+  <harness>` performs, through the gateway's SSH connection: the same
+  discovery, the same per-harness credential denylist, the same secret
+  scanner, and the same content-addressed delta against the server's
+  current head. **It takes no allow-secret parameter.** A scanner finding
+  in a file the user wrote refuses the push with `-32002` naming the file
+  and the line, because the file has to be fixed on the machine it lives
+  on; the `--allow-secret` override stays on the CLI, where `--workspace`
+  makes it attributable on a timeline. A finding in vendored plugin
+  content drops that file and the push runs. A missing profile root
+  refuses with `-32002` too. `skipped` carries every exclusion the walk
+  made without refusing - the size caps, symlink escapes, and
+  `vendored-secret` - in the same shape `profile.preview` uses: the push
+  succeeded without those files, so this is the only place the caller
+  learns they are not on the server.
+- Both verbs walk the whole profile root, and both stop when the request
+  is cancelled: a client that closes the connection stops the work on
+  this machine, rather than only stopping its own wait.
+- `pull` fetches the run branch, fast-forwards it when it is checked out, and
+  otherwise creates or updates the local branch without switching branches.
+  `current` reports whether the checkout is on that branch and `dirty` reports
+  uncommitted changes after the operation. `pull.switch` refuses a dirty
+  checkout and switches to the pulled branch when it is clean.
+- `pull`, `pull.switch`, `repo.push`, `sync.start`, and `sync.stop` refuse with
+  `-32002`
+  when no repo is linked.
+- A sync session's states are `starting` (the overlay is dialing the run
+  worktree), `running`, `stopped`, `conflict` (with the conflict text in
+  `conflict`), and `error`. A conflict is also reported to the server as a
+  `sync.conflict` call so both affected members see the event;
+  `sync.stop` dismisses a standing conflict.
 - `image.scaffold` refuses with `-32002` when the files already exist,
   rather than overwriting them.
+- `update.check` answers the release check `aether update --check --json`
+  prints, under `cli`, beside the linked server's version. Its fields are
+  `version`, `commit`, `latest`, `update_available`, `asset`, `release_url`,
+  `dev`, `disabled`, `can_self_update` and `checked_at`
+  ([install.md](install.md#upgrading)). The gateway resolves the latest
+  release at most once every six hours and serves the cached answer in
+  between, so a page load never costs a request to GitHub.
+  `server_behind` compares the linked server's version with that same latest
+  release; `supervised` reports whether this gateway was started by the
+  desktop shell (`aether gui --json`), which is what decides whether
+  `update.apply` may restart it. `shell_build_error` is present only when
+  the last in-app desktop rebuild failed, and carries that build's own
+  error.
+- `cli_path` is the binary `update.apply` would replace, symlinks resolved,
+  and `install_method` how: `direct` when its directory is writable by this
+  user, so the swap just happens; `admin-prompt` when it is not and the
+  administrator dialog can install there, so the click opens it; `manual`
+  when the gateway cannot replace it from here, and the banner shows the
+  command instead. `admin-prompt` needs all four of: the directory is not
+  writable by this user; the directory and every directory above it up to
+  `/` is owned by root, is not a symlink, has no group or other write bit,
+  and carries no access control list (`ls -ld` shows one as a trailing `+`
+  in the mode column); this is macOS; and there is a GUI session
+  (`/bin/launchctl managername` answers `Aqua`). Anything else is `manual`:
+  Linux, Windows, a gateway started over SSH, or a directory that is not
+  root's alone, such as one user's Homebrew `/usr/local/bin` (Intel) used
+  from another account, or a root-owned bin directory under a user's home
+  (`sudo` installed into `~/.local/bin`). The root-only rule is what the
+  privileged command relies on: root stages a temp file in that directory
+  by name and renames it over the binary by path, so any account that can
+  write the directory, or swap a directory above it for a symlink, could
+  redirect root's copy, `chmod` and rename between its steps. `sudo aether
+  update` has no such gap: it stages with `O_EXCL` and renames its own
+  inode, which a fixed shell command cannot. The gateway probes on every
+  call by creating and removing one temp file in that directory,
+  then the ownership and session checks, the same test `update.apply`
+  runs, so the promise and the behavior cannot drift and a reinstall or a
+  `chown` shows on the next check; only the release lookup is cached. Both
+  fields are absent when the probe itself fails; the click then reports
+  that error.
+- A `server.info` call that fails costs the server half only: the answer
+  still carries `cli`, with an empty `server_version`, `server_behind`
+  false, and the backend's own message in `server_error`. The CLI half is
+  about a binary on this machine and has nothing to do with the SSH hop, so
+  a server outage must not take the CLI update prompt down with it.
+- `update.apply` runs the swap `aether update` runs, on the `aether`
+  binary this gateway is served from - and `aether-server` beside it on a
+  Linux server host, in which case `restart_command` carries the
+  `sudo systemctl restart aether-server` the command prints, because the
+  running server keeps the old code until its unit restarts. On a
+  supervised gateway it answers `restarting: true`; started from a terminal
+  it answers `restarting: false` and a note telling the user to rerun
+  `aether gui`. It never updates a *remote* server: the dashboard has no
+  authority there, and the server banner names the commands to run on that
+  host instead. A second `update.apply` for a release this gateway process
+  already installed does not download or prompt again: the binary is
+  already on disk, so the answer picks up after the swap. When that
+  release's desktop-app rebuild already finished in this process, no second
+  rebuild starts: it answers `rebuilding: false` with the note `the desktop
+  app was rebuilt; restart it to use the new version`, and a supervised
+  gateway does not exit again.
+- This process never gains privileges. Where the binary's directory is
+  writable (`install_method: "direct"`) the release is downloaded, verified
+  against `checksums.txt`, staged beside the binary and renamed over it,
+  exactly as the command does. On macOS with a directory this account
+  cannot write (`admin-prompt`) the route is longer, and its one privileged
+  step runs outside this process:
+
+  1. It downloads and verifies the release as the user into a private
+     staging directory, `<user cache>/aether/update`
+     (`~/Library/Caches/aether/update`), created `0700` and refused when
+     something else is there - a symlink, another user's directory -
+     because root will read from it.
+  2. It runs `/usr/bin/osascript -e 'do shell script "<command>" with
+     prompt "<text>" with administrator privileges'`, which shows macOS's
+     standard administrator dialog: titled `osascript`, Aether's text
+     beneath it (`Aether wants to replace /usr/local/bin/aether with aether
+     v1.3.0. macOS shows this request as osascript, the tool Aether asks
+     through. Aether never sees your password.`), and the system's own
+     last line, "Touch ID or enter your password to allow this." The
+     password or Touch ID match goes to macOS's authorization service;
+     nothing is stored, piped, or logged by Aether. Root runs one fixed
+     `sh` command made of
+     system tools - a `0600` temp file in the destination directory, a
+     copy, a SHA-256 check against the digest baked into the command text,
+     `chmod 0755`, `mv -f` - with the environment
+     `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `LANG=C`, `HOME`, and `/` as its
+     working directory. The command is quoted verbatim in
+     [security.md](security.md#client-self-update-on-macos).
+  3. It re-checks the installed file as the user - a regular file, mode
+     `0755`, root-owned, hashing to the release digest - before rebuilding
+     the desktop app or exiting.
+
+  The digest is checked three times: on the download by the user, on the
+  root-owned copy by root, on the installed file by the user. Linux and
+  Windows are unchanged in kind; the only Linux-visible change is that the
+  banner shows `sudo aether update` before the click instead of a button
+  that fails.
+- The call waits on the request context only: there is no dialog timeout,
+  because a native authorization dialog has none, and a request that closed
+  under the user would leave the dialog on screen with the password
+  authorizing nothing. Closing the tab or the app cancels the request; a
+  dialog already on screen may stay until dismissed, and the password then
+  authorizes nothing. One install runs at a time per gateway.
+- The binary swap is synchronous; the desktop-app rebuild that follows it
+  is not. When an app is installed for this account, `update.apply` spawns
+  `<the new aether> gui build --json` in the background, answers
+  `rebuilding: true`, and the dashboard polls `update.status` for progress.
+  The new binary runs the build because the Electron shell sources ship
+  inside it - the process answering this call is the one being replaced. A
+  machine with no app installed answers `rebuilding: false` and builds
+  nothing. One build runs at a time: a second `update.apply` while one is
+  still going answers `rebuilding: true` with the note `a rebuild of the
+  desktop app is already running`, and starts nothing - and, critically,
+  does not exit a supervised gateway, which would drop the shell back into
+  the old app mid-swap. The build child belongs to the gateway: closing the
+  gateway kills it rather than leaving it downloading Node and swapping the
+  app directory on its own.
+- `update.status` reports that rebuild: `phase` is `idle` before any
+  rebuild has run in this process, then the `gui build --json` phases
+  (`unpacking`, `fetching node`, `installing dependencies`, `packaging`,
+  `installing`), then `done` or `error`. `lines_tail` carries the last 20
+  lines of the build's own output, and `error` the build's own message. A
+  gateway that comes up after a rebuild answers `idle`: the build belonged
+  to the process that exited.
+- A supervised gateway exits only once the rebuild ends: **75** on success,
+  so the shell relaunches onto the new app, and **0** on failure, so the
+  shell respawns the sidecar on the new CLI. A failed build is also written
+  to `<user cache>/aether/desktop-build/last-error.txt`, which the next
+  gateway's `update.check` returns as `shell_build_error` so the dashboard
+  can show what went wrong; the next successful `aether gui build` removes
+  it. An *unsupervised* gateway never exits: it rebuilds the app and the
+  note tells the user to restart it.
+- `update.apply` errors, each carrying the underlying message verbatim:
+  - `-32001` (denied, 403): the user cancelled the dialog, or macOS refused
+    the password and gave up. `nothing was changed: administrator access was
+    not granted: ... execution error: User canceled. (-128)` - the tail is
+    osascript's own line, where `...` is its position prefix, which varies;
+    the gateway reads only the trailing number. The banner shows it muted
+    as *Update cancelled, nothing was changed.* and the button comes back.
+  - `-32002` (invalid state, 409): a directory this account cannot write
+    and no dialog to install through - Linux, or a macOS gateway with no
+    GUI session (started over SSH), which `update.check` already reported
+    as `manual`: the same refusal the command prints, ending in ``re-run as
+    `sudo aether update` ``, before anything is downloaded. If osascript
+    still reports no session at run time, ``no GUI session to show the
+    macOS authorization dialog in: ... (-1713); run `sudo aether update` in
+    a terminal on this Mac``. Also a dev build, `AETHER_NO_UPDATE_CHECK`
+    set, Windows, and a running build that is already the newest release
+    (downloading it over itself would report success for work that changed
+    nothing, and restart the app for nothing).
+  - `-32003` (conflict, 409): `an update is already running in this
+    gateway` - a second click from another tab while the dialog is up.
+  - `-32004` (unavailable, 503): everything else, carrying the real
+    message after an `install <tag>: ` prefix - a download or checksum
+    error, osascript failing to start, root's checksum check failing
+    (`install v1.3.0: replace /usr/local/bin/aether: osascript: ...
+    execution error: copied binary does not match the release checksum
+    (65)`, with the same `...` position prefix as above), or
+    the post-install check failing (`install v1.3.0: installed
+    /usr/local/bin/aether does not match the release checksum; do not run
+    it`). A release lookup that fails answers the same code with the
+    transport's own error after `check for releases: `.
 
 ## WebSockets
 
@@ -341,32 +651,50 @@ needs.
 
 Closing the socket detaches; the run is unaffected.
 
-### `GET /ws/shell`
+#### Run shell tabs
 
-An interactive workspace shell (bootstrap
-tools, harness login, agent setup) with the attach socket's frame
-protocol - binary output, JSON control frames for input and resize,
-always honored.
+`GET /ws/attach/<run_id>?shell=<tab>` opens a writable shell tab inside the
+run container instead of attaching to the agent process. A shell tab always
+requires **steer** permission and ignores the `write` value in the header;
+there is no read-only shell mode. Tab names must match
+`^[a-z0-9-]{1,32}$`, and each run can have at most four active shell tabs.
+The shell starts in `/workspace`. When it exits, the socket closes normally
+with **1000** and the tab name is free to reopen with a fresh shell.
+Closing the socket only detaches: the shell keeps running, still counts
+toward the four-tab cap, and reconnecting the same tab name reattaches to
+it. Every shell ends with the run's container.
 
-1. Client sends one **text** frame: a `protocol.WorkspaceShellRequest`
-   (`workspace` selector, `mode`, optional `harness`, geometry, and the
-   agent-setup fields), within 10 seconds of the socket opening. Missing
-   geometry defaults to 80x24.
-2. Server answers one **text** frame: a `WorkspaceShellResponse` -
-   `{"ok":true,...}` echoing the effective selection and geometry, or
-   `{"ok":false,"code":...,"error":"..."}` followed by a close.
-3. Binary output frames stream; text control frames go back, as on
-   attach. Client frames are capped at 64 KiB.
-4. The shell exiting cleanly closes the socket with **1000**; a nonzero
-   remote exit status closes with **4001** and the error text as the
-   reason, so the SPA can tell a dirty exit from a clean one.
+### `GET /ws/terminal?tab=<tab>`
+
+The member environment terminal uses the same binary-output and JSON-control
+framing as run attaches. The `tab` query is `main` or a client-selected name
+matching `^[a-z0-9-]{1,32}$`.
+
+1. The client sends one text header with `cols` and `rows`. The gateway
+   ensures the member's environment container and the requested shell.
+2. The gateway answers `{"ok":true,"tab":"main","cols":120,"rows":40}` or a
+   JSON error followed by a close. At most six tabs may be active.
+3. Output is binary. Input and resize are text frames:
+
+   ```json
+   {"type":"input","data":"ls -la\r"}
+   {"type":"resize","cols":132,"rows":50}
+   ```
+
+Closing the socket detaches without stopping the shell. A normal shell exit
+closes with **1000**. Membership loss closes with **1008**. `terminal.status`
+reports the running container, image, start time, and active tabs;
+`terminal.stop` stops the container and deletes its tab sessions while
+preserving the member home.
+
 
 ### `GET /ws/envscan`
 
-Runs one environment scan on this machine: the chosen coding agent
-inspects the local toolchains (or, in repo mode, a repository's own
-files) headless and writes the Dockerfile and manifest pair the
-onboarding wizard reviews into a scratch directory. Every frame is JSON
+Runs one scan on this machine: the chosen coding agent runs headless and
+writes a validated result into a scratch directory. Four modes: three
+build a workspace image (the local toolchains, or a repository's own
+files, or a revision of a previous pair) and one recommends which of
+your local agent configuration is worth importing. Every frame is JSON
 text.
 
 1. Client sends one **text** start frame within 10 seconds. `mode` is
@@ -375,13 +703,16 @@ text.
    `repo_path`, the repository folder on this machine; `refine` reruns
    the agent over a previous pair with the user's feedback and carries
    the three extra fields (plus `repo_path` when that pair came from a
-   repo scan):
+   repo scan); `profile` reads the `profile.preview` inventory of every
+   harness configured on this machine and recommends what to import,
+   optionally with `repo_path` so the project can inform the call:
 
    ```json
    {"harness":"claude","mode":"inventory"}
    {"harness":"claude","mode":"repo","repo_path":"/path/to/clone"}
    {"harness":"claude","mode":"refine","previous_dockerfile":"FROM ...",
     "previous_manifest_json":"[...]","feedback":"drop jq, add ripgrep"}
+   {"harness":"claude","mode":"profile","repo_path":"/path/to/clone"}
    ```
 
    A `repo_path` that is missing, not a folder, or not a git repository
@@ -410,6 +741,27 @@ text.
    {"type":"result","dockerfile":"FROM ubuntu:24.04\n...",
     "manifest_json":"[...]","manifest":[{"name":"go","version":"1.24.1",...}]}
    ```
+
+   A `profile` scan answers a recommendation instead of a pair: one
+   entry per harness the agent was shown, each with a one-sentence
+   reason a developer can check against the file list. It is a proposal,
+   never an action - importing is a separate `profile.push` per harness,
+   after the user edits and approves the list:
+
+   ```json
+   {"type":"result","recommendation":{"harnesses":[
+     {"harness":"claude","import":true,"categories":["skills","commands"],
+      "reason":"..."},
+     {"harness":"codex","import":false,"categories":[],"reason":"..."}]}}
+   ```
+
+   The agent is shown paths and category counts only. File contents,
+   credential paths, and anything the denylist or the scanner flagged
+   never reach the prompt. An entry naming a harness or a category that
+   was not in the inventory fails validation, which earns the same one
+   retry a malformed manifest earns. A machine with no agent
+   configuration at all answers one `error` frame
+   (`no agent configuration found on this machine; nothing to import`).
 
    Failure carries the reason and the last agent output for diagnosis:
 

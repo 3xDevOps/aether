@@ -38,6 +38,8 @@ jobs:
         continue-on-error: true
       - name: Unit tests
         run: make test
+      - name: Shell script tests
+        run: make test-scripts
       - name: Build binaries
         run: make build
 
@@ -90,6 +92,45 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           aether gui build
           desktop-file-validate ~/.local/share/applications/aether-desktop.desktop
+          test -x ~/.local/share/aether/desktop/aether-desktop
+      # Proves the app builds on a machine with no Node at all: with node,
+      # npm and npx off PATH, the CLI has to download its own copy into the
+      # cache directory and build with that. The directories that carry node
+      # also carry sh and the rest of the toolchain, so they are mirrored
+      # into a shadow of symlinks with those three names left out rather
+      # than dropped.
+      - name: aether gui build without Node on PATH
+        run: |
+          shadow="$RUNNER_TEMP/no-node"
+          mkdir -p "$shadow"
+          clean=""
+          IFS=:
+          for dir in $PATH; do
+            unset IFS
+            [ -d "$dir" ] || continue
+            if [ -x "$dir/node" ] || [ -x "$dir/npm" ] || [ -x "$dir/npx" ]; then
+              for tool in "$dir"/*; do
+                name="${tool##*/}"
+                case "$name" in node | npm | npx | corepack | '*') continue ;; esac
+                # -e is false for a dangling link, and two PATH directories
+                # can carry the same name, so a failed ln is expected and
+                # must not end the step. scripts/install-test.sh does the
+                # same for the same reason.
+                [ -e "$shadow/$name" ] || ln -s "$tool" "$shadow/$name" 2>/dev/null || true
+              done
+            else
+              clean="${clean:+$clean:}$dir"
+            fi
+          done
+          # No empty PATH entry: that would put the checkout's own directory
+          # on PATH when every directory carried node.
+          export PATH="$HOME/.local/bin:$shadow${clean:+:$clean}"
+          if command -v node; then echo "node is still on PATH" >&2; exit 1; fi
+          aether gui build
+          test -d ~/.cache/aether/node ||
+            { echo "no Node was downloaded into ~/.cache/aether/node" >&2; exit 1; }
+          find ~/.cache/aether/node -type f -name node -perm -u+x | grep -q . ||
+            { echo "the downloaded Node has no executable node" >&2; exit 1; }
           test -x ~/.local/share/aether/desktop/aether-desktop
 
   # The client ships for Windows, so it gets a real Windows runner. Only the

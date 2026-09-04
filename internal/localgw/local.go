@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -27,19 +29,27 @@ var localVerbs = []string{
 	"link.repo",
 	"link.status",
 	"link.switch",
+	"profile.preview",
+	"profile.push",
 	"pull",
+	"pull.switch",
+	"repo.push",
 	"sync.start",
 	"sync.status",
 	"sync.stop",
+	"update.apply",
+	"update.check",
+	"update.status",
 }
 
 // localState is the mutable client-machine state behind /local/v1 and
 // /ws/envscan: the saved link config (link.repo updates it), the
 // background sync sessions, and the single environment-scan slot.
 type localState struct {
-	mu   sync.Mutex
-	cfg  cli.Config
-	sync *localops.SyncManager
+	mu    sync.Mutex
+	cfg   cli.Config
+	mtime time.Time
+	sync  *localops.SyncManager
 	// scanActive claims the one-scan-at-a-time slot for /ws/envscan.
 	scanActive bool
 	// scanArgv overrides the scan's harness command; tests set it to run
@@ -51,13 +61,51 @@ type localState struct {
 // fails: an unlinked (zero) cli.Config simply reports linked:false and
 // refuses the verbs that need a repo.
 func newLocalState(cfg Config) *localState {
-	return &localState{cfg: cfg.CLI, sync: localops.NewSyncManager()}
+	state := &localState{cfg: cfg.CLI, sync: localops.NewSyncManager()}
+	if path, err := cli.Path(); err == nil {
+		if info, err := os.Stat(path); err == nil {
+			state.mtime = info.ModTime()
+		}
+	}
+	return state
 }
 
-// snapshot returns the current link config under the lock.
+// cacheConfig updates the in-memory link and its file timestamp together.
+// Callers hold s.mu while changing the cache.
+func (s *localState) cacheConfig(cfg cli.Config) {
+	path, err := cli.Path()
+	if err != nil {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	s.cfg = cfg
+	s.mtime = info.ModTime()
+}
+
+// snapshot returns the current link config under the lock. The CLI may update
+// its config while the gateway is running, so reload it when its mtime changes.
 func (s *localState) snapshot() cli.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	path, err := cli.Path()
+	if err == nil {
+		if info, statErr := os.Stat(path); statErr == nil && !info.ModTime().Equal(s.mtime) {
+			if cfg, loadErr := cli.Load(); loadErr == nil {
+				if s.cfg.Active != "" {
+					named, ok := cfg.Named(s.cfg.Active)
+					if !ok {
+						return s.cfg
+					}
+					cfg = named
+				}
+				s.cacheConfig(cfg)
+			}
+		}
+	}
 	return s.cfg
 }
 
@@ -77,17 +125,24 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 	}
 	verb := r.PathValue("verb")
 	handler, ok := map[string]func(*Gateway, *http.Request, []byte) (any, *protocol.Error){
-		"daemon.install": (*Gateway).localDaemonInstall,
-		"daemon.status":  (*Gateway).localDaemonStatus,
-		"env.harnesses":  (*Gateway).localEnvHarnesses,
-		"image.scaffold": (*Gateway).localImageScaffold,
-		"link.repo":      (*Gateway).localLinkRepo,
-		"link.switch":    (*Gateway).localLinkSwitch,
-		"link.status":    (*Gateway).localLinkStatus,
-		"pull":           (*Gateway).localPull,
-		"sync.start":     (*Gateway).localSyncStart,
-		"sync.status":    (*Gateway).localSyncStatus,
-		"sync.stop":      (*Gateway).localSyncStop,
+		"daemon.install":  (*Gateway).localDaemonInstall,
+		"daemon.status":   (*Gateway).localDaemonStatus,
+		"env.harnesses":   (*Gateway).localEnvHarnesses,
+		"image.scaffold":  (*Gateway).localImageScaffold,
+		"link.repo":       (*Gateway).localLinkRepo,
+		"link.switch":     (*Gateway).localLinkSwitch,
+		"link.status":     (*Gateway).localLinkStatus,
+		"profile.preview": (*Gateway).localProfilePreview,
+		"profile.push":    (*Gateway).localProfilePush,
+		"pull":            (*Gateway).localPull,
+		"pull.switch":     (*Gateway).localPullSwitch,
+		"repo.push":       (*Gateway).localRepoPush,
+		"sync.start":      (*Gateway).localSyncStart,
+		"sync.status":     (*Gateway).localSyncStatus,
+		"sync.stop":       (*Gateway).localSyncStop,
+		"update.apply":    (*Gateway).localUpdateApply,
+		"update.check":    (*Gateway).localUpdateCheck,
+		"update.status":   (*Gateway).localUpdateStatus,
 	}[verb]
 	if !ok {
 		webgate.WriteError(w, http.StatusNotFound, &protocol.Error{
@@ -140,13 +195,14 @@ func namedLinks(cfg cli.Config) []linkRef {
 func (g *Gateway) localLinkStatus(*http.Request, []byte) (any, *protocol.Error) {
 	cfg := g.local.snapshot()
 	return struct {
-		Linked bool      `json:"linked"`
-		Addr   string    `json:"addr"`
-		User   string    `json:"user"`
-		Repo   string    `json:"repo"`
-		Links  []linkRef `json:"links,omitempty"`
-		Active string    `json:"active,omitempty"`
-	}{Linked: cfg.Repo != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
+		Linked           bool      `json:"linked"`
+		ServerConfigured bool      `json:"server_configured"`
+		Addr             string    `json:"addr"`
+		User             string    `json:"user"`
+		Repo             string    `json:"repo"`
+		Links            []linkRef `json:"links,omitempty"`
+		Active           string    `json:"active,omitempty"`
+	}{Linked: cfg.Repo != "", ServerConfigured: cfg.Addr != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
 		Links: namedLinks(cfg), Active: cfg.Active}, nil
 }
 
@@ -198,7 +254,7 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
-	g.local.cfg = cfg
+	g.local.cacheConfig(cfg)
 	return struct {
 		Repo   string `json:"repo"`
 		Remote string `json:"remote"`
@@ -211,22 +267,104 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 // implicitly, none or several is an invalid state the user resolves
 // server-side first.
 func (g *Gateway) resolveWorkspace(r *http.Request) (string, *protocol.Error) {
-	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodWorkspaceList, nil)
+	ws, perr := g.pickWorkspace(r, "")
 	if perr != nil {
 		return "", perr
 	}
+	return ws.ID, nil
+}
+
+// pickWorkspace returns the workspace the caller named, or the sole one
+// on the server when it named none. Callers that only have a name to
+// show the user need the whole record, not just the ID.
+func (g *Gateway) pickWorkspace(r *http.Request, wsID string) (protocol.Workspace, *protocol.Error) {
+	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodWorkspaceList, nil)
+	if perr != nil {
+		return protocol.Workspace{}, perr
+	}
 	var wl protocol.WorkspaceListResult
 	if err := json.Unmarshal(result, &wl); err != nil {
-		return "", &protocol.Error{Code: protocol.CodeInternal, Message: "decode workspace list: " + err.Error()}
+		return protocol.Workspace{}, &protocol.Error{Code: protocol.CodeInternal, Message: "decode workspace list: " + err.Error()}
+	}
+	if wsID != "" {
+		for _, ws := range wl.Workspaces {
+			if ws.ID == wsID {
+				return ws, nil
+			}
+		}
+		return protocol.Workspace{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no workspace " + wsID + " on this server"}
 	}
 	switch len(wl.Workspaces) {
 	case 0:
-		return "", &protocol.Error{Code: protocol.CodeInvalidState, Message: "no workspace yet; add one before linking a repo"}
+		return protocol.Workspace{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no workspace yet; add one before linking a repo"}
 	case 1:
-		return wl.Workspaces[0].ID, nil
+		return wl.Workspaces[0], nil
 	default:
-		return "", &protocol.Error{Code: protocol.CodeInvalidState, Message: "multiple workspaces; link with `aether link --repo --workspace <name-or-id>`"}
+		return protocol.Workspace{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: "multiple workspaces; link with `aether link --repo --workspace <name-or-id>`"}
 	}
+}
+
+// localRepoPush seeds the workspace with the push the quickstart used to
+// ask the user to run in a terminal: one `git push -u aether <base>` in
+// the linked repository, never forced and never carrying a second ref.
+// The branch is the workspace's own base branch, so a workspace created
+// with `--base` seeds the branch its runs actually fork from.
+func (g *Gateway) localRepoPush(r *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	cfg := g.local.snapshot()
+	if cfg.Repo == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
+	}
+	ws, perr := g.pickWorkspace(r, params.WorkspaceID)
+	if perr != nil {
+		return nil, perr
+	}
+	if ws.BaseBranch == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "workspace " + ws.Name + " has no base branch"}
+	}
+	if perr := checkRemoteWorkspace(cfg, ws); perr != nil {
+		return nil, perr
+	}
+	output, err := localops.Push(cfg.Repo, ws.BaseBranch)
+	switch {
+	case errors.Is(err, localops.ErrPushPrecondition):
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	case err != nil:
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	return struct {
+		Branch string `json:"branch"`
+		Remote string `json:"remote"`
+		Output string `json:"output"`
+	}{Branch: ws.BaseBranch, Remote: "aether", Output: output}, nil
+}
+
+// checkRemoteWorkspace refuses a push whose branch was read from one
+// workspace while the `aether` remote points at another. The remote URL
+// carries the workspace ID, so the two can disagree whenever link.repo
+// last ran for a different workspace - and the answer would otherwise
+// report success for a workspace this repository never seeded. A repo
+// with no remote at all passes through to Push's own refusal, which
+// names the fix.
+func checkRemoteWorkspace(cfg cli.Config, ws protocol.Workspace) *protocol.Error {
+	url, err := localops.AetherRemoteURL(cfg.Repo)
+	if err != nil {
+		// This check reads the repository before the push does, so a
+		// folder the user has since moved or deleted fails here first.
+		// Say nothing: Push's preflight names the path and the fix a
+		// moment later, in the user's own terms.
+		return nil
+	}
+	if want := cli.GitURL(cfg.User, cfg.Addr, ws.ID); url != "" && url != want {
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: "the aether remote in " + cfg.Repo +
+			" points at " + url + ", not workspace " + ws.Name + "; add the remote for this workspace first"}
+	}
+	return nil
 }
 
 func (g *Gateway) localPull(r *http.Request, body []byte) (any, *protocol.Error) {
@@ -255,15 +393,55 @@ func (g *Gateway) localPull(r *http.Request, body []byte) (any, *protocol.Error)
 	if err = json.Unmarshal(result, &coords); err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "decode pull coordinates: " + err.Error()}
 	}
-	branch, ref, output, err := localops.Pull(cfg.Repo, cfg.User, cfg.Addr, coords)
+	pullResult, err := localops.Pull(cfg.Repo, cfg.User, cfg.Addr, coords)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
 	return struct {
+		Branch  string `json:"branch"`
+		Ref     string `json:"ref"`
+		Output  string `json:"output"`
+		Current bool   `json:"current"`
+		Dirty   bool   `json:"dirty"`
+	}{
+		Branch: pullResult.Branch, Ref: pullResult.Ref, Output: pullResult.Output,
+		Current: pullResult.Current, Dirty: pullResult.Dirty,
+	}, nil
+
+}
+
+func (g *Gateway) localPullSwitch(r *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		RunID string `json:"run_id"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	if params.RunID == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "run_id is required"}
+	}
+	cfg := g.local.snapshot()
+	if cfg.Repo == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
+	}
+	callParams, err := json.Marshal(protocol.RunIDParams{RunID: params.RunID})
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodRunPull, callParams)
+	if perr != nil {
+		return nil, perr
+	}
+	var coords protocol.RunPullResult
+	if err = json.Unmarshal(result, &coords); err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "decode pull coordinates: " + err.Error()}
+	}
+	if err := localops.SwitchPull(cfg.Repo, coords.Branch); err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	}
+	return struct {
 		Branch string `json:"branch"`
-		Ref    string `json:"ref"`
-		Output string `json:"output"`
-	}{Branch: branch, Ref: ref, Output: output}, nil
+	}{Branch: coords.Branch}, nil
 }
 
 func (g *Gateway) localSyncStart(_ *http.Request, body []byte) (any, *protocol.Error) {
@@ -346,14 +524,18 @@ func (g *Gateway) localDaemonInstall(_ *http.Request, body []byte) (any, *protoc
 	if params.Server == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "server is required"}
 	}
+	linked := g.local.snapshot()
 	repo := params.Repo
 	if repo == "" {
-		repo = g.local.snapshot().Repo
+		repo = linked.Repo
 	}
 	if repo == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "repo is required (none linked)"}
 	}
-	unitPath, note, err := localops.InstallDaemon(params.Server, repo)
+	// The daemon dials the same server as this gateway, so it needs the
+	// key `aether link --key` chose; without it the unit falls back to
+	// ~/.ssh/id_ed25519 and cannot authenticate.
+	unitPath, note, err := localops.InstallDaemon(params.Server, repo, linked.Key)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}

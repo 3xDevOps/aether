@@ -428,6 +428,57 @@ func (d *Docker) Attach(ctx context.Context, id ID) (Attachment, error) {
 	return newDockerAttachment(d.cli, string(id), tty, resp), nil
 }
 
+// ExecTTY opens an additional TTY process inside a running container.
+func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir string, cols, rows uint) (Attachment, error) {
+	opts := container.ExecOptions{
+		Tty:          true,
+		AttachStdin:  true,
+		AttachStdout: true,
+		Cmd:          argv,
+		WorkingDir:   workDir,
+	}
+	if cols != 0 && rows != 0 {
+		opts.ConsoleSize = &[2]uint{rows, cols}
+	}
+	created, err := d.cli.ContainerExecCreate(ctx, string(id), opts)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: exec create: %w", err)
+	}
+	resp, err := d.cli.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{Tty: true})
+	if err != nil {
+		if exitErr := d.execExitError(ctx, created.ID); exitErr != nil {
+			return nil, exitErr
+		}
+		return nil, fmt.Errorf("runtime: exec attach: %w", err)
+	}
+	att := newExecAttachment(d.cli, created.ID, resp)
+	if cols != 0 && rows != 0 {
+		if err := att.Resize(ctx, cols, rows); err != nil {
+			_ = att.Close()
+			// The daemon accepts the attach even when the executable is
+			// missing; the immediate exit only surfaces here.
+			if exitErr := d.execExitError(ctx, created.ID); exitErr != nil {
+				return nil, exitErr
+			}
+			return nil, err
+		}
+	}
+	return att, nil
+}
+
+// execExitError reports an exec that already exited with a
+// missing-executable status (126/127), or nil.
+func (d *Docker) execExitError(ctx context.Context, execID string) error {
+	ins, err := d.cli.ContainerExecInspect(ctx, execID)
+	if err != nil || ins.Running {
+		return nil
+	}
+	if ins.ExitCode == 126 || ins.ExitCode == 127 {
+		return &ExecExitError{Code: ins.ExitCode}
+	}
+	return nil
+}
+
 // Wait implements Runtime. A container that has never been started waits
 // for its first run to finish rather than reporting a phantom zero exit.
 func (d *Docker) Wait(ctx context.Context, id ID) (ExitStatus, error) {

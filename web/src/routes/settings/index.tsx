@@ -6,7 +6,7 @@
 
 import { Copy } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
@@ -64,6 +64,7 @@ function LinkCard({ client }: { client: Api }) {
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const link = useStore((s) => s.linkStatus)
   const [error, setError] = useState<string | null>(null)
+  const serverConfigured = link !== null && link.server_configured
   // The gateway's SSH identity is process-lifetime, so link.switch always
   // answers an instruction to restart; show it verbatim.
   const [switchNote, setSwitchNote] = useState<string | null>(null)
@@ -92,20 +93,22 @@ function LinkCard({ client }: { client: Api }) {
     <section aria-label="Link" className="space-y-2 rounded-md border bg-card p-3">
       <h2 className="text-sm font-medium">Link</h2>
       {error && <p className="text-xs text-state-failed">{error}</p>}
-      {link?.linked && (
+      {serverConfigured && (
         <dl className="space-y-1 text-sm">
           <div className="flex gap-2">
             <dt className="text-muted-foreground">Server</dt>
-            <dd className="font-mono">{link.addr}</dd>
+            <dd className="font-mono">{link?.addr}</dd>
           </div>
           <div className="flex gap-2">
             <dt className="text-muted-foreground">User</dt>
-            <dd>{link.user}</dd>
+            <dd>{link?.user}</dd>
           </div>
-          <div className="flex gap-2">
-            <dt className="text-muted-foreground">Repository</dt>
-            <dd className="font-mono">{link.repo}</dd>
-          </div>
+          {link?.linked && (
+            <div className="flex gap-2">
+              <dt className="text-muted-foreground">Repository</dt>
+              <dd className="font-mono">{link.repo}</dd>
+            </div>
+          )}
         </dl>
       )}
       {(link?.links?.length ?? 0) > 0 && (
@@ -138,9 +141,15 @@ function LinkCard({ client }: { client: Api }) {
           )}
         </div>
       )}
-      {link && !link.linked && (
+      {link && serverConfigured && !link.linked && (
         <p className="text-sm text-muted-foreground">
-          Not linked. Run `aether link` in a terminal, or start with onboarding.
+          No repository linked. Start onboarding or link a repository from a
+          terminal.
+        </p>
+      )}
+      {link && !serverConfigured && (
+        <p className="text-sm text-muted-foreground">
+          No server configured. Run `aether link` in a terminal to get started.
         </p>
       )}
     </section>

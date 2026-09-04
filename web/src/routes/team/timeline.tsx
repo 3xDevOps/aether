@@ -13,12 +13,14 @@ import { useStore } from '@/store'
 const types = [
   ['', 'Everything'],
   ['run.status', 'Run status'],
+  ['run.title', 'Run titles'],
   ['workspace.timeline', 'Steering'],
   ['workspace.approval', 'Approvals'],
   ['workspace.presence', 'Presence'],
   ['run.cost', 'Cost'],
   ['run.overlap', 'Conflicts'],
   ['git.branch', 'Branches'],
+  ['server.update', 'Server updates'],
 ]
 
 /** The way into the feed, from the status bar. */

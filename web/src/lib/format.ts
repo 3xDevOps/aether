@@ -30,3 +30,16 @@ export function timeAgo(iso: string, now = Date.now()): string {
   }
   return ''
 }
+
+/**
+ * A version with its release-tag prefix off. Release tags are "v1.2.3", the
+ * desktop shell records "1.2.3", and the two have to compare equal.
+ */
+export function bareVersion(version: string): string {
+  return version.replace(/^v/, '')
+}
+
+/** An error's text, whatever the throw site handed us. */
+export function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}

@@ -16,10 +16,14 @@ export interface Run {
   workspace_id: string
   member_id: string
   task: string
+  /** Latest terminal title, omitted by older servers and for empty titles. */
+  title?: string
   harness: string
   mode: string
   status: RunStatus
   branch: string
+  last_commit?: string
+  last_commit_at?: string | null
   protected?: boolean
   created_at: string
   started_at: string | null
@@ -29,8 +33,8 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
-}
 
+}
 export interface Workspace {
   id: string
   name: string
@@ -68,10 +72,12 @@ export interface DiskUsage {
   total_bytes: number
   /** What an unprivileged writer can still claim; the scheduler's floor. */
   free_bytes: number
-  /** The three directories that grow without bound. */
+  /** The four directories that grow without bound. */
   worktree_bytes: number
   transcript_bytes: number
   database_bytes: number
+  /** The bare workspace repos; absent on servers predating the component. */
+  repo_bytes?: number
 }
 
 /**
@@ -84,7 +90,19 @@ export interface GatewayCapabilities {
   methods: string[]
   ws: string[]
   local?: string[]
+  /** The CLI build serving this gateway; absent before the field existed. */
+  version?: string
+  commit?: string
 }
+
+/** The member's persistent environment terminal status. */
+export interface TerminalStatusResult {
+  running: boolean
+  image?: string
+  started_at?: string
+  tabs?: string[]
+}
+
 
 export interface Event {
   id: string
@@ -101,6 +119,16 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
+}
+
+export interface GitBranchPayload {
+  workspace_id: string
+  branch: string
+  commit: string
+}
+
+export interface RunTitlePayload {
+  title: string
 }
 
 // Team surfaces: the approval inbox, the presence roster, cost and budgets,
@@ -216,6 +244,31 @@ export interface RunPatch {
   truncated: boolean
 }
 
+/** One immediate child returned by files.tree. */
+export interface FileTreeEntry {
+  name: string
+  kind: 'file' | 'dir'
+  size: number
+}
+
+export interface FilesTreeResult {
+  entries: FileTreeEntry[]
+}
+
+/** One files.read response. */
+export interface FileRead {
+  content: string
+  truncated: boolean
+  binary: boolean
+  size: number
+}
+
+/** One files.diff response. */
+export interface FileDiff {
+  patch: string
+  truncated: boolean
+}
+
 /** Wire form of a task template (internal/protocol/template.go). */
 export interface Template {
   id: string
@@ -262,29 +315,13 @@ export interface WorkspaceSelector {
   name?: string
 }
 
-/** Stable executable metadata; never a server filesystem path. */
-export interface ToolManifest {
-  executable?: string
-  version?: string
-  metadata?: Record<string, string>
-}
-
-/** Immutable member/workspace tool snapshot (internal/protocol/tools.go). */
-export interface ToolSnapshot {
-  id: string
-  workspace_id: string
-  member_id: string
-  digest: string
-  manifest: ToolManifest
-  created_at: string
-  /** Set on the snapshot currently active for the workspace. */
-  active?: boolean
-}
 
 /** One entry of agent.list; source is who supplied the harness. */
 export interface AgentInfo {
   name: string
   source: 'shipped' | 'member'
+  /** Vendor installer command for shipped harnesses, when available. */
+  install_script?: string
 }
 
 /** A member-supplied custom harness launch definition (agent.register). */
@@ -324,12 +361,107 @@ export interface ProfileStatus {
   snapshots: ProfileSnapshot[]
 }
 
+/** The categories a profile preview groups files into, in report order. */
+export type ProfileCategory =
+  | 'memory'
+  | 'skills'
+  | 'commands'
+  | 'settings'
+  | 'mcp'
+  | 'plugins'
+  | 'other'
+
+/** One category of a profile preview. `paths` is capped server-side, with
+ * `truncated` set when it was cut; `files` and `bytes` stay exact. */
+export interface ProfilePreviewCategory {
+  category: ProfileCategory
+  files: number
+  bytes: number
+  paths: string[]
+  truncated: boolean
+}
+
+/** Why a file was left out of a profile push. `too-large` and
+ * `over-budget` are the server's size caps, applied before the file is
+ * ever read. `secret` is a scanner finding in a file the user wrote and
+ * refuses the push; `vendored-secret` is one inside third-party content
+ * the harness installed, which drops that file and lets the rest sync. */
+export type ProfileExcludeReason =
+  | 'credential'
+  | 'secret'
+  | 'vendored-secret'
+  | 'ignored'
+  | 'symlink'
+  | 'too-large'
+  | 'over-budget'
+  | 'not-regular'
+
+/** One file the guards left out of a profile push, and why. */
+export interface ProfileExclusion {
+  path: string
+  reason: ProfileExcludeReason
+  detail: string
+}
+
+/**
+ * profile.preview: the discovery a push would run, uploading nothing.
+ * `present` is false when this machine has no profile root for the harness
+ * - a normal answer, not an error. `blocked` is true when the push would
+ * be refused outright rather than partially carried; `blocked_reason`,
+ * `blocked_path` and `blocked_detail` name which condition and where.
+ * Only a `secret` has a CLI override, so a surface offering one must read
+ * the reason rather than assume.
+ */
+export interface ProfilePreview {
+  harness: string
+  root: string
+  present: boolean
+  files: number
+  bytes: number
+  categories?: ProfilePreviewCategory[]
+  /** Capped; `excluded_total` is how many there were. */
+  excluded?: ProfileExclusion[]
+  excluded_total?: number
+  blocked: boolean
+  blocked_reason?: ProfileExcludeReason
+  blocked_path?: string
+  blocked_detail?: string
+}
+
+/** profile.push: the snapshot the push created, and the files the size
+ * caps left behind - the only place the user learns they are not on the
+ * server, since the push itself succeeded without them. */
+export interface ProfilePushResult {
+  harness: string
+  skipped?: ProfileExclusion[]
+  snapshot_id: string
+  digest: string
+  files: number
+  bytes: number
+}
+
+/** One harness in a profile scan's recommendation. A proposal, never an
+ * action: the import is a separate profile.push the user approves. */
+export interface HarnessRecommendation {
+  harness: string
+  import: boolean
+  categories: ProfileCategory[]
+  reason: string
+}
+
+/** What a `profile` scan answers instead of a Dockerfile and manifest. */
+export interface ProfileRecommendation {
+  harnesses: HarnessRecommendation[]
+}
+
 // The local gateway's client-machine verbs, POST /local/v1/<verb>
 // (internal/localgw/local.go). Only a gateway with the user's repository
 // and SSH key serves these; useCapability's hasLocal gates every caller.
 
-/** link.status: whether this gateway has a linked repository. */
+/** link.status: whether this gateway has a linked server and repository. */
 export interface LinkStatus {
+  /** A server address is configured, even when no repository is linked. */
+  server_configured: boolean
   linked: boolean
   addr: string
   user: string
@@ -351,6 +483,19 @@ export interface LinkRepoResult {
 export interface PullResult {
   branch: string
   ref: string
+  output: string
+  current: boolean
+  dirty: boolean
+}
+
+/** pull.switch: the run branch now checked out locally. */
+export interface PullSwitchResult {
+  branch: string
+}
+/** repo.push: the base branch seeded into the workspace. */
+export interface RepoPushResult {
+  branch: string
+  remote: string
   output: string
 }
 
@@ -386,6 +531,180 @@ export interface DaemonStatusResult {
 /** image.scaffold: the files written (existing files are never overwritten). */
 export interface ImageScaffoldResult {
   written: string[]
+}
+
+/**
+ * update.check: one release-check answer for the CLI on this machine
+ * (internal/selfupdate). `dev` and `disabled` both mean no release was
+ * resolved - a local build, or AETHER_NO_UPDATE_CHECK set - and neither
+ * ever reports an update.
+ */
+export interface UpdateCheck {
+  /** The running version; "dev" for a local build. */
+  version: string
+  commit: string
+  /** The newest release tag; empty when nothing was checked. */
+  latest?: string
+  update_available: boolean
+  /** The release asset for this platform, aether-<goos>-<goarch>. */
+  asset?: string
+  release_url?: string
+  dev: boolean
+  disabled: boolean
+  /** False on Windows, where the binary cannot replace itself. */
+  can_self_update: boolean
+  checked_at: string
+}
+
+/** update.check: the CLI answer plus how the server it talks to compares. */
+export interface UpdateStatus {
+  cli: UpdateCheck
+  /** Empty when the server did not answer; server_error then says why. */
+  server_version: string
+  server_behind: boolean
+  /**
+   * Why the server half is unknown. The CLI half is about a binary on this
+   * machine, so it is answered in full even when the SSH hop is down.
+   */
+  server_error?: string
+  /** The desktop shell spawned this gateway, so it can restart it. */
+  supervised: boolean
+  /**
+   * The error from the last desktop-app rebuild that failed, persisted by
+   * the gateway to a file. Absent when the last rebuild succeeded or none
+   * has run.
+   */
+  shell_build_error?: string
+  /** The binary update.apply replaces, symlinks resolved. Absent when the
+   * gateway could not probe it; install_method is absent with it. */
+  cli_path?: string
+  /**
+   * How update.apply gets to write cli_path. `direct`: its directory is
+   * writable and the update just happens. `admin-prompt`: macOS shows its
+   * administrator password dialog first. `manual`: the gateway cannot
+   * replace it (a root-owned directory on Linux, or Windows), so the member
+   * runs `sudo aether update` in a terminal. Absent when the probe failed.
+   */
+  install_method?: 'direct' | 'admin-prompt' | 'manual'
+}
+
+/** update.apply: what the self-update replaced and what happens next. */
+export interface UpdateApplyResult {
+  /** Every binary path replaced, in order. */
+  updated: string[]
+  version: string
+  /** True only under the desktop shell, which respawns the gateway. */
+  restarting: boolean
+  note?: string
+  /**
+   * Present when a co-located aether-server was replaced too: the running
+   * server keeps the old code until this command restarts its unit.
+   */
+  restart_command?: string
+  /**
+   * True when the gateway started a desktop-app rebuild in the background
+   * after swapping the CLI binary.
+   */
+  rebuilding: boolean
+}
+
+/** update.status: progress of a desktop-app rebuild running in this gateway
+ * process. */
+export interface UpdateBuildStatus {
+  phase:
+    | 'idle'
+    | 'unpacking'
+    | 'fetching node'
+    | 'installing dependencies'
+    | 'packaging'
+    | 'installing'
+    | 'done'
+    | 'error'
+  /** Up to the last 20 lines of the build's own output. */
+  lines_tail?: string[]
+  /** The real build error; present only when phase is "error". */
+  error?: string
+}
+
+// The server's own update, from internal/protocol/serverupdate.go and the
+// server.update event payload in internal/events/serverupdate.go. Calling
+// server.update is admin only; reading the status is not, so a member who
+// cannot press the button can still be told why the server is restarting.
+
+/** One update recorded and waiting for an idle server. */
+export interface PendingServerUpdate {
+  version: string
+  /** The member id that asked for it. */
+  requested_by: string
+  requested_at: string
+}
+
+/** What a pending update is still waiting for. Paused runs are reported
+ * but hold nothing back: a frozen container survives a restart. */
+export interface ServerUpdateWaiting {
+  runs: number
+  paused: number
+  shells: number
+}
+
+/** The outcome of the last update the server tried. */
+export interface ServerUpdateAttempt {
+  version: string
+  outcome: 'applied' | 'failed'
+  /** The real error behind a failed attempt. */
+  detail?: string
+  at: string
+}
+
+/**
+ * server.update_status: whether this server can replace its own binaries,
+ * and what update is in flight. `capable` is false on the documented
+ * unprivileged install - the binary directory is not writable by the
+ * service user - and `manual_commands` then carries what to run on the
+ * server host instead.
+ */
+export interface ServerUpdateStatus {
+  server_version: string
+  latest?: string
+  update_available: boolean
+  capable: boolean
+  /** Which reason the server cannot update itself. */
+  incapable?: string
+  pending?: PendingServerUpdate
+  waiting?: ServerUpdateWaiting
+  last?: ServerUpdateAttempt
+  manual_commands?: string[]
+}
+
+/** When an update applies: immediately, at the next idle moment, or never
+ * (which clears the pending one). */
+export type ServerUpdateWhen = 'now' | 'idle' | 'cancel'
+
+/** server.update: what the call recorded. The version fields are empty for
+ * a cancel. */
+export interface ServerUpdateResult {
+  status: 'applying' | 'scheduled' | 'cancelled'
+  version?: string
+  requested_by?: string
+  requested_at?: string
+}
+
+/** How far one update has got. `restarting` is the last frame the socket
+ * carries: the server re-executes there and every connection drops. */
+export type ServerUpdatePhase =
+  | 'scheduled'
+  | 'applying'
+  | 'restarting'
+  | 'failed'
+  | 'cancelled'
+
+/** The server.update event payload: one moment of a self-update. */
+export interface ServerUpdatePayload {
+  phase: ServerUpdatePhase
+  version?: string
+  actor_id?: string
+  /** The real error behind a failed phase. */
+  detail?: string
 }
 
 // Workspace environments: internal/protocol/environment.go and
@@ -498,10 +817,11 @@ export interface EnvHarnessesResult {
 /** The first frame the client sends on /ws/envscan. A repo scan names the
  * repository folder to read; a refine run carries the pair it starts from
  * and the user's feedback, plus the repo folder when that pair came from
- * a repo scan. Inventory omits them all. */
+ * a repo scan. A profile scan reads this machine's agent configuration and
+ * takes the repo folder optionally. Inventory omits them all. */
 export interface EnvScanRequest {
   harness: string
-  mode: 'inventory' | 'repo' | 'refine'
+  mode: 'inventory' | 'repo' | 'refine' | 'profile'
   repo_path?: string
   previous_dockerfile?: string
   previous_manifest_json?: string
@@ -518,10 +838,25 @@ export interface EnvScanResult {
   manifest: ManifestItem[]
 }
 
+/** The terminal success frame. Which half it carries follows the mode: a
+ * pair for the three environment scans, a recommendation for `profile`. */
+export type EnvScanResultFrame =
+  | {
+      type: 'result'
+      dockerfile: string
+      manifest: ManifestItem[]
+      recommendation?: undefined
+    }
+  | {
+      type: 'result'
+      recommendation: ProfileRecommendation
+      dockerfile?: undefined
+    }
+
 /** One frame from the gateway on /ws/envscan. `result` and `error` are
  * terminal; closing the socket cancels the scan. */
 export type EnvScanFrame =
   | { type: 'output'; line: string }
   | { type: 'status'; status: EnvScanStatus }
-  | { type: 'result'; dockerfile: string; manifest: ManifestItem[] }
+  | EnvScanResultFrame
   | { type: 'error'; detail: string; output_tail?: string }

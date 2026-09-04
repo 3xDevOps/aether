@@ -26,9 +26,10 @@ func runAttach(args []string) error {
 	fs := flag.NewFlagSet("attach", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	readOnly := fs.Bool("read-only", false, "watch the terminal without being able to type into it")
+	shell := fs.String("shell", "", "open a writable shell tab inside the run")
 	runID, err := parseLeadingArg(fs, args)
 	if err != nil || runID == "" {
-		return fmt.Errorf("usage: aether attach [--read-only] <run>")
+		return fmt.Errorf("usage: aether attach [--read-only] [--shell <tab>] <run>")
 	}
 	cfg, err := cli.Load()
 	if err != nil {
@@ -40,7 +41,7 @@ func runAttach(args []string) error {
 	}
 	defer func() { _ = conn.Close() }()
 	cols, rows := termSize()
-	stream, err := openAttach(conn, runID, cols, rows, *readOnly)
+	stream, err := openAttach(conn, runID, cols, rows, *readOnly, *shell)
 	if err != nil {
 		return err
 	}
@@ -49,15 +50,18 @@ func runAttach(args []string) error {
 }
 
 // openAttach asks to steer unless told otherwise, and drops to a read-only
-// mirror when the server refuses steer, as the dashboard's terminal does:
-// a viewer's attach has to show them the terminal, not an error.
-func openAttach(conn *cli.Conn, runID string, cols, rows uint, readOnly bool) (io.ReadWriteCloser, error) {
-	req := protocol.AttachRequest{RunID: runID, Cols: cols, Rows: rows, ReadOnly: readOnly}
+// mirror when the server refuses steer, as the dashboard's terminal does.
+// Shell tabs are always writable and report a refusal without downgrading.
+func openAttach(conn *cli.Conn, runID string, cols, rows uint, readOnly bool, shell string) (io.ReadWriteCloser, error) {
+	if shell != "" {
+		readOnly = false
+	}
+	req := protocol.AttachRequest{RunID: runID, Cols: cols, Rows: rows, ReadOnly: readOnly, Shell: shell}
 	stream, ack, err := conn.AttachStream(req)
 	if err == nil {
 		return stream, nil
 	}
-	if readOnly || ack.OK || ack.Code != protocol.CodeDenied {
+	if shell != "" || readOnly || ack.OK || ack.Code != protocol.CodeDenied {
 		return nil, err
 	}
 	req.ReadOnly = true

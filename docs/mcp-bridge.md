@@ -139,30 +139,33 @@ and nothing checks that an overridden command still is that CLI, so the
 flag is never appended to it and the overridden harness degrades to
 notice-only coordination the same way.
 
-### What the end-to-end test covers, and what it does not
+### What the end-to-end tests cover
 
-The coordination E2E (`internal/server`, `integration` tag) runs against
-the in-process runtime, so it proves the host half: the launch wiring, the
+The coordination E2E (`internal/server`, `integration` tag) has a host half
+and a container half.
+
+The host half runs against the in-process runtime: the launch wiring, the
 config document, the argument, all three kill-switch positions, and a real
 MCP client driving the real bridge over a real coordination socket into the
 real mailbox and workspace timeline.
 
-It does not prove the container half. The two mounts are only asserted as
-fields on the container spec, never as realized bind mounts; the staged
-`0555` binary is never executed as `/opt/aether/aether-server mcp`; and no
-non-root container user ever traverses the `0755` directory, reads the
-`0444` config, or connects to the `0666` socket. That gap matters because
-its failure mode is silent: a run that cannot reach the bridge degrades to
-notice-only, which is a legal state, so a green suite would not notice.
-Closing it needs the staged binary to be a real `aether-server` rather than
-whatever `/proc/self/exe` is under `go test`, which is a scheduler seam
-change; the real-harness smoke tests
+The container half runs against real Docker. Its failure mode is the reason
+it exists: a run that cannot reach the bridge degrades to notice-only,
+which is a legal state, so nothing short of a positive assertion would
+catch a broken mount, a binary that will not execute, or a permission a
+non-root agent does not have. It asserts the two binds are realized and
+read-only, that the staged binary runs as
+`/opt/aether/aether-server mcp` under a non-root container user, and that
+two overlapping runs complete a status/send/inbox round trip through it.
+See docs/testing.md for how it stages a binary that really has the
+subcommand. The real-harness smoke tests
 (`internal/harness/smoke_integration_test.go`) cover the argv half against
-the actual CLI in the meantime.
+the actual CLIs.
 
 ## Staging the binary
 
-The server stages `/proc/self/exe` at
+The server stages its own binary - `/proc/self/exe`, or whatever
+`scheduler.Config.ServerBinary` names - at
 `<data>/runtime/bin/aether-server-<sha256>`:
 
 - the running binary is hashed, and a staged copy that already matches its

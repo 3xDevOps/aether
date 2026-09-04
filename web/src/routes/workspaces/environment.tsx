@@ -3,12 +3,12 @@
 // flow, where an admin describes a change in plain language, a coding
 // agent registered on the server proposes a revised environment, and the
 // review here (Dockerfile diff plus updated summary) gates the rebuild.
-// Self-fetching like ToolsPanel, and it re-reads env.status whenever this
-// session's build state moves or an edit run settles, so a finished build
+// Self-fetching like the environment panel, and it re-reads env.status whenever
+// this session's build state moves or an edit run settles, so a finished build
 // or a fresh proposal shows up without a reload.
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { message } from '@/components/palette/palette'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,

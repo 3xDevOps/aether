@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
 // GitTransport is the SSH server's view of the git engine (*gitengine.Engine).
@@ -15,7 +16,7 @@ type GitTransport interface {
 
 // PTYAttacher is the SSH server's view of the PTY host (*ptyhost.Host).
 type PTYAttacher interface {
-	Attach(ctx context.Context, run domain.RunID, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error
+	Attach(ctx context.Context, key ptyhost.SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error
 }
 
 // RunController is the SSH server's view of the scheduler (*scheduler.Scheduler).
@@ -30,5 +31,12 @@ type RunController interface {
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
-	WorkspaceShell(ctx context.Context, member domain.MemberID, req domain.WorkspaceShellRequest, cols, rows uint, conn io.ReadWriter, resize <-chan [2]uint) error
+	EnsureRunShellTab(ctx context.Context, run domain.RunID, tab string, cols, rows uint) error
+	EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
+	EnsureTerminalTab(ctx context.Context, member domain.MemberID, tab string, cols, rows uint) error
+	StopTerminal(ctx context.Context, member domain.MemberID) error
+	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
+	// HoldShell counts one live interactive terminal attach for the
+	// self-update idle check; the returned func releases it.
+	HoldShell() func()
 }

@@ -1,14 +1,15 @@
 // The onboarding wizard: the quickstart's most error-prone stretch - link,
-// workspace, environment, repo remote, first run - as five steps. It exists
-// only where the gateway has this machine's SSH identity and filesystem, so
+// workspace, environment, repo remote, agents, first run - as six steps. It
+// exists only where the gateway has this machine's SSH identity and
+// filesystem, so
 // the whole route gates on the link.status local verb; a remote gateway gets
-// an empty state, not a broken wizard. Nothing persists: every mount
-// re-checks link status.
+// an empty state, not a broken wizard. Step and workspace choices persist so
+// a reload resumes where the user left off.
 
 import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import type { Workspace } from '@/lib/types'
+import { AgentsStep } from '@/routes/onboarding/agents-step'
 import {
   EnvironmentReview,
   EnvironmentStep,
@@ -21,15 +22,39 @@ import {
   WorkspaceStep,
 } from '@/routes/onboarding/steps'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
-const steps = ['Link', 'Workspace', 'Environment', 'Repository', 'First run'] as const
+const steps = [
+  'Link',
+  'Workspace',
+  'Environment',
+  'Repository',
+  'Agents',
+  'First run',
+] as const
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
-  const [step, setStep] = useState(0)
-  const [workspace, setWorkspace] = useState<Workspace | null>(null)
+  const persistedStep = useStore((s) => s.onboardingStep)
+  const setOnboardingStep = useStore((s) => s.setOnboardingStep)
+  const setOnboardingWorkspace = useStore((s) => s.setOnboardingWorkspace)
+  const upsertWorkspace = useStore((s) => s.upsertWorkspace)
+  const onboardingWorkspace = useStore((s) => s.onboardingWorkspace)
+  const workspaces = useStore((s) => s.workspaces)
+  const workspace = onboardingWorkspace ? workspaces[onboardingWorkspace] ?? null : null
+  const [step, setStepState] = useState(() =>
+    Math.max(0, Math.min(steps.length - 1, persistedStep)),
+  )
   const [review, setReview] = useState<EnvScanReview | null>(null)
+  // The harness the Agents step set up, so the first run starts on the one
+  // that is actually logged in. Empty until a setup shell exits cleanly.
+  const [setUpHarness, setSetUpHarness] = useState('')
+
+  const setStep = (next: number) => {
+    setStepState(next)
+    setOnboardingStep(next)
+  }
 
   if (!caps.hasLocal('link.status')) {
     return (
@@ -66,13 +91,19 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           ))}
         </ol>
 
-        {step === 0 && <LinkStep client={client} onNext={() => setStep(1)} />}
+        {step === 0 && (
+          <LinkStep
+            client={client}
+            onNext={(nextStep) => setStep(nextStep)}
+          />
+        )}
         {step === 1 && (
           <WorkspaceStep
             client={client}
             caps={caps}
             onNext={(w) => {
-              setWorkspace(w)
+              upsertWorkspace(w)
+              setOnboardingWorkspace(w.id)
               setStep(2)
             }}
           />
@@ -102,9 +133,30 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           />
         )}
         {step === 3 && (
-          <RepoStep client={client} workspace={workspace} onNext={() => setStep(4)} />
+          <RepoStep
+            client={client}
+            caps={caps}
+            workspace={workspace}
+            onNext={() => setStep(4)}
+          />
         )}
-        {step === 4 && <FirstRunStep client={client} workspace={workspace} />}
+        {step === 4 && (
+          <AgentsStep
+            client={client}
+            caps={caps}
+            workspace={workspace}
+            onNext={() => setStep(5)}
+            onReady={setSetUpHarness}
+          />
+        )}
+        {step === 5 && (
+          <FirstRunStep
+            client={client}
+            workspace={workspace}
+            defaultHarness={setUpHarness}
+            onBackToWorkspace={() => setStep(1)}
+          />
+        )}
 
         {step > 0 && (
           <button
