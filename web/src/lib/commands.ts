@@ -88,7 +88,8 @@ export interface RunCommandContext {
    * from the run list's `paused` wire field, but a legacy gateway sends none,
    * so there a reloaded tab knows no run's state until a pause or resume
    * event arrives. Offer neither verb rather than the one the server would
-   * refuse. See the paused-badge gap in docs/dashboard-frontend.md.
+   * refuse. See "Reason and paused on the wire" in
+   * docs/dashboard-frontend.md.
    */
   paused: boolean | undefined
   cap: Capability
