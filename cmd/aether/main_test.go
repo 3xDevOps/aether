@@ -55,29 +55,29 @@ func TestParseLeadingArgSupportsBothFlagOrders(t *testing.T) {
 	}
 }
 
-func TestAbsoluteRepo(t *testing.T) {
+func TestAbsolutePath(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("get working directory: %v", err)
 	}
 
-	got, err := absoluteRepo(".")
+	got, err := absolutePath(".")
 	if err != nil {
-		t.Fatalf("absoluteRepo(.): %v", err)
+		t.Fatalf("absolutePath(.): %v", err)
 	}
 	if want := filepath.Clean(cwd); got != want {
-		t.Errorf("absoluteRepo(.) = %q, want %q", got, want)
+		t.Errorf("absolutePath(.) = %q, want %q", got, want)
 	}
 	if !filepath.IsAbs(got) {
-		t.Errorf("absoluteRepo(.) = %q, want absolute path", got)
+		t.Errorf("absolutePath(.) = %q, want absolute path", got)
 	}
 
-	got, err = absoluteRepo("")
+	got, err = absolutePath("")
 	if err != nil {
-		t.Fatalf("absoluteRepo(empty): %v", err)
+		t.Fatalf("absolutePath(empty): %v", err)
 	}
 	if got != "" {
-		t.Errorf("absoluteRepo(empty) = %q, want empty", got)
+		t.Errorf("absolutePath(empty) = %q, want empty", got)
 	}
 }
 

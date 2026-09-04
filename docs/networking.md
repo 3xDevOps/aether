@@ -140,9 +140,28 @@ aether link 192.168.1.50:2222
 
 The first key to link a fresh server is registered as the admin. The CLI uses
 `~/.ssh/id_ed25519` by default and also offers any key loaded in your ssh-agent.
-There is no `--key` flag: to use a key at another path, or a
-passphrase-protected one, `ssh-add` it first. Without a usable key the
-handshake fails with `attempted methods [none]`.
+For a key at another path:
+
+```sh
+aether link 192.168.1.50:2222 --key ~/.ssh/aether_ed25519
+```
+
+`link` saves that path in `~/.config/aether/config.json`, and re-linking
+without `--key` keeps it. Every command that dials the server's control
+connection - `aether runs`, `attach`, `workspace`, `gui`, and the daemon the
+dashboard installs - reads it from there. Two paths do not:
+
+- git. `aether pull` and `git push aether` shell out to the system `ssh`
+  client, which follows `~/.ssh/config`. Point it at the same key with an
+  `IdentityFile` line for the server host.
+- `aether daemon run` and `aether daemon install` on the command line, which
+  take their own `--key` and otherwise default to `~/.ssh/id_ed25519`.
+
+A `--key` path that does not exist fails before the dial, rather than falling
+back to the agent. The CLI never prompts for a passphrase: to use a
+passphrase-protected key, `ssh-add` it first. Without a usable key the
+handshake fails with `attempted methods [none]`, followed by the reason the
+key it found was rejected - unreadable, unparseable, or passphrase-protected.
 
 ### Everyone else
 

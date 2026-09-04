@@ -72,31 +72,87 @@ func linkConfig(cfg, prev cli.Config, name string) cli.Config {
 	})
 }
 
-func absoluteRepo(repo string) (string, error) {
-	if repo == "" {
+// absolutePath resolves a path flag against the current directory, because
+// the saved config is read again from wherever the next command runs.
+func absolutePath(path string) (string, error) {
+	if path == "" {
 		return "", nil
 	}
-	return filepath.Abs(repo)
+	return filepath.Abs(path)
 }
 
-func runLink(args []string) error {
+// linkOptions is one parsed `aether link` command line: the config the
+// link will dial with and save, plus the flags that steer the run itself.
+type linkOptions struct {
+	cfg       cli.Config
+	invite    string
+	name      string
+	workspace string
+}
+
+func parseLinkArgs(args []string) (linkOptions, error) {
 	fs := flag.NewFlagSet("link", flag.ExitOnError)
 	invite := fs.String("invite", "", "one-time invite code")
 	name := fs.String("name", "", "profile label for this link (also the display name when joining via invite)")
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
 	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
+	key := fs.String("key", "", "SSH private key to authenticate with (default ~/.ssh/id_ed25519); saved in the config for later commands")
 	addr, err := parseLeadingArg(fs, args)
 	if err != nil || addr == "" {
-		return fmt.Errorf("usage: aether link <addr> [--invite] [--name] [--repo] [--workspace]")
+		return linkOptions{}, fmt.Errorf("usage: aether link <addr> [--invite] [--key] [--name] [--repo] [--workspace]")
 	}
-	repoPath, err := absoluteRepo(*repo)
+	repoPath, err := absolutePath(*repo)
+	if err != nil {
+		return linkOptions{}, err
+	}
+	keyPath, err := absolutePath(*key)
+	if err != nil {
+		return linkOptions{}, err
+	}
+	// Fail on the path the user typed, before a handshake turns it into
+	// an authentication failure that names no file.
+	if keyPath != "" {
+		if _, err := os.Stat(keyPath); err != nil {
+			return linkOptions{}, fmt.Errorf("link --key: %w", err)
+		}
+	}
+	return linkOptions{
+		cfg:       cli.Config{Addr: normalizeAddr(addr), Repo: repoPath, Key: keyPath, User: "aether"},
+		invite:    *invite,
+		name:      *name,
+		workspace: *workspace,
+	}, nil
+}
+
+// savedKey is the key path a re-link without --key keeps using: the one
+// already stored for this profile, else the default link's. Named
+// overlays the top-level fields, so an unset profile key falls back on
+// its own.
+func savedKey(prev cli.Config, name string) string {
+	if name != "" {
+		if named, ok := prev.Named(name); ok {
+			return named.Key
+		}
+	}
+	return prev.Key
+}
+
+func runLink(args []string) error {
+	opts, err := parseLinkArgs(args)
 	if err != nil {
 		return err
 	}
-	cfg := cli.Config{Addr: normalizeAddr(addr), Repo: repoPath, User: "aether"}
+	prev, loadErr := cli.Load()
+	if loadErr != nil {
+		prev = cli.Config{}
+	}
+	cfg := opts.cfg
+	if cfg.Key == "" {
+		cfg.Key = savedKey(prev, opts.name)
+	}
 	var conn *cli.Conn
-	if *invite != "" {
-		conn, err = cli.DialInvite(cfg, *invite, *name)
+	if opts.invite != "" {
+		conn, err = cli.DialInvite(cfg, opts.invite, opts.name)
 	} else {
 		conn, err = cli.Dial(cfg)
 	}
@@ -119,11 +175,7 @@ func runLink(args []string) error {
 		return fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
 	}
 
-	prev, loadErr := cli.Load()
-	if loadErr != nil {
-		prev = cli.Config{}
-	}
-	if err = cli.Save(linkConfig(cfg, prev, *name)); err != nil {
+	if err = cli.Save(linkConfig(cfg, prev, opts.name)); err != nil {
 		return err
 	}
 	who := info.Member.DisplayName
@@ -143,7 +195,7 @@ func runLink(args []string) error {
 		fmt.Println("no workspace yet; skip git remote (re-run link --repo after workspace add)")
 		return nil
 	}
-	wsID := *workspace
+	wsID := opts.workspace
 	if wsID == "" {
 		if len(wl.Workspaces) > 1 {
 			return fmt.Errorf("link --repo: multiple workspaces; pass --workspace <name-or-id>")
