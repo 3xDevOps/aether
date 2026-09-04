@@ -318,6 +318,8 @@ describe('connectAttach', () => {
 
     expect(exited).toBe(true)
     expect(StubSocket.opened).toHaveLength(1)
+    a.close()
+  })
 
   it('stops without reconnecting when the server ends the session', () => {
     const a = attach()

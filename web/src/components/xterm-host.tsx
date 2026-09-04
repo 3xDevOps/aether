@@ -4,6 +4,7 @@ import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { terminalFontFamily, whenTerminalFontReady } from '@/lib/term-font'
+import { attachClipboardKeys } from '@/lib/term-clipboard'
 
 export interface XtermOptions {
   enabled?: boolean
@@ -141,6 +142,7 @@ export function useXterm({
       const fit = new FitAddon()
       created.loadAddon(fit)
       created.open(host)
+      attachClipboardKeys(created)
 
       const repaint = () => paint(host, created)
       repaint()

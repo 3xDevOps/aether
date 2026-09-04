@@ -48,6 +48,13 @@ const groups: { name: string; entries: [string, string][] }[] = [
       ['Mark all runs seen', 'Clear the attention markers'],
     ],
   },
+  {
+    name: 'Terminal',
+    entries: [
+      ['Copy', 'Ctrl+Shift+C - a plain Ctrl+C copies too when text is selected'],
+      ['Paste', 'Ctrl+Shift+V - plain Ctrl+V works as well'],
+    ],
+  },
 ]
 
 /** True when the key event happened inside a text field of any flavour. */
