@@ -300,10 +300,10 @@ func privateStageDir() (string, error) {
 		return "", fmt.Errorf("find a directory to stage the update in: %w", err)
 	}
 	dir := filepath.Join(cache, "aether", "update")
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+	if err = os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return "", fmt.Errorf("create %s: %w", filepath.Dir(dir), err)
 	}
-	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+	if err = os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 		return "", fmt.Errorf("create %s: %w", dir, err)
 	}
 	info, err := os.Lstat(dir)

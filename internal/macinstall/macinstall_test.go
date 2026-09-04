@@ -192,8 +192,8 @@ func TestShellCommandInstallsAVerifiedCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("/bin/sh", "-c", cmd).CombinedOutput(); err != nil {
-		t.Fatalf("sh: %v: %s", err, out)
+	if out, runErr := exec.Command("/bin/sh", "-c", cmd).CombinedOutput(); runErr != nil {
+		t.Fatalf("sh: %v: %s", runErr, out)
 	}
 	got, err := os.ReadFile(dst)
 	if err != nil {

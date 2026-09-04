@@ -140,8 +140,8 @@ func TestUpdateWithAuthorizationAsksWhenUnwritable(t *testing.T) {
 	if !strings.Contains(got.Src, filepath.Join("aether", "update")) {
 		t.Fatalf("request src = %s, want it under the private staging directory", got.Src)
 	}
-	if _, err := os.Stat(got.Src); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("staged file after the install: %v, want it removed", err)
+	if _, statErr := os.Stat(got.Src); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("staged file after the install: %v, want it removed", statErr)
 	}
 	if !strings.Contains(prompt, dst) || !strings.Contains(prompt, "v1.3.0") {
 		t.Fatalf("prompt = %q, want it to name the binary and the release", prompt)
