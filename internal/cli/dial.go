@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -50,21 +51,14 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 	if cfg.Addr == "" {
 		return nil, errors.New("cli: server address required")
 	}
-	var (
-		auth      []ssh.AuthMethod
-		closeAuth func()
-		err       error
-	)
+	auth := loadAuth(cfg)
+	if auth.close != nil {
+		defer auth.close()
+	}
 	if requireAuth {
-		auth, closeAuth, err = requiredAuthMethods(cfg)
-	} else {
-		auth, closeAuth = optionalAuthMethods(cfg)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if closeAuth != nil {
-		defer closeAuth()
+		if err := auth.require(); err != nil {
+			return nil, err
+		}
 	}
 	known := cfg.knownHostsPath()
 	cb, err := hostKeyCallback(known)
@@ -73,7 +67,7 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 	}
 	conf := &ssh.ClientConfig{
 		User:            user,
-		Auth:            auth,
+		Auth:            auth.methods,
 		HostKeyCallback: cb,
 		Timeout:         dialTimeout,
 	}
@@ -84,8 +78,11 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 	cc, chans, reqs, err := ssh.NewClientConn(nc, cfg.Addr, conf)
 	if err != nil {
 		_ = nc.Close()
-		return nil, fmt.Errorf("cli: ssh handshake with %s: %w", cfg.Addr, err)
+		return nil, auth.explain(fmt.Errorf("cli: ssh handshake with %s: %w", cfg.Addr, err))
 	}
+	// The handshake got through without the unusable methods, so they are
+	// a warning here rather than the failure: the next dial may need them.
+	auth.warn(os.Stderr)
 	return &Conn{client: ssh.NewClient(cc, chans, reqs), cfg: cfg}, nil
 }
 
@@ -95,48 +92,101 @@ func (c *Conn) Close() error { return c.client.Close() }
 // SSH is the underlying SSH client (port-forwards, extra sessions).
 func (c *Conn) SSH() *ssh.Client { return c.client }
 
-func optionalAuthMethods(cfg Config) ([]ssh.AuthMethod, func()) {
-	methods, closeAuth, err := loadAuthMethods(cfg)
-	if len(methods) == 0 && err != nil {
-		fmt.Fprintf(os.Stderr, "aether: %v\n", err)
-	}
-	return methods, closeAuth
+// sshAuth is the set of SSH authentication methods a dial offers, plus the
+// reason any configured method was left out.
+type sshAuth struct {
+	methods []ssh.AuthMethod
+	close   func()
+	// problem is why a configured method is unusable - an agent that
+	// cannot be reached, a key file that cannot be read or decrypted. It
+	// is a warning while another method remains and the whole failure
+	// when none does. errors.Join carries both causes at once.
+	problem error
 }
 
-func requiredAuthMethods(cfg Config) ([]ssh.AuthMethod, func(), error) {
-	methods, closeAuth, err := loadAuthMethods(cfg)
-	if len(methods) > 0 {
-		return methods, closeAuth, nil
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, nil, errors.New("cli: no SSH key or agent available")
-}
-
-func loadAuthMethods(cfg Config) ([]ssh.AuthMethod, func(), error) {
-	var methods []ssh.AuthMethod
-	method, closeAuth, authErr := agentAuthMethod()
+// loadAuth collects the agent and key-file methods for cfg. Neither source
+// is required: an unconfigured agent and an absent key file are not
+// problems, an unusable one is.
+func loadAuth(cfg Config) sshAuth {
+	var a sshAuth
+	method, closeAgent, agentErr := agentAuthMethod()
 	if method != nil {
-		methods = append(methods, method)
+		a.methods = append(a.methods, method)
 	}
-	keyPath := cfg.keyPath()
-	if keyPath == "" {
-		return methods, closeAuth, authErr
+	a.close = closeAgent
+	keyMethod, keyErr := keyAuthMethod(cfg.keyPath())
+	if keyMethod != nil {
+		a.methods = append(a.methods, keyMethod)
 	}
-	raw, err := os.ReadFile(keyPath)
+	a.problem = errors.Join(agentErr, keyErr)
+	return a
+}
+
+// require rejects a dial that must authenticate with nothing to offer.
+func (a sshAuth) require() error {
+	if len(a.methods) > 0 {
+		return nil
+	}
+	if a.problem != nil {
+		return a.problem
+	}
+	return errors.New("cli: no SSH key or agent available")
+}
+
+// warn prints each unusable method on its own line.
+func (a sshAuth) warn(w io.Writer) {
+	for _, cause := range causes(a.problem) {
+		_, _ = fmt.Fprintf(w, "aether: %v\n", cause)
+	}
+}
+
+// explain appends the unusable methods to a handshake failure, so a
+// rejection names the key it could not offer instead of leaving the user
+// with an empty list of attempted methods.
+func (a sshAuth) explain(err error) error {
+	for _, cause := range causes(a.problem) {
+		err = fmt.Errorf("%w; %v", err, cause)
+	}
+	return err
+}
+
+// causes splits an errors.Join result into its parts so each prints on its
+// own line rather than as one embedded newline.
+func causes(err error) []error {
+	if err == nil {
+		return nil
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		return joined.Unwrap()
+	}
+	return []error{err}
+}
+
+// keyAuthMethod loads the private key at path. A nil method with a nil
+// error means there is no key file there, which is not a failure: agent
+// auth may still succeed.
+func keyAuthMethod(path string) (ssh.AuthMethod, error) {
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return methods, closeAuth, authErr
+			return nil, nil
 		}
-		return methods, closeAuth, fmt.Errorf("cli: read ssh key: %w", err)
+		return nil, fmt.Errorf("cli: read ssh key %s: %w", path, err)
 	}
 	signer, err := ssh.ParsePrivateKey(raw)
 	if err != nil {
-		return methods, closeAuth, fmt.Errorf("cli: parse ssh key %s: %w", keyPath, err)
+		var locked *ssh.PassphraseMissingError
+		if errors.As(err, &locked) {
+			return nil, fmt.Errorf(
+				"cli: %s is passphrase-protected; add it to ssh-agent (ssh-add %s) or pass --key <unencrypted key>: %w",
+				path, path, err)
+		}
+		return nil, fmt.Errorf("cli: parse ssh key %s: %w", path, err)
 	}
-	methods = append(methods, ssh.PublicKeys(signer))
-	return methods, closeAuth, authErr
+	return ssh.PublicKeys(signer), nil
 }
 
 // agentAuthMethod dials the local SSH agent and collects its signers. A nil

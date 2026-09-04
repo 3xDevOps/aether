@@ -351,7 +351,9 @@ ssh-add $env:USERPROFILE\.ssh\id_ed25519
 socket rather than using the pipe. Leave it unset unless you deliberately run
 a different agent. When neither is reachable the client falls back to the key
 file rather than failing; only with no usable key either does `aether link`
-report `attempted methods [none]`.
+report `attempted methods [none]`, and that error names the key file it found
+and why it could not use it. `aether link <addr> --key <path>` picks a key
+outside `%USERPROFILE%\.ssh\id_ed25519`.
 
 **Console.** `aether attach` mirrors an agent's TUI byte for byte, so the
 console needs ANSI escape processing. The client enables it on the console it

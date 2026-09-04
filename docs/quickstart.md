@@ -9,8 +9,9 @@ Two machines are involved, though they can be the same one:
 
 Your machine needs git and, unless both machines are on a tailnet
 (see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
-`~/.ssh/id_ed25519` and your ssh-agent, so `ssh-add` a passphrase-protected
-key first. Windows paths and the OpenSSH agent service are in
+`~/.ssh/id_ed25519` and your ssh-agent. For a key somewhere else, pass
+`aether link --key <path>`; for a passphrase-protected one, `ssh-add` it
+first. Windows paths and the OpenSSH agent service are in
 [install.md](install.md#the-windows-client).
 
 ---
@@ -382,7 +383,9 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | --- | --- |
 | `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`%AppData%\aether\config.json` on Windows) on this machine yet. |
 | `no Aether member for this key` | The server already has an admin, so you are not the first member. Get an invite: [teams.md](teams.md). |
-| `unable to authenticate, attempted methods [none]` | The CLI found no usable key: none at `~/.ssh/id_ed25519`, no ssh-agent, or a passphrase-protected key with no agent to unlock it. Run `ssh-add`, or generate an unencrypted key. On Windows, check `Get-Service ssh-agent` and look for the key at `%USERPROFILE%\.ssh\id_ed25519`. |
+| `unable to authenticate, attempted methods [none]` | The CLI had no key to offer: none at `~/.ssh/id_ed25519` and no ssh-agent. The same error names the key when one was found but could not be used - read the rest of the line. On Windows, check `Get-Service ssh-agent` and look for the key at `%USERPROFILE%\.ssh\id_ed25519`. |
+| `<path> is passphrase-protected; add it to ssh-agent (ssh-add <path>) or pass --key <unencrypted key>` | The key exists but the CLI cannot decrypt it; it does not prompt for a passphrase. Run `ssh-add <path>`, or point at an unencrypted key with `aether link <addr> --key <path>`. |
+| `parse ssh key <path>` | The file at that path is not an SSH private key (a public key, or a truncated file). Pass the private key with `aether link <addr> --key <path>`. |
 | `host key mismatch` / `REMOTE HOST IDENTIFICATION HAS CHANGED` on `aether link` | The server was reinstalled and generated a new host key, but your `known_hosts` still trusts the old one. Clear it: `ssh-keygen -R '[<server-host>]:2222'`. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |

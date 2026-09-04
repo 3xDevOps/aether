@@ -1,10 +1,49 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 )
+
+// --key picks the private key the link dials with, and the path is saved
+// so every later command uses the same key. Relative paths are resolved
+// now, because the next command runs from wherever the user happens to be.
+func TestParseLinkArgsKey(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts, err := parseLinkArgs([]string{"my-server", "--key", "deploy_key", "--name", "prod"})
+	if err != nil {
+		t.Fatalf("parseLinkArgs: %v", err)
+	}
+	want := filepath.Join(cwd, "deploy_key")
+	if opts.cfg.Key != want {
+		t.Errorf("cfg.Key = %q, want %q", opts.cfg.Key, want)
+	}
+
+	saved := linkConfig(opts.cfg, cli.Config{}, opts.name)
+	if saved.Key != want {
+		t.Errorf("saved Key = %q, want %q", saved.Key, want)
+	}
+	if len(saved.Links) != 1 || saved.Links[0].Key != want {
+		t.Errorf("saved profile = %+v, want Key %q", saved.Links, want)
+	}
+
+	// Without --key the config stays empty, so cli.Config falls back to
+	// ~/.ssh/id_ed25519.
+	opts, err = parseLinkArgs([]string{"my-server"})
+	if err != nil {
+		t.Fatalf("parseLinkArgs without --key: %v", err)
+	}
+	if opts.cfg.Key != "" {
+		t.Errorf("cfg.Key = %q, want empty without --key", opts.cfg.Key)
+	}
+}
 
 // linkConfig without --name must not touch the profile list beyond
 // carrying it forward; with --name it snapshots the fresh link under
