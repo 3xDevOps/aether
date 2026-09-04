@@ -192,8 +192,26 @@ func (c *e2eContainer) readStdinLine() (string, bool) {
 	}
 }
 
-// exitNow ends the main process, EOF-ing every attachment. Idempotent.
+// exitNow is the script-facing exit: it ends the main process with the
+// given code. It rejects state "created", the one state Docker can never
+// report as exited, because a container has no process before Start. A
+// forged exit there leaves Attach refusing the container as not running,
+// so a script that beats the code under test to Start reads that refusal
+// instead of the exit code it set.
 func (c *e2eContainer) exitNow(code int) {
+	c.mu.Lock()
+	created := c.state == "created"
+	c.mu.Unlock()
+	if created {
+		panic(fmt.Sprintf("e2e runtime: container %s exited before it started; wait for it to be running first", c.spec.Name))
+	}
+	c.endProcess(code)
+}
+
+// endProcess records the exit code and EOFs every attachment. Idempotent,
+// and reachable from any state: Stop and Destroy tear down containers
+// that never started.
+func (c *e2eContainer) endProcess(code int) {
 	c.mu.Lock()
 	if c.exit != nil {
 		c.mu.Unlock()
@@ -243,7 +261,7 @@ func (r *e2eRuntime) Stop(_ context.Context, id runtime.ID, _ time.Duration) err
 	if err != nil {
 		return err
 	}
-	c.exitNow(137)
+	c.endProcess(137)
 	return nil
 }
 
@@ -253,7 +271,7 @@ func (r *e2eRuntime) Destroy(_ context.Context, id runtime.ID) error {
 	delete(r.containers, id)
 	r.mu.Unlock()
 	if ok {
-		c.exitNow(137)
+		c.endProcess(137)
 	}
 	return nil
 }

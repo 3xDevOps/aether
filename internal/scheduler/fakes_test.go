@@ -69,9 +69,6 @@ type fakeContainer struct {
 	stdin bytes.Buffer
 	exit  *runtime.ExitStatus
 	done  chan struct{}
-	// startedWithAttach records whether an attachment existed when Start
-	// ran; interactive shells must attach first or lose the first prompt.
-	startedWithAttach bool
 }
 
 // output emits agent PTY bytes to every open attachment.
@@ -84,9 +81,26 @@ func (c *fakeContainer) output(s string) {
 	}
 }
 
-// exitNow ends the main process with the given code, EOF-ing every
-// attachment. Idempotent.
+// exitNow is the test-facing exit: it ends the main process with the
+// given code. It rejects state "created", the one state Docker can never
+// report as exited, because a container has no process before Start. A
+// forged exit there leaves Attach refusing the container as not running,
+// so a test that beats the code under test to Start reads that refusal
+// instead of the exit code it set.
 func (c *fakeContainer) exitNow(code int) {
+	c.mu.Lock()
+	created := c.state == "created"
+	c.mu.Unlock()
+	if created {
+		panic(fmt.Sprintf("fake runtime: container %s exited before it started; wait for it to be running first", c.id))
+	}
+	c.endProcess(code)
+}
+
+// endProcess records the exit code and EOFs every attachment. Idempotent,
+// and reachable from any state: Stop and Destroy tear down containers
+// that never started.
+func (c *fakeContainer) endProcess(code int) {
 	c.mu.Lock()
 	if c.exit != nil {
 		c.mu.Unlock()
@@ -156,7 +170,6 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 		return fmt.Errorf("fake runtime: start from state %q", c.state)
 	}
 	c.state = "running"
-	c.startedWithAttach = len(c.atts) > 0
 	if r.startHook != nil {
 		go r.startHook(c)
 	}
@@ -196,7 +209,7 @@ func (r *fakeRuntime) Stop(_ context.Context, id runtime.ID, _ time.Duration) er
 	if err != nil {
 		return err
 	}
-	c.exitNow(137)
+	c.endProcess(137)
 	return nil
 }
 
@@ -206,7 +219,7 @@ func (r *fakeRuntime) Destroy(_ context.Context, id runtime.ID) error {
 	delete(r.containers, id)
 	r.mu.Unlock()
 	if ok {
-		c.exitNow(137)
+		c.endProcess(137)
 	}
 	return nil
 }
