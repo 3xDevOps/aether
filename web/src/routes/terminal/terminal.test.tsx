@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
+import { Terminal } from '@xterm/xterm'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import { codeDenied } from '@/routes/terminal/attach'
@@ -97,6 +98,24 @@ describe('terminal view', () => {
     expect(toggle.disabled).toBe(false)
     expect(screen.queryByText('no live terminal')).toBeNull()
     expect(screen.queryByText('Retry')).toBeNull()
+    view.unmount()
+  })
+
+  it('writes PTY output frames into the terminal', () => {
+    // The blank-terminal regression: the attach delivered frames but the
+    // view never handed them to xterm, so the pane stayed empty forever.
+    const write = vi.spyOn(Terminal.prototype, 'write')
+    const view = mount()
+    attached()
+
+    const chunk = new TextEncoder().encode('agent says hi').buffer
+    act(() => StubSocket.last().onmessage?.({ data: chunk }))
+
+    const written = write.mock.calls.map(([data]) =>
+      typeof data === 'string' ? data : new TextDecoder().decode(data),
+    )
+    expect(written).toContain('agent says hi')
+    write.mockRestore()
     view.unmount()
   })
 

@@ -8,7 +8,7 @@
 | Panel | `#070b16` | Cards and popovers |
 | Bar | `#0b1120` | Bars and raised surfaces |
 | Text | `#dce6f2` | Primary text |
-| Mint | `#6ee7d6` / `#9ff0e4` | Accent and highlight |
+| Mint | `#6ee7d6` / `#9ff0e4` | Landing accent and highlight; the app dims it to `#5cb7aa` for interactive fills |
 | Steel | `#4a6fa5` | Borders at 18%-70% alpha |
 | Fonts | VT323 + IBM Plex Mono | Display + body |
 | Geometry | Square corners | No rounded geometry |
@@ -29,14 +29,14 @@
 | `--muted` | Neutral | `#0b1120` |
 | `--secondary` | Neutral | `#0b1120` |
 | `--secondary-foreground` | Neutral | `#dce6f2` |
-| `--accent` | Neutral | `#0b1120` |
+| `--accent` | Neutral | `#242e40` |
 | `--accent-foreground` | Neutral | `#dce6f2` |
 | `--muted-foreground` | Neutral | `rgb(220 230 242 / 0.62)` |
 | `--border` | Neutral | `rgb(74 111 165 / 0.28)` |
 | `--input` | Neutral | `rgb(74 111 165 / 0.36)` |
-| `--primary` | `oklch(0.55 0.11 175)` | `#6ee7d6` |
+| `--primary` | `oklch(0.55 0.11 175)` | `#5cb7aa` |
 | `--primary-foreground` | Neutral | `#05070f` |
-| `--ring` | `oklch(0.55 0.11 175)` | `#6ee7d6` |
+| `--ring` | `oklch(0.55 0.11 175)` | `#5cb7aa` |
 | State tokens | Unchanged | Unchanged |
 
 The mint 2px left border marks the active NAV item only; run rows keep the owner colour on that edge.

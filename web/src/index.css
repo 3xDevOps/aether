@@ -85,20 +85,20 @@
   --card-foreground: #dce6f2;
   --popover: #070b16;
   --popover-foreground: #dce6f2;
-  --primary: #6ee7d6;
+  --primary: #5cb7aa;
   --primary-foreground: #05070f;
   --sidebar: #0b1120;
   --secondary: #0b1120;
   --secondary-foreground: #dce6f2;
   --muted: #0b1120;
   --muted-foreground: rgb(220 230 242 / 0.62);
-  --accent: #0b1120;
+  --accent: #242e40;
   --accent-foreground: #dce6f2;
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: rgb(74 111 165 / 0.28);
   --input: rgb(74 111 165 / 0.36);
-  --ring: #6ee7d6;
+  --ring: #5cb7aa;
 
   --state-working: oklch(0.7 0.14 250);
   --state-waiting: oklch(0.8 0.12 85);
