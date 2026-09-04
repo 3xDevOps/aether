@@ -66,6 +66,9 @@ type Actor struct {
 // value is correct for capabilities that target no run (Launch,
 // WorkspaceAdmin).
 type Target struct {
+	// Workspace carries the workspace addressed by a resolver. Check does
+	// not consult it yet; it is retained for future per-workspace access.
+	Workspace domain.WorkspaceID
 	// Owner is the targeted run's owning member; empty when no run is
 	// targeted.
 	Owner domain.MemberID

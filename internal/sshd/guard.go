@@ -34,6 +34,29 @@ func runTarget(s *Server, ctx context.Context, params json.RawMessage) (permissi
 	return target, nil
 }
 
+// workspaceTarget resolves a files request that addresses a workspace rather
+// than a run. The workspace is checked here so a missing workspace is reported
+// before the files service is called.
+func workspaceTarget(s *Server, ctx context.Context, params json.RawMessage) (permissions.Target, *protocol.Error) {
+	var p struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if len(params) == 0 {
+		return permissions.Target{}, invalidParams("workspace_id is required")
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return permissions.Target{}, invalidParams("invalid params: " + err.Error())
+	}
+	if p.WorkspaceID == "" {
+		return permissions.Target{}, invalidParams("workspace_id is required")
+	}
+	id := domain.WorkspaceID(p.WorkspaceID)
+	if _, err := s.cfg.Store.GetWorkspace(ctx, id); err != nil {
+		return permissions.Target{}, rpcError(err)
+	}
+	return permissions.Target{Workspace: id}, nil
+}
+
 // registerGuarded adds a control-channel handler behind a capability
 // check: the caller's role is re-fetched per request, resolve names the
 // target (nil for none), and permissions.Check runs before h. Denials are

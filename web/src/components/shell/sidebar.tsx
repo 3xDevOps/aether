@@ -3,6 +3,7 @@ import {
   Compass,
   FileText,
   FolderGit2,
+  FolderTree,
   LayoutGrid,
   List,
   PanelLeftClose,
@@ -270,6 +271,8 @@ function NavSection() {
     links.push({ name: 'templates', label: 'Templates', Icon: FileText })
   if (cap.hasMethod('agent.list'))
     links.push({ name: 'agents', label: 'Agents', Icon: Bot })
+  if (cap.hasMethod('files.tree'))
+    links.push({ name: 'files', label: 'Files', Icon: FolderTree })
   if (cap.hasLocal('link.status'))
     links.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass })
   if (cap.hasLocal('daemon.status'))

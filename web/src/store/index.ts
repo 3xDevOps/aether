@@ -4,6 +4,7 @@ import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
 import { createCostSlice, type CostSlice } from '@/store/cost'
 import { createDiffSlice, type DiffSlice } from '@/store/diff'
+import { createFilesSlice, type FilesSlice } from '@/store/files'
 import { createEnvironmentSlice, type EnvironmentSlice } from '@/store/environment'
 import { createEnvTerminalSlice, type EnvTerminalSlice } from '@/store/env-terminal'
 import { createLocalSlice, type LocalSlice } from '@/store/local'
@@ -29,6 +30,7 @@ export type RootState = ServerSlice &
   PresenceSlice &
   CostSlice &
   TimelineSlice &
+  FilesSlice &
   DiffSlice &
   LocalSlice &
   EnvironmentSlice &
@@ -55,6 +57,7 @@ export function createRootStore() {
         ...createCostSlice(...a),
         ...createTimelineSlice(...a),
         ...createDiffSlice(...a),
+        ...createFilesSlice(...a),
         ...createLocalSlice(...a),
         ...createEnvironmentSlice(...a),
         ...createUiSlice(...a),

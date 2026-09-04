@@ -216,27 +216,32 @@ server was not told where the data directory is, or the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
 zero anywhere else).
 
-### `run.patch` and `server.disk` on the control channel
+### `run.patch`, `server.disk`, and files on the control channel
 
-The two `GET` endpoints above are backed by SSH control-channel methods,
-because this gateway proxies the whole API shape over SSH and needs both
-reads without a listener on the server.
+The two `GET` endpoints above and the files methods below are backed by SSH
+control-channel methods, because this gateway proxies the whole API shape over
+SSH and needs these reads without a listener on the server.
 
 | Method | Params | Result |
 | --- | --- | --- |
 | `run.patch` | `RunIDParams` (`{"run_id":"..."}`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+| `files.tree` | `FilesTreeParams` (`{"workspace_id":"...","run_id":"...","path":"src"}`; `run_id` optional) | `FilesTreeResult` - immediate file and directory entries |
+| `files.read` | `FilesReadParams` (`{"workspace_id":"...","run_id":"...","path":"README.md"}`; `run_id` optional) | `FilesReadResult` - read-only content, size, binary, and truncation |
+| `files.diff` | `FilesDiffParams` (`{"run_id":"...","path":"README.md"}`) | `FilesDiffResult` - one file's patch against the run base |
 | `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its image, start time, and active tabs |
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit.
-- Both answer `-32004` (unavailable) when the read cannot be served:
-  `run.patch` when diff rendering is not enabled (no git engine wired) or the
-  run has no checkout left to diff, `server.disk` when the server was not
-  told where the data directory is or the filesystem holding it could not be
-  read. The underlying errors name server-side paths, so they are not echoed
-  to the client.
+- The read methods answer `-32004` (unavailable) when the read cannot be
+  served: `run.patch` when diff rendering is not enabled (no git engine wired)
+  or the run has no checkout left to diff, `server.disk` when the server was
+  not told where the data directory is or the filesystem holding it could not
+  be read, and `files.tree`, `files.read`, or `files.diff` when their
+  checkout or repository is unavailable. All three files methods also answer
+  `-32602` for a rejected path. The underlying errors name server-side paths,
+  so they are not echoed to the client.
 
 ## `/local/v1` verbs
 

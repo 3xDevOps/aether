@@ -356,6 +356,9 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       patch: '',
       truncated: false,
     })),
+    filesTree: vi.fn(async () => ({ entries: [] })),
+    filesRead: vi.fn(async () => ({ content: '', truncated: false, binary: false, size: 0 })),
+    filesDiff: vi.fn(async () => ({ patch: '', truncated: false })),
     disk: vi.fn(async () => ({
       used_bytes: 512 * 1024 * 1024,
       total_bytes: 2 * 1024 * 1024 * 1024,

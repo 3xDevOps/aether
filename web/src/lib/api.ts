@@ -36,6 +36,9 @@ import type {
   PullSwitchResult,
   RepoPushResult,
   Run,
+  FileDiff,
+  FileRead,
+  FilesTreeResult,
   RunPatch,
   Schedule,
   ServerInfo,
@@ -499,6 +502,12 @@ export const api = {
   // result. See docs/local-gateway.md.
   runPatch: (runID: string) =>
     get<RunPatch>(`/run/${encodeURIComponent(runID)}/patch`),
+  filesTree: (params: { workspace_id: string; run_id?: string; path: string }) =>
+    call<FilesTreeResult>('files.tree', params),
+  filesRead: (params: { workspace_id: string; run_id?: string; path: string }) =>
+    call<FileRead>('files.read', params),
+  filesDiff: (runID: string, path: string) =>
+    call<FileDiff>('files.diff', { run_id: runID, path }),
   disk: () => get<DiskUsage>('/disk'),
   capabilities: () => get<GatewayCapabilities>('/capabilities'),
   // The local gateway's client-machine verbs; see the `local` helper.
