@@ -77,8 +77,8 @@ func (s *Scheduler) flushRunTitleWithRetry(runID domain.RunID, retry bool) {
 		workspaceID = run.WorkspaceID
 		changed = run.Title != title
 		s.titleMu.Lock()
-		if pending := s.titleUpdates[runID]; pending != nil && pending.workspaceID == "" {
-			pending.workspaceID = workspaceID
+		if entry := s.titleUpdates[runID]; entry != nil && entry.workspaceID == "" {
+			entry.workspaceID = workspaceID
 		}
 		s.titleMu.Unlock()
 	}

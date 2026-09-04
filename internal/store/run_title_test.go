@@ -17,7 +17,7 @@ func TestRunTitleMigrationAndScan(t *testing.T) {
 	if got, err := db.db.QueryContext(context.Background(), `SELECT title FROM runs WHERE id = ?`, run.ID); err != nil {
 		t.Fatalf("query title column: %v", err)
 	} else {
-		defer got.Close()
+		defer func() { _ = got.Close() }()
 		if !got.Next() {
 			t.Fatal("title row missing")
 		}
