@@ -24,12 +24,12 @@ import {
 } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
-// The local gateway: every method, the shell and envscan sockets, and the
+// The local gateway: every method, the envscan socket, and the
 // client-machine verbs this step rides on.
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
-  ws: ['events', 'attach', 'shell', 'envscan'],
+  ws: ['events', 'attach', 'terminal', 'envscan'],
   local: [
     'link.status',
     'link.repo',
@@ -57,7 +57,6 @@ function seed(caps: GatewayCapabilities = localCaps) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
-    shellRequest: null,
     envBuilds: {},
   })
 }
@@ -226,7 +225,7 @@ describe('agents step', () => {
     expect(client.localProfilePreview).not.toHaveBeenCalled()
   })
 
-  it('opens the agent-setup shell inline and marks the harness ready on a clean exit', async () => {
+  it('shows the live terminal dock and marks the harness ready on confirmation', async () => {
     const client = fakeApi()
     const { onReady } = renderStep(client)
 
@@ -235,25 +234,15 @@ describe('agents step', () => {
     )
     await act(async () => {})
 
-    // The same agent-setup shell the Agents page opens, in the workspace
-    // the wizard already settled on - no second form.
-    expect(useStore.getState().shellRequest).toEqual({
-      workspace: { id: workspace.id },
-      mode: 'agent-setup',
-      harness: 'claude',
-    })
-    expect(screen.queryByText('Open setup shell')).toBeNull()
+    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
+    expect(screen.getByText(/claude.ai\/install.sh/)).toBeDefined()
 
     const listCalls = vi.mocked(client.agentList).mock.calls.length
-    act(() => {
-      StubSocket.last().onopen?.()
-      StubSocket.last().onmessage?.({ data: JSON.stringify({ ok: true }) })
-      StubSocket.last().onclose?.({ code: 1000 })
-    })
+    fireEvent.click(
+      screen.getByRole('button', { name: "I've installed and logged in" }),
+    )
     await act(async () => {})
 
-    // Registration is the server's, reported by the clean exit: refetch,
-    // and carry the harness to the first run.
     expect(screen.getByText('Agent registered')).toBeDefined()
     expect(vi.mocked(client.agentList).mock.calls.length).toBe(listCalls + 1)
     expect(onReady).toHaveBeenCalledWith('claude')
@@ -264,7 +253,24 @@ describe('agents step', () => {
     ).toBeDefined()
   })
 
-  it('hides Set up where the gateway cannot run the setup shell', async () => {
+  it('keeps static terminal instructions on a gateway without the terminal socket', async () => {
+    const client = fakeApi()
+    const { onReady } = renderStep(client, {
+      ...localCaps,
+      ws: ['events', 'attach', 'envscan'],
+    })
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Set up Claude Code' }),
+    )
+    await act(async () => {})
+
+    expect(screen.getByText('aether terminal')).toBeDefined()
+    expect(screen.getByText(/claude.ai\/install.sh/)).toBeDefined()
+    expect(onReady).not.toHaveBeenCalled()
+  })
+
+  it('hides Set up where the gateway cannot register agents', async () => {
     const client = fakeApi()
     renderStep(client, {
       gateway: 'remote',
@@ -573,14 +579,14 @@ describe('agents step', () => {
     ).toBeDefined()
   })
 
-  it('skips from the list, from an open setup shell, and after an import', async () => {
+  it('skips from the list, from open setup instructions, and after an import', async () => {
     const client = fakeApi()
     const { onNext } = renderStep(client)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
     expect(onNext).toHaveBeenCalledTimes(1)
 
-    // The setup shell is a terminal, not a trap.
+    // The setup instructions are a step, not a trap.
     fireEvent.click(screen.getByRole('button', { name: 'Set up Claude Code' }))
     await act(async () => {})
     fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
@@ -708,11 +714,11 @@ describe('the harness the step set up', () => {
       await screen.findByRole('button', { name: 'Set up Claude Code' }),
     )
     await act(async () => {})
-    act(() => {
-      StubSocket.last().onopen?.()
-      StubSocket.last().onclose?.({ code: 1000 })
-    })
+    fireEvent.click(
+      screen.getByRole('button', { name: "I've installed and logged in" }),
+    )
     await act(async () => {})
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
     expect(

@@ -150,7 +150,9 @@ func (g *Gateway) startAppRebuild(bin string) rebuildOutcome {
 		return rebuildBusy
 	}
 	argv := rebuildArgv(bin, who, true)
+	g.builds.Add(1)
 	go func() {
+		defer g.builds.Done()
 		defer g.rebuild.release()
 		err := g.runRebuild(argv)
 		g.finishRebuild(err)

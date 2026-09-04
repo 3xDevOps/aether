@@ -51,9 +51,8 @@ should come back on the new binary.
 The gateway holds no server code: every read and write is a
 control-channel call proxied over one SSH connection to the linked server,
 through the same `internal/cli` client the terminal commands use. One
-`Backend` interface covers the whole surface - `Call` for methods, and a
-fresh subsystem channel per WebSocket for events, attach, shell, and sync
-- so the HTTP handlers never know they are riding SSH.
+fresh subsystem channel per WebSocket for events, attach, terminal, and sync -
+so the HTTP handlers never know they are riding SSH.
 
 The connection is dialed lazily on first use and shared. When a call fails
 on transport (a server restart, a dropped network) the backend redials
@@ -88,7 +87,8 @@ and prefix as a `POST /api/v1` error.
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
-| `GET` | `/ws/shell` | interactive workspace shell (WebSocket) |
+| `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
+| `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
 | `GET` | `/ws/envscan` | environment scan on this machine (WebSocket) |
 | `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
 
@@ -132,7 +132,7 @@ the same capability checks the SSH transport applies.
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","shell","envscan"],
+{"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
           "link.repo","link.status","link.switch","profile.preview",
           "profile.push","pull","repo.push","sync.start","sync.status",
@@ -226,6 +226,8 @@ reads without a listener on the server.
 | --- | --- | --- |
 | `run.patch` | `RunIDParams` (`{"run_id":"..."}`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+| `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its image, start time, and active tabs |
+| `terminal.stop` | none | empty result; stops the member environment and its tabs |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit.
@@ -260,7 +262,7 @@ authority.
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
 | `image.scaffold` | `{"repo":"...","kind":"dockerfile"\|"devcontainer"}` (`repo` defaults to the linked one) | `{"written":["..."]}` |
 | `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`; `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
-| `update.check` | `{}` | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool}` (`server_error` only when the server did not answer) |
+| `update.check` | `{}` | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `cli_path` and `install_method` absent when the binary could not be probed) |
 | `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
 | `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
 
@@ -385,12 +387,39 @@ authority.
   `update.apply` may restart it. `shell_build_error` is present only when
   the last in-app desktop rebuild failed, and carries that build's own
   error.
+- `cli_path` is the binary `update.apply` would replace, symlinks resolved,
+  and `install_method` how: `direct` when its directory is writable by this
+  user, so the swap just happens; `admin-prompt` when it is not and the
+  administrator dialog can install there, so the click opens it; `manual`
+  when the gateway cannot replace it from here, and the banner shows the
+  command instead. `admin-prompt` needs all four of: the directory is not
+  writable by this user; the directory and every directory above it up to
+  `/` is owned by root, is not a symlink, has no group or other write bit,
+  and carries no access control list (`ls -ld` shows one as a trailing `+`
+  in the mode column); this is macOS; and there is a GUI session
+  (`/bin/launchctl managername` answers `Aqua`). Anything else is `manual`:
+  Linux, Windows, a gateway started over SSH, or a directory that is not
+  root's alone, such as one user's Homebrew `/usr/local/bin` (Intel) used
+  from another account, or a root-owned bin directory under a user's home
+  (`sudo` installed into `~/.local/bin`). The root-only rule is what the
+  privileged command relies on: root stages a temp file in that directory
+  by name and renames it over the binary by path, so any account that can
+  write the directory, or swap a directory above it for a symlink, could
+  redirect root's copy, `chmod` and rename between its steps. `sudo aether
+  update` has no such gap: it stages with `O_EXCL` and renames its own
+  inode, which a fixed shell command cannot. The gateway probes on every
+  call by creating and removing one temp file in that directory,
+  then the ownership and session checks, the same test `update.apply`
+  runs, so the promise and the behavior cannot drift and a reinstall or a
+  `chown` shows on the next check; only the release lookup is cached. Both
+  fields are absent when the probe itself fails; the click then reports
+  that error.
 - A `server.info` call that fails costs the server half only: the answer
   still carries `cli`, with an empty `server_version`, `server_behind`
   false, and the backend's own message in `server_error`. The CLI half is
   about a binary on this machine and has nothing to do with the SSH hop, so
   a server outage must not take the CLI update prompt down with it.
-- `update.apply` runs exactly what `aether update` runs, on the `aether`
+- `update.apply` runs the swap `aether update` runs, on the `aether`
   binary this gateway is served from - and `aether-server` beside it on a
   Linux server host, in which case `restart_command` carries the
   `sudo systemctl restart aether-server` the command prints, because the
@@ -399,7 +428,56 @@ authority.
   it answers `restarting: false` and a note telling the user to rerun
   `aether gui`. It never updates a *remote* server: the dashboard has no
   authority there, and the server banner names the commands to run on that
-  host instead.
+  host instead. A second `update.apply` for a release this gateway process
+  already installed does not download or prompt again: the binary is
+  already on disk, so the answer picks up after the swap. When that
+  release's desktop-app rebuild already finished in this process, no second
+  rebuild starts: it answers `rebuilding: false` with the note `the desktop
+  app was rebuilt; restart it to use the new version`, and a supervised
+  gateway does not exit again.
+- This process never gains privileges. Where the binary's directory is
+  writable (`install_method: "direct"`) the release is downloaded, verified
+  against `checksums.txt`, staged beside the binary and renamed over it,
+  exactly as the command does. On macOS with a directory this account
+  cannot write (`admin-prompt`) the route is longer, and its one privileged
+  step runs outside this process:
+
+  1. It downloads and verifies the release as the user into a private
+     staging directory, `<user cache>/aether/update`
+     (`~/Library/Caches/aether/update`), created `0700` and refused when
+     something else is there - a symlink, another user's directory -
+     because root will read from it.
+  2. It runs `/usr/bin/osascript -e 'do shell script "<command>" with
+     prompt "<text>" with administrator privileges'`, which shows macOS's
+     standard administrator dialog: titled `osascript`, Aether's text
+     beneath it (`Aether wants to replace /usr/local/bin/aether with aether
+     v1.3.0. macOS shows this request as osascript, the tool Aether asks
+     through. Aether never sees your password.`), and the system's own
+     last line, "Touch ID or enter your password to allow this." The
+     password or Touch ID match goes to macOS's authorization service;
+     nothing is stored, piped, or logged by Aether. Root runs one fixed
+     `sh` command made of
+     system tools - a `0600` temp file in the destination directory, a
+     copy, a SHA-256 check against the digest baked into the command text,
+     `chmod 0755`, `mv -f` - with the environment
+     `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `LANG=C`, `HOME`, and `/` as its
+     working directory. The command is quoted verbatim in
+     [security.md](security.md#client-self-update-on-macos).
+  3. It re-checks the installed file as the user - a regular file, mode
+     `0755`, root-owned, hashing to the release digest - before rebuilding
+     the desktop app or exiting.
+
+  The digest is checked three times: on the download by the user, on the
+  root-owned copy by root, on the installed file by the user. Linux and
+  Windows are unchanged in kind; the only Linux-visible change is that the
+  banner shows `sudo aether update` before the click instead of a button
+  that fails.
+- The call waits on the request context only: there is no dialog timeout,
+  because a native authorization dialog has none, and a request that closed
+  under the user would leave the dialog on screen with the password
+  authorizing nothing. Closing the tab or the app cancels the request; a
+  dialog already on screen may stay until dismissed, and the password then
+  authorizes nothing. One install runs at a time per gateway.
 - The binary swap is synchronous; the desktop-app rebuild that follows it
   is not. When an app is installed for this account, `update.apply` spawns
   `<the new aether> gui build --json` in the background, answers
@@ -429,14 +507,36 @@ authority.
   can show what went wrong; the next successful `aether gui build` removes
   it. An *unsupervised* gateway never exits: it rebuilds the app and the
   note tells the user to restart it.
-- `update.apply` refuses with `-32002` (invalid state) on a dev build, when
-  `AETHER_NO_UPDATE_CHECK` is set, when the running build is already the
-  newest release (downloading it over itself would report success for work
-  that changed nothing, and restart the app for nothing), and when the
-  binary's directory is not writable - that last message names the exact
-  `sudo aether update` command.
-  The gateway never escalates privileges. A release that cannot be reached
-  answers `-32004` (unavailable) carrying the transport's own error.
+- `update.apply` errors, each carrying the underlying message verbatim:
+  - `-32001` (denied, 403): the user cancelled the dialog, or macOS refused
+    the password and gave up. `nothing was changed: administrator access was
+    not granted: ... execution error: User canceled. (-128)` - the tail is
+    osascript's own line, where `...` is its position prefix, which varies;
+    the gateway reads only the trailing number. The banner shows it muted
+    as *Update cancelled, nothing was changed.* and the button comes back.
+  - `-32002` (invalid state, 409): a directory this account cannot write
+    and no dialog to install through - Linux, or a macOS gateway with no
+    GUI session (started over SSH), which `update.check` already reported
+    as `manual`: the same refusal the command prints, ending in ``re-run as
+    `sudo aether update` ``, before anything is downloaded. If osascript
+    still reports no session at run time, ``no GUI session to show the
+    macOS authorization dialog in: ... (-1713); run `sudo aether update` in
+    a terminal on this Mac``. Also a dev build, `AETHER_NO_UPDATE_CHECK`
+    set, Windows, and a running build that is already the newest release
+    (downloading it over itself would report success for work that changed
+    nothing, and restart the app for nothing).
+  - `-32003` (conflict, 409): `an update is already running in this
+    gateway` - a second click from another tab while the dialog is up.
+  - `-32004` (unavailable, 503): everything else, carrying the real
+    message after an `install <tag>: ` prefix - a download or checksum
+    error, osascript failing to start, root's checksum check failing
+    (`install v1.3.0: replace /usr/local/bin/aether: osascript: ...
+    execution error: copied binary does not match the release checksum
+    (65)`, with the same `...` position prefix as above), or
+    the post-install check failing (`install v1.3.0: installed
+    /usr/local/bin/aether does not match the release checksum; do not run
+    it`). A release lookup that fails answers the same code with the
+    transport's own error after `check for releases: `.
 
 ## WebSockets
 
@@ -520,25 +620,42 @@ needs.
 
 Closing the socket detaches; the run is unaffected.
 
-### `GET /ws/shell`
+#### Run shell tabs
 
-An interactive workspace shell (bootstrap
-tools, harness login, agent setup) with the attach socket's frame
-protocol - binary output, JSON control frames for input and resize,
-always honored.
+`GET /ws/attach/<run_id>?shell=<tab>` opens a writable shell tab inside the
+run container instead of attaching to the agent process. A shell tab always
+requires **steer** permission and ignores the `write` value in the header;
+there is no read-only shell mode. Tab names must match
+`^[a-z0-9-]{1,32}$`, and each run can have at most four active shell tabs.
+The shell starts in `/workspace`. When it exits, the socket closes normally
+with **1000** and the tab name is free to reopen with a fresh shell.
+Closing the socket only detaches: the shell keeps running, still counts
+toward the four-tab cap, and reconnecting the same tab name reattaches to
+it. Every shell ends with the run's container.
 
-1. Client sends one **text** frame: a `protocol.WorkspaceShellRequest`
-   (`workspace` selector, `mode`, optional `harness`, geometry, and the
-   agent-setup fields), within 10 seconds of the socket opening. Missing
-   geometry defaults to 80x24.
-2. Server answers one **text** frame: a `WorkspaceShellResponse` -
-   `{"ok":true,...}` echoing the effective selection and geometry, or
-   `{"ok":false,"code":...,"error":"..."}` followed by a close.
-3. Binary output frames stream; text control frames go back, as on
-   attach. Client frames are capped at 64 KiB.
-4. The shell exiting cleanly closes the socket with **1000**; a nonzero
-   remote exit status closes with **4001** and the error text as the
-   reason, so the SPA can tell a dirty exit from a clean one.
+### `GET /ws/terminal?tab=<tab>`
+
+The member environment terminal uses the same binary-output and JSON-control
+framing as run attaches. The `tab` query is `main` or a client-selected name
+matching `^[a-z0-9-]{1,32}$`.
+
+1. The client sends one text header with `cols` and `rows`. The gateway
+   ensures the member's environment container and the requested shell.
+2. The gateway answers `{"ok":true,"tab":"main","cols":120,"rows":40}` or a
+   JSON error followed by a close. At most six tabs may be active.
+3. Output is binary. Input and resize are text frames:
+
+   ```json
+   {"type":"input","data":"ls -la\r"}
+   {"type":"resize","cols":132,"rows":50}
+   ```
+
+Closing the socket detaches without stopping the shell. A normal shell exit
+closes with **1000**. Membership loss closes with **1008**. `terminal.status`
+reports the running container, image, start time, and active tabs;
+`terminal.stop` stops the container and deletes its tab sessions while
+preserving the member home.
+
 
 ### `GET /ws/envscan`
 

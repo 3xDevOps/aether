@@ -14,8 +14,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +34,7 @@ type WriteGate func(ctx context.Context, member domain.MemberID, key SessionKey)
 // Config configures a Host.
 type Config struct {
 	TranscriptDir string    // <data>/transcripts
-	ReplayBytes   int       // scrollback replayed to new attachments; default 65536
+	ReplayBytes   int       // scrollback replayed to new attachments; default 1 MiB
 	DefaultCols   uint      // 120
 	DefaultRows   uint      // 30
 	Gate          WriteGate // nil = allow
@@ -41,7 +43,7 @@ type Config struct {
 }
 
 const (
-	defaultReplayBytes = 65536
+	defaultReplayBytes = 1 << 20
 	defaultCols        = 120
 	defaultRows        = 30
 )
@@ -122,7 +124,25 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	if err := h.reserve(key); err != nil {
 		return err
 	}
-	tr, err := newCastWriter(h.transcriptPath(key), h.cfg.DefaultCols, h.cfg.DefaultRows)
+	// Replace a session that ended (its process exited) so a fresh process
+	// can reuse the key: a run-shell tab whose shell exited must be
+	// reopenable. stop() is idempotent and closes the old attachment.
+	if prev := h.lookup(key); prev != nil {
+		prev.stop()
+	}
+	path := h.transcriptPath(key)
+	var err error
+	var seed []byte
+	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && key.seedsReplay() {
+		seed, err = readCastTail(path, h.cfg.ReplayBytes)
+		if err != nil {
+			slog.Warn("ptyhost: seed replay from transcript", "path", path, "error", err)
+			seed = nil
+		}
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		slog.Warn("ptyhost: inspect transcript for replay", "path", path, "error", statErr)
+	}
+	tr, err := newCastWriter(path, h.cfg.DefaultCols, h.cfg.DefaultRows)
 	if err != nil {
 		h.unreserve(key)
 		return err
@@ -140,6 +160,14 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		cols:    h.cfg.DefaultCols,
 		rows:    h.cfg.DefaultRows,
 		done:    make(chan struct{}),
+	}
+	if len(seed) > 0 {
+		s.ring.write(seed)
+	}
+	if h.cfg.OnTitle != nil {
+		s.onTitle = func(title string) {
+			h.cfg.OnTitle(key, title)
+		}
 	}
 
 	h.mu.Lock()
@@ -294,7 +322,9 @@ func (h *Host) reserve(key SessionKey) error {
 	if _, ok := h.starting[key]; ok {
 		return fmt.Errorf("ptyhost: session already started for key %s", key)
 	}
-	if prev, ok := h.sessions[key]; ok && !prev.isStopped() {
+	// An ended session (its process exited) does not block the key: the
+	// restart in StartSession stops and replaces it.
+	if prev, ok := h.sessions[key]; ok && prev.isActive() {
 		return fmt.Errorf("ptyhost: session already started for key %s", key)
 	}
 	h.starting[key] = struct{}{}
@@ -310,6 +340,20 @@ func (h *Host) unreserve(key SessionKey) {
 func (h *Host) transcriptPath(key SessionKey) string {
 	name := strings.ReplaceAll(string(key), ":", "-")
 	return filepath.Join(h.cfg.TranscriptDir, name+".cast")
+}
+
+// ActiveSessions returns the keys of live sessions with the given prefix.
+func (h *Host) ActiveSessions(prefix string) []SessionKey {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	keys := make([]SessionKey, 0)
+	for key, s := range h.sessions {
+		if strings.HasPrefix(string(key), prefix) && s.isActive() {
+			keys = append(keys, key)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
 }
 
 // StopSessionsWithPrefix stops every live session whose key has prefix.

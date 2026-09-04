@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"golang.org/x/term"
 )
@@ -63,23 +64,21 @@ func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 }
 
 type agentAddOptions struct {
-	name      string
-	workspace string
-	tui       string
-	headless  string
+	name     string
+	tui      string
+	headless string
 }
 
 func parseAgentAdd(args []string) (agentAddOptions, error) {
 	fs := flag.NewFlagSet("agent add", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	workspace := fs.String("workspace", "", "workspace name or ID")
 	tui := fs.String("tui", "", "interactive command template")
 	headless := fs.String("headless", "", "headless command template")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" {
-		return agentAddOptions{}, fmt.Errorf("usage: aether agent add <name> [--workspace <workspace>] [--tui <argv>] [--headless <argv>]")
+		return agentAddOptions{}, fmt.Errorf("usage: aether agent add <name> [--tui <argv>] [--headless <argv>]")
 	}
-	return agentAddOptions{name: name, workspace: *workspace, tui: *tui, headless: *headless}, nil
+	return agentAddOptions{name: name, tui: *tui, headless: *headless}, nil
 }
 
 // resolveAgentArgs turns flag values into argv templates. Shipped names send
@@ -124,44 +123,86 @@ func agentAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	shipped := false
+	var selected protocol.AgentInfo
+	found := false
 	if listErr := withControl(func(c *protocol.Client) error {
 		var list protocol.AgentListResult
 		if callErr := c.Call(protocol.MethodAgentList, struct{}{}, &list); callErr != nil {
 			return callErr
 		}
-		for _, a := range list.Agents {
-			if a.Name == opts.name && a.Source == "shipped" {
-				shipped = true
+		for _, agent := range list.Agents {
+			if agent.Name == opts.name {
+				selected, found = agent, true
+				break
 			}
 		}
 		return nil
 	}); listErr != nil {
 		return listErr
 	}
+	if found && selected.Source == "shipped" {
+		return runShippedAgentInstall(selected)
+	}
 	var promptInput io.Reader
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		promptInput = os.Stdin
 	}
-	tuiArgs, headlessArgs, err := resolveAgentArgs(opts.name, opts.tui, opts.headless, shipped, promptInput)
+	tuiArgs, headlessArgs, err := resolveAgentArgs(opts.name, opts.tui, opts.headless, false, promptInput)
 	if err != nil {
 		return err
 	}
-	return withResolvedWorkspace(opts.workspace, func(selector protocol.WorkspaceSelector) error {
-		cols, rows := termSize()
-		stream, err := openWorkspaceShell(protocol.WorkspaceShellRequest{
-			Workspace:    selector,
-			Mode:         protocol.WorkspaceShellModeAgentSetup,
-			Harness:      opts.name,
-			TUIArgs:      tuiArgs,
-			HeadlessArgs: headlessArgs,
-			Cols:         cols,
-			Rows:         rows,
-		})
-		if err != nil {
+	return withControl(func(c *protocol.Client) error {
+		var result protocol.AgentRegisterResult
+		if err := c.Call(protocol.MethodAgentRegister, protocol.AgentRegisterParams{
+			Definition: protocol.AgentDefinition{
+				Name:         opts.name,
+				Executable:   opts.name,
+				TUIArgs:      tuiArgs,
+				HeadlessArgs: headlessArgs,
+			},
+		}, &result); err != nil {
 			return err
 		}
-		defer func() { _ = stream.Close() }()
-		return copyRaw(stream)
+		return nil
 	})
+}
+
+func runShippedAgentInstall(agent protocol.AgentInfo) error {
+	cfg, err := cli.Load()
+	if err != nil {
+		return printAgentInstallGuidance(os.Stdout, agent)
+	}
+	conn, err := cli.Dial(cfg)
+	if err != nil {
+		return printAgentInstallGuidance(os.Stdout, agent)
+	}
+	defer func() { _ = conn.Close() }()
+
+	cols, rows := termSize()
+	stream, _, err := conn.TerminalStream(protocol.TerminalRequest{
+		Cols: cols,
+		Rows: rows,
+	})
+	if err != nil {
+		return printAgentInstallGuidance(os.Stdout, agent)
+	}
+	defer func() { _ = stream.Close() }()
+
+	script := agent.InstallScript
+	if script == "" {
+		script = fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
+	}
+	if _, err := io.WriteString(stream, script+"\n"); err != nil {
+		return err
+	}
+	return describeTerminalEnd(copyRaw(stream))
+}
+
+func printAgentInstallGuidance(w io.Writer, agent protocol.AgentInfo) error {
+	script := agent.InstallScript
+	if script == "" {
+		script = fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
+	}
+	_, err := fmt.Fprintf(w, "Run `aether terminal`, then paste:\n%s\n", script)
+	return err
 }

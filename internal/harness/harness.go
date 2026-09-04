@@ -4,11 +4,11 @@
 // by default), the environment variables that pass plain API keys from
 // server-side config into run containers, the container-side paths holding
 // the harness's native login state (persisted per member under
-// <data>/homes/<member-id>/<harness>/ and bind-mounted read-write into
-// every run so token refreshes persist), an explicit numeric uid:gid
-// mapping for images whose configured user is named rather than numeric,
-// and whether the harness can be pointed at an MCP server config at launch
-// (how conflict coordination reaches the agent; see docs/mcp-bridge.md).
+// <data>/homes/<member-id>/ and bind-mounted read-write into every run), an
+// explicit numeric uid:gid mapping for images whose configured user is named
+// rather than numeric, and whether the harness can be pointed at an MCP
+// server config at launch (how conflict coordination reaches the agent; see
+// docs/mcp-bridge.md).
 //
 // The registry is a map and a few functions, not a plugin system.
 package harness
@@ -17,12 +17,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 // TaskPlaceholder is replaced by the run's task prompt in argv templates.
@@ -91,37 +88,10 @@ func validateName(name string) error {
 	return nil
 }
 
-// ValidateMemberDefinition applies Validate plus the restrictions that hold
-// only for member-supplied definitions: no path may live under the
-// tool-snapshot mount (~/.local). Runs mount the immutable snapshot
-// read-only there, so a member credential path beneath it would either be
-// shadowed or punch a writable hole through snapshot immutability. Trusted
-// administrator definitions keep the capability (the opencode pattern).
+// ValidateMemberDefinition applies the generic definition validation to a
+// member-owned definition.
 func ValidateMemberDefinition(d Definition) error {
-	if err := d.Validate(); err != nil {
-		return err
-	}
-	if d.ProfileRoot != "" {
-		if err := rejectToolPath(d.ProfileRoot); err != nil {
-			return fmt.Errorf("harness: profile root: %w", err)
-		}
-	}
-	for _, credential := range d.CredentialPaths {
-		if err := rejectToolPath(credential); err != nil {
-			return fmt.Errorf("harness: credential path: %w", err)
-		}
-	}
-	return nil
-}
-
-func rejectToolPath(raw string) error {
-	clean := path.Clean(raw)
-	for _, root := range []string{"/root/.local", "/home/aether/.local"} {
-		if isPathWithin(clean, root) {
-			return fmt.Errorf("path %q is under the tool mount %s", raw, root)
-		}
-	}
-	return nil
+	return d.Validate()
 }
 
 func validateExecutable(executable string) error {
@@ -197,12 +167,10 @@ type Profile struct {
 	// process into run containers when set (plain API-key harnesses;
 	// keys are never baked into images).
 	EnvPassthrough []string
-	// CredentialPaths are home-relative container-side paths holding the
-	// harness's native login state (e.g. ".claude"). Each is persisted
-	// per member on the host and mounted read-write into the member's
-	// runs at HomeDir(user)/<path>. Directories only: a bind source that
-	// does not exist yet is created as a directory before the container
-	// starts. This is the login-home list; it is independent of LocalRoot.
+	// CredentialPaths are home-relative paths holding the harness's native
+	// login state (e.g. ".claude"). They are persisted in the member's
+	// shared home and available read-write in every run. This is the
+	// login-home list; it is independent of LocalRoot.
 	CredentialPaths []string
 	// LocalRoot is the home-relative directory captured as the agent
 	// profile (e.g. ".claude"). Empty means no profile sync (custom).
@@ -233,14 +201,9 @@ type Profile struct {
 	// means it has no MCP registration and conflict coordination degrades
 	// to the overlap notice alone.
 	MCPConfigFlag string
-	// InstallScript is the vendor's documented install command, run
-	// automatically inside an agent-setup shell before the member gets the
-	// prompt, so a shipped agent sets itself up without hand-typed installer
-	// commands. It must install into ~/.local/bin (the snapshotted tree).
-	// Best-effort: a failed install leaves the member in the shell to install
-	// manually, exactly as if the script were empty. These are the vendors'
-	// own commands and vendors move them; when one breaks, the manual shell
-	// still works and the registry gets updated.
+	// InstallScript is the vendor's documented install command, run in the
+	// member's terminal (aether terminal). It must install into ~/.local/bin.
+	// A failed install leaves the member in the terminal to install manually.
 	InstallScript string
 }
 
@@ -270,8 +233,8 @@ var profiles = map[string]Profile{
 		LocalRoot:       ".codex",
 		DenyNames:       []string{"auth.json", "keychain", "token.json"},
 		// Codex ships via npm; --prefix keeps the install inside the
-		// snapshotted tree. Without npm in the image the member installs
-		// manually, as before.
+		// member's persistent home. Without npm in the image the member
+		// installs manually, as before.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @openai/codex",
 	},
 	"pi": {
@@ -299,9 +262,7 @@ var profiles = map[string]Profile{
 		HeadlessArgs:   []string{"amp", "--dangerously-allow-all", "-x", TaskPlaceholder},
 		EnvPassthrough: []string{"AMP_API_KEY"},
 		// Settings live under ~/.config/amp; XDG data (secrets.json,
-		// state.json) under ~/.local/share/amp. The data path sits under
-		// the tool mount, which registry profiles may do (the opencode
-		// precedent).
+		// state.json) under ~/.local/share/amp in the member's home.
 		CredentialPaths: []string{".config/amp", ".local/share/amp"},
 		LocalRoot:       ".config/amp",
 		DenyNames:       []string{"secrets.json", "state.json"},
@@ -429,6 +390,21 @@ func HomeDir(user string) string {
 	return "/home/aether"
 }
 
+// HomeRelative returns a path relative to the resolved container home.
+// Absolute paths outside either supported home are returned cleaned.
+func HomeRelative(p string) string {
+	clean := path.Clean(p)
+	for _, prefix := range []string{"/root/", "/home/aether/"} {
+		if strings.HasPrefix(clean, prefix) {
+			return strings.TrimPrefix(clean, prefix)
+		}
+	}
+	if clean == "/root" || clean == "/home/aether" {
+		return "."
+	}
+	return clean
+}
+
 // ContainerLocalRoot is the absolute container path of the profile
 // directory for a resolved run user. Empty LocalRoot yields "".
 func (p Profile) ContainerLocalRoot(user string) string {
@@ -439,48 +415,6 @@ func (p Profile) ContainerLocalRoot(user string) string {
 		return path.Clean(p.LocalRoot)
 	}
 	return path.Join(HomeDir(user), p.LocalRoot)
-}
-
-func containerHomePath(containerHome, configured string) string {
-	if path.IsAbs(configured) {
-		return path.Clean(configured)
-	}
-	return path.Join(containerHome, configured)
-}
-
-func hostCredentialPath(hostHome, containerHome, configured string) string {
-	relative := configured
-	if path.IsAbs(configured) {
-		cleaned := path.Clean(configured)
-		home := path.Clean(containerHome)
-		relative = strings.TrimPrefix(cleaned, home+"/")
-		if relative == cleaned {
-			switch {
-			case isPathWithin(cleaned, "/root"):
-				relative = strings.TrimPrefix(cleaned, "/root/")
-			case isPathWithin(cleaned, "/home/aether"):
-				relative = strings.TrimPrefix(cleaned, "/home/aether/")
-			}
-		}
-	}
-	return filepath.Join(hostHome, filepath.FromSlash(relative))
-}
-
-// CredentialMounts maps the profile's home-relative or absolute credential
-// paths into a member's harness home on the host and the run user's home in
-// the container. Absolute paths are restricted by Definition.Validate.
-func (p Profile) CredentialMounts(hostHome, containerHome string) []runtime.Mount {
-	if hostHome == "" || len(p.CredentialPaths) == 0 {
-		return nil
-	}
-	mounts := make([]runtime.Mount, 0, len(p.CredentialPaths))
-	for _, cp := range p.CredentialPaths {
-		mounts = append(mounts, runtime.Mount{
-			HostPath:      hostCredentialPath(hostHome, containerHome, cp),
-			ContainerPath: containerHomePath(containerHome, cp),
-		})
-	}
-	return mounts
 }
 
 // ResolveUser resolves the one numeric "uid:gid" a run's container and

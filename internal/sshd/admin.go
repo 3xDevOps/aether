@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -106,6 +107,19 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	}
 	if err := s.cfg.Store.DeleteMember(ctx, id); err != nil {
 		return nil, rpcError(err)
+	}
+	// The home is bind-mounted into the terminal container; deleting the
+	// tree under a container that refused to stop would leave a live
+	// shell writing into a removed directory. Retain it for a later
+	// cleanup instead.
+	stopErr := s.cfg.Runs.StopTerminal(ctx, id)
+	if stopErr != nil {
+		slog.Warn("sshd: member terminal cleanup failed; retaining home", "member", id, "error", stopErr)
+	}
+	if stopErr == nil && s.cfg.Homes != nil {
+		if err := s.cfg.Homes.Remove(id); err != nil {
+			slog.Warn("sshd: member home cleanup failed", "member", id, "error", err)
+		}
 	}
 	return struct{}{}, nil
 }

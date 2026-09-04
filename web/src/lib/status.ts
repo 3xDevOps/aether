@@ -36,9 +36,9 @@ export function runState(status: RunStatus, pendingApproval = false): Presentati
   }
 }
 
-/** A run's human title. Empty tasks (TUI launches) read as a placeholder. */
-export function runLabel(run: { task: string }): string {
-  return run.task.trim() || 'Untitled run'
+/** A run's human title. Empty titles fall back to the task. */
+export function runLabel(run: { task: string; title?: string }): string {
+  return run.title?.trim() || run.task.trim() || 'Untitled run'
 }
 
 /** The runs an approval request is still waiting on, across every inbox. */

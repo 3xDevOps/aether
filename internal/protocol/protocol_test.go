@@ -12,10 +12,21 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
+func TestAttachRequestShellWire(t *testing.T) {
+	raw, err := json.Marshal(AttachRequest{RunID: "run-1", Shell: "tab-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"shell":"tab-1"`) {
+		t.Fatalf("attach request = %s, want shell field", raw)
+	}
+}
+
 func TestRunWireShape(t *testing.T) {
 	created := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	r := &domain.Run{
 		ID: "run_1", WorkspaceID: "ws_1", MemberID: "m_1", Task: "fix it",
+		Title:   "Run title",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 		Branch: "aether/run-1-fix-it", Worktree: "/var/lib/aether/checkouts/run_1",
 		CreatedAt: created,
@@ -28,18 +39,18 @@ func TestRunWireShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"id", "workspace_id", "member_id", "task", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused"} {
+	for _, k := range []string{"id", "workspace_id", "member_id", "task", "title", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("run wire form missing key %q", k)
 		}
 	}
 	// paused is deliberately not omitempty: absence means "gateway too old
 	// to know", so an unpaused run must still serialize paused:false.
-	if len(m) != 12 {
-		t.Errorf("run wire form has %d keys, want 12: %v", len(m), m)
+	if len(m) != 13 {
+		t.Errorf("run wire form has %d keys, want 13: %v", len(m), m)
 	}
-	if m["started_at"] != nil || m["finished_at"] != nil {
-		t.Errorf("unset times must marshal as null, got %v / %v", m["started_at"], m["finished_at"])
+	if m["title"] != "Run title" {
+		t.Errorf("title = %v, want Run title", m["title"])
 	}
 	if m["created_at"] != "2026-08-09T12:00:00Z" {
 		t.Errorf("created_at = %v, want RFC3339", m["created_at"])

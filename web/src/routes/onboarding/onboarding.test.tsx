@@ -18,12 +18,12 @@ import {
   workspace,
 } from '@/test/fixtures'
 
-// The local gateway's descriptor: full method map, shell socket, and the
-// client-machine verbs the wizard rides on.
+// The local gateway's descriptor: full method map, event and attach sockets,
+// plus the client-machine verbs the wizard rides on.
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
-  ws: ['events', 'attach', 'shell'],
+  ws: ['events', 'attach', 'terminal'],
   local: ['link.status', 'link.repo', 'pull', 'repo.push', 'daemon.status'],
 }
 

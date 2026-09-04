@@ -72,7 +72,11 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, _ json.R
 		if p.Name == "custom" {
 			continue
 		}
-		agents = append(agents, protocol.AgentInfo{Name: p.Name, Source: "shipped"})
+		agents = append(agents, protocol.AgentInfo{
+			Name:          p.Name,
+			Source:        "shipped",
+			InstallScript: p.InstallScript,
+		})
 	}
 	rows, serr := s.cfg.Store.ListHarnessDefinitions(ctx, member)
 	if serr != nil {

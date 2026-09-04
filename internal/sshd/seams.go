@@ -31,5 +31,12 @@ type RunController interface {
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
-	WorkspaceShell(ctx context.Context, member domain.MemberID, req domain.WorkspaceShellRequest, cols, rows uint, conn io.ReadWriter, resize <-chan [2]uint) error
+	EnsureRunShellTab(ctx context.Context, run domain.RunID, tab string, cols, rows uint) error
+	EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
+	EnsureTerminalTab(ctx context.Context, member domain.MemberID, tab string, cols, rows uint) error
+	StopTerminal(ctx context.Context, member domain.MemberID) error
+	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
+	// HoldShell counts one live interactive terminal attach for the
+	// self-update idle check; the returned func releases it.
+	HoldShell() func()
 }

@@ -4,6 +4,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { canLaunch } from '@/lib/commands'
 import { useDelayed } from '@/lib/hooks'
 import { registerRoute } from '@/routes/registry'
+import { TerminalDock } from '@/routes/board/terminal-dock'
 import { RunCard } from '@/routes/board/run-card'
 import { useBoard, type BoardColumn } from '@/routes/board/selectors'
 import { useStore } from '@/store'
@@ -18,6 +19,7 @@ import '@/components/palette'
 export function Board() {
   const { columns } = useBoard()
   const ackAll = useStore((s) => s.ackAll)
+  const caps = useCapability()
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
@@ -48,20 +50,23 @@ export function Board() {
         </div>
       </header>
 
-      {unreachable && total === 0 ? (
-        <p className="p-4 text-sm text-muted-foreground">
-          {dead ? error : 'Cannot reach the server. Retrying.'}
-        </p>
-      ) : (
-        <>
-          {empty && <EmptyNotice />}
-          <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
-            {columns.map((column) => (
-              <Column key={column.key} column={column} loading={loading} />
-            ))}
-          </div>
-        </>
-      )}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {unreachable && total === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">
+            {dead ? error : 'Cannot reach the server. Retrying.'}
+          </p>
+        ) : (
+          <>
+            {empty && <EmptyNotice />}
+            <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
+              {columns.map((column) => (
+                <Column key={column.key} column={column} loading={loading} />
+              ))}
+            </div>
+          </>
+        )}
+        {caps.hasWS('terminal') && <TerminalDock />}
+      </div>
     </div>
   )
 }

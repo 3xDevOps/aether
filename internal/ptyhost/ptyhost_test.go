@@ -835,11 +835,143 @@ func TestStopSessionsWithPrefix(t *testing.T) {
 		t.Fatal("run session was stopped")
 	}
 }
+func TestRingBytesReturnsAllWhenUnwrapped(t *testing.T) {
+	r := newRing(8)
+	r.write([]byte("abc\n"))
+	if got := string(r.bytes()); got != "abc\n" {
+		t.Fatalf("unwrapped ring bytes = %q, want %q", got, "abc\n")
+	}
+}
+
+func TestRingBytesStartsAtLineBoundaryAfterWrap(t *testing.T) {
+	r := newRing(10)
+	r.write([]byte("12345\n6789x"))
+	if got := string(r.bytes()); got != "6789x" {
+		t.Fatalf("wrapped ring bytes = %q, want %q", got, "6789x")
+	}
+}
+
+func TestRingBytesReturnsAllWrappedBytesWithoutNewline(t *testing.T) {
+	r := newRing(5)
+	r.write([]byte("abcdef"))
+	if got := string(r.bytes()); got != "bcdef" {
+		t.Fatalf("wrapped ring without newline = %q, want %q", got, "bcdef")
+	}
+}
+
+func TestActiveSessionsFiltersPrefixAndStoppedSessions(t *testing.T) {
+	h, _ := newTestHost(t)
+	active := newFakeAtt()
+	stopped := newFakeAtt()
+	ended := newFakeAtt()
+	other := newFakeAtt()
+	if err := h.StartSession(context.Background(), RunShellSession("r1", "active"), active); err != nil {
+		t.Fatalf("start active: %v", err)
+	}
+	if err := h.StartSession(context.Background(), RunShellSession("r1", "stopped"), stopped); err != nil {
+		t.Fatalf("start stopped: %v", err)
+	}
+	if err := h.StartSession(context.Background(), RunShellSession("r1", "ended"), ended); err != nil {
+		t.Fatalf("start ended: %v", err)
+	}
+	if err := h.StartSession(context.Background(), RunShellSession("r2", "other"), other); err != nil {
+		t.Fatalf("start other: %v", err)
+	}
+	if err := h.StopSession(context.Background(), RunShellSession("r1", "stopped")); err != nil {
+		t.Fatalf("stop session: %v", err)
+	}
+	if err := ended.outW.Close(); err != nil {
+		t.Fatalf("close ended output: %v", err)
+	}
+	waitFor(t, "ended shell session", func() bool {
+		return !h.lookup(RunShellSession("r1", "ended")).isActive()
+	})
+
+	got := h.ActiveSessions("run-shell:r1:")
+	if len(got) != 1 || got[0] != RunShellSession("r1", "active") {
+		t.Fatalf("active sessions = %v, want [%q]", got, RunShellSession("r1", "active"))
+	}
+}
 
 func TestTranscriptPathReplacesSessionKeySeparators(t *testing.T) {
 	h, _ := newTestHost(t)
 	want := h.cfg.TranscriptDir + "/terminal-m1-main.cast"
 	if got := h.transcriptPath(TerminalSession("m1", "main")); got != want {
 		t.Fatalf("transcript path = %q, want %q", got, want)
+	}
+}
+
+// TestStartSessionReplacesEndedSession: a run-shell tab whose shell exited
+// must be reopenable under the same key, and the fresh session must not
+// replay the dead shell's transcript.
+func TestStartSessionReplacesEndedSession(t *testing.T) {
+	h, _ := newTestHost(t)
+	key := RunShellSession("r1", "t1")
+	first := newFakeAtt()
+	if err := h.StartSession(context.Background(), key, first); err != nil {
+		t.Fatalf("first StartSession: %v", err)
+	}
+	first.writeOutput(t, "old shell output\n")
+	waitFor(t, "first output recorded", func() bool {
+		ts, ok := h.LastOutput(key)
+		return ok && !ts.IsZero()
+	})
+	if err := first.outW.Close(); err != nil {
+		t.Fatalf("end first shell: %v", err)
+	}
+	waitFor(t, "first session ended", func() bool {
+		return !h.lookup(key).isActive()
+	})
+
+	second := newFakeAtt()
+	if err := h.StartSession(context.Background(), key, second); err != nil {
+		t.Fatalf("reopen StartSession: %v", err)
+	}
+	second.writeOutput(t, "new shell\n")
+	out := &sink{}
+	kr, kw := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- h.Attach(context.Background(), key, "m1", 120, 30, false, &testConn{r: kr, w: out}, nil)
+	}()
+	t.Cleanup(func() {
+		_ = kw.Close()
+		_ = kr.Close()
+	})
+	waitFor(t, "replay of the new shell only", func() bool {
+		return strings.Contains(out.String(), "new shell")
+	})
+	if got := out.String(); strings.Contains(got, "old shell output") {
+		t.Fatalf("replay contains the dead shell's output: %q", got)
+	}
+}
+
+func TestStartSessionTitleCallbackUsesSessionKey(t *testing.T) {
+	got := make(chan struct {
+		key   SessionKey
+		title string
+	}, 1)
+	h, _ := newTestHost(t, func(cfg *Config) {
+		cfg.OnTitle = func(key SessionKey, title string) {
+			got <- struct {
+				key   SessionKey
+				title string
+			}{key: key, title: title}
+		}
+	})
+	key := RunSession("run-1")
+	att := newFakeAtt()
+	if err := h.StartSession(context.Background(), key, att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	att.writeOutput(t, "\x1b]0;run title\x07")
+
+	select {
+	case gotTitle := <-got:
+		if gotTitle.key != key || gotTitle.title != "run title" {
+			t.Fatalf("title callback = %#v, want key %q and title %q", gotTitle, key, "run title")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for title callback")
 	}
 }

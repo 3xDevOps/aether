@@ -28,10 +28,13 @@ afterwards.
 | `none` | The same as `server`, `sudo` fallback included. | Nothing further. The binaries are installed and the script stops. |
 
 A client gets `~/.local/bin` because the dashboard's **Update now** button
-replaces the CLI from the `aether gui` process, which runs as you. A
-root-owned binary in `/usr/local/bin` leaves that button with nothing to do
-but print `sudo aether update`. `--bin-dir` overrides the choice for every
-role.
+replaces the CLI from the `aether gui` process, which runs as you, and a
+directory you own never asks for a password. A binary in a directory this
+account cannot write, such as `/usr/local/bin`, still updates from the button
+on macOS, through one administrator dialog (Touch ID or password); on Linux
+the banner shows the `sudo aether update` to run instead (see
+[Upgrading](#upgrading)).
+`--bin-dir` overrides the choice for every role.
 
 A client gets the CLI alone for the same reason: `aether update` reads an
 `aether-server` next to the CLI as proof the machine is a server, so one
@@ -94,14 +97,51 @@ curl -fsSL .../install.sh | sh -s -- --role server
 `aether update` replaces the running CLI with the latest release (or
 `--version <tag>`), verifying it against the release's `checksums.txt`. On a
 Linux host with `aether-server` installed next to the CLI it updates both and
-reminds you to `sudo systemctl restart aether-server`. A client CLI in
-`~/.local/bin` updates in place, which is what the dashboard's **Update now**
-button uses; binaries in `/usr/local/bin` need `sudo aether update`, because
-the gateway never escalates privileges for you, it names that command.
+reminds you to `sudo systemctl restart aether-server`. The command never asks
+for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
+a stock install, is refused before anything is downloaded. The refusal names
+the probe file it could not create (the number varies) and ends with the
+command to run:
+
+```
+aether: open /usr/local/bin/.aether-update-probe-1234567890: permission denied: /usr/local/bin is not writable by this user; re-run as `sudo aether update`
+```
+
 Re-running the installer does the same job; the data directory is untouched
 either way. `aether update` is not a Windows command; it refuses to run
 there. Upgrading a Windows client means downloading the new release binary
 over the old one, exactly as below.
+
+**From the dashboard.** The **Update now** button runs the same swap from the
+`aether gui` process, which runs as you. A CLI in a directory you own -
+`~/.local/bin`, a Homebrew prefix - is replaced without a question on macOS
+and Linux (Windows has no self-update). A CLI in a directory this account
+cannot write, such as `/usr/local/bin`, splits by platform, and the banner
+says which case you are in before you click:
+
+- **macOS.** The banner says *macOS will ask for an administrator password:
+  /usr/local/bin/aether is in a directory this account cannot write to. The
+  dialog is labelled osascript, the tool Aether asks through. Aether never
+  sees your password.* The button shows the standard macOS administrator
+  dialog, once. The dialog is titled `osascript` because the request goes
+  through `/usr/bin/osascript`, the system tool that asks for administrator
+  rights on behalf of an app that is built locally and unsigned. Beneath the
+  title is Aether's own text, quoted in
+  [local-gateway.md](local-gateway.md#localv1-verbs), which names the file
+  and the release; the last line is the system's own, "Touch ID or enter
+  your password to allow this." The password or the Touch ID match goes to
+  macOS's authorization service; Aether never sees it. Root then runs one
+  fixed copy-and-verify command made of system tools, never Aether's own
+  code ([security.md](security.md#client-self-update-on-macos) has the
+  command). Cancelling the dialog, or a wrong password macOS gives up on,
+  changes nothing: the banner says *Update cancelled, nothing was changed.*
+  and the button comes back. The button is offered only where the dialog
+  can install: the gateway must be in a GUI login session (not started over
+  SSH), and only root can write the binary's directory or any directory
+  above it. Anywhere else the banner shows `sudo aether update` instead;
+  the full rule, and why, sits beside the quoted text in local-gateway.md.
+- **Linux.** No button. The banner shows `sudo aether update` to run in a
+  terminal instead.
 
 **It rebuilds the desktop app too.** The dashboard ships inside the CLI, but
 the Electron shell around it does not, so once the binaries are swapped
@@ -158,8 +198,12 @@ only - the next release shows the banner again.
 The button does the same two steps the command does. It swaps the binaries,
 then rebuilds the app when one is installed, and the banner follows along:
 *Updating the CLI...*, then *Rebuilding the app (about a minute; the first
-time also fetches Node)...*, then *Relaunching*. **Update now** stays disabled
-until it is over. In the desktop app the shell relaunches itself onto the new
+time also fetches Node)...*, then *Relaunching*. On macOS with a binary in
+a directory this account cannot write, the first step reads *Downloading
+v1.3.0, then macOS asks for an administrator password...* and the dialog
+(Touch ID or password) opens once the download is verified; cancelling it
+ends the update there with nothing changed.
+**Update now** stays disabled until it is over. In the desktop app the shell relaunches itself onto the new
 build, so the window you end up in is the new one. In a browser tab the
 gateway never exits (it is your terminal's process, not the app's): the app is
 still rebuilt, and the banner tells you to restart it.
@@ -191,7 +235,7 @@ not come back. If the re-exec itself fails under systemd, the server falls
 back to `systemctl restart aether-server`.
 
 `--when idle` instead records one pending update, applied the first time no
-run is working and no workspace shell is open. Two kinds of run do not hold
+run is working and no terminal is attached. Two kinds of run do not hold
 it back: one parked at `needs-attention`, waiting on a person, and one
 paused with `aether pause`, whose container is frozen. Neither has anything
 running inside it and both survive the restart like any other run. A second
@@ -449,12 +493,9 @@ are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 
 - **Linux.** Windows and macOS are client platforms.
 - **Docker**, running, with the server's user able to reach its socket. Every
-  bootstrap shell, login shell, and run is a container.
+  environment terminal and run is a container. Agent installation happens in
+  the member's environment terminal.
 - **git** on the host. Bare repos, run checkouts, and diffs are real git.
-- **A server-owned neutral image** is selected automatically when a workspace
-  has no custom image. An administrator may configure a custom image when
-  system dependencies are required. Agent installation can instead happen in
-  the workspace bootstrap shell; it is not a prerequisite for every image.
 - Optionally **Tailscale**, which is the recommended way to make the SSH port
   reachable and the recommended identity layer. See
   [networking.md](networking.md).
@@ -462,23 +503,15 @@ are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 ## Images and containers
 
 An image is a read-only package used to create containers. A container is one
-runtime instance of that image and is discarded after a run or shell session.
-The server opens shells only inside containers, never on the host. Aether never
-mounts the Docker socket into a workspace container. How workspace images are
-chosen and built is covered in [environments.md](environments.md).
+runtime instance of that image and is discarded after a run or terminal
+session. The server opens terminals only inside containers, never on the host.
+Aether never mounts the Docker socket into a workspace container. How workspace
+images are chosen and built is covered in [environments.md](environments.md).
 
-When a workspace has no custom image, the server selects the neutral bootstrap
-image:
-
-```
-ghcr.io/3xdevops/aether-bootstrap:<release-tag>
-```
-
-It contains a shell, certificates, curl, Git, and common file-search tools. It
-does not contain an agent vendor or execute a vendor installer. A member can
-install an executable into `~/.local` with
-`aether workspace bootstrap <name> --command <executable>`. Those files are
-captured in a per-member, per-workspace immutable tool snapshot.
+When a workspace has no custom image, the server selects its configured neutral
+image. It contains a shell, certificates, curl, Git, and common file-search
+tools. It does not contain a vendor agent. Install agents in the member home
+with `aether terminal`; the installed files persist across containers.
 
 A release also publishes a prebuilt standard environment image:
 
@@ -494,7 +527,7 @@ workspace created with this image keeps its exact ref until an explicit image
 change. Both images are tagged with the release tag, the commit hash, and
 `latest`.
 
-User-installed tools under `~/.local` persist across containers. System packages
+Files installed in the member home persist across containers. System packages
 installed into `/usr` or `/etc`, edits elsewhere in the container filesystem,
 and container process state do not persist. Put required system dependencies in
 an administrator-approved custom image.
@@ -502,18 +535,18 @@ an administrator-approved custom image.
 Use `aether workspace init <name>` for the neutral default, or
 `aether workspace init <name> --image <image>` when the project needs system
 dependencies that the neutral image does not provide. Workspace image
-references are administrator-owned configuration, not input to a shell session.
+references are administrator-owned configuration, not member input.
 
 Workspaces can also carry a server-built environment image: an admin-saved
 Dockerfile the server builds, verifies, and swaps in (see
-[bootstrap.md](bootstrap.md)). These images live only in the server's Docker
-daemon as `aether/ws-<workspace-id>:<version>` tags and are never pushed to
-or pulled from a registry. Retention keeps two tags per workspace - the
-active version and the most recent previously active one - and removes older
-tags after a successful swap. `aether env rollback` re-activates the
-previous version, rebuilding its image from the stored Dockerfile if
-retention already removed the tag, so disk usage stays bounded at roughly
-two images per workspace.
+[environments.md](environments.md)). These images live only in the server's
+Docker daemon as `aether/ws-<workspace-id>:<version>` tags and are never pushed
+to or pulled from a registry. Retention keeps two tags per workspace, the
+active version and the most recent previously active one, and removes older
+tags after a successful swap. `aether env rollback` re-activates the previous
+version, rebuilding its image from the stored Dockerfile if retention already
+removed the tag, so disk usage stays bounded at roughly two images per
+workspace.
 
 To prepare a normal Dockerfile and optional standard Dev Container metadata for
 review and later image publication:
@@ -577,7 +610,7 @@ Serve options, which are also the config-file keys:
 | --- | --- | --- |
 | `--data-dir` | `/var/lib/aether` | Everything the server owns. |
 | `--addr` | `:2222` | The SSH listener. This is the only port that must be reachable. |
-| `--neutral-image` | `ghcr.io/3xdevops/aether-bootstrap:<build-version>` | Server-owned image selected for workspaces without a custom image. A release build defaults to the image published with that release; a dev build tracks `latest`. Set this to a pinned deployment-approved image to override it. |
+| `--neutral-image` | server-configured neutral image | Server-owned image selected for workspaces without a custom image. Set this to a pinned deployment-approved image to override it. |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard environment image that clients recommend at workspace creation; `server.info` reports it alongside the neutral image. Same tagging rules as `--neutral-image`. |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key. |
@@ -620,9 +653,8 @@ from `/etc/aether/aether-server.env`, which the unit loads if it exists. Provide
 those values through your deployment's secret manager; do not commit them or
 paste them into public configuration examples.
 
-Subscription logins do **not** go there. They live in the per-member,
-per-harness server-side home that `aether agent add` (or `aether setup`)
-writes. See
+Subscription logins do **not** go there. They live in the member's persistent
+home, which `aether terminal` uses after `aether agent add`. See
 [harnesses.md](harnesses.md).
 
 ## The client-side sync daemon
@@ -650,34 +682,26 @@ turns that half off.
 
 | Path | Contents |
 | --- | --- |
-| `aether.db` | SQLite: members, workspaces, runs, event log, and snapshot metadata. |
+| `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
 | `ssh/` | The server's SSH host key. |
 | `repos/` | One bare git repo per workspace. |
 | `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. |
 | `transcripts/` | Per-run PTY recordings (asciicast v2). |
-| `homes/<member>/<harness>/` | Per-member, per-harness login state. |
+| `homes/<member>/` | One persistent environment home per member. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
-| `toolenv/staging/` | Pending per-member, per-workspace bootstrap staging. |
-| `toolenv/snapshots/` | Immutable per-member, per-workspace tool snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run conflict-coordination sockets, recreated each run. |
 | `env-edits/` | Per-edit scratch output of environment edit agents, removed when each edit ends. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. |
 
-Tool snapshots and pending staging are server-owned state. Back up the database
-and `toolenv/` when recovery of installed workspace tools matters. Pending
-staging can be resumed after a client disconnect, while stale unreferenced
-staging is removed by the server's bounded cleanup policy. Active snapshots and
-snapshots pinned by running work remain available. See
-[bootstrap.md](bootstrap.md) for rollback, reset, and the read-only normal-run
-mount.
+Member homes are server-owned state. Back up the database, `homes/`, and
+`profiles/` when recovery of installed agents, login state, and synced profiles
+matters. Each member home is mounted only in that member's containers.
 
 Three consequences worth knowing:
 
-- **Back up `aether.db`, `repos/`, `toolenv/`, and the homes you need to
-  recover.** The database and git repos are core state. Tool snapshots,
-  profile snapshots, and per-member login homes are also persistent workspace
-  state.
+- **Back up `aether.db`, `repos/`, `homes/`, and `profiles/` to recover core
+  state, installed agents, login state, and profile snapshots.**
 - **Three of these grow without bound**: `checkouts/` (reclaimed by the TTL
   GC), `transcripts/`, and `aether.db` (the event log). The dashboard's disk
   gauge breaks the data directory down across exactly those three, and new
@@ -710,7 +734,8 @@ sudo systemctl daemon-reload
 
 # 2. Containers. Stopping the server does NOT remove them.
 sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)
-sudo docker rmi $(sudo docker images -q ghcr.io/3xdevops/aether-bootstrap)
+# Remove deployment-specific neutral and standard images according to your
+# Docker image retention policy.
 
 # 3. State, config, binary.
 sudo rm -rf /var/lib/aether /etc/aether

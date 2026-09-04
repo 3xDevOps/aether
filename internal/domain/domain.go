@@ -9,7 +9,6 @@ package domain
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -23,8 +22,6 @@ type (
 	RunID string
 	// MemberID identifies a Member.
 	MemberID string
-	// ToolSnapshotID identifies an immutable per-member workspace tool tree.
-	ToolSnapshotID string
 )
 
 // SetupPolicy controls the script run before a command starts in the
@@ -122,62 +119,6 @@ func (s WorkspaceSelector) Valid() bool {
 	return (s.ID != "") != (strings.TrimSpace(s.Name) != "")
 }
 
-// WorkspaceShellMode identifies the purpose of a workspace shell.
-type WorkspaceShellMode string
-
-const (
-	WorkspaceShellBootstrapTools WorkspaceShellMode = "bootstrap-tools"
-	WorkspaceShellHarnessLogin   WorkspaceShellMode = "harness-login"
-	// WorkspaceShellAgentSetup combines bootstrap and login in one session:
-	// install the agent, run its login flow, exit; the server snapshots
-	// tools, persists login state, and registers the member definition.
-	WorkspaceShellAgentSetup WorkspaceShellMode = "agent-setup"
-)
-
-// Valid reports whether m is a supported workspace shell mode.
-func (m WorkspaceShellMode) Valid() bool {
-	return m == WorkspaceShellBootstrapTools || m == WorkspaceShellHarnessLogin || m == WorkspaceShellAgentSetup
-}
-
-// WorkspaceShellRequest describes one agent-agnostic interactive workspace
-// shell request.
-type WorkspaceShellRequest struct {
-	Workspace              WorkspaceSelector
-	Mode                   WorkspaceShellMode
-	Harness                string
-	VerificationExecutable string
-	// TUIArgs/HeadlessArgs are the member's proposed argv templates for an
-	// agent-setup shell registering a custom agent. Empty for shipped names.
-	TUIArgs      []string
-	HeadlessArgs []string
-	Resume       bool
-	Reset        bool
-	Cols         uint
-	Rows         uint
-}
-
-// Validate checks selector, mode, mode-specific harness, and intent fields.
-func (r WorkspaceShellRequest) Validate() error {
-	switch {
-	case !r.Workspace.Valid():
-		return errors.New("workspace selector must contain exactly one ID or name")
-	case !r.Mode.Valid():
-		return fmt.Errorf("invalid workspace shell mode %q", r.Mode)
-	case r.Resume && r.Reset:
-		return errors.New("resume and reset cannot both be set")
-	case (r.Mode == WorkspaceShellHarnessLogin || r.Mode == WorkspaceShellAgentSetup) && strings.TrimSpace(r.Harness) == "":
-		return errors.New("harness is required for login and agent-setup modes")
-	case r.Mode == WorkspaceShellBootstrapTools && strings.TrimSpace(r.Harness) != "":
-		return errors.New("harness is not allowed for bootstrap mode")
-	case r.Mode != WorkspaceShellAgentSetup && (len(r.TUIArgs) > 0 || len(r.HeadlessArgs) > 0):
-		return errors.New("argv proposals are only allowed for agent-setup mode")
-	}
-	if strings.ContainsAny(r.VerificationExecutable, "/\x00\r\n\t ") {
-		return errors.New("verification executable must be a name")
-	}
-	return nil
-}
-
 // RunStatus is the lifecycle state of a Run.
 //
 // The lifecycle is:
@@ -251,24 +192,6 @@ func (r Role) Valid() bool {
 	return r == RoleViewer || r == RoleCollaborator || r == RoleAdmin
 }
 
-// ToolManifest records stable metadata discovered while creating a tool
-// snapshot. It contains no server filesystem paths.
-type ToolManifest struct {
-	Executable string            `json:"executable,omitempty"`
-	Version    string            `json:"version,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-}
-
-// ToolSnapshot is an immutable member/workspace tool tree.
-type ToolSnapshot struct {
-	ID          ToolSnapshotID
-	WorkspaceID WorkspaceID
-	MemberID    MemberID
-	Digest      string
-	Manifest    ToolManifest
-	CreatedAt   time.Time
-}
-
 // Workspace is a repo checkout, its server-owned environment definition,
 // and the shared context every run against it inherits: runs, costs,
 // approvals, templates, and the event feed are all workspace-scoped.
@@ -323,6 +246,22 @@ type Member struct {
 	CreatedAt time.Time
 }
 
+// Terminal is the persistent per-member environment container.
+type Terminal struct {
+	Member      MemberID
+	ContainerID string
+	Image       string
+	StartedAt   time.Time
+}
+
+// TerminalStatus describes the running state and live tabs of a member terminal.
+type TerminalStatus struct {
+	Running   bool
+	Image     string
+	StartedAt time.Time
+	Tabs      []string
+}
+
 // Run is one agent execution: a task, an isolated worktree and branch, a
 // container, and a PTY transcript, owned by one member within one
 // workspace.
@@ -333,6 +272,8 @@ type Run struct {
 	MemberID MemberID
 	// Task is the prompt the agent was launched with.
 	Task string
+	// Title is the latest terminal title reported by the agent.
+	Title string
 	// Harness is the agent harness name, e.g. "claude", "codex".
 	Harness string
 	Mode    LaunchMode
@@ -358,9 +299,6 @@ type Run struct {
 	// ProfileSnapshotID is the immutable agent-profile snapshot pinned at
 	// provisioning. Zero (empty) means unpinned / no snapshot.
 	ProfileSnapshotID ProfileSnapshotID
-	// ToolSnapshotID is the immutable workspace tool snapshot pinned before
-	// container creation. Zero means no active tool snapshot.
-	ToolSnapshotID ToolSnapshotID
 }
 
 // ServerBusy reports what is keeping a server from being idle, which is
@@ -381,8 +319,9 @@ type ServerBusy struct {
 	Runs int
 	// Paused is how many runs are paused. They do not hold an update back.
 	Paused int
-	// Shells is how many workspace shells are open. They have no container
-	// to reattach to after a restart, so each one holds an update back.
+	// Shells is how many interactive terminal attaches are live. A restart
+	// would drop each stream under the person typing into it, so each one
+	// holds an update back.
 	Shells int
 }
 

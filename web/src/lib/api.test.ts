@@ -2,7 +2,7 @@
 // job is to move the credential into sessionStorage and out of the address
 // bar - the one place it would otherwise sit in history and screenshots.
 
-import { api, socketURL } from '@/lib/api'
+import { api } from '@/lib/api'
 import type { EnvScanResult } from '@/lib/types'
 import { fakeApi, manifestItem } from '@/test/fixtures'
 
@@ -39,17 +39,14 @@ describe('token bootstrap', () => {
     expect(window.location.search).toBe('?view=board')
   })
 
-  it('keeps using the stored token once the URL is clean', async () => {
+  it('builds a tokened shell attach URL with encoded run and tab', () => {
     window.sessionStorage.setItem('aether.token', 'tok_stored')
-    const fetchSpy = fakeFetch()
-    vi.stubGlobal('fetch', fetchSpy)
 
-    await api.serverInfo()
+    const url = api.attachShellSocket('run/1', 't-2')
 
-    expect(sentHeaders(fetchSpy).authorization).toBe('Bearer tok_stored')
-    // The sockets cannot send headers, so their URL carries it instead.
-    expect(socketURL('/ws/events')).toContain('token=tok_stored')
+    expect(url).toContain('/ws/attach/run%2F1?shell=t-2&token=tok_stored')
   })
+
 
   it('posts a local verb to /local/v1 with the same bearer', async () => {
     window.sessionStorage.setItem('aether.token', 'tok_stored')
@@ -62,6 +59,31 @@ describe('token bootstrap', () => {
     expect(sentHeaders(fetchSpy).authorization).toBe('Bearer tok_stored')
     expect(fetchSpy.mock.calls[0][1]?.body).toBe(
       JSON.stringify({ run_id: 'run_1', force: true }),
+    )
+  })
+})
+
+describe('environment terminal methods', () => {
+  beforeEach(() => {
+    window.sessionStorage.setItem('aether.token', 'tok_terminal')
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    window.sessionStorage.clear()
+  })
+
+  it('posts status and stop RPCs and builds an encoded terminal socket URL', async () => {
+    const fetchSpy = fakeFetch({ running: false, tabs: [] })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await api.terminalStatus()
+    await api.terminalStop()
+
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/terminal.status')
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({})
+    expect(fetchSpy.mock.calls[1][0]).toBe('/api/v1/terminal.stop')
+    expect(api.terminalSocket('t 2')).toContain(
+      '/ws/terminal?tab=t+2&token=tok_terminal',
     )
   })
 })

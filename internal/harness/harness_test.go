@@ -2,7 +2,6 @@ package harness
 
 import (
 	"path"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -214,36 +213,6 @@ func TestArgvTaskless(t *testing.T) {
 	}
 }
 
-func TestCredentialMounts(t *testing.T) {
-	p, _ := Lookup("claude")
-	home := filepath.Join("data", "homes", "mem_1", "claude")
-	mounts := p.CredentialMounts(home, "/root")
-	if len(mounts) != 1 {
-		t.Fatalf("mounts = %v", mounts)
-	}
-	if mounts[0].ContainerPath != "/root/.claude" {
-		t.Errorf("container path = %q", mounts[0].ContainerPath)
-	}
-	if want := filepath.Join(home, ".claude"); mounts[0].HostPath != want {
-		t.Errorf("host path = %q, want %q", mounts[0].HostPath, want)
-	}
-	if mounts[0].ReadOnly {
-		t.Error("credential mounts must be read-write")
-	}
-	// A non-root run resolves the same host home to a different container
-	// home: login state persists across image-user changes.
-	nonRoot := p.CredentialMounts(home, "/home/aether")
-	if nonRoot[0].ContainerPath != "/home/aether/.claude" {
-		t.Errorf("non-root container path = %q", nonRoot[0].ContainerPath)
-	}
-	if nonRoot[0].HostPath != mounts[0].HostPath {
-		t.Errorf("host home changed with container home: %q vs %q", nonRoot[0].HostPath, mounts[0].HostPath)
-	}
-	if got := p.CredentialMounts("", "/root"); got != nil {
-		t.Errorf("empty home mounts = %v, want nil", got)
-	}
-}
-
 func TestHomeDir(t *testing.T) {
 	tests := []struct{ user, want string }{
 		{"", "/root"},
@@ -255,6 +224,27 @@ func TestHomeDir(t *testing.T) {
 		if got := HomeDir(tt.user); got != tt.want {
 			t.Errorf("HomeDir(%q) = %q, want %q", tt.user, got, tt.want)
 		}
+	}
+}
+func TestHomeRelative(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"root home path", "/root/.claude", ".claude"},
+		{"aether home path", "/home/aether/.config/omp", ".config/omp"},
+		{"root itself", "/root", "."},
+		{"aether home itself", "/home/aether", "."},
+		{"relative path is cleaned", "foo/../bar", "bar"},
+		{"outside home stays absolute", "/var/lib/omp", "/var/lib/omp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HomeRelative(tt.path); got != tt.want {
+				t.Errorf("HomeRelative(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -360,37 +350,26 @@ func TestDefinitionValidation(t *testing.T) {
 	}
 }
 
-// Member-supplied definitions additionally reject paths under the tool
-// mount: they would shadow or pierce the read-only snapshot at ~/.local.
-// Administrator definitions and registry profiles (opencode) keep the
-// capability.
+// Member-supplied definitions use the same path policy as administrator
+// definitions, including paths under ~/.local.
 func TestValidateMemberDefinition(t *testing.T) {
 	valid := Definition{
 		Name:            "omp",
 		TUIArgs:         []string{"omp", "{task}"},
 		HeadlessArgs:    []string{"omp", "-p", "{task}"},
 		Executable:      "omp",
-		ProfileRoot:     "/home/aether/.omp",
-		CredentialPaths: []string{"/home/aether/.omp"},
+		ProfileRoot:     "/home/aether/.local",
+		CredentialPaths: []string{"/home/aether/.local/bin", "/home/aether/.local/share/omp"},
 	}
 	if err := ValidateMemberDefinition(valid); err != nil {
 		t.Fatalf("valid member definition rejected: %v", err)
 	}
-	for name, def := range map[string]Definition{
-		"credential under tool mount": validWith(valid, func(d *Definition) {
-			d.ProfileRoot = ""
-			d.CredentialPaths = []string{"/home/aether/.local/bin"}
-		}),
-		"profile under tool mount": validWith(valid, func(d *Definition) {
-			d.ProfileRoot = "/root/.local/share/omp"
-			d.CredentialPaths = []string{"/root/.local/share/omp"}
-		}),
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := ValidateMemberDefinition(def); err == nil {
-				t.Fatal("member definition accepted")
-			}
-		})
+	rootDefinition := validWith(valid, func(d *Definition) {
+		d.ProfileRoot = "/root/.local"
+		d.CredentialPaths = []string{"/root/.local/bin", "/root/.local/share/omp"}
+	})
+	if err := ValidateMemberDefinition(rootDefinition); err != nil {
+		t.Fatalf("valid root member definition rejected: %v", err)
 	}
 	// The opencode registry profile keeps its under-.local credentials.
 	opencode, _ := Lookup("opencode")

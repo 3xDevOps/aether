@@ -230,6 +230,23 @@ describe('workspace activity feed', () => {
     )
   })
 
+  it('filters run title events', async () => {
+    const client = feedApi()
+    seed()
+    render(<TimelineFeed params={{}} client={client} />)
+    await screen.findByText(/waiting on a question/)
+
+    fireEvent.change(screen.getByLabelText('Type'), {
+      target: { value: 'run.title' },
+    })
+
+    await vi.waitFor(() =>
+      expect(client.workspaceTimeline).toHaveBeenCalledWith(
+        expect.objectContaining({ types: ['run.title'] }),
+      ),
+    )
+  })
+
   it('puts the floor back when a load-older read fails, so a retry fills the gap', async () => {
     const client = feedApi()
     seed()
@@ -289,4 +306,24 @@ describe('workspace activity feed', () => {
     expect(useStore.getState().feed).toHaveLength(0)
     expect(useStore.getState().feedLoading).toBe(true)
   })
+
+  it('describes run title events with their title', async () => {
+    const client = feedApi([
+      {
+        id: 'evt_title',
+        seq: 4199,
+        time: '2026-08-14T10:04:00Z',
+        workspace_id: workspace.id,
+        run_id: 'run_1',
+        actor_id: bob.id,
+        type: 'run.title',
+        payload: { title: 'Session title' },
+      },
+    ])
+    seed()
+    render(<TimelineFeed params={{}} client={client} />)
+
+    expect(await screen.findByText('Session title')).toBeDefined()
+  })
+
 })

@@ -43,11 +43,11 @@ import type {
   ServerUpdateWhen,
   SyncSessionState,
   SyncStatusResult,
+  TerminalStatusResult,
   Template,
   TemplateLaunch,
   TimelinePage,
   TimelineQuery,
-  ToolSnapshot,
   UpdateApplyResult,
   UpdateBuildStatus,
   UpdateStatus,
@@ -189,9 +189,9 @@ interface ScanHandlers {
  * openScan runs one scan on this machine through the local gateway's
  * /ws/envscan socket: one JSON start frame out, then output and status
  * frames in until a terminal result or error frame. Framing mirrors the
- * shell client (routes/shell/client.ts): a session settles exactly once,
- * and a close the caller asked for is not an outcome. Every mode -
- * inventory, repo, refine, profile - rides this one function.
+ * attach client: a session settles exactly once, and a close the caller
+ * asked for is not an outcome. Every mode - inventory, repo, refine,
+ * profile - rides this one function.
  */
 function openScan(req: EnvScanRequest, h: ScanHandlers): EnvScanSession {
   let socket: WebSocket | null = null
@@ -440,21 +440,6 @@ export const api = {
       workspace_id: params.workspace_id,
       steer_others: params.steer_others ?? '',
     }).then((r) => r.workspace),
-  // Workspace tool snapshots. Every method addresses the workspace by
-  // exactly one of id or name, like the protocol's WorkspaceSelector.
-  toolsList: (ws: WorkspaceSelector) =>
-    call<{ snapshots: ToolSnapshot[] }>('workspace.tools.list', {
-      workspace: ws,
-    }).then((r) => r.snapshots),
-  toolsVerify: (ws: WorkspaceSelector) =>
-    call<unknown>('workspace.tools.verify', { workspace: ws }),
-  toolsRollback: (ws: WorkspaceSelector, snapshotID: string) =>
-    call<unknown>('workspace.tools.rollback', {
-      workspace: ws,
-      snapshot_id: snapshotID,
-    }),
-  toolsReset: (ws: WorkspaceSelector) =>
-    call<unknown>('workspace.tools.reset', { workspace: ws, confirm: true }),
   // Budgets: the server clears a budget on a limit of zero or less, so
   // `clear` is spelled here rather than by every caller.
   budgetSet: (params: {
@@ -606,13 +591,19 @@ export const api = {
    * override lives on the CLI. */
   localProfilePush: (harness: string) =>
     local<ProfilePushResult>('profile.push', { harness }),
+  terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
+  terminalStop: () => call<unknown>('terminal.stop', {}),
+  terminalSocket: (tab: string) =>
+    socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),
   openEnvScan,
   openProfileScan,
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),
-  /** The unified workspace-shell socket; the header frame picks the mode. */
-  shellSocket: () => socketURL('/ws/shell'),
+  attachShellSocket: (runID: string, tab: string) =>
+    socketURL(
+      `/ws/attach/${encodeURIComponent(runID)}?shell=${encodeURIComponent(tab)}`,
+    ),
 }
 
 export type Api = typeof api

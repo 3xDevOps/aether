@@ -21,19 +21,19 @@ import (
 // wsStubBackend records the requests the WS handlers hand it and answers
 // with configured streams, terminals, and acks.
 type wsStubBackend struct {
-	mu        sync.Mutex
-	eventsReq protocol.SubscribeRequest
-	attachReq protocol.AttachRequest
-	shellReq  protocol.WorkspaceShellRequest
+	mu          sync.Mutex
+	eventsReq   protocol.SubscribeRequest
+	attachReq   protocol.AttachRequest
+	terminalReq protocol.TerminalRequest
 
 	eventsStream io.ReadWriteCloser
 	eventsErr    error
 	attachTerm   cli.Terminal
 	attachAck    protocol.AttachResponse
 	attachErr    error
-	shellTerm    cli.Terminal
-	shellAck     protocol.WorkspaceShellResponse
-	shellErr     error
+	terminalTerm cli.Terminal
+	terminalAck  protocol.TerminalResponse
+	terminalErr  error
 }
 
 func (b *wsStubBackend) Call(context.Context, string, json.RawMessage) (json.RawMessage, *protocol.Error) {
@@ -46,7 +46,6 @@ func (b *wsStubBackend) Events(req protocol.SubscribeRequest) (io.ReadWriteClose
 	b.mu.Unlock()
 	return b.eventsStream, b.eventsErr
 }
-
 func (b *wsStubBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protocol.AttachResponse, error) {
 	b.mu.Lock()
 	b.attachReq = req
@@ -54,21 +53,26 @@ func (b *wsStubBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protoc
 	return b.attachTerm, b.attachAck, b.attachErr
 }
 
-func (b *wsStubBackend) Shell(req protocol.WorkspaceShellRequest) (cli.Terminal, protocol.WorkspaceShellResponse, error) {
+func (b *wsStubBackend) Terminal(req protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error) {
 	b.mu.Lock()
-	b.shellReq = req
+	b.terminalReq = req
 	b.mu.Unlock()
-	return b.shellTerm, b.shellAck, b.shellErr
+	return b.terminalTerm, b.terminalAck, b.terminalErr
 }
-
 func (b *wsStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
 	return nil, errors.New("not implemented")
 }
+func (b *wsStubBackend) Close() error { return nil }
 
 func (b *wsStubBackend) recordedAttach() protocol.AttachRequest {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.attachReq
+}
+func (b *wsStubBackend) recordedTerminal() protocol.TerminalRequest {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.terminalReq
 }
 
 func (b *wsStubBackend) recordedEvents() protocol.SubscribeRequest {
@@ -161,7 +165,11 @@ func newWSGateway(t *testing.T, b Backend) (*Gateway, string) {
 
 func wsDial(t *testing.T, base, path, token string) *websocket.Conn {
 	t.Helper()
-	url := "ws" + strings.TrimPrefix(base, "http") + path + "?token=" + token
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	url := "ws" + strings.TrimPrefix(base, "http") + path + sep + "token=" + token
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, url, nil)
@@ -258,6 +266,43 @@ func TestEventsRefusalForwardsCode(t *testing.T) {
 	expectClose(t, conn, websocket.StatusPolicyViolation)
 }
 
+func TestAttachShellQueryForcesWriteAndResize(t *testing.T) {
+	term := newWSStubTerminal(io.EOF)
+	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Cols: 80, Rows: 24}}
+	g, base := newWSGateway(t, b)
+	conn := wsDial(t, base, "/ws/attach/run-1?shell=tab-1", g.Token())
+
+	writeWSJSON(t, conn, protocol.DashAttachRequest{Write: false})
+	if ack := readWSJSON[protocol.AttachResponse](t, conn); !ack.OK {
+		t.Fatalf("ack = %+v, want ok", ack)
+	}
+	req := b.recordedAttach()
+	if req.Shell != "tab-1" || req.ReadOnly || req.Cols != defaultCols || req.Rows != defaultRows {
+		t.Fatalf("attach request = %+v, want writable shell tab-1 %dx%d", req, defaultCols, defaultRows)
+	}
+
+	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "pwd\n"})
+	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachResize, Cols: 132, Rows: 43})
+	select {
+	case in := <-term.inputCh:
+		if string(in) != "pwd\n" {
+			t.Fatalf("input = %q, want pwd\\n", in)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shell input never reached terminal")
+	}
+	select {
+	case rs := <-term.resizeCh:
+		if rs != [2]uint{132, 43} {
+			t.Fatalf("resize = %v, want [132 43]", rs)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shell resize never reached terminal")
+	}
+	term.finish()
+	expectClose(t, conn, websocket.StatusNormalClosure)
+}
+
 // TestAttachMirrorHeaderMapsToReadOnly: write:false must become
 // ReadOnly:true toward the backend, with default geometry filled in, and
 // mirror input must never reach the terminal.
@@ -348,6 +393,7 @@ func TestAttachRefusalForwardsAck(t *testing.T) {
 		attachAck: protocol.AttachResponse{OK: false, Code: protocol.CodeNotFound, Error: "run not found"},
 		attachErr: errors.New("cli: attach: run not found"),
 	}
+
 	g, base := newWSGateway(t, b)
 	conn := wsDial(t, base, "/ws/attach/run-x", g.Token())
 
@@ -360,24 +406,39 @@ func TestAttachRefusalForwardsAck(t *testing.T) {
 		t.Fatalf("close reason = %q, want attach refused", reason)
 	}
 }
-
-// TestShellCleanExit covers the shell happy path: valid header, ack echo,
-// output, input, resize honored, and clean EOF as 1000 "shell exited".
-func TestShellCleanExit(t *testing.T) {
+func TestTerminalForwardsOutputInputResizeAndClosesCleanly(t *testing.T) {
 	term := newWSStubTerminal(io.EOF)
-	b := &wsStubBackend{shellTerm: term, shellAck: protocol.WorkspaceShellResponse{OK: true, Cols: 90, Rows: 30}}
+	b := &wsStubBackend{terminalTerm: term, terminalAck: protocol.TerminalResponse{OK: true, Tab: "dev", Cols: 100, Rows: 40}}
 	g, base := newWSGateway(t, b)
-	conn := wsDial(t, base, "/ws/shell", g.Token())
+	conn := wsDial(t, base, "/ws/terminal?tab=dev", g.Token())
 
-	writeWSJSON(t, conn, protocol.WorkspaceShellRequest{
-		Workspace: protocol.WorkspaceSelector{Name: "dev"},
-		Mode:      protocol.WorkspaceShellBootstrapTools,
-		Cols:      90, Rows: 30,
-	})
-	if ack := readWSJSON[protocol.WorkspaceShellResponse](t, conn); !ack.OK || ack.Cols != 90 {
+	writeWSJSON(t, conn, protocol.DashAttachRequest{Cols: 100, Rows: 40})
+	ack := readWSJSON[protocol.TerminalResponse](t, conn)
+	if !ack.OK || ack.Tab != "dev" || ack.Cols != 100 || ack.Rows != 40 {
 		t.Fatalf("ack = %+v", ack)
 	}
+	req := b.recordedTerminal()
+	if req.Tab != "dev" || req.Cols != 100 || req.Rows != 40 {
+		t.Fatalf("terminal request = %+v", req)
+	}
 
+	term.emit([]byte("hello"))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	typ, data, err := conn.Read(ctx)
+	cancel()
+	if err != nil || typ != websocket.MessageBinary || string(data) != "hello" {
+		t.Fatalf("output frame = %v %q (%v), want binary hello", typ, data, err)
+	}
+
+	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "pwd\n"})
+	select {
+	case in := <-term.inputCh:
+		if string(in) != "pwd\n" {
+			t.Fatalf("input = %q, want pwd\\n", in)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("input never reached terminal")
+	}
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachResize, Cols: 132, Rows: 43})
 	select {
 	case rs := <-term.resizeCh:
@@ -389,47 +450,16 @@ func TestShellCleanExit(t *testing.T) {
 	}
 
 	term.finish()
-	if reason := expectClose(t, conn, websocket.StatusNormalClosure); reason != "shell exited" {
-		t.Fatalf("close reason = %q, want shell exited", reason)
-	}
+	expectClose(t, conn, websocket.StatusNormalClosure)
 }
 
-// TestShellDirtyExitCloses4001: a terminal read error carrying the remote
-// exit status closes 4001 with the error text as the reason.
-func TestShellDirtyExitCloses4001(t *testing.T) {
-	term := newWSStubTerminal(errors.New("cli: remote exited with status 3"))
-	b := &wsStubBackend{shellTerm: term, shellAck: protocol.WorkspaceShellResponse{OK: true}}
-	g, base := newWSGateway(t, b)
-	conn := wsDial(t, base, "/ws/shell", g.Token())
-
-	writeWSJSON(t, conn, protocol.WorkspaceShellRequest{
-		Workspace: protocol.WorkspaceSelector{Name: "dev"},
-		Mode:      protocol.WorkspaceShellBootstrapTools,
-	})
-	if ack := readWSJSON[protocol.WorkspaceShellResponse](t, conn); !ack.OK {
-		t.Fatalf("ack = %+v", ack)
-	}
-
-	term.emit([]byte("boom")) // some output before the dirty end
-	term.finish()
-	reason := expectClose(t, conn, websocket.StatusCode(statusDirtyExit))
-	if !strings.Contains(reason, "status 3") {
-		t.Fatalf("close reason = %q, want remote exit status", reason)
-	}
-}
-
-// TestShellInvalidHeaderRefusedWithInvalidParams: a header that fails
-// Validate is refused with -32602 before the backend is dialed.
-func TestShellInvalidHeaderRefusedWithInvalidParams(t *testing.T) {
+func TestTerminalRejectsInvalidTab(t *testing.T) {
 	b := &wsStubBackend{}
 	g, base := newWSGateway(t, b)
-	conn := wsDial(t, base, "/ws/shell", g.Token())
-
-	// No workspace selector: Validate fails.
-	writeWSJSON(t, conn, protocol.WorkspaceShellRequest{Mode: protocol.WorkspaceShellBootstrapTools})
-	ack := readWSJSON[protocol.WorkspaceShellResponse](t, conn)
+	conn := wsDial(t, base, "/ws/terminal?tab=bad_tab", g.Token())
+	ack := readWSJSON[protocol.TerminalResponse](t, conn)
 	if ack.OK || ack.Code != protocol.CodeInvalidParams {
-		t.Fatalf("ack = %+v, want code %d", ack, protocol.CodeInvalidParams)
+		t.Fatalf("ack = %+v, want invalid params", ack)
 	}
 	expectClose(t, conn, websocket.StatusPolicyViolation)
 }

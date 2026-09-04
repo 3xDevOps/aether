@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -22,11 +24,23 @@ func withProfiles(t *testing.T) func(*Config) {
 		if !ok {
 			t.Fatal("store is not *store.DB")
 		}
-		svc, err := profile.New(db, filepath.Join(t.TempDir(), "profiles"))
+		svc, err := profile.New(db)
 		if err != nil {
 			t.Fatal(err)
 		}
 		c.Profiles = svc
+	}
+}
+
+func withProfilesHomes(t *testing.T) func(*Config) {
+	t.Helper()
+	return func(c *Config) {
+		withProfiles(t)(c)
+		homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Homes = homes
 	}
 }
 
@@ -168,6 +182,59 @@ func TestProfileRollbackDoesNotMutateRunPin(t *testing.T) {
 	}
 	if got.Run.ProfileSnapshotID != second.Snapshot.ID {
 		t.Fatalf("run.get pin = %q, want %s", got.Run.ProfileSnapshotID, second.Snapshot.ID)
+	}
+}
+
+func TestProfilePushAndRollbackMaterializeMemberHome(t *testing.T) {
+	e := newTestEnv(t, withProfilesHomes(t))
+	c := controlClient(t, e)
+	var first, second protocol.ProfilePushResult
+	if err := c.Call(protocol.MethodProfilePush, protocol.ProfilePushParams{
+		Harness: "claude",
+		Files:   []protocol.ProfileFile{{Path: "settings.json", Mode: 0o644, Content: []byte(`{"n":1}`)}},
+	}, &first); err != nil {
+		t.Fatalf("first push: %v", err)
+	}
+	home, err := e.srv.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".claude", "settings.json")
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read materialized push %s: %v", target, err)
+	}
+	if string(got) != `{"n":1}` {
+		t.Fatalf("materialized push = %q", got)
+	}
+	if pushErr := c.Call(protocol.MethodProfilePush, protocol.ProfilePushParams{
+		Harness: "claude",
+		Files:   []protocol.ProfileFile{{Path: "settings.json", Mode: 0o644, Content: []byte(`{"n":2}`)}},
+	}, &second); pushErr != nil {
+		t.Fatalf("second push: %v", pushErr)
+	}
+	if rbErr := c.Call(protocol.MethodProfileRollback, protocol.ProfileRollbackParams{
+		Harness: "claude", SnapshotID: first.Snapshot.ID,
+	}, nil); rbErr != nil {
+		t.Fatalf("rollback: %v", rbErr)
+	}
+	got, err = os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read materialized rollback %s: %v", target, err)
+	}
+	if string(got) != `{"n":1}` {
+		t.Fatalf("materialized rollback = %q", got)
+	}
+}
+
+func TestProfilePushWithoutHomesSkipsMaterialization(t *testing.T) {
+	e := newTestEnv(t, withProfiles(t))
+	c := controlClient(t, e)
+	if err := c.Call(protocol.MethodProfilePush, protocol.ProfilePushParams{
+		Harness: "claude",
+		Files:   []protocol.ProfileFile{{Path: "settings.json", Mode: 0o644, Content: []byte(`{"ok":true}`)}},
+	}, nil); err != nil {
+		t.Fatalf("push without homes: %v", err)
 	}
 }
 

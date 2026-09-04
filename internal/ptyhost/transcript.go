@@ -2,9 +2,11 @@ package ptyhost
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -85,6 +87,71 @@ func renameAsideTranscript(path string) error {
 		return fmt.Errorf("ptyhost: preserve prior transcript: %w", err)
 	}
 	return nil
+}
+
+// readCastTail decodes output events from the bounded tail of an asciinema
+// v2 transcript. A partial first line is discarded because the read window
+// may begin in the middle of a JSON event.
+func readCastTail(path string, maxBytes int) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	window := int64(maxBytes) * 4
+	if window < 0 || window > info.Size() {
+		window = info.Size()
+	}
+	if window == 0 {
+		return nil, nil
+	}
+	raw := make([]byte, int(window))
+	if _, err := io.ReadFull(io.NewSectionReader(f, info.Size()-window, window), raw); err != nil {
+		return nil, err
+	}
+	if info.Size() > window {
+		i := bytes.IndexByte(raw, '\n')
+		if i < 0 {
+			return nil, nil
+		}
+		raw = raw[i+1:]
+	}
+
+	out := make([]byte, 0, maxBytes)
+	for _, line := range bytes.Split(raw, []byte{'\n'}) {
+		if len(line) == 0 {
+			continue
+		}
+		var event []json.RawMessage
+		if err := json.Unmarshal(line, &event); err != nil || len(event) < 3 {
+			continue
+		}
+		var code string
+		if err := json.Unmarshal(event[1], &code); err != nil || code != "o" {
+			continue
+		}
+		data, err := decodeCastString(event[2])
+		if err != nil {
+			continue
+		}
+		out = append(out, data...)
+	}
+	if len(out) > maxBytes {
+		out = out[len(out)-maxBytes:]
+		// The cut can land mid-escape-sequence or mid-rune; replay must
+		// start on a line boundary, the same rule the replay ring applies.
+		if i := bytes.IndexByte(out, '\n'); i >= 0 {
+			out = out[i+1:]
+		}
+	}
+	return out, nil
 }
 
 func (w *castWriter) flushLoop() {

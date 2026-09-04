@@ -70,7 +70,7 @@ and borrows only the identity mechanism.
 
 ### Joining and approval
 
-- **First contact bootstraps the admin.** The first tailnet identity to link a
+- **First contact creates the admin.** The first tailnet identity to link a
   fresh server is registered as an admin, not pending. Solo developers never
   see a join step.
 - **Everyone after that joins pending.** They are registered as collaborators

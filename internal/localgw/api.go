@@ -91,7 +91,7 @@ func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(protocol.GatewayCapabilities{
 		Gateway: "local",
 		Methods: []string{"*"},
-		WS:      []string{"events", "attach", "shell", "envscan"},
+		WS:      []string{"events", "attach", "terminal", "envscan"},
 		Local:   localVerbs,
 		Version: version.Version,
 		Commit:  version.Commit,

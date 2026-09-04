@@ -12,14 +12,14 @@ import (
 func init() {
 	register(command{
 		name:  "workspace",
-		short: "manage workspaces: init, add, list, settings, bootstrap, tools",
+		short: "manage workspaces: init, add, list, settings",
 		run:   runWorkspace,
 	})
 }
 
 func runWorkspace(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether workspace <init|add|list|settings|bootstrap|tools>")
+		return fmt.Errorf("usage: aether workspace <init|add|list|settings>")
 	}
 	switch args[0] {
 	case "init":
@@ -30,10 +30,6 @@ func runWorkspace(args []string) error {
 		return workspaceList(args[1:])
 	case "settings":
 		return workspaceSettings(args[1:])
-	case "bootstrap":
-		return workspaceBootstrap(args[1:])
-	case "tools":
-		return runWorkspaceTools(args[1:])
 	default:
 		return fmt.Errorf("unknown workspace command %q", args[0])
 	}
@@ -65,57 +61,6 @@ func printWorkspaces(w io.Writer, workspaces []protocol.Workspace) error {
 		}
 	}
 	return nil
-}
-
-type workspaceBootstrapOptions struct {
-	workspace string
-	command   string
-	resume    bool
-	reset     bool
-}
-
-func parseWorkspaceBootstrap(args []string) (workspaceBootstrapOptions, error) {
-	fs := flag.NewFlagSet("workspace bootstrap", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	command := fs.String("command", "", "verification executable")
-	resume := fs.Bool("resume", false, "resume pending bootstrap")
-	reset := fs.Bool("reset", false, "discard pending bootstrap")
-	workspace, err := parseLeadingArg(fs, args)
-	if err != nil || workspace == "" {
-		return workspaceBootstrapOptions{}, fmt.Errorf("usage: aether workspace bootstrap <workspace> [--command <executable>] [--resume] [--reset]")
-	}
-	if *resume && *reset {
-		return workspaceBootstrapOptions{}, fmt.Errorf("aether workspace bootstrap: --resume and --reset cannot be used together")
-	}
-	return workspaceBootstrapOptions{workspace: workspace, command: *command, resume: *resume, reset: *reset}, nil
-}
-
-func workspaceBootstrap(args []string) error {
-	opts, err := parseWorkspaceBootstrap(args)
-	if err != nil {
-		return err
-	}
-	return withResolvedWorkspace(opts.workspace, func(selector protocol.WorkspaceSelector) error {
-		cols, rows := termSize()
-		stream, err := openWorkspaceShell(protocol.WorkspaceShellRequest{
-			Workspace:              selector,
-			Mode:                   protocol.WorkspaceShellModeBootstrapTools,
-			VerificationExecutable: opts.command,
-			Resume:                 opts.resume,
-			Reset:                  opts.reset,
-			Cols:                   cols,
-			Rows:                   rows,
-		})
-		if err != nil {
-			return err
-		}
-		defer func() { _ = stream.Close() }()
-		if err := copyRaw(stream); err != nil {
-			return err
-		}
-		fmt.Println("User-local tools persist in the workspace. System packages and container filesystem changes do not. Configure credentials separately with aether setup.")
-		return nil
-	})
 }
 
 type workspaceCreateOptions struct {
@@ -203,15 +148,6 @@ func workspaceEnvironment(image string) protocol.WorkspaceEnvironment {
 		return protocol.WorkspaceEnvironment{NeutralImage: true}
 	}
 	return protocol.WorkspaceEnvironment{CustomImage: image}
-}
-func withResolvedWorkspace(input string, fn func(protocol.WorkspaceSelector) error) error {
-	return withControl(func(c *protocol.Client) error {
-		selector, err := resolveWorkspaceSelector(c, input)
-		if err != nil {
-			return err
-		}
-		return fn(selector)
-	})
 }
 
 func resolveWorkspaceSelector(c *protocol.Client, input string) (protocol.WorkspaceSelector, error) {

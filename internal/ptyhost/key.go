@@ -29,3 +29,11 @@ func (k SessionKey) Run() (domain.RunID, bool) {
 	}
 	return domain.RunID(k), true
 }
+
+// seedsReplay reports whether a restarted session should replay the prior
+// transcript tail: agent runs and member terminals survive restarts, while
+// a run-shell tab is always a fresh process whose old scrollback would
+// mislead.
+func (k SessionKey) seedsReplay() bool {
+	return !strings.HasPrefix(string(k), "run-shell:")
+}

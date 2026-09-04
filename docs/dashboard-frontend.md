@@ -416,48 +416,61 @@ server would refuse.
 tab strip (`tabs.tsx`), so Overview, Terminal, Diff and Events are registry
 routes on the same `runId`.
 
+The Terminal view is a vertical split. The agent terminal keeps the flexible
+space above a `RunDock` below it. The dock has a persisted height
+(`UiSlice.runDockHeight`, default 240px), a collapse toggle, and a resizer.
+Its tab state and socket registry live in `src/store/terminal.ts`, so opening
+Overview, Diff, or Events does not discard run-shell tabs or their attachments.
+Only the selected shell tab mounts an xterm host; switching tabs remounts that
+host and relies on transcript replay to restore its content.
+
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
-  terminal and the event stream reconnect on the same jittered schedule, and
-  it splits large input (a paste) into several ordered frames under the
-  gateway's 64 KiB frame cap, never splitting a surrogate pair.
-- **Mirror by default.** The header frame carries no `write` key unless the
-  user asks to steer; the toggle reattaches rather than upgrading in place.
-  Whether the member may steer is the server's answer, never the client's
-  guess: a `-32001` refusal drops the request back to a mirror and disables the
-  toggle. Every other refusal (unknown run, no live terminal) stops the
-  reconnect loop and offers a retry.
-- **Every attach answers for itself.** The run's slice entry is reset when the
-  view mounts, and a successful attach clears the standing refusal. Otherwise a
-  denial outlives the socket that produced it: leaving the tab and coming back
-  would show a live terminal beside a stale error, with steering greyed out
-  even after `run.handoff` granted it.
+  terminal and event stream reconnect on the same jittered schedule, and it
+  splits large input (a paste) into several ordered frames under the gateway's
+  64 KiB frame cap, never splitting a surrogate pair.
+- **Mirror by default for the agent.** The agent header carries no `write` key
+  unless the user asks to steer; the toggle reattaches rather than upgrading
+  in place. Whether the member may steer is the server's answer, never the
+  client's guess: a `-32001` refusal drops the request back to a mirror and
+  disables the toggle. Every other refusal (unknown run, no live terminal)
+  stops the reconnect loop and offers a retry.
+- **Run-shell tabs always write.** The `+` control opens names `t1`, `t2`,
+  `t3`, and `t4`; four is the per-run limit and the disabled control says
+  `At most 4 tabs`. Each shell attach uses
+  `/ws/attach/<run>?shell=<tab>`, requires write/steer permission, and closes
+  its socket when the tab is closed. A `-32001` response does not reconnect;
+  the dock replaces the terminal with the sentence **You can view this run
+  but not open a shell in it**. A normal `1000` socket close removes the
+  finished tab.
+- **Every attach answers for itself.** The agent run slice is reset when the
+  view mounts, and a successful attach clears the standing refusal. Otherwise
+  a denial outlives the socket that produced it: leaving the tab and coming
+  back would show a live terminal beside a stale error, with steering greyed
+  out even after `run.handoff` granted it.
 - **A 1008 close is read, not guessed at.** The server re-checks a live
   attach's authorization every few seconds, the gateway relays a loss as a
-  1008 close, and the close reason names which gate fell: `steer permission withdrawn` just downgrades - the client
-  reconnects immediately as a read-only mirror - while a dead token or
-  `membership withdrawn` would refuse every reconnect, so those stop the loop
-  and surface the reason. A refusal frame arrives with its own 1008 close,
-  which is why the client reacts to the code only when no refusal preceded it -
-  and a refusal frame that itself names the dead token stops the loop like the
-  close reason would, rather than being read as a steer denial.
-- **Reconnect resumes.** The gateway replays the recent transcript to every
-  attach, so a reconnected pane is never blank; the client clears the buffer
-  first, which is what keeps a reconnect from stacking a second copy of the
-  scrollback under the first.
+  1008 close, and the close reason names which gate fell: `steer permission
+  withdrawn` just downgrades - the client reconnects immediately as a
+  read-only mirror - while a dead token or `membership withdrawn` would refuse
+  every reconnect, so those stop the loop and surface the reason. A refusal
+  frame arrives with its own 1008 close, which is why the client reacts to the
+  code only when no refusal preceded it.
+- **Reconnect resumes with full recent history.** The gateway replays the
+  recent transcript to every attach, and the client clears the buffer first,
+  which keeps a reconnect from stacking a second copy of the scrollback under
+  the first. The shared xterm host uses `scrollback: 50000`; the server replay
+  ring is 1 MiB and is seeded from the cast tail when a session is restarted,
+  so re-attach retains the full recent history rather than only 64 KiB.
 - **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
-  glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038),
-  garbling scrolled rows until a forced refresh; the DOM renderer never
-  desyncs. The terminals render in the shipped JetBrainsMono Nerd Font Mono
+  glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038), garbling
+  scrolled rows until a forced refresh; the DOM renderer never desyncs. The
+  terminals render in the shipped JetBrainsMono Nerd Font Mono
   (`src/lib/term-font.ts`, declared in `src/index.css`), so agent TUIs get
-  their powerline and devicon glyphs at the same advance as text - a
-  symbols-only overlay font renders them full-em wide and xterm's per-cell
-  letter-spacing slices the overhang off. The terminal opens only once
-  regular and bold faces are loaded, because xterm caches glyph metrics
-  synchronously at `open` and would otherwise bake fallback metrics in.
-  The workspace-shell pane (`routes/shell/pane.tsx`) uses the identical
-  renderer and font setup.
-- **Injections need no client work.**  writes the attributed
+  their powerline and devicon glyphs at the same advance as text. The terminal
+  opens only once regular and bold faces are loaded, because xterm caches glyph
+  metrics synchronously at `open` and would otherwise bake fallback metrics in.
+- **Injections need no client work.** The server writes the attributed
   member-coloured banner into the PTY stream itself, so it arrives as ANSI and
   xterm renders it like any other output.
 - Board cards get no live terminal previews in v1 (spec cut-line).
@@ -737,11 +750,14 @@ can still be read.
 ## Update prompts
 
 `src/components/update-banner.tsx` is where the dashboard says a binary is out
-of date. It is mounted by `AppShell` above everything else, because an
-out-of-date binary is about the whole app rather than the view that happens to
-be open. The CLI and shell prompts need the gateway to serve `update.check` -
-a remote monitor cannot update anything on your machine - while the server
-prompt asks the server about itself and shows wherever the member is an admin.
+of date: it hosts the banners, with the CLI one in
+`src/components/cli-update-banner.tsx` and the pieces they share in
+`src/components/update-banner-shared.tsx`. It is mounted by `AppShell` above
+everything else, because an out-of-date binary is about the whole app rather
+than the view that happens to be open. The CLI and shell prompts need the
+gateway to serve `update.check` - a remote monitor cannot update anything on
+your machine - while the server prompt asks the server about itself and shows
+wherever the member is an admin.
 
 - **Two reads.** The host reads `update.check` once on mount
   (`docs/local-gateway.md`; the gateway caches the release lookup, so this
@@ -760,17 +776,30 @@ prompt asks the server about itself and shows wherever the member is an admin.
   one, says what updating costs - it replaces the `aether` binary on this
   machine and restarts the dashboard, taking attached terminals and any
   running sync session with it, while the runs keep going on the server - and
-  offers **Update now**, the release notes, and a dismiss. Clicking Update
-  calls `update.apply` and the banner goes to a restarting state; nothing else
+  offers **Update now**, the release notes, and a dismiss. What the button
+  will do is decided before the click, from `update.check`'s `install_method`
+  (`docs/local-gateway.md`): *direct* offers the button and nothing more;
+  *admin-prompt* (macOS with a GUI session and a `cli_path` in a directory
+  only root can write, such as `/usr/local/bin/aether`) offers the
+  button and says, before the click: *macOS will ask for an administrator
+  password: {cli_path} is in a directory this account cannot write to. The
+  dialog is labelled osascript, the tool Aether asks through. Aether never
+  sees your password.*; *manual* (Linux with a directory this account
+  cannot write, Windows, or a macOS gateway the dialog cannot serve - the
+  rule is in `docs/local-gateway.md`) offers no button and shows the
+  command to run instead - `sudo aether update` with a copy button, or the
+  release link where the platform has no self-update at all. Clicking Update calls
+  `update.apply` and the banner goes to a restarting state; nothing else
   reconnects, because the existing `ConnectionError` page already owns a
   gateway that goes away. The done state names every binary the swap replaced
   and, on a single-box install where `aether-server` was one of them, the
   `restart_command` the gateway sends back: the server keeps running the old
-  code until its unit restarts, and the CLI prints that same line. A refusal is
-  rendered verbatim - a binary in `/usr/local/bin` answers with the exact
-  `sudo aether update` command to run - and the button becomes usable again.
-  Where the platform has no self-update (Windows) the button is not offered at
-  all and the banner links the release instead.
+  code until its unit restarts, and the CLI prints that same line. A `-32001`
+  (denied) answer is the dialog cancelled or the password refused: the banner
+  shows *Update cancelled, nothing was changed.* muted rather than as a
+  failure, and the button comes back. Any other refusal is rendered verbatim -
+  the gateway's own message, ending in the command to run where there is one -
+  and the button becomes usable again.
 - **The server banner is for admins, and it acts.** Capability is half the
   gate and the caller's role is the other half, the same rule the admin
   surfaces follow, so it needs `useIsAdmin()` as well. It shows the server
@@ -791,7 +820,7 @@ prompt asks the server about itself and shows wherever the member is an admin.
     that banner from `update.check`'s `server_behind`, and says only what it
     knows - "The dashboard cannot update the server."
   - The scheduled state also names what the update is still waiting for
-    (`status.waiting`), because an open workspace shell holds it back the
+    (`status.waiting`), because a live terminal attach holds it back the
     same way a working run does.
 - **The phases come off the feed.** `server.update` events land on the
   `server` slice through `applyEvent`, once per workspace and once more from
@@ -834,10 +863,8 @@ prompt asks the server about itself and shows wherever the member is an admin.
 
 ## Styleguide
 
-- **Tokens only.** Colours live in `src/index.css`: the shadcn neutral base
-  plus `--state-*` tokens for the presentation states. Components use token
-  classes (`bg-state-working`, `text-muted-foreground`); no hex literals. The
-  exception is member attribution colour, which is data from the server and is
+- **Tokens only.** See [styles.md](styles.md) for the landing palette in dark, neutral in light, and `--state-*` tokens; components use token classes and no hex literals.
+  The exception is member attribution colour, which is data from the server and is
   applied inline.
 - **Dark, light, system.** The preference is stored, `system` follows
   `prefers-color-scheme` live.
