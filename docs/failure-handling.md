@@ -96,7 +96,7 @@ interrupted conversation behind it.
 
 ### Disk pressure
 
-Three things grow without bound, and the dashboard's gauge covers all three
+Four things grow without bound, and the dashboard's gauge covers all four
 (`GET /api/v1/disk`, shown in the status bar with the breakdown in its
 tooltip):
 
@@ -105,6 +105,7 @@ tooltip):
 | `checkouts/` | The TTL GC, once the run is terminal. |
 | `transcripts/` | Nothing - they live as long as the run row. |
 | `aether.db` (and its WAL) | Nothing - the event log accumulates. |
+| `repos/` | Nothing - every push, run branch and reflog entry stays. |
 
 The GC sweeps on boot and hourly. It only reclaims worktrees of runs that
 reached a terminal state longer than `--checkout-ttl` ago, and never a path

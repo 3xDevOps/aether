@@ -222,7 +222,7 @@ func TestPatchProxies(t *testing.T) {
 }
 
 func TestDiskProxies(t *testing.T) {
-	disk := `{"used_bytes":1,"total_bytes":2,"free_bytes":1,"worktree_bytes":0,"transcript_bytes":0,"database_bytes":0}`
+	disk := `{"used_bytes":1,"total_bytes":2,"free_bytes":1,"worktree_bytes":0,"transcript_bytes":0,"database_bytes":0,"repo_bytes":0}`
 	backend := &apiStubBackend{results: map[string]json.RawMessage{
 		protocol.MethodServerDisk: json.RawMessage(disk),
 	}}

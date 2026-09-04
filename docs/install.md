@@ -702,10 +702,11 @@ Three consequences worth knowing:
 
 - **Back up `aether.db`, `repos/`, `homes/`, and `profiles/` to recover core
   state, installed agents, login state, and profile snapshots.**
-- **Three of these grow without bound**: `checkouts/` (reclaimed by the TTL
-  GC), `transcripts/`, and `aether.db` (the event log). The dashboard's disk
-  gauge breaks the data directory down across exactly those three, and new
-  runs are refused below `--min-free-disk`. See
+- **Four of these grow without bound**: `checkouts/` (reclaimed by the TTL
+  GC), `transcripts/`, `aether.db` (the event log), and `repos/` (every push,
+  run branch and reflog entry stays). The dashboard's disk gauge breaks the
+  data directory down across exactly those four, and new runs are refused
+  below `--min-free-disk`. See
   [failure-handling.md](failure-handling.md).
 - **Keep the path short.** Per-run coordination sockets live under
   `coord/<run-id>/coord2.sock`, and unix socket paths have a hard length limit

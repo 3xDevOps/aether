@@ -134,3 +134,33 @@ describe('the server update notice', () => {
     expect(screen.queryByText(/server update/)).toBeNull()
   })
 })
+
+// The bar says the disk is filling; the tooltip says what is filling it.
+// Bare workspace repos keep every push, every run branch and the reflogs,
+// and nothing reclaims them, so leaving them out of the breakdown makes a
+// repo-dominated server's shrinking headroom unexplainable.
+describe('the disk gauge breakdown', () => {
+  test('names the bare workspace repos alongside the other tenants', () => {
+    seed()
+    render(<StatusBar />)
+
+    const title = screen.getByLabelText('Disk usage').getAttribute('title') ?? ''
+    expect(title).toContain('Worktrees 256 MB')
+    expect(title).toContain('Transcripts 128 MB')
+    expect(title).toContain('Database 64 MB')
+    expect(title).toContain('Repos 512 MB')
+  })
+
+  // A server predating the component sends no repo_bytes. Showing it as
+  // zero would claim the deployment holds no repositories.
+  test('drops the repos line when the server does not report it', () => {
+    seed()
+    const { repo_bytes: _dropped, ...older } = serverInfo.disk!
+    useStore.setState({ info: { ...serverInfo, member: alice, disk: older } })
+    render(<StatusBar />)
+
+    const title = screen.getByLabelText('Disk usage').getAttribute('title') ?? ''
+    expect(title).toContain('Worktrees 256 MB')
+    expect(title).not.toContain('Repos')
+  })
+})

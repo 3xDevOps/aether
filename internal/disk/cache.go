@@ -17,9 +17,9 @@ const DefaultCacheTTL = 30 * time.Second
 // The two halves of a reading cost very different things. The filesystem
 // headroom is one statfs and is taken fresh every time, so the gauge never
 // lags the disk actually filling. The component sizes are a full walk of
-// the checkouts and transcripts trees - a run checkout is a whole clone -
-// and are reused for TTL. A dashboard refreshing every couple of seconds
-// must not turn into a couple of tree walks per second.
+// the checkouts, transcripts and repos trees - a run checkout is a whole
+// clone - and are reused for TTL. A dashboard refreshing every couple of
+// seconds must not turn into a couple of tree walks per second.
 type Cache struct {
 	dataDir string
 	ttl     time.Duration
@@ -51,6 +51,7 @@ func (c *Cache) Usage() (Usage, error) {
 	u.WorktreeBytes = sizes.WorktreeBytes
 	u.TranscriptBytes = sizes.TranscriptBytes
 	u.DatabaseBytes = sizes.DatabaseBytes
+	u.RepoBytes = sizes.RepoBytes
 	return u, nil
 }
 
@@ -66,6 +67,7 @@ func (c *Cache) sizesNow() Usage {
 			WorktreeBytes:   treeBytes(filepath.Join(c.dataDir, checkoutsDir)),
 			TranscriptBytes: treeBytes(filepath.Join(c.dataDir, transcriptsDir)),
 			DatabaseBytes:   databaseBytes(filepath.Join(c.dataDir, databaseFile)),
+			RepoBytes:       treeBytes(filepath.Join(c.dataDir, reposDir)),
 		}
 		c.at, c.walked = now, true
 	}

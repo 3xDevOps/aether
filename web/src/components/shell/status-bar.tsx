@@ -36,9 +36,14 @@ const unreachableLabel: Record<UnreachableKind, string> = {
 /**
  * The gauge's tooltip: what is holding the disk, in the order an operator
  * can act on it. Run checkouts are garbage-collected after their TTL,
- * transcripts live as long as their run rows, and the database is where the
- * event log accumulates. The bar says the disk is filling; this says what
- * is filling it, which is the only version an operator can act on.
+ * transcripts live as long as their run rows, the database is where the
+ * event log accumulates, and the bare workspace repos keep every push and
+ * run branch. The bar says the disk is filling; this says what is filling
+ * it, which is the only version an operator can act on.
+ *
+ * The repos line is dropped rather than shown as zero when the server
+ * predates the component, so an old server reads as silent instead of as a
+ * server with no repositories.
  */
 function diskBreakdown(disk: DiskUsage): string {
   return [
@@ -46,6 +51,9 @@ function diskBreakdown(disk: DiskUsage): string {
     `Worktrees ${formatBytes(disk.worktree_bytes)}`,
     `Transcripts ${formatBytes(disk.transcript_bytes)}`,
     `Database ${formatBytes(disk.database_bytes)}`,
+    ...(disk.repo_bytes === undefined
+      ? []
+      : [`Repos ${formatBytes(disk.repo_bytes)}`]),
     `${formatBytes(disk.free_bytes)} free`,
   ].join(' · ')
 }

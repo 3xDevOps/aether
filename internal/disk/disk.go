@@ -1,5 +1,5 @@
 // Package disk measures the server's data directory: how much room the
-// filesystem holding it has left, and how much of that the three Aether
+// filesystem holding it has left, and how much of that the four Aether
 // directories that grow without bound are using. One measurement serves
 // both consumers, so the dashboard's gauge and the scheduler's free-space
 // floor can never disagree about the same disk.
@@ -19,7 +19,7 @@ import (
 // than Total-Used wherever the filesystem reserves blocks; it is the number
 // the floor is checked against.
 //
-// The three component fields are Aether's own growing tenants. Everything
+// The four component fields are Aether's own growing tenants. Everything
 // else under the data directory (host keys, invites, credential homes,
 // profile snapshots) is bounded by the number of members and is not worth
 // a line on a gauge.
@@ -39,6 +39,11 @@ type Usage struct {
 	// log is the part that grows without bound; it has no file of its own
 	// to measure.
 	DatabaseBytes uint64
+	// RepoBytes is <data>/repos: the bare repo behind each workspace. It
+	// keeps every push, every run branch, and the reflogs the engine turns
+	// on, and nothing reclaims it, so on a long-lived server it is often
+	// the component holding the most.
+	RepoBytes uint64
 }
 
 // Data directory members Measure accounts for, relative to the data
@@ -46,6 +51,7 @@ type Usage struct {
 const (
 	checkoutsDir   = "checkouts"
 	transcriptsDir = "transcripts"
+	reposDir       = "repos"
 	databaseFile   = "aether.db"
 )
 
@@ -62,6 +68,7 @@ func Measure(dataDir string) (Usage, error) {
 	u.WorktreeBytes = treeBytes(filepath.Join(dataDir, checkoutsDir))
 	u.TranscriptBytes = treeBytes(filepath.Join(dataDir, transcriptsDir))
 	u.DatabaseBytes = databaseBytes(filepath.Join(dataDir, databaseFile))
+	u.RepoBytes = treeBytes(filepath.Join(dataDir, reposDir))
 	return u, nil
 }
 

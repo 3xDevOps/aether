@@ -8,8 +8,9 @@ import (
 )
 
 // seedDataDir builds a data directory holding one run checkout, one
-// transcript and a database file, with distinct sizes so a component that
-// measures the wrong directory is visible in the number.
+// transcript, a database file and one workspace bare repo, with distinct
+// sizes so a component that measures the wrong directory is visible in the
+// number.
 func seedDataDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -27,6 +28,8 @@ func seedDataDir(t *testing.T) string {
 	write(filepath.Join(checkoutsDir, "run_1", "README.md"), 100)
 	write(filepath.Join(transcriptsDir, "run_1.cast"), 200)
 	write(databaseFile, 300)
+	write(filepath.Join(reposDir, "ws_1.git", "objects", "pack", "pack-1.pack"), 700)
+	write(filepath.Join(reposDir, "ws_1.git", "logs", "HEAD"), 50)
 	return dir
 }
 
@@ -44,6 +47,9 @@ func TestMeasureAccountsForEachGrowingDirectory(t *testing.T) {
 	if got.DatabaseBytes != 300 {
 		t.Errorf("database bytes = %d, want 300", got.DatabaseBytes)
 	}
+	if got.RepoBytes != 750 {
+		t.Errorf("repo bytes = %d, want 750 (the whole bare repo tree)", got.RepoBytes)
+	}
 	if got.TotalBytes == 0 || got.FreeBytes == 0 {
 		t.Errorf("filesystem reading = %+v, want a real total and free", got)
 	}
@@ -57,7 +63,7 @@ func TestMeasureToleratesMissingDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Measure on an empty data dir: %v", err)
 	}
-	if got.WorktreeBytes != 0 || got.TranscriptBytes != 0 || got.DatabaseBytes != 0 {
+	if got.WorktreeBytes != 0 || got.TranscriptBytes != 0 || got.DatabaseBytes != 0 || got.RepoBytes != 0 {
 		t.Errorf("components on an empty data dir = %+v, want zeroes", got)
 	}
 	if got.TotalBytes == 0 {
@@ -80,9 +86,15 @@ func TestCacheReusesTheWalkUntilTheTTLExpires(t *testing.T) {
 	if first.WorktreeBytes != 500 {
 		t.Fatalf("worktree bytes = %d, want 500", first.WorktreeBytes)
 	}
+	if first.RepoBytes != 750 {
+		t.Fatalf("repo bytes = %d, want 750", first.RepoBytes)
+	}
 
 	if werr := os.WriteFile(filepath.Join(dir, checkoutsDir, "run_1", "big"), make([]byte, 1000), 0o644); werr != nil {
 		t.Fatalf("grow the checkout: %v", werr)
+	}
+	if werr := os.WriteFile(filepath.Join(dir, reposDir, "ws_1.git", "objects", "pack", "pack-2.pack"), make([]byte, 250), 0o644); werr != nil {
+		t.Fatalf("grow the bare repo: %v", werr)
 	}
 	within, err := c.Usage()
 	if err != nil {
@@ -90,6 +102,9 @@ func TestCacheReusesTheWalkUntilTheTTLExpires(t *testing.T) {
 	}
 	if within.WorktreeBytes != 500 {
 		t.Errorf("worktree bytes within the TTL = %d, want the cached 500", within.WorktreeBytes)
+	}
+	if within.RepoBytes != 750 {
+		t.Errorf("repo bytes within the TTL = %d, want the cached 750", within.RepoBytes)
 	}
 
 	clock = clock.Add(time.Minute)
@@ -99,5 +114,8 @@ func TestCacheReusesTheWalkUntilTheTTLExpires(t *testing.T) {
 	}
 	if after.WorktreeBytes != 1500 {
 		t.Errorf("worktree bytes after the TTL = %d, want the re-walked 1500", after.WorktreeBytes)
+	}
+	if after.RepoBytes != 1000 {
+		t.Errorf("repo bytes after the TTL = %d, want the re-walked 1000", after.RepoBytes)
 	}
 }
