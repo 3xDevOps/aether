@@ -718,6 +718,17 @@ func (d *DB) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain
 	return err
 }
 
+// SetRunTitle updates only the run's title, leaving all other columns
+// untouched.
+func (d *DB) SetRunTitle(ctx context.Context, id domain.RunID, title string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE runs SET title = ? WHERE id = ?`, title, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set run title: %w", err)
+	}
+	return err
+}
+
 // TransferRun reassigns a run's owner. Existence of the new owner is
 // enforced by the runs.member_id REFERENCES members(id) foreign key
 // (foreign_keys pragma is on): a bogus member surfaces as ErrConflict

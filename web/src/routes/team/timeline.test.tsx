@@ -289,4 +289,24 @@ describe('workspace activity feed', () => {
     expect(useStore.getState().feed).toHaveLength(0)
     expect(useStore.getState().feedLoading).toBe(true)
   })
+
+  it('describes run title events with their title', async () => {
+    const client = feedApi([
+      {
+        id: 'evt_title',
+        seq: 4199,
+        time: '2026-08-14T10:04:00Z',
+        workspace_id: workspace.id,
+        run_id: 'run_1',
+        actor_id: bob.id,
+        type: 'run.title',
+        payload: { title: 'Session title' },
+      },
+    ])
+    seed()
+    render(<TimelineFeed params={{}} client={client} />)
+
+    expect(await screen.findByText('Session title')).toBeDefined()
+  })
+
 })

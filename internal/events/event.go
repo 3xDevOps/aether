@@ -92,6 +92,7 @@ type RunStatusPayload struct {
 	// Reason is an optional human-readable cause, e.g. "agent exited 1".
 	Reason string `json:"reason,omitempty"`
 }
+
 // RunTitlePayload reports the latest terminal title for a run.
 type RunTitlePayload struct {
 	Title string `json:"title"`
