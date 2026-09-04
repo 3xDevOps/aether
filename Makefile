@@ -13,6 +13,14 @@ LDFLAGS := -s -w \
 DIST := dist
 BUN  := bun
 
+# The Go version go.mod pins: the `toolchain` line when it names one, else the
+# `go` directive. `toolchain default` is legal and names no version, so only a
+# goX.Y value counts. Assigned lazily - only `lint` reads it.
+GO_TOOLCHAIN = $(shell awk ' \
+  $$1 == "toolchain" && $$2 ~ /^go[0-9]/ { t = $$2 } \
+  $$1 == "go" && $$2 ~ /^[0-9]/ { g = "go" $$2 } \
+  END { print (t != "" ? t : g) }' go.mod)
+
 # Release matrix. The server is Linux-only by design (see the v1 cut-line);
 # the CLI additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
@@ -44,8 +52,15 @@ test-scripts:
 vet:
 	go vet ./...
 
+# golangci-lint cannot decode export data produced by a Go newer than the one
+# that built it, so on a host whose default Go is ahead of go.mod's toolchain
+# it fails before linting anything. Run it under the toolchain go.mod pins,
+# which is what CI lints with too: setup-go installs the `go` directive's
+# version and the default GOTOOLCHAIN=auto re-execs into the `toolchain` line.
+# Go downloads that toolchain on demand, so no local setup is needed.
 lint:
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.4.0 run
+	GOTOOLCHAIN=$(or $(GO_TOOLCHAIN),$(error go.mod has no go or toolchain version to pin the linter to)) \
+		go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.4.0 run
 
 # Advisory: the two Moby CVEs reachable through the Docker SDK have no fixed
 # release, and govulncheck has no suppression flag, so this target exits

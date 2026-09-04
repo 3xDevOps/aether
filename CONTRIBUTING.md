@@ -41,6 +41,11 @@ make test
 make public-audit
 ```
 
+`make lint` runs golangci-lint under the toolchain pinned in `go.mod`, the same
+Go version CI uses. Without that pin, a host whose default Go is newer fails
+with `export data version 4 is greater than maximum supported version 2`
+before linting anything.
+
 The integration suite uses real Docker and git:
 
 ```sh
