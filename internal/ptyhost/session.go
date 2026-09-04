@@ -330,9 +330,12 @@ func (s *session) inject(actorName, actorColor, message string) error {
 // every lone CR or LF as CRLF (ICRNL and ONLCR) and renders any other
 // control byte in hat notation (ECHOCTL), TAB excepted, so a multi-line or
 // control-bearing steer echoes as something quite unlike what was written.
-// An expectation too large to hold is dropped whole rather than
-// half-matched. Callers hold mu, and stdinMu so the queue keeps the order
-// the writes reach the PTY.
+// The editing characters are left out: DEL and the other VERASE/VKILL
+// bindings are consumed by the line editor, which repaints rather than
+// echoes them, so they take the divergence path and cost a stall one more
+// threshold instead of being modelled wrongly here. An expectation too
+// large to hold is dropped whole rather than half-matched. Callers hold
+// mu, and stdinMu so the queue keeps the order the writes reach the PTY.
 func (s *session) expectEcho(in []byte, now time.Time) {
 	echo := make([]byte, 0, len(in)+8)
 	for _, b := range in {
@@ -341,7 +344,7 @@ func (s *session) expectEcho(in []byte, now time.Time) {
 			echo = append(echo, '\r', '\n')
 		case b == '\t':
 			echo = append(echo, b)
-		case b < 0x20 || b == 0x7f:
+		case b < 0x20:
 			echo = append(echo, '^', b^0x40)
 		default:
 			echo = append(echo, b)

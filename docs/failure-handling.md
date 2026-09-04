@@ -45,8 +45,11 @@ or typing on an attach) is usually what gets it talking.
 Steering is not itself that output. A steer's attributed banner is the
 server's own, and so is the terminal's echo of the steered line - or of
 keystrokes typed on an attach - which comes back even when the agent never
-reads its input. None of it refreshes the clock, so poking a hung agent
-does not hide the hang for another threshold. What the agent puts on the
+reads its input. The server discounts what it wrote, so poking a hung agent
+does not hide the hang for another threshold. That discount is best effort:
+an unusually configured terminal, a steer over 8 KiB, or an echo that takes
+more than a second to come back falls through to counting the bytes, and the
+run then takes one more threshold to park again. What the agent puts on the
 stream itself always counts: a full-screen agent that repaints its UI in
 response is producing real output and clears its stall, which is the point.
 The run parks on silence from the agent, not on silence from the stream.

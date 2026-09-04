@@ -483,9 +483,24 @@ func TestEchoExpectation(t *testing.T) {
 			steps:  []echoStep{{"wa", false}, {"ke\r\n", false}, {"got:wake\r\n", true}},
 		},
 		{
-			name:   "terminal without ONLCR echoes the CR alone",
+			// A terminal with either translation turned off, and an editing
+			// character the line editor repaints instead of echoing, all
+			// send back something the expectation does not predict. They
+			// take the divergence path: one more threshold at worst, and
+			// never a missed hang.
+			name:   "terminal without ONLCR echoes a bare LF",
 			writes: []string{"wake\r"},
-			steps:  []echoStep{{"wake\r", false}, {"got:wake\r\n", true}},
+			steps:  []echoStep{{"wake\n", true}},
+		},
+		{
+			name:   "terminal without ICRNL echoes the CR in hat notation",
+			writes: []string{"wake\r"},
+			steps:  []echoStep{{"wake^M", true}},
+		},
+		{
+			name:   "DEL is repainted by the line editor, not echoed",
+			writes: []string{"a\x7fb\r"},
+			steps:  []echoStep{{"a\x08 \x08b\r\n", true}},
 		},
 		{
 			name:   "multi-line steer echoes every newline as CRLF",

@@ -126,7 +126,7 @@ type Config struct {
 	// scheduler and all documented in docs/failure-handling.md. Zero means
 	// the scheduler's shipped default.
 	//
-	// StallThreshold is how long a run may go with no PTY output and no
+	// StallThreshold is how long a run may go with no agent output and no
 	// file changes before it parks at needs-attention; PollInterval is how
 	// often that is checked. CheckoutTTL is how long a finished run's
 	// checkout is kept before the GC reclaims it (negative disables GC).
