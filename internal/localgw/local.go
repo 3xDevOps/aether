@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -43,9 +45,10 @@ var localVerbs = []string{
 // /ws/envscan: the saved link config (link.repo updates it), the
 // background sync sessions, and the single environment-scan slot.
 type localState struct {
-	mu   sync.Mutex
-	cfg  cli.Config
-	sync *localops.SyncManager
+	mu    sync.Mutex
+	cfg   cli.Config
+	mtime time.Time
+	sync  *localops.SyncManager
 	// scanActive claims the one-scan-at-a-time slot for /ws/envscan.
 	scanActive bool
 	// scanArgv overrides the scan's harness command; tests set it to run
@@ -57,13 +60,51 @@ type localState struct {
 // fails: an unlinked (zero) cli.Config simply reports linked:false and
 // refuses the verbs that need a repo.
 func newLocalState(cfg Config) *localState {
-	return &localState{cfg: cfg.CLI, sync: localops.NewSyncManager()}
+	state := &localState{cfg: cfg.CLI, sync: localops.NewSyncManager()}
+	if path, err := cli.Path(); err == nil {
+		if info, err := os.Stat(path); err == nil {
+			state.mtime = info.ModTime()
+		}
+	}
+	return state
 }
 
-// snapshot returns the current link config under the lock.
+// cacheConfig updates the in-memory link and its file timestamp together.
+// Callers hold s.mu while changing the cache.
+func (s *localState) cacheConfig(cfg cli.Config) {
+	path, err := cli.Path()
+	if err != nil {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	s.cfg = cfg
+	s.mtime = info.ModTime()
+}
+
+// snapshot returns the current link config under the lock. The CLI may update
+// its config while the gateway is running, so reload it when its mtime changes.
 func (s *localState) snapshot() cli.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	path, err := cli.Path()
+	if err == nil {
+		if info, statErr := os.Stat(path); statErr == nil && !info.ModTime().Equal(s.mtime) {
+			if cfg, loadErr := cli.Load(); loadErr == nil {
+				if s.cfg.Active != "" {
+					named, ok := cfg.Named(s.cfg.Active)
+					if !ok {
+						return s.cfg
+					}
+					cfg = named
+				}
+				s.cacheConfig(cfg)
+			}
+		}
+	}
 	return s.cfg
 }
 
@@ -152,13 +193,14 @@ func namedLinks(cfg cli.Config) []linkRef {
 func (g *Gateway) localLinkStatus(*http.Request, []byte) (any, *protocol.Error) {
 	cfg := g.local.snapshot()
 	return struct {
-		Linked bool      `json:"linked"`
-		Addr   string    `json:"addr"`
-		User   string    `json:"user"`
-		Repo   string    `json:"repo"`
-		Links  []linkRef `json:"links,omitempty"`
-		Active string    `json:"active,omitempty"`
-	}{Linked: cfg.Repo != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
+		Linked           bool      `json:"linked"`
+		ServerConfigured bool      `json:"server_configured"`
+		Addr             string    `json:"addr"`
+		User             string    `json:"user"`
+		Repo             string    `json:"repo"`
+		Links            []linkRef `json:"links,omitempty"`
+		Active           string    `json:"active,omitempty"`
+	}{Linked: cfg.Repo != "", ServerConfigured: cfg.Addr != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
 		Links: namedLinks(cfg), Active: cfg.Active}, nil
 }
 
@@ -210,7 +252,7 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
-	g.local.cfg = cfg
+	g.local.cacheConfig(cfg)
 	return struct {
 		Repo   string `json:"repo"`
 		Remote string `json:"remote"`

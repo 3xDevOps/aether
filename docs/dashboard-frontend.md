@@ -658,11 +658,21 @@ the workspace: where the gateway serves `repo.push` it shows a **Push now**
 button that runs the push in the clone. Success names the branch that
 landed and keeps git's output in a "What git did" panel, open on arrival
 because `Everything up-to-date` and `[new branch]` are both success and
-mean different things; Continue then moves on. A refusal keeps the user on the
-step with git's own output in a monospace block, both retry and the
+mean different things; Continue then moves on. A refusal keeps the user on
+the step with git's own output in a monospace block, both retry and the
 copyable command still there. The branch is the workspace's base branch,
 so a workspace created with `--base` seeds the branch its runs fork from.
 An older gateway without the verb shows only the copyable command.
+
+The UI slice persists the current step and selected workspace, and first open
+routes an unboarded local gateway here. Completing the final step or
+navigating elsewhere marks the UI onboarded and clears that wizard state.
+
+The Link step distinguishes no configured server, a server with no repository,
+and a fully linked server. It refreshes on Retry and when the window regains
+focus, so a separate `aether link` command appears without restarting the GUI.
+The first four steps' components live in `steps.tsx`; the Environment step is
+`environment-step.tsx`.
 
 The Environment step offers two cards: mirror this machine (recommended,
 preselected) and keep the standard environment the workspace was created

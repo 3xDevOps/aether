@@ -79,6 +79,12 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     s.setOverlaps(overlaps)
     s.setCapabilities(capabilities)
     s.setHydrated(true)
+    if (
+      !store.getState().onboarded &&
+      capabilities?.local?.includes('link.status') === true
+    ) {
+      store.setState({ route: { name: 'onboarding', params: {} } })
+    }
     s.setUnreachable(null)
     return true
   } catch (err) {

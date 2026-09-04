@@ -1,7 +1,7 @@
 // The onboarding steps. Each step talks to the gateway through the injected
-// Api client and reports completion to the wizard; nothing here persists.
-// Re-entering the wizard re-checks reality instead of trusting stale state,
-// and every server refusal is rendered verbatim.
+// Api client and reports completion to the wizard. Step and workspace choices
+// are stored in the UI slice, while link status is checked against the local
+// gateway whenever this route is entered or refocused.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -32,11 +32,17 @@ const pane =
   'max-h-64 overflow-x-auto overflow-y-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
 
 /**
- * Step 1: is this machine linked? Checked on every mount - the user may have
- * run `aether link` in a terminal since the last look - and mirrored into the
- * store so the status bar agrees with the wizard.
+ * Step 1: is this machine linked? A server link without a repository skips
+ * directly to the repository form; the gateway resolves its sole workspace
+ * when the user submits that form.
  */
-export function LinkStep({ client, onNext }: { client: Api; onNext: () => void }) {
+export function LinkStep({
+  client,
+  onNext,
+}: {
+  client: Api
+  onNext: (step: number) => void
+}) {
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const [status, setStatus] = useState<LinkStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -54,27 +60,20 @@ export function LinkStep({ client, onNext }: { client: Api; onNext: () => void }
 
   useEffect(() => {
     void check()
+    const onFocus = () => void check()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [check])
 
   const loading = useDelayed(status === null && error === null)
+  const serverConfigured = status !== null && status.server_configured
 
   return (
     <section aria-label="Link" className="space-y-3">
       <h2 className="text-sm font-medium">Link to your server</h2>
       {loading && <Skeleton className="h-16 w-full" />}
       {error && <p className="text-xs text-state-failed">{error}</p>}
-      {status?.linked && (
-        <>
-          <p className="text-sm">
-            Linked to <span className="font-mono">{status.addr}</span> as{' '}
-            <span className="font-medium">{status.user}</span>.
-          </p>
-          <Button size="sm" onClick={onNext}>
-            Continue
-          </Button>
-        </>
-      )}
-      {status && !status.linked && (
+      {status && !serverConfigured && (
         <div className="space-y-2 text-sm">
           <p>
             This machine is not linked yet. The gateway needs an SSH identity
@@ -92,6 +91,32 @@ export function LinkStep({ client, onNext }: { client: Api; onNext: () => void }
             Retry
           </Button>
         </div>
+      )}
+      {status && serverConfigured && !status.linked && (
+        <div className="space-y-2 text-sm">
+          <p>
+            Connected to <span className="font-mono">{status.addr}</span> as{' '}
+            <span className="font-medium">{status.user}</span>.
+          </p>
+          <p className="text-muted-foreground">
+            No repository is linked yet. Continue to connect one.
+          </p>
+          <Button size="sm" onClick={() => onNext(3)}>
+            Continue to repository
+          </Button>
+        </div>
+      )}
+      {status && serverConfigured && status.linked && (
+        <>
+          <p className="text-sm">
+            Linked to <span className="font-mono">{status.addr}</span> as{' '}
+            <span className="font-medium">{status.user}</span>, with{' '}
+            <span className="font-mono">{status.repo}</span>.
+          </p>
+          <Button size="sm" onClick={() => onNext(1)}>
+            Continue
+          </Button>
+        </>
       )}
     </section>
   )
@@ -431,12 +456,16 @@ export function FirstRunStep({
   client,
   workspace,
   defaultHarness,
+  onBackToWorkspace,
 }: {
   client: Api
   workspace: Workspace | null
   defaultHarness?: string
+  onBackToWorkspace?: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
+  const setOnboarded = useStore((s) => s.setOnboarded)
+
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [harness, setHarness] = useState('')
   const [custom, setCustom] = useState('')
@@ -471,6 +500,7 @@ export function FirstRunStep({
         task: task.trim(),
         harness: chosen,
       })
+      setOnboarded(true)
       navigate('run', { runId: run.id })
     } catch (err) {
       setError(message(err))
@@ -479,17 +509,35 @@ export function FirstRunStep({
     }
   }
 
+  const goToBoard = () => {
+    setOnboarded(true)
+    navigate('board')
+  }
+
+  if (!workspace) {
+    return (
+      <section aria-label="First run" className="space-y-3">
+        <h2 className="text-sm font-medium">Launch your first run</h2>
+        <p className="text-sm text-muted-foreground">
+          Choose a workspace before launching a run.
+        </p>
+        <Button variant="outline" size="sm" onClick={onBackToWorkspace}>
+          Back to Workspace
+        </Button>
+      </section>
+    )
+  }
+
   return (
     <section aria-label="First run" className="space-y-3">
       <h2 className="text-sm font-medium">Launch your first run</h2>
       {/* A mirror build approved two steps back may still be running; the
           banner says the starter image is in use so a missing toolchain
           reads as expected, not broken. */}
-      <EnvironmentBanner client={client} workspaceId={workspace?.id} />
+      <EnvironmentBanner client={client} workspaceId={workspace.id} />
       <p className="text-sm text-muted-foreground">
-        The run forks from{' '}
-        <span className="font-mono">{workspace?.base_branch ?? 'the base branch'}</span>{' '}
-        in {workspace?.name ?? 'your workspace'}.
+        The run forks from <span className="font-mono">{workspace.base_branch}</span>{' '}
+        in {workspace.name}.
       </p>
       {freeText ? (
         <label className="block space-y-1 text-sm">
@@ -541,9 +589,14 @@ export function FirstRunStep({
         />
       </label>
       {error && <p className="text-xs text-state-failed">{error}</p>}
-      <Button size="sm" disabled={busy || !ready} onClick={() => void launch()}>
-        Launch
-      </Button>
+      <div className="flex gap-2">
+        <Button size="sm" disabled={busy || !ready} onClick={() => void launch()}>
+          Launch
+        </Button>
+        <Button variant="outline" size="sm" onClick={goToBoard}>
+          Go to board
+        </Button>
+      </div>
       <div className="space-y-1 rounded-md border bg-card p-3 text-xs text-muted-foreground">
         <p className="font-medium text-foreground">No agent subscription yet?</p>
         <p>

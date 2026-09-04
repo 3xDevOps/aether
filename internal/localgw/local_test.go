@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -66,6 +67,30 @@ func newVerbGateway(t *testing.T, backend Backend, cfg cli.Config) *Gateway {
 	return g
 }
 
+// useTempConfigDir points cli.Save/cli.Load at a scratch config directory.
+// Both variables are needed because os.UserConfigDir reads different
+// environment variables on Unix and Windows.
+func useTempConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
+}
+
+func saveConfigAt(t *testing.T, cfg cli.Config, mtime time.Time) {
+	t.Helper()
+	if err := cli.Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	path, err := cli.Path()
+	if err != nil {
+		t.Fatalf("config path: %v", err)
+	}
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatalf("set config mtime: %v", err)
+	}
+}
+
 // localGit runs one git command for the pull test's scratch repos.
 func localGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -117,11 +142,12 @@ func TestLocalLinkStatus(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
 	var got struct {
-		Linked bool   `json:"linked"`
-		Addr   string `json:"addr"`
-		User   string `json:"user"`
-		Repo   string `json:"repo"`
-		Links  []struct {
+		Linked           bool   `json:"linked"`
+		ServerConfigured bool   `json:"server_configured"`
+		Addr             string `json:"addr"`
+		User             string `json:"user"`
+		Repo             string `json:"repo"`
+		Links            []struct {
 			Name string `json:"name"`
 			Addr string `json:"addr"`
 		} `json:"links"`
@@ -130,7 +156,7 @@ func TestLocalLinkStatus(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Linked || got.Addr != "host:2222" || got.User != "alice" || got.Repo != "/src/repo" {
+	if !got.Linked || !got.ServerConfigured || got.Addr != "host:2222" || got.User != "alice" || got.Repo != "/src/repo" {
 		t.Fatalf("link.status = %+v", got)
 	}
 	if got.Active != "prod" {
@@ -151,8 +177,8 @@ func TestLocalLinkStatus(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Linked {
-		t.Fatalf("unlinked gateway reports linked: %+v", got)
+	if got.Linked || got.ServerConfigured {
+		t.Fatalf("unlinked gateway reports configured/linked: %+v", got)
 	}
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &keys); err != nil {
@@ -163,6 +189,132 @@ func TestLocalLinkStatus(t *testing.T) {
 	}
 	if _, ok := keys["active"]; ok {
 		t.Errorf("top-level link.status carries active: %s", rec.Body)
+	}
+}
+func TestLocalSnapshotRefreshesConfigAfterMtimeChange(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{Addr: "host:2222", User: "alice"}
+	initialMtime := time.Unix(1_700_000_000, 0)
+	saveConfigAt(t, initial, initialMtime)
+
+	state := newLocalState(Config{CLI: initial})
+	if got := state.snapshot(); got.Repo != "" {
+		t.Fatalf("initial repo = %q, want empty", got.Repo)
+	}
+
+	updated := cli.Config{
+		Addr: "host:2222",
+		User: "alice",
+		Repo: "/src/repo",
+	}
+	updatedMtime := initialMtime.Add(time.Second)
+	saveConfigAt(t, updated, updatedMtime)
+
+	if got := state.snapshot(); got.Repo != updated.Repo {
+		t.Fatalf("refreshed repo = %q, want %q", got.Repo, updated.Repo)
+	}
+}
+
+func TestLocalSnapshotRefreshesNamedOverlayAfterMtimeChange(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/old"}},
+	}
+	initialMtime := time.Unix(1_700_000_000, 0)
+	saveConfigAt(t, initial, initialMtime)
+	selected, ok := initial.Named("prod")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	state := newLocalState(Config{CLI: selected})
+	if got := state.snapshot(); got.Repo != "/old" {
+		t.Fatalf("initial named repo = %q, want /old", got.Repo)
+	}
+
+	updated := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/new"}},
+	}
+	saveConfigAt(t, updated, initialMtime.Add(time.Second))
+
+	got := state.snapshot()
+	if got.Repo != "/new" || got.Active != "prod" {
+		t.Fatalf("refreshed named config = %+v", got)
+	}
+}
+
+func TestLocalLinkRepoKeepsNewRepoForActiveNamedProfile(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/old"}},
+	}
+	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
+	selected, ok := initial.Named("prod")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	g := newVerbGateway(t, &verbStubBackend{}, selected)
+	// Force the next disk write to be observable without depending on the
+	// filesystem timestamp resolution.
+	g.local.mtime = time.Unix(1, 0)
+	repo := t.TempDir()
+	localGit(t, repo, "init")
+
+	body := `{"repo":` + strconv.Quote(repo) + `,"workspace_id":"ws_1"}`
+	rec := do(g, http.MethodPost, "/local/v1/link.repo", body, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("link.repo = %d: %s", rec.Code, rec.Body)
+	}
+
+	got := g.local.snapshot()
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Repo != abs {
+		t.Fatalf("snapshot repo = %q, want newly linked %q", got.Repo, abs)
+	}
+}
+
+func TestLocalSnapshotKeepsCachedNamedConfigWhenProfileDisappears(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Repo:  "/default",
+		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/prod"}},
+	}
+	initialMtime := time.Unix(1_700_000_000, 0)
+	saveConfigAt(t, initial, initialMtime)
+	selected, ok := initial.Named("prod")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	state := newLocalState(Config{CLI: selected})
+
+	removed := initial
+	removed.Links = nil
+	removedMtime := initialMtime.Add(time.Second)
+	saveConfigAt(t, removed, removedMtime)
+
+	got := state.snapshot()
+	if got.Active != "prod" || got.Addr != "prod:2222" || got.Repo != "/prod" {
+		t.Fatalf("cached named config = %+v", got)
+	}
+	if !state.mtime.Equal(initialMtime) {
+		t.Fatalf("cached mtime = %v, want unchanged %v", state.mtime, initialMtime)
+	}
+
+	restored := initial
+	restored.Links = []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/restored"}}
+	saveConfigAt(t, restored, removedMtime.Add(time.Second))
+	if got := state.snapshot(); got.Repo != "/restored" {
+		t.Fatalf("snapshot did not retry after profile restore: %+v", got)
 	}
 }
 
