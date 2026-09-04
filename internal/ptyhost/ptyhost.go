@@ -198,6 +198,32 @@ func (h *Host) StopSession(ctx context.Context, key SessionKey) error {
 	return nil
 }
 
+// RemoveRunTranscripts removes the agent transcript and every run-shell
+// transcript for a run after the scheduler has stopped their sessions.
+func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	name := filepath.Base(string(run))
+	patterns := []string{
+		filepath.Join(h.cfg.TranscriptDir, name+".cast"),
+		filepath.Join(h.cfg.TranscriptDir, name+".*.cast"),
+		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.cast"),
+	}
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return fmt.Errorf("ptyhost: find run transcripts: %w", err)
+		}
+		for _, path := range matches {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("ptyhost: remove run transcript: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 // LastOutput reports the wall-clock time of the last byte the agent wrote
 // to the session's PTY; false if the key has no session. Bytes that came
 // from the server are excluded - an injection banner, and the terminal's

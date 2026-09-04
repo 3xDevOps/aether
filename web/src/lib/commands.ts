@@ -1,8 +1,8 @@
 // Every verb the dashboard can perform on a run or on the board, as data.
 // The command palette and the visible action buttons render the same list, so
 // a label, an icon or a capability gate is written once and both surfaces
-// agree. Nothing here touches the store's run state: the steering verbs go to
-// the gateway and the event stream reports the result.
+// agree. Gateway verbs go through the API; deleting also removes the
+// confirmed run from the local store.
 
 import type { LucideIcon } from 'lucide-react'
 import {
@@ -21,6 +21,7 @@ import {
   Shield,
   ShieldOff,
   Square,
+  Trash2,
   UserPlus,
 } from 'lucide-react'
 import { useCallback } from 'react'
@@ -43,6 +44,8 @@ export interface CommandDeps {
   ackAll: () => void
   /** Keeps a pull's git output for the diff tab to show. */
   recordPull: (runID: string, result: PullResult) => void
+  /** Removes a run after the server has deleted its durable record. */
+  removeRun: (runID: string) => void
   /** The template form's open state lives with the dialog host, not the store. */
   onTemplates: () => void
 }
@@ -186,7 +189,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     })
   }
 
-  if (!finished && mayKill) {
+  if (run.status === 'needs-attention' && mayKill) {
     list.push({
       id: 'close:merged',
       label: 'Close as merged',
@@ -213,18 +216,39 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       },
       perform: (d) => d.api.runClose(id, 'abandoned'),
     })
+  }
+
+  if (mayKill) {
     list.push({
       id: 'kill',
       label: 'Kill run',
       short: 'Kill',
       Icon: Square,
-      done: 'Killed',
+      done: finished ? 'Already stopped' : 'Killed',
       confirm: {
         title: 'Kill this run?',
-        body: 'The agent stops immediately. Work already committed to the run branch stays.',
+        body: finished
+          ? 'This run is already stopped. Use Delete run to remove it.'
+          : 'The agent stops immediately. Work already committed to the run branch stays.',
         action: 'Kill run',
       },
       perform: (d) => d.api.runKill(id),
+    })
+    list.push({
+      id: 'delete',
+      label: 'Delete run',
+      short: 'Delete',
+      Icon: Trash2,
+      done: 'Deleted',
+      confirm: {
+        title: 'Delete this run?',
+        body: 'The run, transcript, and coordination records will be removed from Aether.',
+        action: 'Delete run',
+      },
+      perform: (d) =>
+        d.api.runDelete(id).then(() => {
+          d.removeRun(id)
+        }),
     })
   }
 
@@ -341,6 +365,7 @@ export function useCommandRunner(
   const openDialog = useStore((s) => s.openPaletteDialog)
   const ackAll = useStore((s) => s.ackAll)
   const recordPull = useStore((s) => s.recordPull)
+  const removeRun = useStore((s) => s.removeRun)
   const { onDone, onTemplates } = opts
 
   return useCallback(
@@ -352,6 +377,7 @@ export function useCommandRunner(
         openDialog,
         ackAll,
         recordPull,
+        removeRun,
         onTemplates: onTemplates ?? (() => {}),
       })
       const done = command.done
@@ -363,6 +389,6 @@ export function useCommandRunner(
         toast.error(`${done} failed: ${message(err)}`)
       }
     },
-    [ackAll, navigate, onDone, onTemplates, openDialog, recordPull],
+    [ackAll, navigate, onDone, onTemplates, openDialog, recordPull, removeRun],
   )
 }

@@ -1,11 +1,11 @@
 // The focused run's verbs as visible buttons. The list, the gates, the icons
 // and the words all come from `src/lib/commands.ts`, so this bar and the
 // command palette can never drift apart; buttons take the short label and
-// keep the full one as their tooltip, because eight of these share one
-// header row. The two things this surface adds are the confirm step - a
-// button is one click away from an accident, where a palette item is already
-// several deliberate steps away from one - and the in-flight state, which
-// stops a slow verb being fired twice.
+// keep the full one as their tooltip, because the action bar stays compact.
+// The two things this surface adds are the confirm step - a button is one
+// click away from an accident, where a palette item is already several
+// deliberate steps away from one - and the in-flight state, which stops a
+// slow verb being fired twice.
 
 import { Loader2, UserPlus } from 'lucide-react'
 import { useState } from 'react'

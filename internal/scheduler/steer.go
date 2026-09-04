@@ -13,13 +13,18 @@ import (
 // Kill terminates a run: any non-terminal state moves to abandoned with
 // reason "killed"; the checkout, branch, and transcript are preserved and
 // partial work is committed as "wip:". For a supervised run the container
-// is stopped and the wait goroutine finishes the job.
+// is stopped and the wait goroutine finishes the job. Terminal calls are
+// idempotent.
 func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
 	s.mu.Lock()
 	entry := s.runs[run]
 	if entry == nil {
 		s.mu.Unlock()
 		return s.killUnsupervised(ctx, run, actor)
+	}
+	if entry.status.Terminal() {
+		s.mu.Unlock()
+		return nil
 	}
 	entry.killRequested = true
 	entry.killActor = actor
@@ -53,7 +58,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		return err
 	}
 	if r.Status.Terminal() {
-		return fmt.Errorf("%w: run is already %s", ErrInvalidTransition, r.Status)
+		return nil
 	}
 	if r.Worktree != "" {
 		if _, cerr := s.cfg.Git.CommitAll(ctx, id, "wip: "+taskLine(r.Task)); cerr != nil {
@@ -77,7 +82,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	}
 	if r.Status.Terminal() {
 		s.mu.Unlock()
-		return fmt.Errorf("%w: run is already %s", ErrInvalidTransition, r.Status)
+		return nil
 	}
 	err = s.transitionLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor)
 	s.mu.Unlock()
@@ -87,6 +92,55 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	s.removeSidecar(id)
 	s.publishTimeline(ctx, r.WorkspaceID, id, actor, events.TimelineKill, "")
 	return nil
+}
+
+// DeleteRun stops a live run if necessary, waits for supervision to release
+// its checkout, removes the checkout and transcripts, and then removes the
+// durable run record and its dependent data. The published branch remains.
+// Terminal runs are deleted directly; deleting never leaves a live container.
+func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
+	s.mu.Lock()
+	entry := s.runs[run]
+	alreadyKilling := entry != nil && entry.killRequested
+	terminal := entry != nil && entry.status.Terminal()
+	var done <-chan struct{}
+	if entry != nil {
+		done = entry.done
+	}
+	s.mu.Unlock()
+
+	if entry != nil {
+		if !terminal && !alreadyKilling {
+			if err := s.Kill(ctx, run, actor); err != nil {
+				return err
+			}
+		}
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	} else {
+		current, err := s.cfg.Store.GetRun(ctx, run)
+		if err != nil {
+			return err
+		}
+		if !current.Status.Terminal() {
+			if err := s.Kill(ctx, run, actor); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := s.cfg.Git.RemoveRunCheckout(ctx, run); err != nil {
+		return fmt.Errorf("scheduler: delete run checkout: %w", err)
+	}
+	if err := s.cfg.PTY.RemoveRunTranscripts(ctx, run); err != nil {
+		return fmt.Errorf("scheduler: delete run transcripts: %w", err)
+	}
+	return s.cfg.Store.DeleteRun(ctx, run)
 }
 
 // Pause freezes a supervised run's container (SIGSTOP semantics). Status

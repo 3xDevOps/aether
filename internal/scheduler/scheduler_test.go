@@ -699,14 +699,55 @@ func TestInvalidAPITransitions(t *testing.T) {
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("CloseRun on terminal run: %v, want ErrInvalidTransition", err)
 	}
-	if err := e.sched.Kill(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("Kill on terminal run: %v, want ErrInvalidTransition", err)
+	if err := e.sched.Kill(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Kill on terminal run: %v", err)
 	}
 	if err := e.sched.Pause(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Pause on finished run: %v, want ErrInvalidTransition", err)
 	}
 	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi"); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Inject on finished run: %v, want ErrInvalidTransition", err)
+	}
+}
+
+func TestDeleteRunRemovesTerminalRun(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run := &domain.Run{
+		WorkspaceID: e.ws.ID,
+		MemberID:    e.member.ID,
+		Task:        "remove stale run",
+		Harness:     "claude",
+		Mode:        domain.LaunchTUI,
+		Status:      domain.RunFailed,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := e.db.CreateRun(t.Context(), run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	if err := e.sched.DeleteRun(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	if _, err := e.db.GetRun(t.Context(), run.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetRun after delete: %v, want store.ErrNotFound", err)
+	}
+}
+
+func TestDeleteRunStopsActiveRunBeforeRemovingIt(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, container := e.launchFake(t, "remove active run")
+
+	if err := e.sched.DeleteRun(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	if _, err := e.db.GetRun(t.Context(), run.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetRun after active delete: %v, want store.ErrNotFound", err)
+	}
+	if container.currentState() != "stopped" {
+		t.Fatalf("container state = %q, want stopped", container.currentState())
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("active run container was not destroyed")
 	}
 }
 

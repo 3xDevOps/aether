@@ -25,6 +25,7 @@ type GitEngine interface {
 type PTYHost interface {
 	StartSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error
 	StopSession(ctx context.Context, key ptyhost.SessionKey) error
+	RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 	StopSessionsWithPrefix(ctx context.Context, prefix string)
 	ActiveSessions(prefix string) []ptyhost.SessionKey
 	LastOutput(key ptyhost.SessionKey) (time.Time, bool)

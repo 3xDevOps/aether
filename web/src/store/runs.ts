@@ -26,6 +26,7 @@ export interface RunsSlice {
   runs: Record<string, RunRecord>
   setRuns: (runs: Run[]) => void
   upsertRun: (run: Run) => void
+  removeRun: (runID: string) => void
   applyRunStatus: (
     runID: string,
     to: RunStatus,
@@ -46,6 +47,13 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
     })),
   upsertRun: (run) =>
     set((s) => ({ runs: { ...s.runs, [run.id]: toRecord(run, s.runs[run.id]) } })),
+  removeRun: (runID) =>
+    set((s) => {
+      if (!s.runs[runID]) return {}
+      const runs = { ...s.runs }
+      delete runs[runID]
+      return { runs }
+    }),
   applyRunStatus: (runID, to, reason, time) =>
     set((s) => {
       const current = s.runs[runID]

@@ -208,6 +208,9 @@ func (f *fakeRuns) Kill(_ context.Context, run domain.RunID, actor domain.Member
 	return f.record(fmt.Sprintf("kill:%s:%s", run, actor))
 }
 
+func (f *fakeRuns) DeleteRun(_ context.Context, run domain.RunID, actor domain.MemberID) error {
+	return f.record(fmt.Sprintf("delete:%s:%s", run, actor))
+}
 func (f *fakeRuns) Pause(_ context.Context, run domain.RunID, actor domain.MemberID) error {
 	return f.record(fmt.Sprintf("pause:%s:%s", run, actor))
 }

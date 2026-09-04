@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Toaster, toast } from 'sonner'
 import { ConnectionError } from '@/components/connection-error'
+import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
 import { TitleBar } from '@/components/shell/title-bar'
 import { ThemeEffect } from '@/components/theme'
@@ -42,27 +43,30 @@ export function App() {
   }, [resetConnection])
 
   return (
-    // The desktop window is frameless, so the title bar has to outrank the
-    // branch below it: without it the error page would leave an offline user
-    // no way to move or close the window.
-    <div className="flex h-full flex-col">
-      <TitleBar />
-      <div className="min-h-0 flex-1">
-        {blocked ? (
-          <ConnectionError
-            kind={unreachable}
-            dead={streamDead}
-            error={hydrationError}
-            onRetry={retry}
-          />
-        ) : (
-          <>
-            <ThemeEffect />
-            <AppShell />
-            <Toaster position="bottom-right" richColors theme={theme} />
-          </>
-        )}
+    <>
+      <LaunchSplash />
+      {/* The desktop window is frameless, so the title bar has to outrank the
+          branch below it: without it the error page would leave an offline user
+          no way to move or close the window. */}
+      <div className="flex h-full flex-col">
+        <TitleBar />
+        <div className="min-h-0 flex-1">
+          {blocked ? (
+            <ConnectionError
+              kind={unreachable}
+              dead={streamDead}
+              error={hydrationError}
+              onRetry={retry}
+            />
+          ) : (
+            <>
+              <ThemeEffect />
+              <AppShell />
+              <Toaster position="bottom-right" richColors theme={theme} />
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   )
 }

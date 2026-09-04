@@ -363,5 +363,6 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		bridgeDigest:  sc.BridgeDigest,
 		bridgePath:    sc.BridgePath,
 		coordDir:      sc.CoordDir,
+		done:          make(chan struct{}),
 	}
 }

@@ -249,5 +249,39 @@ func (d *DB) SetRunProtected(ctx context.Context, id domain.RunID, protected boo
 }
 
 func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
-	return d.execDelete(ctx, "delete run", `DELETE FROM runs WHERE id = ?`, id)
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: delete run: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	deletes := []struct {
+		query string
+		args  []any
+	}{
+		{`DELETE FROM approvals WHERE run_id = ?`, []any{id}},
+		{`DELETE FROM run_costs WHERE run_id = ?`, []any{id}},
+		{`DELETE FROM run_messages WHERE from_run = ? OR to_run = ?`, []any{id, id}},
+	}
+	for _, deletion := range deletes {
+		if _, execErr := tx.ExecContext(ctx, deletion.query, deletion.args...); execErr != nil {
+			return fmt.Errorf("store: delete run: %w", mapConstraint(execErr, ErrInUse))
+		}
+	}
+
+	result, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: delete run: %w", mapConstraint(err, ErrInUse))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: delete run: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: delete run: %w", ErrNotFound)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: delete run: commit: %w", err)
+	}
+	return nil
 }

@@ -330,6 +330,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runGet: vi.fn(async () => run()),
     runLaunch: vi.fn(async () => run()),
     runKill: vi.fn(async () => ({})),
+    runDelete: vi.fn(async () => ({})),
     runPause: vi.fn(async () => ({})),
     runResume: vi.fn(async () => ({})),
     runInject: vi.fn(async () => ({})),

@@ -23,6 +23,7 @@ type PTYAttacher interface {
 type RunController interface {
 	Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
+	DeleteRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Pause(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Resume(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	// Paused reports whether the run's container is currently frozen;
