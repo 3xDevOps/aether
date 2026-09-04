@@ -489,6 +489,8 @@ describe('onboarding wizard', () => {
           { name: 'pi', installed: false },
           { name: 'amp', installed: false },
         ],
+        searched: ['/usr/bin', '/bin'],
+        warning: 'read PATH from the login shell: /bin/zsh -l -i -c: exit status 1',
       })),
     })
     seed()
@@ -500,6 +502,20 @@ describe('onboarding wizard', () => {
     ).toBeDefined()
     expect(screen.getByText(/Claude Code, Codex, pi, or Amp/)).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Start scan' })).toBeNull()
+
+    // The notice says where the gateway looked, why the shell could not
+    // widen that, and how to fix it, so an agent installed off the PATH
+    // is a fixable state, not a mystery.
+    expect(screen.getByText('Aether looked in: /usr/bin, /bin')).toBeDefined()
+    expect(
+      screen.getByText(
+        /could not read your shell's PATH \(read PATH from the login shell: \/bin\/zsh -l -i -c: exit status 1\), so only the standard folders were checked/,
+      ),
+    ).toBeDefined()
+    expect(screen.getByText(/add that folder to your shell PATH/)).toBeDefined()
+    // Check again re-asks the gateway without leaving the step.
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(client.envHarnesses).toHaveBeenCalledTimes(2))
 
     // The keep card is the way forward.
     fireEvent.click(
@@ -619,6 +635,7 @@ describe('environment step scan flow', () => {
       .mockRejectedValueOnce(new Error('the gateway is restarting'))
       .mockResolvedValue({
         harnesses: [{ name: 'claude', installed: true }],
+        searched: ['/usr/local/bin'],
       })
     const client = fakeApi({ envHarnesses })
     renderStep(client)

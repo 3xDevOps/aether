@@ -687,7 +687,10 @@ with. Mirror lists the setup-capable harnesses found on this machine
 `/ws/envscan` behind a one-line status with a collapsed "View process"
 expander streaming the raw agent output, and hands the validated Dockerfile
 and manifest pair to the review gate; when no supported CLI is installed the
-card says so and names the four. Cancel and every scan failure land on "try
+card says so, names the four, lists the folders the gateway searched, notes
+when the login shell could not be asked for its `PATH`, and offers "Check
+again", which widens `PATH` and detects again so an agent installed since
+is found without relaunching. Cancel and every scan failure land on "try
 again" or "keep the standard environment", so the wizard never dead-ends.
 Non-admin members see only the keep path, because saving an environment is
 an administrator method.

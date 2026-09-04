@@ -819,6 +819,11 @@ export interface HarnessStatus {
  * suggestion for the wizard's from-repo input. */
 export interface EnvHarnessesResult {
   harnesses: HarnessStatus[]
+  /** The folders the gateway looked in, so an empty result can say where. */
+  searched: string[]
+  /** Why the login shell could not be asked for its PATH; set only when
+   * the probe failed and just the standard folders were checked. */
+  warning?: string
   repo_path?: string
 }
 

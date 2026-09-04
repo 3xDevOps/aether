@@ -158,8 +158,9 @@ func runScanCommand(ctx context.Context, argvTemplate []string, prompt, workDir 
 	cmd.Dir = workDir
 	cmd.Stdout = output
 	cmd.Stderr = output
-	// A harness may leave children holding the output pipe; do not let
-	// Wait hang on them after the process itself is gone.
+	// A cancelled scan must take the harness's children with it, or they
+	// keep the output pipe open and Wait only returns after WaitDelay.
+	detachCommand(cmd)
 	cmd.WaitDelay = 5 * time.Second
 
 	emit(ScanEvent{Status: ScanStatusRunning})

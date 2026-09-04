@@ -531,6 +531,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
         { name: 'pi', installed: false },
         { name: 'amp', installed: false },
       ],
+      searched: ['/usr/local/bin', '/home/alice/.local/bin'],
       repo_path: '/src/repo',
     })),
     // A scan that succeeds with the canned pair on the next tick, like the
