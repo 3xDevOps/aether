@@ -657,3 +657,79 @@ func TestInventoryCarriesRegularFiles(t *testing.T) {
 		}
 	}
 }
+
+// The preview a dashboard renders must agree with the push: a finding in
+// an installed plugin's own test fixture leaves the harness importable
+// and is reported as third-party, not as the user's secret.
+func TestInventoryVendoredPluginFindingDoesNotBlock(t *testing.T) {
+	root := setupClaudeRoot(t)
+	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := vendoredFixture("6.3.0")
+	writeAll(t, root, map[string]string{
+		"settings.json": `{"model":"opus"}`,
+		rel:             string(secret),
+	})
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Blocked {
+		t.Fatalf("blocked on vendored plugin content: %s %s", preview.BlockedPath, preview.BlockedDetail)
+	}
+	if preview.Files != 1 {
+		t.Fatalf("files = %d, want the one clean file", preview.Files)
+	}
+	var found bool
+	for _, e := range preview.Excluded {
+		if e.Path != rel {
+			continue
+		}
+		found = true
+		if e.Reason != ExcludeVendoredSecret {
+			t.Errorf("reason = %q, want %q", e.Reason, ExcludeVendoredSecret)
+		}
+		if !strings.Contains(e.Detail, "third-party plugin content") {
+			t.Errorf("detail does not name it as third-party: %q", e.Detail)
+		}
+		// The line is still named, the way every other finding is.
+		if !strings.Contains(e.Detail, " at ") {
+			t.Errorf("detail names no location: %q", e.Detail)
+		}
+	}
+	if !found {
+		t.Fatalf("%s was not reported at all: %+v", rel, preview.Excluded)
+	}
+}
+
+// A preview must never promise what a push then refuses, so both run the
+// same walk over the same tree: a vendored finding and a real one
+// together leave the preview blocked on the user's own file alone.
+func TestInventoryVendoredAndOwnFindingAgreeWithPush(t *testing.T) {
+	root := setupClaudeRoot(t)
+	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAll(t, root, map[string]string{
+		"settings.json":          `{"ok":true}`,
+		"memory/notes.md":        string(secret),
+		vendoredFixture("6.3.0"): string(secret),
+	})
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preview.Blocked || preview.BlockedPath != "memory/notes.md" {
+		t.Fatalf("blocked = %v on %q, want the user's own file", preview.Blocked, preview.BlockedPath)
+	}
+	_, _, pushErr := DiscoverFiles(t.Context(), "claude", nil)
+	var de *DiscoverError
+	if !errors.As(pushErr, &de) || de.Path != "memory/notes.md" {
+		t.Fatalf("push refusal = %v, want memory/notes.md", pushErr)
+	}
+}

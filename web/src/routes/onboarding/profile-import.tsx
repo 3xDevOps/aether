@@ -3,8 +3,11 @@
 // servers, plugins - to the server, one harness at a time. Every harness
 // is previewed first (profile.preview uploads nothing), the preview's
 // exclusions are shown with the reason the guard gave, and only a checked
-// row is pushed. A scanner finding blocks its harness outright: the fix is
-// local, and the --allow-secret override stays on the CLI. The agent path
+// row is pushed. A scanner finding in a file the user wrote blocks its
+// harness outright: the fix is local, and the --allow-secret override
+// stays on the CLI. A finding inside content a harness installed from a
+// marketplace drops that one file instead, and is called out as
+// third-party rather than left to read as the user's own. The agent path
 // (a `profile` scan) only proposes a checklist; the push is still the
 // user's click.
 
@@ -63,14 +66,32 @@ export function previewSummary(preview: ProfilePreview): string {
 }
 
 /** The exclusion behind a blocked preview: the one the gateway named, or
- * the scanner finding when it named none. A scanner finding is the only
- * thing that blocks a push; everything else is carried as a skip. */
+ * the scanner finding when it named none. A finding in a file the user
+ * wrote is the only thing that blocks a push; everything else, a finding
+ * in vendored plugin content included, is carried as a skip. */
 function flagged(preview: ProfilePreview) {
   const excluded = preview.excluded ?? []
   return (
     excluded.find((e) => e.path === preview.blocked_path) ??
     excluded.find((e) => e.reason === 'secret')
   )
+}
+
+/** Scanner findings inside the plugin trees the harness installs into.
+ * They read as the user's own secrets in a flat exclusion list, so the
+ * row names where they came from.
+ *
+ * `excluded` is capped by the gateway while `excluded_total` is exact,
+ * so a capped list can only support a floor, never a count. */
+function vendoredFindings(preview: ProfilePreview): {
+  count: number
+  atLeast: boolean
+} {
+  const excluded = preview.excluded ?? []
+  return {
+    count: excluded.filter((e) => e.reason === 'vendored-secret').length,
+    atLeast: (preview.excluded_total ?? excluded.length) > excluded.length,
+  }
 }
 
 /** What blocked this profile, in the gateway's own words where it gave
@@ -456,6 +477,7 @@ function ProfileRow({
   // excluded is capped by the gateway; excluded_total is exact.
   const excludedTotal = preview.excluded_total ?? excluded.length
   const secret = flagged(preview)
+  const vendored = vendoredFindings(preview)
   const snapshot = status?.snapshot
 
   return (
@@ -486,6 +508,17 @@ function ProfileRow({
             </p>
           )}
           {reason && <p className="text-xs">{reason}</p>}
+          {vendored.count > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {vendored.atLeast ? 'At least ' : ''}
+              {vendored.count} {vendored.count === 1 ? 'file' : 'files'} under{' '}
+              <span className="font-mono">plugins/cache</span> and{' '}
+              <span className="font-mono">plugins/marketplaces</span>, which
+              hold the plugins {label} installed, tripped the secret scanner.{' '}
+              {vendored.count === 1 ? 'It is' : 'They are'} left out and the
+              rest of this profile still imports.
+            </p>
+          )}
           {suggested && suggested.length > 0 && (
             <p className="text-xs text-muted-foreground">
               The agent pointed at {suggested.join(', ')}; a push carries the

@@ -723,8 +723,11 @@ on its own row while the rest still run. A `blocked` preview gets no
 checkbox at all - the row names the condition from `blocked_reason` and shows
 the flagged file, and offers the `--allow-secret` command only for a scanner
 finding, since a symlink escape has no override. That override is
-deliberately not in the dashboard. Where a setup-capable harness is
-installed locally, **Ask an agent** runs the `profile` scan over
+deliberately not in the dashboard. A `vendored-secret` exclusion never
+blocks: the row says how many files inside installed plugins tripped the
+scanner and that they are third-party, and the harness stays importable.
+Where a setup-capable harness is installed locally,
+**Ask an agent** runs the `profile` scan over
 `/ws/envscan`, streams the agent's output, and pre-checks what it
 recommended with each one-sentence reason next to its row; the scan is a
 proposal the user edits, and a failure leaves the manual path and both

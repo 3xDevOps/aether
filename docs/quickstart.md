@@ -204,8 +204,10 @@ recommend what is worth bringing, with a sentence of reasoning per agent;
 the recommendation is a checklist you edit, never something that acts on
 its own. Both parts are optional - **Skip for now** moves on.
 
-Secrets never sync, and the dashboard has no override: a scanner finding
-refuses the push and names the file so you can fix it locally.
+Secrets never sync, and the dashboard has no override: a scanner finding in
+a file you wrote refuses the push and names the file so you can fix it
+locally. One inside an installed plugin drops that file and imports the
+rest, since there is nothing to fix in your own configuration.
 [harnesses.md](harnesses.md) has the full rules, including the CLI-only
 `--allow-secret`.
 

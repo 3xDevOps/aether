@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,13 +14,21 @@ import (
 	profilesvc "github.com/3xDevOps/Aether/internal/profile"
 )
 
-// Why a file was left out of a push. Discover turns secret and symlink
-// into a blocking error; Inventory reports every reason to the user.
+// Why a file was left out of a push. Discover turns only a secret in a
+// file the user wrote into a blocking error; every other reason - a
+// symlink escape and a finding in vendored content included - is
+// reported and skipped. Inventory reports every reason to the user.
 const (
 	// ExcludeCredential is a basename on the harness credential denylist.
 	ExcludeCredential = "credential"
-	// ExcludeSecret is a content-scanner finding.
+	// ExcludeSecret is a content-scanner finding in a file the user
+	// wrote. It refuses the whole push: the fix is on this machine.
 	ExcludeSecret = "secret"
+	// ExcludeVendoredSecret is a content-scanner finding inside one of
+	// the harness's vendoredRoots - third-party content the user did not
+	// write and cannot edit. That one file is dropped and reported; the
+	// rest of the profile still syncs.
+	ExcludeVendoredSecret = "vendored-secret"
 	// ExcludeIgnored is a .aether-profile-ignore match, or one of the
 	// per-harness defaults below.
 	ExcludeIgnored = "ignored"
@@ -58,9 +67,45 @@ var defaultIgnores = map[string][]string{
 	// codex/tmp holds a per-run scratch directory whose apply_patch entry
 	// is a symlink out to the codex binary; sessions/ is codex's own
 	// transcript archive, the same thing claude keeps in projects/.
-	// plugins/cache is deliberately not here: it is real third-party
-	// content, not something codex wrote for itself.
+	// claude's plugins/ trees are deliberately in neither list: they are
+	// real third-party content a user may want on the server.
+	// vendoredRoots below covers them instead.
 	"codex": {"tmp/", ".tmp/", "sessions/"},
+}
+
+// vendoredRoots are the directories inside a harness profile root that
+// hold plugin packages the harness installed, rather than files the user
+// edits in place. They still sync - an installed plugin is configuration
+// the server needs - but a scanner finding inside one is not a secret
+// anybody can remove from the profile root, so it drops that one file
+// instead of refusing the whole push.
+//
+// claude fills both: plugins/cache/<marketplace>/<plugin>/<version>/ is
+// the installed copy, and plugins/marketplaces/<marketplace>/ is the
+// clone of the marketplace repository, which carries the plugin sources
+// inline and is the larger of the two on a stock install. Plugins ship
+// their own test suites, and a fixture holding a secret-shaped string
+// used to block the entire import until the user passed --allow-secret
+// with a path carrying the plugin version - an override the next update
+// of that plugin invalidated, because the version segment had moved.
+var vendoredRoots = map[string][]string{
+	"claude": {"plugins/cache/", "plugins/marketplaces/"},
+}
+
+// isVendored reports whether a profile-relative path sits under one of
+// the harness's vendored roots. It matches on the root prefix alone, so
+// it holds across a plugin version bump, a new plugin, and a new
+// marketplace without needing an entry per plugin. Each prefix ends in a
+// slash, so a file literally named plugins/cache is outside them: there
+// has to be a segment after the root.
+func isVendored(harnessName, rel string) bool {
+	clean := path.Clean(rel)
+	for _, prefix := range vendoredRoots[harnessName] {
+		if strings.HasPrefix(clean, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // visited is one entry the walk classified. Reason is empty for a file
@@ -74,8 +119,9 @@ type visited struct {
 	Content []byte
 	Reason  string
 	Detail  string
-	// Finding carries the scanner hit behind an ExcludeSecret, so callers
-	// can name the file and the location.
+	// Finding carries the scanner hit behind an ExcludeSecret or an
+	// ExcludeVendoredSecret, so callers can name the file and the
+	// location.
 	Finding Finding
 }
 
@@ -116,7 +162,7 @@ func walkRoot(ctx context.Context, root string, prof harness.Profile, allowed ma
 	if err != nil {
 		return err
 	}
-	return readCandidates(ctx, candidates, allowed, visit)
+	return readCandidates(ctx, prof.Name, candidates, allowed, visit)
 }
 
 // rootMatcher compiles the harness defaults followed by the user's own
@@ -233,7 +279,7 @@ func classifyRoot(ctx context.Context, root string, prof harness.Profile, matche
 // highest-priority files first. Directory order would otherwise decide
 // it, and on a real profile root that means transcripts and plugin
 // caches crowd out every skill and command the user actually wrote.
-func readCandidates(ctx context.Context, candidates []candidate, allowed map[string]bool, visit func(visited) error) error {
+func readCandidates(ctx context.Context, harnessName string, candidates []candidate, allowed map[string]bool, visit func(visited) error) error {
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].priority != candidates[j].priority {
 			return candidates[i].priority < candidates[j].priority
@@ -261,15 +307,35 @@ func readCandidates(ctx context.Context, candidates []candidate, allowed map[str
 		file := visited{Rel: c.rel, Abs: c.abs, Mode: c.mode, Size: c.size, Content: content}
 		if findings := scanContent(c.rel, content); len(findings) > 0 && !allowed[c.rel] && !allowed[c.abs] {
 			file.Content = nil
-			file.Reason = ExcludeSecret
 			file.Finding = findings[0]
-			file.Detail = "secret detected (" + findings[0].Kind + ")"
+			file.Reason, file.Detail = findingVerdict(harnessName, c.rel, findings[0])
 		}
 		if err := visit(file); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// findingVerdict decides what a scanner hit means for the push. In a
+// file the user wrote it is a secret to remove, and it refuses the push.
+// In vendored content it is a string inside a plugin package: that file
+// is dropped, so its bytes still never leave the machine, and the push
+// carries everything else.
+//
+// A vendored verdict carries the location itself, because it is never
+// turned into a DiscoverError - the caller that would have supplied the
+// line has only the skipped list to print.
+func findingVerdict(harnessName, rel string, finding Finding) (string, string) {
+	rule := "secret detected (" + finding.Kind + ")"
+	if !isVendored(harnessName, rel) {
+		return ExcludeSecret, rule
+	}
+	if finding.Location != "" {
+		rule += " at " + finding.Location
+	}
+	return ExcludeVendoredSecret, rule +
+		" in third-party plugin content; this file is left out and the rest of the profile still syncs"
 }
 
 // categoryRank orders the categories the budget is spent on: the

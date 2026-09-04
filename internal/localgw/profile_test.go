@@ -2,11 +2,13 @@ package localgw
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -400,5 +402,106 @@ func TestLocalProfilePushReportsSkipped(t *testing.T) {
 			strings.Contains(call.params, "huge.jsonl") {
 			t.Fatalf("the oversized file was sent: %s", call.params)
 		}
+	}
+}
+
+// The dashboard path end to end for a marketplace plugin's own test
+// fixture: the preview stays importable and names the file as
+// third-party, the push succeeds without it, and the fixture never
+// reaches the wire. The user cannot edit that file, and its path carries
+// the plugin version, so blocking the import made the whole feature wait
+// on a third party's next release.
+func TestLocalProfileVendoredPluginFixtureDoesNotBlock(t *testing.T) {
+	secret, err := os.ReadFile(filepath.Join("..", "cli", "profile", "testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both trees claude fills: the installed copy under plugins/cache,
+	// and the marketplace clone that carries the sources inline.
+	fixtures := []string{
+		"plugins/cache/claude-plugins-official/notes-toolkit/6.3.0/tests/ws-protocol.test.js",
+		"plugins/marketplaces/claude-plugins-official/plugins/notes-toolkit/tests/ws-protocol.test.js",
+	}
+	files := map[string]string{"CLAUDE.md": "# standing instructions\n"}
+	for _, f := range fixtures {
+		files[f] = string(secret)
+	}
+	profileHome(t, files)
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
+		results: map[string]json.RawMessage{protocol.MethodProfilePush: pushResultJSON(t, "sha1")},
+	}}
+	g := newVerbGateway(t, backend, cli.Config{})
+
+	rec := do(g, http.MethodPost, "/local/v1/profile.preview", `{"harness":"claude"}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("profile.preview = %d: %s", rec.Code, rec.Body)
+	}
+	var preview profilePreviewBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.Blocked {
+		t.Fatalf("a plugin's own test fixture blocked the preview: %+v", preview)
+	}
+	if len(preview.Excluded) != len(fixtures) {
+		t.Fatalf("excluded = %+v, want both plugin trees", preview.Excluded)
+	}
+	for _, e := range preview.Excluded {
+		if e.Reason != profile.ExcludeVendoredSecret || !slices.Contains(fixtures, e.Path) {
+			t.Fatalf("excluded entry = %+v", e)
+		}
+	}
+
+	rec = do(g, http.MethodPost, "/local/v1/profile.push", `{"harness":"claude"}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("profile.push = %d: %s", rec.Code, rec.Body)
+	}
+	var pushed struct {
+		Files   int `json:"files"`
+		Skipped []struct {
+			Path   string `json:"path"`
+			Reason string `json:"reason"`
+			Detail string `json:"detail"`
+		} `json:"skipped"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &pushed); err != nil {
+		t.Fatal(err)
+	}
+	if pushed.Files != 1 {
+		t.Errorf("files = %d, want the one clean file", pushed.Files)
+	}
+	if len(pushed.Skipped) != len(fixtures) {
+		t.Fatalf("skipped = %+v, want both plugin trees", pushed.Skipped)
+	}
+	for _, s := range pushed.Skipped {
+		if !slices.Contains(fixtures, s.Path) ||
+			!strings.Contains(s.Detail, "third-party plugin content") {
+			t.Fatalf("skipped entry = %+v", s)
+		}
+	}
+	// Not just the path: the fixture's own bytes must be absent from the
+	// wire too. Content is a []byte, so JSON carries it base64-encoded -
+	// the raw token would never appear even if the file were sent.
+	encoded := base64.StdEncoding.EncodeToString(secret)
+	token := strings.TrimSpace("token=" + strings.SplitN(string(secret), "token=", 2)[1])
+	var sawPush bool
+	for _, call := range backend.recorded() {
+		if call.method != protocol.MethodProfilePush {
+			continue
+		}
+		sawPush = true
+		// The clean file's own bytes prove the encoding this searches
+		// for, so the absence below is a real absence and not a miss.
+		if clean := base64.StdEncoding.EncodeToString([]byte("# standing instructions\n")); !strings.Contains(call.params, clean) {
+			t.Fatalf("the pushed file is not base64 in the params, so the leak check proves nothing: %s", call.params)
+		}
+		for _, leak := range []string{"ws-protocol", encoded, token} {
+			if strings.Contains(call.params, leak) {
+				t.Fatalf("the flagged fixture reached the wire (%q): %s", leak, call.params)
+			}
+		}
+	}
+	if !sawPush {
+		t.Fatal("no profile.push reached the backend")
 	}
 }

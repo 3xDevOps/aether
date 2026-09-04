@@ -58,20 +58,23 @@ func LocalDir(harnessName string) (string, harness.Profile, error) {
 // allowSecret names files (relative, basename, or absolute) that may pass
 // scanner findings. Negation in the ignore file cannot re-include denied
 // credential paths, extra credential names, symlink escapes, or findings
-// that were not explicitly allowed.
+// that were not explicitly allowed. A finding in a file the user wrote
+// refuses the whole walk; one in vendored third-party content drops that
+// file and is reported as an exclusion.
 func Discover(ctx context.Context, harnessName string, allowSecret []string) ([]LocalFile, error) {
 	files, _, err := DiscoverFiles(ctx, harnessName, allowSecret)
 	return files, err
 }
 
 // DiscoverFiles is Discover plus the entries it skipped without
-// refusing: the ones the size caps dropped, and symlinks pointing out of
-// the profile root. Those are the exclusions a caller has to be able to
-// mention - a credential or an ignored file is excluded by a rule the
-// user wrote or asked for, but a file dropped for its size or a link the
-// walk would not follow is one they would otherwise expect to find on
-// the server. Callers with somewhere to print report them; the daemon,
-// which pushes unattended, logs them.
+// refusing: the ones the size caps dropped, symlinks pointing out of the
+// profile root, and scanner findings in vendored plugin content. Those
+// are the exclusions a caller has to be able to mention - a credential
+// or an ignored file is excluded by a rule the user wrote or asked for,
+// but a file dropped for its size, a link the walk would not follow, or
+// a plugin's own file is one they would otherwise expect to find on the
+// server. Callers with somewhere to print report them; the daemon, which
+// pushes unattended, logs them.
 func DiscoverFiles(ctx context.Context, harnessName string, allowSecret []string) ([]LocalFile, []Exclusion, error) {
 	root, prof, err := LocalDir(harnessName)
 	if err != nil {
@@ -96,7 +99,14 @@ func discoverRoot(ctx context.Context, root string, prof harness.Profile, allowS
 		// only decided that the other files stayed off too. Symlinking
 		// skills into a shared directory is an ordinary setup, and it
 		// used to block the whole import with no override to offer.
-		case ExcludeSymlink, ExcludeTooLarge, ExcludeOverBudget:
+		// A finding in vendored third-party content is skipped for the
+		// same reason: the file is never read onto the server either
+		// way, and refusing the import only decided that the user's own
+		// skills and commands stayed off it too. A test fixture inside
+		// an installed plugin is not a secret the user can remove, and
+		// the --allow-secret path that used to unblock it carried the
+		// plugin version, so it had to be redone on every update.
+		case ExcludeSymlink, ExcludeVendoredSecret, ExcludeTooLarge, ExcludeOverBudget:
 			skipped = append(skipped, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: f.Detail})
 		case "":
 			out = append(out, LocalFile{Path: f.Rel, AbsPath: f.Abs, Mode: f.Mode, Content: f.Content})

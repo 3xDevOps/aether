@@ -398,6 +398,71 @@ describe('agents step', () => {
     expect(client.localProfilePush).not.toHaveBeenCalled()
   })
 
+  it('names a plugin-tree finding by where it lives and still imports', async () => {
+    // A plugin ships its own test fixtures, and one of them holding a
+    // secret-shaped string is nothing the user can fix in their own
+    // configuration. The gateway drops that file rather than blocking,
+    // and the row has to say which directories those files came from.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: 'plugins/cache/claude-plugins-official/notes-toolkit/6.3.0/tests/ws-protocol.test.js',
+                  reason: 'vendored-secret',
+                  detail:
+                    'secret detected (aws-access-key) at 52:12 in third-party plugin content; this file is left out and the rest of the profile still syncs',
+                },
+              ],
+              excluded_total: 1,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(
+      await screen.findByText(/1 file under/, { exact: false }),
+    ).toBeDefined()
+    expect(screen.getByText('plugins/marketplaces')).toBeDefined()
+    // An uncapped list gives an exact count, so no hedge.
+    expect(screen.queryByText(/At least/)).toBeNull()
+    // The harness is still importable: the checkbox is there, and no
+    // --allow-secret command is offered.
+    expect(
+      screen.getByRole('checkbox', { name: 'Bring Claude Code configuration' }),
+    ).toBeDefined()
+    expect(screen.queryByText(/--allow-secret/)).toBeNull()
+  })
+
+  it('hedges the plugin-tree count when the gateway capped the list', async () => {
+    // excluded is capped at 200 while excluded_total is exact, so the
+    // vendored entries the row can see are a floor, never a count.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: 'plugins/marketplaces/claude-plugins-official/plugins/notes-toolkit/tests/ws-protocol.test.js',
+                  reason: 'vendored-secret',
+                  detail:
+                    'secret detected (aws-access-key) at 52:12 in third-party plugin content; this file is left out and the rest of the profile still syncs',
+                },
+              ],
+              excluded_total: 1403,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(await screen.findByText(/At least/, { exact: false })).toBeDefined()
+  })
+
   it('renders a push refusal on its own row and still runs the others', async () => {
     const client = fakeApi({
       localProfilePreview: bothPresent(),
