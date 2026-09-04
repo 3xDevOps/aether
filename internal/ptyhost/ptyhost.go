@@ -198,8 +198,11 @@ func (h *Host) StopSession(ctx context.Context, key SessionKey) error {
 	return nil
 }
 
-// LastOutput reports the wall-clock time of the last byte read from the
-// session's PTY; false if the key has no session.
+// LastOutput reports the wall-clock time of the last byte the agent wrote
+// to the session's PTY; false if the key has no session. Bytes that came
+// from the server - an injection banner, and the terminal's echo of the
+// injected line - are excluded, so this is a liveness clock for the agent
+// rather than for the stream.
 func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
 	s := h.lookup(key)
 	if s == nil {
@@ -210,7 +213,8 @@ func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
 
 // Inject writes an attributed banner to every attachment and the transcript,
 // then writes message plus a carriage return to the session's stdin. The
-// banner never reaches the agent's input. Authorization is the caller's.
+// banner never reaches the agent's input, and neither it nor the echo the
+// terminal sends back advances LastOutput. Authorization is the caller's.
 func (h *Host) Inject(ctx context.Context, key SessionKey, actorName, actorColor, message string) error {
 	_ = ctx
 	s := h.lookup(key)

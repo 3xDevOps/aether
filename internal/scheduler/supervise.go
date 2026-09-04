@@ -117,6 +117,9 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 // checkStalls implements §6.7: a running, non-paused run with no PTY
 // output and no file changes past StallThreshold parks at needs-attention;
 // a stalled-but-alive run whose activity refreshes returns to running.
+// PTY output is what the agent wrote: a steer's banner and the terminal's
+// echo of it are the server's, so only the agent's own answer clears a
+// stall.
 func (s *Scheduler) checkStalls(ctx context.Context) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0, len(s.runs))

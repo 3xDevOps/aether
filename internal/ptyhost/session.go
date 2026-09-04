@@ -47,6 +47,12 @@ type session struct {
 	title      titleScanner
 	onTitle    func(string)
 
+	// pendingEcho is the echo an injection is still owed by the terminal.
+	// The line discipline echoes injected input back through the PTY even
+	// when the agent never reads it, so those bytes are not evidence the
+	// agent is alive; see consumeEcho.
+	pendingEcho []byte
+
 	// resizeMu serializes att.Resize applications so nudge sequences from
 	// concurrent reconciles never interleave; it is never held with mu.
 	resizeMu sync.Mutex
@@ -74,7 +80,11 @@ func (s *session) deliver(p []byte) {
 	if s.stopped || s.ended {
 		return
 	}
-	s.lastOut = now
+	// Viewers, the transcript and the title scanner get every byte; only
+	// the liveness clock discounts the echo of what the server injected.
+	if s.consumeEcho(p) {
+		s.lastOut = now
+	}
 	s.title.scan(p, s.onTitle)
 	s.ring.write(p)
 	s.tr.output(p)
@@ -270,7 +280,11 @@ func (s *session) inject(actorName, actorColor, message string) error {
 		s.mu.Unlock()
 		return ErrSessionEnded
 	}
-	s.lastOut = time.Now()
+	// Neither the banner nor the echo the terminal owes us may touch
+	// lastOut: stall detection reads that clock, and counting the server's
+	// own bytes would clear a stall for an agent that never answered. The
+	// line discipline turns the trailing CR into CRLF on the way back.
+	s.pendingEcho = append(s.pendingEcho, bytes.ReplaceAll([]byte(message+"\r"), []byte("\r"), []byte("\r\n"))...)
 	s.tr.output(banner)
 	s.tr.marker("inject by " + actorName + ": " + message)
 	for c := range s.clients {
@@ -284,6 +298,26 @@ func (s *session) inject(actorName, actorColor, message string) error {
 		return fmt.Errorf("ptyhost: inject stdin write: %w", err)
 	}
 	return nil
+}
+
+// consumeEcho strips the echo an injection is still owed from the head of
+// p and reports whether anything is left over - that leftover is the agent
+// talking. The terminal echoes injected input back through the PTY even
+// when the agent never reads it, so an echo alone must not refresh the
+// liveness clock. The first byte that diverges from the expected echo drops
+// the expectation: a terminal with echo off never sends it, and everything
+// from there is the agent's. Callers hold mu.
+func (s *session) consumeEcho(p []byte) bool {
+	n := 0
+	for n < len(p) && n < len(s.pendingEcho) && p[n] == s.pendingEcho[n] {
+		n++
+	}
+	if n < len(p) && n < len(s.pendingEcho) {
+		s.pendingEcho = nil
+		return true
+	}
+	s.pendingEcho = s.pendingEcho[n:]
+	return n < len(p)
 }
 
 // renderBanner renders the attributed injection banner shown to viewers and

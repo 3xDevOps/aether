@@ -717,9 +717,9 @@ func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, a
 	if !ok {
 		return errFakeNoSession
 	}
-	sess.mu.Lock()
-	sess.last = time.Now().UTC()
-	sess.mu.Unlock()
+	// Like ptyhost.Host, the banner is the server's own output and never
+	// advances the session's last-output clock; only the agent's answer,
+	// which arrives on the attachment, does.
 	_, err := sess.att.Stdin().Write([]byte(message + "\r"))
 	return err
 }

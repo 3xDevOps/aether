@@ -452,6 +452,55 @@ func TestInjectAndTranscriptReplay(t *testing.T) {
 	}
 }
 
+// TestInjectIsNotAgentOutput pins the liveness clock stall detection reads.
+// A steer puts two lots of bytes on the PTY that the agent did not write:
+// the banner, and the line discipline's echo of the injected line, which
+// arrives even when the agent never reads its stdin. Neither may refresh
+// LastOutput, or steering a hung agent would clear its stall.
+func TestInjectIsNotAgentOutput(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	_ = att.captureStdin() // drain the injected line
+	run := domain.RunID("run-liveness")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	a := startAttach(t, h, run, "m1", 120, 30, false)
+	waitAttached(t, h, run, 1)
+
+	att.writeOutput(t, "thinking...\r\n")
+	waitFor(t, "agent output before the steer", func() bool { return strings.HasSuffix(a.out.String(), "thinking...\r\n") })
+	before, ok := h.LastOutput(RunSession(run))
+	if !ok || before.IsZero() {
+		t.Fatalf("LastOutput = %v, %v after agent output", before, ok)
+	}
+
+	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "wake"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	// The echo comes back split across reads, as a real PTY delivers it.
+	att.writeOutput(t, "wa")
+	att.writeOutput(t, "ke\r\n")
+	waitFor(t, "banner and echo on the stream", func() bool { return strings.HasSuffix(a.out.String(), "wake\r\n") })
+	if ts, _ := h.LastOutput(RunSession(run)); !ts.Equal(before) {
+		t.Fatalf("LastOutput moved from %v to %v across a steer the agent never answered", before, ts)
+	}
+
+	// The agent's own answer is what moves it.
+	att.writeOutput(t, "got:wake\r\n")
+	waitFor(t, "LastOutput follows the agent", func() bool {
+		ts, _ := h.LastOutput(RunSession(run))
+		return ts.After(before)
+	})
+
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	if err := a.wait(t); err != nil {
+		t.Fatalf("attach returned %v", err)
+	}
+}
+
 func TestWriteGate(t *testing.T) {
 	gateErr := errors.New("not allowed")
 	h, _ := newTestHost(t, func(cfg *Config) {
