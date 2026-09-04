@@ -67,13 +67,14 @@ func Discover(ctx context.Context, harnessName string, allowSecret []string) ([]
 }
 
 // DiscoverFiles is Discover plus the entries it skipped without
-// refusing: the ones the size caps dropped, and symlinks pointing out of
-// the profile root. Those are the exclusions a caller has to be able to
-// mention - a credential or an ignored file is excluded by a rule the
-// user wrote or asked for, but a file dropped for its size or a link the
-// walk would not follow is one they would otherwise expect to find on
-// the server. Callers with somewhere to print report them; the daemon,
-// which pushes unattended, logs them.
+// refusing: the ones the size caps dropped, symlinks pointing out of the
+// profile root, and scanner findings in vendored plugin content. Those
+// are the exclusions a caller has to be able to mention - a credential
+// or an ignored file is excluded by a rule the user wrote or asked for,
+// but a file dropped for its size, a link the walk would not follow, or
+// a plugin's own file is one they would otherwise expect to find on the
+// server. Callers with somewhere to print report them; the daemon, which
+// pushes unattended, logs them.
 func DiscoverFiles(ctx context.Context, harnessName string, allowSecret []string) ([]LocalFile, []Exclusion, error) {
 	root, prof, err := LocalDir(harnessName)
 	if err != nil {

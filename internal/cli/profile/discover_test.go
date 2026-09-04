@@ -6,8 +6,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/3xDevOps/Aether/internal/harness"
 )
 
 func TestDiscoverExcludesRegistryCredentials(t *testing.T) {
@@ -181,18 +179,7 @@ func TestBuildPushParamsDeltaOmitsKnownBlobs(t *testing.T) {
 
 func setupClaudeRoot(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
-	userHome = func() (string, error) { return home, nil }
-	t.Cleanup(func() { userHome = os.UserHomeDir })
-	p, ok := harness.Lookup("claude")
-	if !ok {
-		t.Fatal("claude harness missing")
-	}
-	root := filepath.Join(home, filepath.FromSlash(p.LocalRoot))
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return root
+	return setupHarnessRoot(t, "claude")
 }
 
 func mustWrite(t *testing.T, path, body string) {
@@ -248,7 +235,14 @@ func TestDiscoverAllowSecretDoesNotMatchBasenameAlone(t *testing.T) {
 // separate argument because the fix must not key off it.
 func vendoredFixture(version string) string {
 	return "plugins/cache/claude-plugins-official/notes-toolkit/" + version +
-		"/tests/brainstorm-server/ws-protocol.test.js"
+		"/tests/ws-protocol.test.js"
+}
+
+// marketplaceFixture is the same file in the other tree claude fills:
+// the clone of the marketplace repository, which carries plugin sources
+// inline and has no version segment at all.
+func marketplaceFixture() string {
+	return "plugins/marketplaces/claude-plugins-official/plugins/notes-toolkit/tests/ws-protocol.test.js"
 }
 
 // A secret-shaped string in an installed plugin's test fixture is not
@@ -267,8 +261,11 @@ func TestDiscoverVendoredPluginFindingSkipsWithoutRefusing(t *testing.T) {
 		"notes-toolkit", "6.3.0", "README.md"), "# notes-toolkit\n")
 	// Two installed versions of the same plugin, which is the ordinary
 	// state of a plugin cache. Nothing here may key off either segment.
-	for _, version := range []string{"6.3.0", "6.4.0"} {
-		mustWrite(t, filepath.Join(root, filepath.FromSlash(vendoredFixture(version))), string(secret))
+	// The marketplace clone holds the same sources inline and is the
+	// larger tree on a stock install, so it has to be covered too.
+	flagged := []string{vendoredFixture("6.3.0"), vendoredFixture("6.4.0"), marketplaceFixture()}
+	for _, rel := range flagged {
+		mustWrite(t, filepath.Join(root, filepath.FromSlash(rel)), string(secret))
 	}
 
 	files, skipped, err := DiscoverFiles(t.Context(), "claude", nil)
@@ -289,8 +286,7 @@ func TestDiscoverVendoredPluginFindingSkipsWithoutRefusing(t *testing.T) {
 	for _, s := range skipped {
 		byPath[s.Path] = s
 	}
-	for _, version := range []string{"6.3.0", "6.4.0"} {
-		rel := vendoredFixture(version)
+	for _, rel := range flagged {
 		if _, ok := got[rel]; ok {
 			t.Errorf("%s was pushed despite a scanner finding", rel)
 		}
@@ -304,17 +300,23 @@ func TestDiscoverVendoredPluginFindingSkipsWithoutRefusing(t *testing.T) {
 		if !strings.Contains(s.Detail, "third-party plugin content") {
 			t.Errorf("%s detail does not name it as third-party: %q", rel, s.Detail)
 		}
+		// The line belongs with the rule, not trailing after the whole
+		// sentence.
+		if !strings.Contains(s.Detail, ") at ") {
+			t.Errorf("%s detail does not carry the location with the rule: %q", rel, s.Detail)
+		}
 	}
 }
 
-// The vendored carve-out is the plugin cache only. A file the user wrote
-// still refuses the push, including elsewhere under plugins/.
-func TestDiscoverOwnSecretStillRefusesOutsidePluginCache(t *testing.T) {
+// The vendored carve-out is the plugin trees claude installs into. A
+// file the user wrote still refuses the push, including a file named
+// plugins/cache itself and one elsewhere under plugins/.
+func TestDiscoverOwnSecretStillRefusesOutsidePluginTrees(t *testing.T) {
 	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rel := range []string{"memory/notes.md", "plugins/config.json"} {
+	for _, rel := range []string{"memory/notes.md", "plugins/config.json", "plugins/cache"} {
 		t.Run(rel, func(t *testing.T) {
 			root := setupClaudeRoot(t)
 			mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
@@ -348,5 +350,28 @@ func TestDiscoverAllowSecretCarriesVendoredFile(t *testing.T) {
 	}
 	if _, ok := names(files)[rel]; !ok {
 		t.Fatalf("--allow-secret did not carry %s: %v", rel, names(files))
+	}
+}
+
+// vendoredRoots is keyed by harness, and only claude installs plugins
+// into those trees. The same path under another harness's profile root
+// is a directory the user made, so it still refuses the push.
+func TestDiscoverVendoredRootsAreClaudeOnly(t *testing.T) {
+	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := vendoredFixture("6.3.0")
+	for _, name := range []string{"codex", "opencode"} {
+		t.Run(name, func(t *testing.T) {
+			root := setupHarnessRoot(t, name)
+			mustWrite(t, filepath.Join(root, filepath.FromSlash(rel)), string(secret))
+
+			_, err := Discover(t.Context(), name, nil)
+			var de *DiscoverError
+			if !asDiscover(err, &de) || de.Path != rel {
+				t.Fatalf("err = %v, want %s to refuse the push under %s", err, rel, name)
+			}
+		})
 	}
 }

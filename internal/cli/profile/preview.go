@@ -156,7 +156,10 @@ func Inventory(ctx context.Context, harnessName string) (Preview, error) {
 	walkErr := walkRoot(ctx, root, prof, nil, func(f visited) error {
 		if f.Reason != "" {
 			detail := f.Detail
-			if f.Finding.Location != "" {
+			// A vendored verdict already carries its location, in the
+			// middle of the sentence where it reads as part of the rule
+			// rather than trailing after it.
+			if f.Reason == ExcludeSecret && f.Finding.Location != "" {
 				detail += " at " + f.Finding.Location
 			}
 			preview.Excluded = append(preview.Excluded, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: detail})

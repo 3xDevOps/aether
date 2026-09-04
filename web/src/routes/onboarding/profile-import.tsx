@@ -77,11 +77,21 @@ function flagged(preview: ProfilePreview) {
   )
 }
 
-/** Scanner findings inside content the harness installed from a
- * marketplace. They read as the user's own secrets in a flat exclusion
- * list, so the row names them for what they are. */
-function vendoredFindings(preview: ProfilePreview): ProfileExclusion[] {
-  return (preview.excluded ?? []).filter((e) => e.reason === 'vendored-secret')
+/** Scanner findings inside the plugin trees the harness installs into.
+ * They read as the user's own secrets in a flat exclusion list, so the
+ * row names where they came from.
+ *
+ * `excluded` is capped by the gateway while `excluded_total` is exact,
+ * so a capped list can only support a floor, never a count. */
+function vendoredFindings(preview: ProfilePreview): {
+  count: number
+  atLeast: boolean
+} {
+  const excluded = preview.excluded ?? []
+  return {
+    count: excluded.filter((e) => e.reason === 'vendored-secret').length,
+    atLeast: (preview.excluded_total ?? excluded.length) > excluded.length,
+  }
 }
 
 /** What blocked this profile, in the gateway's own words where it gave
@@ -498,14 +508,15 @@ function ProfileRow({
             </p>
           )}
           {reason && <p className="text-xs">{reason}</p>}
-          {vendored.length > 0 && (
+          {vendored.count > 0 && (
             <p className="text-xs text-muted-foreground">
-              {vendored.length === 1
-                ? '1 file inside an installed plugin'
-                : `${vendored.length} files inside installed plugins`} tripped
-              the secret scanner. That is third-party content, not yours to
-              fix: {vendored.length === 1 ? 'it is' : 'they are'} left out and
-              the rest of this profile still imports.
+              {vendored.atLeast ? 'At least ' : ''}
+              {vendored.count} {vendored.count === 1 ? 'file' : 'files'} under{' '}
+              <span className="font-mono">plugins/cache</span> and{' '}
+              <span className="font-mono">plugins/marketplaces</span>, which
+              hold the plugins {label} installed, tripped the secret scanner.{' '}
+              {vendored.count === 1 ? 'It is' : 'They are'} left out and the
+              rest of this profile still imports.
             </p>
           )}
           {suggested && suggested.length > 0 && (

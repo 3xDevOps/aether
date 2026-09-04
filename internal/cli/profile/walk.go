@@ -14,8 +14,10 @@ import (
 	profilesvc "github.com/3xDevOps/Aether/internal/profile"
 )
 
-// Why a file was left out of a push. Discover turns secret and symlink
-// into a blocking error; Inventory reports every reason to the user.
+// Why a file was left out of a push. Discover turns only a secret in a
+// file the user wrote into a blocking error; every other reason - a
+// symlink escape and a finding in vendored content included - is
+// reported and skipped. Inventory reports every reason to the user.
 const (
 	// ExcludeCredential is a basename on the harness credential denylist.
 	ExcludeCredential = "credential"
@@ -65,35 +67,39 @@ var defaultIgnores = map[string][]string{
 	// codex/tmp holds a per-run scratch directory whose apply_patch entry
 	// is a symlink out to the codex binary; sessions/ is codex's own
 	// transcript archive, the same thing claude keeps in projects/.
-	// claude's plugins/cache is deliberately in neither list: it is real
-	// third-party content a user may want on the server. vendoredRoots
-	// below covers it instead.
+	// claude's plugins/ trees are deliberately in neither list: they are
+	// real third-party content a user may want on the server.
+	// vendoredRoots below covers them instead.
 	"codex": {"tmp/", ".tmp/", "sessions/"},
 }
 
 // vendoredRoots are the directories inside a harness profile root that
-// hold third-party content: packages a harness installed from a
-// marketplace, not files the user wrote. They still sync - an installed
-// plugin is configuration the server needs - but a scanner finding
-// inside one is not a secret anybody can remove locally, so it drops
-// that one file instead of refusing the whole push.
+// hold plugin packages the harness installed, rather than files the user
+// edits in place. They still sync - an installed plugin is configuration
+// the server needs - but a scanner finding inside one is not a secret
+// anybody can remove from the profile root, so it drops that one file
+// instead of refusing the whole push.
 //
-// claude installs a marketplace plugin at
-// plugins/cache/<marketplace>/<plugin>/<version>/, and plugins ship
-// their own test suites. A fixture holding a secret-shaped string used
-// to block the entire import until the user passed --allow-secret with a
-// path carrying the plugin version - an override the next update of that
-// plugin invalidated, because the version segment had moved.
+// claude fills both: plugins/cache/<marketplace>/<plugin>/<version>/ is
+// the installed copy, and plugins/marketplaces/<marketplace>/ is the
+// clone of the marketplace repository, which carries the plugin sources
+// inline and is the larger of the two on a stock install. Plugins ship
+// their own test suites, and a fixture holding a secret-shaped string
+// used to block the entire import until the user passed --allow-secret
+// with a path carrying the plugin version - an override the next update
+// of that plugin invalidated, because the version segment had moved.
 var vendoredRoots = map[string][]string{
-	"claude": {"plugins/cache/"},
+	"claude": {"plugins/cache/", "plugins/marketplaces/"},
 }
 
 // isVendored reports whether a profile-relative path sits under one of
 // the harness's vendored roots. It matches on the root prefix alone, so
 // it holds across a plugin version bump, a new plugin, and a new
-// marketplace without needing an entry per plugin.
+// marketplace without needing an entry per plugin. Each prefix ends in a
+// slash, so a file literally named plugins/cache is outside them: there
+// has to be a segment after the root.
 func isVendored(harnessName, rel string) bool {
-	clean := path.Clean(rel) + "/"
+	clean := path.Clean(rel)
 	for _, prefix := range vendoredRoots[harnessName] {
 		if strings.HasPrefix(clean, prefix) {
 			return true
@@ -313,15 +319,23 @@ func readCandidates(ctx context.Context, harnessName string, candidates []candid
 
 // findingVerdict decides what a scanner hit means for the push. In a
 // file the user wrote it is a secret to remove, and it refuses the push.
-// In vendored third-party content it is a string inside a package the
-// user installed: that file is dropped, so its bytes still never leave
-// the machine, and the push carries everything else.
+// In vendored content it is a string inside a plugin package: that file
+// is dropped, so its bytes still never leave the machine, and the push
+// carries everything else.
+//
+// A vendored verdict carries the location itself, because it is never
+// turned into a DiscoverError - the caller that would have supplied the
+// line has only the skipped list to print.
 func findingVerdict(harnessName, rel string, finding Finding) (string, string) {
-	if isVendored(harnessName, rel) {
-		return ExcludeVendoredSecret, "secret detected (" + finding.Kind +
-			") in third-party plugin content; this file is left out and the rest of the profile still syncs"
+	rule := "secret detected (" + finding.Kind + ")"
+	if !isVendored(harnessName, rel) {
+		return ExcludeSecret, rule
 	}
-	return ExcludeSecret, "secret detected (" + finding.Kind + ")"
+	if finding.Location != "" {
+		rule += " at " + finding.Location
+	}
+	return ExcludeVendoredSecret, rule +
+		" in third-party plugin content; this file is left out and the rest of the profile still syncs"
 }
 
 // categoryRank orders the categories the budget is spent on: the

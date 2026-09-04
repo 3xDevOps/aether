@@ -316,9 +316,9 @@ authority.
   `truncated` set when it was cut; `files` and `bytes` stay exact.
   `reason` on an exclusion is `credential` (a denylisted basename),
   `secret` (a content-scanner finding in a file the user wrote),
-  `vendored-secret` (a finding inside third-party content the harness
-  installed, such as claude's `plugins/cache/` - that file is dropped and
-  the push still runs), `ignored` (an
+  `vendored-secret` (a finding inside a plugin tree the harness installs
+  into - claude's `plugins/cache/` and `plugins/marketplaces/` - where
+  that file is dropped and the push still runs), `ignored` (an
   `.aether-profile-ignore` match, or one of the per-harness defaults in
   [harnesses.md](harnesses.md)), `symlink` (a link out of the profile
   root, skipped rather than followed - its target is never opened),
@@ -355,13 +355,16 @@ authority.
   discovery, the same per-harness credential denylist, the same secret
   scanner, and the same content-addressed delta against the server's
   current head. **It takes no allow-secret parameter.** A scanner finding
-  refuses the push with `-32002` naming the file and the line, because
-  the file has to be fixed on the machine it lives on; the
-  `--allow-secret` override stays on the CLI, where `--workspace` makes
-  it attributable on a timeline. A missing profile root refuses with
-  `-32002` too. `skipped` carries the size exclusions, in the same shape
-  `profile.preview` uses: the push succeeded without those files, so this
-  is the only place the caller learns they are not on the server.
+  in a file the user wrote refuses the push with `-32002` naming the file
+  and the line, because the file has to be fixed on the machine it lives
+  on; the `--allow-secret` override stays on the CLI, where `--workspace`
+  makes it attributable on a timeline. A finding in vendored plugin
+  content drops that file and the push runs. A missing profile root
+  refuses with `-32002` too. `skipped` carries every exclusion the walk
+  made without refusing - the size caps, symlink escapes, and
+  `vendored-secret` - in the same shape `profile.preview` uses: the push
+  succeeded without those files, so this is the only place the caller
+  learns they are not on the server.
 - Both verbs walk the whole profile root, and both stop when the request
   is cancelled: a client that closes the connection stops the work on
   this machine, rather than only stopping its own wait.

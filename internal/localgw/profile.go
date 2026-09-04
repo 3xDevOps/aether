@@ -99,9 +99,10 @@ func (g *Gateway) localProfilePush(r *http.Request, body []byte) (any, *protocol
 		Digest:     pushed.Snapshot.Digest,
 		Files:      len(files),
 		Bytes:      totalBytes,
-		// Files the size caps left behind. The push succeeded without
-		// them, so this is the only place the user learns they are not
-		// on the server.
+		// What the walk left behind without refusing: the size caps,
+		// symlinks out of the root, and findings in vendored plugin
+		// content. The push succeeded without them, so this is the only
+		// place the user learns they are not on the server.
 		Skipped: skipped,
 	}, nil
 }

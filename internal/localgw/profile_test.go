@@ -2,11 +2,13 @@ package localgw
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -414,11 +416,17 @@ func TestLocalProfileVendoredPluginFixtureDoesNotBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture := "plugins/cache/claude-plugins-official/notes-toolkit/6.3.0/tests/brainstorm-server/ws-protocol.test.js"
-	profileHome(t, map[string]string{
-		"CLAUDE.md": "# standing instructions\n",
-		fixture:     string(secret),
-	})
+	// Both trees claude fills: the installed copy under plugins/cache,
+	// and the marketplace clone that carries the sources inline.
+	fixtures := []string{
+		"plugins/cache/claude-plugins-official/notes-toolkit/6.3.0/tests/ws-protocol.test.js",
+		"plugins/marketplaces/claude-plugins-official/plugins/notes-toolkit/tests/ws-protocol.test.js",
+	}
+	files := map[string]string{"CLAUDE.md": "# standing instructions\n"}
+	for _, f := range fixtures {
+		files[f] = string(secret)
+	}
+	profileHome(t, files)
 	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
 		results: map[string]json.RawMessage{protocol.MethodProfilePush: pushResultJSON(t, "sha1")},
 	}}
@@ -435,9 +443,13 @@ func TestLocalProfileVendoredPluginFixtureDoesNotBlock(t *testing.T) {
 	if preview.Blocked {
 		t.Fatalf("a plugin's own test fixture blocked the preview: %+v", preview)
 	}
-	if len(preview.Excluded) != 1 || preview.Excluded[0].Path != fixture ||
-		preview.Excluded[0].Reason != profile.ExcludeVendoredSecret {
-		t.Fatalf("excluded = %+v", preview.Excluded)
+	if len(preview.Excluded) != len(fixtures) {
+		t.Fatalf("excluded = %+v, want both plugin trees", preview.Excluded)
+	}
+	for _, e := range preview.Excluded {
+		if e.Reason != profile.ExcludeVendoredSecret || !slices.Contains(fixtures, e.Path) {
+			t.Fatalf("excluded entry = %+v", e)
+		}
 	}
 
 	rec = do(g, http.MethodPost, "/local/v1/profile.push", `{"harness":"claude"}`, true)
@@ -458,13 +470,38 @@ func TestLocalProfileVendoredPluginFixtureDoesNotBlock(t *testing.T) {
 	if pushed.Files != 1 {
 		t.Errorf("files = %d, want the one clean file", pushed.Files)
 	}
-	if len(pushed.Skipped) != 1 || pushed.Skipped[0].Path != fixture ||
-		!strings.Contains(pushed.Skipped[0].Detail, "third-party plugin content") {
-		t.Fatalf("skipped = %+v", pushed.Skipped)
+	if len(pushed.Skipped) != len(fixtures) {
+		t.Fatalf("skipped = %+v, want both plugin trees", pushed.Skipped)
 	}
-	for _, call := range backend.recorded() {
-		if call.method == protocol.MethodProfilePush && strings.Contains(call.params, "ws-protocol") {
-			t.Fatalf("the flagged fixture was sent: %s", call.params)
+	for _, s := range pushed.Skipped {
+		if !slices.Contains(fixtures, s.Path) ||
+			!strings.Contains(s.Detail, "third-party plugin content") {
+			t.Fatalf("skipped entry = %+v", s)
 		}
+	}
+	// Not just the path: the fixture's own bytes must be absent from the
+	// wire too. Content is a []byte, so JSON carries it base64-encoded -
+	// the raw token would never appear even if the file were sent.
+	encoded := base64.StdEncoding.EncodeToString(secret)
+	token := strings.TrimSpace("token=" + strings.SplitN(string(secret), "token=", 2)[1])
+	var sawPush bool
+	for _, call := range backend.recorded() {
+		if call.method != protocol.MethodProfilePush {
+			continue
+		}
+		sawPush = true
+		// The clean file's own bytes prove the encoding this searches
+		// for, so the absence below is a real absence and not a miss.
+		if clean := base64.StdEncoding.EncodeToString([]byte("# standing instructions\n")); !strings.Contains(call.params, clean) {
+			t.Fatalf("the pushed file is not base64 in the params, so the leak check proves nothing: %s", call.params)
+		}
+		for _, leak := range []string{"ws-protocol", encoded, token} {
+			if strings.Contains(call.params, leak) {
+				t.Fatalf("the flagged fixture reached the wire (%q): %s", leak, call.params)
+			}
+		}
+	}
+	if !sawPush {
+		t.Fatal("no profile.push reached the backend")
 	}
 }
