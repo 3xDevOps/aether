@@ -289,6 +289,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		harness:     run.Harness,
 		status:      domain.RunProvisioning,
 		startedAt:   time.Now().UTC(),
+		done:        make(chan struct{}),
 	}
 	s.mu.Lock()
 	err := s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunQueued, domain.RunProvisioning, "", actor)
@@ -426,12 +427,20 @@ func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cau
 		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunFailed,
 			"provisioning: "+cause.Error(), actor)
 	}
-	delete(s.runs, run.ID)
 	s.mu.Unlock()
 	if err != nil {
 		slog.Warn("scheduler: record provisioning outcome", "run", run.ID, "error", err)
 	}
 	s.removeSidecar(run.ID)
+	if entry != nil && entry.done != nil {
+		close(entry.done)
+	}
+	s.mu.Lock()
+	if s.runs[run.ID] == entry {
+		delete(s.runs, run.ID)
+	}
+	s.mu.Unlock()
+
 }
 
 // freshen re-reads the run so callers see the row exactly as persisted

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -1083,6 +1085,32 @@ func TestTranscriptPathReplacesSessionKeySeparators(t *testing.T) {
 	want := h.cfg.TranscriptDir + "/terminal-m1-main.cast"
 	if got := h.transcriptPath(TerminalSession("m1", "main")); got != want {
 		t.Fatalf("transcript path = %q, want %q", got, want)
+	}
+}
+
+func TestRemoveRunTranscripts(t *testing.T) {
+	h, dir := newTestHost(t)
+	for _, name := range []string{
+		"run-1.cast",
+		"run-1.123.cast",
+		"run-shell-run-1-main.cast",
+		"run-2.cast",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("transcript"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	if err := h.RemoveRunTranscripts(t.Context(), "run-1"); err != nil {
+		t.Fatalf("RemoveRunTranscripts: %v", err)
+	}
+	for _, name := range []string{"run-1.cast", "run-1.123.cast", "run-shell-run-1-main.cast"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s still exists (err %v)", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "run-2.cast")); err != nil {
+		t.Errorf("unrelated transcript missing: %v", err)
 	}
 }
 

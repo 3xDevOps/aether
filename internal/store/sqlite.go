@@ -595,6 +595,7 @@ func (d *DB) DeleteTerminal(ctx context.Context, member domain.MemberID) error {
 		`DELETE FROM member_terminals WHERE member_id = ?`, member); err != nil {
 		return fmt.Errorf("store: delete terminal: %w", err)
 	}
+
 	return nil
 }
 

@@ -654,6 +654,10 @@ func (p *fakePTY) StopSession(_ context.Context, key ptyhost.SessionKey) error {
 	}
 	return sess.att.Close()
 }
+
+func (p *fakePTY) RemoveRunTranscripts(_ context.Context, _ domain.RunID) error {
+	return nil
+}
 func (p *fakePTY) ActiveSessions(prefix string) []ptyhost.SessionKey {
 	p.mu.Lock()
 	defer p.mu.Unlock()

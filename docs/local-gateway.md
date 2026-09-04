@@ -129,6 +129,13 @@ Param and result shapes are the ones in `internal/protocol` (`wire.go` and
 the per-feature files), unchanged by this transport, and every call passes
 the same capability checks the SSH transport applies.
 
+`run.delete` uses the same `Kill` capability as `run.kill` and accepts the
+same `{"run_id":"..."}` params. For a live run it stops the container and
+waits for supervision to publish the final branch before removing the
+checkout, transcripts and run-owned database records. For an old run it
+removes the checkout and transcripts directly. The run's timeline remains as
+audit history.
+
 ### `GET /api/v1/capabilities`
 
 ```json

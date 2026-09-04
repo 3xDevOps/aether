@@ -149,21 +149,22 @@ tooltip):
 
 | Growing | Reclaimed by |
 | --- | --- |
-| `checkouts/` | The TTL GC, once the run is terminal. |
-| `transcripts/` | Nothing - they live as long as the run row. |
-| `aether.db` (and its WAL) | Nothing - the event log accumulates. |
+| `checkouts/` | The TTL GC, or deleting the run. |
+| `transcripts/` | Deleting the run. |
+| `aether.db` (and its WAL) | Deleting the run's dependent records; the event log remains. |
 | `repos/` | Nothing - every push, run branch and reflog entry stays. |
 
 The GC sweeps on boot and hourly. It only reclaims worktrees of runs that
 reached a terminal state longer than `--checkout-ttl` ago, and never a path
 an active run still names. **The branch is the artifact**: publishing
 happens before the checkout is reclaimable, so reclaiming a worktree never
-loses work.
+loses work. The dashboard's Delete action removes the checkout and durable
+run records after a live run has stopped; its timeline stays as audit history.
 
 Below `--min-free-disk`, `run.launch` and `run.relaunch` are refused with
 `-32004` (unavailable) and a message naming the numbers. Everything else -
-attaching, steering, pulling, closing runs - keeps working, which is what
-you need to actually clear space.
+attaching, steering, pulling, closing, killing and deleting runs - keeps
+working, which is what you need to actually clear space.
 
 If the filesystem cannot be read at all, the floor allows the run: the guard
 exists to stop a disk from filling, not to stop the server.

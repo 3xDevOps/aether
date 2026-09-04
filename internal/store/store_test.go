@@ -634,6 +634,67 @@ func TestRunCRUDRoundTripsEveryField(t *testing.T) {
 	}
 }
 
+func TestDeleteRunCleansRunOwnedData(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, w.ID, m.ID, domain.RunFailed)
+	other := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+
+	if err := db.CreateApproval(ctx, &Approval{
+		WorkspaceID: w.ID,
+		RunID:       run.ID,
+		Action:      "Bash",
+	}); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+	if err := db.PutRunCost(ctx, &RunCost{
+		RunID: run.ID, WorkspaceID: w.ID, MemberID: m.ID, CostUSD: 1.25,
+	}); err != nil {
+		t.Fatalf("PutRunCost: %v", err)
+	}
+	for _, msg := range []*RunMessage{
+		{WorkspaceID: w.ID, FromRun: run.ID, ToRun: other.ID, Body: "outbound"},
+		{WorkspaceID: w.ID, FromRun: other.ID, ToRun: run.ID, Body: "inbound"},
+	} {
+		if err := db.AppendRunMessage(ctx, msg, 10); err != nil {
+			t.Fatalf("AppendRunMessage: %v", err)
+		}
+	}
+
+	if err := db.DeleteRun(ctx, run.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	if _, err := db.GetRun(ctx, run.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetRun after delete: %v, want ErrNotFound", err)
+	}
+	if _, err := db.GetRun(ctx, other.ID); err != nil {
+		t.Fatalf("unrelated run deleted: %v", err)
+	}
+
+	for _, check := range []struct {
+		table string
+		where string
+		args  []any
+	}{
+		{"approvals", "run_id = ?", []any{run.ID}},
+		{"run_costs", "run_id = ?", []any{run.ID}},
+		{"run_messages", "from_run = ? OR to_run = ?", []any{run.ID, run.ID}},
+	} {
+		var count int
+		if err := db.db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM "+check.table+" WHERE "+check.where,
+			check.args...,
+		).Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", check.table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows remain for deleted run: %d", check.table, count)
+		}
+	}
+}
+
 func TestRunQueries(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

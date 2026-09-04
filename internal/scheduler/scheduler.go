@@ -187,6 +187,7 @@ type supervised struct {
 	paused        bool
 	killRequested bool
 	killActor     domain.MemberID
+	done          chan struct{}
 	// runUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root (no ownership pass). Set once
 	// the user is resolved during provisioning, or from the sidecar on

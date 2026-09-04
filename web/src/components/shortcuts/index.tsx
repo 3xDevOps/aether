@@ -26,6 +26,7 @@ const groups: { name: string; entries: [string, string][] }[] = [
       ['Inject a message', 'Send guidance to the running agent'],
       ['Close as merged / abandoned', 'Finish the run and record how it ended'],
       ['Kill run', 'Stop the run immediately'],
+      ['Delete run', 'Remove the run, checkout and transcript'],
       ['Protect / Unprotect', 'Shield the run from the idle reaper'],
       ['Relaunch run', 'Start a finished run over from its task'],
       ['Pull branch', 'Fetch the run branch into the local workspace'],

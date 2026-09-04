@@ -86,6 +86,20 @@ test('kill asks first, then calls run.kill', async () => {
   expect(useStore.getState().runs[record.id]?.status).toBe('running')
 })
 
+test('delete asks first, calls run.delete, and removes the run', async () => {
+  const record = seed({ paused: false })
+  render(<RunActions run={record} />)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+  expect(await screen.findByText('Delete this run?')).toBeTruthy()
+  expect(api.runDelete).not.toHaveBeenCalled()
+
+  const dialog = within(screen.getByRole('dialog'))
+  fireEvent.click(dialog.getByRole('button', { name: 'Delete run' }))
+  await waitFor(() => expect(api.runDelete).toHaveBeenCalledWith(record.id))
+  expect(useStore.getState().runs[record.id]).toBeUndefined()
+})
+
 test('hand off offers the members who may own a run, and nobody else', async () => {
   const record = seed({ paused: false, members: [alice, bob, vera] })
   render(<RunActions run={record} />)
@@ -130,11 +144,10 @@ test('relaunch is offered on a finished run only', () => {
   const { unmount } = render(<RunActions run={seed({ paused: false })} />)
   expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()
   unmount()
-
   render(<RunActions run={seed({ run: { status: 'merged' } })} />)
   expect(screen.getByRole('button', { name: 'Relaunch' })).toBeTruthy()
-  // A finished run has nothing left to steer.
-  expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
 })
 
 // The failure path: the server's refusal is the whole message, prefixed by
@@ -222,7 +235,7 @@ test('a viewer is offered nothing to change', () => {
     />,
   )
 
-  for (const name of ['Pause', 'Inject', 'Merged', 'Abandoned', 'Kill', 'Protect']) {
+  for (const name of ['Pause', 'Inject', 'Merged', 'Abandoned', 'Kill', 'Delete', 'Protect']) {
     expect(screen.queryByRole('button', { name })).toBeNull()
   }
   expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()
@@ -241,6 +254,7 @@ test('a collaborator on another member run may steer it but not give it away', (
 
   expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Protect' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()
 })

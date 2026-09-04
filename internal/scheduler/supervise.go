@@ -100,7 +100,6 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		to, reason, actor = domain.RunAbandoned, "killed", entry.killActor
 	}
 	err := s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor)
-	delete(s.runs, entry.runID)
 	s.mu.Unlock()
 	// ErrInvalidTransition means the run already reached a terminal state
 	// (e.g. CloseRun raced the exit); the cleanup below still applies.
@@ -112,6 +111,15 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		slog.Warn("scheduler: destroy container", "run", entry.runID, "error", err)
 	}
 	s.removeSidecar(entry.runID)
+	if entry.done != nil {
+		close(entry.done)
+	}
+	s.mu.Lock()
+	if s.runs[entry.runID] == entry {
+		delete(s.runs, entry.runID)
+	}
+	s.mu.Unlock()
+
 }
 
 // checkStalls implements §6.7: a running, non-paused run with no PTY

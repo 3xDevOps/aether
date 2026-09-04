@@ -83,7 +83,7 @@ func TestCollaboratorWriteAttachAllowedByDefault(t *testing.T) {
 }
 
 // A collaborator can kill another member's run by default; a viewer
-// cannot kill or launch anything.
+// cannot kill, delete, or launch anything.
 func TestCollaboratorKillsOthersRunViewerDenied(t *testing.T) {
 	e := newTestEnv(t, nil)
 	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)
@@ -96,6 +96,7 @@ func TestCollaboratorKillsOthersRunViewerDenied(t *testing.T) {
 
 	vc := controlAs(t, e, viewer)
 	wantDenied(t, vc.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "viewer run.kill")
+	wantDenied(t, vc.Call(protocol.MethodRunDelete, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "viewer run.delete")
 	wantDenied(t, vc.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(e.ws.ID), Task: "t", Harness: "claude",
 	}, nil), "viewer run.launch")

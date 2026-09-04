@@ -50,6 +50,7 @@ const (
 	MethodRunList        = "run.list"
 	MethodRunGet         = "run.get"
 	MethodRunKill        = "run.kill"
+	MethodRunDelete      = "run.delete"
 	MethodRunPause       = "run.pause"
 	MethodRunResume      = "run.resume"
 	MethodRunInject      = "run.inject"

@@ -155,6 +155,9 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 	if err := c.Call(protocol.MethodRunClose, protocol.RunCloseParams{RunID: string(e.run.ID), Outcome: "merged"}, &cr); err != nil {
 		t.Fatalf("run.close: %v", err)
 	}
+	if err := c.Call(protocol.MethodRunDelete, protocol.RunIDParams{RunID: string(e.run.ID)}, nil); err != nil {
+		t.Fatalf("run.delete: %v", err)
+	}
 	var rr protocol.RunResult
 	if err := c.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: string(e.run.ID)}, &rr); err != nil {
 		t.Fatalf("run.relaunch: %v", err)
@@ -170,6 +173,7 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 		"resume:" + string(e.run.ID) + ":" + string(e.member.ID),
 		"inject:" + string(e.run.ID) + ":" + string(e.member.ID) + ":focus",
 		"close:" + string(e.run.ID) + ":" + string(e.member.ID) + ":merged",
+		"delete:" + string(e.run.ID) + ":" + string(e.member.ID),
 		"relaunch:" + string(e.run.ID) + ":" + string(e.member.ID),
 	}
 	got := e.runs.Calls()

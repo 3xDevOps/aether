@@ -219,7 +219,7 @@ type RunListResult struct {
 }
 
 // RunIDParams are the params of methods addressing one run by ID
-// (run.get, run.kill, run.pause, run.resume, run.relaunch, run.pull).
+// (run.get, run.kill, run.delete, run.pause, run.resume, run.relaunch, run.pull).
 type RunIDParams struct {
 	RunID string `json:"run_id"`
 }

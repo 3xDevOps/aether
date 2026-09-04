@@ -334,14 +334,19 @@ verb rather than offering the one the server would refuse.
 ## Commands: one list, two ways to reach it
 
 `src/lib/commands.ts` holds every verb the dashboard can perform - the run
-verbs (pause/resume, inject, close as merged or abandoned, kill,
-protect/unprotect, relaunch, pull branch, hand off) and the board verbs
-(open the board or the list, launch, launch from a template, mark all seen) -
-as data: an id, a label, an icon, the capability gate, and the call itself.
-`useCommandRunner()` performs one and reports the outcome the same way
-everywhere: the gateway verbs toast their past-tense name or the server's
-refusal verbatim, and nothing writes run state into the store, because the
-event stream is what reports the result.
+verbs (pause/resume, inject, close as merged or abandoned when a run needs
+attention, kill, delete, protect/unprotect, relaunch, pull branch, hand off)
+and the board verbs (open the board or the list, launch, launch from a
+template, mark all seen) - as data: an id, a label, an icon, the capability
+gate, and the call itself. `useCommandRunner()` performs one and reports the
+outcome the same way everywhere: gateway verbs toast their past-tense name or
+the server's refusal verbatim. Deleting a run also removes it from the local
+run map after the server confirms deletion; other run state is still reported
+by the event stream.
+
+Kill and Delete stay available to members with the `Kill` capability for
+every run status. Killing a terminal run is a safe no-op; deleting removes
+the run's checkout, transcripts and durable run-owned records.
 
 Two surfaces render that one list, so a label or a gate can never drift:
 
@@ -360,15 +365,15 @@ Two surfaces render that one list, so a label or a gate can never drift:
   run-detail tab, which is where the run verbs live for a member who has not
   learned `⌘K` yet.
 
-Two things the buttons add. A `Command` carrying a `confirm` field - kill and
-both closes - opens a dialog naming the run before it runs; the palette does
-not ask, because a palette item is already several deliberate steps (open,
-type, select) away from an accident, where a button is one click. And the bar
-locks while a verb is in flight, showing a spinner on the one running: a pull
-shells out to `git fetch` over SSH and takes seconds, and a second click would
-race the first for the same ref. Buttons also take the command's `short` label
-and keep the full sentence as their tooltip, because eight of them share one
-`h-9` header row.
+Two things the buttons add. A `Command` carrying a `confirm` field - kill,
+delete and both close actions - opens a dialog naming the run before it runs;
+the palette does not ask, because a palette item is already several
+deliberate steps (open, type, select) away from an accident, where a button
+is one click. And the bar locks while a verb is in flight, showing a spinner
+on the one running: a pull shells out to `git fetch` over SSH and takes
+seconds, and a second click would race the first for the same ref. Buttons
+also take the command's `short` label and keep the full sentence as their
+tooltip, because the action bar is intentionally compact.
 
 **Who may do what is asked twice.** `src/lib/permissions.ts` mirrors
 `internal/permissions`: the role table, plus the two restrictions on top of it
