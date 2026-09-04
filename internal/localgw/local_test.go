@@ -364,6 +364,7 @@ func TestLocalPull(t *testing.T) {
 	localGit(t, remote, "commit", "--allow-empty", "-m", "run work")
 	local := t.TempDir()
 	localGit(t, local, "init", "-b", "main")
+	localGit(t, local, "remote", "add", "aether", remote)
 
 	// GitURL renders ssh://alice@host:2222/<ws>.git; a GIT_SSH_COMMAND
 	// shim executes the wrapped git-upload-pack locally instead of
@@ -394,15 +395,20 @@ func TestLocalPull(t *testing.T) {
 		t.Fatalf("pull = %d: %s", rec.Code, rec.Body)
 	}
 	var got struct {
-		Branch string `json:"branch"`
-		Ref    string `json:"ref"`
-		Output string `json:"output"`
+		Branch  string `json:"branch"`
+		Ref     string `json:"ref"`
+		Output  string `json:"output"`
+		Current bool   `json:"current"`
+		Dirty   bool   `json:"dirty"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Branch != "aether/run_1" || got.Ref != "refs/remotes/aether/aether/run_1" {
 		t.Fatalf("pull = %+v", got)
+	}
+	if got.Current || got.Dirty {
+		t.Fatalf("pull state = current %v dirty %v, want false false", got.Current, got.Dirty)
 	}
 	want := localGit(t, remote, "rev-parse", "aether/run_1")
 	if fetched := localGit(t, local, "rev-parse", "refs/remotes/aether/aether/run_1"); fetched != want {

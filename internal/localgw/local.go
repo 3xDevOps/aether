@@ -32,6 +32,7 @@ var localVerbs = []string{
 	"profile.preview",
 	"profile.push",
 	"pull",
+	"pull.switch",
 	"repo.push",
 	"sync.start",
 	"sync.status",
@@ -134,6 +135,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 		"profile.preview": (*Gateway).localProfilePreview,
 		"profile.push":    (*Gateway).localProfilePush,
 		"pull":            (*Gateway).localPull,
+		"pull.switch":     (*Gateway).localPullSwitch,
 		"repo.push":       (*Gateway).localRepoPush,
 		"sync.start":      (*Gateway).localSyncStart,
 		"sync.status":     (*Gateway).localSyncStatus,
@@ -391,15 +393,55 @@ func (g *Gateway) localPull(r *http.Request, body []byte) (any, *protocol.Error)
 	if err = json.Unmarshal(result, &coords); err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "decode pull coordinates: " + err.Error()}
 	}
-	branch, ref, output, err := localops.Pull(cfg.Repo, cfg.User, cfg.Addr, coords)
+	pullResult, err := localops.Pull(cfg.Repo, cfg.User, cfg.Addr, coords)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
 	return struct {
+		Branch  string `json:"branch"`
+		Ref     string `json:"ref"`
+		Output  string `json:"output"`
+		Current bool   `json:"current"`
+		Dirty   bool   `json:"dirty"`
+	}{
+		Branch: pullResult.Branch, Ref: pullResult.Ref, Output: pullResult.Output,
+		Current: pullResult.Current, Dirty: pullResult.Dirty,
+	}, nil
+
+}
+
+func (g *Gateway) localPullSwitch(r *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		RunID string `json:"run_id"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	if params.RunID == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "run_id is required"}
+	}
+	cfg := g.local.snapshot()
+	if cfg.Repo == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
+	}
+	callParams, err := json.Marshal(protocol.RunIDParams{RunID: params.RunID})
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodRunPull, callParams)
+	if perr != nil {
+		return nil, perr
+	}
+	var coords protocol.RunPullResult
+	if err = json.Unmarshal(result, &coords); err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "decode pull coordinates: " + err.Error()}
+	}
+	if err := localops.SwitchPull(cfg.Repo, coords.Branch); err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	}
+	return struct {
 		Branch string `json:"branch"`
-		Ref    string `json:"ref"`
-		Output string `json:"output"`
-	}{Branch: branch, Ref: ref, Output: output}, nil
+	}{Branch: coords.Branch}, nil
 }
 
 func (g *Gateway) localSyncStart(_ *http.Request, body []byte) (any, *protocol.Error) {

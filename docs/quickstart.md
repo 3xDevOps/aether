@@ -286,32 +286,40 @@ everyone watching sees who said it.
 
 ## 8. Pull the result
 
-When the agent exits, its work is already committed to the run's branch and the
+When the agent exits, its latest work is committed to the run's branch and the
 run parks in `needs-attention`.
 
 ```sh
 aether pull <run-id>
 ```
 
+If your checkout is already on the run branch, Aether fast-forwards it. If not,
+Aether creates or updates the local run branch without switching your checkout:
+
 ```
-fetched aether/run-add-a-health-check-endpoint-mgcped into refs/remotes/aether/aether/run-add-a-health-check-endpoint-mgcped (not merged)
+Branch aether/run-add-a-health-check-endpoint-mgcped is ready. Switch with: git switch aether/run-add-a-health-check-endpoint-mgcped
 ```
 
-A run branch is named `aether/run-<slug>-<short-id>`: the task slugified,
-then the last six characters of the run ID. The branch is now in your local
-clone as a remote-tracking ref. Review it, diff it, merge it - by hand.
-**Aether never merges anything for you.**
+The branch name is `aether/run-<slug>-<short-id>`: the task slugified, then the
+last six characters of the run ID. Aether never switches branches or merges
+the run into your base branch. Review it, diff it, then merge it by hand:
 
 ```sh
-git log --oneline aether/aether/run-add-a-health-check-endpoint-mgcped
-git diff main...aether/aether/run-add-a-health-check-endpoint-mgcped
+git log --oneline aether/run-add-a-health-check-endpoint-mgcped
+git diff main...aether/run-add-a-health-check-endpoint-mgcped
 ```
+
+If the local checkout has uncommitted changes, the pull still fetches the run
+branch and reports that the checkout is dirty. Commit or stash those changes
+before switching to the run branch.
 
 Then close the run out so it leaves the attention board:
 
 ```sh
+git switch aether/run-add-a-health-check-endpoint-mgcped
 aether close <run-id> --outcome merged      # or --outcome abandoned
 ```
+
 
 
 To stop pulling by hand, run the local sync daemon - it fetches run branches as

@@ -10,10 +10,18 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// PullCommand builds the git fetch that lands a run branch in repo under
-// refs/remotes/aether/<branch>, from the run.pull coordinates. The caller
-// wires the command's output (the CLI streams it to the terminal) and
-// runs it.
+// PullResult describes the run branch after it has been fetched and either
+// created locally or fast-forwarded.
+type PullResult struct {
+	Branch  string
+	Ref     string
+	Output  string
+	Current bool
+	Dirty   bool
+}
+
+// PullCommand builds the fetch that lands a run branch in repo under
+// refs/remotes/aether/<branch>. Pull performs the follow-up branch operation.
 func PullCommand(repo, user, addr string, coords protocol.RunPullResult) (string, *exec.Cmd, error) {
 	if coords.Branch == "" {
 		return "", nil, errors.New("run has no branch")
@@ -22,22 +30,105 @@ func PullCommand(repo, user, addr string, coords protocol.RunPullResult) (string
 	return coords.Branch, fetchCommand(repo, url, coords.Branch), nil
 }
 
-// Pull runs the fetch built by PullCommand with its combined output
-// captured instead of streamed, for callers answering an API request
-// rather than a terminal. It returns the branch, the local tracking ref,
-// and everything git printed; on failure the output is folded into the
-// error as well.
-func Pull(repo, user, addr string, coords protocol.RunPullResult) (branch, ref, output string, err error) {
+// Pull fetches a run branch, creates or updates its local branch, and reports
+// whether that branch is current and whether the worktree is dirty.
+func Pull(repo, user, addr string, coords protocol.RunPullResult) (PullResult, error) {
 	if coords.Branch == "" {
-		return "", "", "", errors.New("run has no branch")
+		return PullResult{}, errors.New("run has no branch")
 	}
 	url := cli.GitURL(user, addr, coords.WorkspaceID)
-	ref, output, err = pullFetch(repo, url, coords.Branch)
-	return coords.Branch, ref, output, err
+	return pull(repo, url, coords.Branch)
 }
 
-// pullFetch is the captured-output fetch core, taking the resolved git
-// URL so it stays testable against a filesystem remote.
+// pull is the captured-output core, taking a resolved URL so filesystem
+// remotes can exercise the same branch and merge behavior in unit tests.
+func pull(repo, url, branch string) (PullResult, error) {
+	result := PullResult{
+		Branch: branch,
+		Ref:    "refs/remotes/aether/" + branch,
+	}
+	ref, output, err := pullFetch(repo, url, branch)
+	result.Ref, result.Output = ref, output
+	if err != nil {
+		return result, err
+	}
+
+	result.Current = currentBranch(repo) == branch
+
+	var opOutput []byte
+	if result.Current {
+		opOutput, err = exec.Command("git", "-C", repo, "merge", "--ff-only", "aether/"+branch).CombinedOutput()
+	} else {
+		args := []string{"-C", repo, "branch", "--force"}
+		tracked := remoteExists(repo, "aether")
+		if tracked {
+			args = append(args, "--track")
+		}
+		args = append(args, branch, "aether/"+branch)
+		opOutput, err = exec.Command("git", args...).CombinedOutput()
+		if err != nil && tracked {
+			fallback := exec.Command("git", "-C", repo, "branch", "--force", branch, "aether/"+branch)
+			var fallbackOutput []byte
+			fallbackOutput, err = fallback.CombinedOutput()
+			opOutput = append(opOutput, fallbackOutput...)
+		}
+	}
+	result.Output += string(opOutput)
+	if err != nil {
+		action := "create local branch"
+		if result.Current {
+			action = "fast-forward branch"
+		}
+		return result, fmt.Errorf("git %s: %w: %s", action, err, strings.TrimSpace(string(opOutput)))
+	}
+	result.Dirty, err = worktreeDirty(repo)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func remoteExists(repo, remote string) bool {
+	return exec.Command("git", "-C", repo, "remote", "get-url", remote).Run() == nil
+}
+
+// SwitchPull switches to an already fetched run branch. It never risks
+// discarding local edits: a dirty worktree must be committed or stashed first.
+func SwitchPull(repo, branch string) error {
+	if branch == "" {
+		return errors.New("run has no branch")
+	}
+	dirty, err := worktreeDirty(repo)
+	if err != nil {
+		return err
+	}
+	if dirty {
+		return errors.New("working tree has uncommitted changes; commit or stash them first")
+	}
+	out, err := exec.Command("git", "-C", repo, "switch", branch).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git switch %s: %w: %s", branch, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func currentBranch(repo string) string {
+	out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--quiet", "--short", "HEAD").CombinedOutput()
+	if err != nil {
+		return "" // A detached HEAD is not the run branch.
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func worktreeDirty(repo string) (bool, error) {
+	out, err := exec.Command("git", "-C", repo, "status", "--porcelain").CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git status: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return len(strings.TrimSpace(string(out))) != 0, nil
+}
+
+// pullFetch is the fetch-only seam used by tests and by Pull.
 func pullFetch(repo, url, branch string) (ref, output string, err error) {
 	ref = "refs/remotes/aether/" + branch
 	out, err := fetchCommand(repo, url, branch).CombinedOutput()

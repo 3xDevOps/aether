@@ -224,6 +224,7 @@ describe('command palette', () => {
 
   it('pulls the focused run branch through the local gateway', async () => {
     useStore.setState({
+      runs: { [active.id]: toRecord(run({ last_commit: 'abc1234' })) },
       route: { name: 'run', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',

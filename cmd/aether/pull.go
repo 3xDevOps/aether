@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -34,15 +33,14 @@ func runPull(args []string) error {
 	}); err != nil {
 		return err
 	}
-	branch, cmd, err := localops.PullCommand(cfg.Repo, cfg.User, cfg.Addr, coords)
+	result, err := localops.Pull(cfg.Repo, cfg.User, cfg.Addr, coords)
 	if err != nil {
 		return err
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
+	if result.Current {
+		fmt.Printf("You are on %s; fast-forwarded.\n", result.Branch)
+	} else {
+		fmt.Printf("Branch %s is ready. Switch with: git switch %s\n", result.Branch, result.Branch)
 	}
-	fmt.Printf("fetched %s into refs/remotes/aether/%s (not merged)\n", branch, branch)
 	return nil
 }

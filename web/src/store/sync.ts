@@ -7,6 +7,7 @@ import type {
   EnvironmentBuildPayload,
   EnvironmentEditPayload,
   Event,
+  GitBranchPayload,
   OverlapPayload,
   RunDiffPayload,
   RunStatusPayload,
@@ -178,6 +179,19 @@ export async function applyEvent(
       store
         .getState()
         .noteDiffSnapshot(ev.run_id, { time: ev.time, files: p.files ?? [] })
+      break
+    }
+    case 'git.branch': {
+      const p = ev.payload as GitBranchPayload
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          store.getState().setUnreachable(classifyUnreachable(err))
+          return false
+        }
+      }
+      if (p.commit) store.getState().applyLastCommit(ev.run_id, p.commit, ev.time)
       break
     }
     case 'run.overlap': {

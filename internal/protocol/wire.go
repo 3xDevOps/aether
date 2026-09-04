@@ -26,6 +26,8 @@ type Run struct {
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused            bool    `json:"paused"`
 	Branch            string  `json:"branch"`
+	LastCommit        string  `json:"last_commit,omitempty"`
+	LastCommitAt      *string `json:"last_commit_at,omitempty"`
 	Protected         bool    `json:"protected,omitempty"`
 	CreatedAt         string  `json:"created_at"`
 	StartedAt         *string `json:"started_at"`
@@ -75,6 +77,13 @@ func rfc3339Ptr(t *time.Time) *string {
 	s := rfc3339(*t)
 	return &s
 }
+func rfc3339ValuePtr(t time.Time) *string {
+	if t.IsZero() {
+		return nil
+	}
+	s := rfc3339(t)
+	return &s
+}
 
 // RunFromDomain converts a domain run to its wire form.
 func RunFromDomain(r *domain.Run) Run {
@@ -89,6 +98,8 @@ func RunFromDomain(r *domain.Run) Run {
 		Status:            string(r.Status),
 		Reason:            r.Reason,
 		Branch:            r.Branch,
+		LastCommit:        r.LastCommit,
+		LastCommitAt:      rfc3339ValuePtr(r.LastCommitAt),
 		Protected:         r.Protected,
 		CreatedAt:         rfc3339(r.CreatedAt),
 		StartedAt:         rfc3339Ptr(r.StartedAt),

@@ -154,6 +154,42 @@ func TestMigrationIdempotency(t *testing.T) {
 	}
 }
 
+func TestRunCommitMigrationAddsColumns(t *testing.T) {
+	db := openTestDB(t)
+	rows, err := db.db.Query(`PRAGMA table_info(runs)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(runs): %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type column struct {
+		typ     string
+		notNull int
+		defVal  sql.NullString
+	}
+	columns := make(map[string]column)
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var defVal sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defVal, &pk); err != nil {
+			t.Fatalf("scan runs column: %v", err)
+		}
+		columns[name] = column{typ: typ, notNull: notNull, defVal: defVal}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate runs columns: %v", err)
+	}
+	if got := columns["last_commit"]; got.typ != "TEXT" || got.notNull != 1 ||
+		!got.defVal.Valid || got.defVal.String != "''" {
+		t.Fatalf("last_commit column = %+v, want TEXT NOT NULL DEFAULT ''", got)
+	}
+	if got := columns["last_commit_at"]; got.typ != "INTEGER" || got.notNull != 0 ||
+		got.defVal.Valid {
+		t.Fatalf("last_commit_at column = %+v, want nullable INTEGER", got)
+	}
+}
+
 func TestMigrateRejectsNewerSchema(t *testing.T) {
 	db := openTestDB(t)
 	if _, err := db.db.Exec(
@@ -553,8 +589,11 @@ func TestRunCRUDRoundTripsEveryField(t *testing.T) {
 	}
 	r.Branch = "aether/run-" + string(r.ID) + "-auth-fix"
 	r.Worktree = "/var/lib/aether/worktrees/" + string(r.ID)
+	r.LastCommit = strings.Repeat("a", 40)
+	lastCommitAt := time.Date(2026, 8, 9, 10, 31, 0, 123456789, time.UTC)
+	r.LastCommitAt = lastCommitAt
 	if err := db.UpdateRun(ctx, r); err != nil {
-		t.Fatalf("UpdateRun (branch/worktree): %v", err)
+		t.Fatalf("UpdateRun (branch/worktree/commit): %v", err)
 	}
 
 	got, err := db.GetRun(ctx, r.ID)
@@ -919,6 +958,8 @@ func assertRunEqual(t *testing.T, want, got *domain.Run) {
 	if got.ID != want.ID || got.WorkspaceID != want.WorkspaceID || got.MemberID != want.MemberID ||
 		got.Task != want.Task || got.Harness != want.Harness || got.Mode != want.Mode ||
 		got.Status != want.Status || got.Branch != want.Branch || got.Worktree != want.Worktree ||
+		got.ProfileSnapshotID != want.ProfileSnapshotID ||
+		got.LastCommit != want.LastCommit || !got.LastCommitAt.Equal(want.LastCommitAt) ||
 		got.Protected != want.Protected ||
 		!got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("run round-trip: got %+v, want %+v", got, want)

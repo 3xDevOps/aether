@@ -70,6 +70,9 @@ type Store interface {
 	ListRunsByMember(ctx context.Context, id domain.MemberID) ([]*domain.Run, error)
 	ListActiveRuns(ctx context.Context) ([]*domain.Run, error)
 	UpdateRun(ctx context.Context, r *domain.Run) error
+
+	// UpdateRunCommit updates only the last published commit metadata.
+	UpdateRunCommit(ctx context.Context, id domain.RunID, commit string, at time.Time) error
 	// UpdateRunStatus sets only the run's status and reason (the reason
 	// column is always overwritten, empty clears it), plus started/finished
 	// timestamps when non-nil, leaving every other field untouched. This

@@ -111,12 +111,16 @@ test('a run with nobody to hand to shows no hand off button', () => {
 
 // Pull is a local-gateway verb: a remote monitor never shows the button, so
 // nobody clicks a verb the server would refuse anyway.
-test('pull branch needs the local pull capability', async () => {
+test('pull branch needs a published commit and local pull capability', async () => {
   const { unmount } = render(<RunActions run={seed({ paused: false })} />)
   expect(screen.queryByRole('button', { name: 'Pull' })).toBeNull()
   unmount()
 
-  const record = seed({ paused: false, local: ['pull'] })
+  const record = seed({
+    paused: false,
+    local: ['pull'],
+    run: { last_commit: 'a'.repeat(40) },
+  })
   render(<RunActions run={record} />)
   fireEvent.click(screen.getByRole('button', { name: 'Pull' }))
   await waitFor(() => expect(api.localPull).toHaveBeenCalledWith(record.id))
@@ -156,13 +160,23 @@ test('a refused verb surfaces the server message verbatim', async () => {
 // race the first on the same ref, so nothing in the bar is clickable while a
 // verb is in flight.
 test('the bar locks while a verb is in flight, and names what it fetched', async () => {
-  let finish = (_: { branch: string; ref: string; output: string }) => {}
+  let finish = (_: {
+    branch: string
+    ref: string
+    output: string
+    current: boolean
+    dirty: boolean
+  }) => {}
   vi.mocked(api.localPull).mockReturnValue(
     new Promise((resolve) => {
       finish = resolve
     }),
   )
-  const record = seed({ paused: false, local: ['pull'] })
+  const record = seed({
+    paused: false,
+    local: ['pull'],
+    run: { last_commit: 'a'.repeat(40) },
+  })
   render(<RunActions run={record} />)
 
   fireEvent.click(screen.getByRole('button', { name: 'Pull' }))
@@ -181,8 +195,9 @@ test('the bar locks while a verb is in flight, and names what it fetched', async
     branch: record.branch,
     ref: `refs/heads/${record.branch}`,
     output: 'From ssh://host\n * [new branch] run-1-checkout',
+    current: false,
+    dirty: false,
   })
-
   await waitFor(() =>
     expect(toast.success).toHaveBeenCalledWith(
       `Pulled refs/heads/${record.branch}`,

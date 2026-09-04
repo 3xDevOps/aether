@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -210,6 +211,14 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		ReposDir:     filepath.Join(cfg.DataDir, "repos"),
 		CheckoutsDir: filepath.Join(cfg.DataDir, "checkouts"),
 		Bus:          s.bus,
+		OnBranchPublished: func(run domain.RunID, commit string, at time.Time) {
+			if s.sched == nil {
+				return
+			}
+			if recordErr := s.sched.RecordCommit(context.Background(), run, commit, at); recordErr != nil {
+				slog.Warn("server: record run commit failed", "run", run, "error", recordErr)
+			}
+		},
 	}); err != nil {
 		return nil, err
 	}
