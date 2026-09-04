@@ -34,14 +34,14 @@ var (
 // Config configures an Engine. ReposDir and CheckoutsDir are required; the
 // rest defaults sensibly.
 type Config struct {
-	ReposDir     string        // <data>/repos
-	CheckoutsDir string        // <data>/checkouts
-	GitPath      string        // "git"
-	Bus          events.Bus    // run.diff + git.branch; may be nil in tests
+	ReposDir          string     // <data>/repos
+	CheckoutsDir      string     // <data>/checkouts
+	GitPath           string     // "git"
+	Bus               events.Bus // run.diff + git.branch; may be nil in tests
 	OnBranchPublished func(run domain.RunID, commit string, at time.Time)
-	QuietPeriod  time.Duration // default 2s
-	MinInterval  time.Duration // default 10s
-	MaxInterval  time.Duration // default 60s
+	QuietPeriod       time.Duration // default 2s
+	MinInterval       time.Duration // default 10s
+	MaxInterval       time.Duration // default 60s
 }
 
 // runInfo is a watch-registry entry. Entries are created by StartDiffWatch
@@ -322,14 +322,19 @@ func gitEnv() []string {
 }
 
 // publishBranch emits git.branch for a run whose branch tip moved, scoped
-// to the workspace recorded in the watch registry. The callback records the
-// commit metadata even when no event bus is configured.
+// to the workspace recorded in the watch registry or the run metadata
+// sidecar. The callback records the commit metadata even when no event bus
+// is configured.
 func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, commit string) {
 	e.mu.Lock()
 	info, ok := e.registry[run]
 	e.mu.Unlock()
 	if !ok {
-		return
+		meta, err := e.readRunMeta(run)
+		if err != nil {
+			return
+		}
+		info = runInfo{workspace: meta.Workspace, branch: meta.Branch}
 	}
 	if e.cfg.Bus != nil {
 		_, err := e.cfg.Bus.Publish(ctx, events.Event{

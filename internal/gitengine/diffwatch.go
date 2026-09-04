@@ -46,12 +46,14 @@ type diffWatch struct {
 	finished chan struct{}
 
 	// loop-goroutine state
-	dirty          bool
-	headDirty      bool
-	lastEvent      time.Time
-	lastSnap       time.Time
-	lastHead       string
-	lastFiles      []events.FileDiffStat
+	dirty            bool
+	headDirty        bool
+	lastEvent        time.Time
+	headEvent        time.Time
+	headRetryAt      time.Time
+	lastSnap         time.Time
+	lastHead         string
+	lastFiles        []events.FileDiffStat
 	lastSnapshotWarn time.Time
 	lastPublishWarn  time.Time
 }
@@ -108,9 +110,14 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 		_ = watcher.Close()
 		return err
 	}
+	refDir := filepath.Dir(filepath.Join(checkout, ".git", "refs", "heads", meta.Branch))
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		_ = watcher.Close()
+		return fmt.Errorf("gitengine: create ref watch directory %s: %w", refDir, err)
+	}
 	for _, dir := range []string{
 		filepath.Join(checkout, ".git"),
-		filepath.Join(checkout, ".git", "refs", "heads"),
+		refDir,
 	} {
 		if err := watcher.Add(dir); err != nil {
 			_ = watcher.Close()
@@ -237,7 +244,8 @@ func (w *diffWatch) loop() {
 			now := time.Now()
 			if w.underGit(ev.Name) {
 				w.headDirty = true
-				w.lastEvent = now
+				w.headEvent = now
+				w.headRetryAt = time.Time{}
 				w.arm(timer, now)
 				continue
 			}
@@ -266,8 +274,13 @@ func (w *diffWatch) loop() {
 				ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 				if w.checkHead(ctx) {
 					w.headDirty = false
+					w.headRetryAt = time.Time{}
 				} else {
-					w.lastEvent = now
+					retry := w.e.cfg.QuietPeriod
+					if retry < w.e.cfg.MinInterval {
+						retry = w.e.cfg.MinInterval
+					}
+					w.headRetryAt = time.Now().Add(retry)
 				}
 				cancel()
 				if w.headDirty || w.dirty {
@@ -297,10 +310,15 @@ func (w *diffWatch) loop() {
 // arm resets the timer to the earliest instant a snapshot could fire:
 // max(lastEvent+QuietPeriod, lastSnap+MinInterval), capped at
 // lastSnap+MaxInterval (the sustained-churn bound). A HEAD-only event is
-// gated only by the quiet period.
+// gated by headEvent and does not affect the tree-change deadline.
 func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
 	deadline := w.lastEvent.Add(w.e.cfg.QuietPeriod)
-	if !w.headDirty {
+	if w.headDirty {
+		deadline = w.headEvent.Add(w.e.cfg.QuietPeriod)
+		if w.headRetryAt.After(deadline) {
+			deadline = w.headRetryAt
+		}
+	} else {
 		if floor := w.lastSnap.Add(w.e.cfg.MinInterval); deadline.Before(floor) {
 			deadline = floor
 		}

@@ -74,7 +74,6 @@ func TestPullCreatesBranchWhenNotCurrent(t *testing.T) {
 	requireGit(t)
 	local, remote := scratchRepos(t, "run-branch")
 	git(t, local, "switch", "-c", "main")
-	git(t, local, "remote", "add", "aether", remote)
 
 	result, err := pull(local, remote, "run-branch")
 	if err != nil {
@@ -87,7 +86,24 @@ func TestPullCreatesBranchWhenNotCurrent(t *testing.T) {
 		t.Fatalf("result = %+v, want non-current clean branch", result)
 	}
 	if got := git(t, local, "rev-parse", "refs/heads/run-branch"); got != git(t, remote, "rev-parse", "run-branch") {
-		t.Fatalf("local branch did not track fetched branch: %s", got)
+		t.Fatalf("local branch did not point to fetched branch: %s", got)
+	}
+	if got := git(t, local, "for-each-ref", "--format=%(upstream:short)", "refs/heads/run-branch"); got != "" {
+		t.Fatalf("local branch upstream = %q, want none without a remote", got)
+	}
+}
+
+func TestPullCreatesTrackingBranchWhenRemoteExists(t *testing.T) {
+	requireGit(t)
+	local, remote := scratchRepos(t, "run-branch")
+	git(t, local, "switch", "-c", "main")
+	git(t, local, "remote", "add", "aether", remote)
+
+	if _, err := pull(local, remote, "run-branch"); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if got := git(t, local, "for-each-ref", "--format=%(upstream:short)", "refs/heads/run-branch"); got != "aether/run-branch" {
+		t.Fatalf("local branch upstream = %q, want aether/run-branch", got)
 	}
 }
 
@@ -142,7 +158,7 @@ func TestPullSwitchRefusesDirtyWorktree(t *testing.T) {
 	if _, err := pull(local, remote, "run-branch"); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
-	if err := SwitchPull(local, "run-branch"); err == nil || !strings.Contains(err.Error(), "working tree is dirty") {
+	if err := SwitchPull(local, "run-branch"); err == nil || !strings.Contains(err.Error(), "working tree has uncommitted changes; commit or stash them first") {
 		t.Fatalf("SwitchPull error = %v, want dirty-worktree refusal", err)
 	}
 	if got := git(t, local, "branch", "--show-current"); got != "main" {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 )
 
 // The scheduler's and sshd's consumer-side seam interfaces, copied verbatim
@@ -122,4 +123,57 @@ func TestMissingRepoAndCheckoutErrors(t *testing.T) {
 		t.Error("LastFileChange without a watch should report false")
 	}
 	e.StopDiffWatch("r1") // idempotent no-op
+}
+
+func TestPublishBranchUsesRunMetadataWithoutRegistry(t *testing.T) {
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newUnitEngine(t)
+	e.cfg.Bus = bus
+
+	const (
+		run       domain.RunID       = "r1"
+		branch    string             = "aether/r1"
+		workspace domain.WorkspaceID = "ws1"
+		commit                       = "0123456789abcdef"
+	)
+	if err := e.writeRunMeta(run, runMeta{Base: "main", Branch: branch, Workspace: workspace}); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := bus.Subscribe(t.Context(), events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeGitBranch}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sub.Close() })
+
+	var (
+		callbackRun    domain.RunID
+		callbackCommit string
+	)
+	e.cfg.OnBranchPublished = func(gotRun domain.RunID, gotCommit string, _ time.Time) {
+		callbackRun, callbackCommit = gotRun, gotCommit
+	}
+	e.publishBranch(t.Context(), run, commit)
+
+	select {
+	case event := <-sub.Events():
+		payload, ok := event.Payload.(events.GitBranchPayload)
+		if !ok {
+			t.Fatalf("payload type = %T, want events.GitBranchPayload", event.Payload)
+		}
+		if event.WorkspaceID != workspace || event.RunID != run {
+			t.Fatalf("event scope = %s/%s, want %s/%s", event.WorkspaceID, event.RunID, workspace, run)
+		}
+		if payload.WorkspaceID != workspace || payload.Branch != branch || payload.Commit != commit {
+			t.Fatalf("event payload = %+v", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("publishBranch did not emit git.branch")
+	}
+	if callbackRun != run || callbackCommit != commit {
+		t.Fatalf("callback = %s/%s, want %s/%s", callbackRun, callbackCommit, run, commit)
+	}
 }

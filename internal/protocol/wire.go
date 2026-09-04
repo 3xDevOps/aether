@@ -32,6 +32,7 @@ type Run struct {
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
 	ProfileSnapshotID string  `json:"profile_snapshot_id,omitempty"`
+
 }
 
 // Workspace is the wire form of a workspace; image, env, and setup script
@@ -103,6 +104,7 @@ func RunFromDomain(r *domain.Run) Run {
 		StartedAt:         rfc3339Ptr(r.StartedAt),
 		FinishedAt:        rfc3339Ptr(r.FinishedAt),
 		ProfileSnapshotID: string(r.ProfileSnapshotID),
+
 	}
 }
 

@@ -63,7 +63,19 @@ func pull(repo, url, branch string) (PullResult, error) {
 	if result.Current {
 		opOutput, err = exec.Command("git", "-C", repo, "merge", "--ff-only", "aether/"+branch).CombinedOutput()
 	} else {
-		opOutput, err = exec.Command("git", "-C", repo, "branch", "--force", "--track", branch, "aether/"+branch).CombinedOutput()
+		args := []string{"-C", repo, "branch", "--force"}
+		tracked := remoteExists(repo, "aether")
+		if tracked {
+			args = append(args, "--track")
+		}
+		args = append(args, branch, "aether/"+branch)
+		opOutput, err = exec.Command("git", args...).CombinedOutput()
+		if err != nil && tracked {
+			fallback := exec.Command("git", "-C", repo, "branch", "--force", branch, "aether/"+branch)
+			var fallbackOutput []byte
+			fallbackOutput, err = fallback.CombinedOutput()
+			opOutput = append(opOutput, fallbackOutput...)
+		}
 	}
 	result.Output += string(opOutput)
 	if err != nil {
@@ -73,12 +85,15 @@ func pull(repo, url, branch string) (PullResult, error) {
 		}
 		return result, fmt.Errorf("git %s: %w: %s", action, err, strings.TrimSpace(string(opOutput)))
 	}
-
 	result.Dirty, err = worktreeDirty(repo)
 	if err != nil {
 		return result, err
 	}
 	return result, nil
+}
+
+func remoteExists(repo, remote string) bool {
+	return exec.Command("git", "-C", repo, "remote", "get-url", remote).Run() == nil
 }
 
 // SwitchPull switches to an already fetched run branch. It never risks
@@ -92,7 +107,7 @@ func SwitchPull(repo, branch string) error {
 		return err
 	}
 	if dirty {
-		return errors.New("working tree is dirty; commit or stash changes before switching branches")
+		return errors.New("working tree has uncommitted changes; commit or stash them first")
 	}
 	out, err := exec.Command("git", "-C", repo, "switch", branch).CombinedOutput()
 	if err != nil {

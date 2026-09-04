@@ -196,9 +196,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}
 
 	if s.git, err = gitengine.New(gitengine.Config{
-		ReposDir: filepath.Join(cfg.DataDir, "repos"),
+		ReposDir:     filepath.Join(cfg.DataDir, "repos"),
 		CheckoutsDir: filepath.Join(cfg.DataDir, "checkouts"),
-		Bus: s.bus,
+		Bus:          s.bus,
 		OnBranchPublished: func(run domain.RunID, commit string, at time.Time) {
 			if s.sched == nil {
 				return
