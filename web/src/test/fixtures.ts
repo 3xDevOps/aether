@@ -367,13 +367,18 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     capabilities: vi.fn(async () => ({
       gateway: 'remote',
       methods: ['*'],
-      ws: ['events', 'attach'],
+      ws: ['events', 'attach', 'terminal'],
     })),
     eventsSocket: vi.fn(() => 'ws://localhost/ws/events'),
     attachSocket: vi.fn((runID: string) => `ws://localhost/ws/attach/${runID}`),
     attachShellSocket: vi.fn(
       (runID: string, tab: string) =>
         `ws://localhost/ws/attach/${runID}?shell=${encodeURIComponent(tab)}`,
+    ),
+    terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
+    terminalStop: vi.fn(async () => ({})),
+    terminalSocket: vi.fn(
+      (tab: string) => `ws://localhost/ws/terminal?tab=${encodeURIComponent(tab)}`,
     ),
     memberInvite: vi.fn(async () => ({
       code: 'inv-code-1',

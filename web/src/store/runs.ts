@@ -33,6 +33,7 @@ export interface RunsSlice {
     time: string,
   ) => void
   applyLastCommit: (runID: string, commit: string, time: string) => void
+  applyRunTitle: (runID: string, title: string) => void
 }
 
 export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
@@ -65,6 +66,13 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
           [runID]: { ...current, last_commit: commit, last_commit_at: time },
         },
       }
+    }),
+
+  applyRunTitle: (runID, title) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current || current.title === title) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, title } } }
     }),
 })
 

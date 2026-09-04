@@ -44,6 +44,7 @@ import type {
   ServerUpdateWhen,
   SyncSessionState,
   SyncStatusResult,
+  TerminalStatusResult,
   Template,
   TemplateLaunch,
   TimelinePage,
@@ -593,6 +594,10 @@ export const api = {
    * override lives on the CLI. */
   localProfilePush: (harness: string) =>
     local<ProfilePushResult>('profile.push', { harness }),
+  terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
+  terminalStop: () => call<unknown>('terminal.stop', {}),
+  terminalSocket: (tab: string) =>
+    socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),
   openEnvScan,
   openProfileScan,
   eventsSocket: () => socketURL('/ws/events'),

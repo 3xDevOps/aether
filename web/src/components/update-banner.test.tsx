@@ -29,6 +29,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const shellWindow = window as Window & { aetherDesktop?: AetherDesktop }
 
+
 /** Opens the newest stub socket and acknowledges the subscription on it. */
 async function subscribe() {
   await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThan(0))

@@ -16,7 +16,7 @@ func TestDispatchHelp(t *testing.T) {
 		t.Fatalf("bare aether: %v", err)
 	}
 	help := helpText()
-	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "runs", "pull", "workspace", "image", "member", "invite", "gui", "gui build", "profile", "kill", "pause", "resume", "inject", "close", "relaunch", "inbox", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
+	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "terminal", "runs", "pull", "workspace", "image", "member", "invite", "gui", "gui build", "profile", "kill", "pause", "resume", "inject", "close", "relaunch", "inbox", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
 		if !strings.Contains(help, name) {
 			t.Errorf("help missing %q:\n%s", name, help)
 		}

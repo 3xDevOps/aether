@@ -32,6 +32,16 @@ describe('Sidebar', () => {
     expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
     expect(useStore.getState().activeWorkspace).toBe(workspace.id)
   })
+  it('uses the sidebar surface in both expanded and collapsed states', () => {
+    const getSidebar = () => screen.getByRole('complementary')
+
+    render(<Sidebar />)
+    expect(getSidebar().className).toContain('bg-sidebar')
+
+    act(() => useStore.setState({ sidebarCollapsed: true }))
+    expect(getSidebar().className).toContain('bg-sidebar')
+  })
+
 
   it('routes to a run when its row is clicked', () => {
     render(<Sidebar />)
@@ -179,7 +189,7 @@ describe('Sidebar', () => {
       capabilities: {
         gateway: 'local',
         methods: ['*'],
-        ws: ['events', 'attach'],
+        ws: ['events', 'attach', 'terminal'],
         local: ['link.status', 'daemon.status', 'pull'],
       },
     })

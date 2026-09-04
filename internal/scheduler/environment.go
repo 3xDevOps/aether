@@ -36,17 +36,28 @@ type EnvironmentPlan struct {
 // BuildEnvironmentPlan resolves the image, user, environment, and
 // server-owned mounts for one member container.
 func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, ws *domain.Workspace, member *domain.Member, profile harness.Profile, purpose EnvironmentPurpose) (*EnvironmentPlan, error) {
-	if ws == nil || member == nil {
-		return nil, errors.New("scheduler: workspace and member are required")
-	}
 	switch purpose {
 	case EnvironmentPurposeRun, EnvironmentPurposeTerminal:
 	default:
 		return nil, fmt.Errorf("scheduler: invalid environment purpose %q", purpose)
 	}
-	image := ws.Environment.EffectiveImage(s.cfg.NeutralImage)
-	if image == "" {
-		return nil, errors.New("scheduler: workspace has no effective image")
+	if member == nil {
+		return nil, errors.New("scheduler: member is required")
+	}
+	if purpose == EnvironmentPurposeRun && ws == nil {
+		return nil, errors.New("scheduler: workspace is required for run environment")
+	}
+	var image string
+	if purpose == EnvironmentPurposeTerminal && ws == nil {
+		image = s.cfg.StandardImage
+		if image == "" {
+			return nil, errors.New("scheduler: standard image is required for terminal environment")
+		}
+	} else {
+		image = ws.Environment.EffectiveImage(s.cfg.NeutralImage)
+		if image == "" {
+			return nil, errors.New("scheduler: workspace has no effective image")
+		}
 	}
 	user, err := s.resolveContainerUser(ctx, image, profile)
 	if err != nil {
@@ -56,14 +67,24 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if home == "" {
 		home = "/root"
 	}
-	env := make(map[string]string, len(ws.Environment.Variables)+len(profile.EnvPassthrough)+5)
+	var setupScript string
+	if ws != nil && purpose == EnvironmentPurposeRun {
+		setupScript = ws.Environment.SetupPolicy.Script
+	}
+	var variableCount int
+	if ws != nil && purpose == EnvironmentPurposeRun {
+		variableCount = len(ws.Environment.Variables)
+	}
+	env := make(map[string]string, variableCount+len(profile.EnvPassthrough)+5)
 	for _, key := range profile.EnvPassthrough {
 		if value, ok := os.LookupEnv(key); ok && value != "" {
 			env[key] = value
 		}
 	}
-	for key, value := range ws.Environment.Variables {
-		env[key] = value
+	if ws != nil && purpose == EnvironmentPurposeRun {
+		for key, value := range ws.Environment.Variables {
+			env[key] = value
+		}
 	}
 	env["HOME"] = home
 	env["TERM"] = "xterm-256color"
@@ -75,7 +96,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	env["PATH"] = localBin + ":" + pathValue
 	plan := &EnvironmentPlan{
 		Purpose: purpose, Image: image, Env: env,
-		SetupScript: ws.Environment.SetupPolicy.Script,
+		SetupScript: setupScript,
 		User:        user, Home: home, Path: env["PATH"],
 	}
 	if s.cfg.Homes != nil {

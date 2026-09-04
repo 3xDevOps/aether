@@ -167,9 +167,10 @@ Choose an agent once:
 aether agent add claude
 ```
 
-For a shipped agent, the command shows its vendor install script. Open the
-environment terminal, run the script, install into `~/.local/bin`, and complete
-the vendor login there:
+For a shipped agent, the dashboard's Agents step opens the live environment
+terminal dock and types its vendor install script. From the CLI, open the
+terminal, run the script, install into `~/.local/bin`, and complete the vendor
+login there:
 
 ```sh
 aether terminal
@@ -177,11 +178,12 @@ aether terminal
 
 For a name Aether does not ship, the command first asks for interactive and
 headless launch templates. Install that executable into `~/.local/bin` using
-the vendor's instructions, then complete its login in the environment
-terminal. Return to the dashboard when finished.
+the vendor's instructions, then complete its login in the environment terminal.
+Return to the dashboard when finished.
 
 The member home persists the executable, login state, and synced profile files
-across containers. The terminal command ships in this release series.
+across containers. See [the environment terminal guide](terminal.md) for tab
+and stop behavior.
 
 Your own agent configuration - skills, custom commands, standing
 instructions like `CLAUDE.md`, settings, plugins - is separate from the
@@ -191,9 +193,9 @@ login and syncs one way from your machine:
 aether profile push --agent claude
 ```
 
-The dashboard does both without a terminal. Its onboarding wizard's
-**Agents** step opens the same setup shell in the page, and then shows what
-a profile push would carry from each agent you have configured locally,
+The dashboard does both without a separate terminal window. Its onboarding
+wizard's **Agents** step opens the same setup dock in the page, types the
+install command, and then shows what a profile push would carry from each agent
 grouped as skills, commands, memory, settings, MCP config and plugins, with
 every file the credential denylist or the secret scanner left behind and
 why. Check the agents you want and approve. Where a setup-capable agent is

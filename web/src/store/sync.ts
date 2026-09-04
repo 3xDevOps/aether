@@ -12,6 +12,7 @@ import type {
   RunDiffPayload,
   RunStatusPayload,
   ServerUpdatePayload,
+  RunTitlePayload,
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import { pausedFromTimeline } from '@/store/board'
@@ -150,6 +151,19 @@ export async function applyEvent(
         }
       }
       store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time)
+      break
+    }
+    case 'run.title': {
+      const p = ev.payload as RunTitlePayload
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          store.getState().setUnreachable(classifyUnreachable(err))
+          return false
+        }
+      }
+      store.getState().applyRunTitle(ev.run_id, p.title)
       break
     }
     case 'run.diff': {

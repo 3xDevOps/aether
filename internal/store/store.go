@@ -60,6 +60,10 @@ type Store interface {
 	UpdateMember(ctx context.Context, m *domain.Member) error
 	DeleteMember(ctx context.Context, id domain.MemberID) error
 
+	GetTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
+	PutTerminal(ctx context.Context, terminal *domain.Terminal) error
+	DeleteTerminal(ctx context.Context, member domain.MemberID) error
+
 	CreateRun(ctx context.Context, r *domain.Run) error
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Run, error)
@@ -75,6 +79,9 @@ type Store interface {
 	// is the mutator lifecycle transitions should use so they cannot
 	// clobber concurrent writes to other fields.
 	UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
+	// SetRunTitle sets only the run's title, leaving every other field
+	// untouched.
+	SetRunTitle(ctx context.Context, id domain.RunID, title string) error
 	// TransferRun reassigns only the run's owning member (handoff),
 	// leaving every other field untouched.
 	TransferRun(ctx context.Context, id domain.RunID, to domain.MemberID) error

@@ -121,3 +121,25 @@ func TestAttachResponseKeepsAckErrorAndLeftoverBytes(t *testing.T) {
 		t.Fatalf("leftover = %q, want terminal output", body)
 	}
 }
+
+func TestTerminalResponseKeepsAckErrorAndLeftoverBytes(t *testing.T) {
+	stream := &sessionStream{
+		Reader: strings.NewReader(`{"ok":true,"tab":"main","cols":80,"rows":24}` + "\n" + "terminal output"),
+		stdin:  &trackingWriteCloser{},
+	}
+	var ack protocol.TerminalResponse
+	out, err := readAck(stream, &ack)
+	if err != nil {
+		t.Fatalf("readAck: %v", err)
+	}
+	if !ack.OK || ack.Tab != "main" || ack.Cols != 80 || ack.Rows != 24 {
+		t.Fatalf("ack = %+v", ack)
+	}
+	body, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatalf("read leftover: %v", err)
+	}
+	if string(body) != "terminal output" {
+		t.Fatalf("leftover = %q, want terminal output", body)
+	}
+}

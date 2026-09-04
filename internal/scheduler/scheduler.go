@@ -56,6 +56,7 @@ type Config struct {
 	ReposDir      string
 	WorktreeMount string
 	NeutralImage  string
+	StandardImage string
 	// EnvEditDir is the server-owned scratch root for environment edit
 	// runs: each edit gets its own 0700 directory under it for the
 	// agent's output pair, removed when the edit ends. Empty refuses
@@ -124,11 +125,15 @@ type Scheduler struct {
 	// cannot be raced past; a hung exec on one run never blocks another.
 	// Entries are created on first use and kept for the scheduler's life.
 	runShellLocks   map[domain.RunID]*sync.Mutex
+	terminalLocks   map[domain.MemberID]*sync.Mutex
+	terminals       map[domain.MemberID]*terminalSupervision
 	credentialUsers map[*credentialUserReservation]struct{}
 	// envBuildLocks serializes environment builds (and rollbacks) per
 	// workspace: one build at a time per workspace, later callers wait.
 	// Entries are created on first use and kept for the scheduler's life.
 	envBuildLocks map[domain.WorkspaceID]*sync.Mutex
+	titleMu       sync.Mutex
+	titleUpdates  map[domain.RunID]*pendingRunTitle
 	// coordination is the attached conflict-coordination service and the
 	// staged-bridge directory (UseCoordination); nil means new containers
 	// get no coordination assets.
@@ -136,8 +141,8 @@ type Scheduler struct {
 	// updates is the attached server self-update service (UseUpdates);
 	// nil means a scheduled update never applies.
 	updates UpdateTicker
-	// shells counts the workspace shells open right now. They have no
-	// container to reattach to after a restart, so they hold the idle
+	// shells counts the live interactive terminal attaches. A restart would
+	// drop each stream under the person typing into it, so they hold the idle
 	// check open the way an active run does.
 	shells int
 }
@@ -246,6 +251,8 @@ func New(cfg Config) (*Scheduler, error) {
 		superCancel:     cancel,
 		runs:            make(map[domain.RunID]*supervised),
 		runShellLocks:   make(map[domain.RunID]*sync.Mutex),
+		terminalLocks:   make(map[domain.MemberID]*sync.Mutex),
+		terminals:       make(map[domain.MemberID]*terminalSupervision),
 		credentialUsers: make(map[*credentialUserReservation]struct{}),
 	}, nil
 }
@@ -255,6 +262,9 @@ func New(cfg Config) (*Scheduler, error) {
 // never stops containers; supervision simply ends.
 func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.recoverRuns(ctx); err != nil {
+		return err
+	}
+	if err := s.recoverTerminals(ctx); err != nil {
 		return err
 	}
 	stall := time.NewTicker(s.cfg.PollInterval)
@@ -286,6 +296,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 func (s *Scheduler) Close() error {
 	s.superCancel()
 	s.wg.Wait()
+	s.flushPendingRunTitles()
 	return nil
 }
 func validateHarnessSpec(name string, spec HarnessSpec) error {

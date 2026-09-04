@@ -16,7 +16,7 @@ function caps(): GatewayCapabilities {
   return {
     gateway: 'local',
     methods: ['*'],
-    ws: ['events', 'attach'],
+    ws: ['events', 'attach', 'terminal'],
     local: ['link.status', 'update.check', 'update.apply'],
     version: 'v1.2.3',
   }

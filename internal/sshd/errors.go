@@ -70,9 +70,9 @@ func rpcError(err error) *protocol.Error {
 	case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrInUse),
 		errors.Is(err, scheduler.ErrRunShellTabLimit):
 		code = protocol.CodeConflict
-	case errors.Is(err, scheduler.ErrInvalidRunShellTab):
+	case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab):
 		code = protocol.CodeInvalidParams
-	case errors.Is(err, errInvalidTransition):
+	case errors.Is(err, errInvalidTransition), errors.Is(err, scheduler.ErrTerminalTabLimit):
 		code = protocol.CodeInvalidState
 	case errors.Is(err, errWriteDenied), errors.Is(err, errMemberRemoved),
 		errors.Is(err, errMemberPending), errors.Is(err, permissions.ErrDenied):

@@ -24,7 +24,7 @@ export function RunView({ params }: RouteProps) {
     <div className="flex h-full flex-col">
       <ViewHeader
         title={runLabel(run)}
-        subtitle={run.branch}
+        subtitle={run.title?.trim() && run.task.trim() ? run.task.trim() : run.branch}
         actions={<RunActions run={run} />}
       />
       <RunTabs runID={run.id} active="run" />

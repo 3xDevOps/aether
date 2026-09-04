@@ -26,6 +26,8 @@ const (
 	// endpoint stream bridging a member's local directory to a run
 	// worktree.
 	SubsystemSync = "aether-sync"
+	// SubsystemTerminal is the per-member terminal control and PTY channel.
+	SubsystemTerminal = "aether-terminal"
 )
 
 // MaxLineBytes is the maximum length of one NDJSON line, framing included.
@@ -34,27 +36,29 @@ const MaxLineBytes = 32 << 20
 
 // Control-channel method names.
 const (
-	MethodServerInfo    = "server.info"
-	MethodWorkspaceList = "workspace.list"
-	MethodWorkspaceGet  = "workspace.get"
-	MethodMemberList    = "member.list"
-	MethodMemberApprove = "member.approve"
-	MethodMemberInvite  = "member.invite"
-	MethodMemberRemove  = "member.remove"
-	MethodMemberColor   = "member.color"
-	MethodMemberRole    = "member.role"
-	MethodWorkspaceAdd  = "workspace.add"
-	MethodRunLaunch     = "run.launch"
-	MethodRunList       = "run.list"
-	MethodRunGet        = "run.get"
-	MethodRunKill       = "run.kill"
-	MethodRunPause      = "run.pause"
-	MethodRunResume     = "run.resume"
-	MethodRunInject     = "run.inject"
-	MethodRunClose      = "run.close"
-	MethodRunRelaunch   = "run.relaunch"
-	MethodRunHandoff    = "run.handoff"
-	MethodRunPull       = "run.pull"
+	MethodServerInfo     = "server.info"
+	MethodWorkspaceList  = "workspace.list"
+	MethodWorkspaceGet   = "workspace.get"
+	MethodMemberList     = "member.list"
+	MethodMemberApprove  = "member.approve"
+	MethodMemberInvite   = "member.invite"
+	MethodMemberRemove   = "member.remove"
+	MethodMemberColor    = "member.color"
+	MethodMemberRole     = "member.role"
+	MethodWorkspaceAdd   = "workspace.add"
+	MethodRunLaunch      = "run.launch"
+	MethodRunList        = "run.list"
+	MethodRunGet         = "run.get"
+	MethodRunKill        = "run.kill"
+	MethodRunPause       = "run.pause"
+	MethodRunResume      = "run.resume"
+	MethodRunInject      = "run.inject"
+	MethodRunClose       = "run.close"
+	MethodRunRelaunch    = "run.relaunch"
+	MethodRunHandoff     = "run.handoff"
+	MethodRunPull        = "run.pull"
+	MethodTerminalStatus = "terminal.status"
+	MethodTerminalStop   = "terminal.stop"
 )
 
 // Custom agent (harness) onboarding methods.

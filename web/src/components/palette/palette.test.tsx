@@ -179,7 +179,7 @@ describe('command palette', () => {
       capabilities: {
         gateway: 'local',
         methods: ['*'],
-        ws: ['events', 'attach'],
+        ws: ['events', 'attach', 'terminal'],
         local: ['link.status', 'daemon.status', 'pull'],
       },
     })
@@ -229,7 +229,7 @@ describe('command palette', () => {
       capabilities: {
         gateway: 'local',
         methods: ['*'],
-        ws: ['events', 'attach'],
+        ws: ['events', 'attach', 'terminal'],
         local: ['pull'],
       },
     })
@@ -264,7 +264,7 @@ describe('command palette', () => {
       capabilities: {
         gateway: 'local',
         methods: ['*'],
-        ws: ['events', 'attach'],
+        ws: ['events', 'attach', 'terminal'],
         local: [],
       },
     })

@@ -51,8 +51,8 @@ should come back on the new binary.
 The gateway holds no server code: every read and write is a
 control-channel call proxied over one SSH connection to the linked server,
 through the same `internal/cli` client the terminal commands use. One
-fresh subsystem channel per WebSocket for events, attach, and sync - so the
-HTTP handlers never know they are riding SSH.
+fresh subsystem channel per WebSocket for events, attach, terminal, and sync -
+so the HTTP handlers never know they are riding SSH.
 
 The connection is dialed lazily on first use and shared. When a call fails
 on transport (a server restart, a dropped network) the backend redials
@@ -88,6 +88,7 @@ and prefix as a `POST /api/v1` error.
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
+| `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
 | `GET` | `/ws/envscan` | environment scan on this machine (WebSocket) |
 | `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
 
@@ -131,7 +132,7 @@ the same capability checks the SSH transport applies.
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","envscan"],
+{"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
           "link.repo","link.status","link.switch","profile.preview",
           "profile.push","pull","pull.switch","repo.push","sync.start","sync.status",
@@ -225,6 +226,8 @@ reads without a listener on the server.
 | --- | --- | --- |
 | `run.patch` | `RunIDParams` (`{"run_id":"..."}`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+| `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its image, start time, and active tabs |
+| `terminal.stop` | none | empty result; stops the member environment and its tabs |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit.
@@ -636,6 +639,30 @@ with **1000** and the tab name is free to reopen with a fresh shell.
 Closing the socket only detaches: the shell keeps running, still counts
 toward the four-tab cap, and reconnecting the same tab name reattaches to
 it. Every shell ends with the run's container.
+
+### `GET /ws/terminal?tab=<tab>`
+
+The member environment terminal uses the same binary-output and JSON-control
+framing as run attaches. The `tab` query is `main` or a client-selected name
+matching `^[a-z0-9-]{1,32}$`.
+
+1. The client sends one text header with `cols` and `rows`. The gateway
+   ensures the member's environment container and the requested shell.
+2. The gateway answers `{"ok":true,"tab":"main","cols":120,"rows":40}` or a
+   JSON error followed by a close. At most six tabs may be active.
+3. Output is binary. Input and resize are text frames:
+
+   ```json
+   {"type":"input","data":"ls -la\r"}
+   {"type":"resize","cols":132,"rows":50}
+   ```
+
+Closing the socket detaches without stopping the shell. A normal shell exit
+closes with **1000**. Membership loss closes with **1008**. `terminal.status`
+reports the running container, image, start time, and active tabs;
+`terminal.stop` stops the container and deletes its tab sessions while
+preserving the member home.
+
 
 ### `GET /ws/envscan`
 

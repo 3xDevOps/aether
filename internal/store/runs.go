@@ -50,11 +50,11 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 	if _, err := d.db.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
-		                   finished_at, profile_snapshot_id, last_commit, last_commit_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.LastCommit, lastCommitAt,
+		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -71,7 +71,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
-		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID,
+		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt); err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 
 const runCols = `id, workspace_id, member_id, task, harness, mode, status,
 	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id,
-	last_commit, last_commit_at`
+	title, last_commit, last_commit_at`
 
 func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 	r, err := scanRun(d.db.QueryRowContext(ctx,
@@ -161,11 +161,11 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		`UPDATE runs SET workspace_id = ?, member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
-		     profile_snapshot_id = ?, last_commit = ?, last_commit_at = ?
+		     profile_snapshot_id = ?, title = ?, last_commit = ?, last_commit_at = ?
 		 WHERE id = ?`,
 		r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.LastCommit, lastCommitAt, r.ID,
+		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.ID,
 	))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
@@ -185,6 +185,17 @@ func (d *DB) UpdateRunCommit(ctx context.Context, id domain.RunID, commit string
 		commit, lastCommitAt, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("store: update run commit: %w", err)
+	}
+	return err
+}
+
+// SetRunTitle updates only the run's title, leaving all other columns
+// untouched.
+func (d *DB) SetRunTitle(ctx context.Context, id domain.RunID, title string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE runs SET title = ? WHERE id = ?`, title, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set run title: %w", err)
 	}
 	return err
 }

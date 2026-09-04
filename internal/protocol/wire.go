@@ -17,6 +17,7 @@ type Run struct {
 	WorkspaceID string `json:"workspace_id"`
 	MemberID    string `json:"member_id"`
 	Task        string `json:"task"`
+	Title       string `json:"title,omitempty"`
 	Harness     string `json:"harness"`
 	Mode        string `json:"mode"`
 	Status      string `json:"status"`
@@ -91,6 +92,7 @@ func RunFromDomain(r *domain.Run) Run {
 		WorkspaceID:       string(r.WorkspaceID),
 		MemberID:          string(r.MemberID),
 		Task:              r.Task,
+		Title:             r.Title,
 		Harness:           r.Harness,
 		Mode:              string(r.Mode),
 		Status:            string(r.Status),

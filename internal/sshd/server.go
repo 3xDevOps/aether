@@ -452,6 +452,13 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 		}
 	}
 
+	if member != "" {
+		if svc := s.cfg.Services.Approvals; svc != nil {
+			svc.ConnectionOpened(member)
+			defer svc.ConnectionClosed(member)
+		}
+	}
+
 	// Deny every global request, including tcpip-forward (no reverse
 	// forwarding).
 	s.spawn(func() {

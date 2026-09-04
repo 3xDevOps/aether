@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"golang.org/x/term"
 )
@@ -140,7 +141,7 @@ func agentAdd(args []string) error {
 		return listErr
 	}
 	if found && selected.Source == "shipped" {
-		return printAgentInstallGuidance(os.Stdout, selected)
+		return runShippedAgentInstall(selected)
 	}
 	var promptInput io.Reader
 	if term.IsTerminal(int(os.Stdin.Fd())) {
@@ -164,6 +165,37 @@ func agentAdd(args []string) error {
 		}
 		return nil
 	})
+}
+
+func runShippedAgentInstall(agent protocol.AgentInfo) error {
+	cfg, err := cli.Load()
+	if err != nil {
+		return printAgentInstallGuidance(os.Stdout, agent)
+	}
+	conn, err := cli.Dial(cfg)
+	if err != nil {
+		return printAgentInstallGuidance(os.Stdout, agent)
+	}
+	defer func() { _ = conn.Close() }()
+
+	cols, rows := termSize()
+	stream, _, err := conn.TerminalStream(protocol.TerminalRequest{
+		Cols: cols,
+		Rows: rows,
+	})
+	if err != nil {
+		return printAgentInstallGuidance(os.Stdout, agent)
+	}
+	defer func() { _ = stream.Close() }()
+
+	script := agent.InstallScript
+	if script == "" {
+		script = fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
+	}
+	if _, err := io.WriteString(stream, script+"\n"); err != nil {
+		return err
+	}
+	return describeTerminalEnd(copyRaw(stream))
 }
 
 func printAgentInstallGuidance(w io.Writer, agent protocol.AgentInfo) error {

@@ -31,9 +31,21 @@ func NewSSHBackend(cfg cli.Config) Backend {
 	return &sshBackend{cfg: cfg}
 }
 
+// Close releases the shared SSH connection, if it has been opened.
+func (b *sshBackend) Close() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn == nil {
+		return nil
+	}
+	conn := b.conn
+	b.conn = nil
+	return conn.Close()
+}
+
 // live returns the shared connection, dialing when there is none yet. A
 // dial failure comes back already classified so every surface that dials
-// (Call, Events, Attach, Shell, Sync) reports it identically.
+// (Call, Events, Attach, Terminal, Sync) reports it identically.
 func (b *sshBackend) live() (*cli.Conn, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -232,6 +244,18 @@ func (b *sshBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protocol.
 	out, err := stream(b, func(c *cli.Conn) (attachResult, error) {
 		term, ack, err := c.AttachStream(req)
 		return attachResult{term: term, ack: ack}, err
+	})
+	return out.term, out.ack, err
+}
+
+func (b *sshBackend) Terminal(req protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error) {
+	type terminalResult struct {
+		term cli.Terminal
+		ack  protocol.TerminalResponse
+	}
+	out, err := stream(b, func(c *cli.Conn) (terminalResult, error) {
+		term, ack, err := c.TerminalStream(req)
+		return terminalResult{term: term, ack: ack}, err
 	})
 	return out.term, out.ack, err
 }

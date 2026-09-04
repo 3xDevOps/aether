@@ -13,6 +13,7 @@ import { useStore } from '@/store'
 const types = [
   ['', 'Everything'],
   ['run.status', 'Run status'],
+  ['run.title', 'Run titles'],
   ['workspace.timeline', 'Steering'],
   ['workspace.approval', 'Approvals'],
   ['workspace.presence', 'Presence'],

@@ -611,7 +611,11 @@ CREATE TABLE member_terminals (
 	started_at   INTEGER NOT NULL
 );
 `,
-	// v16: published run commit metadata. The SHA is empty until the first
+	// v16: runs gain the latest title reported by the agent's terminal.
+	`
+ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT '';
+`,
+	// v17: published run commit metadata. The SHA is empty until the first
 	// branch publication; the timestamp remains nullable for that state.
 	`
 ALTER TABLE runs ADD COLUMN last_commit TEXT NOT NULL DEFAULT '';

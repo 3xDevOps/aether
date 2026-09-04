@@ -29,6 +29,20 @@ function statusEvent(over: Partial<Event> = {}): Event {
   }
 }
 
+function titleEvent(over: Partial<Event> = {}): Event {
+  return {
+    id: 'evt_title',
+    seq: 6,
+    time: '2026-08-14T11:01:00Z',
+    workspace_id: workspace.id,
+    run_id: 'run_1',
+    actor_id: '',
+    type: 'run.title',
+    payload: { title: 'Fixing the login bug' },
+    ...over,
+  }
+}
+
 describe('hydrate', () => {
   it('fills the store from one round of fetches', async () => {
     const store = createRootStore()
@@ -290,6 +304,16 @@ describe('applyEvent', () => {
     await applyEvent(store, statusEvent({ payload: { to: 'merged' } }), fakeApi())
 
     expect(store.getState().runs.run_1.finished_at).toBe('2026-08-14T11:00:00Z')
+  })
+
+  it('updates a run title from a run.title event', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    await applyEvent(store, titleEvent(), fakeApi())
+
+    expect(store.getState().runs.run_1.title).toBe('Fixing the login bug')
+    expect(store.getState().lastSeq).toBe(6)
   })
 
   it('ignores an event already applied, so replay is idempotent', async () => {

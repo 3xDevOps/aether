@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -135,6 +137,37 @@ func TestRefuseDeletingLastAdmin(t *testing.T) {
 	}
 	if pe != nil && !strings.Contains(pe.Message, "last admin") {
 		t.Errorf("message %q does not mention last admin", pe.Message)
+	}
+}
+
+func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
+	homeRoot := t.TempDir()
+	homes, err := memberhome.New(homeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEnv(t, func(c *Config) { c.Homes = homes })
+	_, target := addMember(t, e, "Target", domain.RoleCollaborator, false)
+	home, err := homes.Path(target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(home, "marker")
+	if err := os.WriteFile(marker, []byte("keep?"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := controlClient(t, e)
+	if err := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(target.ID)}, nil); err != nil {
+		t.Fatalf("member.remove: %v", err)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("member home still exists: stat err = %v", err)
+	}
+	calls := e.runs.Calls()
+	want := "terminal-stop:" + string(target.ID)
+	if len(calls) == 0 || calls[len(calls)-1] != want {
+		t.Fatalf("RunController calls = %v, want final %q", calls, want)
 	}
 }
 
