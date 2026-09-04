@@ -555,7 +555,6 @@ func (d *DB) DeleteMember(ctx context.Context, id domain.MemberID) error {
 	return d.execDelete(ctx, "delete member", `DELETE FROM members WHERE id = ?`, id)
 }
 
-
 // collect drains rows through scan, closing them and surfacing iteration
 // errors.
 func collect[T any](rows *sql.Rows, scan func(interface{ Scan(...any) error }) (*T, error)) ([]*T, error) {

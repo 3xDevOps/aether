@@ -50,12 +50,11 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 	if _, err := d.db.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
-		                   finished_at, profile_snapshot_id, tool_snapshot_id,
-		                   last_commit, last_commit_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   finished_at, profile_snapshot_id, last_commit, last_commit_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.ToolSnapshotID, r.LastCommit, lastCommitAt,
+		r.ProfileSnapshotID, r.LastCommit, lastCommitAt,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -72,7 +71,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
-		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.ToolSnapshotID,
+		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID,
 		&r.LastCommit, &lastCommitAt); err != nil {
 		return nil, err
 	}
@@ -86,7 +85,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 }
 
 const runCols = `id, workspace_id, member_id, task, harness, mode, status,
-	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id, tool_snapshot_id,
+	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id,
 	last_commit, last_commit_at`
 
 func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
@@ -162,12 +161,11 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		`UPDATE runs SET workspace_id = ?, member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
-		     profile_snapshot_id = ?, tool_snapshot_id = ?,
-		     last_commit = ?, last_commit_at = ?
+		     profile_snapshot_id = ?, last_commit = ?, last_commit_at = ?
 		 WHERE id = ?`,
 		r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.ToolSnapshotID, r.LastCommit, lastCommitAt, r.ID,
+		r.ProfileSnapshotID, r.LastCommit, lastCommitAt, r.ID,
 	))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
@@ -226,44 +224,6 @@ func (d *DB) TransferRun(ctx context.Context, id domain.RunID, to domain.MemberI
 		err = fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
 	}
 	return err
-}
-
-// SetRunToolSnapshot updates only the run's tool snapshot pin. A non-empty
-// snapshot must belong to the run's current member and workspace, and the
-// ownership check is part of the update so a concurrent handoff cannot be
-// overwritten by a stale run object.
-func (d *DB) SetRunToolSnapshot(ctx context.Context, id domain.RunID, snapshot domain.ToolSnapshotID) error {
-	var (
-		res sql.Result
-		err error
-	)
-	if snapshot == "" {
-		res, err = d.db.ExecContext(ctx,
-			`UPDATE runs SET tool_snapshot_id = '' WHERE id = ?`, id)
-	} else {
-		res, err = d.db.ExecContext(ctx, `
-			UPDATE runs
-			SET tool_snapshot_id = ?
-			WHERE id = ?
-			  AND EXISTS (
-				SELECT 1
-				FROM tool_snapshots ts
-				WHERE ts.id = ?
-				  AND ts.member_id = runs.member_id
-				  AND ts.workspace_id = runs.workspace_id
-			  )`, snapshot, id, snapshot)
-	}
-	if err != nil {
-		return fmt.Errorf("store: set run tool snapshot: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("store: set run tool snapshot: %w", err)
-	}
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 func (d *DB) SetRunProtected(ctx context.Context, id domain.RunID, protected bool) error {
