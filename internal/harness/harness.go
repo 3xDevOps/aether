@@ -6,9 +6,12 @@
 // the harness's native login state (persisted per member under
 // <data>/homes/<member-id>/ and bind-mounted read-write into every run), an
 // explicit numeric uid:gid mapping for images whose configured user is named
-// rather than numeric, and whether the harness can be pointed at an MCP
-// server config at launch (how conflict coordination reaches the agent; see
-// docs/mcp-bridge.md).
+// rather than numeric, whether the harness can be pointed at an MCP server
+// config at launch (how conflict coordination reaches the agent; see
+// docs/mcp-bridge.md), and how it names a conversation so a relaunch resumes
+// the interrupted run's own: a session ID pinned at launch where the CLI
+// supports one, and "continue whatever ran here last" where it does not (see
+// docs/failure-handling.md).
 //
 // The registry is a map and a few functions, not a plugin system.
 package harness

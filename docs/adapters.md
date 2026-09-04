@@ -112,12 +112,10 @@ both say out loud.
 `AgentSession` carries the harness's own conversation ID, which is unrelated
 to any Aether scope. It is a timeline record, not the resume mechanism: the
 resume authority is the session the server pinned at launch and stored on
-the run row, which exists for TUI runs too, where no adapter ever runs. For
-a harness with a `SessionFlag` the streamed ID is the harness confirming the
-one it was given; for a harness without one it is the only place the ID
-appears at all. Emit it either way - it is what an operator needs to find
-the conversation in the harness's own tooling. See
-[failure-handling.md](failure-handling.md).
+the run row, which exists for TUI runs too, where no adapter ever runs. The
+streamed ID is the harness confirming the one it was given. Emit it anyway -
+it is what an operator needs to find the conversation in the harness's own
+tooling. See [failure-handling.md](failure-handling.md).
 
 ### Testing
 

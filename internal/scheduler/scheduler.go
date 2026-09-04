@@ -416,7 +416,7 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 // it back; a harness without that flag records nothing and relaunches on
 // ResumeFlag's best effort.
 func pinSession(argv []string, profile harness.Profile) ([]string, string) {
-	if profile.SessionFlag == "" || len(argv) == 0 {
+	if profile.SessionFlag == "" {
 		return argv, ""
 	}
 	id := uuid.NewString()
@@ -424,18 +424,38 @@ func pinSession(argv []string, profile harness.Profile) ([]string, string) {
 }
 
 // resumeSession points a relaunch at the interrupted run's own conversation
-// and returns the argv plus the session the new row carries forward. A run
-// with a pinned session is resumed by ID, which names the conversation
-// outright rather than trusting "the most recent one in this directory" -
-// every run mounts its checkout at the same container path and shares one
-// credential home per member, so that guess can land on another run's
-// conversation, even one from another workspace. A run whose harness cannot
-// pin, or whose row predates pinning, keeps that best-effort behavior.
-func resumeSession(argv []string, profile harness.Profile, session string) ([]string, string) {
-	if session != "" && profile.SessionResumeFlag != "" {
-		return harness.WithFlag(argv, profile.SessionResumeFlag, session), session
+// and returns the argv plus the session the new row carries forward.
+// Resuming by ID names the conversation outright rather than trusting "the
+// most recent one in this directory" - every run mounts its checkout at the
+// same container path and shares one credential home per member, so that
+// guess can land on another run's conversation, even one from another
+// workspace.
+//
+// The pinned ID is only worth naming when this relaunch can reach the
+// transcript behind it, which two interrupted rows cannot:
+//
+//   - The agent never started. recoverUnstarted interrupts queued and
+//     provisioning rows too, and the ID is stamped when the row is created,
+//     so it names a conversation the harness never opened.
+//   - The relaunch is not by the run's owner. Steering others is allowed by
+//     default and a handoff transfers the row, but the container mounts the
+//     actor's credential home while the transcript lives in the owner's.
+//
+// claude --resume on an ID it cannot find prints "No conversation found
+// with session ID: <id>" and exits 1, which would fail the relaunch
+// outright, so both open a fresh conversation instead.
+//
+// A row with no pinned session at all - a harness that cannot pin, or a row
+// written before pinning existed - keeps ResumeFlag's best effort. That
+// fallback is sticky: there is no earlier ID left to recover.
+func resumeSession(argv []string, profile harness.Profile, old *domain.Run, actor domain.MemberID) ([]string, string) {
+	if old.HarnessSessionID == "" || profile.SessionResumeFlag == "" {
+		return harness.WithFlag(argv, profile.ResumeFlag, ""), ""
 	}
-	return harness.WithFlag(argv, profile.ResumeFlag, ""), ""
+	if old.StartedAt == nil || old.MemberID != actor {
+		return pinSession(argv, profile)
+	}
+	return harness.WithFlag(argv, profile.SessionResumeFlag, old.HarnessSessionID), old.HarnessSessionID
 }
 
 // memberHarnessSpec loads and validates the member's stored definition for
