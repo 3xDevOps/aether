@@ -373,29 +373,31 @@
 
   .launch-splash__shooting-star {
     --shoot-angle: 35deg;
+    --shoot-distance: 80vmax;
     position: absolute;
     left: -18vw;
     top: 24%;
     width: clamp(90px, 12vw, 150px);
     height: 2px;
     border-radius: 999px;
+    transform-origin: right center;
     background: linear-gradient(
-      to left,
+      to right,
       transparent 0%,
       rgb(220 230 242 / 0.18) 40%,
       rgb(220 230 242 / 0.7) 76%,
       #dce6f2 100%
     );
-    transform: rotate(var(--shoot-angle));
+    transform: rotate(var(--shoot-angle)) translate3d(0, 0, 0);
     animation: launch-shoot 1.35s cubic-bezier(0.2, 0.7, 0.25, 1) infinite;
   }
 
   .launch-splash__shooting-star--two {
-    --shoot-angle: 145deg;
+    --shoot-angle: 42deg;
     top: 58%;
     left: 34vw;
     background: linear-gradient(
-      to left,
+      to right,
       transparent 0%,
       rgb(110 231 214 / 0.16) 40%,
       rgb(110 231 214 / 0.7) 76%,
@@ -406,11 +408,11 @@
   }
 
   .launch-splash__shooting-star--three {
-    --shoot-angle: 25deg;
+    --shoot-angle: 30deg;
     top: 42%;
     left: 72vw;
     background: linear-gradient(
-      to left,
+      to right,
       transparent 0%,
       rgb(255 157 107 / 0.14) 40%,
       rgb(255 157 107 / 0.65) 76%,
@@ -489,14 +491,14 @@
     0%,
     8% {
       opacity: 0;
-      transform: translate3d(0, 0, 0) rotate(var(--shoot-angle));
+      transform: rotate(var(--shoot-angle)) translate3d(0, 0, 0);
     }
     18% {
       opacity: 1;
     }
     100% {
       opacity: 0;
-      transform: translate3d(55vw, 55vh, 0) rotate(var(--shoot-angle));
+      transform: rotate(var(--shoot-angle)) translate3d(var(--shoot-distance), 0, 0);
     }
   }
 
