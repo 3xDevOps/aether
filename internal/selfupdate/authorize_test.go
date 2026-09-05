@@ -313,6 +313,12 @@ func TestOwnedOnlyByWalksToTheTop(t *testing.T) {
 		t.Skip("root owns everything")
 	}
 	top := t.TempDir()
+	// t.TempDir inherits the umask; under 002 it comes out group-writable
+	// and the walk would refuse `top` itself rather than what the test
+	// arranges below.
+	if err := os.Chmod(top, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	dir := filepath.Join(top, "usr", "local", "bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
