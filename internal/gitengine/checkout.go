@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -232,27 +233,51 @@ func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceI
 
 // CommitAll stages and commits everything in the run's checkout with the
 // fixed Aether identity. Returns "", nil when the tree is clean.
+//
+// The checkout - .git included - is agent-writable, so anything in it
+// that names a command to run is hostile input that must never execute
+// as the server: hooks are pointed at an empty path, fsmonitor is
+// disabled, attribute lookups read from the empty tree instead of the
+// worktree so a planted .gitattributes cannot select a clean filter, and
+// .git/info/attributes (which GIT_ATTR_SOURCE does not override) is
+// removed outright - it is plumbing no agent legitimately writes.
 func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string) (commit string, err error) {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return "", err
 	}
-	if _, addErr := e.git(ctx, checkout, "add", "-A"); addErr != nil {
+	if rmErr := os.Remove(filepath.Join(checkout, ".git", "info", "attributes")); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		return "", fmt.Errorf("gitengine: drop checkout attributes override: %w", rmErr)
+	}
+	// The empty tree exists implicitly in every repository, whatever its
+	// object format, so it is resolved here rather than hardcoded.
+	emptyTree, err := e.git(ctx, checkout, "hash-object", "-t", "tree", os.DevNull)
+	if err != nil {
+		return "", err
+	}
+	env := append(gitEnv(), "GIT_ATTR_SOURCE="+emptyTree)
+	// core.fsmonitor in the checkout's config would be executed by add and
+	// status; false disables it. Hooks likewise come from writable config.
+	neutral := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false"}
+	git := func(args ...string) (string, error) {
+		return e.gitIn(ctx, checkout, env, append(neutral, args...)...)
+	}
+	if _, addErr := git("add", "-A"); addErr != nil {
 		return "", addErr
 	}
-	status, err := e.git(ctx, checkout, "status", "--porcelain")
+	status, err := git("status", "--porcelain")
 	if err != nil {
 		return "", err
 	}
 	if status == "" {
 		return "", nil
 	}
-	if _, err := e.git(ctx, checkout,
+	if _, err := git(
 		"-c", "user.name=Aether", "-c", "user.email=aether@localhost",
 		"commit", "-m", message); err != nil {
 		return "", err
 	}
-	return e.git(ctx, checkout, "rev-parse", "HEAD")
+	return git("rev-parse", "HEAD")
 }
 
 // PublishRunBranch fetches the run's branch from its checkout into the

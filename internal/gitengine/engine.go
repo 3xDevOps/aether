@@ -298,12 +298,18 @@ func validateID(id string) error {
 // passes -c safe.directory=* to neutralize mixed-ownership checks on
 // container-written checkouts. dir may be empty. Returns trimmed stdout.
 func (e *Engine) git(ctx context.Context, dir string, args ...string) (string, error) {
+	return e.gitIn(ctx, dir, gitEnv(), args...)
+}
+
+// gitIn is git with the environment chosen by the caller, for operations
+// that need more neutralized than the baseline (CommitAll).
+func (e *Engine) gitIn(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	argv := append([]string{"-c", "safe.directory=*"}, args...)
 	if dir != "" {
 		argv = append([]string{"-C", dir}, argv...)
 	}
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
-	cmd.Env = gitEnv()
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
