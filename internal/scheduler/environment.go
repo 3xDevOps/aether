@@ -47,9 +47,21 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if purpose == EnvironmentPurposeRun && ws == nil {
 		return nil, errors.New("scheduler: workspace is required for run environment")
 	}
-	image := s.cfg.StandardImage
+	image := member.Image
+	if image == "" {
+		image = s.cfg.StandardImage
+	}
 	if image == "" {
 		return nil, errors.New("scheduler: standard image is required")
+	}
+	if member.Image != "" {
+		exists, err := s.cfg.Runtime.ImageExists(ctx, image)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: check saved environment image %q: %w", image, err)
+		}
+		if !exists {
+			return nil, fmt.Errorf("scheduler: saved environment image %q is missing from the runtime; run aether env reset to return to the standard image", image)
+		}
 	}
 	user, err := s.resolveContainerUser(ctx, image, profile)
 	if err != nil {

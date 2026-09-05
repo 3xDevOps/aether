@@ -389,9 +389,9 @@ func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {
 		return fmt.Errorf("store: create member: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, createdAt,
+		`INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at, image)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, createdAt, m.Image,
 	); err != nil {
 		return fmt.Errorf("store: create member: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -421,14 +421,14 @@ func scanMember(row interface{ Scan(...any) error }) (*domain.Member, error) {
 		createdAt int64
 	)
 	if err := row.Scan(&m.ID, &m.DisplayName, &m.PublicKey, &m.TailnetLogin, &m.Pending,
-		&m.Color, &m.Role, &createdAt); err != nil {
+		&m.Color, &m.Role, &createdAt, &m.Image); err != nil {
 		return nil, err
 	}
 	m.CreatedAt = decodeTime(createdAt)
 	return &m, nil
 }
 
-const memberCols = `id, display_name, public_key, tailnet_login, pending, color, role, created_at`
+const memberCols = `id, display_name, public_key, tailnet_login, pending, color, role, created_at, image`
 
 func (d *DB) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
 	m, err := scanMember(d.db.QueryRowContext(ctx,
@@ -478,6 +478,16 @@ func (d *DB) ApproveMember(ctx context.Context, id domain.MemberID) error {
 		`UPDATE members SET pending = 0 WHERE id = ?`, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: approve member: %w", err)
+	}
+	return err
+}
+
+// UpdateMemberImage sets only the member's saved environment image.
+func (d *DB) UpdateMemberImage(ctx context.Context, id domain.MemberID, image string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE members SET image = ? WHERE id = ?`, image, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: update member image: %w", err)
 	}
 	return err
 }

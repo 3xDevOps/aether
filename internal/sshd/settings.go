@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -52,7 +51,6 @@ func (s *Server) workspaceSettings(ctx context.Context, member domain.MemberID, 
 	})
 	return protocol.WorkspaceSettingsResult{Workspace: protocol.WorkspaceFromDomain(ws)}, nil
 }
-
 
 // runProtect toggles a run's protected flag (owner or admin; the guard has
 // already checked Protect against the run). The change is stamped into the

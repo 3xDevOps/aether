@@ -27,7 +27,6 @@ func TestVersionPinsTemplate(t *testing.T) {
 	}
 }
 
-
 // profileClauses are distinctive phrases, one per profile-prompt clause,
 // in the order the template must state them: what is being decided, the
 // embedded inventory, the never-read limits, the judgement rule, the

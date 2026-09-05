@@ -2,15 +2,14 @@ package localops
 
 import (
 	"errors"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"os"
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"testing"
-	"github.com/3xDevOps/Aether/internal/harness"
 )
-
 
 // writeStub writes an executable shell script and returns the argv
 // override that runs it with the rendered prompt as its first argument.
@@ -92,7 +91,6 @@ func resolvePath(t *testing.T, path string) string {
 	return resolved
 }
 
-
 func TestDetectHarnesses(t *testing.T) {
 	bin := t.TempDir()
 	for _, name := range []string{"claude", "pi"} {
@@ -123,4 +121,3 @@ func TestDetectHarnesses(t *testing.T) {
 		}
 	}
 }
-

@@ -492,7 +492,6 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 	}
 }
 
-
 // TestContainerSpecNonRootHome pins that a non-root run user gets
 // HOME=/home/aether in the container env (Docker leaves HOME wrong for
 // numeric users, and the credential mounts land under that home).

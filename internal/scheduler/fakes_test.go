@@ -31,7 +31,9 @@ type fakeRuntime struct {
 	createHook  func()
 	startErr    error
 	waitErr     error
-	startHook func(c *fakeContainer)
+	startHook   func(c *fakeContainer)
+	commitErr   error
+	commits     []fakeCommitCall
 	// execTTYHook overrides ExecTTY for tests that need to model an
 	// immediate shell-executable failure.
 	execTTYHook func(context.Context, runtime.ID, []string, string, uint, uint) (runtime.Attachment, error)
@@ -39,6 +41,11 @@ type fakeRuntime struct {
 	attaches    int
 	// images is the fake daemon's local image registry.
 	images map[string]string
+}
+
+type fakeCommitCall struct {
+	id  runtime.ID
+	tag string
 }
 
 type fakeExecTTYCall struct {
@@ -310,9 +317,29 @@ func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.
 	return "", fmt.Errorf("fake runtime: creation key %q: %w", key, runtime.ErrNotFound)
 }
 
+// Commit records a saved image and registers its tag in the fake daemon.
+func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.commitErr != nil {
+		return r.commitErr
+	}
+	r.commits = append(r.commits, fakeCommitCall{id: id, tag: tag})
+	if r.images == nil {
+		r.images = make(map[string]string)
+	}
+	r.images[tag] = string(id)
+	return nil
+}
 
-// ImageExists mirrors the Docker capability probe the scheduler asserts
-// for rollback: a tag exists once built and disappears on RemoveImage.
+func (r *fakeRuntime) commitCalls() []fakeCommitCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.commits)
+}
+
+// ImageExists mirrors the Docker capability probe the scheduler uses for
+// saved member environment images.
 func (r *fakeRuntime) ImageExists(_ context.Context, tag string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -327,9 +354,8 @@ func (r *fakeRuntime) hasImage(tag string) bool {
 	return ok
 }
 
-
-// RemoveImage forgets a built tag; a missing tag is not an error,
-// matching the Docker implementation.
+// RemoveImage forgets a saved member environment tag; a missing tag is not
+// an error, matching the Docker implementation.
 func (r *fakeRuntime) RemoveImage(_ context.Context, tag string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -54,7 +54,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	rt, image, verifyNoLeaks := pickRuntime(t)
+	rt, _, verifyNoLeaks := pickRuntime(t)
 	// A not-yet-existing data dir proves first-run startup: New must create
 	// the directory itself before opening the store.
 	dataDir := filepath.Join(t.TempDir(), "data")

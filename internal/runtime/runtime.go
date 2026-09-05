@@ -239,6 +239,10 @@ type Runtime interface {
 	// found and destroyed. Keys are assumed unique; with duplicates any
 	// match may be returned.
 	FindByCreationKey(ctx context.Context, key string) (ID, error)
+	// Commit snapshots a running container as a tagged image.
+	Commit(ctx context.Context, id ID, tag string) error
+	// ImageExists reports whether an image reference exists locally.
+	ImageExists(ctx context.Context, ref string) (bool, error)
 	// RemoveImage removes a local image tag. Removing a tag that does
 	// not exist is not an error.
 	RemoveImage(ctx context.Context, tag string) error

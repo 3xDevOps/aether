@@ -261,7 +261,6 @@ type WorkspaceSettingsResult struct {
 	Workspace Workspace `json:"workspace"`
 }
 
-
 // RunPullResult is the result of run.pull: fetch coordinates for the run's
 // branch; the transfer itself is a normal git fetch over the exec git
 // transport.

@@ -159,7 +159,6 @@ func (s *Scheduler) checkFreeSpace() error {
 		ErrDiskFull, free, s.cfg.MinFreeBytes)
 }
 
-
 // Launch creates a new run and provisions it synchronously: checkout and
 // branch via the git seam, container via the runtime, agent PTY via the
 // PTY seam. It returns the run in running state, or an error with the run

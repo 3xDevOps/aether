@@ -56,6 +56,8 @@ type Store interface {
 	// ApproveMember clears only the member's pending flag, leaving every
 	// other field untouched.
 	ApproveMember(ctx context.Context, id domain.MemberID) error
+	// UpdateMemberImage sets only the member's saved environment image.
+	UpdateMemberImage(ctx context.Context, id domain.MemberID, image string) error
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	UpdateMember(ctx context.Context, m *domain.Member) error
 	DeleteMember(ctx context.Context, id domain.MemberID) error

@@ -36,12 +36,12 @@ type envScanRequest struct {
 // envScanFrame is every frame the server sends: type discriminates, the
 // other fields are set per type.
 type envScanFrame struct {
-	Type string `json:"type"`
-	Status string `json:"status,omitempty"`
-	Line string `json:"line,omitempty"`
+	Type           string                  `json:"type"`
+	Status         string                  `json:"status,omitempty"`
+	Line           string                  `json:"line,omitempty"`
 	Recommendation *profile.Recommendation `json:"recommendation,omitempty"`
-	Detail string `json:"detail,omitempty"`
-	OutputTail string `json:"output_tail,omitempty"`
+	Detail         string                  `json:"detail,omitempty"`
+	OutputTail     string                  `json:"output_tail,omitempty"`
 }
 
 // beginScan claims the gateway's single scan slot; false means a scan is

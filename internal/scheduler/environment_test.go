@@ -2,13 +2,13 @@ package scheduler
 
 import (
 	"context"
-	"path/filepath"
-	"testing"
-
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"path/filepath"
+	"strings"
+	"testing"
 )
 
 func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
@@ -59,5 +59,36 @@ func TestBuildEnvironmentPlanUsesStandardImageAndToolsFirstPath(t *testing.T) {
 	}
 	if plan.Env["EXTRA"] != "yes" || plan.Env["HOME"] != "/root" {
 		t.Fatalf("environment = %#v", plan.Env)
+	}
+}
+func TestBuildEnvironmentPlanUsesSavedMemberImage(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
+	const saved = "aether/member-saved:123"
+	e.member.Image = saved
+	if err := e.db.UpdateMemberImage(t.Context(), e.member.ID, saved); err != nil {
+		t.Fatalf("UpdateMemberImage: %v", err)
+	}
+	e.rt.images = map[string]string{saved: "saved"}
+	for _, purpose := range []EnvironmentPurpose{EnvironmentPurposeRun, EnvironmentPurposeTerminal} {
+		plan, err := e.sched.BuildEnvironmentPlan(t.Context(), nil, e.ws, e.member, harness.Profile{}, purpose)
+		if err != nil {
+			t.Fatalf("BuildEnvironmentPlan(%q): %v", purpose, err)
+		}
+		if plan.Image != saved {
+			t.Fatalf("purpose %q image = %q, want %q", purpose, plan.Image, saved)
+		}
+	}
+}
+
+func TestBuildEnvironmentPlanRejectsMissingSavedMemberImage(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
+	const saved = "aether/member-missing:123"
+	e.member.Image = saved
+	if err := e.db.UpdateMemberImage(t.Context(), e.member.ID, saved); err != nil {
+		t.Fatalf("UpdateMemberImage: %v", err)
+	}
+	_, err := e.sched.BuildEnvironmentPlan(t.Context(), nil, e.ws, e.member, harness.Profile{}, EnvironmentPurposeRun)
+	if err == nil || !strings.Contains(err.Error(), "aether env reset") || !strings.Contains(err.Error(), saved) {
+		t.Fatalf("missing image error = %v, want saved tag and reset command", err)
 	}
 }

@@ -198,7 +198,6 @@ func scanArgvTemplate(harnessName string, override []string) ([]string, error) {
 	return nil, fmt.Errorf("localops: harness %q is not available for environment setup", harnessName)
 }
 
-
 // repoStatus captures the repository's git status so the engine can prove
 // a scan left the repository untouched.
 func repoStatus(ctx context.Context, repo string) (string, error) {

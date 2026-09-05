@@ -328,6 +328,27 @@ func TestMemberCRUDAndPublicKeyLookup(t *testing.T) {
 		t.Fatalf("ListMembers len = %d, want 1", len(list))
 	}
 
+	if err := db.UpdateMemberImage(ctx, m.ID, "aether/member-"+string(m.ID)+":123"); err != nil {
+		t.Fatalf("UpdateMemberImage: %v", err)
+	}
+	got, err = db.GetMember(ctx, m.ID)
+	if err != nil {
+		t.Fatalf("GetMember after image update: %v", err)
+	}
+	if got.Image != "aether/member-"+string(m.ID)+":123" {
+		t.Fatalf("member image = %q, want saved image", got.Image)
+	}
+	list, err = db.ListMembers(ctx)
+	if err != nil {
+		t.Fatalf("ListMembers after image update: %v", err)
+	}
+	if len(list) != 1 || list[0].Image != got.Image {
+		t.Fatalf("ListMembers image = %+v, want %q", list, got.Image)
+	}
+	if err := db.UpdateMemberImage(ctx, "missing", "tag"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateMemberImage missing member = %v, want ErrNotFound", err)
+	}
+
 	if err := db.DeleteMember(ctx, m.ID); err != nil {
 		t.Fatalf("DeleteMember: %v", err)
 	}
@@ -1010,7 +1031,7 @@ func TestWorkspaceEnvironmentUsesFirstClassRepresentation(t *testing.T) {
 		Name: "environment",
 		Environment: domain.WorkspaceEnvironment{
 			Variables:   map[string]string{"A": "1"},
-			SetupPolicy:  domain.SetupPolicy{Script: "echo setup"},
+			SetupPolicy: domain.SetupPolicy{Script: "echo setup"},
 		},
 	}
 	if err := db.CreateWorkspace(ctx, w); err != nil {

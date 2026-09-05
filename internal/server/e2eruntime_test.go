@@ -29,12 +29,14 @@ type e2eRuntime struct {
 	seq        int
 	containers map[runtime.ID]*e2eContainer
 	scripts    map[string]func(*e2eContainer)
+	images     map[string]struct{}
 }
 
 func newE2ERuntime() *e2eRuntime {
 	return &e2eRuntime{
 		containers: make(map[runtime.ID]*e2eContainer),
 		scripts:    make(map[string]func(*e2eContainer)),
+		images:     make(map[string]struct{}),
 	}
 }
 
@@ -328,11 +330,28 @@ func (r *e2eRuntime) FindByCreationKey(_ context.Context, key string) (runtime.I
 	}
 	return "", runtime.ErrNotFound
 }
+func (r *e2eRuntime) Commit(_ context.Context, id runtime.ID, tag string) error {
+	if _, err := r.get(id); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.images[tag] = struct{}{}
+	return nil
+}
 
+func (r *e2eRuntime) ImageExists(_ context.Context, ref string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.images[ref]
+	return ok, nil
+}
 
-// RemoveImage is a no-op for the same reason; a missing tag is not an
-// error, matching the Docker implementation.
-func (r *e2eRuntime) RemoveImage(context.Context, string) error {
+// RemoveImage is idempotent, matching the Docker implementation.
+func (r *e2eRuntime) RemoveImage(_ context.Context, ref string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.images, ref)
 	return nil
 }
 

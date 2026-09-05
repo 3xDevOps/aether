@@ -645,6 +645,10 @@ ALTER TABLE workspaces DROP COLUMN image;
 ALTER TABLE workspaces DROP COLUMN env;
 ALTER TABLE workspaces DROP COLUMN setup_script;
 `,
+	// v20: saved per-member environment image references.
+	`
+ALTER TABLE members ADD COLUMN image TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

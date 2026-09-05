@@ -9,7 +9,6 @@ import (
 	"github.com/distribution/reference"
 )
 
-
 // TestDefaultStandardImageIsValidDockerReference guards the standard image
 // default the same way: lowercase repository, explicit tag.
 func TestDefaultStandardImageIsValidDockerReference(t *testing.T) {
@@ -24,7 +23,6 @@ func TestDefaultStandardImageIsValidDockerReference(t *testing.T) {
 		t.Fatalf("DefaultStandardImage repository %q must be lowercase", repo)
 	}
 }
-
 
 func TestReleaseImageTag(t *testing.T) {
 	cases := []struct {

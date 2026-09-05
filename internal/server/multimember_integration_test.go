@@ -79,7 +79,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	rt, image, verifyNoLeaks := pickRuntime(t)
+	rt, _, verifyNoLeaks := pickRuntime(t)
 	if e2e, ok := rt.(*e2eRuntime); ok {
 		registerMultiMemberScripts(e2e)
 	}

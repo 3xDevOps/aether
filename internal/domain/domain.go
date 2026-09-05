@@ -179,6 +179,7 @@ type Member struct {
 	// colorblind-safe palette; overridable.
 	Color     string
 	Role      Role
+	Image     string `json:"image,omitempty"`
 	CreatedAt time.Time
 }
 
@@ -192,10 +193,11 @@ type Terminal struct {
 
 // TerminalStatus describes the running state and live tabs of a member terminal.
 type TerminalStatus struct {
-	Running   bool
-	Image     string
-	StartedAt time.Time
-	Tabs      []string
+	Running    bool
+	Image      string
+	SavedImage string
+	StartedAt  time.Time
+	Tabs       []string
 }
 
 // Run is one agent execution: a task, an isolated worktree and branch, a

@@ -658,7 +658,6 @@ func TestLocalSyncStartRequiresLinkedRepo(t *testing.T) {
 	}
 }
 
-
 // sshShim makes ssh:// git URLs resolve to local paths, so a test push
 // really moves objects without dialing anything. Same trick as the pull
 // test: the shim runs the wrapped git-receive-pack itself.

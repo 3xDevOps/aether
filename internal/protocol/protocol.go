@@ -60,6 +60,10 @@ const (
 	MethodRunPull        = "run.pull"
 	MethodTerminalStatus = "terminal.status"
 	MethodTerminalStop   = "terminal.stop"
+	// MethodEnvSave snapshots the caller's running environment terminal.
+	MethodEnvSave = "env.save"
+	// MethodEnvReset stops the caller's environment terminal and returns it to the standard image.
+	MethodEnvReset = "env.reset"
 )
 
 // Custom agent (harness) onboarding methods.

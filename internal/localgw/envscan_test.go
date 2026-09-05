@@ -11,12 +11,10 @@ import (
 	"testing"
 	"time"
 
-
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/localops"
 )
-
 
 // writeScanStub writes an executable shell script and returns the argv
 // override that runs it with the rendered prompt as its first argument,
@@ -33,7 +31,6 @@ func writeScanStub(t *testing.T, body string) []string {
 	}
 	return []string{"/bin/sh", script, harness.TaskPlaceholder}
 }
-
 
 func waitForFile(t *testing.T, path string) {
 	t.Helper()
@@ -225,4 +222,3 @@ func TestLocalEnvHarnessesRepoSuggestion(t *testing.T) {
 		}
 	}
 }
-

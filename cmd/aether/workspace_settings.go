@@ -96,4 +96,3 @@ func printWorkspaceSettings(ws protocol.Workspace) {
 	fmt.Printf("base branch   %s\n", ws.BaseBranch)
 	fmt.Printf("steer others  %s\n", describeSteerOthers(ws.SteerOthers))
 }
-

@@ -89,7 +89,6 @@ type Config struct {
 	// on a tailnet. Reported verbatim by server.info.
 	TailnetHostname string
 
-
 	// InvitesDir holds one-time invite files (<data>/invites). Empty
 	// disables member.invite and invite-code joins.
 	InvitesDir string
