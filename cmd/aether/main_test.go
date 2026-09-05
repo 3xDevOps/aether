@@ -94,6 +94,9 @@ func TestSteerUsage(t *testing.T) {
 		{[]string{"close"}, "usage: aether close <run-id> --outcome merged|abandoned"},
 		{[]string{"close", "run-1"}, "usage: aether close <run-id> --outcome merged|abandoned"},
 		{[]string{"relaunch"}, "usage: aether relaunch <run-id>"},
+		{[]string{"env"}, "usage: aether env save|reset"},
+		{[]string{"env", "save", "extra"}, "usage: aether env save|reset"},
+		{[]string{"env", "reset", "extra"}, "usage: aether env save|reset"},
 	}
 	for _, tc := range cases {
 		err := dispatch(tc.args)

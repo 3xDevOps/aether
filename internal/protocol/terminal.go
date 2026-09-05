@@ -19,8 +19,14 @@ type TerminalResponse struct {
 
 // TerminalStatusResult is the wire form of domain.TerminalStatus.
 type TerminalStatusResult struct {
-	Running   bool     `json:"running"`
-	Image     string   `json:"image,omitempty"`
-	StartedAt string   `json:"started_at,omitempty"`
-	Tabs      []string `json:"tabs,omitempty"`
+	Running    bool     `json:"running"`
+	Image      string   `json:"image,omitempty"`
+	SavedImage string   `json:"saved_image,omitempty"`
+	StartedAt  string   `json:"started_at,omitempty"`
+	Tabs       []string `json:"tabs,omitempty"`
+}
+
+// EnvSaveResult is the result of saving a member's environment terminal.
+type EnvSaveResult struct {
+	Image string `json:"image"`
 }

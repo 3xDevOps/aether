@@ -17,6 +17,8 @@ import (
 func init() {
 	registerMethod(protocol.MethodTerminalStatus, (*Server).terminalStatus)
 	registerMethod(protocol.MethodTerminalStop, (*Server).terminalStop)
+	registerMethod(protocol.MethodEnvSave, (*Server).environmentSave)
+	registerMethod(protocol.MethodEnvReset, (*Server).environmentReset)
 }
 
 // serveTerminal serves one member's persistent environment terminal. The
@@ -119,7 +121,7 @@ func (s *Server) terminalStatus(ctx context.Context, member domain.MemberID, _ j
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	out := protocol.TerminalStatusResult{Running: status.Running, Image: status.Image, Tabs: status.Tabs}
+	out := protocol.TerminalStatusResult{Running: status.Running, Image: status.Image, SavedImage: status.SavedImage, Tabs: status.Tabs}
 	if !status.StartedAt.IsZero() {
 		out.StartedAt = status.StartedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
 	}
@@ -128,6 +130,21 @@ func (s *Server) terminalStatus(ctx context.Context, member domain.MemberID, _ j
 
 func (s *Server) terminalStop(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
 	if err := s.cfg.Runs.StopTerminal(ctx, member); err != nil {
+		return nil, rpcError(err)
+	}
+	return struct{}{}, nil
+}
+
+func (s *Server) environmentSave(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	image, err := s.cfg.Runs.SaveEnvironment(ctx, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.EnvSaveResult{Image: image}, nil
+}
+
+func (s *Server) environmentReset(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	if err := s.cfg.Runs.ResetEnvironment(ctx, member); err != nil {
 		return nil, rpcError(err)
 	}
 	return struct{}{}, nil
