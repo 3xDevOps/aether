@@ -397,6 +397,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceSettings: vi.fn(async () => workspace),
+    workspaceImage: vi.fn(async () => ({
+      workspace,
+      image: serverInfo.standard_image ?? '',
+    })),
     budgetSet: vi.fn(async () => budget(workspace.id)),
     templateSave: vi.fn(async () => template),
     templateDelete: vi.fn(async () => ({})),
@@ -479,6 +483,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       remote: 'aether',
       output:
         'To ssh://alice@host:2222/wsp_1\n * [new branch] main -> main',
+    })),
+    localRepoSync: vi.fn(async () => ({
+      branch: 'main',
+      output: 'From origin\nAlready up to date.',
     })),
     localSyncStart: vi.fn(async (runID: string) => ({
       run_id: runID,

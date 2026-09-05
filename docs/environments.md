@@ -129,12 +129,20 @@ These create a normal `Dockerfile`, `.dockerignore`, and optionally a
 `.devcontainer/devcontainer.json`; they do not build or push anything.
 Aether never executes arbitrary project container metadata on the server.
 
+An administrator can repoint an existing workspace to another tagged or
+digest-pinned image with `aether workspace settings --image <ref>`. This is
+useful after a server upgrade ships a newer standard image. The dashboard's
+workspace settings action provides the same operation.
+
 ## Protocol surface
 
 For integrators: the control-channel methods are `env.save`, `env.build`,
-`env.status`, `env.rollback`, `env.edit`, and `env.get`, all requiring
-workspace admin. Build and edit progress ride the event feed as
+`env.status`, `env.rollback`, `env.edit`, `env.get`, and `workspace.image`.
+All require workspace admin. `workspace.image` reads the current image when
+called without an image and updates it when given a tagged or digest-pinned
+reference. Build and edit progress ride the event feed as
 `environment.build` and `environment.edit` events (version, status, output
 line, failure detail). The local machine-side pieces - harness detection
 and the scan socket - are documented in
 [local-gateway.md](local-gateway.md).
+

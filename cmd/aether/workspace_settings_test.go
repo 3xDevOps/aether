@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 func TestParseSteerOthers(t *testing.T) {
@@ -32,6 +35,16 @@ func TestDescribeSteerOthersRoundTrips(t *testing.T) {
 		if got, err := parseSteerOthers(word); err != nil || got != wire {
 			t.Errorf("describe(%q) = %q; parse(%q) = (%q, %v), want %q", wire, desc, word, got, err, wire)
 		}
+	}
+}
+
+func TestWriteWorkspaceImage(t *testing.T) {
+	var out bytes.Buffer
+	if err := writeWorkspaceImage(&out, protocol.WorkspaceImageResult{Image: "ghcr.io/example/workspace:v2"}); err != nil {
+		t.Fatalf("writeWorkspaceImage: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "image  ghcr.io/example/workspace:v2\n") {
+		t.Fatalf("output = %q, want image row", got)
 	}
 }
 

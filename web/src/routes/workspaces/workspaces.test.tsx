@@ -112,6 +112,61 @@ describe('workspaces view', () => {
     expect(await screen.findByText(workspace.base_branch)).toBeDefined()
     expect(screen.getByText('admins steer others')).toBeDefined()
   })
+  it('updates a workspace on a stale standard image', async () => {
+    const client = fakeApi({
+      workspaceListFull: vi.fn(async () => [workspace]),
+      workspaceImage: vi
+        .fn()
+        .mockResolvedValueOnce({
+          workspace,
+          image: 'ghcr.io/3xdevops/aether-standard:1.2.2',
+        })
+        .mockResolvedValueOnce({
+          workspace,
+          image: serverInfo.standard_image ?? '',
+        }),
+    })
+    render(<WorkspacesRoute params={{}} client={client} />)
+
+    const update = await screen.findByRole('button', { name: 'Update to 1.2.3' })
+    fireEvent.click(update)
+
+    expect(client.workspaceImage).toHaveBeenCalledWith(workspace.id, serverInfo.standard_image)
+    expect(await screen.findByText(serverInfo.standard_image as string)).toBeDefined()
+  })
+
+  it('does not offer a standard image update when already current', async () => {
+    const client = fakeApi({
+      workspaceListFull: vi.fn(async () => [workspace]),
+      workspaceImage: vi.fn(async () => ({
+        workspace,
+        image: serverInfo.standard_image ?? '',
+      })),
+    })
+    seed()
+    render(<WorkspacesRoute params={{}} client={client} />)
+
+    await screen.findByText(serverInfo.standard_image as string)
+    expect(screen.queryByRole('button', { name: 'Update to 1.2.3' })).toBeNull()
+  })
+
+  it('hides workspace images without the workspace.image capability', async () => {
+    const client = fakeApi({
+      workspaceListFull: vi.fn(async () => [workspace]),
+    })
+    seed({
+      capabilities: {
+        gateway: 'remote',
+        methods: ['workspace.add'],
+        ws: ['events', 'attach'],
+      },
+    })
+    render(<WorkspacesRoute params={{}} client={client} />)
+
+    await screen.findByText(workspace.name)
+    expect(screen.queryByText('Image')).toBeNull()
+    expect(client.workspaceImage).not.toHaveBeenCalled()
+  })
 
   it('wraps workspace metadata and actions without crowding', async () => {
     const client = fakeApi({
