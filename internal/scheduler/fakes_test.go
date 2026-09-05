@@ -28,24 +28,27 @@ type fakeRuntime struct {
 	containers  map[runtime.ID]*fakeContainer
 	containerIP string
 	createErr   error
+	createHook  func()
 	startErr    error
 	waitErr     error
-	buildErr    error
-	createHook  func() // runs at the top of Create; set before any Create call
-	// buildHook runs at the top of BuildImage; set before any build starts.
-	buildHook func(tag string)
-	// startHook runs in its own goroutine once a container starts; tests
-	// use it to script the container's output and exit.
-	startHook func(c *fakeContainer)
+	startHook   func(c *fakeContainer)
+	commitErr   error
+	commits     []fakeCommitCall
+	// heldImages are tags the fake daemon refuses to remove, as Docker does
+	// while a container still uses them.
+	heldImages map[string]bool
 	// execTTYHook overrides ExecTTY for tests that need to model an
 	// immediate shell-executable failure.
 	execTTYHook func(context.Context, runtime.ID, []string, string, uint, uint) (runtime.Attachment, error)
 	execCalls   []fakeExecTTYCall
 	attaches    int
-	builds      int
-	// images maps built tags to their Dockerfile text, lazily allocated
-	// by BuildImage.
+	// images is the fake daemon's local image registry.
 	images map[string]string
+}
+
+type fakeCommitCall struct {
+	id  runtime.ID
+	tag string
 }
 
 type fakeExecTTYCall struct {
@@ -317,36 +320,48 @@ func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.
 	return "", fmt.Errorf("fake runtime: creation key %q: %w", key, runtime.ErrNotFound)
 }
 
-// BuildImage records the tag as built, keyed to its Dockerfile, and emits
-// one engine progress line like the Docker daemon does.
-func (r *fakeRuntime) BuildImage(_ context.Context, dockerfile, tag string, progress io.Writer) error {
-	if r.buildHook != nil {
-		r.buildHook(tag)
-	}
+// Commit records a saved image and registers its tag in the fake daemon.
+func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error {
 	r.mu.Lock()
-	if r.buildErr != nil {
-		r.mu.Unlock()
-		return r.buildErr
+	defer r.mu.Unlock()
+	if r.commitErr != nil {
+		return r.commitErr
 	}
+	r.commits = append(r.commits, fakeCommitCall{id: id, tag: tag})
 	if r.images == nil {
 		r.images = make(map[string]string)
 	}
-	r.images[tag] = dockerfile
-	r.builds++
-	r.mu.Unlock()
-	if progress != nil {
-		_, _ = fmt.Fprintf(progress, "Step 1/1 : building %s\n", tag)
-	}
+	r.images[tag] = string(id)
 	return nil
 }
 
-// ImageExists mirrors the Docker capability probe the scheduler asserts
-// for rollback: a tag exists once built and disappears on RemoveImage.
+func (r *fakeRuntime) commitCalls() []fakeCommitCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.commits)
+}
+
+// ImageExists mirrors the Docker capability probe the scheduler uses for
+// saved member environment images.
 func (r *fakeRuntime) ImageExists(_ context.Context, tag string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, ok := r.images[tag]
 	return ok, nil
+}
+
+// ListImageTags returns the registered tags under repo, like Docker's
+// reference filter.
+func (r *fakeRuntime) ListImageTags(_ context.Context, repo string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var tags []string
+	for tag := range r.images {
+		if strings.HasPrefix(tag, repo+":") {
+			tags = append(tags, tag)
+		}
+	}
+	return tags, nil
 }
 
 func (r *fakeRuntime) hasImage(tag string) bool {
@@ -356,19 +371,25 @@ func (r *fakeRuntime) hasImage(tag string) bool {
 	return ok
 }
 
-func (r *fakeRuntime) buildCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.builds
-}
-
-// RemoveImage forgets a built tag; a missing tag is not an error,
-// matching the Docker implementation.
+// RemoveImage forgets a saved member environment tag; a missing tag is not
+// an error, matching the Docker implementation.
 func (r *fakeRuntime) RemoveImage(_ context.Context, tag string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.heldImages[tag] {
+		return fmt.Errorf("fake runtime: image %s is in use by a container", tag)
+	}
 	delete(r.images, tag)
 	return nil
+}
+
+func (r *fakeRuntime) holdImage(tag string, held bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.heldImages == nil {
+		r.heldImages = make(map[string]bool)
+	}
+	r.heldImages[tag] = held
 }
 
 func (r *fakeRuntime) attachCount() int {
@@ -387,16 +408,6 @@ func (r *fakeRuntime) byName(name string) *fakeContainer {
 		}
 	}
 	return nil
-}
-
-func (r *fakeRuntime) allContainers() []*fakeContainer {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]*fakeContainer, 0, len(r.containers))
-	for _, c := range r.containers {
-		out = append(out, c)
-	}
-	return out
 }
 
 type fakeAttachment struct {

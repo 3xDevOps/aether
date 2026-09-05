@@ -142,13 +142,6 @@ type ServerInfoResult struct {
 	// TailnetIdentityAuth reports whether the server resolves tailnet
 	// identities (WhoIs) for keyless auth.
 	TailnetIdentityAuth bool `json:"tailnet_identity_auth,omitempty"`
-	// NeutralImage is the server-owned image used for workspaces whose
-	// environment selects the neutral base.
-	NeutralImage string `json:"neutral_image,omitempty"`
-	// StandardImage is the published standard environment image the
-	// server recommends for new workspaces; clients pin it as the
-	// workspace's custom image. Absent on servers predating it.
-	StandardImage string `json:"standard_image,omitempty"`
 }
 
 // WorkspaceListResult is the result of workspace.list.
@@ -266,19 +259,6 @@ type WorkspaceSettingsParams struct {
 // WorkspaceSettingsResult is the result of workspace.settings.
 type WorkspaceSettingsResult struct {
 	Workspace Workspace `json:"workspace"`
-}
-
-// WorkspaceImageParams are the params of workspace.image (admin only).
-// An empty Image reads the current custom image; a non-empty Image replaces it.
-type WorkspaceImageParams struct {
-	WorkspaceID string `json:"workspace_id"`
-	Image       string `json:"image"`
-}
-
-// WorkspaceImageResult is the result of workspace.image.
-type WorkspaceImageResult struct {
-	Workspace Workspace `json:"workspace"`
-	Image     string    `json:"image"`
 }
 
 // RunPullResult is the result of run.pull: fetch coordinates for the run's

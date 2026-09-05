@@ -16,7 +16,6 @@ const localCaps: GatewayCapabilities = {
     'sync.status',
     'daemon.status',
     'daemon.install',
-    'image.scaffold',
     'repo.sync',
   ],
 }

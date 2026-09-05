@@ -43,10 +43,8 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 		base = domain.DefaultBaseBranch
 	}
 	w := &domain.Workspace{Name: p.Name, BaseBranch: base, Environment: domain.WorkspaceEnvironment{
-		CustomImage:  p.Environment.CustomImage,
-		NeutralImage: p.Environment.NeutralImage,
-		Variables:    p.Environment.Variables,
-		SetupPolicy:  domain.SetupPolicy{Script: p.Environment.SetupPolicy.Script},
+		Variables:   p.Environment.Variables,
+		SetupPolicy: domain.SetupPolicy{Script: p.Environment.SetupPolicy.Script},
 	}}
 	if err := s.cfg.Store.CreateWorkspace(ctx, w); err != nil {
 		return nil, rpcError(err)

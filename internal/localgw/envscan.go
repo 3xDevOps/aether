@@ -2,14 +2,12 @@ package localgw
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/3xDevOps/Aether/internal/cli/profile"
-	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/localops"
 )
 
@@ -28,38 +26,22 @@ const (
 // validating, retrying).
 const envScanStatusDetecting = "detecting"
 
-// envScanRequest is the client's start frame: which harness to run, the
-// repository folder for a repo-mode scan, and, for a refine run, the
-// previous pair and the user's feedback.
+// envScanRequest is the client's start frame.
 type envScanRequest struct {
-	Harness string `json:"harness"`
-	Mode    string `json:"mode"`
-	// RepoPath is the repository folder a repo scan reads. Required when
-	// mode is repo; the engine validates it and an invalid folder answers
-	// an error frame naming the problem.
-	RepoPath             string `json:"repo_path"`
-	PreviousDockerfile   string `json:"previous_dockerfile"`
-	PreviousManifestJSON string `json:"previous_manifest_json"`
-	Feedback             string `json:"feedback"`
+	Harness  string `json:"harness"`
+	Mode     string `json:"mode"`
+	RepoPath string `json:"repo_path"`
 }
 
 // envScanFrame is every frame the server sends: type discriminates, the
 // other fields are set per type.
 type envScanFrame struct {
-	Type string `json:"type"`
-	// Status frames: detecting, running, validating, retrying.
-	Status string `json:"status,omitempty"`
-	// Output frames: one raw line of agent output.
-	Line string `json:"line,omitempty"`
-	// Result frame: the validated pair.
-	Dockerfile   string                `json:"dockerfile,omitempty"`
-	ManifestJSON string                `json:"manifest_json,omitempty"`
-	Manifest     []domain.ManifestItem `json:"manifest,omitempty"`
-	// Result frame of a profile scan: which configurations to import.
+	Type           string                  `json:"type"`
+	Status         string                  `json:"status,omitempty"`
+	Line           string                  `json:"line,omitempty"`
 	Recommendation *profile.Recommendation `json:"recommendation,omitempty"`
-	// Error frame: what went wrong and the last agent output for diagnosis.
-	Detail     string `json:"detail,omitempty"`
-	OutputTail string `json:"output_tail,omitempty"`
+	Detail         string                  `json:"detail,omitempty"`
+	OutputTail     string                  `json:"output_tail,omitempty"`
 }
 
 // beginScan claims the gateway's single scan slot; false means a scan is
@@ -97,11 +79,7 @@ func (s *localState) scanArgvOverride() []string {
 	return s.scanArgv
 }
 
-// handleEnvScan serves GET /ws/envscan: one environment inventory scan on
-// this machine, streamed as JSON frames. The client sends a start frame,
-// receives output and status frames while the chosen harness runs, and one
-// terminal result or error frame. Closing the socket cancels the scan and
-// kills its process.
+// handleEnvScan serves the profile scan websocket.
 func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
 	if !g.authorized(r, true) {
 		g.deny(w)
@@ -148,54 +126,16 @@ func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
 	if writeFrame(ctx, conn, envScanFrame{Type: envScanFrameStatus, Status: envScanStatusDetecting}) != nil {
 		return
 	}
-	// The agent may live in a folder only the login shell lists, or have
-	// been installed since the gateway started. A failed probe has no
-	// reader here: the scan's own error names a still-missing executable.
+	if req.Mode != localops.ScanModeProfile {
+		_ = writeFrame(ctx, conn, envScanFrame{
+			Type:   envScanFrameError,
+			Detail: "unsupported scan mode",
+		})
+		_ = conn.Close(websocket.StatusPolicyViolation, "unsupported scan mode")
+		return
+	}
 	widenCtx, widenDone := context.WithTimeout(ctx, loginPathTimeout)
 	_, _ = localops.AdoptLoginPath(widenCtx)
 	widenDone()
-	// A profile scan answers a recommendation instead of an image pair,
-	// so it runs its own branch over the same socket and the same slot.
-	if req.Mode == localops.ScanModeProfile {
-		g.runProfileScan(ctx, conn, req)
-		return
-	}
-	result, err := localops.RunScan(ctx, localops.ScanOptions{
-		Harness:              req.Harness,
-		Mode:                 req.Mode,
-		RepoPath:             req.RepoPath,
-		PreviousDockerfile:   req.PreviousDockerfile,
-		PreviousManifestJSON: req.PreviousManifestJSON,
-		Feedback:             req.Feedback,
-		Argv:                 g.local.scanArgvOverride(),
-	}, func(e localops.ScanEvent) {
-		// RunScan calls back serially and the handler writes nothing else
-		// while it runs, so frames never interleave. A write failure means
-		// the client is gone; the read pump above is already canceling.
-		if e.Status != "" {
-			_ = writeFrame(ctx, conn, envScanFrame{Type: envScanFrameStatus, Status: e.Status})
-			return
-		}
-		_ = writeFrame(ctx, conn, envScanFrame{Type: envScanFrameOutput, Line: e.Line})
-	})
-	if err != nil {
-		frame := envScanFrame{Type: envScanFrameError, Detail: err.Error()}
-		var failure *localops.ScanFailure
-		if errors.As(err, &failure) {
-			frame.OutputTail = failure.OutputTail
-		}
-		_ = writeFrame(ctx, conn, frame)
-		_ = conn.Close(websocket.StatusNormalClosure, "scan failed")
-		return
-	}
-	err = writeFrame(ctx, conn, envScanFrame{
-		Type:         envScanFrameResult,
-		Dockerfile:   result.Dockerfile,
-		ManifestJSON: result.ManifestJSON,
-		Manifest:     result.Manifest,
-	})
-	if err != nil {
-		return
-	}
-	_ = conn.Close(websocket.StatusNormalClosure, "scan complete")
+	g.runProfileScan(ctx, conn, req)
 }

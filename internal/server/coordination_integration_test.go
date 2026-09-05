@@ -268,7 +268,7 @@ func (e *coordEnv) seed(ctx context.Context, t *testing.T, disabled bool) *coord
 
 	e.ws = &domain.Workspace{
 		Name:        "coord",
-		Environment: domain.WorkspaceEnvironment{CustomImage: e.image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err := srv.srv.Store().CreateWorkspace(ctx, e.ws); err != nil {
@@ -318,6 +318,7 @@ func (e *coordEnv) start(ctx context.Context, t *testing.T, disabled bool) *coor
 		DataDir:              e.dataDir,
 		Addr:                 "127.0.0.1:0",
 		Runtime:              e.rt,
+		StandardImage:        e.image,
 		CoordinationDisabled: disabled,
 		ServerBinary:         e.serverBinary,
 	})

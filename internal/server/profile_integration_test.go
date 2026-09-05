@@ -47,7 +47,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	rt, image, verifyNoLeaks := pickRuntime(t)
+	rt, _, verifyNoLeaks := pickRuntime(t)
 	if _, fallback := rt.(*e2eRuntime); fallback {
 		t.Skip("the profile lifecycle needs a real shell in the container; Docker daemon unreachable")
 	}
@@ -71,7 +71,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "prof",
-		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {

@@ -68,7 +68,7 @@ func RunProfileScan(ctx context.Context, opts ProfileScanOptions, progress func(
 		return nil, errors.New("localops: a profile scan needs at least one harness inventory")
 	}
 	if opts.RepoPath != "" {
-		if err := validateRepoPath(opts.RepoPath); err != nil {
+		if err := validateProfileRepoPath(opts.RepoPath); err != nil {
 			return nil, err
 		}
 	}
@@ -91,6 +91,25 @@ func RunProfileScan(ctx context.Context, opts ProfileScanOptions, progress func(
 		func(scratch string) (*ProfileScanResult, error) {
 			return collectProfileOutput(scratch, opts.Inventory)
 		})
+}
+
+func validateProfileRepoPath(repoPath string) error {
+	if strings.TrimSpace(repoPath) == "" {
+		return errors.New("localops: a profile scan needs the repository's folder")
+	}
+	info, err := os.Stat(repoPath)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("localops: the folder %s does not exist", repoPath)
+	case err != nil:
+		return fmt.Errorf("localops: check the folder %s: %w", repoPath, err)
+	case !info.IsDir():
+		return fmt.Errorf("localops: %s is not a folder", repoPath)
+	}
+	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err != nil {
+		return fmt.Errorf("localops: %s is not a git repository (it has no .git entry)", repoPath)
+	}
+	return nil
 }
 
 // formatProfileInventory renders the previews as the plain text block the

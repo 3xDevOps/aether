@@ -121,17 +121,19 @@ the command.
 
 ## Workspaces
 
-A workspace is the whole shared scope. It is a repo plus the container image
-its agents run in, and everything the team shares hangs off it: runs, the
-event feed, the approval inbox, presence, templates, schedules, costs and the
-budget. One per project.
+A workspace is the whole shared scope. It is a repository plus workspace
+settings; each member's runs and shells use that member's saved image, or the
+server's standard image when they have not saved one. See
+[environments.md](environments.md) for image selection and saving. Everything
+the team shares hangs off the workspace: runs, the event feed, the approval
+inbox, presence, templates, schedules, costs, and the budget. One workspace
+normally covers one project.
 
-Creating one is an admin operation. `init` takes the server's neutral
-image; `add` requires an administrator-approved one:
+Creating one is an admin operation:
 
 ```sh
-aether workspace init myproject [--image <image>] [--base <branch>]
-aether workspace add myproject --image <image> [--base <branch>]
+aether workspace init myproject [--base <branch>]
+aether workspace add myproject [--base <branch>]
 ```
 
 Two settings belong to the workspace rather than to any run in it:

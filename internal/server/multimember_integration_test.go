@@ -79,7 +79,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	rt, image, verifyNoLeaks := pickRuntime(t)
+	rt, _, verifyNoLeaks := pickRuntime(t)
 	if e2e, ok := rt.(*e2eRuntime); ok {
 		registerMultiMemberScripts(e2e)
 	}
@@ -185,7 +185,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	var addedWS protocol.WorkspaceAddResult
 	if err := adaCtrl.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{
 		Name:        "team",
-		Environment: protocol.WorkspaceEnvironment{CustomImage: image},
+		Environment: protocol.WorkspaceEnvironment{},
 	}, &addedWS); err != nil {
 		t.Fatalf("workspace.add: %v", err)
 	}

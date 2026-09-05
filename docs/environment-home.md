@@ -2,8 +2,9 @@
 
 Each member has one server-owned home directory under `<data>/homes/<member>`.
 Aether mounts it read-write as `$HOME` in every container that member receives,
-including agent runs and environment terminal sessions. The image and
-workspace checkout are still selected separately by the administrator.
+including agent runs, workspace shells, and the environment terminal. Every
+container also starts from that member's saved image, or the standard image
+when none is saved.
 
 ## What persists
 
@@ -13,11 +14,9 @@ The home is the member's durable environment:
 - Vendor login state and other files written by the agent
 - Profile files synced with `aether profile push`
 
-Container files outside the home are temporary. System packages belong in an
-administrator-approved image. Containers run as root by default and the
-shipped images include `sudo`, so vendor install scripts work exactly as
-their docs describe. A member's home is mounted only in that member's
-containers, never in another member's.
+Files outside the home live in the container layer. **Save environment** in the
+terminal turns that layer into your member image so later runs get it; see
+[environments.md](environments.md).
 
 ## Setting up an agent
 

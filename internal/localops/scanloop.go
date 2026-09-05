@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -197,28 +196,6 @@ func scanArgvTemplate(harnessName string, override []string) ([]string, error) {
 		}
 	}
 	return nil, fmt.Errorf("localops: harness %q is not available for environment setup", harnessName)
-}
-
-// validateRepoPath checks the folder a repo-anchored run reads before
-// anything launches. Each failure names the path so surfaces can show the
-// message next to the folder input.
-func validateRepoPath(path string) error {
-	if strings.TrimSpace(path) == "" {
-		return errors.New("localops: a repo scan needs the repository's folder")
-	}
-	info, err := os.Stat(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("localops: the folder %s does not exist", path)
-	case err != nil:
-		return fmt.Errorf("localops: check the folder %s: %w", path, err)
-	case !info.IsDir():
-		return fmt.Errorf("localops: %s is not a folder", path)
-	}
-	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
-		return fmt.Errorf("localops: %s is not a git repository (it has no .git entry)", path)
-	}
-	return nil
 }
 
 // repoStatus captures the repository's git status so the engine can prove

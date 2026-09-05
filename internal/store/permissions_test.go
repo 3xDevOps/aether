@@ -21,7 +21,7 @@ func TestWorkspaceSteerOthersRoundTrip(t *testing.T) {
 		Name:        "locked",
 		BaseBranch:  "main",
 		SteerOthers: domain.SteerOthersAdminsOnly,
-		Environment: domain.WorkspaceEnvironment{CustomImage: "alpine:3.20"},
+		Environment: domain.WorkspaceEnvironment{},
 	}
 	if err := db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
@@ -70,7 +70,7 @@ func TestWorkspaceBaseBranchDefaults(t *testing.T) {
 
 	w := &domain.Workspace{
 		Name:        "bare",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "alpine:3.20"},
+		Environment: domain.WorkspaceEnvironment{},
 	}
 	if err := db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)

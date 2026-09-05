@@ -77,7 +77,7 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	rt, image, verifyNoLeaks := pickRuntime(t)
+	rt, _, verifyNoLeaks := pickRuntime(t)
 	dataDir := filepath.Join(t.TempDir(), "data")
 
 	// The binaries the update replaces. They are inert files, not the test
@@ -141,7 +141,7 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "update",
-		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {

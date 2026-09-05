@@ -132,7 +132,6 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 		"daemon.install":  (*Gateway).localDaemonInstall,
 		"daemon.status":   (*Gateway).localDaemonStatus,
 		"env.harnesses":   (*Gateway).localEnvHarnesses,
-		"image.scaffold":  (*Gateway).localImageScaffold,
 		"link.repo":       (*Gateway).localLinkRepo,
 		"link.switch":     (*Gateway).localLinkSwitch,
 		"link.status":     (*Gateway).localLinkStatus,
@@ -714,36 +713,4 @@ func suggestedRepo(cfg cli.Config) string {
 		}
 	}
 	return repo
-}
-
-func (g *Gateway) localImageScaffold(_ *http.Request, body []byte) (any, *protocol.Error) {
-	var params struct {
-		Repo string `json:"repo"`
-		Kind string `json:"kind"`
-	}
-	if perr := decodeParams(body, &params); perr != nil {
-		return nil, perr
-	}
-	repo := params.Repo
-	if repo == "" {
-		repo = g.local.snapshot().Repo
-	}
-	if repo == "" {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "repo is required (none linked)"}
-	}
-	switch params.Kind {
-	case "dockerfile", "devcontainer":
-	default:
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "kind must be dockerfile or devcontainer"}
-	}
-	written, err := localops.Scaffold(repo, params.Kind)
-	switch {
-	case errors.Is(err, localops.ErrScaffoldExists):
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
-	case err != nil:
-		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
-	}
-	return struct {
-		Written []string `json:"written"`
-	}{Written: written}, nil
 }

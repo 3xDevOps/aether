@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"net/url"
 	"os"
@@ -59,7 +58,6 @@ func mustCreateWorkspace(t *testing.T, db *DB) *domain.Workspace {
 	w := &domain.Workspace{
 		Name: "aether",
 		Environment: domain.WorkspaceEnvironment{
-			CustomImage: "ghcr.io/3xdevops/aether-dev:latest",
 			Variables:   map[string]string{"GOFLAGS": "-trimpath", "TZ": "UTC"},
 			SetupPolicy: domain.SetupPolicy{Script: "make deps\n"},
 		},
@@ -223,10 +221,10 @@ func TestWorkspaceCRUD(t *testing.T) {
 
 	w.Name = "aether-v2"
 	w.Environment = domain.WorkspaceEnvironment{
-		CustomImage: "alpine:3.20",
 		Variables:   map[string]string{"A": "1"},
 		SetupPolicy: domain.SetupPolicy{Script: "true"},
 	}
+
 	if uerr := db.UpdateWorkspace(ctx, w); uerr != nil {
 		t.Fatalf("UpdateWorkspace: %v", uerr)
 	}
@@ -261,7 +259,7 @@ func TestWorkspaceCRUD(t *testing.T) {
 func TestWorkspaceNilEnvRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
-	w := &domain.Workspace{Name: "bare", Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"}}
+	w := &domain.Workspace{Name: "bare"}
 	if err := db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
@@ -271,39 +269,6 @@ func TestWorkspaceNilEnvRoundTrip(t *testing.T) {
 	}
 	if got.Environment.Variables != nil {
 		t.Fatalf("nil Variables round-tripped as %#v", got.Environment.Variables)
-	}
-}
-
-func TestWorkspaceEnvironmentAcceptsNumericNeutralImage(t *testing.T) {
-	db := openTestDB(t)
-	ctx := context.Background()
-	w := mustCreateWorkspace(t, db)
-	if _, err := db.db.ExecContext(ctx, `UPDATE workspaces SET environment = ? WHERE id = ?`,
-		`{"custom_image":"","neutral_image":1,"variables":{},"setup_policy":{"script":""}}`, w.ID); err != nil {
-		t.Fatalf("seed legacy environment: %v", err)
-	}
-
-	got, err := db.GetWorkspace(ctx, w.ID)
-	if err != nil {
-		t.Fatalf("GetWorkspace: %v", err)
-	}
-	if !got.Environment.NeutralImage {
-		t.Fatal("numeric neutral_image was not decoded as true")
-	}
-}
-
-func TestWorkspaceEnvironmentMarshalUsesCanonicalBoolean(t *testing.T) {
-	data, err := json.Marshal(domain.WorkspaceEnvironment{NeutralImage: true})
-	if err != nil {
-		t.Fatalf("marshal environment: %v", err)
-	}
-
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		t.Fatalf("decode marshaled environment: %v", err)
-	}
-	if got := string(fields["neutral_image"]); got != "true" {
-		t.Fatalf("neutral_image JSON = %s, want true", got)
 	}
 }
 
@@ -361,6 +326,27 @@ func TestMemberCRUDAndPublicKeyLookup(t *testing.T) {
 	}
 	if len(list) != 1 {
 		t.Fatalf("ListMembers len = %d, want 1", len(list))
+	}
+
+	if err = db.UpdateMemberImage(ctx, m.ID, "aether/member-"+string(m.ID)+":123"); err != nil {
+		t.Fatalf("UpdateMemberImage: %v", err)
+	}
+	got, err = db.GetMember(ctx, m.ID)
+	if err != nil {
+		t.Fatalf("GetMember after image update: %v", err)
+	}
+	if got.Image != "aether/member-"+string(m.ID)+":123" {
+		t.Fatalf("member image = %q, want saved image", got.Image)
+	}
+	list, err = db.ListMembers(ctx)
+	if err != nil {
+		t.Fatalf("ListMembers after image update: %v", err)
+	}
+	if len(list) != 1 || list[0].Image != got.Image {
+		t.Fatalf("ListMembers image = %+v, want %q", list, got.Image)
+	}
+	if err := db.UpdateMemberImage(ctx, "missing", "tag"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateMemberImage missing member = %v, want ErrNotFound", err)
 	}
 
 	if err := db.DeleteMember(ctx, m.ID); err != nil {
@@ -949,7 +935,7 @@ func TestZeroTimeRejected(t *testing.T) {
 		t.Fatal("UpdateRunStatus accepted a zero StartedAt")
 	}
 	far := time.Date(2263, 1, 1, 0, 0, 0, 0, time.UTC)
-	ws := &domain.Workspace{Name: "far", Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"}, CreatedAt: far}
+	ws := &domain.Workspace{Name: "far", CreatedAt: far}
 	if err := db.CreateWorkspace(ctx, ws); err == nil {
 		t.Fatal("CreateWorkspace accepted a CreatedAt outside the storable range")
 	}
@@ -982,7 +968,7 @@ func TestCreatedAtPreservedWhenSet(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	want := time.Date(2020, 1, 2, 3, 4, 5, 678900000, time.UTC)
-	w := &domain.Workspace{Name: "old", Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"}, CreatedAt: want}
+	w := &domain.Workspace{Name: "old", CreatedAt: want}
 	if err := db.CreateWorkspace(ctx, w); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
@@ -998,8 +984,6 @@ func TestCreatedAtPreservedWhenSet(t *testing.T) {
 func assertWorkspaceEqual(t *testing.T, want, got *domain.Workspace) {
 	t.Helper()
 	if got.ID != want.ID || got.Name != want.Name ||
-		got.Environment.CustomImage != want.Environment.CustomImage ||
-		got.Environment.NeutralImage != want.Environment.NeutralImage ||
 		got.Environment.SetupPolicy != want.Environment.SetupPolicy ||
 		!got.CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("workspace round-trip: got %+v, want %+v", got, want)
@@ -1044,11 +1028,10 @@ func TestWorkspaceEnvironmentUsesFirstClassRepresentation(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := &domain.Workspace{
-		Name: "neutral",
+		Name: "environment",
 		Environment: domain.WorkspaceEnvironment{
-			NeutralImage: true,
-			Variables:    map[string]string{"A": "1"},
-			SetupPolicy:  domain.SetupPolicy{Script: "echo setup"},
+			Variables:   map[string]string{"A": "1"},
+			SetupPolicy: domain.SetupPolicy{Script: "echo setup"},
 		},
 	}
 	if err := db.CreateWorkspace(ctx, w); err != nil {
@@ -1065,7 +1048,7 @@ func TestWorkspaceEnvironmentUsesFirstClassRepresentation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Environment.NeutralImage || got.Environment.Variables["A"] != "1" ||
+	if got.Environment.Variables["A"] != "1" ||
 		got.Environment.SetupPolicy.Script != "echo setup" {
 		t.Fatalf("environment = %+v", got.Environment)
 	}

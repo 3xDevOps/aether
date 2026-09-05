@@ -47,23 +47,17 @@ const DefaultMinFreeBytes = 1 << 30
 
 // Config wires the scheduler's dependencies and tuning knobs.
 type Config struct {
-	Store         store.Store
-	Runtime       runtime.Runtime
-	Bus           events.Bus
-	Git           GitEngine
-	PTY           PTYHost
-	StateDir      string
-	Homes         *memberhome.Manager
-	Profiles      profileService
-	ReposDir      string
-	WorktreeMount string
-	NeutralImage  string
-	StandardImage string
-	// EnvEditDir is the server-owned scratch root for environment edit
-	// runs: each edit gets its own 0700 directory under it for the
-	// agent's output pair, removed when the edit ends. Empty refuses
-	// agent-driven environment edits.
-	EnvEditDir     string
+	Store          store.Store
+	Runtime        runtime.Runtime
+	Bus            events.Bus
+	Git            GitEngine
+	PTY            PTYHost
+	StateDir       string
+	Homes          *memberhome.Manager
+	Profiles       profileService
+	ReposDir       string
+	WorktreeMount  string
+	StandardImage  string
 	StallThreshold time.Duration
 	PollInterval   time.Duration
 	StopGrace      time.Duration // default 10s
@@ -147,12 +141,8 @@ type Scheduler struct {
 	terminalLocks   map[domain.MemberID]*sync.Mutex
 	terminals       map[domain.MemberID]*terminalSupervision
 	credentialUsers map[*credentialUserReservation]struct{}
-	// envBuildLocks serializes environment builds (and rollbacks) per
-	// workspace: one build at a time per workspace, later callers wait.
-	// Entries are created on first use and kept for the scheduler's life.
-	envBuildLocks map[domain.WorkspaceID]*sync.Mutex
-	titleMu       sync.Mutex
-	titleUpdates  map[domain.RunID]*pendingRunTitle
+	titleMu         sync.Mutex
+	titleUpdates    map[domain.RunID]*pendingRunTitle
 	// coordination is the attached conflict-coordination service and the
 	// staged-bridge directory (UseCoordination); nil means new containers
 	// get no coordination assets.

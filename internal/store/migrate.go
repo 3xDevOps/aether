@@ -562,7 +562,7 @@ DROP TABLE run_messages_migrate;
 DROP TABLE events_migrate;
 `,
 	// v13: versioned workspace environment definitions. The definition
-	// column is the JSON-encoded domain.EnvironmentDefinition; the version,
+	// column is the JSON-encoded environment definition; the version,
 	// status, failure_detail, and timestamp columns are authoritative for
 	// the fields they mirror. The partial unique index enforces the
 	// one-active-version-per-workspace invariant in the schema itself.
@@ -626,6 +626,28 @@ ALTER TABLE runs ADD COLUMN last_commit_at INTEGER;
 	// every existing row: those relaunch with the old best-effort flag.
 	`
 ALTER TABLE runs ADD COLUMN harness_session_id TEXT NOT NULL DEFAULT '';
+`,
+	// v19: workspace environments retain only variables and setup policy.
+	// Backfill rows that still rely on the legacy columns before dropping
+	// those columns and the obsolete environment definition table.
+	`
+UPDATE workspaces
+SET environment = json_object(
+	'variables', CASE
+		WHEN json_valid(env) AND json_type(env) = 'object' THEN json(env)
+		ELSE json('{}')
+	END,
+	'setup_policy', json_object('script', setup_script)
+)
+WHERE environment IN ('', '{}');
+DROP TABLE environment_definitions;
+ALTER TABLE workspaces DROP COLUMN image;
+ALTER TABLE workspaces DROP COLUMN env;
+ALTER TABLE workspaces DROP COLUMN setup_script;
+`,
+	// v20: saved per-member environment image references.
+	`
+ALTER TABLE members ADD COLUMN image TEXT NOT NULL DEFAULT '';
 `,
 }
 

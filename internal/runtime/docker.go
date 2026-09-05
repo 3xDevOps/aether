@@ -122,7 +122,7 @@ func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 
 func (d *Docker) pull(ctx context.Context, ref string) error {
 	if localOnlyImage(ref) {
-		return fmt.Errorf("runtime: image %s is built locally and is missing from the daemon; run \"aether env rebuild\" to rebuild it", ref)
+		return fmt.Errorf("runtime: image %s is built locally and is missing from the daemon", ref)
 	}
 	rc, err := d.cli.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
@@ -378,7 +378,7 @@ func (d *Docker) Resume(ctx context.Context, id ID) error {
 func (d *Docker) Stop(ctx context.Context, id ID, grace time.Duration) error {
 	info, err := d.cli.ContainerInspect(ctx, string(id))
 	if err != nil {
-		return fmt.Errorf("runtime: inspect container: %w", err)
+		return dockerWaitError("inspect", id, err)
 	}
 	if info.State != nil && info.State.Paused {
 		if err := d.cli.ContainerUnpause(ctx, string(id)); err != nil {

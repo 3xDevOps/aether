@@ -153,7 +153,7 @@ audit history.
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","forward.start",
-          "forward.status","forward.stop","image.scaffold","link.repo","link.status",
+          "forward.status","forward.stop","link.repo","link.status",
           "link.switch","profile.preview","profile.push","pull","pull.switch",
           "repo.push","repo.sync","sync.start","sync.status","sync.stop",
           "update.apply","update.check","update.status"],
@@ -275,8 +275,10 @@ SSH and needs these reads without a listener on the server.
 | `files.tree` | `FilesTreeParams` (`{"workspace_id":"...","run_id":"...","path":"src"}`; `run_id` optional) | `FilesTreeResult` - immediate file and directory entries |
 | `files.read` | `FilesReadParams` (`{"workspace_id":"...","run_id":"...","path":"README.md"}`; `run_id` optional) | `FilesReadResult` - read-only content, size, binary, and truncation |
 | `files.diff` | `FilesDiffParams` (`{"run_id":"...","path":"README.md"}`) | `FilesDiffResult` - one file's patch against the run base |
-| `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its image, start time, and active tabs |
+| `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
+| `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
+| `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit. `from` and `to` select
@@ -316,7 +318,6 @@ authority.
 | `sync.status` | `{}` | `{"sessions":[{"run_id":"...","state":"...","conflict":"..."\|null}]}` |
 | `daemon.install` | `{"server":"host:port","repo":"..."}` (`repo` defaults to the linked one; the unit gets the linked `--key`) | `{"unit_path":"...","note":"..."}` |
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
-| `image.scaffold` | `{"repo":"...","kind":"dockerfile"\|"devcontainer"}` (`repo` defaults to the linked one) | `{"written":["..."]}` |
 | `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"searched":["/usr/local/bin",...],"warning":"...","repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`. The verb first widens the gateway's `PATH` from your login shell (`$SHELL -l -i`, bounded to 5 seconds), so agents installed through a shell profile or since the gateway started are found; `searched` is the resulting `PATH` as a list of folders (always present, may be empty); `warning` is present only when the login shell could not be asked, carrying that error verbatim (the standard folders `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, and `~/.bun/bin` were still checked); `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
 | `forward.start` | `{"run_id":"...","port":1455}` | `{"run_id":"...","port":1455,"local_port":1455,"state":"active"}` |
 | `forward.stop` | `{"run_id":"...","port":1455}` | `{"run_id":"...","port":1455,"state":"stopped"}` |
@@ -453,8 +454,6 @@ authority.
   `conflict`), and `error`. A conflict is also reported to the server as a
   `sync.conflict` call so both affected members see the event;
   `sync.stop` dismisses a standing conflict.
-- `image.scaffold` refuses with `-32002` when the files already exist,
-  rather than overwriting them.
 - `update.check` answers the release check `aether update --check --json`
   prints, under `cli`, beside the linked server's version. Its fields are
   `version`, `commit`, `latest`, `update_available`, `asset`, `release_url`,
@@ -738,44 +737,33 @@ matching `^[a-z0-9-]{1,32}$`.
 
 Closing the socket detaches without stopping the shell. A normal shell exit
 closes with **1000**. Membership loss closes with **1008**. `terminal.status`
-reports the running container, image, start time, and active tabs;
-`terminal.stop` stops the container and deletes its tab sessions while
-preserving the member home.
+reports the running container's `image`, its `saved_image` when set, start
+time, and active tabs; `terminal.stop` stops the container and deletes its tab
+sessions while preserving the member home.
 
 
 ### `GET /ws/envscan`
 
-Runs one scan on this machine: the chosen coding agent runs headless and
-writes a validated result into a scratch directory. Four modes: three
-build a workspace image (the local toolchains, or a repository's own
-files, or a revision of a previous pair) and one recommends which of
-your local agent configuration is worth importing. Every frame is JSON
-text. Before the agent runs, the gateway widens its `PATH` from your login
-shell the way `env.harnesses` does.
+Runs the onboarding **profile** scan on this machine. The chosen setup-capable
+coding agent runs headless and recommends which local agent configurations are
+worth importing into Aether. Every frame is JSON text. Before the agent runs,
+the gateway widens its `PATH` from your login shell the way `env.harnesses`
+does.
 
-1. Client sends one **text** start frame within 10 seconds. `mode` is
-   `inventory` for a first scan; `repo` derives the environment from a
-   repository's own files instead of the machine and requires
-   `repo_path`, the repository folder on this machine; `refine` reruns
-   the agent over a previous pair with the user's feedback and carries
-   the three extra fields (plus `repo_path` when that pair came from a
-   repo scan); `profile` reads the `profile.preview` inventory of every
-   harness configured on this machine and recommends what to import,
-   optionally with `repo_path` so the project can inform the call:
+1. The client sends one **text** start frame within 10 seconds. `mode` must be
+   `profile`; `harness` names the setup-capable agent to run. `repo_path` is
+   optional. When present, it must name a Git repository; the agent runs from
+   that directory, never writes it, and the scan fails if its Git status
+   changes:
 
    ```json
-   {"harness":"claude","mode":"inventory"}
-   {"harness":"claude","mode":"repo","repo_path":"/path/to/clone"}
-   {"harness":"claude","mode":"refine","previous_dockerfile":"FROM ...",
-    "previous_manifest_json":"[...]","feedback":"drop jq, add ripgrep"}
+   {"harness":"claude","mode":"profile"}
    {"harness":"claude","mode":"profile","repo_path":"/path/to/clone"}
    ```
 
-   A `repo_path` that is missing, not a folder, or not a git repository
-   answers one `error` frame naming the problem, then a **1000** close.
-   A repo scan runs with the repository as its working directory but
-   writes only to its scratch directory; the scan fails if the
-   repository changed during the run.
+   The gateway answers an unsupported mode with one `error` frame and a
+   **1008** close. A bad `repo_path` answers one `error` frame naming the
+   problem, then closes with **1000**.
 
 2. Server streams progress frames while the agent runs:
 
@@ -785,24 +773,12 @@ shell the way `env.harnesses` does.
    ```
 
    Statuses arrive in order: `detecting`, `running`, `validating`, and
-   `retrying` when the agent's output failed validation and the one
-   automatic retry starts.
+   `retrying` when the agent's output failed validation and the one automatic
+   retry starts.
 
 3. Exactly one terminal frame ends the scan, then the socket closes with
-   **1000**. Success carries the validated pair - `manifest` is the parsed
-   item list (`internal/domain.ManifestItem` shape), `manifest_json` the
-   raw text the agent wrote:
-
-   ```json
-   {"type":"result","dockerfile":"FROM ubuntu:24.04\n...",
-    "manifest_json":"[...]","manifest":[{"name":"go","version":"1.24.1",...}]}
-   ```
-
-   A `profile` scan answers a recommendation instead of a pair: one
-   entry per harness the agent was shown, each with a one-sentence
-   reason a developer can check against the file list. It is a proposal,
-   never an action - importing is a separate `profile.push` per harness,
-   after the user edits and approves the list:
+   **1000**. Success carries a recommendation with one entry per harness the
+   agent was shown:
 
    ```json
    {"type":"result","recommendation":{"harnesses":[
@@ -811,13 +787,13 @@ shell the way `env.harnesses` does.
      {"harness":"codex","import":false,"categories":[],"reason":"..."}]}}
    ```
 
-   The agent is shown paths and category counts only. File contents,
-   credential paths, and anything the denylist or the scanner flagged
-   never reach the prompt. An entry naming a harness or a category that
-   was not in the inventory fails validation, which earns the same one
-   retry a malformed manifest earns. A machine with no agent
-   configuration at all answers one `error` frame
-   (`no agent configuration found on this machine; nothing to import`).
+   The recommendation is a proposal, never an action. The user edits and
+   approves it before importing with a separate `profile.push` call per
+   harness. The agent sees names, paths, category counts, and sizes only:
+   file contents, credential paths, and anything the denylist or secret
+   scanner flagged never reach the prompt. A machine with no agent
+   configuration answers one `error` frame:
+   `no agent configuration found on this machine; nothing to import`.
 
    Failure carries the reason and the last agent output for diagnosis:
 
@@ -825,7 +801,7 @@ shell the way `env.harnesses` does.
    {"type":"error","detail":"the scan timed out after 10m0s","output_tail":"..."}
    ```
 
-One scan runs at a time per gateway; a second start frame while one runs
-answers an `error` frame (`detail` says a scan is already running) and a
-**1008** close. Closing the socket cancels the scan and kills the agent
-process; the scratch directory is removed in every outcome.
+One scan runs at a time per gateway. A second start frame answers an `error`
+frame whose `detail` says a scan is already running, then closes with **1008**.
+Closing the socket cancels the scan and kills the agent process; its scratch
+directory is removed in every outcome.

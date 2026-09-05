@@ -54,7 +54,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	rt, image, verifyNoLeaks := pickRuntime(t)
+	rt, _, verifyNoLeaks := pickRuntime(t)
 	// A not-yet-existing data dir proves first-run startup: New must create
 	// the directory itself before opening the store.
 	dataDir := filepath.Join(t.TempDir(), "data")
@@ -72,7 +72,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "e2e",
-		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {
@@ -200,7 +200,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 
 	// A workspace created while the server is running is usable without a
 	// restart: the first transport touch lazily creates its bare repo.
-	lateWS := &domain.Workspace{Name: "e2e-late", Environment: domain.WorkspaceEnvironment{CustomImage: image}}
+	lateWS := &domain.Workspace{Name: "e2e-late", Environment: domain.WorkspaceEnvironment{}}
 	if err = srv.Store().CreateWorkspace(ctx, lateWS); err != nil {
 		t.Fatalf("seed late workspace: %v", err)
 	}

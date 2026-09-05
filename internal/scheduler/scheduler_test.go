@@ -16,7 +16,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -78,7 +77,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 	e.ws = &domain.Workspace{
 		Name:        "ws",
 		BaseBranch:  "main",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "busybox:1.36", Variables: map[string]string{"WS": "1"}},
+		Environment: domain.WorkspaceEnvironment{Variables: map[string]string{"WS": "1"}},
 	}
 	if cerr := db.CreateWorkspace(ctx, e.ws); cerr != nil {
 		t.Fatalf("create workspace: %v", cerr)
@@ -93,13 +92,14 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		t.Fatalf("memberhome.New: %v", err)
 	}
 	e.cfg = Config{
-		Store:    db,
-		Runtime:  e.rt,
-		Bus:      bus,
-		Git:      e.git,
-		PTY:      e.pty,
-		StateDir: filepath.Join(dir, "scheduler"),
-		Homes:    homes,
+		Store:         db,
+		Runtime:       e.rt,
+		Bus:           bus,
+		Git:           e.git,
+		PTY:           e.pty,
+		StateDir:      filepath.Join(dir, "scheduler"),
+		Homes:         homes,
+		StandardImage: "busybox:1.36",
 	}
 	if mutate != nil {
 		mutate(&e.cfg)
@@ -489,86 +489,6 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 	c2 := e.rt.byName(string(run2.ID))
 	if c2 == nil || len(c2.spec.Mounts) != 1 || c2.spec.Mounts[0].HostPath != wantHome {
 		t.Fatalf("second home mount = %+v, want %q", c2.spec.Mounts, wantHome)
-	}
-}
-
-func TestCheckAgentPresentRefusesMissingExecutable(t *testing.T) {
-	e := newTestEnv(t, nil)
-	ws := &domain.Workspace{Environment: domain.WorkspaceEnvironment{NeutralImage: true}}
-	p, ok := harness.Lookup("claude")
-	if !ok {
-		t.Fatal("claude profile missing")
-	}
-	err := e.sched.checkAgentPresent(t.Context(), e.member.ID, ws, "claude", "claude")
-	if err == nil {
-		t.Fatal("missing agent accepted")
-	}
-	want := fmt.Sprintf("scheduler: agent %q is not installed in your environment: %q is not in ~/.local/bin; open your terminal (aether terminal) and run: %s",
-		"claude", "claude", p.InstallScript)
-	if err.Error() != want {
-		t.Fatalf("error = %q, want %q", err, want)
-	}
-}
-
-func TestCheckAgentPresentSkipsDeploymentAndCustomImages(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) {
-		cfg.Harnesses = map[string]HarnessSpec{"deployment": {
-			TUIArgs:      []string{"deployment", "{task}"},
-			HeadlessArgs: []string{"deployment", "{task}"},
-			Executable:   "deployment",
-		}}
-	})
-	neutral := &domain.Workspace{Environment: domain.WorkspaceEnvironment{NeutralImage: true}}
-	if err := e.sched.checkAgentPresent(t.Context(), e.member.ID, neutral, "deployment", "missing"); err != nil {
-		t.Fatalf("deployment harness was checked: %v", err)
-	}
-	if err := e.sched.checkAgentPresent(t.Context(), e.member.ID, e.ws, "claude", "missing"); err != nil {
-		t.Fatalf("custom image was checked: %v", err)
-	}
-}
-
-func TestCheckAgentPresentAcceptsAbsoluteSymlink(t *testing.T) {
-	e := newTestEnv(t, nil)
-	ws := &domain.Workspace{Environment: domain.WorkspaceEnvironment{NeutralImage: true}}
-	home, err := e.cfg.Homes.Path(e.member.ID)
-	if err != nil {
-		t.Fatalf("member home: %v", err)
-	}
-	if mkErr := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); mkErr != nil {
-		t.Fatalf("create agent bin: %v", mkErr)
-	}
-	// The claude native installer leaves ~/.local/bin/claude as a symlink
-	// to an absolute versioned path that only resolves in the container.
-	if lnErr := os.Symlink("/root/.local/share/claude/versions/1.0.0", filepath.Join(home, ".local", "bin", "claude")); lnErr != nil {
-		t.Fatalf("symlink agent: %v", lnErr)
-	}
-	if err := e.sched.checkAgentPresent(t.Context(), e.member.ID, ws, "claude", "claude"); err != nil {
-		t.Fatalf("symlinked agent refused: %v", err)
-	}
-}
-
-func TestLaunchNeutralImageWithHomeExecutable(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) { cfg.NeutralImage = "neutral:latest" })
-	e.ws.Environment = domain.WorkspaceEnvironment{NeutralImage: true}
-	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
-		t.Fatalf("update workspace: %v", err)
-	}
-	home, err := e.cfg.Homes.Path(e.member.ID)
-	if err != nil {
-		t.Fatalf("member home: %v", err)
-	}
-	if mkErr := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); mkErr != nil {
-		t.Fatalf("create agent bin: %v", mkErr)
-	}
-	if writeErr := os.WriteFile(filepath.Join(home, ".local", "bin", "claude"), []byte("#!/bin/sh\n"), 0o755); writeErr != nil {
-		t.Fatalf("write agent: %v", writeErr)
-	}
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "neutral", "claude", domain.LaunchTUI)
-	if err != nil {
-		t.Fatalf("Launch: %v", err)
-	}
-	if run.Status != domain.RunRunning {
-		t.Fatalf("run status = %s, want running", run.Status)
 	}
 }
 

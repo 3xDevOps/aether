@@ -35,7 +35,7 @@ type Mount struct {
 	ReadOnly bool
 }
 
-// Spec describes one run container, engine-neutrally: the workspace image,
+// Spec describes one run container, engine-neutrally: the image,
 // environment, the run worktree bind-mounted into the container, resource
 // limits, working directory, setup script hook, and the main command.
 type Spec struct {
@@ -239,13 +239,13 @@ type Runtime interface {
 	// found and destroyed. Keys are assumed unique; with duplicates any
 	// match may be returned.
 	FindByCreationKey(ctx context.Context, key string) (ID, error)
-	// BuildImage builds an image from the Dockerfile text and tags it.
-	// The build context contains the Dockerfile alone, so the file
-	// cannot COPY or ADD anything from the host. Engine progress lines
-	// stream to progress (which may be nil) as the build runs; a failed
-	// build returns the engine's error detail.
-	BuildImage(ctx context.Context, dockerfile string, tag string, progress io.Writer) error
-	// RemoveImage removes a local image tag. Removing a tag that does
-	// not exist is not an error.
+	// Commit snapshots a running container as a tagged image.
+	Commit(ctx context.Context, id ID, tag string) error
+	// ImageExists reports whether an image reference exists locally.
+	ImageExists(ctx context.Context, ref string) (bool, error)
+	// ListImageTags returns the local tags under one repository.
+	ListImageTags(ctx context.Context, repo string) ([]string, error)
+	// RemoveImage untags a local image. Removing a tag that does not
+	// exist is not an error.
 	RemoveImage(ctx context.Context, tag string) error
 }

@@ -257,7 +257,10 @@ func (s *Scheduler) attachTerminalLocked(ctx context.Context, member *domain.Mem
 	} else {
 		_ = att.Close()
 	}
-	terminal := &domain.Terminal{Member: member.ID, ContainerID: string(cid), Image: s.cfg.StandardImage, StartedAt: time.Now().UTC()}
+	terminal := &domain.Terminal{Member: member.ID, ContainerID: string(cid), Image: member.Image, StartedAt: time.Now().UTC()}
+	if terminal.Image == "" {
+		terminal.Image = s.cfg.StandardImage
+	}
 	if row != nil {
 		terminal.Image = row.Image
 		terminal.StartedAt = row.StartedAt
@@ -324,7 +327,11 @@ func (s *Scheduler) EnsureTerminalTab(ctx context.Context, member domain.MemberI
 	if len(s.cfg.PTY.ActiveSessions(terminalPrefix(member))) >= maxTerminalTabs {
 		return ErrTerminalTabLimit
 	}
-	plan, err := s.BuildEnvironmentPlan(ctx, nil, nil, &domain.Member{ID: member}, harness.Profile{}, EnvironmentPurposeTerminal)
+	memberRow, err := s.cfg.Store.GetMember(ctx, member)
+	if err != nil {
+		return fmt.Errorf("scheduler: get terminal tab member: %w", err)
+	}
+	plan, err := s.BuildEnvironmentPlan(ctx, nil, nil, memberRow, harness.Profile{}, EnvironmentPurposeTerminal)
 	if err != nil {
 		return fmt.Errorf("scheduler: build terminal tab environment: %w", err)
 	}
@@ -349,16 +356,20 @@ func (s *Scheduler) EnsureTerminalTab(ctx context.Context, member domain.MemberI
 
 // TerminalStatus returns the current terminal and tab state for a member.
 func (s *Scheduler) TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error) {
+	m, err := s.cfg.Store.GetMember(ctx, member)
+	if err != nil {
+		return domain.TerminalStatus{}, fmt.Errorf("scheduler: get member for terminal status: %w", err)
+	}
 	row, err := s.cfg.Store.GetTerminal(ctx, member)
 	if errors.Is(err, store.ErrNotFound) {
-		return domain.TerminalStatus{}, nil
+		return domain.TerminalStatus{SavedImage: m.Image}, nil
 	}
 	if err != nil {
 		return domain.TerminalStatus{}, fmt.Errorf("scheduler: get terminal status: %w", err)
 	}
 	tabs := terminalTabs(s.cfg.PTY.ActiveSessions(terminalPrefix(member)), member)
 	running := len(tabs) > 0 || s.lookupTerminal(member) != nil
-	return domain.TerminalStatus{Running: running, Image: row.Image, StartedAt: row.StartedAt, Tabs: tabs}, nil
+	return domain.TerminalStatus{Running: running, Image: row.Image, SavedImage: m.Image, StartedAt: row.StartedAt, Tabs: tabs}, nil
 }
 
 func terminalTabs(keys []ptyhost.SessionKey, member domain.MemberID) []string {
@@ -379,6 +390,11 @@ func (s *Scheduler) StopTerminal(ctx context.Context, member domain.MemberID) er
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+	return s.stopTerminalLocked(ctx, member)
+}
+
+// stopTerminalLocked stops a member's terminal while its member lock is held.
+func (s *Scheduler) stopTerminalLocked(ctx context.Context, member domain.MemberID) error {
 	row, err := s.cfg.Store.GetTerminal(ctx, member)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("scheduler: get terminal to stop: %w", err)

@@ -1,6 +1,5 @@
 import type {
   Api,
-  EnvScanHandlers,
   EnvScanSession,
   ProfileScanHandlers,
   ProfileScanRequest,
@@ -9,11 +8,6 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
-  EnvGetResult,
-  EnvScanRequest,
-  EnvScanResult,
-  EnvironmentVersion,
-  ManifestItem,
   Member,
   ProfilePreview,
   Run,
@@ -82,8 +76,6 @@ export const serverInfo: ServerInfo = {
   protocol_version: '1',
   time: '2026-08-14T10:05:00Z',
   member: alice,
-  neutral_image: 'ghcr.io/3xdevops/aether-bootstrap:1.2.3',
-  standard_image: 'ghcr.io/3xdevops/aether-standard:1.2.3',
   disk: {
     used_bytes: 512 * 1024 * 1024,
     total_bytes: 2 * 1024 * 1024 * 1024,
@@ -141,40 +133,9 @@ export function agentInfo(over: Partial<AgentInfo> = {}): AgentInfo {
   }
 }
 
-export function budget(
-  workspaceID: string,
-  over: Partial<BudgetReport> = {},
-): BudgetReport {
-  return {
-    workspace_id: workspaceID,
-    state: 'ok',
-    spend: {
-      runs: 1,
-      metered_runs: 1,
-      unmetered_runs: 0,
-      input_tokens: 1000,
-      output_tokens: 200,
-      cost_usd: 0.5,
-    },
-    ...over,
-  }
-}
-
-export function manifestItem(over: Partial<ManifestItem> = {}): ManifestItem {
-  return {
-    name: 'jq',
-    version: '1.7.1',
-    reason: 'used by the project scripts',
-    start_line: 3,
-    end_line: 5,
-    check_command: 'jq --version',
-    ...over,
-  }
-}
-
 /** What profile.preview answers for the harness this machine configured.
- * The other setup-capable harnesses answer present:false, which is a
- * normal answer rather than an error. */
+ * Other setup-capable harnesses answer present:false, which is a normal
+ * answer rather than an error. */
 export function profilePreview(
   over: Partial<ProfilePreview> = {},
 ): ProfilePreview {
@@ -211,76 +172,25 @@ export function profilePreview(
     ...over,
   }
 }
-
-/** The pair the fake scan produces; mirrors localops' canned inventory. */
-export function scanResult(over: Partial<EnvScanResult> = {}): EnvScanResult {
+export function budget(
+  workspaceID: string,
+  over: Partial<BudgetReport> = {},
+): BudgetReport {
   return {
-    dockerfile:
-      'FROM ubuntu:24.04\n' +
-      '\n' +
-      'RUN apt-get update \\\n' +
-      '    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 \\\n' +
-      '    && rm -rf /var/lib/apt/lists/*\n',
-    manifest: [manifestItem()],
+    workspace_id: workspaceID,
+    state: 'ok',
+    spend: {
+      runs: 1,
+      metered_runs: 1,
+      unmetered_runs: 0,
+      input_tokens: 1000,
+      output_tokens: 200,
+      cost_usd: 0.5,
+    },
     ...over,
   }
 }
 
-export function envVersion(
-  over: Partial<EnvironmentVersion> = {},
-): EnvironmentVersion {
-  return {
-    version: 1,
-    source: 'mirror',
-    harness: 'claude',
-    status: 'active',
-    active: true,
-    manifest: [manifestItem()],
-    created_at: '2026-08-14T09:00:00Z',
-    updated_at: '2026-08-14T09:10:00Z',
-    ...over,
-  }
-}
-
-/** One stored version as env.get returns it: the proposed pair plus a
- * Dockerfile diff shaped like real `git diff --no-index` output, so the
- * review's parsePatch path is exercised by fixtures. */
-export function envGetResult(over: Partial<EnvGetResult> = {}): EnvGetResult {
-  return {
-    version: 2,
-    dockerfile:
-      'FROM ubuntu:24.04\n' +
-      '\n' +
-      'RUN apt-get update \\\n' +
-      '    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 golang-go=2:1.24~1 \\\n' +
-      '    && rm -rf /var/lib/apt/lists/*\n',
-    manifest: [
-      manifestItem(),
-      manifestItem({
-        name: 'go',
-        version: '1.24',
-        reason: 'requested by the admin',
-        check_command: 'go version',
-      }),
-    ],
-    source: 'mirror',
-    harness: 'claude',
-    status: 'saved',
-    diff:
-      'diff --git a/Dockerfile b/Dockerfile\n' +
-      'index 5716ca5..7601807 100644\n' +
-      '--- a/Dockerfile\n' +
-      '+++ b/Dockerfile\n' +
-      '@@ -1,5 +1,5 @@\n' +
-      ' FROM ubuntu:24.04\n' +
-      ' \n' +
-      ' RUN apt-get update \\\n' +
-      '-    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 \\\n' +
-      '+    && apt-get install -y --no-install-recommends jq=1.7.1-3build1 golang-go=2:1.24~1 \\\n' +
-      '     && rm -rf /var/lib/apt/lists/*\n',
-    ...over,
-  }
-}
 
 /** One update.check answer: a CLI a release behind, a current server. */
 export function updateStatus(over: Partial<UpdateStatus> = {}): UpdateStatus {
@@ -383,6 +293,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     ),
     terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
     terminalStop: vi.fn(async () => ({})),
+    envSave: vi.fn(async () => ({ image: 'aether/member-1:123' })),
+    envReset: vi.fn(async () => ({})),
     terminalSocket: vi.fn(
       (tab: string) => `ws://localhost/ws/terminal?tab=${encodeURIComponent(tab)}`,
     ),
@@ -397,10 +309,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceSettings: vi.fn(async () => workspace),
-    workspaceImage: vi.fn(async () => ({
-      workspace,
-      image: serverInfo.standard_image ?? '',
-    })),
     budgetSet: vi.fn(async () => budget(workspace.id)),
     templateSave: vi.fn(async () => template),
     templateDelete: vi.fn(async () => ({})),
@@ -517,7 +425,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       installed: false,
       unit_path: '',
     })),
-    localImageScaffold: vi.fn(async () => ({ written: ['Dockerfile'] })),
     localUpdateCheck: vi.fn(async () => updateStatus()),
     localUpdateApply: vi.fn(async () => ({
       updated: ['/usr/local/bin/aether'],
@@ -533,15 +440,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       requested_by: alice.id,
       requested_at: '2026-08-14T10:06:00Z',
     })),
-    envStatus: vi.fn(async () => ({
-      versions: [envVersion()],
-      active_version: 1,
-    })),
-    envSave: vi.fn(async () => 2),
-    envBuild: vi.fn(async () => 2),
-    envRollback: vi.fn(async () => 1),
-    envEdit: vi.fn(async () => ({ accepted: true })),
-    envGet: vi.fn(async () => envGetResult()),
     // The gateway knows one linked repo, so the verb suggests its folder
     // for the wizard's from-repo input.
     envHarnesses: vi.fn(async () => ({
@@ -554,25 +452,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       searched: ['/usr/local/bin', '/home/alice/.local/bin'],
       repo_path: '/src/repo',
     })),
-    // A scan that succeeds with the canned pair on the next tick, like the
-    // gateway's fake harness; tests drive other outcomes by overriding.
-    openEnvScan: vi.fn(
-      (_req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession => {
-        let closed = false
-        queueMicrotask(() => {
-          if (closed) return
-          h.onStatus('running')
-          h.onOutput('fake harness: returning the canned inventory')
-          h.onStatus('validating')
-          h.onResult(scanResult())
-        })
-        return {
-          close: () => {
-            closed = true
-          },
-        }
-      },
-    ),
     // A profile scan that recommends the configured harness, like the
     // gateway's fake harness; tests drive other outcomes by overriding.
     openProfileScan: vi.fn(

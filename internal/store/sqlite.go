@@ -167,9 +167,6 @@ func notFoundOnZeroRows(res sql.Result, err error) error {
 // Workspaces
 
 func normalizeWorkspaceEnvironment(e domain.WorkspaceEnvironment) (domain.WorkspaceEnvironment, error) {
-	if e.CustomImage == "" && !e.NeutralImage {
-		e.NeutralImage = true
-	}
 	if !e.Valid() {
 		return domain.WorkspaceEnvironment{}, fmt.Errorf("store: invalid workspace environment")
 	}
@@ -205,24 +202,14 @@ func (d *DB) CreateWorkspace(ctx context.Context, w *domain.Workspace) error {
 	if err != nil {
 		return fmt.Errorf("store: encode workspace environment: %w", err)
 	}
-	variables, err := json.Marshal(envDef.Variables)
-	if err != nil {
-		return fmt.Errorf("store: encode workspace variables: %w", err)
-	}
 	createdAt, err := encodeTime(ts)
 	if err != nil {
 		return fmt.Errorf("store: create workspace: %w", err)
 	}
-	image := envDef.CustomImage
-	if envDef.NeutralImage {
-		image = ""
-	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO workspaces (id, name, image, env, setup_script, created_at, environment,
-		                         base_branch, steer_others)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, w.Name, image, string(variables), envDef.SetupPolicy.Script, createdAt, string(environment),
-		baseBranch, w.SteerOthers,
+		`INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		id, w.Name, createdAt, string(environment), baseBranch, w.SteerOthers,
 	); err != nil {
 		return fmt.Errorf("store: create workspace: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -232,37 +219,23 @@ func (d *DB) CreateWorkspace(ctx context.Context, w *domain.Workspace) error {
 
 func scanWorkspace(row interface{ Scan(...any) error }) (*domain.Workspace, error) {
 	var (
-		w                        domain.Workspace
-		legacyImage, legacyEnv   string
-		legacySetup, environment string
-		createdAt                int64
+		w           domain.Workspace
+		environment string
+		createdAt   int64
 	)
-	if err := row.Scan(&w.ID, &w.Name, &legacyImage, &legacyEnv, &legacySetup, &createdAt,
-		&environment, &w.BaseBranch, &w.SteerOthers); err != nil {
+	if err := row.Scan(&w.ID, &w.Name, &createdAt, &environment, &w.BaseBranch, &w.SteerOthers); err != nil {
 		return nil, err
 	}
 	if environment != "" && environment != "{}" {
 		if err := json.Unmarshal([]byte(environment), &w.Environment); err != nil {
 			return nil, fmt.Errorf("store: decode workspace environment: %w", err)
 		}
-	} else {
-		w.Environment = domain.WorkspaceEnvironment{
-			CustomImage:  legacyImage,
-			NeutralImage: legacyImage == "",
-			SetupPolicy:  domain.SetupPolicy{Script: legacySetup},
-		}
-		if err := json.Unmarshal([]byte(legacyEnv), &w.Environment.Variables); err != nil {
-			return nil, fmt.Errorf("store: decode workspace variables: %w", err)
-		}
-	}
-	if w.Environment.CustomImage == "" && !w.Environment.NeutralImage {
-		w.Environment.NeutralImage = true
 	}
 	w.CreatedAt = decodeTime(createdAt)
 	return &w, nil
 }
 
-const workspaceCols = `id, name, image, env, setup_script, created_at, environment, base_branch, steer_others`
+const workspaceCols = `id, name, created_at, environment, base_branch, steer_others`
 
 func (d *DB) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
 	w, err := scanWorkspace(d.db.QueryRowContext(ctx,
@@ -301,20 +274,10 @@ func (d *DB) UpdateWorkspace(ctx context.Context, w *domain.Workspace) error {
 	if err != nil {
 		return fmt.Errorf("store: encode workspace environment: %w", err)
 	}
-	variables, err := json.Marshal(envDef.Variables)
-	if err != nil {
-		return fmt.Errorf("store: encode workspace variables: %w", err)
-	}
-	image := envDef.CustomImage
-	if envDef.NeutralImage {
-		image = ""
-	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE workspaces SET name = ?, image = ?, env = ?, setup_script = ?, environment = ?,
-		     base_branch = ?, steer_others = ?
+		`UPDATE workspaces SET name = ?, environment = ?, base_branch = ?, steer_others = ?
 		 WHERE id = ?`,
-		w.Name, image, string(variables), envDef.SetupPolicy.Script, string(environment),
-		baseBranch, w.SteerOthers, w.ID))
+		w.Name, string(environment), baseBranch, w.SteerOthers, w.ID))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update workspace: %w", mapConstraint(err, ErrNotFound))
 	} else if err == nil {
@@ -426,9 +389,9 @@ func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {
 		return fmt.Errorf("store: create member: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, createdAt,
+		`INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at, image)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, createdAt, m.Image,
 	); err != nil {
 		return fmt.Errorf("store: create member: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -458,14 +421,14 @@ func scanMember(row interface{ Scan(...any) error }) (*domain.Member, error) {
 		createdAt int64
 	)
 	if err := row.Scan(&m.ID, &m.DisplayName, &m.PublicKey, &m.TailnetLogin, &m.Pending,
-		&m.Color, &m.Role, &createdAt); err != nil {
+		&m.Color, &m.Role, &createdAt, &m.Image); err != nil {
 		return nil, err
 	}
 	m.CreatedAt = decodeTime(createdAt)
 	return &m, nil
 }
 
-const memberCols = `id, display_name, public_key, tailnet_login, pending, color, role, created_at`
+const memberCols = `id, display_name, public_key, tailnet_login, pending, color, role, created_at, image`
 
 func (d *DB) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
 	m, err := scanMember(d.db.QueryRowContext(ctx,
@@ -515,6 +478,16 @@ func (d *DB) ApproveMember(ctx context.Context, id domain.MemberID) error {
 		`UPDATE members SET pending = 0 WHERE id = ?`, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: approve member: %w", err)
+	}
+	return err
+}
+
+// UpdateMemberImage sets only the member's saved environment image.
+func (d *DB) UpdateMemberImage(ctx context.Context, id domain.MemberID, image string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE members SET image = ? WHERE id = ?`, image, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: update member image: %w", err)
 	}
 	return err
 }

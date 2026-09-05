@@ -97,6 +97,11 @@ func printTerminalStatus(w io.Writer, status protocol.TerminalStatusResult) erro
 			return err
 		}
 	}
+	if status.SavedImage != "" {
+		if _, err := fmt.Fprintf(w, "saved image\t%s\n", status.SavedImage); err != nil {
+			return err
+		}
+	}
 	if status.StartedAt != "" {
 		if _, err := fmt.Fprintf(w, "started\t%s\n", status.StartedAt); err != nil {
 			return err

@@ -319,6 +319,17 @@ func (f *fakeRuns) TerminalStatus(_ context.Context, member domain.MemberID) (do
 	return domain.TerminalStatus{}, nil
 }
 
+func (f *fakeRuns) SaveEnvironment(_ context.Context, member domain.MemberID) (string, error) {
+	if err := f.record(fmt.Sprintf("env-save:%s", member)); err != nil {
+		return "", err
+	}
+	return "aether/member-" + string(member) + ":1", nil
+}
+
+func (f *fakeRuns) ResetEnvironment(_ context.Context, member domain.MemberID) error {
+	return f.record(fmt.Sprintf("env-reset:%s", member))
+}
+
 func (f *fakeRuns) HoldShell() func() { return func() {} }
 
 type testEnv struct {
@@ -400,7 +411,7 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 		if cerr := db.CreateMember(ctx, e.member); cerr != nil {
 			t.Fatalf("create member: %v", cerr)
 		}
-		e.ws = &domain.Workspace{Name: "proj", BaseBranch: "main", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+		e.ws = &domain.Workspace{Name: "proj", BaseBranch: "main", Environment: domain.WorkspaceEnvironment{}}
 		if cerr := db.CreateWorkspace(ctx, e.ws); cerr != nil {
 			t.Fatalf("create workspace: %v", cerr)
 		}

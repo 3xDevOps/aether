@@ -43,3 +43,10 @@ export function bareVersion(version: string): string {
 export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
+/** Display names for the setup-capable harnesses. */
+export const friendly: Record<string, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  pi: 'pi',
+  amp: 'Amp',
+}

@@ -43,6 +43,8 @@ type RunController interface {
 	EnsureTerminalTab(ctx context.Context, member domain.MemberID, tab string, cols, rows uint) error
 	StopTerminal(ctx context.Context, member domain.MemberID) error
 	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
+	SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error)
+	ResetEnvironment(ctx context.Context, member domain.MemberID) error
 	// HoldShell counts one live interactive terminal attach for the
 	// self-update idle check; the returned func releases it.
 	HoldShell() func()

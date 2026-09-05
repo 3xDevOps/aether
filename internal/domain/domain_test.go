@@ -81,19 +81,14 @@ func TestRoleValid(t *testing.T) {
 	}
 }
 
-func TestWorkspaceEnvironmentRepresentsMigrationFields(t *testing.T) {
+func TestWorkspaceEnvironmentRetainsVariablesAndSetupPolicy(t *testing.T) {
 	env := WorkspaceEnvironment{
-		CustomImage:  "registry.example/workspace:latest",
-		NeutralImage: true,
-		Variables:    map[string]string{"AETHER_MODE": "bootstrap"},
+		Variables: map[string]string{"AETHER_MODE": "bootstrap"},
 		SetupPolicy: SetupPolicy{
 			Script: "echo setup",
 		},
 	}
 	w := Workspace{ID: "ws_1", Name: "project", Environment: env}
-	if w.Environment.CustomImage != env.CustomImage || !w.Environment.NeutralImage {
-		t.Fatalf("workspace environment was not retained: %+v", w.Environment)
-	}
 	if w.Environment.Variables["AETHER_MODE"] != "bootstrap" {
 		t.Fatalf("environment variables were not retained: %+v", w.Environment.Variables)
 	}
@@ -108,10 +103,9 @@ func TestWorkspaceEnvironmentValidation(t *testing.T) {
 		env  WorkspaceEnvironment
 		want bool
 	}{
-		{"neutral", WorkspaceEnvironment{NeutralImage: true}, true},
-		{"custom", WorkspaceEnvironment{CustomImage: "image"}, true},
-		{"neither image", WorkspaceEnvironment{}, false},
-		{"invalid variable", WorkspaceEnvironment{NeutralImage: true, Variables: map[string]string{"": "value"}}, false},
+		{"empty", WorkspaceEnvironment{}, true},
+		{"variables", WorkspaceEnvironment{Variables: map[string]string{"AETHER_MODE": "bootstrap"}}, true},
+		{"invalid variable", WorkspaceEnvironment{Variables: map[string]string{"": "value"}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

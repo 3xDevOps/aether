@@ -57,7 +57,6 @@ function seed(caps: GatewayCapabilities = localCaps) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
-    envBuilds: {},
   })
 }
 
@@ -760,21 +759,15 @@ describe('the harness the step set up', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: `Use ${workspace.name}` }),
     )
-    fireEvent.click(
-      await screen.findByRole('radio', {
-        name: 'Keep the standard environment',
-      }),
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     fireEvent.change(await screen.findByLabelText('Repository path'), {
       target: { value: '/home/alice/code/myproject' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 
-    // Step five of six: the agents step.
+    // Step four of five: the agents step.
     const steps = screen.getByLabelText('Steps')
-    expect(steps.textContent).toContain('5. Agents')
+    expect(steps.textContent).toContain('4. Agents')
     fireEvent.click(
       await screen.findByRole('button', { name: 'Set up Claude Code' }),
     )

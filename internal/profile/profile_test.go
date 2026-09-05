@@ -146,7 +146,7 @@ func TestPinRun(t *testing.T) {
 	}
 	w := &domain.Workspace{
 		Name:        "ws",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "alpine"},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = db.CreateWorkspace(ctx, w); err != nil {

@@ -47,7 +47,7 @@ func TestMemberHomePersistsAcrossContainers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	rt, image, verifyNoLeaks := pickRuntime(t)
+	rt, _, verifyNoLeaks := pickRuntime(t)
 	if _, fallback := rt.(*e2eRuntime); fallback {
 		t.Skip("home persistence needs real bind mounts; Docker daemon unreachable")
 	}
@@ -78,7 +78,7 @@ func TestMemberHomePersistsAcrossContainers(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "homes",
-		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	for _, m := range []*domain.Member{memberA, memberB} {

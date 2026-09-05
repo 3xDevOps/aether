@@ -1,20 +1,14 @@
 // The onboarding wizard: the quickstart's most error-prone stretch - link,
-// workspace, environment, repo remote, agents, first run - as six steps. It
-// exists only where the gateway has this machine's SSH identity and
-// filesystem, so
-// the whole route gates on the link.status local verb; a remote gateway gets
-// an empty state, not a broken wizard. Step and workspace choices persist so
-// a reload resumes where the user left off.
+// workspace, repo remote, agents, first run - as five steps. It exists only
+// where the gateway has this machine's SSH identity and filesystem, so the
+// whole route gates on the link.status local verb; a remote gateway gets an
+// empty state, not a broken wizard. Step and workspace choices persist so a
+// reload resumes where the user left off.
 
 import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { AgentsStep } from '@/routes/onboarding/agents-step'
-import {
-  EnvironmentReview,
-  EnvironmentStep,
-  type EnvScanReview,
-} from '@/routes/onboarding/environment-step'
 import {
   FirstRunStep,
   LinkStep,
@@ -28,7 +22,6 @@ import { useCapability } from '@/store/hooks'
 const steps = [
   'Link',
   'Workspace',
-  'Environment',
   'Repository',
   'Agents',
   'First run',
@@ -46,7 +39,6 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const [step, setStepState] = useState(() =>
     Math.max(0, Math.min(steps.length - 1, persistedStep)),
   )
-  const [review, setReview] = useState<EnvScanReview | null>(null)
   // The harness the Agents step set up, so the first run starts on the one
   // that is actually logged in. Empty until a setup shell exits cleanly.
   const [setUpHarness, setSetUpHarness] = useState('')
@@ -108,48 +100,24 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             }}
           />
         )}
-        {step === 2 && review === null && (
-          <EnvironmentStep
-            client={client}
-            onNext={() => setStep(3)}
-            onReview={setReview}
-          />
-        )}
-        {step === 2 && review !== null && (
-          <EnvironmentReview
-            client={client}
-            workspaceId={workspace?.id}
-            review={review}
-            // Advancing clears the review, so Back from Repository lands
-            // on the choice cards rather than a stale review gate.
-            onDone={() => {
-              setReview(null)
-              setStep(3)
-            }}
-            onKeep={() => {
-              setReview(null)
-              setStep(3)
-            }}
-          />
-        )}
-        {step === 3 && (
+        {step === 2 && (
           <RepoStep
             client={client}
             caps={caps}
             workspace={workspace}
-            onNext={() => setStep(4)}
+            onNext={() => setStep(3)}
           />
         )}
-        {step === 4 && (
+        {step === 3 && (
           <AgentsStep
             client={client}
             caps={caps}
             workspace={workspace}
-            onNext={() => setStep(5)}
             onReady={setSetUpHarness}
+            onNext={() => setStep(4)}
           />
         )}
-        {step === 5 && (
+        {step === 4 && (
           <FirstRunStep
             client={client}
             workspace={workspace}
@@ -162,15 +130,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           <button
             type="button"
             className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-            onClick={() => {
-              // Backing out of the review returns to the choice cards
-              // rather than leaving the step.
-              if (step === 2 && review !== null) {
-                setReview(null)
-                return
-              }
-              setStep(step - 1)
-            }}
+            onClick={() => setStep(step - 1)}
           >
             Back
           </button>
