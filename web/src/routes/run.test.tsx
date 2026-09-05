@@ -50,6 +50,16 @@ describe('run view environment banner', () => {
     expect(screen.getByText('aether/run-1-checkout')).toBeDefined()
   })
 })
+it('marks a protected run in the view header', () => {
+  seed()
+  useStore.setState({ runs: { run_1: toRecord(run({ protected: true })) } })
+
+  render(<RunView params={{ runId: 'run_1' }} />)
+
+  expect(
+    screen.getByTitle('Protected: only the owner or an admin can steer or kill this run'),
+  ).toBeDefined()
+})
 
 it('shows the last commit row only when its timestamp is set', () => {
   useStore.setState({

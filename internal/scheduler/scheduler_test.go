@@ -913,3 +913,24 @@ func TestFakeHarnessDefinitionUsesEnvironment(t *testing.T) {
 		t.Fatalf("argv = %s, want %s", got, want)
 	}
 }
+func TestContainerAddrReturnsLiveContainerIP(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.rt.containerIP = "192.0.2.44"
+	run, _ := e.launchFake(t, "forward")
+
+	got, err := e.sched.ContainerAddr(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("ContainerAddr: %v", err)
+	}
+	if got != "192.0.2.44" {
+		t.Fatalf("ContainerAddr = %q, want 192.0.2.44", got)
+	}
+}
+
+func TestContainerAddrRequiresSupervisedRun(t *testing.T) {
+	e := newTestEnv(t, nil)
+	_, err := e.sched.ContainerAddr(t.Context(), "run_missing")
+	if err == nil || err.Error() != "run has no live container" {
+		t.Fatalf("ContainerAddr missing = %v, want run has no live container", err)
+	}
+}

@@ -1,7 +1,7 @@
 import type { SliceCreator } from '@/store/slice'
 
-/** The palette's two forms, each needing free text the palette input cannot take. */
-export type PaletteDialog = 'launch' | 'inject'
+/** The palette's forms, each needing input the palette cannot take. */
+export type PaletteDialog = 'launch' | 'inject' | 'forward' | 'close'
 
 export interface PaletteSlice {
   paletteOpen: boolean

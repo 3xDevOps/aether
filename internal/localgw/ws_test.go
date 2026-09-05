@@ -62,6 +62,10 @@ func (b *wsStubBackend) Terminal(req protocol.TerminalRequest) (cli.Terminal, pr
 func (b *wsStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
 	return nil, errors.New("not implemented")
 }
+
+func (b *wsStubBackend) Forward(string, uint32) (io.ReadWriteCloser, error) {
+	return nil, errors.New("not implemented")
+}
 func (b *wsStubBackend) Close() error { return nil }
 
 func (b *wsStubBackend) recordedAttach() protocol.AttachRequest {

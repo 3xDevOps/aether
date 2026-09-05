@@ -35,6 +35,7 @@ export interface RunsSlice {
   ) => void
   applyLastCommit: (runID: string, commit: string, time: string) => void
   applyRunTitle: (runID: string, title: string) => void
+  applyRunProtected: (runID: string, isProtected: boolean) => void
 }
 
 export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
@@ -81,6 +82,12 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       const current = s.runs[runID]
       if (!current || current.title === title) return {}
       return { runs: { ...s.runs, [runID]: { ...current, title } } }
+    }),
+  applyRunProtected: (runID, isProtected) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current || current.protected === isProtected) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, protected: isProtected } } }
     }),
 })
 

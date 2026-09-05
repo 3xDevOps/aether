@@ -1,4 +1,4 @@
-import { GitBranch, GitCommit, PauseCircle } from 'lucide-react'
+import { GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { StateDot } from '@/components/state-dot'
@@ -66,6 +66,16 @@ export function RunCard({ card }: { card: BoardCard }) {
               title="Changed since you last looked"
               className="mt-1.5 size-1.5 shrink-0 rounded-full bg-foreground"
             />
+          )}
+          {run.protected && (
+            <span
+              role="img"
+              aria-label="Protected: only the owner or an admin can steer or kill this run"
+              title="Protected: only the owner or an admin can steer or kill this run"
+              className="relative z-20 flex shrink-0 items-center text-muted-foreground"
+            >
+              <Shield className="size-3.5" aria-hidden />
+            </span>
           )}
           <CardSlot name="card:badges" run={run} />
         </div>

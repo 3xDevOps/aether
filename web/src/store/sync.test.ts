@@ -43,6 +43,20 @@ function titleEvent(over: Partial<Event> = {}): Event {
   }
 }
 
+function protectedEvent(over: Partial<Event> = {}): Event {
+  return {
+    id: 'evt_protected',
+    seq: 7,
+    time: '2026-08-14T11:02:00Z',
+    workspace_id: workspace.id,
+    run_id: 'run_1',
+    actor_id: '',
+    type: 'run.protected',
+    payload: { protected: true },
+    ...over,
+  }
+}
+
 describe('hydrate', () => {
   it('fills the store from one round of fetches', async () => {
     const store = createRootStore()
@@ -359,10 +373,26 @@ describe('applyEvent', () => {
   it('stamps finished_at on a terminal transition', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
-
     await applyEvent(store, statusEvent({ payload: { to: 'merged' } }), fakeApi())
 
     expect(store.getState().runs.run_1.finished_at).toBe('2026-08-14T11:00:00Z')
+  })
+
+  it('updates a run protection flag from run.protected events', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    expect(store.getState().runs.run_1.protected).toBeUndefined()
+    await applyEvent(store, protectedEvent(), fakeApi())
+    expect(store.getState().runs.run_1.protected).toBe(true)
+
+    await applyEvent(
+      store,
+      protectedEvent({ id: 'evt_unprotected', seq: 8, payload: { protected: false } }),
+      fakeApi(),
+    )
+    expect(store.getState().runs.run_1.protected).toBe(false)
+    expect(store.getState().lastSeq).toBe(8)
   })
 
   it('updates a run title from a run.title event', async () => {

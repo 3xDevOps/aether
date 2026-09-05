@@ -25,7 +25,9 @@ var localVerbs = []string{
 	"daemon.install",
 	"daemon.status",
 	"env.harnesses",
-	"image.scaffold",
+	"forward.start",
+	"forward.status",
+	"forward.stop",
 	"link.repo",
 	"link.status",
 	"link.switch",
@@ -47,10 +49,11 @@ var localVerbs = []string{
 // /ws/envscan: the saved link config (link.repo updates it), the
 // background sync sessions, and the single environment-scan slot.
 type localState struct {
-	mu    sync.Mutex
-	cfg   cli.Config
-	mtime time.Time
-	sync  *localops.SyncManager
+	mu      sync.Mutex
+	cfg     cli.Config
+	mtime   time.Time
+	sync    *localops.SyncManager
+	forward *localops.ForwardManager
 	// scanActive claims the one-scan-at-a-time slot for /ws/envscan.
 	scanActive bool
 	// scanArgv overrides the scan's harness command; tests set it to run
@@ -62,7 +65,7 @@ type localState struct {
 // fails: an unlinked (zero) cli.Config simply reports linked:false and
 // refuses the verbs that need a repo.
 func newLocalState(cfg Config) *localState {
-	state := &localState{cfg: cfg.CLI, sync: localops.NewSyncManager()}
+	state := &localState{cfg: cfg.CLI, sync: localops.NewSyncManager(), forward: localops.NewForwardManager()}
 	if path, err := cli.Path(); err == nil {
 		if info, err := os.Stat(path); err == nil {
 			state.mtime = info.ModTime()
@@ -139,6 +142,9 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 		"pull.switch":     (*Gateway).localPullSwitch,
 		"repo.push":       (*Gateway).localRepoPush,
 		"repo.sync":       (*Gateway).localRepoSync,
+		"forward.start":   (*Gateway).localForwardStart,
+		"forward.status":  (*Gateway).localForwardStatus,
+		"forward.stop":    (*Gateway).localForwardStop,
 		"sync.start":      (*Gateway).localSyncStart,
 		"sync.status":     (*Gateway).localSyncStatus,
 		"sync.stop":       (*Gateway).localSyncStop,
@@ -550,6 +556,71 @@ func (g *Gateway) localSyncStatus(*http.Request, []byte) (any, *protocol.Error) 
 	return struct {
 		Sessions []localops.SyncSession `json:"sessions"`
 	}{Sessions: sessions}, nil
+}
+
+func (g *Gateway) localForwardStart(_ *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		RunID string `json:"run_id"`
+		Port  uint32 `json:"port"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	if params.RunID == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "run_id is required"}
+	}
+	if params.Port < 1 || params.Port > 65535 {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "port must be between 1 and 65535"}
+	}
+	err := g.local.forward.Start(params.RunID, int(params.Port), func() (io.ReadWriteCloser, error) {
+		return g.cfg.Backend.Forward(params.RunID, params.Port)
+	})
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	}
+	return struct {
+		RunID     string `json:"run_id"`
+		Port      uint32 `json:"port"`
+		LocalPort uint32 `json:"local_port"`
+		State     string `json:"state"`
+	}{RunID: params.RunID, Port: params.Port, LocalPort: params.Port, State: "active"}, nil
+}
+
+func (g *Gateway) localForwardStop(_ *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		RunID string `json:"run_id"`
+		Port  uint32 `json:"port"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	if params.RunID == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "run_id is required"}
+	}
+	if params.Port < 1 || params.Port > 65535 {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "port must be between 1 and 65535"}
+	}
+	if err := g.local.forward.Stop(params.RunID, int(params.Port)); err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	}
+	return struct {
+		RunID string `json:"run_id"`
+		Port  uint32 `json:"port"`
+		State string `json:"state"`
+	}{RunID: params.RunID, Port: params.Port, State: "stopped"}, nil
+}
+
+func (g *Gateway) localForwardStatus(*http.Request, []byte) (any, *protocol.Error) {
+	forwards := g.local.forward.Status()
+	sort.Slice(forwards, func(i, j int) bool {
+		if forwards[i].RunID != forwards[j].RunID {
+			return forwards[i].RunID < forwards[j].RunID
+		}
+		return forwards[i].Port < forwards[j].Port
+	})
+	return struct {
+		Forwards []localops.ForwardSession `json:"forwards"`
+	}{Forwards: forwards}, nil
 }
 
 func (g *Gateway) localDaemonInstall(_ *http.Request, body []byte) (any, *protocol.Error) {

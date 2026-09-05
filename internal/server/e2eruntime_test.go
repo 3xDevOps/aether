@@ -292,6 +292,13 @@ func (r *e2eRuntime) Attach(_ context.Context, id runtime.ID) (runtime.Attachmen
 	c.attOnce.Do(func() { close(c.attached) })
 	return a, nil
 }
+func (r *e2eRuntime) ContainerIP(_ context.Context, id runtime.ID) (string, error) {
+	if _, err := r.get(id); err != nil {
+		return "", err
+	}
+	return "127.0.0.1", nil
+}
+
 func (r *e2eRuntime) ExecTTY(ctx context.Context, id runtime.ID, _ []string, _ string, _, _ uint) (runtime.Attachment, error) {
 	return r.Attach(ctx, id)
 }

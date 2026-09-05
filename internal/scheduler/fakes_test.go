@@ -23,14 +23,15 @@ import (
 // blocking until exit, Stop escalating to a signal exit code, Attach
 // failing on stopped containers, idempotent Destroy.
 type fakeRuntime struct {
-	mu         sync.Mutex
-	seq        int
-	containers map[runtime.ID]*fakeContainer
-	createErr  error
-	startErr   error
-	waitErr    error
-	buildErr   error
-	createHook func() // runs at the top of Create; set before any Create call
+	mu          sync.Mutex
+	seq         int
+	containers  map[runtime.ID]*fakeContainer
+	containerIP string
+	createErr   error
+	startErr    error
+	waitErr     error
+	buildErr    error
+	createHook  func() // runs at the top of Create; set before any Create call
 	// buildHook runs at the top of BuildImage; set before any build starts.
 	buildHook func(tag string)
 	// startHook runs in its own goroutine once a container starts; tests
@@ -56,7 +57,7 @@ type fakeExecTTYCall struct {
 }
 
 func newFakeRuntime() *fakeRuntime {
-	return &fakeRuntime{containers: make(map[runtime.ID]*fakeContainer)}
+	return &fakeRuntime{containers: make(map[runtime.ID]*fakeContainer), containerIP: "127.0.0.1"}
 }
 
 type fakeContainer struct {
@@ -242,6 +243,18 @@ func (r *fakeRuntime) Attach(_ context.Context, id runtime.ID) (runtime.Attachme
 	c.atts = append(c.atts, a)
 	return a, nil
 }
+func (r *fakeRuntime) ContainerIP(_ context.Context, id runtime.ID) (string, error) {
+	if _, err := r.get(id); err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.containerIP == "" {
+		return "", fmt.Errorf("fake runtime: container %q has no IP", id)
+	}
+	return r.containerIP, nil
+}
+
 func (r *fakeRuntime) ExecTTY(ctx context.Context, id runtime.ID, argv []string, workDir string, cols, rows uint) (runtime.Attachment, error) {
 	r.mu.Lock()
 	r.execCalls = append(r.execCalls, fakeExecTTYCall{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -55,6 +56,76 @@ func (b *verbStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
 		io.Writer
 		io.Closer
 	}{r, w, w}, nil
+}
+
+func (b *verbStubBackend) Forward(string, uint32) (io.ReadWriteCloser, error) {
+	client, server := net.Pipe()
+	go func() {
+		_, _ = io.Copy(server, server)
+		_ = server.Close()
+	}()
+	return client, nil
+}
+
+func TestLocalForwardLifecycle(t *testing.T) {
+	port := freeLocalForwardPort(t)
+	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{})
+	defer func() { _ = g.Close() }()
+
+	rec := do(g, http.MethodPost, "/local/v1/forward.start", `{"run_id":"run_1","port":`+strconv.Itoa(port)+`}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("forward.start = %d: %s", rec.Code, rec.Body)
+	}
+	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatalf("dial forwarded port: %v", err)
+	}
+	if _, err := conn.Write([]byte("hello")); err != nil {
+		t.Fatalf("write forwarded port: %v", err)
+	}
+	buf := make([]byte, len("hello"))
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("read forwarded echo: %v", err)
+	}
+	if string(buf) != "hello" {
+		t.Fatalf("echo = %q", buf)
+	}
+	_ = conn.Close()
+
+	rec = do(g, http.MethodPost, "/local/v1/forward.status", `{}`, true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"run_id":"run_1"`) {
+		t.Fatalf("forward.status = %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(g, http.MethodPost, "/local/v1/forward.stop", `{"run_id":"run_1","port":`+strconv.Itoa(port)+`}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("forward.stop = %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(g, http.MethodPost, "/local/v1/forward.status", `{}`, true)
+	if rec.Code != http.StatusOK || rec.Body.String() != "{\"forwards\":[]}\n" {
+		t.Fatalf("forward.status after stop = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestLocalForwardValidatesParams(t *testing.T) {
+	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{})
+	defer func() { _ = g.Close() }()
+	for _, body := range []string{`{}`, `{"run_id":"run_1"}`, `{"run_id":"run_1","port":0}`, `{"run_id":"run_1","port":65536}`} {
+		rec := do(g, http.MethodPost, "/local/v1/forward.start", body, true)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("body %s: status = %d, want 400: %s", body, rec.Code, rec.Body)
+		}
+	}
+}
+
+func freeLocalForwardPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	return port
 }
 
 // newVerbGateway builds a gateway whose local state carries cfg.

@@ -225,6 +225,8 @@ type Runtime interface {
 	Destroy(ctx context.Context, id ID) error
 	// Attach opens a stdio stream to the container's main process.
 	Attach(ctx context.Context, id ID) (Attachment, error)
+	// ContainerIP returns the bare IP address of a live container.
+	ContainerIP(ctx context.Context, id ID) (string, error)
 	// ExecTTY opens an additional TTY process inside a running container;
 	// exit 126/127 surfaces as *ExecExitError so callers can retry with
 	// /bin/sh -l.

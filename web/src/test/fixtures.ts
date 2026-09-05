@@ -497,6 +497,18 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       state: 'stopped',
     })),
     localSyncStatus: vi.fn(async () => ({ sessions: [] })),
+    localForwardStart: vi.fn(async (runID: string, port: number) => ({
+      run_id: runID,
+      port,
+      local_port: port,
+      state: 'active' as const,
+    })),
+    localForwardStop: vi.fn(async (runID: string, port: number) => ({
+      run_id: runID,
+      port,
+      state: 'stopped' as const,
+    })),
+    localForwardStatus: vi.fn(async () => ({ forwards: [] })),
     localDaemonInstall: vi.fn(async () => ({
       unit_path: '/home/alice/.config/systemd/user/aether-sync.service',
       note: 'enable with systemctl --user enable --now aether-sync',

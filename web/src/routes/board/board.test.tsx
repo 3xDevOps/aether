@@ -163,6 +163,15 @@ describe('run board', () => {
     act(() => timeline('resume', 2))
     expect(screen.queryByTitle('Paused')).toBeNull()
   })
+  it('marks a protected run with its access restriction badge', () => {
+    const protectedRun = run({ protected: true })
+    seed([protectedRun])
+    render(<Board />)
+
+    expect(
+      screen.getByTitle('Protected: only the owner or an admin can steer or kill this run'),
+    ).toBeDefined()
+  })
 
   it('re-emphasizes an acknowledged run when it changes state again', () => {
     seed([working])

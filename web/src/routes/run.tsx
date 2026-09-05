@@ -1,4 +1,5 @@
 import { RunActions } from '@/components/run-actions'
+import { Shield } from 'lucide-react'
 import { StateDot } from '@/components/state-dot'
 import { ViewHeader } from '@/components/view-header'
 import { timeAgo } from '@/lib/format'
@@ -24,6 +25,18 @@ export function RunView({ params }: RouteProps) {
     <div className="flex h-full flex-col">
       <ViewHeader
         title={runLabel(run)}
+        titleAdornment={
+          run.protected ? (
+            <span
+              role="img"
+              aria-label="Protected: only the owner or an admin can steer or kill this run"
+              title="Protected: only the owner or an admin can steer or kill this run"
+              className="flex shrink-0 items-center text-muted-foreground"
+            >
+              <Shield className="size-3.5" aria-hidden />
+            </span>
+          ) : undefined
+        }
         subtitle={run.title?.trim() && run.task.trim() ? run.task.trim() : run.branch}
         actions={<RunActions run={run} />}
       />
