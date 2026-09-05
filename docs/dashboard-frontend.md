@@ -652,6 +652,23 @@ routes (`approvals`, `timeline`).
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored
   `server.info`, which is what fills the status bar's disk gauge.
 
+## Manage workspaces
+
+`src/routes/workspaces/` renders each workspace as a card with its base branch
+and steering policy. When the control capability includes `workspace.image`, a
+card also reads and shows its effective custom image. If that image uses the
+same repository as `server.info.standard_image` with a different tag, the card
+offers `Update to <tag>`; the image field and Save button accept an arbitrary
+image reference. The server validates and persists the change.
+
+## Settings
+
+`src/routes/settings/` shows the local link, sync daemon, image scaffolding and
+live overlay. When the local capability includes `repo.sync`, the Base branch
+card's **Sync from origin** button fast-forwards the server's workspace base
+branch from this machine's `origin` remote. It shows the returned branch and
+git's output verbatim; server refusals stay verbatim.
+
 ## Onboarding wizard
 
 `src/routes/onboarding/` is the guided first-run path, six steps: Link,
@@ -673,9 +690,12 @@ copyable command still there. The branch is the workspace's base branch,
 so a workspace created with `--base` seeds the branch its runs fork from.
 An older gateway without the verb shows only the copyable command.
 
-The UI slice persists the current step and selected workspace, and first open
-routes an unboarded local gateway here. Completing the final step or
-navigating elsewhere marks the UI onboarded and clears that wizard state.
+The UI slice persists the current step and selected workspace. Hydration reads
+`link.status` first: a linked local gateway is marked onboarded before the
+redirect decision, so a linked machine never re-enters onboarding after a fresh
+GUI launch. An unlinked local gateway still routes here when `onboarded` is
+false. Completing the final step or navigating elsewhere marks the UI onboarded
+and clears that wizard state.
 
 The Link step distinguishes no configured server, a server with no repository,
 and a fully linked server. It refreshes on Retry and when the window regains

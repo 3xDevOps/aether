@@ -198,9 +198,10 @@ describe('hydrate', () => {
   })
   it('routes to onboarding only for an unboarded local gateway', async () => {
     const cases = [
-      { onboarded: false, local: true, onboarding: true },
-      { onboarded: true, local: true, onboarding: false },
-      { onboarded: false, local: false, onboarding: false },
+      { onboarded: false, local: true, linked: false, onboarding: true },
+      { onboarded: false, local: true, linked: true, onboarding: false },
+      { onboarded: true, local: true, linked: false, onboarding: false },
+      { onboarded: false, local: false, linked: false, onboarding: false },
     ]
 
     for (const tc of cases) {
@@ -213,11 +214,19 @@ describe('hydrate', () => {
           ws: ['events', 'attach'],
           ...(tc.local ? { local: ['link.status'] } : {}),
         })),
+        localLinkStatus: vi.fn(async () => ({
+          server_configured: true,
+          linked: tc.linked,
+          addr: 'host:2222',
+          user: 'alice',
+          repo: tc.linked ? '/src/repo' : '',
+        })),
       })
 
       await hydrate(store, client)
 
       expect(store.getState().route.name).toBe(tc.onboarding ? 'onboarding' : 'board')
+      if (tc.linked) expect(store.getState().onboarded).toBe(true)
     }
   })
 
