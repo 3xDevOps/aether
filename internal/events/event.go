@@ -27,6 +27,8 @@ const (
 	TypeRunDeleted Type = "run.deleted"
 	// TypeRunTitle carries the latest terminal title for a run.
 	TypeRunTitle Type = "run.title"
+	// TypeRunProtected carries a run's protection state.
+	TypeRunProtected Type = "run.protected"
 	// TypeRunDiff carries a periodic diff snapshot of a run's worktree.
 	TypeRunDiff Type = "run.diff"
 	// TypeRunCost carries token usage and cost attribution for a run.
@@ -106,6 +108,16 @@ type RunTitlePayload struct {
 }
 
 func (RunTitlePayload) EventType() Type { return TypeRunTitle }
+
+// RunProtectedPayload reports whether a run is protected from non-owner
+// steering and killing.
+type RunProtectedPayload struct {
+	Protected bool `json:"protected"`
+}
+
+func (RunProtectedPayload) EventType() Type { return TypeRunProtected }
+
+func init() { registerPayload[RunProtectedPayload](TypeRunProtected) }
 
 func (RunStatusPayload) EventType() Type { return TypeRunStatus }
 

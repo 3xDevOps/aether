@@ -194,6 +194,7 @@ the artifact. Every other branch behaves like a normal git remote.
 | `aether cost --runs` | Token spend per member and per run. |
 | `aether budget` | The workspace's spend cap and what has been used. |
 | `aether sync --live <local-dir> <run>` | Live-overlay a local directory onto a run's worktree. Local edits that collide are preserved as `*.aether-conflict` files. |
+| `aether forward <run-id> <port> [--local <port>]` | Forward a run container port to loopback for callbacks such as agent OAuth. The local port defaults to the forwarded port. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. |
 
 ### Task templates and schedules

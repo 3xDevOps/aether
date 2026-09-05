@@ -17,8 +17,8 @@ export function AppShell() {
         </main>
       </div>
       <StatusBar />
-      {/* The launch and inject forms, hosted by the shell so every surface
-          that opens one reaches the same host. */}
+      {/* The launch, inject and forward forms, hosted by the shell so every
+          surface that opens one reaches the same host. */}
       <PaletteDialogs />
     </div>
   )

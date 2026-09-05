@@ -473,6 +473,8 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 		switch nc.ChannelType() {
 		case "session":
 			s.spawn(func() { s.handleSession(ctx, member, nc) })
+		case "direct-tcpip":
+			s.spawn(func() { s.handleDirectTCPIP(ctx, member, nc) })
 		default:
 			_ = nc.Reject(ssh.UnknownChannelType, "unsupported channel type")
 		}

@@ -1,10 +1,16 @@
 package cli
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"io"
+	"net"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -141,5 +147,97 @@ func TestTerminalResponseKeepsAckErrorAndLeftoverBytes(t *testing.T) {
 	}
 	if string(body) != "terminal output" {
 		t.Fatalf("leftover = %q, want terminal output", body)
+	}
+}
+
+func TestForwardOpensDirectTCPIPChannel(t *testing.T) {
+	_, hostSigner, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(hostSigner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverConfig := &ssh.ServerConfig{NoClientAuth: true}
+	serverConfig.AddHostKey(signer)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	payloads := make(chan struct {
+		host     string
+		port     uint32
+		origHost string
+		origPort uint32
+	}, 1)
+	go func() {
+		raw, aerr := listener.Accept()
+		if aerr != nil {
+			return
+		}
+		conn, chans, reqs, serr := ssh.NewServerConn(raw, serverConfig)
+		if serr != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		go ssh.DiscardRequests(reqs)
+		for newCh := range chans {
+			var payload struct {
+				DestHost string
+				DestPort uint32
+				OrigHost string
+				OrigPort uint32
+			}
+			_ = ssh.Unmarshal(newCh.ExtraData(), &payload)
+			payloads <- struct {
+				host     string
+				port     uint32
+				origHost string
+				origPort uint32
+			}{payload.DestHost, payload.DestPort, payload.OrigHost, payload.OrigPort}
+			ch, requests, cerr := newCh.Accept()
+			if cerr != nil {
+				return
+			}
+			go ssh.DiscardRequests(requests)
+			go func() {
+				_, _ = io.Copy(ch, ch)
+				_ = ch.Close()
+			}()
+		}
+	}()
+	client, err := ssh.Dial("tcp", listener.Addr().String(), &ssh.ClientConfig{
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+
+	stream, err := (&Conn{client: client}).Forward("run_1", 1455)
+	if err != nil {
+		t.Fatalf("Forward: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+	select {
+	case payload := <-payloads:
+		if payload.host != "run:run_1" || payload.port != 1455 ||
+			payload.origHost != "127.0.0.1" || payload.origPort != 0 {
+			t.Fatalf("payload = %#v", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server did not receive direct-tcpip payload")
+	}
+	if _, err := stream.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	body := make([]byte, len("hello"))
+	if _, err := io.ReadFull(stream, body); err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "hello" {
+		t.Fatalf("echo = %q", body)
 	}
 }

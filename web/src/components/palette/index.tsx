@@ -1,8 +1,8 @@
 // The command palette. It has no home of its own in the shell, so it rides
 // the status bar's extension slot: the trigger sits in the status bar and the
-// palette itself is a dialog portalled to the document. The launch and inject
-// forms are not here - they are the shell's, in `dialogs.tsx`, so a button on
-// any surface can open one.
+// palette itself is a dialog portalled to the document. The launch, inject and
+// forward forms are not here - they are the shell's, in `dialogs.tsx`, so a
+// button on any surface can open one.
 
 import { useEffect, useState } from 'react'
 import { PaletteBody } from '@/components/palette/palette'

@@ -10,6 +10,7 @@ import type {
   GitBranchPayload,
   OverlapPayload,
   RunDiffPayload,
+  RunProtectedPayload,
   RunStatusPayload,
   ServerUpdatePayload,
   RunTitlePayload,
@@ -191,6 +192,19 @@ export async function applyEvent(
         }
       }
       store.getState().applyRunTitle(ev.run_id, p.title)
+      break
+    }
+    case 'run.protected': {
+      const p = ev.payload as RunProtectedPayload
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          store.getState().setUnreachable(classifyUnreachable(err))
+          return false
+        }
+      }
+      store.getState().applyRunProtected(ev.run_id, p.protected)
       break
     }
     case 'run.diff': {

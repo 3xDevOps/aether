@@ -130,6 +130,9 @@ export interface GitBranchPayload {
 export interface RunTitlePayload {
   title: string
 }
+export interface RunProtectedPayload {
+  protected: boolean
+}
 
 // Team surfaces: the approval inbox, the presence roster, cost and budgets,
 // and the workspace timeline (internal/protocol approval.go, cost.go,

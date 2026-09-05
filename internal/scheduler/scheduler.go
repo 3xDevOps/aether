@@ -362,6 +362,20 @@ func (s *Scheduler) Close() error {
 	s.flushPendingRunTitles()
 	return nil
 }
+
+// ContainerAddr returns the network address of a supervised run container.
+func (s *Scheduler) ContainerAddr(ctx context.Context, run domain.RunID) (string, error) {
+	s.mu.Lock()
+	entry := s.runs[run]
+	if entry == nil {
+		s.mu.Unlock()
+		return "", errors.New("run has no live container")
+	}
+	containerID := entry.containerID
+	s.mu.Unlock()
+	return s.cfg.Runtime.ContainerIP(ctx, containerID)
+}
+
 func validateHarnessSpec(name string, spec HarnessSpec) error {
 	registered, known := harness.Lookup(name)
 	if spec.Executable == "" {

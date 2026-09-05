@@ -118,6 +118,12 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		ActorID:     member,
+		Payload:     events.RunProtectedPayload{Protected: p.Protected},
+	})
 	msg := "run protection disabled"
 	if run.Protected {
 		msg = "run protection enabled"

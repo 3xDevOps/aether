@@ -190,10 +190,12 @@ func (p *fakePTY) setErr(err error) {
 
 // fakeRuns records RunController calls and returns the configured error.
 type fakeRuns struct {
-	mu     sync.Mutex
-	err    error
-	calls  []string
-	paused map[domain.RunID]bool
+	mu      sync.Mutex
+	err     error
+	addr    string
+	addrErr error
+	calls   []string
+	paused  map[domain.RunID]bool
 }
 
 func (f *fakeRuns) record(call string) error {
@@ -224,6 +226,23 @@ func (f *fakeRuns) Launch(_ context.Context, workspace domain.WorkspaceID, membe
 		Harness: harness, Mode: mode, Status: domain.RunQueued,
 		CreatedAt: time.Now().UTC(),
 	}, nil
+}
+
+func (f *fakeRuns) ContainerAddr(_ context.Context, run domain.RunID) (string, error) {
+	if err := f.record(fmt.Sprintf("container-addr:%s", run)); err != nil {
+		return "", err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.addrErr != nil {
+		return "", f.addrErr
+	}
+	return f.addr, nil
+}
+func (f *fakeRuns) setAddr(addr string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addr = addr
 }
 
 func (f *fakeRuns) Kill(_ context.Context, run domain.RunID, actor domain.MemberID) error {

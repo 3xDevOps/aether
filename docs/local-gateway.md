@@ -29,6 +29,18 @@ initial browser tab). The printed URL is
 `http://127.0.0.1:<port>/?token=<token>`. The process serves until
 `SIGINT`, `SIGTERM`, or `SIGHUP`; the token dies with it.
 
+### Agent OAuth logins
+
+When an agent prints an OAuth URL, open it in your browser. Forward the
+callback port so the browser redirect reaches the run container, for example:
+
+```sh
+aether forward <run-id> 1455
+```
+
+The local port defaults to the container port; use `--local <port>` only when
+the OAuth redirect URI is configured for a different local port.
+
 `--json` prints exactly one line and then serves:
 
 ```json
@@ -140,10 +152,11 @@ audit history.
 
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
- "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
-          "link.repo","link.status","link.switch","profile.preview",
-          "profile.push","pull","pull.switch","repo.push","repo.sync","sync.start",
-          "sync.status","sync.stop","update.apply","update.check","update.status"],
+ "local":["daemon.install","daemon.status","env.harnesses","forward.start",
+          "forward.status","forward.stop","image.scaffold","link.repo","link.status",
+          "link.switch","profile.preview","profile.push","pull","pull.switch",
+          "repo.push","repo.sync","sync.start","sync.status","sync.stop",
+          "update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -305,6 +318,9 @@ authority.
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
 | `image.scaffold` | `{"repo":"...","kind":"dockerfile"\|"devcontainer"}` (`repo` defaults to the linked one) | `{"written":["..."]}` |
 | `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"searched":["/usr/local/bin",...],"warning":"...","repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`. The verb first widens the gateway's `PATH` from your login shell (`$SHELL -l -i`, bounded to 5 seconds), so agents installed through a shell profile or since the gateway started are found; `searched` is the resulting `PATH` as a list of folders (always present, may be empty); `warning` is present only when the login shell could not be asked, carrying that error verbatim (the standard folders `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, and `~/.bun/bin` were still checked); `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
+| `forward.start` | `{"run_id":"...","port":1455}` | `{"run_id":"...","port":1455,"local_port":1455,"state":"active"}` |
+| `forward.stop` | `{"run_id":"...","port":1455}` | `{"run_id":"...","port":1455,"state":"stopped"}` |
+| `forward.status` | `{}` | `{"forwards":[{"run_id":"...","port":1455,"local_port":1455,"conns":1}]}` sorted by run ID, then port |
 | `update.check` | `{}` | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `cli_path` and `install_method` absent when the binary could not be probed) |
 | `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
 | `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |

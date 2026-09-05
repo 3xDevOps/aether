@@ -51,6 +51,10 @@ func (b *apiStubBackend) Terminal(protocol.TerminalRequest) (cli.Terminal, proto
 func (b *apiStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
 	panic("not reached")
 }
+
+func (b *apiStubBackend) Forward(string, uint32) (io.ReadWriteCloser, error) {
+	panic("not reached")
+}
 func (b *apiStubBackend) Close() error { return nil }
 
 type closeBackend struct {

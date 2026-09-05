@@ -307,11 +307,11 @@ func TestHandoffRecipientMustBeAbleToOwnRun(t *testing.T) {
 	}
 }
 
-// The run.protect timeline note is attributed to the acting member.
-func TestRunProtectPublishesAttributedNote(t *testing.T) {
+// The run.protect event and timeline note are attributed to the acting member.
+func TestRunProtectPublishesEvents(t *testing.T) {
 	e := newTestEnv(t, nil)
 	sub, err := e.bus.Subscribe(context.Background(), events.SubscribeOptions{
-		Filter: events.Filter{Types: []events.Type{events.TypeTimeline}},
+		Filter: events.Filter{Types: []events.Type{events.TypeTimeline, events.TypeRunProtected}},
 	})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
@@ -322,14 +322,36 @@ func TestRunProtectPublishesAttributedNote(t *testing.T) {
 	if err := admin.Call(protocol.MethodRunProtect, protocol.RunProtectParams{RunID: string(e.run.ID), Protected: true}, nil); err != nil {
 		t.Fatalf("run.protect: %v", err)
 	}
-	select {
-	case ev := <-sub.Events():
-		p, ok := ev.Payload.(events.TimelinePayload)
-		if !ok || p.Kind != events.TimelineNote || ev.ActorID != e.member.ID || ev.RunID != e.run.ID {
-			t.Errorf("protect event = %+v actor %s run %s", ev.Payload, ev.ActorID, ev.RunID)
+
+	var timelineSeen, protectedSeen bool
+	for range 2 {
+		select {
+		case ev := <-sub.Events():
+			if ev.ActorID != e.member.ID || ev.RunID != e.run.ID {
+				t.Errorf("protect event = %+v actor %s run %s", ev.Payload, ev.ActorID, ev.RunID)
+			}
+			switch ev.Type {
+			case events.TypeTimeline:
+				p, ok := ev.Payload.(events.TimelinePayload)
+				if !ok || p.Kind != events.TimelineNote {
+					t.Errorf("timeline protect event = %+v", ev.Payload)
+				}
+				timelineSeen = true
+			case events.TypeRunProtected:
+				p, ok := ev.Payload.(events.RunProtectedPayload)
+				if !ok || !p.Protected {
+					t.Errorf("protected event = %+v", ev.Payload)
+				}
+				protectedSeen = true
+			default:
+				t.Errorf("unexpected protect event type %q", ev.Type)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("missing run.protect event")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no timeline event for run.protect")
+	}
+	if !timelineSeen || !protectedSeen {
+		t.Fatalf("run.protect events: timeline=%v protected=%v", timelineSeen, protectedSeen)
 	}
 }
 

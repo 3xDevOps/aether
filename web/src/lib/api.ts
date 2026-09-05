@@ -142,6 +142,26 @@ async function local<T>(
   return (await res.json()) as T
 }
 
+export interface LocalForward {
+  run_id: string
+  port: number
+  local_port: number
+}
+
+export interface LocalForwardStartResult extends LocalForward {
+  state: 'active'
+}
+
+export interface LocalForwardStopResult {
+  run_id: string
+  port: number
+  state: 'stopped'
+}
+
+export interface LocalForwardStatusResult {
+  forwards: Array<LocalForward & { conns: number }>
+}
+
 // Failures carry the JSON-RPC error object: {"error":{"code":-32001,...}}.
 async function failure(res: Response): Promise<string> {
   try {
@@ -545,6 +565,11 @@ export const api = {
     local<SyncSessionState>('sync.start', { run_id: runID, force }),
   localSyncStop: (runID: string) =>
     local<SyncSessionState>('sync.stop', { run_id: runID }),
+  localForwardStart: (runID: string, port: number) =>
+    local<LocalForwardStartResult>('forward.start', { run_id: runID, port }),
+  localForwardStop: (runID: string, port: number) =>
+    local<LocalForwardStopResult>('forward.stop', { run_id: runID, port }),
+  localForwardStatus: () => local<LocalForwardStatusResult>('forward.status'),
   localSyncStatus: () => local<SyncStatusResult>('sync.status'),
   localDaemonInstall: (server: string, repo: string) =>
     local<DaemonInstallResult>('daemon.install', { server, repo }),

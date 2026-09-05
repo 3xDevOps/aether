@@ -75,6 +75,14 @@ the server exposes, and the browser surface inherits its boundary.
   be - the terminal view falls back to a mirror - and a removed member
   loses every open channel.
 
+## SSH port forwarding
+
+Port forwarding is limited to direct-tcpip channels whose destination is
+`run:<run-id>`. The server checks the Steer capability for the authenticated
+member, resolves the run's live container address itself, and dials only the
+requested container port. Arbitrary hosts and ports are not targets, and
+reverse forwarding is disabled: global forwarding requests are denied.
+
 ## Conflict coordination
 
 When two runs edit the same file, each container gets a unix socket it can

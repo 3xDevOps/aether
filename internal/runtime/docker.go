@@ -428,6 +428,23 @@ func (d *Docker) Attach(ctx context.Context, id ID) (Attachment, error) {
 	return newDockerAttachment(d.cli, string(id), tty, resp), nil
 }
 
+// ContainerIP implements Runtime by inspecting the container's network
+// endpoints.
+func (d *Docker) ContainerIP(ctx context.Context, id ID) (string, error) {
+	info, err := d.cli.ContainerInspect(ctx, string(id))
+	if err != nil {
+		return "", fmt.Errorf("runtime: inspect container %q: %w", id, err)
+	}
+	if info.NetworkSettings != nil {
+		for _, network := range info.NetworkSettings.Networks {
+			if network != nil && network.IPAddress != "" {
+				return network.IPAddress, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("runtime: container %q has no network IP", id)
+}
+
 // ExecTTY opens an additional TTY process inside a running container.
 func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir string, cols, rows uint) (Attachment, error) {
 	opts := container.ExecOptions{

@@ -87,7 +87,8 @@ test('kill asks first, then calls run.kill', async () => {
 })
 
 test('delete asks first, calls run.delete, and removes the run', async () => {
-  const record = seed({ paused: false })
+  // Delete is a post-mortem action: only a finished run offers it.
+  const record = seed({ run: { status: 'failed' } })
   render(<RunActions run={record} />)
 
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
@@ -146,7 +147,8 @@ test('relaunch is offered on a finished run only', () => {
   unmount()
   render(<RunActions run={seed({ run: { status: 'merged' } })} />)
   expect(screen.getByRole('button', { name: 'Relaunch' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
+  // A finished agent has nothing to kill; Delete is the remaining end.
+  expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
 })
 
@@ -254,7 +256,8 @@ test('a collaborator on another member run may steer it but not give it away', (
 
   expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
+  // Delete is reserved for runs that already ended.
+  expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Protect' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()
 })

@@ -263,3 +263,9 @@ func (b *sshBackend) Terminal(req protocol.TerminalRequest) (cli.Terminal, proto
 func (b *sshBackend) Sync(runID string, force bool) (io.ReadWriteCloser, error) {
 	return stream(b, func(c *cli.Conn) (io.ReadWriteCloser, error) { return c.Sync(runID, force) })
 }
+
+func (b *sshBackend) Forward(runID string, port uint32) (io.ReadWriteCloser, error) {
+	return stream(b, func(c *cli.Conn) (io.ReadWriteCloser, error) {
+		return c.Forward(runID, port)
+	})
+}

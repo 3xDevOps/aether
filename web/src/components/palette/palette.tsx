@@ -38,7 +38,7 @@ export function PaletteBody({
 }: {
   onDone: () => void
   // The template form's open state lives with the dialog host, not the
-  // store: store dialogs know only the launch and inject forms.
+  // store: store dialogs know the launch, inject and forward forms.
   onTemplates: () => void
 }) {
   const runs = useAttentionRuns()

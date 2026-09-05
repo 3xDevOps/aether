@@ -51,6 +51,8 @@ type Backend interface {
 	Terminal(req protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error)
 	// Sync opens the sync subsystem's raw mutagen endpoint stream.
 	Sync(runID string, force bool) (io.ReadWriteCloser, error)
+	// Forward opens one direct-tcpip channel to a run container port.
+	Forward(runID string, port uint32) (io.ReadWriteCloser, error)
 	// Close releases the backend's shared connection.
 	Close() error
 }
@@ -267,6 +269,7 @@ func (g *Gateway) requestExit(code int) {
 // the gateway owns. Safe before Start, and safe to call twice.
 func (g *Gateway) Close() error {
 	g.cancel()
+	g.local.forward.Close()
 	backendErr := g.cfg.Backend.Close()
 	if g.ln == nil {
 		return backendErr

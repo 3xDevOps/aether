@@ -7,16 +7,19 @@ import type { ReactNode } from 'react'
  */
 export function ViewHeader({
   title,
+  titleAdornment,
   subtitle,
   actions,
 }: {
   title: string
+  titleAdornment?: ReactNode
   subtitle?: string
   actions?: ReactNode
 }) {
   return (
     <header className="flex h-9 items-center gap-2 border-b px-4">
       <h1 className="truncate text-sm font-medium">{title}</h1>
+      {titleAdornment}
       {subtitle && (
         <span className="shrink-0 text-xs text-muted-foreground">{subtitle}</span>
       )}

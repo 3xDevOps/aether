@@ -6,11 +6,11 @@
 
 import type { LucideIcon } from 'lucide-react'
 import {
-  Archive,
+  Cable,
   CheckCheck,
+  CircleCheck,
   Download,
   FileText,
-  GitMerge,
   LayoutGrid,
   List,
   MessageSquarePlus,
@@ -187,53 +187,47 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       Icon: MessageSquarePlus,
       perform: (d) => d.openDialog('inject', id),
     })
+    if (cap.hasLocal('forward.start')) {
+      list.push({
+        id: 'forward',
+        label: 'Forward a port...',
+        short: 'Forward',
+        Icon: Cable,
+        perform: (d) => d.openDialog('forward', id),
+      })
+    }
   }
 
+  // One ending action per lifecycle stage: a live agent is killed, a run
+  // waiting on review is closed (the dialog asks merged or abandoned), and
+  // only a run that has already ended can be deleted.
   if (run.status === 'needs-attention' && mayKill) {
     list.push({
-      id: 'close:merged',
-      label: 'Close as merged',
-      short: 'Merged',
-      Icon: GitMerge,
-      done: 'Closed as merged',
-      confirm: {
-        title: 'Close as merged?',
-        body: 'The run is recorded as merged and leaves the board.',
-        action: 'Close as merged',
-      },
-      perform: (d) => d.api.runClose(id, 'merged'),
-    })
-    list.push({
-      id: 'close:abandoned',
-      label: 'Close as abandoned',
-      short: 'Abandoned',
-      Icon: Archive,
-      done: 'Closed as abandoned',
-      confirm: {
-        title: 'Close as abandoned?',
-        body: 'The run is recorded as abandoned and leaves the board.',
-        action: 'Close as abandoned',
-      },
-      perform: (d) => d.api.runClose(id, 'abandoned'),
+      id: 'close',
+      label: 'Close run...',
+      short: 'Close',
+      Icon: CircleCheck,
+      perform: (d) => d.openDialog('close', id),
     })
   }
 
-  if (mayKill) {
+  if (!finished && run.status !== 'needs-attention' && mayKill) {
     list.push({
       id: 'kill',
       label: 'Kill run',
       short: 'Kill',
       Icon: Square,
-      done: finished ? 'Already stopped' : 'Killed',
+      done: 'Killed',
       confirm: {
         title: 'Kill this run?',
-        body: finished
-          ? 'This run is already stopped. Use Delete run to remove it.'
-          : 'The agent stops immediately. Work already committed to the run branch stays.',
+        body: 'The agent stops immediately. Work already committed to the run branch stays.',
         action: 'Kill run',
       },
       perform: (d) => d.api.runKill(id),
     })
+  }
+
+  if ((finished || run.status === 'needs-attention') && mayKill) {
     list.push({
       id: 'delete',
       label: 'Delete run',
