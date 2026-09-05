@@ -15,6 +15,7 @@ import type {
   DaemonInstallResult,
   DaemonStatusResult,
   ImageScaffoldResult,
+  RepoSyncResult,
 } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { SyncPanel } from '@/routes/run-sync'
@@ -27,7 +28,7 @@ const field =
 export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
 
-  if (!caps.hasLocal('daemon.status')) {
+  if (!caps.hasLocal('daemon.status') && !caps.hasLocal('repo.sync')) {
     return (
       <div className="flex h-full flex-col">
         <ViewHeader title="Settings" />
@@ -46,10 +47,11 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
     <div className="flex h-full flex-col">
       <ViewHeader title="Settings" subtitle="this machine" />
       <div className="flex-1 space-y-6 overflow-y-auto p-4">
-        <LinkCard client={client} />
-        <DaemonCard client={client} />
-        <ScaffoldCard client={client} />
-        <OverlayCard client={client} />
+        {caps.hasLocal('link.status') && <LinkCard client={client} />}
+        {caps.hasLocal('daemon.status') && <DaemonCard client={client} />}
+        {caps.hasLocal('repo.sync') && <RepoSyncCard client={client} />}
+        {caps.hasLocal('image.scaffold') && <ScaffoldCard client={client} />}
+        {caps.hasLocal('sync.status') && <OverlayCard client={client} />}
       </div>
     </div>
   )
@@ -280,6 +282,58 @@ function DaemonCard({ client }: { client: Api }) {
             Install
           </Button>
         </form>
+      )}
+    </section>
+  )
+}
+
+/**
+ * Moves the linked repository's origin base branch into the server's
+ * workspace branch and shows git's response without rewriting it.
+ */
+function RepoSyncCard({ client }: { client: Api }) {
+  const workspaceID = useStore((s) => s.activeWorkspace)
+  const [result, setResult] = useState<RepoSyncResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const sync = async () => {
+    setBusy(true)
+    setError(null)
+    setResult(null)
+    try {
+      setResult(await client.localRepoSync(workspaceID || undefined))
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section
+      aria-label="Base branch"
+      className="space-y-2 rounded-md border bg-card p-3"
+    >
+      <h2 className="text-sm font-medium">Base branch</h2>
+      <p className="text-sm text-muted-foreground">
+        Fast-forwards the server&apos;s copy of the workspace base branch to
+        your repository&apos;s origin remote.
+      </p>
+      <Button size="sm" onClick={() => void sync()} disabled={busy}>
+        {busy ? 'Syncing...' : 'Sync from origin'}
+      </Button>
+      {error && <p className="text-xs text-state-failed">{error}</p>}
+      {result && (
+        <div className="space-y-1 text-sm">
+          <div>
+            <span className="text-muted-foreground">Branch </span>
+            <span className="font-mono">{result.branch}</span>
+          </div>
+          <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border bg-background p-2 font-mono text-xs">
+            {result.output}
+          </pre>
+        </div>
       )}
     </section>
   )

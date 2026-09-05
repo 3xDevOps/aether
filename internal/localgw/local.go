@@ -34,6 +34,7 @@ var localVerbs = []string{
 	"pull",
 	"pull.switch",
 	"repo.push",
+	"repo.sync",
 	"sync.start",
 	"sync.status",
 	"sync.stop",
@@ -137,6 +138,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 		"pull":            (*Gateway).localPull,
 		"pull.switch":     (*Gateway).localPullSwitch,
 		"repo.push":       (*Gateway).localRepoPush,
+		"repo.sync":       (*Gateway).localRepoSync,
 		"sync.start":      (*Gateway).localSyncStart,
 		"sync.status":     (*Gateway).localSyncStatus,
 		"sync.stop":       (*Gateway).localSyncStop,
@@ -344,13 +346,50 @@ func (g *Gateway) localRepoPush(r *http.Request, body []byte) (any, *protocol.Er
 	}{Branch: ws.BaseBranch, Remote: "aether", Output: output}, nil
 }
 
-// checkRemoteWorkspace refuses a push whose branch was read from one
+// localRepoSync fetches the workspace base branch from the repository's
+// origin remote and advances the matching server branch without touching the
+// local branch or working tree.
+func (g *Gateway) localRepoSync(r *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	cfg := g.local.snapshot()
+	if cfg.Repo == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
+	}
+	ws, perr := g.pickWorkspace(r, params.WorkspaceID)
+	if perr != nil {
+		return nil, perr
+	}
+	if ws.BaseBranch == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "workspace " + ws.Name + " has no base branch"}
+	}
+	if perr := checkRemoteWorkspace(cfg, ws); perr != nil {
+		return nil, perr
+	}
+	output, err := localops.SyncBase(cfg.Repo, ws.BaseBranch)
+	switch {
+	case errors.Is(err, localops.ErrPushPrecondition):
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	case err != nil:
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	return struct {
+		Branch string `json:"branch"`
+		Output string `json:"output"`
+	}{Branch: ws.BaseBranch, Output: output}, nil
+}
+
+// checkRemoteWorkspace refuses a push or sync whose branch was read from one
 // workspace while the `aether` remote points at another. The remote URL
 // carries the workspace ID, so the two can disagree whenever link.repo
 // last ran for a different workspace - and the answer would otherwise
 // report success for a workspace this repository never seeded. A repo
-// with no remote at all passes through to Push's own refusal, which
-// names the fix.
+// with no remote at all passes through to Push or SyncBase's own refusal,
+// which names the fix.
 func checkRemoteWorkspace(cfg cli.Config, ws protocol.Workspace) *protocol.Error {
 	url, err := localops.AetherRemoteURL(cfg.Repo)
 	if err != nil {

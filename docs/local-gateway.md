@@ -142,8 +142,8 @@ audit history.
 {"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","image.scaffold",
           "link.repo","link.status","link.switch","profile.preview",
-          "profile.push","pull","pull.switch","repo.push","sync.start","sync.status",
-          "sync.stop","update.apply","update.check","update.status"],
+          "profile.push","pull","pull.switch","repo.push","repo.sync","sync.start",
+          "sync.status","sync.stop","update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -297,6 +297,7 @@ authority.
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |
 | `pull.switch` | `{"run_id":"..."}` | `{"branch":"..."}` |
 | `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","output":"..."}` |
+| `repo.sync` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
 | `sync.stop` | `{"run_id":"..."}` | `{"run_id":"...","state":"stopped"}` |
 | `sync.status` | `{}` | `{"sessions":[{"run_id":"...","state":"...","conflict":"..."\|null}]}` |
@@ -331,11 +332,21 @@ authority.
   workspace and the objects would land in another. A push git ran and the
   server rejected - branch protection, a missing key - answers `-32603`
   carrying git's own stderr.
-- `repo.push` is bounded at ten minutes and runs with
+- `repo.sync` fetches `<base>` with
+  `git fetch --no-tags origin <base>`, then pushes
+  `refs/remotes/origin/<base>:refs/heads/<base>` to `aether` without force.
+  `<base>` is the selected workspace's base branch, and `output` joins the
+  trimmed stdout and stderr from both commands. It leaves the local branch and
+  working tree alone.
+- `repo.sync` refuses with `-32002` (invalid state) when there is no linked
+  repository, no `origin` remote, no `aether` remote, or the `aether` remote
+  points at another workspace. A failed fetch or push answers `-32603`
+  carrying git's own output, including non-fast-forward refusals.
+- `repo.push` and `repo.sync` are bounded at ten minutes and run with
   `GIT_TERMINAL_PROMPT=0`, so git cannot block on its own credential
   prompt. That does not reach `ssh`: a passphrase-protected key with no
   agent still waits on ssh's own prompt until the ten minutes are up. Load
-  the key into an agent before pushing from the dashboard.
+  the key into an agent before pushing or syncing from the dashboard.
 - `profile.preview` runs the discovery `aether profile push --agent
   <harness>` would run and uploads nothing. It reports what a push would
   carry, grouped into categories a developer recognizes, and everything
