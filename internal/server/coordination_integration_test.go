@@ -318,6 +318,7 @@ func (e *coordEnv) start(ctx context.Context, t *testing.T, disabled bool) *coor
 		DataDir:              e.dataDir,
 		Addr:                 "127.0.0.1:0",
 		Runtime:              e.rt,
+		StandardImage:        e.image,
 		CoordinationDisabled: disabled,
 		ServerBinary:         e.serverBinary,
 	})
