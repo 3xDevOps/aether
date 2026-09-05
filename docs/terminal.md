@@ -24,6 +24,22 @@ reattaches to its shell.
 The Agents setup step uses the same dock and types the install command for you.
 Complete the vendor login there, then return to the wizard.
 
+## Save your environment
+
+Install system tools and toolchains in this terminal, then select **Save
+environment** in the terminal dock. The same actions are available from the
+CLI:
+
+```sh
+aether env save
+aether env reset
+```
+
+Saving pauses the terminal for the few seconds Docker needs to commit it.
+New runs and workspace shells use the saved image; reset stops the terminal,
+removes the saved image, and makes the next open use the standard image. See
+[environments.md](environments.md) for image selection and persistence.
+
 ## Tabs and lifecycle
 
 There is one environment container per member. `main` is its login shell. Other

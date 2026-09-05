@@ -55,7 +55,7 @@ screen with a reveal path, and every surface routes through the same call.
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
 one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `palette`, `approvals`, `presence`, `cost`, `timeline`, `diff`, `shell`,
-`local`, `environment`, `ui`). A new feature adds a slice file and one spread in
+`local`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
 collapse state, `activeWorkspace`, grouping, dismissed update versions) are
@@ -220,9 +220,8 @@ run's wire `paused` field, skipping runs that do not carry it.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
-  An `environment.build` event lands in the `environment` slice, which feeds
-  the build banner (see the onboarding wizard section), and a `server.update`
-  event lands in the `server` slice, which feeds the update prompts.
+  A `server.update` event lands in the `server` slice, which feeds the update
+  prompts.
 
 **The capabilities descriptor is the transport seam.** The store holds the
 `GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, `local`), and
@@ -440,6 +439,11 @@ Overview, Diff, or Events does not discard run-shell tabs or their attachments.
 Only the selected shell tab mounts an xterm host; switching tabs remounts that
 host and relies on transcript replay to restore its content.
 
+The board's `TerminalDock` exposes **Save environment** while the member's
+terminal is running, and its Stop dialog includes the destructive **Reset to
+standard** action. When the terminal is running and `saved_image` is empty, it
+shows the hint **Installs here reach agents after you save.**
+
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
 terminal and event stream reconnect on the same jittered schedule, and it
@@ -581,7 +585,7 @@ routes (`approvals`, `timeline`).
   also where the presence heartbeat lives.
 - **One refresh covers every workspace, and there is only the one.** These
   reads are per workspace on the wire, and a workspace is a repo plus its
-  environment plan: a deployment has a handful of them and they outlive every
+  team settings. A deployment has a handful of them and they outlive every
   run in them. So `refreshTeam` reads all of them each time rather than
   splitting into a bounded recurring pass and a wide occasional one. Both
   readouts it feeds ask a whole-deployment question anyway - the status bar
@@ -636,17 +640,6 @@ routes (`approvals`, `timeline`).
   branch without offering to change it: runs have already forked from it, so
   editing it there would only make the displayed branch disagree with the
   branches on disk.
-- **The Environment panel sits above the run list.**
-  `routes/workspaces/environment.tsx` renders in the workspace view's
-  scrolling body wherever the gateway serves `env.status`: the active
-  version's manifest as a plain list (name, version, reason), one sentence
-  saying which path made it and with which agent, a compact version history
-  with the failure detail on failed rows, and rollback behind a confirm that
-  names the version it returns to - the newest good version below the active
-  one, the same pick the server makes. A workspace with no definitions gets
-  one sentence: it uses the image it was created with. The panel re-reads
-  `env.status` whenever this session's build state moves, so an approved
-  build's outcome lands in the history without a reload.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored
@@ -655,29 +648,24 @@ routes (`approvals`, `timeline`).
 ## Manage workspaces
 
 `src/routes/workspaces/` renders each workspace as a card with its base branch
-and steering policy. When the control capability includes `workspace.image`, a
-card also reads and shows its effective custom image. If that image uses the
-same repository as `server.info.standard_image` with a different tag, the card
-offers `Update to <tag>`; the image field and Save button accept an arbitrary
-image reference. The server validates and persists the change.
+and steering policy.
 
 ## Settings
 
-`src/routes/settings/` shows the local link, sync daemon, image scaffolding and
-live overlay. When the local capability includes `repo.sync`, the Base branch
-card's **Sync from origin** button fast-forwards the server's workspace base
-branch from this machine's `origin` remote. It shows the returned branch and
-git's output verbatim; server refusals stay verbatim.
+`src/routes/settings/` shows the local link, sync daemon, and live overlay.
+When the local capability includes `repo.sync`, the Base branch card's **Sync
+from origin** button fast-forwards the server's workspace base branch from
+this machine's `origin` remote. It shows the returned branch and git's output
+verbatim; server refusals stay verbatim.
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the guided first-run path, six steps: Link,
-Workspace, Environment, Repository, Agents, First run. It renders only where
-the gateway serves the client-machine verbs (the capability descriptor lists
-`link.status`); a remote monitor gets an explanatory empty state instead of
-a broken wizard. Link, Workspace, Repository and First run live in
-`steps.tsx`; Environment is `environment-step.tsx`; Agents is
-`agents-step.tsx` with its second half in `profile-import.tsx`.
+`src/routes/onboarding/` is the guided first-run path, five steps: Link,
+Workspace, Repository, Agents, First run. It renders only where the gateway
+serves the client-machine verbs (the capability descriptor lists
+`link.status`); a remote monitor gets an explanatory empty state instead of a
+broken wizard. Link, Workspace, Repository and First run live in `steps.tsx`;
+Agents is `agents-step.tsx` with its second half in `profile-import.tsx`.
 
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
@@ -700,23 +688,6 @@ and clears that wizard state.
 The Link step distinguishes no configured server, a server with no repository,
 and a fully linked server. It refreshes on Retry and when the window regains
 focus, so a separate `aether link` command appears without restarting the GUI.
-The first four steps' components live in `steps.tsx`; the Environment step is
-`environment-step.tsx`.
-
-The Environment step offers two cards: mirror this machine (recommended,
-preselected) and keep the standard environment the workspace was created
-with. Mirror lists the setup-capable harnesses found on this machine
-(`env.harnesses`) by friendly name, runs the chosen one headless over
-`/ws/envscan` behind a one-line status with a collapsed "View process"
-expander streaming the raw agent output, and hands the validated Dockerfile
-and manifest pair to the review gate; when no supported CLI is installed the
-card says so, names the four, lists the folders the gateway searched, notes
-when the login shell could not be asked for its `PATH`, and offers "Check
-again", which widens `PATH` and detects again so an agent installed since
-is found without relaunching. Cancel and every scan failure land on "try
-again" or "keep the standard environment", so the wizard never dead-ends.
-Non-admin members see only the keep path, because saving an environment is
-an administrator method.
 
 The Agents step has two optional halves and never blocks: **Skip for now**
 is reachable from every state, including an open setup shell and a failed
@@ -757,30 +728,6 @@ recommended with each one-sentence reason next to its row; the scan is a
 proposal the user edits, and a failure leaves the manual path and both
 buttons live.
 
-The review gate (`EnvironmentReview`, same file) renders the manifest as a
-readable list - name, version, reason - with a per-item remove toggle
-backed by `removeManifestItem` (dropping an item drops its Dockerfile lines
-and shifts later spans; the last remaining item cannot be removed). A
-free-text change request reopens the scan in refine mode with the current
-pair and the note; approve calls `env.save` (source `mirror`, the chosen
-harness) then `env.build` and advances the wizard immediately - the build
-runs in the background.
-
-Build state lives in the `environment` slice: approve primes it before the
-build call so no event frame can beat it, and `environment.build` events
-applied by `sync.ts` drive it from there, ignoring frames about older
-versions. The slice keeps the approved pair because `env.status` never
-returns the Dockerfile: a verification failure can seed its repair scan
-only from what this session holds. `EnvironmentBanner` (same file, rendered
-by the First-run step and the run Overview view) reads the slice: while the
-latest build for the workspace is pending it says the environment is still
-building on the starter image; on `active` it clears; on `failed` it shows
-the detail and offers "ask the agent to fix it" - a refine scan seeded with
-the failure detail, feeding the same review gate - plus "keep the standard
-environment", which just forgets the build, since the workspace image
-already is the fallback. Nothing in the slice persists: after a reload the
-banner is simply gone, and `aether env show` is where the build's outcome
-can still be read.
 
 ## Update prompts
 
@@ -972,21 +919,15 @@ denied, the confirmation an admin must clear before giving up their own admin
 role, and a non-admin getting the same roster as read-only text with no admin
 verbs - which the sidebar and the palette match by keeping Members reachable
 behind the narrow remote allowlist while every other admin entry stays
-hidden. The onboarding wizard walks all
-five steps against the stub API, and the environment step is exercised on
-both the walk and its scan flow - mirror preselected, the no-harness
-fallback, streamed output behind the expander, cancel, failure landing on
-the fallback offers, the scan result reaching the review boundary, and the
-non-admin keep-only path - through a stubbed scan session. The review gate
-and the build banner ride the same stubs: a removal shrinking the approved
-payload, approve saving then building and priming the slice, a change
-request reopening the scan in refine mode, the banner appearing on building
-and clearing on active in both the First-run step and the run view, and a
-verification failure offering the repair scan and the dismissal. The diff tab covers the parser on the
-shapes that would break it - a deletion, a new file, a removed line that reads
-exactly like a file marker - then the fetch, the truncation notice, a snapshot
-rendering its own interval and only that change, deselecting returning to the
-cumulative patch without a refetch, a snapshot carrying no tree staying
-unselectable, and a conflict chip naming its member and opening their run.
+hidden. The onboarding wizard walks all five steps against the stub API. The
+Agents step tests setup-capable harness detection, the live terminal dock,
+profile previews and exclusions, profile recommendations, cancellation,
+secret and plugin guards, push refusals, and the optional skip paths. The diff
+tab covers the parser on the shapes that would break it - a deletion, a new
+file, a removed line that reads exactly like a file marker - then the fetch,
+the truncation notice, a snapshot rendering its own interval and only that
+change, deselecting returning to the cumulative patch without a refetch, a
+snapshot carrying no tree staying unselectable, and a conflict chip naming its
+member and opening their run.
 Full end-to-end coverage of the dashboard belongs to the E2E harness driving
 the real gateway.

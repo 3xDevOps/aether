@@ -107,38 +107,18 @@ Compare that against what the server printed if you care to.
 
 ## 4. Create a workspace and push your repo
 
-A **workspace** is a repo plus a server-owned environment. Creating one is an
-admin operation. Start with the standard environment - a prebuilt image
-published with each release that carries git, go, node, python with uv, rust,
-and common build tools, so most projects work with zero setup:
+A **workspace** is the repo plus a server-owned scope for runs and shells.
+Creating one is an admin operation. Every container for a member starts from
+that member's saved image, or the server's standard image when none is saved:
 
 ```sh
-aether workspace init myproject --standard
+aether workspace init myproject
 ```
 
-The dashboard's create-workspace form offers the same choice with the
-standard environment preselected. Its onboarding wizard then adds an
-Environment step: keep the standard environment, have a coding agent on
-your machine mirror your local toolchains into the workspace image, or
-have it read the repository's own files - devcontainer config included -
-and build what the project needs. The
-agent proposes a list of tools, you review and approve it, and the image
-builds in the background while you finish onboarding - until it is ready,
-runs use the image the workspace was created with and the dashboard shows a
-banner saying so. An Agents step follows the Repository step and covers
-step 5 below.
-
-To change the environment later, open the workspace page in the dashboard.
-Its Environment panel shows what is installed, keeps every previous version
-for rollback, and takes a plain-language change request: a coding agent
-registered on the server proposes the change, you review the Dockerfile
-diff and the updated tool list, and approving rebuilds the image.
-Environment changes are admin actions.
-
-Without `--standard` the server uses its minimal neutral image. Pass
-`--image <ref>` instead for an administrator-approved image when the project
-needs something the standard one lacks, and `--base <branch>` to cut run
-worktrees from something other than `main`.
+Use `--base <branch>` when runs should branch from something other than
+`main`. The dashboard's create-workspace form uses the same command. Install
+tools in the environment terminal, then press **Save environment** so runs get
+them too; see [environments.md](environments.md).
 
 Now point your local clone at it and seed the repo:
 
@@ -382,13 +362,13 @@ echo "# demo" > README.md
 git add -A && git commit -m seed
 ```
 
-Then run steps 3, 4, 6 and 8 above with `busybox` as the workspace image
-and `--agent fake` instead of `--agent claude`. Skip step 5: the fake harness has
+Then run steps 3, 4, 6 and 8 above with the default standard image and
+`--agent fake` instead of `--agent claude`. Skip step 5: the fake harness has
 no agent login. Step 7 (`aether gui`) works too if you want to watch.
 
 ```sh
 aether link <server-host>:2222
-aether workspace init demo --image busybox
+aether workspace init demo
 aether link <server-host>:2222 --repo "$PWD"
 git push -u aether main
 aether run "write a result file" --agent fake
@@ -430,7 +410,7 @@ go or the next `aether link` fails.
 ## Next
 
 - [install.md](install.md) - systemd, upgrades, data layout
-- [environments.md](environments.md) - agent-built workspace images, verification, rollback
+- [environments.md](environments.md) - member images, saving, resetting, and persistence
 - [environment-home.md](environment-home.md) - member home, installed agents, and migration
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
 - [teams.md](teams.md) - joining, roles, workspaces

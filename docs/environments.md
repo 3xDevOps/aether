@@ -1,148 +1,113 @@
-# Workspace environments
+# Member environments
 
-Every workspace runs its agents inside one image. This guide covers where that
-image comes from: the prebuilt options, the coding-agent flows that build one
-for you, verification, rollback, and changing the environment later. Each
-member's home, login state, and installed user-local executables persist
-separately in [environment-home.md](environment-home.md).
+A member's environment is the container image used by every container that
+member receives: agent runs, workspace shells, and the environment terminal.
+If the member has saved an image, Aether uses it. Otherwise, Aether uses the
+server's standard image. A member's image is never used for another member.
 
-## Choosing an environment at creation
+## The standard image
 
-Workspace creation (admin) picks the starting image:
+The standard image is published with each release:
 
-```sh
-aether workspace init <name> --standard   # recommended
-aether workspace init <name>              # minimal neutral image
-aether workspace init <name> --image <ref>  # any admin-approved image
+```
+ghcr.io/3xdevops/aether-standard:<tag>
 ```
 
-The **standard image** is published with each release
-(`ghcr.io/3xdevops/aether-standard`) and carries git, go, node (via fnm),
-python with uv, rust, and common build tools, so most projects work with
-zero setup. The **neutral image** is a minimal Ubuntu with shell basics
-only. The dashboard's create-workspace form offers the same three choices
-with standard preselected; `server.info` reports both refs so clients can
-name them.
+Its contents are pinned in `images/standard/Dockerfile`: Ubuntu 24.04 with
+bash, build-essential, certificates, curl, findutils, Git, grep, jq,
+pkg-config, Python 3 with venv, ripgrep, sudo, unzip, Go, Node and npm via
+fnm, uv, and Rust via rustup. The server selects this image through
+`--standard-image`; the default is the image matching the server build. Teams
+that need a shared baseline can publish their own image and point
+`--standard-image` at it.
 
-A workspace keeps the exact ref it was created with across server
-upgrades. Moving to a newer standard image is an explicit environment
-change, never a silent one.
-
-## Letting an agent build the environment
-
-The dashboard's onboarding wizard adds an Environment step after workspace
-creation. It needs the desktop app or `aether gui` (the flows run through
-the local gateway on your machine) and one of the four setup-capable
-agents installed locally: claude, codex, pi, or amp
-(see [harnesses.md](harnesses.md)). Two agent paths:
-
-- **Mirror my machine**: the agent inventories your local toolchains -
-  language runtimes at your versions, version managers, dev CLIs, system
-  libraries - and translates them to Ubuntu equivalents. It never reads
-  dotfiles, credentials, or personal files.
-- **From the repository**: the agent reads the project's own files
-  (manifests, lockfiles, CI configs, and `.devcontainer/devcontainer.json`
-  as the strongest signal) and derives what the project needs rather than
-  what any machine has. The scan runs read-only: if the repository's git
-  status changes during the run, the scan fails.
-
-The agent runs headless with a fixed prompt and must produce exactly a
-`Dockerfile` and a `manifest.json` naming each item with its version, the
-Dockerfile lines that install it, and a check command. Raw agent output
-streams behind a collapsed "View process" expander. Malformed output gets
-one automatic retry; scans time out after ten minutes.
-
-The same headless machinery runs one more scan, in the wizard's Agents
-step: a `profile` scan reads what each coding agent on your machine is
-configured with - paths and counts only, never file contents and never
-anything the credential denylist or the secret scanner flagged - and
-recommends which of it is worth importing into Aether, one sentence of
-reasoning per harness. The recommendation is a checklist you edit and
-approve; importing itself is profile sync, described in
-[harnesses.md](harnesses.md).
-
-You then review the result as a plain list: remove items, ask for changes
-in your own words (the agent re-runs with your note), or approve. Approval
-saves the definition and builds it in the background while onboarding
-continues - runs use the creation-time image and show a "still building"
-banner until the verified image swaps in. Every failure path offers
-keeping the standard environment, so the wizard never dead-ends.
-
-## Definitions, verification, and rollback
-
-The server stores each workspace's environment as a versioned
-**definition**: the Dockerfile, the manifest, which path produced it
-(`mirror`, `repo`, `standard`, `manual`), and which harness wrote it.
-Exactly one version is active, and the workspace image always equals the
-active version's tag.
-
-Builds run on the server's own Docker daemon. Built images are tagged
-`aether/ws-<workspace-id>:<version>` and are local-only: never pulled from
-a registry, rebuilt from the stored Dockerfile if the tag is missing.
-The build context is the Dockerfile alone - `COPY` and `ADD` are rejected
-at validation, so no server or local files can enter the image. After a
-successful build the server boots a throwaway container and runs every
-manifest item's check command; only an image whose claims all hold becomes
-the workspace image. On any failure the workspace keeps its previous
-image. Retention keeps the active and the previous version's tags and
-removes older ones.
-
-A build is arbitrary code on the server's Docker daemon, which is why
-every call that saves, builds, edits, or rolls back a definition is
-admin-guarded.
-
-Administrators drive the lifecycle from the CLI:
+Workspace creation does not choose an image. The command needs only the
+workspace name and, optionally, its base branch:
 
 ```sh
-aether env show       # active manifest, version history, statuses
-aether env rebuild    # build the active (or --version <n>) definition
-aether env rollback   # re-activate the previous good version
+aether workspace init <name>
+aether workspace init <name> --base <branch>
 ```
 
-`aether env rebuild` follows the build to its terminal status and exits
-nonzero on failure.
+## Install in the environment terminal
 
-## Changing the environment later
+Open the environment terminal with `aether terminal` or from the dashboard's
+terminal dock. This is where a member installs system tools and language
+runtimes, for example with `sudo apt-get install -y gh`, Homebrew, or a
+language toolchain. The terminal is a persistent shell with the member home
+mounted at `$HOME`.
 
-The workspace page's Environment panel (admin) shows the active manifest,
-the version history with failure details, and rollback. To change
-something, pick a harness and describe the change in plain words - "add
-the postgres 16 client", "bump go to 1.24". The server runs that harness
-headless in a container with your registered login and tools (it must be
-set up via `aether agent add` first), under the same output contract as
-the wizard. The proposal appears as a Dockerfile diff plus the updated
-item list; approving builds, verifies, and swaps exactly like any other
-version, and a dismissed proposal simply stays in history unbuilt.
+Until the environment is saved, only the member home is shared with runs. The
+container layer outside `$HOME` belongs to that terminal container and is not
+available to runs or a replacement terminal.
 
-## Prebuilt images instead
+Workspace environment variables and the workspace setup script still apply to
+runs. They are workspace settings, not image selection.
 
-`workspace init --image <ref>` accepts any registry reference the server
-can pull. To prepare artifacts for administrator review and out-of-band
-publication:
+## Save the environment
+
+Save from the terminal dock with **Save environment**, or run:
 
 ```sh
-aether image init
-aether image init --devcontainer
+aether env save
 ```
 
-These create a normal `Dockerfile`, `.dockerignore`, and optionally a
-`.devcontainer/devcontainer.json`; they do not build or push anything.
-Aether never executes arbitrary project container metadata on the server.
+Saving pauses the terminal for the few seconds Docker needs to commit its
+running container. Aether stores the committed image on the server's Docker
+daemon and never pushes it to a registry. The tag is:
 
-An administrator can repoint an existing workspace to another tagged or
-digest-pinned image with `aether workspace settings --image <ref>`. This is
-useful after a server upgrade ships a newer standard image. The dashboard's
-workspace settings action provides the same operation.
+```
+aether/member-<member-id>:<unix-seconds>
+```
 
-## Protocol surface
+The saved tag is recorded on the member. A later save removes the previous
+saved tag after the new image is active. The command prints `saved <tag>`,
+then `new runs and terminals start from this environment`.
 
-For integrators: the control-channel methods are `env.save`, `env.build`,
-`env.status`, `env.rollback`, `env.edit`, `env.get`, and `workspace.image`.
-All require workspace admin. `workspace.image` reads the current image when
-called without an image and updates it when given a tagged or digest-pinned
-reference. Build and edit progress ride the event feed as
-`environment.build` and `environment.edit` events (version, status, output
-line, failure detail). The local machine-side pieces - harness detection
-and the scan socket - are documented in
-[local-gateway.md](local-gateway.md).
+Runs that are already running keep their existing containers. New runs,
+workspace shells, and the next environment terminal open use the saved image.
+The terminal that was saved keeps running, so its committed state is already
+available to later containers.
 
+Saving requires a running terminal. If the terminal is not running, open it
+first and then save.
+
+## Reset to standard
+
+Reset from **Reset to standard** in the terminal dock's Stop dialog, or run:
+
+```sh
+aether env reset
+```
+
+Reset stops the terminal, forgets the member's saved image, and removes its
+saved tag from the server's Docker daemon. The next terminal open and all new
+runs use the standard image. The command prints
+`environment reset to the standard image`.
+
+There is no save history or other undo. To fix a bad save, repair the
+installation in the terminal and save again, or reset to standard.
+
+## Missing saved images
+
+Saved images exist only on the server's Docker daemon. If an operator prunes a
+saved tag, the member's runs and terminal fail with an error that names the
+missing tag and tells the member to run `aether env reset`. Aether does not
+silently fall back to the standard image.
+
+## Status and protocol
+
+`aether terminal status` reports `image`, the image used by the current
+terminal container, and `saved image`, the member's saved image when one
+exists. The dashboard gets the same saved reference as `saved_image` in
+`terminal.status`; `image` continues to identify the current container image.
+
+The member-scoped control-channel methods are:
+
+- `env.save` returns `{"image":"<tag>"}`.
+- `env.reset` returns `{}`.
+- `terminal.status` includes `saved_image`, omitted when it is empty.
+
+Both environment methods use the normal protocol error path. Saving without a
+running terminal returns an invalid-state error telling the member to open the
+terminal first.

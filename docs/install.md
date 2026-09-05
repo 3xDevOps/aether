@@ -112,6 +112,15 @@ either way. `aether update` is not a Windows command; it refuses to run
 there. Upgrading a Windows client means downloading the new release binary
 over the old one, exactly as below.
 
+### Environment image migration
+
+The member environment image change is one-way. Workspaces no longer carry an
+image; existing custom-image workspaces use the standard image after upgrade.
+The `--neutral-image` server flag and the `env-edits/` data directory are
+gone, and the bootstrap image is no longer published. Saved member images
+live only in the server's Docker daemon; `aether env reset` removes a saved
+image and returns that member to the standard image.
+
 **From the dashboard.** The **Update now** button runs the same swap from the
 `aether gui` process, which runs as you. A CLI in a directory you own -
 `~/.local/bin`, a Homebrew prefix - is replaced without a question on macOS
@@ -513,63 +522,30 @@ are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 ## Images and containers
 
 An image is a read-only package used to create containers. A container is one
-runtime instance of that image and is discarded after a run or terminal
-session. The server opens terminals only inside containers, never on the host.
-Aether never mounts the Docker socket into a workspace container. How workspace
-images are chosen and built is covered in [environments.md](environments.md).
+runtime instance of that image. The server opens terminals only inside
+containers, never on the host, and never mounts the Docker socket into a
+workspace container.
 
-When a workspace has no custom image, the server selects its configured neutral
-image. It contains a shell, certificates, curl, Git, and common file-search
-tools. It does not contain a vendor agent. Install agents in the member home
-with `aether terminal`; the installed files persist across containers.
+Every container a member receives - agent runs, workspace shells, and the
+environment terminal - starts from that member's saved image. When the member
+has not saved one, the server uses its standard image, configured with
+`--standard-image`. See [environments.md](environments.md) for the standard
+image contents, saving, resetting, and missing-image behavior.
 
-A release also publishes a prebuilt standard environment image:
+The environment terminal is where members install system packages and
+toolchains. Files in the member home persist across containers. Files outside
+the home live in the container layer and reach later runs only after the
+member saves the environment.
 
-```
-ghcr.io/3xdevops/aether-standard:<release-tag>
-```
+Workspace creation accepts the workspace name and optional base branch:
 
-It extends the neutral image with build tools (build-essential, pkg-config,
-unzip), ripgrep, jq, and pinned toolchains usable by every container user: Go,
-Node LTS via fnm, Python 3 with uv, and Rust via rustup. The versions are
-pinned in `images/standard/Dockerfile` and change only with a release; a
-workspace created with this image keeps its exact ref until an explicit image
-change. Both images are tagged with the release tag, the commit hash, and
-`latest`.
-
-Files installed in the member home persist across containers. System packages
-installed into `/usr` or `/etc`, edits elsewhere in the container filesystem,
-and container process state do not persist. Put required system dependencies in
-an administrator-approved custom image.
-
-Use `aether workspace init <name>` for the neutral default, or
-`aether workspace init <name> --image <image>` when the project needs system
-dependencies that the neutral image does not provide. Workspace image
-references are administrator-owned configuration, not member input.
-
-Workspaces can also carry a server-built environment image: an admin-saved
-Dockerfile the server builds, verifies, and swaps in (see
-[environments.md](environments.md)). These images live only in the server's
-Docker daemon as `aether/ws-<workspace-id>:<version>` tags and are never pushed
-to or pulled from a registry. Retention keeps two tags per workspace, the
-active version and the most recent previously active one, and removes older
-tags after a successful swap. `aether env rollback` re-activates the previous
-version, rebuilding its image from the stored Dockerfile if retention already
-removed the tag, so disk usage stays bounded at roughly two images per
-workspace.
-
-To prepare a normal Dockerfile and optional standard Dev Container metadata for
-review and later image publication:
-
-```
-aether image init
-aether image init --devcontainer
+```sh
+aether workspace init <name>
+aether workspace init <name> --base <branch>
 ```
 
-The command writes `Dockerfile`, `.dockerignore`, and, when requested,
-`.devcontainer/devcontainer.json` in the current directory. It does not run a
-build, log in to a registry, or install a vendor agent. Existing files are
-preserved unless `--force` is supplied.
+Workspace variables and the setup script remain workspace settings and still
+apply to runs.
 
 ## First boot
 
@@ -602,7 +578,7 @@ journalctl -u aether-server -f
 
 The unit runs the server as root and creates `/var/lib/aether` through
 `StateDirectory=`. Root is deliberate: Docker socket access is already
-root-equivalent on the host, and workspace images with a non-root user make the
+root-equivalent on the host, and member images with a non-root user make the
 server chown run checkouts to that UID, which needs `CAP_CHOWN`. The header
 comment in the unit spells out how to run unprivileged instead, and what you
 give up.
@@ -620,8 +596,7 @@ Serve options, which are also the config-file keys:
 | --- | --- | --- |
 | `--data-dir` | `/var/lib/aether` | Everything the server owns. |
 | `--addr` | `:2222` | The SSH listener. This is the only port that must be reachable. |
-| `--neutral-image` | server-configured neutral image | Server-owned image selected for workspaces without a custom image. Set this to a pinned deployment-approved image to override it. |
-| `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard environment image that clients recommend at workspace creation; `server.info` reports it alongside the neutral image. Same tagging rules as `--neutral-image`. |
+| `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
@@ -710,7 +685,6 @@ The dashboard Settings page can run the same sync once, on demand.
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run conflict-coordination sockets, recreated each run. |
-| `env-edits/` | Per-edit scratch output of environment edit agents, removed when each edit ends. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. |
 
 Member homes are server-owned state. Back up the database, `homes/`, and
@@ -756,8 +730,8 @@ sudo systemctl daemon-reload
 
 # 2. Containers. Stopping the server does NOT remove them.
 sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)
-# Remove deployment-specific neutral and standard images according to your
-# Docker image retention policy.
+# Remove the standard image and saved member images according to your Docker
+# image retention policy.
 
 # 3. State, config, binary.
 sudo rm -rf /var/lib/aether /etc/aether

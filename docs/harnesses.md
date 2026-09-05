@@ -30,13 +30,10 @@ Two rules shape everything below:
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user).
 
-The **Env setup** column marks the harnesses that can set up a workspace
-environment for you (for example, building an image that mirrors your own
-machine during onboarding). Exactly claude, codex, pi, and amp qualify;
-everything else stays launchable for runs but is never offered there. The
-same four power later environment edits from the workspace page's
-Environment panel; those run on the server, so the chosen agent must be
-registered there with `aether agent add`.
+The **Env setup** column marks harnesses that can participate in onboarding:
+running the local `profile` scan and opening the agent setup shell. Exactly
+claude, codex, pi, and amp qualify; everything else stays launchable for runs
+but is not offered in those onboarding flows.
 
 Only harnesses with an **MCP** column of `yes` can be pointed at the in-container
 coordination bridge, so conflict coordination between overlapping runs works for
@@ -98,8 +95,8 @@ requires a task.
 
 These are the vendors' own flags, and vendors rename them. If a launch fails
 with an unknown-flag error, the installed CLI has drifted from the registry.
-Pin it in an administrator-approved custom image or update the registry. A
-member's installed CLI lives in that member's environment home.
+Update the registry or install a compatible CLI in the member's environment
+terminal. The installed executable lives in that member's environment home.
 
 ## Setting up an agent
 

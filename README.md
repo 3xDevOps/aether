@@ -87,8 +87,9 @@ deterministic `fake` harness for testing the whole lifecycle without a vendor
 account. Adding another is one map entry:
 [docs/adapters.md](docs/adapters.md).
 
-Aether does not install agents - the agent CLI lives in your workspace's
-container image. See [docs/harnesses.md](docs/harnesses.md).
+Aether does not install agents - install the agent CLI in your member
+environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
+[docs/environments.md](docs/environments.md).
 
 ## Documentation
 
@@ -96,9 +97,10 @@ container image. See [docs/harnesses.md](docs/harnesses.md).
 | --- | --- |
 | [Quickstart](docs/quickstart.md) | Zero to a finished run in ten minutes. |
 | [Install](docs/install.md) | The install script, systemd, upgrades, data layout. |
+| [Environments](docs/environments.md) | Member images, saving, resetting, and persistence. |
 | [Networking](docs/networking.md) | Tailscale-first keyless setup, plus LAN and VPN. |
 | [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
-| [Harnesses](docs/harnesses.md) | Per-agent login and image requirements. |
+| [Harnesses](docs/harnesses.md) | Per-agent login, profile sync, and launch requirements. |
 | [Adapters](docs/adapters.md) | Adding a harness profile or an output adapter. |
 | [Security](docs/security.md) | What the container boundary does and does not do. |
 | [Local gateway](docs/local-gateway.md) | The HTTP/WS surface `aether gui` serves. |
