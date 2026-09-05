@@ -64,63 +64,37 @@ func printWorkspaces(w io.Writer, workspaces []protocol.Workspace) error {
 }
 
 type workspaceCreateOptions struct {
-	name     string
-	image    string
-	base     string
-	standard bool
+	name string
+	base string
 }
 
 func workspaceInit(args []string) error {
 	fs := flag.NewFlagSet("workspace init", flag.ContinueOnError)
-	image := fs.String("image", "", "custom container image (empty selects the server neutral image)")
 	base := fs.String("base", "", "branch new run worktrees are cut from (default main)")
-	standard := fs.Bool("standard", false, "use the server's recommended standard environment image")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" {
-		return fmt.Errorf("usage: aether workspace init <name> [--standard | --image <image>] [--base <branch>]")
+		return fmt.Errorf("usage: aether workspace init <name> [--base <branch>]")
 	}
-	if *standard && *image != "" {
-		return fmt.Errorf("aether workspace init: --standard and --image cannot be used together")
-	}
-	return createWorkspace(workspaceCreateOptions{name: name, image: *image, base: *base, standard: *standard})
+	return createWorkspace(workspaceCreateOptions{name: name, base: *base})
 }
 
 func workspaceAdd(args []string) error {
 	fs := flag.NewFlagSet("workspace add", flag.ContinueOnError)
-	image := fs.String("image", "", "container image for runs")
 	base := fs.String("base", "", "branch new run worktrees are cut from (default main)")
-	standard := fs.Bool("standard", false, "use the server's recommended standard environment image")
 	name, err := parseLeadingArg(fs, args)
-	if err != nil || name == "" || (*image == "" && !*standard) {
-		return fmt.Errorf("usage: aether workspace add <name> (--standard | --image <image>) [--base <branch>]")
+	if err != nil || name == "" {
+		return fmt.Errorf("usage: aether workspace add <name> [--base <branch>]")
 	}
-	if *standard && *image != "" {
-		return fmt.Errorf("aether workspace add: --standard and --image cannot be used together")
-	}
-	return createWorkspace(workspaceCreateOptions{name: name, image: *image, base: *base, standard: *standard})
+	return createWorkspace(workspaceCreateOptions{name: name, base: *base})
 }
 
-// createWorkspace is the one wire call behind init and add; the two differ
-// only in whether an image is required. An empty base branch lets the
-// server apply its default rather than the CLI guessing one. --standard
-// asks the server for its recommended image first, so the workspace is
-// created already pinned to that ref.
+// createWorkspace is the wire call shared by init and add.
 func createWorkspace(opts workspaceCreateOptions) error {
 	return withControl(func(c *protocol.Client) error {
-		var info protocol.ServerInfoResult
-		if opts.standard {
-			if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
-				return fmt.Errorf("fetch server info for --standard: %w", err)
-			}
-		}
-		env, err := createEnvironment(opts, info)
-		if err != nil {
-			return err
-		}
 		var res protocol.WorkspaceAddResult
 		if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{
 			Name:        opts.name,
-			Environment: env,
+			Environment: protocol.WorkspaceEnvironment{},
 			BaseBranch:  opts.base,
 		}, &res); err != nil {
 			return err
@@ -128,26 +102,6 @@ func createWorkspace(opts workspaceCreateOptions) error {
 		fmt.Printf("workspace %s %s\n", res.Workspace.ID, res.Workspace.Name)
 		return nil
 	})
-}
-
-// createEnvironment shapes the workspace.add environment. --standard pins
-// the ref server.info reported as a plain custom image, so the workspace
-// records the ref itself and keeps it across server upgrades.
-func createEnvironment(opts workspaceCreateOptions, info protocol.ServerInfoResult) (protocol.WorkspaceEnvironment, error) {
-	if !opts.standard {
-		return workspaceEnvironment(opts.image), nil
-	}
-	if info.StandardImage == "" {
-		return protocol.WorkspaceEnvironment{}, fmt.Errorf("server does not report a standard image; upgrade aether-server or pass --image")
-	}
-	return protocol.WorkspaceEnvironment{CustomImage: info.StandardImage}, nil
-}
-
-func workspaceEnvironment(image string) protocol.WorkspaceEnvironment {
-	if image == "" {
-		return protocol.WorkspaceEnvironment{NeutralImage: true}
-	}
-	return protocol.WorkspaceEnvironment{CustomImage: image}
 }
 
 func resolveWorkspaceSelector(c *protocol.Client, input string) (protocol.WorkspaceSelector, error) {

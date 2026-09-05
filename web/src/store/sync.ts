@@ -4,8 +4,6 @@
 import { api, ApiError, type Api } from '@/lib/api'
 import { backoff, connectEvents } from '@/lib/stream'
 import type {
-  EnvironmentBuildPayload,
-  EnvironmentEditPayload,
   Event,
   GitBranchPayload,
   OverlapPayload,
@@ -266,27 +264,12 @@ export async function applyEvent(
       }
       break
     }
-    case 'environment.build': {
-      // One moment of a workspace image build. The slice keeps only the
-      // latest coarse state; the banner on the First-run step and the run
-      // view is its reader.
-      const p = ev.payload as EnvironmentBuildPayload
-      if (ev.workspace_id) store.getState().applyEnvBuild(ev.workspace_id, p)
-      break
-    }
     case 'server.update': {
       // The server updating itself. It is published once per workspace,
       // so the same phase lands several times; the slice keeps the
       // furthest one. The banner and the status bar read it live, and
       // `restarting` is the last frame before the socket drops.
       store.getState().applyServerUpdate(ev.payload as ServerUpdatePayload)
-      break
-    }
-    case 'environment.edit': {
-      // One moment of a server-side edit run. The slice keeps the coarse
-      // state plus a line window; the Environment panel is its reader.
-      const p = ev.payload as EnvironmentEditPayload
-      if (ev.workspace_id) store.getState().applyEnvEdit(ev.workspace_id, p)
       break
     }
   }

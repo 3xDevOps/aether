@@ -9,22 +9,14 @@ import type {
   Approval,
   BudgetReport,
   DaemonInstallResult,
-  DaemonStatusResult,
   DiskUsage,
-  EnvGetResult,
+  DaemonStatusResult,
   EnvHarnessesResult,
-  EnvScanFrame,
-  EnvScanRequest,
-  EnvScanResult,
-  EnvScanResultFrame,
   EnvScanStatus,
-  EnvStatusResult,
-  EnvironmentSource,
   GatewayCapabilities,
   ImageScaffoldResult,
   LinkRepoResult,
   LinkStatus,
-  ManifestItem,
   Member,
   Overlap,
   PresenceEntry,
@@ -57,8 +49,6 @@ import type {
   UpdateBuildStatus,
   UpdateStatus,
   Workspace,
-  WorkspaceImageResult,
-  WorkspaceSelector,
 } from '@/lib/types'
 
 export const API_BASE = '/api/v1'
@@ -182,44 +172,43 @@ export function socketURL(path: string): string {
   return url.toString()
 }
 
-/** What each /ws/envscan frame lands on. Output and status stream while
- * the scan runs; exactly one of result or error ends it. */
-export interface EnvScanHandlers {
-  /** One raw line of agent output, in arrival order. */
-  onOutput: (line: string) => void
-  /** A coarse status change: detecting, running, validating, retrying. */
-  onStatus: (status: EnvScanStatus) => void
-  /** The scan produced a validated Dockerfile and manifest pair. */
-  onResult: (result: EnvScanResult) => void
-  /** The scan failed for good, with the last output lines for diagnosis.
-   * An unexpected close lands here too. */
-  onError: (detail: string, outputTail?: string) => void
-}
-
+/** A profile scan's session; closing cancels the gateway process. */
 export interface EnvScanSession {
-  /** Cancels the scan and its process; no handler fires afterward. */
   close: () => void
 }
 
-/** What a /ws/envscan session reports while it runs. The terminal success
- * frame differs by mode, so the shared framing hands it on whole and each
- * caller reads the half its mode produces. */
-interface ScanHandlers {
+/** The start frame of a profile scan: the harness that runs the agent, and
+ * optionally the repository folder so the project can inform the call. */
+export interface ProfileScanRequest {
+  harness: string
+  repo_path?: string
+}
+
+/** A profile scan's output and status stream, ending in a recommendation. */
+export interface ProfileScanHandlers {
   onOutput: (line: string) => void
   onStatus: (status: EnvScanStatus) => void
-  onResult: (frame: EnvScanResultFrame) => void
+  /** The agent's proposal: which harnesses to import, and why. Nothing is
+   * imported until the user approves and profile.push runs. */
+  onResult: (recommendation: ProfileRecommendation) => void
   onError: (detail: string, outputTail?: string) => void
 }
 
+type ProfileScanFrame =
+  | { type: 'output'; line: string }
+  | { type: 'status'; status: EnvScanStatus }
+  | { type: 'result'; recommendation?: ProfileRecommendation }
+  | { type: 'error'; detail: string; output_tail?: string }
+
 /**
- * openScan runs one scan on this machine through the local gateway's
- * /ws/envscan socket: one JSON start frame out, then output and status
- * frames in until a terminal result or error frame. Framing mirrors the
- * attach client: a session settles exactly once, and a close the caller
- * asked for is not an outcome. Every mode - inventory, repo, refine,
- * profile - rides this one function.
+ * Asks the chosen harness which of this machine's agent configuration is
+ * worth bringing to the server. The agent sees paths and category counts
+ * only, never file contents.
  */
-function openScan(req: EnvScanRequest, h: ScanHandlers): EnvScanSession {
+function openProfileScan(
+  req: ProfileScanRequest,
+  h: ProfileScanHandlers,
+): EnvScanSession {
   let socket: WebSocket | null = null
   let disposed = false
   let settled = false
@@ -234,8 +223,6 @@ function openScan(req: EnvScanRequest, h: ScanHandlers): EnvScanSession {
     socket = new WebSocket(socketURL('/ws/envscan'))
   } catch {
     settled = true
-    // After the caller has its session handle; a constructor failure is a
-    // dead connection.
     queueMicrotask(() => {
       if (!disposed) h.onError('connection failed')
     })
@@ -244,24 +231,18 @@ function openScan(req: EnvScanRequest, h: ScanHandlers): EnvScanSession {
   if (socket) {
     const ws = socket
     ws.onopen = () => {
-      // EnvScanRequest with omitempty mirrored: absent keys, not empties.
       const start: Record<string, unknown> = {
         harness: req.harness,
-        mode: req.mode,
+        mode: 'profile',
       }
       if (req.repo_path) start.repo_path = req.repo_path
-      if (req.previous_dockerfile) start.previous_dockerfile = req.previous_dockerfile
-      if (req.previous_manifest_json) {
-        start.previous_manifest_json = req.previous_manifest_json
-      }
-      if (req.feedback) start.feedback = req.feedback
       ws.send(JSON.stringify(start))
     }
     ws.onmessage = (msg) => {
       if (settled || typeof msg.data !== 'string') return
-      let frame: EnvScanFrame
+      let frame: ProfileScanFrame
       try {
-        frame = JSON.parse(msg.data) as EnvScanFrame
+        frame = JSON.parse(msg.data) as ProfileScanFrame
       } catch {
         return
       }
@@ -273,7 +254,11 @@ function openScan(req: EnvScanRequest, h: ScanHandlers): EnvScanSession {
           h.onStatus(frame.status)
           break
         case 'result':
-          settle(() => h.onResult(frame))
+          settle(() =>
+            frame.recommendation
+              ? h.onResult(frame.recommendation)
+              : h.onError('the scan returned no recommendation'),
+          )
           break
         case 'error':
           settle(() => h.onError(frame.detail, frame.output_tail))
@@ -288,8 +273,6 @@ function openScan(req: EnvScanRequest, h: ScanHandlers): EnvScanSession {
   }
 
   return {
-    // Detach the handlers first: a close we asked for is not an outcome,
-    // and the gateway cancels the scan when the socket goes.
     close: () => {
       disposed = true
       const ws = socket
@@ -299,70 +282,6 @@ function openScan(req: EnvScanRequest, h: ScanHandlers): EnvScanSession {
       ws.close()
     },
   }
-}
-
-/**
- * openEnvScan runs one environment scan - inventory, repo, or refine - and
- * reports the validated Dockerfile and manifest pair.
- */
-function openEnvScan(req: EnvScanRequest, h: EnvScanHandlers): EnvScanSession {
-  return openScan(req, {
-    onOutput: h.onOutput,
-    onStatus: h.onStatus,
-    onResult: (frame) =>
-      frame.recommendation
-        ? h.onError('the scan answered a recommendation, not an environment')
-        : h.onResult({
-            dockerfile: frame.dockerfile,
-            manifest: frame.manifest,
-          }),
-    onError: h.onError,
-  })
-}
-
-/** The start frame of a profile scan: the harness that runs the agent, and
- * optionally the repository folder so the project can inform the call. */
-export interface ProfileScanRequest {
-  harness: string
-  repo_path?: string
-}
-
-/** A profile scan's frames. Same output and status stream as an
- * environment scan; the terminal success frame is a recommendation. */
-export interface ProfileScanHandlers {
-  onOutput: (line: string) => void
-  onStatus: (status: EnvScanStatus) => void
-  /** The agent's proposal: which harnesses to import, and why. Nothing is
-   * imported until the user approves and profile.push runs. */
-  onResult: (recommendation: ProfileRecommendation) => void
-  onError: (detail: string, outputTail?: string) => void
-}
-
-/**
- * openProfileScan asks the chosen harness which of this machine's agent
- * configuration is worth bringing to the server. The agent sees paths and
- * category counts only - never file contents.
- */
-function openProfileScan(
-  req: ProfileScanRequest,
-  h: ProfileScanHandlers,
-): EnvScanSession {
-  return openScan(
-    {
-      harness: req.harness,
-      mode: 'profile',
-      ...(req.repo_path ? { repo_path: req.repo_path } : {}),
-    },
-    {
-      onOutput: h.onOutput,
-      onStatus: h.onStatus,
-      onResult: (frame) =>
-        frame.recommendation
-          ? h.onResult(frame.recommendation)
-          : h.onError('the scan answered an environment, not a recommendation'),
-      onError: h.onError,
-    },
-  )
 }
 
 // Only what the SPA actually calls; the team-feature methods land with the
@@ -467,11 +386,6 @@ export const api = {
       workspace_id: params.workspace_id,
       steer_others: params.steer_others ?? '',
     }).then((r) => r.workspace),
-  workspaceImage: (workspaceID: string, image?: string) =>
-    call<WorkspaceImageResult>('workspace.image', {
-      workspace_id: workspaceID,
-      image: image ?? '',
-    }),
   // Budgets: the server clears a budget on a limit of zero or less, so
   // `clear` is spelled here rather than by every caller.
   budgetSet: (params: {
@@ -583,55 +497,6 @@ export const api = {
   localUpdateStatus: () => local<UpdateBuildStatus>('update.status'),
   localImageScaffold: (repo: string, kind: 'dockerfile' | 'devcontainer') =>
     local<ImageScaffoldResult>('image.scaffold', { repo, kind }),
-  // Workspace environments: definitions live on the server (admin-guarded
-  // wire methods), the inventory scan runs on this machine through the
-  // local gateway.
-  envStatus: (ws: WorkspaceSelector) =>
-    call<EnvStatusResult>('env.status', { workspace: ws }),
-  envSave: (params: {
-    workspace: WorkspaceSelector
-    dockerfile: string
-    manifest: ManifestItem[]
-    source: EnvironmentSource
-    harness?: string
-  }) =>
-    call<{ version: number }>('env.save', {
-      workspace: params.workspace,
-      dockerfile: params.dockerfile,
-      manifest: params.manifest,
-      source: params.source,
-      ...(params.harness ? { harness: params.harness } : {}),
-    }).then((r) => r.version),
-  /** Builds the given version, or the active/newest one when omitted;
-   * progress rides the environment.build event stream. */
-  envBuild: (ws: WorkspaceSelector, version?: number) =>
-    call<{ version: number }>('env.build', {
-      workspace: ws,
-      ...(version ? { version } : {}),
-    }).then((r) => r.version),
-  /** Returns to the most recent previously good version; the server picks
-   * the target and answers with the version that is active again. */
-  envRollback: (ws: WorkspaceSelector) =>
-    call<{ version: number }>('env.rollback', { workspace: ws }).then(
-      (r) => r.version,
-    ),
-  /** Asks the given harness to revise the environment from a plain-language
-   * request. The run is asynchronous: agent output, the proposed version,
-   * and failure all ride the environment.edit event stream. */
-  envEdit: (ws: WorkspaceSelector, harness: string, request: string) =>
-    call<{ accepted: boolean }>('env.edit', {
-      workspace: ws,
-      harness,
-      request,
-    }),
-  /** Reads one stored version in full; diffAgainst names another version
-   * to diff this version's Dockerfile against. */
-  envGet: (ws: WorkspaceSelector, version: number, diffAgainst?: number) =>
-    call<EnvGetResult>('env.get', {
-      workspace: ws,
-      version,
-      ...(diffAgainst ? { diff_against: diffAgainst } : {}),
-    }),
   /** Which setup-capable harnesses this machine has on PATH, plus the
    * linked repository folder when the gateway knows exactly one. */
   envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
@@ -649,7 +514,6 @@ export const api = {
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),
-  openEnvScan,
   openProfileScan,
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>

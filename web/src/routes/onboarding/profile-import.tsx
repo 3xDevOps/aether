@@ -12,10 +12,9 @@
 // user's click.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { message } from '@/lib/format'
+import { friendly, formatBytes, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { ApiError, type Api, type EnvScanSession } from '@/lib/api'
-import { formatBytes } from '@/lib/format'
 import type {
   EnvScanStatus,
   HarnessStatus,
@@ -26,7 +25,6 @@ import type {
   ProfileStatus,
   Workspace,
 } from '@/lib/types'
-import { friendly } from '@/routes/onboarding/environment-step'
 
 const pane =
   'max-h-64 overflow-x-auto overflow-y-auto border-t px-3 py-2 font-mono text-xs whitespace-pre-wrap'

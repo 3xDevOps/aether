@@ -8,14 +8,13 @@
 // an agent login and a profile snapshot are both per-member.
 
 import { useCallback, useEffect, useState } from 'react'
-import { message } from '@/lib/format'
+import { friendly, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
 import type { AgentInfo, HarnessStatus, Workspace } from '@/lib/types'
 import { AgentWizard } from '@/routes/agents/wizard'
-import { friendly } from '@/routes/onboarding/environment-step'
 import { ProfileImport } from '@/routes/onboarding/profile-import'
 import type { Capability } from '@/store/hooks'
 

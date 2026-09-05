@@ -4,7 +4,6 @@ import { StateDot } from '@/components/state-dot'
 import { ViewHeader } from '@/components/view-header'
 import { timeAgo } from '@/lib/format'
 import { pendingApprovalRuns, runLabel, runState, stateLabel } from '@/lib/status'
-import { EnvironmentBanner } from '@/routes/onboarding/environment-step'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
@@ -41,12 +40,6 @@ export function RunView({ params }: RouteProps) {
         actions={<RunActions run={run} />}
       />
       <RunTabs runID={run.id} active="run" />
-      {/* Nothing renders here until this session started an environment
-          build for the run's workspace; hidden when the banner is null so
-          the padding leaves no phantom gap. */}
-      <div className="px-4 pt-4 empty:hidden">
-        <EnvironmentBanner workspaceId={run.workspace_id} />
-      </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 p-4 text-sm">
         <dt className="text-muted-foreground">State</dt>
         <dd className="flex items-center gap-2">
