@@ -233,7 +233,7 @@ func (e *chaosEnv) seedStore(t *testing.T) {
 	}
 	e.ws = &domain.Workspace{
 		Name:        "chaos",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "busybox"},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err := db.CreateWorkspace(e.ctx, e.ws); err != nil {

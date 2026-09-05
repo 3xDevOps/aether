@@ -78,7 +78,7 @@ func TestMemberHomePersistsAcrossContainers(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "homes",
-		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	for _, m := range []*domain.Member{memberA, memberB} {

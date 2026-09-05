@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
@@ -162,71 +159,6 @@ func (s *Scheduler) checkFreeSpace() error {
 		ErrDiskFull, free, s.cfg.MinFreeBytes)
 }
 
-// checkAgentPresent refuses a neutral-image launch when the member home does
-// not contain the executable expected by the resolved shipped profile.
-func (s *Scheduler) checkAgentPresent(_ context.Context, member domain.MemberID, ws *domain.Workspace, harnessName, executable string) error {
-	installScript := ""
-	if p, ok := harness.Lookup(harnessName); ok {
-		installScript = p.InstallScript
-	}
-	return s.checkAgentPresentWithScript(member, ws, harnessName, executable, installScript)
-}
-
-func (s *Scheduler) checkAgentPresentWithScript(member domain.MemberID, ws *domain.Workspace, harnessName, executable, installScript string) error {
-	if _, deployment := s.harnesses[harnessName]; deployment {
-		return nil
-	}
-	if ws == nil || !ws.Environment.NeutralImage || s.cfg.Homes == nil {
-		return nil
-	}
-	return s.agentPresenceError(member, harnessName, executable, installScript)
-}
-
-func (s *Scheduler) memberHomeExecutable(member domain.MemberID, executable string) (bool, error) {
-	if s.cfg.Homes == nil {
-		return false, nil
-	}
-	homePath, err := s.cfg.Homes.Path(member)
-	if err != nil {
-		return false, fmt.Errorf("scheduler: resolve member home: %w", err)
-	}
-	root, err := os.OpenRoot(homePath)
-	if err != nil {
-		return false, fmt.Errorf("scheduler: open member home: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-	rel := filepath.Join(".local", "bin", executable)
-	info, err := root.Lstat(rel)
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("scheduler: stat member home executable: %w", err)
-	}
-	// Vendor installers commonly leave ~/.local/bin/<exe> as a symlink to
-	// a container-absolute versioned path (claude's native install). That
-	// target only resolves inside the container where the home is mounted
-	// at $HOME, so a symlink counts as installed without following it.
-	if info.Mode()&fs.ModeSymlink != 0 {
-		return true, nil
-	}
-	return info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0, nil
-}
-
-func (s *Scheduler) agentPresenceError(member domain.MemberID, harnessName, executable, installScript string) error {
-	present, err := s.memberHomeExecutable(member, executable)
-	if err != nil {
-		return err
-	}
-	if present {
-		return nil
-	}
-	if installScript == "" {
-		installScript = "install " + harnessName + " into ~/.local/bin"
-	}
-	return fmt.Errorf("scheduler: agent %q is not installed in your environment: %q is not in ~/.local/bin; open your terminal (aether terminal) and run: %s",
-		harnessName, executable, installScript)
-}
 
 // Launch creates a new run and provisions it synchronously: checkout and
 // branch via the git seam, container via the runtime, agent PTY via the
@@ -250,9 +182,6 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, workspace)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.checkAgentPresentWithScript(member, ws, harness, argv[0], profile.InstallScript); err != nil {
 		return nil, err
 	}
 	run := &domain.Run{

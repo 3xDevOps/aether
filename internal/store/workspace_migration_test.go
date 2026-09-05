@@ -385,3 +385,55 @@ func TestMemberHomeMigrationDropsLegacyTables(t *testing.T) {
 		t.Fatal("member_terminals table missing after migration")
 	}
 }
+func TestWorkspaceEnvironmentMigrationDropsLegacyImageColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, 18)
+	if _, err := raw.Exec(`
+		INSERT INTO workspaces (id, name, image, env, setup_script, environment, base_branch, steer_others, created_at)
+		VALUES ('w1', 'proj', 'legacy-image', '{"AETHER_MODE":"bootstrap"}', 'echo setup', '{}', 'main', '', 1);
+	`); err != nil {
+		t.Fatalf("seed legacy workspace: %v", err)
+	}
+	if _, err := raw.Exec(migrations[18]); err != nil {
+		t.Fatalf("apply v19: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (19, 0)`); err != nil {
+		t.Fatalf("record v19: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	ws, err := db.GetWorkspace(context.Background(), "w1")
+	if err != nil {
+		t.Fatalf("get migrated workspace: %v", err)
+	}
+	if got := ws.Environment.Variables["AETHER_MODE"]; got != "bootstrap" {
+		t.Fatalf("variables = %#v, want AETHER_MODE=bootstrap", ws.Environment.Variables)
+	}
+	if got := ws.Environment.SetupPolicy.Script; got != "echo setup" {
+		t.Fatalf("setup script = %q, want echo setup", got)
+	}
+	for _, column := range []string{"image", "env", "setup_script"} {
+		var count int
+		if err := db.db.QueryRow(`SELECT count(*) FROM pragma_table_info('workspaces') WHERE name = ?`, column).Scan(&count); err != nil {
+			t.Fatalf("inspect workspace column %s: %v", column, err)
+		}
+		if count != 0 {
+			t.Errorf("workspaces.%s survived migration", column)
+		}
+	}
+	var definitions int
+	if err := db.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'environment_definitions'`).Scan(&definitions); err != nil {
+		t.Fatalf("inspect environment_definitions: %v", err)
+	}
+	if definitions != 0 {
+		t.Fatal("environment_definitions survived migration")
+	}
+}

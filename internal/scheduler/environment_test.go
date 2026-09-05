@@ -16,10 +16,9 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}
-	s := &Scheduler{cfg: Config{NeutralImage: "neutral:latest", Homes: homes}}
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes}}
 	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{
-		NeutralImage: true,
-		Variables:    map[string]string{"PATH": "/workspace/bin", "EXTRA": "yes"},
+		Variables: map[string]string{"PATH": "/workspace/bin", "EXTRA": "yes"},
 	}}
 	member := &domain.Member{ID: "member"}
 	for _, purpose := range []EnvironmentPurpose{EnvironmentPurposeRun, EnvironmentPurposeTerminal} {
@@ -42,19 +41,18 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 	}
 }
 
-func TestBuildEnvironmentPlanUsesNeutralImageAndToolsFirstPath(t *testing.T) {
-	s := &Scheduler{cfg: Config{NeutralImage: "neutral:latest"}}
+func TestBuildEnvironmentPlanUsesStandardImageAndToolsFirstPath(t *testing.T) {
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest"}}
 	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{
-		NeutralImage: true,
-		Variables:    map[string]string{"PATH": "/workspace/bin", "EXTRA": "yes"},
+		Variables: map[string]string{"PATH": "/workspace/bin", "EXTRA": "yes"},
 	}}
 	member := &domain.Member{ID: "member"}
 	plan, err := s.BuildEnvironmentPlan(context.Background(), nil, ws, member, harness.Profile{}, EnvironmentPurposeRun)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Image != "neutral:latest" {
-		t.Fatalf("image = %q, want neutral:latest", plan.Image)
+	if plan.Image != "standard:latest" {
+		t.Fatalf("image = %q, want standard:latest", plan.Image)
 	}
 	if plan.Env["PATH"] != "/root/.local/bin:/workspace/bin" {
 		t.Fatalf("PATH = %q, want tools first", plan.Env["PATH"])

@@ -185,7 +185,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	var addedWS protocol.WorkspaceAddResult
 	if err := adaCtrl.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{
 		Name:        "team",
-		Environment: protocol.WorkspaceEnvironment{CustomImage: image},
+		Environment: protocol.WorkspaceEnvironment{},
 	}, &addedWS); err != nil {
 		t.Fatalf("workspace.add: %v", err)
 	}

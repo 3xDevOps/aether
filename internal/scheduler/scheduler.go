@@ -57,13 +57,7 @@ type Config struct {
 	Profiles      profileService
 	ReposDir      string
 	WorktreeMount string
-	NeutralImage  string
 	StandardImage string
-	// EnvEditDir is the server-owned scratch root for environment edit
-	// runs: each edit gets its own 0700 directory under it for the
-	// agent's output pair, removed when the edit ends. Empty refuses
-	// agent-driven environment edits.
-	EnvEditDir     string
 	StallThreshold time.Duration
 	PollInterval   time.Duration
 	StopGrace      time.Duration // default 10s
@@ -147,10 +141,6 @@ type Scheduler struct {
 	terminalLocks   map[domain.MemberID]*sync.Mutex
 	terminals       map[domain.MemberID]*terminalSupervision
 	credentialUsers map[*credentialUserReservation]struct{}
-	// envBuildLocks serializes environment builds (and rollbacks) per
-	// workspace: one build at a time per workspace, later callers wait.
-	// Entries are created on first use and kept for the scheduler's life.
-	envBuildLocks map[domain.WorkspaceID]*sync.Mutex
 	titleMu       sync.Mutex
 	titleUpdates  map[domain.RunID]*pendingRunTitle
 	// coordination is the attached conflict-coordination service and the

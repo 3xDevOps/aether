@@ -141,7 +141,7 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "update",
-		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {

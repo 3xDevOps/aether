@@ -338,7 +338,7 @@ func newPressureEnv(ctx context.Context, t *testing.T, cfg Config) *pressureEnv 
 	}
 	e.ws = &domain.Workspace{
 		Name:        "pressure",
-		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err := e.srv.Store().CreateWorkspace(ctx, e.ws); err != nil {

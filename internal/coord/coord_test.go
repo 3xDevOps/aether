@@ -166,7 +166,7 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *harness {
 
 	ws := &domain.Workspace{
 		Name:        "proj",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if werr := db.CreateWorkspace(ctx, ws); werr != nil {

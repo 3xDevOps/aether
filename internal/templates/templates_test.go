@@ -79,7 +79,7 @@ func TestScheduleMissedWhileDownIsSkippedNotCaughtUp(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "proj",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
@@ -156,7 +156,7 @@ func TestImpossibleCronRuleIsRefusedAndNeverFires(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "proj",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {
@@ -223,7 +223,7 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "proj",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = db.CreateWorkspace(ctx, ws); err != nil {

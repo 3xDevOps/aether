@@ -658,58 +658,6 @@ func TestLocalSyncStartRequiresLinkedRepo(t *testing.T) {
 	}
 }
 
-func TestLocalImageScaffold(t *testing.T) {
-	// The repo path goes through json.Marshal rather than string
-	// concatenation: a Windows path's backslashes are escape characters
-	// inside a JSON string literal.
-	scaffoldBody := func(repo, kind string) string {
-		t.Helper()
-		raw, err := json.Marshal(struct {
-			Repo string `json:"repo"`
-			Kind string `json:"kind"`
-		}{Repo: repo, Kind: kind})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(raw)
-	}
-
-	repo := t.TempDir()
-	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{Addr: "host:2222"})
-	rec := do(g, http.MethodPost, "/local/v1/image.scaffold",
-		scaffoldBody(repo, "devcontainer"), true)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("image.scaffold = %d: %s", rec.Code, rec.Body)
-	}
-	var got struct {
-		Written []string `json:"written"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got.Written) != 3 {
-		t.Fatalf("written = %v", got.Written)
-	}
-	if got.Written[2] != filepath.Join(repo, ".devcontainer", "devcontainer.json") {
-		t.Fatalf("written[2] = %q", got.Written[2])
-	}
-
-	// Overwrite refusal is an invalid-state, not an internal error.
-	rec = do(g, http.MethodPost, "/local/v1/image.scaffold",
-		scaffoldBody(repo, "dockerfile"), true)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("second scaffold = %d: %s", rec.Code, rec.Body)
-	}
-	if perr := decodeError(t, rec.Body.Bytes()); perr.Code != protocol.CodeInvalidState {
-		t.Fatalf("code = %d", perr.Code)
-	}
-
-	rec = do(g, http.MethodPost, "/local/v1/image.scaffold",
-		scaffoldBody(t.TempDir(), "vm"), true)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("bad kind = %d", rec.Code)
-	}
-}
 
 // sshShim makes ssh:// git URLs resolve to local paths, so a test push
 // really moves objects without dialing anything. Same trick as the pull

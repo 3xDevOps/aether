@@ -400,7 +400,7 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 		if cerr := db.CreateMember(ctx, e.member); cerr != nil {
 			t.Fatalf("create member: %v", cerr)
 		}
-		e.ws = &domain.Workspace{Name: "proj", BaseBranch: "main", Environment: domain.WorkspaceEnvironment{CustomImage: "img"}}
+		e.ws = &domain.Workspace{Name: "proj", BaseBranch: "main", Environment: domain.WorkspaceEnvironment{}}
 		if cerr := db.CreateWorkspace(ctx, e.ws); cerr != nil {
 			t.Fatalf("create workspace: %v", cerr)
 		}

@@ -114,7 +114,6 @@ type Store interface {
 	ApprovalStore
 	TemplateStore
 	CostStore
-	EnvironmentStore
 	ServerUpdateStore
 
 	Close() error

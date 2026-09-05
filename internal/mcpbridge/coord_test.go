@@ -78,7 +78,7 @@ func newCoordStack(t *testing.T) *coordStack {
 
 	ws := &domain.Workspace{
 		Name:        "proj",
-		Environment: domain.WorkspaceEnvironment{CustomImage: "img"},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if werr := db.CreateWorkspace(ctx, ws); werr != nil {

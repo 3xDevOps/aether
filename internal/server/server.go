@@ -37,20 +37,13 @@ import (
 const (
 	DefaultDataDir = "/var/lib/aether"
 	DefaultAddr    = ":2222"
-	// neutralImageRepo and standardImageRepo are the published image
-	// repositories. Docker requires repository names to be lowercase.
-	neutralImageRepo  = "ghcr.io/3xdevops/aether-bootstrap"
+	// standardImageRepo is the published image repository. Docker requires
+	// repository names to be lowercase.
 	standardImageRepo = "ghcr.io/3xdevops/aether-standard"
 )
 
-// DefaultNeutralImage and DefaultStandardImage are the published images
-// matching this build. Release builds pin the images published from the
-// same tag, git-describe builds pin the nearest release tag, and untagged
-// builds track the latest published images.
-var (
-	DefaultNeutralImage  = neutralImageRepo + ":" + releaseImageTag(version.Version)
-	DefaultStandardImage = standardImageRepo + ":" + releaseImageTag(version.Version)
-)
+// DefaultStandardImage is the published image matching this build.
+var DefaultStandardImage = standardImageRepo + ":" + releaseImageTag(version.Version)
 
 var (
 	describeSuffixPattern = regexp.MustCompile(`-\d+-g[0-9a-f]+(?:-dirty)?$`)
@@ -80,17 +73,11 @@ type Config struct {
 	DataDir string
 	// Addr is the SSH listen address; default ":2222".
 	Addr string
-	// NeutralImage is the server-owned image used for workspaces whose
-	// environment selects the neutral base. Empty uses DefaultNeutralImage.
-	// Workspace shell requests cannot override this value.
-	NeutralImage string
-	// StandardImage is the published standard environment image clients
-	// offer as the recommended default at workspace creation, reported by
-	// server.info. Empty uses DefaultStandardImage.
-	StandardImage string
-	// Runtime overrides the container runtime; nil means the local Docker
-	// daemon.
+	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
+	// StandardImage is the server-owned image used for all runs until member
+	// image selection is available. Empty uses DefaultStandardImage.
+	StandardImage string
 	// TailnetAutoJoin registers unknown tailnet identities as approved
 	// members instead of pending ones.
 	TailnetAutoJoin bool
@@ -177,9 +164,6 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}
 	if cfg.Addr == "" {
 		cfg.Addr = DefaultAddr
-	}
-	if cfg.NeutralImage == "" {
-		cfg.NeutralImage = DefaultNeutralImage
 	}
 	if cfg.StandardImage == "" {
 		cfg.StandardImage = DefaultStandardImage
@@ -279,8 +263,6 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Homes:          homes,
 		ReposDir:       filepath.Join(cfg.DataDir, "repos"),
 		Profiles:       prof,
-		EnvEditDir:     filepath.Join(cfg.DataDir, "env-edits"),
-		NeutralImage:   cfg.NeutralImage,
 		StandardImage:  cfg.StandardImage,
 		Harnesses:      cfg.Harnesses,
 		StallThreshold: cfg.StallThreshold,
@@ -317,8 +299,6 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		TailnetAutoJoin:   cfg.TailnetAutoJoin,
 		TailnetRequireKey: cfg.TailnetRequireKey,
 		TailnetHostname:   tailnetHostname,
-		NeutralImage:      cfg.NeutralImage,
-		StandardImage:     cfg.StandardImage,
 		InvitesDir:        filepath.Join(cfg.DataDir, "invites"),
 		Profiles:          prof,
 	}

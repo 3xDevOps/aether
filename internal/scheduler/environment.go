@@ -47,17 +47,9 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if purpose == EnvironmentPurposeRun && ws == nil {
 		return nil, errors.New("scheduler: workspace is required for run environment")
 	}
-	var image string
-	if purpose == EnvironmentPurposeTerminal && ws == nil {
-		image = s.cfg.StandardImage
-		if image == "" {
-			return nil, errors.New("scheduler: standard image is required for terminal environment")
-		}
-	} else {
-		image = ws.Environment.EffectiveImage(s.cfg.NeutralImage)
-		if image == "" {
-			return nil, errors.New("scheduler: workspace has no effective image")
-		}
+	image := s.cfg.StandardImage
+	if image == "" {
+		return nil, errors.New("scheduler: standard image is required")
 	}
 	user, err := s.resolveContainerUser(ctx, image, profile)
 	if err != nil {
@@ -68,11 +60,11 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		home = "/root"
 	}
 	var setupScript string
-	if ws != nil && purpose == EnvironmentPurposeRun {
+	if ws != nil {
 		setupScript = ws.Environment.SetupPolicy.Script
 	}
 	var variableCount int
-	if ws != nil && purpose == EnvironmentPurposeRun {
+	if ws != nil {
 		variableCount = len(ws.Environment.Variables)
 	}
 	env := make(map[string]string, variableCount+len(profile.EnvPassthrough)+5)
@@ -81,7 +73,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			env[key] = value
 		}
 	}
-	if ws != nil && purpose == EnvironmentPurposeRun {
+	if ws != nil {
 		for key, value := range ws.Environment.Variables {
 			env[key] = value
 		}

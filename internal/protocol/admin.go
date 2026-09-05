@@ -2,13 +2,10 @@ package protocol
 
 import "strings"
 
-// WorkspaceEnvironment is the wire form of a workspace environment
-// definition. An empty custom image selects the server neutral image.
+// WorkspaceEnvironment is the wire form of a workspace environment.
 type WorkspaceEnvironment struct {
-	CustomImage  string            `json:"custom_image,omitempty"`
-	NeutralImage bool              `json:"neutral_image,omitempty"`
-	Variables    map[string]string `json:"variables,omitempty"`
-	SetupPolicy  SetupPolicy       `json:"setup_policy,omitempty"`
+	Variables   map[string]string `json:"variables,omitempty"`
+	SetupPolicy SetupPolicy       `json:"setup_policy,omitempty"`
 }
 
 // SetupPolicy is the wire form of the pre-launch setup policy.
@@ -17,9 +14,6 @@ type SetupPolicy struct {
 }
 
 func (e WorkspaceEnvironment) Valid() bool {
-	if (e.CustomImage == "") == !e.NeutralImage {
-		return false
-	}
 	for name := range e.Variables {
 		if name == "" || strings.ContainsAny(name, "=\x00") {
 			return false

@@ -48,26 +48,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Generate bootstrap image tags
-        id: bootstrap-meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/3xdevops/aether-bootstrap
-          tags: |
-            type=raw,value=${{ github.ref_name }}
-            type=raw,value=${{ github.sha }}
-            type=raw,value=latest
-            type=sha,prefix=sha-
-      - name: Publish neutral bootstrap image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/bootstrap/Dockerfile
-          push: true
-          tags: ${{ steps.bootstrap-meta.outputs.tags }}
-          labels: ${{ steps.bootstrap-meta.outputs.labels }}
-      - name: Verify the published image is pullable
-        run: docker pull ghcr.io/3xdevops/aether-bootstrap:${{ github.ref_name }}
 
       - name: Generate standard image tags
         id: standard-meta

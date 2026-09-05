@@ -71,7 +71,6 @@ func TestWorkspaceWireShapeOmitsServerConfig(t *testing.T) {
 	w := &domain.Workspace{
 		ID: "ws_1", Name: "proj",
 		Environment: domain.WorkspaceEnvironment{
-			CustomImage: "secret-image",
 			Variables:   map[string]string{"KEY": "value"},
 			SetupPolicy: domain.SetupPolicy{Script: "curl | sh"},
 		},
@@ -81,7 +80,7 @@ func TestWorkspaceWireShapeOmitsServerConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, leak := range []string{"secret-image", "KEY", "curl"} {
+	for _, leak := range []string{"KEY", "curl"} {
 		if strings.Contains(string(raw), leak) {
 			t.Errorf("workspace wire form leaks %q: %s", leak, raw)
 		}

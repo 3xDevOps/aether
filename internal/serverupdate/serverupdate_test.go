@@ -165,7 +165,7 @@ func newEnv(t *testing.T, poison bool) *env {
 	// The feed is per workspace, so a workspace must exist for the phases
 	// to have anywhere to land.
 	ws := &domain.Workspace{Name: "aether", BaseBranch: "main",
-		Environment: domain.WorkspaceEnvironment{NeutralImage: true}}
+		Environment: domain.WorkspaceEnvironment{}}
 	if cerr := db.CreateWorkspace(t.Context(), ws); cerr != nil {
 		t.Fatalf("create workspace: %v", cerr)
 	}

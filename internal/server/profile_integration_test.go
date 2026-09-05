@@ -71,7 +71,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "prof",
-		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {

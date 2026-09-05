@@ -25,8 +25,6 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		Member:              protocol.MemberFromDomain(m),
 		TailnetHostname:     s.cfg.TailnetHostname,
 		TailnetIdentityAuth: s.cfg.WhoIs != nil,
-		NeutralImage:        s.cfg.NeutralImage,
-		StandardImage:       s.cfg.StandardImage,
 	}, nil
 }
 

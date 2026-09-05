@@ -239,12 +239,6 @@ type Runtime interface {
 	// found and destroyed. Keys are assumed unique; with duplicates any
 	// match may be returned.
 	FindByCreationKey(ctx context.Context, key string) (ID, error)
-	// BuildImage builds an image from the Dockerfile text and tags it.
-	// The build context contains the Dockerfile alone, so the file
-	// cannot COPY or ADD anything from the host. Engine progress lines
-	// stream to progress (which may be nil) as the build runs; a failed
-	// build returns the engine's error detail.
-	BuildImage(ctx context.Context, dockerfile string, tag string, progress io.Writer) error
 	// RemoveImage removes a local image tag. Removing a tag that does
 	// not exist is not an error.
 	RemoveImage(ctx context.Context, tag string) error

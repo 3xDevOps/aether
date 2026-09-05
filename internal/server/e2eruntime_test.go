@@ -329,11 +329,6 @@ func (r *e2eRuntime) FindByCreationKey(_ context.Context, key string) (runtime.I
 	return "", runtime.ErrNotFound
 }
 
-// BuildImage is a no-op: the e2e runtime runs no real images, so a
-// "built" tag needs no state for Create to accept it later.
-func (r *e2eRuntime) BuildImage(context.Context, string, string, io.Writer) error {
-	return nil
-}
 
 // RemoveImage is a no-op for the same reason; a missing tag is not an
 // error, matching the Docker implementation.

@@ -75,7 +75,6 @@ run "aether-server serve -h" for what each one does, or keep them in %s
 type serveOptions struct {
 	dataDir              *string
 	addr                 *string
-	neutralImage         *string
 	standardImage        *string
 	harnessDefinitions   *string
 	tailnetAutoJoin      *bool
@@ -96,8 +95,6 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o := &serveOptions{}
 	o.dataDir = fs.String("data-dir", server.DefaultDataDir, "server data directory")
 	o.addr = fs.String("addr", server.DefaultAddr, "SSH listen address")
-	o.neutralImage = fs.String("neutral-image", server.DefaultNeutralImage,
-		"server-owned neutral bootstrap image for workspaces without a custom image")
 	o.standardImage = fs.String("standard-image", server.DefaultStandardImage,
 		"published standard environment image recommended at workspace creation")
 	o.harnessDefinitions = fs.String("harness-definitions", os.Getenv("AETHER_HARNESS_DEFINITIONS"),
@@ -139,7 +136,6 @@ func serve(args []string) error {
 	srv, err := server.New(ctx, server.Config{
 		DataDir:           *o.dataDir,
 		Addr:              *o.addr,
-		NeutralImage:      *o.neutralImage,
 		StandardImage:     *o.standardImage,
 		Harnesses:         harnesses,
 		TailnetAutoJoin:   *o.tailnetAutoJoin,

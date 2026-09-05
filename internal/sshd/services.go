@@ -22,8 +22,6 @@ type Services struct {
 	Disk DiskReader
 	// Files reads workspace trees and run checkouts without exposing host paths.
 	Files FileReader
-	// Environments builds and rolls back workspace environment images ().
-	Environments EnvironmentService
 	// ServerUpdate replaces the server's own binaries and restarts ().
 	ServerUpdate ServerUpdateService
 }

@@ -7,9 +7,6 @@
 package domain
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -30,82 +27,21 @@ type SetupPolicy struct {
 	Script string `json:"script,omitempty"`
 }
 
-// WorkspaceEnvironment is the server-owned environment definition for a
-// workspace. Exactly one of CustomImage and NeutralImage selects the base
-// image. Variables and setup policy retain the run-level environment inputs.
+// WorkspaceEnvironment carries workspace variables and its pre-launch setup
+// policy.
 type WorkspaceEnvironment struct {
-	CustomImage  string            `json:"custom_image,omitempty"`
-	NeutralImage bool              `json:"neutral_image,omitempty"`
-	Variables    map[string]string `json:"variables,omitempty"`
-	SetupPolicy  SetupPolicy       `json:"setup_policy,omitempty"`
+	Variables   map[string]string `json:"variables,omitempty"`
+	SetupPolicy SetupPolicy       `json:"setup_policy,omitempty"`
 }
 
-// UnmarshalJSON accepts canonical JSON booleans and legacy SQLite numeric
-// 0/1 values for neutral_image. MarshalJSON remains the standard encoder,
-// so values are always written as canonical JSON booleans.
-func (e *WorkspaceEnvironment) UnmarshalJSON(data []byte) error {
-	type environmentAlias WorkspaceEnvironment
-	var raw struct {
-		*environmentAlias
-		NeutralImage json.RawMessage `json:"neutral_image"`
-	}
-	raw.environmentAlias = (*environmentAlias)(e)
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	if len(raw.NeutralImage) == 0 {
-		return nil
-	}
-
-	value := bytes.TrimSpace(raw.NeutralImage)
-	if len(value) == 0 {
-		return fmt.Errorf("domain: neutral_image must be a boolean or numeric 0/1")
-	}
-	switch value[0] {
-	case 't', 'f':
-		var neutral bool
-		if err := json.Unmarshal(value, &neutral); err != nil {
-			return err
-		}
-		e.NeutralImage = neutral
-		return nil
-	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-':
-		var legacy int
-		if err := json.Unmarshal(value, &legacy); err == nil {
-			if legacy == 0 || legacy == 1 {
-				e.NeutralImage = legacy == 1
-				return nil
-			}
-			return fmt.Errorf("domain: neutral_image numeric value must be 0 or 1, got %d", legacy)
-		}
-	}
-
-	return fmt.Errorf("domain: neutral_image must be a boolean or numeric 0/1")
-}
-
-// Valid reports whether the environment has one unambiguous image selection
-// and valid environment variable names.
+// Valid reports whether all environment variable names are valid.
 func (e WorkspaceEnvironment) Valid() bool {
-	if (e.CustomImage == "") == !e.NeutralImage {
-		return false
-	}
 	for name := range e.Variables {
 		if name == "" || strings.ContainsAny(name, "=\x00") {
 			return false
 		}
 	}
 	return true
-}
-
-// EffectiveImage resolves the custom image or the configured neutral image.
-func (e WorkspaceEnvironment) EffectiveImage(neutralImage string) string {
-	if e.CustomImage != "" {
-		return e.CustomImage
-	}
-	if e.NeutralImage {
-		return neutralImage
-	}
-	return ""
 }
 
 // WorkspaceSelector addresses a workspace by exactly one of ID or Name.

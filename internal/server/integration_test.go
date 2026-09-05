@@ -72,7 +72,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	}
 	ws := &domain.Workspace{
 		Name:        "e2e",
-		Environment: domain.WorkspaceEnvironment{CustomImage: image},
+		Environment: domain.WorkspaceEnvironment{},
 		BaseBranch:  domain.DefaultBaseBranch,
 	}
 	if err = srv.Store().CreateMember(ctx, member); err != nil {
@@ -200,7 +200,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 
 	// A workspace created while the server is running is usable without a
 	// restart: the first transport touch lazily creates its bare repo.
-	lateWS := &domain.Workspace{Name: "e2e-late", Environment: domain.WorkspaceEnvironment{CustomImage: image}}
+	lateWS := &domain.Workspace{Name: "e2e-late", Environment: domain.WorkspaceEnvironment{}}
 	if err = srv.Store().CreateWorkspace(ctx, lateWS); err != nil {
 		t.Fatalf("seed late workspace: %v", err)
 	}
