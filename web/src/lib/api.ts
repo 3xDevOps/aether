@@ -13,6 +13,7 @@ import type {
   DaemonStatusResult,
   EnvHarnessesResult,
   EnvScanStatus,
+  EnvSaveResult,
   GatewayCapabilities,
   ImageScaffoldResult,
   LinkRepoResult,
@@ -511,6 +512,8 @@ export const api = {
   localProfilePush: (harness: string) =>
     local<ProfilePushResult>('profile.push', { harness }),
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
+  envSave: () => call<EnvSaveResult>('env.save', {}),
+  envReset: () => call<unknown>('env.reset', {}),
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),

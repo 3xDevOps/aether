@@ -70,16 +70,23 @@ describe('environment terminal methods', () => {
     window.sessionStorage.clear()
   })
 
-  it('posts status and stop RPCs and builds an encoded terminal socket URL', async () => {
+  it('posts status, save, stop, and reset RPCs and builds an encoded terminal socket URL', async () => {
     const fetchSpy = fakeFetch({ running: false, tabs: [] })
     vi.stubGlobal('fetch', fetchSpy)
 
     await api.terminalStatus()
+    await api.envSave()
     await api.terminalStop()
+    await api.envReset()
 
     expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/terminal.status')
     expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({})
-    expect(fetchSpy.mock.calls[1][0]).toBe('/api/v1/terminal.stop')
+    expect(fetchSpy.mock.calls[1][0]).toBe('/api/v1/env.save')
+    expect(JSON.parse(fetchSpy.mock.calls[1][1]?.body as string)).toEqual({})
+    expect(fetchSpy.mock.calls[2][0]).toBe('/api/v1/terminal.stop')
+    expect(JSON.parse(fetchSpy.mock.calls[2][1]?.body as string)).toEqual({})
+    expect(fetchSpy.mock.calls[3][0]).toBe('/api/v1/env.reset')
+    expect(JSON.parse(fetchSpy.mock.calls[3][1]?.body as string)).toEqual({})
     expect(api.terminalSocket('t 2')).toContain(
       '/ws/terminal?tab=t+2&token=tok_terminal',
     )

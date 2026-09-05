@@ -142,7 +142,8 @@ export function AgentsStep({
           harness names it can launch - every shipped harness is on that
           list whether or not you have installed and logged one in. Setup
           installs the agent into your environment home, once for every
-          workspace, and it is safe to re-run.
+          workspace, and it is safe to re-run. When the install is done,
+          press Save environment in the terminal dock so runs get it too.
         </p>
         {loading && <Skeleton className="h-16 w-full" />}
         {listError && (

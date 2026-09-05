@@ -94,10 +94,14 @@ export interface GatewayCapabilities {
 export interface TerminalStatusResult {
   running: boolean
   image?: string
+  saved_image?: string
   started_at?: string
   tabs?: string[]
 }
 
+export interface EnvSaveResult {
+  image: string
+}
 
 export interface Event {
   id: string

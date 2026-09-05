@@ -293,6 +293,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     ),
     terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
     terminalStop: vi.fn(async () => ({})),
+    envSave: vi.fn(async () => ({ image: 'aether/member-1:123' })),
+    envReset: vi.fn(async () => ({})),
     terminalSocket: vi.fn(
       (tab: string) => `ws://localhost/ws/terminal?tab=${encodeURIComponent(tab)}`,
     ),
