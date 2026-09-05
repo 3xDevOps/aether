@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
-const EXIT_START_MS = 1500
-const REMOVE_MS = 1850
+const EXIT_START_MS = 2000
+const REMOVE_MS = 2250
 
 const stars = [
   ['14%', '16%', 'mint'],
