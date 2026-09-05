@@ -34,6 +34,9 @@ type fakeRuntime struct {
 	startHook   func(c *fakeContainer)
 	commitErr   error
 	commits     []fakeCommitCall
+	// heldImages are tags the fake daemon refuses to remove, as Docker does
+	// while a container still uses them.
+	heldImages map[string]bool
 	// execTTYHook overrides ExecTTY for tests that need to model an
 	// immediate shell-executable failure.
 	execTTYHook func(context.Context, runtime.ID, []string, string, uint, uint) (runtime.Attachment, error)
@@ -347,6 +350,20 @@ func (r *fakeRuntime) ImageExists(_ context.Context, tag string) (bool, error) {
 	return ok, nil
 }
 
+// ListImageTags returns the registered tags under repo, like Docker's
+// reference filter.
+func (r *fakeRuntime) ListImageTags(_ context.Context, repo string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var tags []string
+	for tag := range r.images {
+		if strings.HasPrefix(tag, repo+":") {
+			tags = append(tags, tag)
+		}
+	}
+	return tags, nil
+}
+
 func (r *fakeRuntime) hasImage(tag string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -359,8 +376,20 @@ func (r *fakeRuntime) hasImage(tag string) bool {
 func (r *fakeRuntime) RemoveImage(_ context.Context, tag string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.heldImages[tag] {
+		return fmt.Errorf("fake runtime: image %s is in use by a container", tag)
+	}
 	delete(r.images, tag)
 	return nil
+}
+
+func (r *fakeRuntime) holdImage(tag string, held bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.heldImages == nil {
+		r.heldImages = make(map[string]bool)
+	}
+	r.heldImages[tag] = held
 }
 
 func (r *fakeRuntime) attachCount() int {
@@ -379,16 +408,6 @@ func (r *fakeRuntime) byName(name string) *fakeContainer {
 		}
 	}
 	return nil
-}
-
-func (r *fakeRuntime) allContainers() []*fakeContainer {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]*fakeContainer, 0, len(r.containers))
-	for _, c := range r.containers {
-		out = append(out, c)
-	}
-	return out
 }
 
 type fakeAttachment struct {

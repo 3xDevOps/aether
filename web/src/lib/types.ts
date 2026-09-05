@@ -545,10 +545,6 @@ export interface DaemonStatusResult {
   unit_path: string
 }
 
-/** image.scaffold: the files written (existing files are never overwritten). */
-export interface ImageScaffoldResult {
-  written: string[]
-}
 
 /**
  * update.check: one release-check answer for the CLI on this machine

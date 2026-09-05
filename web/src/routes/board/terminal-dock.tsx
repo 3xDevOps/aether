@@ -138,7 +138,8 @@ export function TerminalDock({
         onAttached: () => {
           setEnvTerminalSocketReady(socketKey, true)
           if (activeTabRef.current === socketKey) terminalRef.current?.reset()
-          setStatus(useStore.getState().envTerminal.status, null)
+          const status = useStore.getState().envTerminal.status
+          setStatus({ ...(status ?? { running: false, tabs: [] }), running: true }, null)
         },
         onState: () => {},
         onRefused: (detail) => setStatus(useStore.getState().envTerminal.status, detail),
@@ -178,10 +179,11 @@ export function TerminalDock({
     setSaving(true)
     try {
       const result = await rpc.envSave()
-      setStatus({ ...(dock.status ?? { running: true }), saved_image: result.image })
+      const status = useStore.getState().envTerminal.status
+      setStatus({ ...(status ?? { running: true, tabs: [] }), saved_image: result.image })
       setSavedConfirmation(true)
     } catch (err) {
-      setStatus(dock.status, message(err))
+      setStatus(useStore.getState().envTerminal.status, message(err))
     } finally {
       setSaving(false)
     }
@@ -196,7 +198,7 @@ export function TerminalDock({
       reset()
       setStatus({ running: false, tabs: [], saved_image: '' })
     } catch (err) {
-      setStatus(dock.status, message(err))
+      setStatus(useStore.getState().envTerminal.status, message(err))
     } finally {
       setResetting(false)
     }
@@ -321,18 +323,23 @@ export function TerminalDock({
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setConfirmingStop(false)} disabled={stopping}>
+              <Button type="button" variant="outline" onClick={() => setConfirmingStop(false)} disabled={stopping || resetting}>
                 Cancel
               </Button>
               <Button
                 type="button"
                 variant="destructive"
                 onClick={() => void resetEnvironment()}
-                disabled={resetting}
+                disabled={stopping || resetting}
               >
                 {resetting ? 'Resetting...' : 'Reset to standard'}
               </Button>
-              <Button type="button" variant="destructive" onClick={() => void stop()} disabled={stopping}>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => void stop()}
+                disabled={stopping || resetting}
+              >
                 {stopping ? 'Stopping...' : 'Stop environment'}
               </Button>
             </DialogFooter>

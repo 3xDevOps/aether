@@ -1,8 +1,7 @@
-// Local-machine settings: the link, the background sync daemon, image
-// scaffolding, and the live overlay. All of it rides the /local/v1 verbs, so
-// the whole route gates on daemon.status; a remote monitor gets an empty
-// state pointing at `aether gui`, not a broken form. Every server refusal is
-// shown verbatim.
+// Local-machine settings: the link, the background sync daemon, and the live
+// overlay. All of it rides the /local/v1 verbs, so the whole route gates on
+// daemon.status; a remote monitor gets an empty state pointing at `aether gui`,
+// not a broken form. Every server refusal is shown verbatim.
 
 import { Copy } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -14,7 +13,6 @@ import { runLabel } from '@/lib/status'
 import type {
   DaemonInstallResult,
   DaemonStatusResult,
-  ImageScaffoldResult,
   RepoSyncResult,
 } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -34,9 +32,9 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
         <ViewHeader title="Settings" />
         <div className="flex flex-1 items-center justify-center p-4">
           <p className="max-w-md text-center text-sm text-muted-foreground">
-            These settings manage this machine's link, sync daemon and image
-            scaffolds, so they live in the desktop app or `aether gui`. This
-            gateway is a remote monitor.
+            These settings manage this machine's link and sync daemon, so they
+            live in the desktop app or `aether gui`. This gateway is a remote
+            monitor.
           </p>
         </div>
       </div>
@@ -50,7 +48,6 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
         {caps.hasLocal('link.status') && <LinkCard client={client} />}
         {caps.hasLocal('daemon.status') && <DaemonCard client={client} />}
         {caps.hasLocal('repo.sync') && <RepoSyncCard client={client} />}
-        {caps.hasLocal('image.scaffold') && <ScaffoldCard client={client} />}
         {caps.hasLocal('sync.status') && <OverlayCard client={client} />}
       </div>
     </div>
@@ -339,85 +336,6 @@ function RepoSyncCard({ client }: { client: Api }) {
   )
 }
 
-/**
- * image.scaffold writes a Dockerfile or devcontainer into a repository and
- * never overwrites existing files; the answer lists what was written.
- */
-function ScaffoldCard({ client }: { client: Api }) {
-  const [repo, setRepo] = useState('')
-  const [kind, setKind] = useState<'dockerfile' | 'devcontainer'>('dockerfile')
-  const [written, setWritten] = useState<ImageScaffoldResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  const scaffold = async () => {
-    setBusy(true)
-    setError(null)
-    setWritten(null)
-    try {
-      setWritten(await client.localImageScaffold(repo, kind))
-    } catch (err) {
-      setError(message(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <section
-      aria-label="Image scaffold"
-      className="space-y-2 rounded-md border bg-card p-3"
-    >
-      <h2 className="text-sm font-medium">Image scaffold</h2>
-      <form
-        aria-label="Scaffold image"
-        className="max-w-md space-y-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void scaffold()
-        }}
-      >
-        <label className="block space-y-1 text-xs text-muted-foreground">
-          Repository
-          <input
-            className={field}
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-          />
-        </label>
-        <label className="block space-y-1 text-xs text-muted-foreground">
-          Kind
-          <select
-            className={field}
-            value={kind}
-            onChange={(e) => setKind(e.target.value as 'dockerfile' | 'devcontainer')}
-          >
-            <option value="dockerfile">dockerfile</option>
-            <option value="devcontainer">devcontainer</option>
-          </select>
-        </label>
-        <Button size="sm" type="submit" disabled={busy || !repo}>
-          Scaffold
-        </Button>
-      </form>
-      {error && <p className="text-xs text-state-failed">{error}</p>}
-      {written && (
-        <ul aria-label="Written files" className="space-y-1 text-sm">
-          {written.written.map((file) => (
-            <li key={file} className="font-mono">
-              {file}
-            </li>
-          ))}
-          {written.written.length === 0 && (
-            <li className="text-muted-foreground">
-              Nothing written; the files already exist.
-            </li>
-          )}
-        </ul>
-      )}
-    </section>
-  )
-}
 
 const terminal: Record<string, true> = {
   merged: true,

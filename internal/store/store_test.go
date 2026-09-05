@@ -328,7 +328,7 @@ func TestMemberCRUDAndPublicKeyLookup(t *testing.T) {
 		t.Fatalf("ListMembers len = %d, want 1", len(list))
 	}
 
-	if err := db.UpdateMemberImage(ctx, m.ID, "aether/member-"+string(m.ID)+":123"); err != nil {
+	if err = db.UpdateMemberImage(ctx, m.ID, "aether/member-"+string(m.ID)+":123"); err != nil {
 		t.Fatalf("UpdateMemberImage: %v", err)
 	}
 	got, err = db.GetMember(ctx, m.ID)

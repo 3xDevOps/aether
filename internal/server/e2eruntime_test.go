@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -345,6 +346,18 @@ func (r *e2eRuntime) ImageExists(_ context.Context, ref string) (bool, error) {
 	defer r.mu.Unlock()
 	_, ok := r.images[ref]
 	return ok, nil
+}
+
+func (r *e2eRuntime) ListImageTags(_ context.Context, repo string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var tags []string
+	for tag := range r.images {
+		if strings.HasPrefix(tag, repo+":") {
+			tags = append(tags, tag)
+		}
+	}
+	return tags, nil
 }
 
 // RemoveImage is idempotent, matching the Docker implementation.

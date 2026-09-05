@@ -425,7 +425,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       installed: false,
       unit_path: '',
     })),
-    localImageScaffold: vi.fn(async () => ({ written: ['Dockerfile'] })),
     localUpdateCheck: vi.fn(async () => updateStatus()),
     localUpdateApply: vi.fn(async () => ({
       updated: ['/usr/local/bin/aether'],

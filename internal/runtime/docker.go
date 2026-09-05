@@ -378,7 +378,7 @@ func (d *Docker) Resume(ctx context.Context, id ID) error {
 func (d *Docker) Stop(ctx context.Context, id ID, grace time.Duration) error {
 	info, err := d.cli.ContainerInspect(ctx, string(id))
 	if err != nil {
-		return fmt.Errorf("runtime: inspect container: %w", err)
+		return dockerWaitError("inspect", id, err)
 	}
 	if info.State != nil && info.State.Paused {
 		if err := d.cli.ContainerUnpause(ctx, string(id)); err != nil {

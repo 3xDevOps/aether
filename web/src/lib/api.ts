@@ -15,7 +15,6 @@ import type {
   EnvScanStatus,
   EnvSaveResult,
   GatewayCapabilities,
-  ImageScaffoldResult,
   LinkRepoResult,
   LinkStatus,
   Member,
@@ -496,8 +495,6 @@ export const api = {
   localUpdateApply: () => local<UpdateApplyResult>('update.apply'),
   /** Progress of a desktop-app rebuild started by update.apply. */
   localUpdateStatus: () => local<UpdateBuildStatus>('update.status'),
-  localImageScaffold: (repo: string, kind: 'dockerfile' | 'devcontainer') =>
-    local<ImageScaffoldResult>('image.scaffold', { repo, kind }),
   /** Which setup-capable harnesses this machine has on PATH, plus the
    * linked repository folder when the gateway knows exactly one. */
   envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),

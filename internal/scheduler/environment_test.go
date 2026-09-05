@@ -2,13 +2,14 @@ package scheduler
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
+	"testing"
+
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
-	"path/filepath"
-	"strings"
-	"testing"
 )
 
 func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {

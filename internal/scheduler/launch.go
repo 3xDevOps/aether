@@ -112,18 +112,6 @@ func (s *Scheduler) syncRunUserReservationsLocked() {
 	}
 }
 
-func (s *Scheduler) releaseCredentialUser(reservation *credentialUserReservation) {
-	if reservation == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.credentialUsers, reservation)
-	if reservation.run != nil && reservation.run.userReservation == reservation {
-		reservation.run.userReservation = nil
-	}
-}
-
 // reserveRunUser records the resolved run user and reserves its writable
 // member home for the full live-run registry lifetime.
 func (s *Scheduler) reserveRunUser(entry *supervised, user string, sharedHome bool) error {

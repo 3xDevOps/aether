@@ -277,6 +277,8 @@ SSH and needs these reads without a listener on the server.
 | `files.diff` | `FilesDiffParams` (`{"run_id":"...","path":"README.md"}`) | `FilesDiffResult` - one file's patch against the run base |
 | `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
+| `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
+| `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit. `from` and `to` select

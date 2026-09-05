@@ -62,6 +62,18 @@ describe('environment terminal dock', () => {
 
     await waitFor(() => expect(useStore.getState().envTerminal.activeTab).toBe('main'))
   })
+  it('shows Save environment and the unsaved hint after first open attaches', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    render(<TerminalDock />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+
+    act(() => attach.handlers?.onAttached(true))
+
+    expect(await screen.findByRole('button', { name: 'Save environment' })).toBeDefined()
+    expect(screen.getByText('Installs here reach agents after you save.')).toBeDefined()
+  })
 
   it('confirms before stopping the running environment', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })

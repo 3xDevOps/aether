@@ -44,11 +44,7 @@ func RenderProfile(params ProfileParams) (string, error) {
 	case !filepath.IsAbs(params.OutputDir):
 		return "", fmt.Errorf("envprompt: profile prompt output directory must be absolute, got %q", params.OutputDir)
 	}
-	return render("profile", templateData{
-		Inventory: params.Inventory,
-		OutputDir: params.OutputDir,
-		RepoPath:  params.RepoPath,
-	})
+	return render("profile", templateData(params))
 }
 
 func render(name string, data templateData) (string, error) {

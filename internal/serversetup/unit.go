@@ -42,11 +42,11 @@ Type=simple
 #   1. The unit needs the Docker socket, and Docker socket access is already
 #      root-equivalent on the host - a dedicated user in the docker group
 #      buys nothing.
-#   2. Workspace images whose configured user is non-root make the server
+#   2. Environment images whose configured user is non-root make the server
 #      chown run checkouts and credential homes to that UID, which needs
 #      CAP_CHOWN. A non-root server can only serve root images.
 # To run unprivileged anyway: add User=aether and SupplementaryGroups=docker,
-# keep every workspace image on a root user, and give the user read access to
+# keep every environment image on a root user, and give the user read access to
 # the tailscaled socket (tailscale set --operator=aether) if you want tailnet
 # identity auth.
 #

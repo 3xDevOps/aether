@@ -7,6 +7,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 )
 
@@ -42,7 +43,26 @@ func (d *Docker) Commit(ctx context.Context, id ID, tag string) error {
 	return nil
 }
 
-// RemoveImage removes a local image tag. Removing a missing tag is harmless.
+// ListImageTags returns every local tag whose repository is repo.
+func (d *Docker) ListImageTags(ctx context.Context, repo string) ([]string, error) {
+	list, err := d.cli.ImageList(ctx, image.ListOptions{
+		Filters: filters.NewArgs(filters.Arg("reference", repo+":*")),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("runtime: list images %s: %w", repo, err)
+	}
+	var tags []string
+	for _, summary := range list {
+		for _, tag := range summary.RepoTags {
+			if strings.HasPrefix(tag, repo+":") {
+				tags = append(tags, tag)
+			}
+		}
+	}
+	return tags, nil
+}
+
+// RemoveImage untags a local image. Removing a missing tag is harmless.
 func (d *Docker) RemoveImage(ctx context.Context, tag string) error {
 	_, err := d.cli.ImageRemove(ctx, tag, image.RemoveOptions{PruneChildren: true})
 	if err != nil && !cerrdefs.IsNotFound(err) {

@@ -87,14 +87,14 @@ func TestResetEnvironmentStopsTerminalAndClearsImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveEnvironment: %v", err)
 	}
-	if err := e.sched.ResetEnvironment(t.Context(), e.member.ID); err != nil {
+	if err = e.sched.ResetEnvironment(t.Context(), e.member.ID); err != nil {
 		t.Fatalf("ResetEnvironment: %v", err)
 	}
-	if _, err := e.db.GetTerminal(t.Context(), e.member.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("terminal row after reset = %v, want ErrNotFound", err)
+	if _, rowErr := e.db.GetTerminal(t.Context(), e.member.ID); !errors.Is(rowErr, store.ErrNotFound) {
+		t.Fatalf("terminal row after reset = %v, want ErrNotFound", rowErr)
 	}
-	if _, err := e.rt.get(runtime.ID(terminal.ContainerID)); !errors.Is(err, runtime.ErrNotFound) {
-		t.Fatalf("terminal container after reset = %v, want ErrNotFound", err)
+	if _, getErr := e.rt.get(runtime.ID(terminal.ContainerID)); !errors.Is(getErr, runtime.ErrNotFound) {
+		t.Fatalf("terminal container after reset = %v, want ErrNotFound", getErr)
 	}
 	member, err := e.db.GetMember(t.Context(), e.member.ID)
 	if err != nil {
@@ -119,5 +119,35 @@ func TestResetEnvironmentWithoutTerminalOrImageIsNoop(t *testing.T) {
 	}
 	if member.Image != "" || strings.TrimSpace(member.DisplayName) == "" {
 		t.Fatalf("member after no-op reset = %+v", member)
+	}
+}
+
+func TestSaveEnvironmentRetriesTagsStillInUse(t *testing.T) {
+	e := newTestEnv(t, nil)
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	first, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("first SaveEnvironment: %v", err)
+	}
+	// A run container still holds the first tag when the second save
+	// happens: the daemon refuses the removal, the save still succeeds.
+	e.rt.holdImage(first, true)
+	time.Sleep(1100 * time.Millisecond)
+	second, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("second SaveEnvironment: %v", err)
+	}
+	if !e.rt.hasImage(first) || !e.rt.hasImage(second) {
+		t.Fatalf("images after refused removal: first=%v second=%v, want both kept", e.rt.hasImage(first), e.rt.hasImage(second))
+	}
+	// Once the container is gone, the next reset sweeps every stale tag.
+	e.rt.holdImage(first, false)
+	if err := e.sched.ResetEnvironment(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("ResetEnvironment: %v", err)
+	}
+	if e.rt.hasImage(first) || e.rt.hasImage(second) {
+		t.Fatalf("images after reset: first=%v second=%v, want none", e.rt.hasImage(first), e.rt.hasImage(second))
 	}
 }

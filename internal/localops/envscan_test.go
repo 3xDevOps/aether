@@ -2,13 +2,14 @@ package localops
 
 import (
 	"errors"
-	"github.com/3xDevOps/Aether/internal/harness"
 	"os"
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/harness"
 )
 
 // writeStub writes an executable shell script and returns the argv

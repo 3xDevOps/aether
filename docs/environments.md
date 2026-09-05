@@ -60,8 +60,9 @@ daemon and never pushes it to a registry. The tag is:
 aether/member-<member-id>:<unix-seconds>
 ```
 
-The saved tag is recorded on the member. A later save removes the previous
-saved tag after the new image is active. The command prints `saved <tag>`,
+The saved tag is recorded on the member. After the new image is active, every
+older `aether/member-<member-id>` tag is removed. A tag a run container still
+uses stays until the next save or reset. The command prints `saved <tag>`,
 then `new runs and terminals start from this environment`.
 
 Runs that are already running keep their existing containers. New runs,
@@ -80,9 +81,9 @@ Reset from **Reset to standard** in the terminal dock's Stop dialog, or run:
 aether env reset
 ```
 
-Reset stops the terminal, forgets the member's saved image, and removes its
-saved tag from the server's Docker daemon. The next terminal open and all new
-runs use the standard image. The command prints
+Reset stops the terminal, forgets the member's saved image, and removes the
+member's saved tags from the server's Docker daemon. The next terminal open
+and all new runs use the standard image. The command prints
 `environment reset to the standard image`.
 
 There is no save history or other undo. To fix a bad save, repair the

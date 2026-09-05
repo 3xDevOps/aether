@@ -103,26 +103,3 @@ func createWorkspace(opts workspaceCreateOptions) error {
 		return nil
 	})
 }
-
-func resolveWorkspaceSelector(c *protocol.Client, input string) (protocol.WorkspaceSelector, error) {
-	var list protocol.WorkspaceListResult
-	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
-		return protocol.WorkspaceSelector{}, err
-	}
-	if input == "" {
-		switch len(list.Workspaces) {
-		case 0:
-			return protocol.WorkspaceSelector{}, fmt.Errorf("no workspaces available; specify --workspace")
-		case 1:
-			return protocol.WorkspaceSelector{ID: list.Workspaces[0].ID}, nil
-		default:
-			return protocol.WorkspaceSelector{}, fmt.Errorf("multiple workspaces available; specify --workspace")
-		}
-	}
-	for _, workspace := range list.Workspaces {
-		if workspace.ID == input || workspace.Name == input {
-			return protocol.WorkspaceSelector{ID: workspace.ID}, nil
-		}
-	}
-	return protocol.WorkspaceSelector{}, fmt.Errorf("workspace %q not found", input)
-}

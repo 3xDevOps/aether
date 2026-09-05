@@ -35,7 +35,7 @@ type Mount struct {
 	ReadOnly bool
 }
 
-// Spec describes one run container, engine-neutrally: the workspace image,
+// Spec describes one run container, engine-neutrally: the image,
 // environment, the run worktree bind-mounted into the container, resource
 // limits, working directory, setup script hook, and the main command.
 type Spec struct {
@@ -243,7 +243,9 @@ type Runtime interface {
 	Commit(ctx context.Context, id ID, tag string) error
 	// ImageExists reports whether an image reference exists locally.
 	ImageExists(ctx context.Context, ref string) (bool, error)
-	// RemoveImage removes a local image tag. Removing a tag that does
-	// not exist is not an error.
+	// ListImageTags returns the local tags under one repository.
+	ListImageTags(ctx context.Context, repo string) ([]string, error)
+	// RemoveImage untags a local image. Removing a tag that does not
+	// exist is not an error.
 	RemoveImage(ctx context.Context, tag string) error
 }
