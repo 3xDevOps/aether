@@ -23,6 +23,11 @@ import (
 
 func TestUpdateApplyCarriesTheServerRestart(t *testing.T) {
 	pinVersion(t)
+	// The rebuild path is stubbed to "no app installed" in every apply
+	// test that is not about the rebuild: with a real desktop app on the
+	// developer's machine, update.apply would otherwise spawn a genuine
+	// `aether gui build` and flip the response to its rebuilding shape.
+	stubRebuild(t, "/bin/true", false)
 	g := updateGateway(t, &verbStubBackend{}, false)
 	stubApply(t, func(context.Context, string, string) ([]string, error) {
 		// A single-box install: the swap replaced the server binary too.
@@ -50,6 +55,7 @@ func TestUpdateApplyCarriesTheServerRestart(t *testing.T) {
 
 func TestUpdateApplyOmitsTheRestartWithoutAServer(t *testing.T) {
 	pinVersion(t)
+	stubRebuild(t, "/bin/true", false)
 	g := updateGateway(t, &verbStubBackend{}, false)
 	stubApply(t, func(context.Context, string, string) ([]string, error) {
 		return []string{"/usr/local/bin/aether"}, nil
@@ -122,6 +128,7 @@ func TestUpdateApplyRefusesUnwritableBinary(t *testing.T) {
 
 func TestUpdateApplySupervisedExits(t *testing.T) {
 	pinVersion(t)
+	stubRebuild(t, "/bin/true", false)
 	g := updateGateway(t, &verbStubBackend{}, true)
 	stubApply(t, func(_ context.Context, baseURL, tag string) ([]string, error) {
 		if tag != releaseTag {
@@ -158,6 +165,7 @@ func TestUpdateApplySupervisedExits(t *testing.T) {
 
 func TestUpdateApplyUnsupervisedKeepsServing(t *testing.T) {
 	pinVersion(t)
+	stubRebuild(t, "/bin/true", false)
 	g := updateGateway(t, &verbStubBackend{}, false)
 	stubApply(t, func(context.Context, string, string) ([]string, error) {
 		return []string{"/usr/local/bin/aether"}, nil
@@ -194,6 +202,7 @@ func TestUpdateApplyUnsupervisedKeepsServing(t *testing.T) {
 // buys.
 func TestUpdateApplySupervisedResponseSurvivesShutdown(t *testing.T) {
 	pinVersion(t)
+	stubRebuild(t, "/bin/true", false)
 	g := updateGateway(t, &verbStubBackend{}, true)
 	stubApply(t, func(context.Context, string, string) ([]string, error) {
 		return []string{"/usr/local/bin/aether"}, nil

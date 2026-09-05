@@ -35,10 +35,11 @@ import type {
   PullResult,
   PullSwitchResult,
   RepoPushResult,
-  Run,
+  RepoSyncResult,
   FileDiff,
   FileRead,
   FilesTreeResult,
+  Run,
   RunPatch,
   Schedule,
   ServerInfo,
@@ -56,6 +57,7 @@ import type {
   UpdateBuildStatus,
   UpdateStatus,
   Workspace,
+  WorkspaceImageResult,
   WorkspaceSelector,
 } from '@/lib/types'
 
@@ -445,6 +447,11 @@ export const api = {
       workspace_id: params.workspace_id,
       steer_others: params.steer_others ?? '',
     }).then((r) => r.workspace),
+  workspaceImage: (workspaceID: string, image?: string) =>
+    call<WorkspaceImageResult>('workspace.image', {
+      workspace_id: workspaceID,
+      image: image ?? '',
+    }),
   // Budgets: the server clears a budget on a limit of zero or less, so
   // `clear` is spelled here rather than by every caller.
   budgetSet: (params: {
@@ -531,6 +538,9 @@ export const api = {
    * fresh workspace without leaving the app. */
   localRepoPush: (workspaceID?: string) =>
     local<RepoPushResult>('repo.push', { workspace_id: workspaceID }),
+  /** Fast-forwards the workspace base branch from this machine's origin. */
+  localRepoSync: (workspaceID?: string) =>
+    local<RepoSyncResult>('repo.sync', { workspace_id: workspaceID }),
   localSyncStart: (runID: string, force?: boolean) =>
     local<SyncSessionState>('sync.start', { run_id: runID, force }),
   localSyncStop: (runID: string) =>

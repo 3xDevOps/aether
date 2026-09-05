@@ -338,6 +338,17 @@ That second line is the Linux one. `daemon install` prints the activation
 command for whatever platform you are on: `launchctl load` on macOS,
 `schtasks /Create` on Windows.
 
+`--sync-origin` keeps runs current even when your local base branch is not.
+Pass it to `daemon install` and every catch-up pass fast-forwards the server's
+base branch to your repo's `origin` remote - the server's copy is updated
+without touching your local branch or working tree:
+
+```sh
+aether daemon install --sync-origin --server <server-host>:2222 --repo ~/code/myproject
+```
+
+The dashboard Settings page can run the same sync once, on demand.
+
 ---
 
 ## Prove the plumbing without an agent subscription

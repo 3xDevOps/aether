@@ -17,6 +17,7 @@ const localCaps: GatewayCapabilities = {
     'daemon.status',
     'daemon.install',
     'image.scaffold',
+    'repo.sync',
   ],
 }
 
@@ -73,6 +74,39 @@ describe('settings view', () => {
     )
     // The prefill came from link.status, through the store mirror.
     expect(client.localDaemonInstall).toHaveBeenCalledWith('host:2222', '/src/repo')
+  })
+  it('syncs the workspace base branch from origin', async () => {
+    const client = fakeApi({
+      localRepoSync: vi.fn(async () => ({
+        branch: 'main',
+        output: 'From origin\nAlready up to date.',
+      })),
+    })
+    seed()
+    render(<SettingsRoute params={{}} client={client} />)
+
+    const sync = await screen.findByRole('button', { name: 'Sync from origin' })
+    fireEvent.click(sync)
+
+    expect(client.localRepoSync).toHaveBeenCalledWith(workspace.id)
+    const output = await screen.findByText(/From origin/)
+    expect(output.tagName).toBe('PRE')
+    expect(output.textContent).toBe('From origin\nAlready up to date.')
+    expect(screen.getByText('main')).toBeDefined()
+  })
+
+  it('hides base branch sync without the repo.sync capability', () => {
+    const client = fakeApi()
+    seed({
+      capabilities: {
+        ...localCaps,
+        local: localCaps.local?.filter((verb) => verb !== 'repo.sync'),
+      },
+    })
+    render(<SettingsRoute params={{}} client={client} />)
+
+    expect(screen.queryByRole('region', { name: 'Base branch' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sync from origin' })).toBeNull()
   })
 
   it('lists named servers, marks the active one, and shows the switch instruction', async () => {

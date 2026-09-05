@@ -86,7 +86,9 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     // failed poll must not fail the hydration.
     if (store.getState().capabilities?.local?.includes('link.status')) {
       try {
-        s.setLinkStatus(await client.localLinkStatus())
+        const linkStatus = await client.localLinkStatus()
+        s.setLinkStatus(linkStatus)
+        if (linkStatus.linked === true) s.setOnboarded(true)
       } catch {
         ignore()
       }

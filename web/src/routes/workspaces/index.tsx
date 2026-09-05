@@ -12,7 +12,7 @@ import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
-import type { Workspace } from '@/lib/types'
+import type { Workspace, WorkspaceImageResult } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
@@ -23,6 +23,7 @@ const field =
 export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const navigate = useStore((s) => s.navigate)
+  const standardImage = useStore((s) => s.info?.standard_image)
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const loading = useDelayed(workspaces === null && error === null)
@@ -81,6 +82,13 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                   Open
                 </Button>
               </div>
+              {caps.hasMethod('workspace.image') && (
+                <WorkspaceImageRow
+                  client={client}
+                  workspace={workspace}
+                  standardImage={standardImage}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -88,6 +96,120 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
           <p className="text-sm text-muted-foreground">No workspaces yet.</p>
         )}
       </div>
+    </div>
+  )
+}
+
+function imageRepository(ref: string): string {
+  const digest = ref.indexOf('@')
+  const named = digest >= 0 ? ref.slice(0, digest) : ref
+  const slash = named.lastIndexOf('/')
+  const colon = named.lastIndexOf(':')
+  return colon > slash ? named.slice(0, colon) : named
+}
+
+function imageTag(ref: string): string {
+  const colon = ref.lastIndexOf(':')
+  return colon > ref.lastIndexOf('/') ? ref.slice(colon + 1) : ''
+}
+
+function WorkspaceImageRow({
+  client,
+  workspace,
+  standardImage,
+}: {
+  client: Api
+  workspace: Workspace
+  standardImage?: string
+}) {
+  const [image, setImage] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    client
+      .workspaceImage(workspace.id)
+      .then((result) => {
+        if (cancelled) return
+        setImage(result.image)
+        setDraft(result.image)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(message(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [client, workspace.id])
+
+  const save = async (ref: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const result: WorkspaceImageResult = await client.workspaceImage(
+        workspace.id,
+        ref,
+      )
+      setImage(result.image)
+      setDraft(result.image)
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const updateTag =
+    image &&
+    standardImage &&
+    imageRepository(image) === imageRepository(standardImage) &&
+    imageTag(image) !== imageTag(standardImage)
+      ? imageTag(standardImage)
+      : null
+
+  return (
+    <div className="space-y-2 border-t pt-3">
+      <dl className="space-y-1 text-sm">
+        <div className="flex gap-2">
+          <dt className="text-muted-foreground">Image</dt>
+          <dd className="font-mono">{image === null ? 'Loading...' : image || 'none'}</dd>
+        </div>
+      </dl>
+      {error && <p className="text-xs text-state-failed">{error}</p>}
+      {image !== null && (
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="min-w-0 flex-1 space-y-1 text-xs text-muted-foreground">
+            Image reference
+            <input
+              className={field}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+          </label>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || !draft.trim()}
+            onClick={() => void save(draft.trim())}
+          >
+            Save
+          </Button>
+          {updateTag && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                if (standardImage) void save(standardImage)
+              }}
+            >
+              Update to {updateTag}
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

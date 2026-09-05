@@ -710,6 +710,29 @@ func pushBody(t *testing.T, wsID string) string {
 	return string(body)
 }
 
+// syncGateway extends the push fixture with an origin remote whose branch is
+// ahead of the linked checkout.
+func syncGateway(t *testing.T, branch string) (*Gateway, string, string) {
+	t.Helper()
+	g, aether, wsID := pushGateway(t, branch)
+	local := g.local.snapshot().Repo
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	localGit(t, t.TempDir(), "init", "--bare", "-b", branch, origin)
+	refspec := "refs/heads/" + branch + ":refs/heads/" + branch
+	localGit(t, local, "remote", "add", "origin", origin)
+	localGit(t, local, "push", "origin", refspec)
+
+	clone := filepath.Join(t.TempDir(), "origin-clone")
+	localGit(t, t.TempDir(), "clone", "--branch", branch, origin, clone)
+	if err := os.WriteFile(filepath.Join(clone, "origin.txt"), []byte("from origin\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	localGit(t, clone, "add", "origin.txt")
+	localGit(t, clone, "commit", "-m", "origin update")
+	localGit(t, clone, "push", "origin", refspec)
+	return g, aether, wsID
+}
+
 // The seeding push runs the user's base branch, not a hardcoded main.
 func TestLocalRepoPush(t *testing.T) {
 	g, remote, wsID := pushGateway(t, "trunk")
@@ -734,6 +757,48 @@ func TestLocalRepoPush(t *testing.T) {
 	}
 	if localGit(t, remote, "rev-parse", "trunk") == "" {
 		t.Fatal("remote has no trunk")
+	}
+}
+
+func TestLocalRepoSync(t *testing.T) {
+	g, remote, wsID := syncGateway(t, "trunk")
+	local := g.local.snapshot().Repo
+	beforeHead := localGit(t, local, "rev-parse", "HEAD")
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.sync", pushBody(t, wsID), true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("repo.sync = %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Branch string `json:"branch"`
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Branch != "trunk" {
+		t.Fatalf("repo.sync = %+v", got)
+	}
+	if !strings.Contains(got.Output, "trunk") {
+		t.Fatalf("output does not mention the branch: %q", got.Output)
+	}
+	if got := localGit(t, remote, "rev-parse", "trunk"); got == beforeHead {
+		t.Fatal("repo.sync did not advance the aether branch")
+	}
+	if got := localGit(t, local, "rev-parse", "HEAD"); got != beforeHead {
+		t.Fatalf("repo.sync changed local HEAD from %s to %s", beforeHead, got)
+	}
+}
+
+func TestLocalRepoSyncRequiresLinkedRepo(t *testing.T) {
+	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{Addr: "host:2222"})
+	rec := do(g, http.MethodPost, "/local/v1/repo.sync", `{}`, true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, "no linked repo") {
+		t.Fatalf("error = %+v", perr)
 	}
 }
 

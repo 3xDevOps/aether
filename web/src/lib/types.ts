@@ -507,6 +507,18 @@ export interface RepoPushResult {
   output: string
 }
 
+/** repo.sync: the workspace base branch fast-forwarded from origin. */
+export interface RepoSyncResult {
+  branch: string
+  output: string
+}
+
+/** workspace.image: the workspace's effective custom image. */
+export interface WorkspaceImageResult {
+  workspace: Workspace
+  image: string
+}
+
 /** sync.start / sync.stop: one run's overlay state after the verb. */
 export interface SyncSessionState {
   run_id: string

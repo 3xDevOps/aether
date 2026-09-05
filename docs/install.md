@@ -688,6 +688,15 @@ does the same work in the foreground on any of them. The daemon also watches
 your local agent-profile directories and pushes changes up; `--no-profile-sync`
 turns that half off.
 
+`--sync-origin` extends the base-branch half: on every catch-up pass the
+daemon also fast-forwards the server's base branch to your repo's `origin`
+remote, so runs branch from upstream's current tip even when your local base
+branch is behind. It only moves refs - your local branch and working tree are
+never touched, and the server's base is never rewritten backwards or away
+from local work you have not pushed yet.
+
+The dashboard Settings page can run the same sync once, on demand.
+
 ## What lives in the data directory
 
 | Path | Contents |
