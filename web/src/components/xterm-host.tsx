@@ -11,6 +11,8 @@ export interface XtermOptions {
   enabled?: boolean
   onData?: (data: string) => void
   onResize?: (cols: number, rows: number) => void
+  /** Called synchronously before a terminal hyperlink opens. Return true to handle it. */
+  onLink?: (uri: string) => boolean
 }
 
 export interface XtermController {
@@ -112,13 +114,16 @@ export function useXterm({
   enabled = true,
   onData,
   onResize,
+  onLink,
 }: XtermOptions = {}): XtermController {
   const hostRef = useRef<HTMLDivElement>(null)
   const onDataRef = useRef(onData)
   const onResizeRef = useRef(onResize)
+  const onLinkRef = useRef(onLink)
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   onDataRef.current = onData
   onResizeRef.current = onResize
+  onLinkRef.current = onLink
 
   useEffect(() => {
     if (!enabled) return
@@ -129,7 +134,10 @@ export function useXterm({
     // glyph-atlas positions under heavy glyph churn, garbling scrolled rows
     // until a forced refresh (xtermjs/xterm.js#6038; the fix is unreleased).
     // The DOM renderer never desyncs and keeps up with agent TUI streams.
-    const openLink = (uri: string) => window.open(uri, '_blank', 'noopener,noreferrer')
+    const openLink = (uri: string) => {
+      if (onLinkRef.current?.(uri)) return
+      window.open(uri, '_blank', 'noopener,noreferrer')
+    }
     const created = new Terminal({
       fontSize: 12,
       fontFamily: terminalFontFamily,

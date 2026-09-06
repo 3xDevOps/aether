@@ -48,6 +48,17 @@ func NewForwardManager() *ForwardManager {
 // Start listens on the requested loopback port and forwards each accepted
 // connection through a fresh stream returned by dial.
 func (m *ForwardManager) Start(target string, port int, dial func() (io.ReadWriteCloser, error)) error {
+	return m.start(target, port, dial, false)
+}
+
+// Ensure starts a forward or leaves the matching active forward in place.
+// Dashboard link handling uses it because repeated OAuth-link clicks should
+// not turn an already-ready callback into an error.
+func (m *ForwardManager) Ensure(target string, port int, dial func() (io.ReadWriteCloser, error)) error {
+	return m.start(target, port, dial, true)
+}
+
+func (m *ForwardManager) start(target string, port int, dial func() (io.ReadWriteCloser, error), existingOK bool) error {
 	if target == "" {
 		return errors.New("localops: target is required")
 	}
@@ -62,6 +73,9 @@ func (m *ForwardManager) Start(target string, port int, dial func() (io.ReadWrit
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.sessions[key]; ok {
+		if existingOK {
+			return nil
+		}
 		return fmt.Errorf("localops: forward for target %s port %d is already active", target, port)
 	}
 	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprint(port)))

@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react'
+import { toast } from 'sonner'
 import { RunActions } from '@/components/run-actions'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api } from '@/lib/api'
+import { message } from '@/lib/format'
+import { openOAuthLink } from '@/lib/oauth-forward'
 import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -11,7 +14,9 @@ import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/at
 import { RunDock } from '@/routes/terminal/run-dock'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 import { initialTerminal } from '@/store/terminal'
+
 const connectionLabel: Record<string, string> = {
   connecting: 'Connecting',
   live: 'Attached',
@@ -29,6 +34,7 @@ function TerminalView({ params }: RouteProps) {
   const run = useStore((s) => s.runs[runID])
   const state = useStore((s) => s.terminals[runID] ?? initialTerminal)
   const setTerminal = useStore((s) => s.setTerminal)
+  const capability = useCapability()
 
   const known = run !== undefined
   const attachRef = useRef<Attachment | null>(null)
@@ -44,6 +50,16 @@ function TerminalView({ params }: RouteProps) {
       if (!gate.current.muted()) attachRef.current?.send(data)
     },
     onResize: (cols, rows) => attachRef.current?.resize(cols, rows),
+    onLink: (uri) => {
+      if (!capability.hasLocal('forward.start')) return false
+      return openOAuthLink(
+        api,
+        `run:${runID}`,
+        uri,
+        (port) => toast.success(`OAuth callback ready on localhost:${port}`),
+        (err) => toast.error(`OAuth callback forward failed: ${message(err)}`),
+      )
+    },
   })
   terminalRef.current = terminal
   useEffect(() => {
