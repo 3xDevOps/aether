@@ -203,6 +203,33 @@
   }
 }
 @layer components {
+  .steering-signal {
+    position: relative;
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: 0 0 0 0 currentColor;
+    animation: steering-signal 1.6s ease-out infinite;
+  }
+
+  @keyframes steering-signal {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 55%, transparent);
+    }
+    75%,
+    100% {
+      box-shadow: 0 0 0 0.45rem transparent;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .steering-signal {
+      animation: none;
+    }
+  }
+
   .launch-splash {
     position: fixed;
     inset: 0;

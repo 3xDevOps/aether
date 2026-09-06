@@ -136,6 +136,7 @@ function TerminalView({ params }: RouteProps) {
           disabled={state.steerDenied}
           onClick={toggleWrite}
         >
+          {state.write && <span aria-hidden className="steering-signal" />}
           {state.write ? 'Steering' : 'Take control'}
         </Button>
         {state.steerDenied && (

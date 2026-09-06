@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useStore } from '@/store'
 import {
   emitShellSocketData,
+  initialTerminal,
   initialRunShellDock,
   registerShellSocket,
   subscribeShellSocket,
@@ -72,5 +73,11 @@ describe('run-shell dock state', () => {
       tabs: ['t1'],
       refusedMessage: 'You cannot open a shell',
     })
+  })
+})
+
+describe('run terminal steering', () => {
+  it('asks to steer on first entry', () => {
+    expect(initialTerminal.write).toBe(true)
   })
 })
