@@ -151,19 +151,23 @@ func (s *Scheduler) checkFreeSpace() error {
 // branch via the git seam, container via the runtime, agent PTY via the
 // PTY seam. It returns the run in running state, or an error with the run
 // marked failed ("provisioning: <err>") once the row exists.
-func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	if mode == "" {
 		mode = domain.LaunchTUI
 	}
 	if err := s.checkFreeSpace(); err != nil {
 		return nil, err
 	}
-	argv, profile, err := s.command(ctx, member, harness, mode, task)
+	argv, profile, err := s.command(ctx, account, harness, mode, task)
 	if err != nil {
 		return nil, err
 	}
 	argv, session := pinSession(argv, profile)
-	m, err := s.cfg.Store.GetMember(ctx, member)
+	actor, err := s.cfg.Store.GetMember(ctx, member)
+	if err != nil {
+		return nil, err
+	}
+	accountMember, err := s.cfg.Store.GetMember(ctx, account)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +178,7 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 	run := &domain.Run{
 		WorkspaceID:      workspace,
 		MemberID:         member,
+		AccountMemberID:  account,
 		Task:             task,
 		Harness:          harness,
 		Mode:             mode,
@@ -185,7 +190,7 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 	}
 	pending := s.beginPending(run.ID)
 	defer s.finishPending(run.ID, pending)
-	if err := s.provision(ctx, run, ws, m, argv, profile, false); err != nil {
+	if err := s.provision(ctx, run, ws, actor, accountMember, argv, profile, false); err != nil {
 		return nil, err
 	}
 	return s.freshen(ctx, run), nil
@@ -197,13 +202,12 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 // the row underneath the in-flight launch. Any error after the row exists
 // marks the run failed ("provisioning: <err>"), or abandoned ("killed")
 // when a kill was accepted meanwhile.
-func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, member *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
-	actor := member.ID
+func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
 	entry := &supervised{
 		runID:       run.ID,
 		workspaceID: run.WorkspaceID,
 		task:        run.Task,
-		memberID:    run.MemberID,
+		memberID:    run.AccountMember(),
 		harness:     run.Harness,
 		status:      domain.RunProvisioning,
 		startedAt:   time.Now().UTC(),
@@ -214,7 +218,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		entry.killRequested = true
 		entry.killActor = pending.killActor
 	}
-	err := s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunQueued, domain.RunProvisioning, "", actor)
+	err := s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunQueued, domain.RunProvisioning, "", actor.ID)
 	if err == nil {
 		s.runs[run.ID] = entry
 	}
@@ -223,15 +227,14 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		return err
 	}
 	run.Status = domain.RunProvisioning
-	if err := s.provisionSteps(ctx, entry, run, ws, member, argv, profile, reuseCheckout); err != nil {
-		s.failProvisioning(run, actor, err)
+	if err := s.provisionSteps(ctx, entry, run, ws, actor, account, argv, profile, reuseCheckout); err != nil {
+		s.failProvisioning(run, actor.ID, err)
 		return errors.New(publicRunStatusReason("provisioning: " + err.Error()))
 	}
 	return nil
 }
 
-func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, member *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
-	actor := member.ID
+func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
 	if !reuseCheckout {
 		checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, run.ID, ws.BaseBranch, run.Task)
 		if err != nil {
@@ -245,7 +248,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err := s.pinLatestProfile(ctx, run); err != nil {
 		return fmt.Errorf("pin profile: %w", err)
 	}
-	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, member, profile, EnvironmentPurposeRun)
+	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, account, profile, EnvironmentPurposeRun)
 	if err != nil {
 		return err
 	}
@@ -260,7 +263,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	coordMounts, mcpArgs := s.coordinationMounts(ctx, entry, run, profile)
 	plan.Mounts = append(plan.Mounts, coordMounts...)
 	argv = append(argv, mcpArgs...)
-	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, member, argv, plan))
+	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan))
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)
 	}
@@ -303,7 +306,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if entry.killRequested {
 		err = errKillRequested
 	} else {
-		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, "", actor)
+		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, "", actor.ID)
 	}
 	s.mu.Unlock()
 	if err != nil {

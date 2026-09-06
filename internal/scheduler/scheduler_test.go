@@ -146,7 +146,7 @@ func (e *testEnv) subscribe(t *testing.T) events.Subscription {
 func (e *testEnv) launchFake(t *testing.T, task string) (*domain.Run, *fakeContainer) {
 	t.Helper()
 	t.Setenv(fakeAgentEnv, "fake-agent {task}")
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, task, "fake", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, task, "fake", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestProvisioningFailure(t *testing.T) {
 	e.rt.createErr = errors.New("no such image")
 
 	t.Setenv(fakeAgentEnv, "fake-agent")
-	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "task", "fake", domain.LaunchTUI)
+	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "task", "fake", domain.LaunchTUI)
 	if err == nil {
 		t.Fatal("Launch succeeded despite runtime failure")
 	}
@@ -372,18 +372,18 @@ func TestLaunchValidation(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
-	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "t", "unknown-harness", domain.LaunchTUI); err == nil {
+	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "unknown-harness", domain.LaunchTUI); err == nil {
 		t.Fatal("unknown harness accepted")
 	}
-	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "t", "claude", domain.LaunchMode("bogus")); err == nil {
+	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "claude", domain.LaunchMode("bogus")); err == nil {
 		t.Fatal("invalid mode accepted")
 	}
 	t.Setenv(fakeAgentEnv, "fake-agent")
-	if _, err := e.sched.Launch(ctx, "ws_missing", e.member.ID, "t", "fake", domain.LaunchTUI); !errors.Is(err, store.ErrNotFound) {
+	if _, err := e.sched.Launch(ctx, "ws_missing", e.member.ID, e.member.ID, "t", "fake", domain.LaunchTUI); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing workspace error = %v, want ErrNotFound", err)
 	}
 	t.Setenv(fakeAgentEnv, "")
-	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "t", "fake", domain.LaunchTUI); err == nil {
+	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "fake", domain.LaunchTUI); err == nil {
 		t.Fatal("fake harness with empty AETHER_FAKE_AGENT accepted")
 	}
 }
@@ -458,13 +458,55 @@ func TestLaunchSpecIdentityAndCreationKey(t *testing.T) {
 	}
 }
 
+func TestSharedAccountLaunchUsesAccountHomeAndKeepsActorIdentity(t *testing.T) {
+	e := newTestEnv(t, nil)
+	account := &domain.Member{
+		DisplayName: "Grace", PublicKey: testPublicKey(t),
+		Color: "#3cb44b", Role: domain.RoleCollaborator,
+	}
+	if err := e.db.CreateMember(t.Context(), account); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(fakeAgentEnv, "fake-agent {task}")
+	sub := e.subscribe(t)
+	run, err := e.sched.Launch(
+		t.Context(), e.ws.ID, e.member.ID, account.ID,
+		"shared account", "fake", domain.LaunchTUI,
+	)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if run.MemberID != e.member.ID || run.AccountMember() != account.ID {
+		t.Fatalf("run actor/account = %s/%s, want %s/%s", run.MemberID, run.AccountMember(), e.member.ID, account.ID)
+	}
+	c := e.rt.byName(string(run.ID))
+	if c == nil || len(c.spec.Mounts) != 1 {
+		t.Fatalf("container mounts = %+v, want account home", c)
+	}
+	wantHome, err := e.cfg.Homes.Path(account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.spec.Mounts[0].HostPath != wantHome {
+		t.Fatalf("home mount = %q, want account home %q", c.spec.Mounts[0].HostPath, wantHome)
+	}
+	if c.spec.Env["GIT_AUTHOR_NAME"] != e.member.DisplayName ||
+		c.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(account.ID) {
+		t.Fatalf("container identity env = %+v", c.spec.Env)
+	}
+	started := waitStatusEvent(t, sub, run.ID, domain.RunRunning)
+	if started.ActorID != e.member.ID {
+		t.Fatalf("run.status actor = %s, want launcher %s", started.ActorID, e.member.ID)
+	}
+}
+
 // TestLaunchMountsPersistentHome pins that every launch for one member uses
 // the same writable server-owned home at the container's HOME.
 func TestLaunchMountsPersistentHome(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "with home", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "with home", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -482,7 +524,7 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 	if got := c.spec.Mounts[0]; got.HostPath != wantHome || got.ContainerPath != "/root" || got.ReadOnly {
 		t.Fatalf("home mount = %+v, want %q at /root", got, wantHome)
 	}
-	run2, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "later run", "claude", domain.LaunchTUI)
+	run2, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "later run", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("second Launch: %v", err)
 	}
@@ -741,7 +783,7 @@ func TestLaunchPinsProfileWithoutMount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "with profile", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "with profile", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -765,7 +807,7 @@ func TestLaunchWithoutSnapshotHasOnlyHomeMount(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "no snap", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "no snap", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}

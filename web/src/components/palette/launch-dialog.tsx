@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
-import type { AgentInfo } from '@/lib/types'
+import type { AgentInfo, Member } from '@/lib/types'
 import { useStore } from '@/store'
 
 // The harness roster comes from agent.list so member-registered agents are
@@ -30,11 +30,15 @@ export function LaunchDialog() {
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
   const upsertRun = useStore((s) => s.upsertRun)
+  const self = useStore((s) => s.info?.member)
+  const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
+  const [account, setAccount] = useState(self?.id ?? '')
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [harness, setHarness] = useState('')
   const [task, setTask] = useState('')
   const [mode, setMode] = useState<LaunchMode>('tui')
   const [launching, setLaunching] = useState(false)
+  const ownAccountID = self?.id ?? accounts[0]?.id
   // The server's rule: a taskless launch lands the member in the agent's
   // interactive TUI, but headless has no interactive surface, so it needs a
   // task to have anything to do. Say so here rather than sending a request
@@ -42,11 +46,28 @@ export function LaunchDialog() {
   const needsTask = mode === 'headless' && task.trim() === ''
 
   useEffect(() => {
+    let live = true
+    api
+      .accountList()
+      .then((access) => {
+        if (!live) return
+        setAccounts(access.accounts)
+        setAccount((current) => current || access.accounts[0]?.id || '')
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
+
+  useEffect(() => {
     // agent.list is the roster this server can run. A failed fetch still
     // leaves the "custom" escape hatch selectable below.
     let live = true
+    setAgents(null)
+    setHarness('')
     api
-      .agentList()
+      .agentList(account && account !== ownAccountID ? account : undefined)
       .then((list) => {
         if (!live) return
         setAgents(list)
@@ -60,7 +81,7 @@ export function LaunchDialog() {
     return () => {
       live = false
     }
-  }, [])
+  }, [account, ownAccountID])
 
   const launch = async () => {
     setLaunching(true)
@@ -74,6 +95,9 @@ export function LaunchDialog() {
         harness,
         ...(trimmed ? { task: trimmed } : {}),
         ...(mode === 'tui' ? {} : { mode }),
+        ...(account && account !== ownAccountID
+          ? { account_member_id: account }
+          : {}),
       })
       // Seed the store so the terminal view attaches without a refetch.
       upsertRun(run)
@@ -131,6 +155,21 @@ export function LaunchDialog() {
           </label>
           <div className="flex gap-3">
             <label className="flex-1 space-y-1 text-sm">
+              Account
+              <select
+                className={field}
+                value={account}
+                onChange={(e) => setAccount(e.target.value)}
+              >
+                {accounts.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.display_name}
+                    {member.id === ownAccountID ? ' (you)' : ' (shared)'}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex-1 space-y-1 text-sm">
               Harness
               <select
                 className={field}
@@ -157,6 +196,12 @@ export function LaunchDialog() {
               </select>
             </label>
           </div>
+          {account && account !== ownAccountID && (
+            <p className="text-xs text-muted-foreground">
+              This run uses the selected member&apos;s environment, agent login,
+              profile, and vendor quota. You remain its owner and actor.
+            </p>
+          )}
           {needsTask && (
             <p id="launch-needs-task" className="text-xs text-muted-foreground">
               A headless run has no terminal to type into, so it needs a task.
@@ -171,7 +216,7 @@ export function LaunchDialog() {
             type="submit"
             form="launch-run"
             aria-describedby={needsTask ? 'launch-needs-task' : undefined}
-            disabled={launching || !workspaceID || !harness || needsTask}
+            disabled={launching || !workspaceID || !account || !harness || needsTask}
           >
             Launch
           </Button>

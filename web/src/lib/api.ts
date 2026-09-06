@@ -4,6 +4,7 @@
 // the method's params as the body, bearer token from `aether gui`.
 
 import type {
+  AccountAccess,
   AgentDefinition,
   AgentInfo,
   Approval,
@@ -291,6 +292,11 @@ export const api = {
   serverInfo: () => call<ServerInfo>('server.info'),
   memberList: () =>
     call<{ members: Member[] }>('member.list').then((r) => r.members),
+  accountList: () => call<AccountAccess>('account.list'),
+  accountShare: (memberID: string) =>
+    call<unknown>('account.share', { member_id: memberID }),
+  accountRevoke: (memberID: string) =>
+    call<unknown>('account.revoke', { member_id: memberID }),
   runList: (params: { workspace_id?: string; active_only?: boolean } = {}) =>
     call<{ runs: Run[] }>('run.list', params).then((r) => r.runs),
   runGet: (runID: string) =>
@@ -300,6 +306,7 @@ export const api = {
     task?: string
     harness: string
     mode?: string
+    account_member_id?: string
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
@@ -432,8 +439,10 @@ export const api = {
     call<ProfileStatus>('profile.status', { harness }),
   profileRollback: (harness: string, snapshotID: string) =>
     call<unknown>('profile.rollback', { harness, snapshot_id: snapshotID }),
-  agentList: () =>
-    call<{ agents: AgentInfo[] }>('agent.list').then((r) => r.agents),
+  agentList: (accountMemberID?: string) =>
+    call<{ agents: AgentInfo[] }>('agent.list', {
+      ...(accountMemberID ? { account_member_id: accountMemberID } : {}),
+    }).then((r) => r.agents),
   agentRegister: (definition: AgentDefinition) =>
     call<unknown>('agent.register', { definition }),
   runProtect: (runID: string, protect: boolean) =>

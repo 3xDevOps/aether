@@ -208,6 +208,11 @@ type Run struct {
 	WorkspaceID WorkspaceID
 	// MemberID is the owning member (transferable via handoff).
 	MemberID MemberID
+	// AccountMemberID owns the environment, credentials, profile, and vendor
+	// quota used by this run. It normally equals MemberID; a different value
+	// records an explicit account-share launch without changing run ownership
+	// or actor attribution. Empty rows from older schemas fall back to MemberID.
+	AccountMemberID MemberID
 	// Task is the prompt the agent was launched with.
 	Task string
 	// Title is the latest terminal title reported by the agent.
@@ -248,6 +253,34 @@ type Run struct {
 	// "continue the most recent conversation here" flag. See
 	// docs/failure-handling.md.
 	HarnessSessionID string
+}
+
+// AccountMember returns the member whose agent account backs the run.
+func (r *Run) AccountMember() MemberID {
+	if r.AccountMemberID != "" {
+		return r.AccountMemberID
+	}
+	return r.MemberID
+}
+
+// RelaunchAccount preserves an account that is distinct from the current run
+// owner, including after handoff. A direct relaunch by someone other than the
+// current owner switches an otherwise unshared run to that actor's account.
+func (r *Run) RelaunchAccount(actor MemberID) MemberID {
+	account := r.AccountMember()
+	if account == r.MemberID && actor != r.MemberID {
+		return actor
+	}
+	return account
+}
+
+// AccountShare grants Grantee permission to launch agents with Owner's
+// environment and vendor account. The authenticated grantee remains the run
+// owner and the actor recorded in the timeline.
+type AccountShare struct {
+	Owner     MemberID
+	Grantee   MemberID
+	CreatedAt time.Time
 }
 
 // ServerBusy reports what is keeping a server from being idle, which is

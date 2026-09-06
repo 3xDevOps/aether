@@ -196,7 +196,7 @@ func (s *Service) record(ctx context.Context, run domain.RunID, p events.RunCost
 	c := &store.RunCost{
 		RunID:        r.ID,
 		WorkspaceID:  r.WorkspaceID,
-		MemberID:     r.MemberID,
+		MemberID:     r.AccountMember(),
 		InputTokens:  p.InputTokens,
 		OutputTokens: p.OutputTokens,
 		CostUSD:      p.CostUSD,
@@ -231,7 +231,7 @@ func (s *Service) markUnmetered(ctx context.Context, run domain.RunID) {
 		return
 	}
 	if err := s.store.PutRunCost(ctx, &store.RunCost{
-		RunID: r.ID, WorkspaceID: r.WorkspaceID, MemberID: r.MemberID,
+		RunID: r.ID, WorkspaceID: r.WorkspaceID, MemberID: r.AccountMember(),
 	}); err != nil {
 		slog.Warn("cost: record unmetered run failed", "run", run, "error", err)
 		return

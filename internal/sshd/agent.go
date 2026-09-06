@@ -64,7 +64,15 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 	return protocol.AgentRegisterResult(p), nil
 }
 
-func (s *Server) agentList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.AgentListParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	account, perr := s.launchAccount(ctx, member, p.AccountMemberID)
+	if perr != nil {
+		return nil, perr
+	}
 	// "custom" (deployment escape hatch) and "fake" (deterministic test
 	// harness, registered scheduler-side) are deliberately not advertised.
 	var agents []protocol.AgentInfo
@@ -78,7 +86,7 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, _ json.R
 			InstallScript: p.InstallScript,
 		})
 	}
-	rows, serr := s.cfg.Store.ListHarnessDefinitions(ctx, member)
+	rows, serr := s.cfg.Store.ListHarnessDefinitions(ctx, account)
 	if serr != nil {
 		return nil, rpcError(serr)
 	}

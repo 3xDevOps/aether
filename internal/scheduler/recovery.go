@@ -38,7 +38,8 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if _, statErr := os.Stat(old.Worktree); statErr != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidTransition, relaunchRequiresCheckout)
 	}
-	argv, profile, err := s.command(ctx, actor, old.Harness, old.Mode, old.Task)
+	account := old.RelaunchAccount(actor)
+	argv, profile, err := s.command(ctx, account, old.Harness, old.Mode, old.Task)
 	if err != nil {
 		return nil, err
 	}
@@ -49,11 +50,15 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	// its own.
 	var session string
 	if old.Status == domain.RunInterrupted {
-		argv, session = resumeSession(argv, profile, old, actor)
+		argv, session = resumeSession(argv, profile, old, account)
 	} else {
 		argv, session = pinSession(argv, profile)
 	}
-	m, err := s.cfg.Store.GetMember(ctx, actor)
+	member, err := s.cfg.Store.GetMember(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	accountMember, err := s.cfg.Store.GetMember(ctx, account)
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +76,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	next := &domain.Run{
 		WorkspaceID:      old.WorkspaceID,
 		MemberID:         actor,
+		AccountMemberID:  account,
 		Task:             old.Task,
 		Harness:          old.Harness,
 		Mode:             old.Mode,
@@ -123,7 +129,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.failRelaunch(next, actor, fmt.Errorf("record checkout: %w", err))
 		return nil, err
 	}
-	if err := s.provision(ctx, next, ws, m, argv, profile, true); err != nil {
+	if err := s.provision(ctx, next, ws, member, accountMember, argv, profile, true); err != nil {
 		return nil, err
 	}
 	return s.freshen(ctx, next), nil
@@ -356,7 +362,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		workspaceID:   r.WorkspaceID,
 		containerID:   runtime.ID(sc.ContainerID),
 		task:          r.Task,
-		memberID:      r.MemberID,
+		memberID:      r.AccountMember(),
 		harness:       r.Harness,
 		status:        r.Status,
 		startedAt:     started,

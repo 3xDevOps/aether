@@ -379,10 +379,10 @@ type blockingRuns struct {
 	release chan struct{}
 }
 
-func (b *blockingRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (b *blockingRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	close(b.entered)
 	<-b.release
-	return b.fakeRuns.Launch(ctx, workspace, member, task, harness, mode)
+	return b.fakeRuns.Launch(ctx, workspace, member, account, task, harness, mode)
 }
 
 // TestCloseWaitsForInFlightHandlers pins the shutdown contract Close now

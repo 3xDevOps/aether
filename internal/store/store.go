@@ -62,6 +62,12 @@ type Store interface {
 	UpdateMember(ctx context.Context, m *domain.Member) error
 	DeleteMember(ctx context.Context, id domain.MemberID) error
 
+	ShareAccount(ctx context.Context, owner, grantee domain.MemberID) error
+	RevokeAccountShare(ctx context.Context, owner, grantee domain.MemberID) error
+	AccountSharedWith(ctx context.Context, owner, grantee domain.MemberID) (bool, error)
+	ListAccountOwners(ctx context.Context, grantee domain.MemberID) ([]*domain.Member, error)
+	ListAccountGrantees(ctx context.Context, owner domain.MemberID) ([]*domain.Member, error)
+
 	GetTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
 	PutTerminal(ctx context.Context, terminal *domain.Terminal) error
 	DeleteTerminal(ctx context.Context, member domain.MemberID) error

@@ -39,8 +39,8 @@ func TestRebootRecoveryResumesSupervision(t *testing.T) {
 	run, c := e.launchFake(t, "survive the reboot")
 	// "Reboot": the first scheduler dies without finalizing; the container
 	// keeps running (Docker semantics for a daemonless host process loss).
-	if err := e.sched.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 
 	pty2 := newFakePTY()
@@ -611,7 +611,7 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	e := newTestEnv(t, nil)
 
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -709,7 +709,7 @@ func TestRelaunchOfARunThatNeverStartedPinsAFreshSession(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
-	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "never spoke", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "never spoke", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -757,7 +757,7 @@ func TestRelaunchByAnotherMemberPinsAFreshSession(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
-	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "not yours", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "not yours", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -788,6 +788,50 @@ func TestRelaunchByAnotherMemberPinsAFreshSession(t *testing.T) {
 	}
 }
 
+func TestRelaunchByAnotherMemberResumesExplicitSharedAccountSession(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	account := &domain.Member{
+		DisplayName: "Account", PublicKey: testPublicKey(t),
+		Color: "#4363d8", Role: domain.RoleCollaborator,
+	}
+	if err := e.db.CreateMember(ctx, account); err != nil {
+		t.Fatalf("CreateMember account: %v", err)
+	}
+
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, account.ID, "shared", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	owned := run.HarnessSessionID
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+
+	rt2 := newFakeRuntime()
+	s2 := e.newScheduler(t, rt2, newFakePTY())
+	startScheduler(t, s2)
+	e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
+	other := &domain.Member{
+		DisplayName: "Grace", PublicKey: testPublicKey(t),
+		Color: "#3cb44b", Role: domain.RoleCollaborator,
+	}
+	if createErr := e.db.CreateMember(ctx, other); createErr != nil {
+		t.Fatalf("CreateMember actor: %v", createErr)
+	}
+	next, err := s2.Relaunch(ctx, run.ID, other.ID)
+	if err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+	flag, id := relaunchSessionArgv(t, rt2, next)
+	if flag != "--resume" || id != owned {
+		t.Fatalf("shared-account relaunch session = %q %q, want --resume %q", flag, id, owned)
+	}
+	if next.MemberID != other.ID || next.AccountMember() != account.ID {
+		t.Fatalf("relaunch actor/account = %s/%s, want %s/%s", next.MemberID, next.AccountMember(), other.ID, account.ID)
+	}
+}
+
 // TestRelaunchTwiceRefusesToShareOneConversation pins the guard that keeps
 // two agents from appending to one transcript. The checkout guard cannot
 // catch this: the second relaunch gets a checkout of its own.
@@ -795,7 +839,7 @@ func TestRelaunchTwiceRefusesToShareOneConversation(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
-	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "resume me once", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "resume me once", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -865,7 +909,7 @@ func TestRelaunchTwiceRefusesToShareOneConversation(t *testing.T) {
 func TestRelaunchWithoutAPinnedSessionFallsBackToContinue(t *testing.T) {
 	e := newTestEnv(t, nil)
 
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}

@@ -649,6 +649,21 @@ ALTER TABLE workspaces DROP COLUMN setup_script;
 	`
 ALTER TABLE members ADD COLUMN image TEXT NOT NULL DEFAULT '';
 `,
+	// v21: opt-in member account sharing. Runs retain their authenticated
+	// owner in member_id and separately pin the environment/vendor account
+	// they used. Existing rows fall back to member_id in domain.Run.
+	`
+ALTER TABLE runs ADD COLUMN account_member_id TEXT REFERENCES members(id);
+UPDATE runs SET account_member_id = member_id;
+CREATE TABLE account_shares (
+	owner_member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	grantee_member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	created_at        INTEGER NOT NULL,
+	PRIMARY KEY (owner_member_id, grantee_member_id),
+	CHECK (owner_member_id <> grantee_member_id)
+);
+CREATE INDEX idx_account_shares_grantee ON account_shares(grantee_member_id);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

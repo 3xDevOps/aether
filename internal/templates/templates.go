@@ -66,7 +66,7 @@ var ErrInvalidDefinition = errors.New("templates: invalid definition")
 // guarded controller its RPC handlers use, so a template launch and a
 // cron fire are admitted against the workspace budget like any other run.
 type Launcher interface {
-	Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
+	Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
 }
 
 // BaseResolver reports when a workspace branch was last committed as the
@@ -281,7 +281,7 @@ func (s *Service) launch(ctx context.Context, t *store.Template, member domain.M
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}
 	base := s.baseInfo(ctx, t.WorkspaceID)
-	run, err := s.runs.Launch(ctx, t.WorkspaceID, member, task, t.Harness, t.Mode)
+	run, err := s.runs.Launch(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode)
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}

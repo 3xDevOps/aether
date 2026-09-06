@@ -56,6 +56,8 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   // self-lockout; null when no such change is pending.
   const [demoting, setDemoting] = useState<Member['role'] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [sharedWith, setSharedWith] = useState<Member[]>([])
+  const [sharing, setSharing] = useState<string | null>(null)
 
   // The roster the store holds came from hydration; this view is the one
   // place approvals happen, so opening it re-reads the list.
@@ -67,12 +69,43 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
         if (!cancelled) setMembers(list)
       })
       .catch(() => {})
+    client
+      .accountList()
+      .then((access) => {
+        if (!cancelled) setSharedWith(access.shared_with)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [client, setMembers])
 
   const refetch = async () => setMembers(await client.memberList())
+  const refetchShares = async () =>
+    setSharedWith((await client.accountList()).shared_with)
+
+  const toggleAccountShare = async (member: Member) => {
+    setSharing(member.id)
+    setError(null)
+    try {
+      const shared = sharedWith.some((entry) => entry.id === member.id)
+      if (shared) {
+        await client.accountRevoke(member.id)
+      } else {
+        await client.accountShare(member.id)
+      }
+      await refetchShares()
+      toast.success(
+        shared
+          ? `Account access revoked from ${member.display_name}`
+          : `Account shared with ${member.display_name}`,
+      )
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setSharing(null)
+    }
+  }
 
   const approve = async (member: Member) => {
     setError(null)
@@ -132,9 +165,8 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
     <div className="flex h-full flex-col">
       <ViewHeader
         title="Members"
-        // A non-admin can read the roster but change nothing in it. Saying so
-        // once here beats leaving them to infer it from absent buttons.
-        subtitle={isAdmin ? count : `${count} - read only`}
+        // Account sharing is self-service; only roster roles are read-only.
+        subtitle={isAdmin ? count : `${count} - roles read only`}
       />
       <div className="flex-1 space-y-6 overflow-y-auto p-4">
         {caps.hasMethod('member.invite') && isAdmin && (
@@ -243,6 +275,51 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
             </tbody>
           </table>
         </section>
+
+        {self &&
+          caps.hasMethod('account.share') &&
+          caps.hasMethod('account.revoke') && (
+            <section aria-label="Account sharing" className="space-y-2">
+              <h2 className="text-xs font-medium text-muted-foreground">
+                Your agent account
+              </h2>
+              <p className="max-w-2xl text-sm text-muted-foreground">
+                A member you grant access can launch runs with your saved
+                environment, agent login, profile, and vendor quota. Their
+                actions remain attributed to them. Revoke access at any time;
+                running agents are not stopped.
+              </p>
+              <ul className="space-y-2">
+                {roster
+                  .filter((member) => member.id !== self.id)
+                  .map((member) => {
+                    const shared = sharedWith.some(
+                      (entry) => entry.id === member.id,
+                    )
+                    return (
+                      <li
+                        key={member.id}
+                        className="flex items-center justify-between gap-3 rounded-md border bg-card p-2 text-sm"
+                      >
+                        <span>{member.display_name}</span>
+                        <Button
+                          size="sm"
+                          variant={shared ? 'outline' : 'default'}
+                          disabled={sharing !== null}
+                          onClick={() => void toggleAccountShare(member)}
+                        >
+                          {sharing === member.id
+                            ? 'Saving...'
+                            : shared
+                              ? 'Revoke access'
+                              : 'Share account'}
+                        </Button>
+                      </li>
+                    )
+                  })}
+              </ul>
+            </section>
+          )}
 
         {self && caps.hasMethod('member.color') && (
           <section aria-label="Your color" className="space-y-2">

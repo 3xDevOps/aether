@@ -30,7 +30,7 @@ func TestKillDuringProvisioning(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, "slow image pull", "fake", domain.LaunchTUI)
+		_, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "slow image pull", "fake", domain.LaunchTUI)
 		done <- err
 	}()
 	<-provisioning

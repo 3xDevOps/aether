@@ -184,7 +184,27 @@ describe('members view', () => {
     expect(screen.getByLabelText('Set color #e6194b')).toBeDefined()
     // The header says why the view is inert, rather than leaving the
     // absent buttons to imply it.
-    expect(screen.getByText('3 members - read only')).toBeDefined()
+    expect(screen.getByText('3 members - roles read only')).toBeDefined()
+  })
+
+  it('lets a member grant and revoke use of their agent account', async () => {
+    const accountList = vi
+      .fn()
+      .mockResolvedValueOnce({ accounts: [alice], shared_with: [] })
+      .mockResolvedValueOnce({ accounts: [alice], shared_with: [bob] })
+      .mockResolvedValue({ accounts: [alice], shared_with: [] })
+    const client = fakeApi({
+      accountList,
+      accountShare: vi.fn(async () => ({})),
+      accountRevoke: vi.fn(async () => ({})),
+    })
+    seed()
+    render(<MembersRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+    await waitFor(() => expect(client.accountShare).toHaveBeenCalledWith(bob.id))
+    fireEvent.click(await screen.findByRole('button', { name: 'Revoke access' }))
+    await waitFor(() => expect(client.accountRevoke).toHaveBeenCalledWith(bob.id))
   })
 
   it('renders the server refusal verbatim when a role change is denied', async () => {
