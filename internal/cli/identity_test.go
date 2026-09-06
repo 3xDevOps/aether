@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
@@ -23,20 +24,18 @@ func TestEnsureIdentityCreatesDefaultKeyPair(t *testing.T) {
 	if path != want {
 		t.Fatalf("path = %q, want %q", path, want)
 	}
-	privateInfo, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat private key: %v", err)
-	}
-	if privateInfo.Mode().Perm() != 0o600 {
-		t.Errorf("private mode = %o, want 600", privateInfo.Mode().Perm())
-	}
 	publicPath := path + ".pub"
-	publicInfo, err := os.Stat(publicPath)
-	if err != nil {
-		t.Fatalf("stat public key: %v", err)
-	}
-	if publicInfo.Mode().Perm() != 0o600 {
-		t.Errorf("public mode = %o, want 600", publicInfo.Mode().Perm())
+	// Windows has no POSIX permission bits to check.
+	if runtime.GOOS != "windows" {
+		for _, p := range []string{path, publicPath} {
+			info, statErr := os.Stat(p)
+			if statErr != nil {
+				t.Fatalf("stat %s: %v", p, statErr)
+			}
+			if info.Mode().Perm() != 0o600 {
+				t.Errorf("%s mode = %o, want 600", p, info.Mode().Perm())
+			}
+		}
 	}
 	private, err := os.ReadFile(path)
 	if err != nil {
