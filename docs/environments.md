@@ -1,9 +1,10 @@
 # Member environments
 
-A member's environment is the container image used by every container that
-member receives: agent runs, workspace shells, and the environment terminal.
-If the member has saved an image, Aether uses it. Otherwise, Aether uses the
-server's standard image. A member's image is never used for another member.
+A member's environment is the container image used by their environment
+terminal and every run using their agent account. If the member has saved an
+image, Aether uses it. Otherwise, Aether uses the server's standard image. An
+explicit account share lets another member launch a run with that image; see
+[teams.md](teams.md#agent-accounts).
 
 ## The standard image
 
@@ -65,8 +66,9 @@ older `aether/member-<member-id>` tag is removed. A tag a run container still
 uses stays until the next save or reset. The command prints `saved <tag>`,
 then `new runs and terminals start from this environment`.
 
-Runs that are already running keep their existing containers. New runs,
-workspace shells, and the next environment terminal open use the saved image.
+Runs that are already running keep their existing containers. New runs using
+the account, their workspace shells, and the next environment terminal open
+use the saved image.
 The terminal that was saved keeps running, so its committed state is already
 available to later containers.
 

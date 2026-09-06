@@ -122,8 +122,8 @@ the command.
 ## Workspaces
 
 A workspace is the whole shared scope. It is a repository plus workspace
-settings; each member's runs and shells use that member's saved image, or the
-server's standard image when they have not saved one. See
+settings; a run and its shells use the selected agent account's saved image, or
+the server's standard image when that account has not saved one. See
 [environments.md](environments.md) for image selection and saving. Everything
 the team shares hangs off the workspace: runs, the event feed, the approval
 inbox, presence, templates, schedules, costs, and the budget. One workspace
@@ -189,7 +189,7 @@ the artifact. Every other branch behaves like a normal git remote.
 | `aether inject <run> "..."` | Push an instruction into a running agent. Renders as a banner in your member color. |
 | `aether pause` / `resume` / `kill <run>` | Suspend, thaw, terminate. Worktree and transcript survive a kill. |
 | `aether protect` / `unprotect <run>` | Limit steering and killing one run to its owner and admins, whatever the workspace policy says. |
-| `aether handoff <run> <member>` | Transfer ownership, notification routing, and cost attribution. Overnight relay work. Refused for a viewer or a pending member, since neither can own a run. |
+| `aether handoff <run> <member>` | Transfer ownership and notification routing. Overnight relay work. Refused for a viewer or a pending member, since neither can own a run. The agent account and its cost attribution do not change. |
 | `aether close <run> --outcome merged\|abandoned` | Clear a finished run off the attention board. |
 | `aether inbox` | The shared approval queue; `aether inbox approve\|deny <request-id>` decides, and any steer-holder can. `--all` includes decided requests. |
 | `aether timeline` | The workspace's whole history; filter with `--run`, `--member`, `--type`, `--limit`, export with `--jsonl`. |
@@ -197,6 +197,7 @@ the artifact. Every other branch behaves like a normal git remote.
 | `aether budget` | The workspace's spend cap and what has been used. |
 | `aether sync --live <local-dir> <run>` | Live-overlay a local directory onto a run's worktree. Local edits that collide are preserved as `*.aether-conflict` files. |
 | `aether forward <run-id|terminal> <port> [--local <port>]` | Forward a run or environment terminal port to loopback for callbacks such as agent OAuth. The local port defaults to the forwarded port. |
+| `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. |
 
 ### Task templates and schedules
@@ -262,13 +263,38 @@ At the cap, new runs are refused and running runs finish. Note that runs whose
 harness reports no token usage are counted as *unmetered* - `aether cost` says
 so explicitly, and the totals are a floor rather than the real spend.
 
-## Agent setup is per person
+## Agent accounts
 
 Each member runs `aether agent add <name>` once, then opens `aether terminal`
 to install the agent and complete the vendor login. The member's server-side
 home is mounted into every container that person receives, so all their runs
-share the same login and installed files. No member can see another member's
-home. See [harnesses.md](harnesses.md).
+share the same login and installed files. See [harnesses.md](harnesses.md).
+
+A member may explicitly let another collaborator launch against that account:
+
+```sh
+# Account owner
+aether account share <member-id>
+aether account list
+
+# Recipient
+aether run "triage the failures" --agent codex --account <owner-member-id>
+
+# Account owner
+aether account revoke <member-id>
+```
+
+The dashboard exposes the same grant controls on **Members** and an **Account**
+picker in the launch dialog. The run is owned by the authenticated launcher,
+whose identity is used for the timeline and Git author. The selected account
+supplies its saved environment, complete home and credentials, synced profile,
+custom harness definitions, vendor quota, and cost attribution.
+
+Sharing is directional. It does not let the recipient open the owner's
+environment terminal, and admins get no implicit account access. It does let a
+root process in the recipient's run read or change every file and credential in
+the shared home. Revocation blocks new launches and relaunches but does not
+stop existing runs; stop them first if access must end immediately.
 
 Agent *configuration* - skills, plugins, custom commands - syncs one way from
 each member's laptop with `aether profile push` (and automatically, if the

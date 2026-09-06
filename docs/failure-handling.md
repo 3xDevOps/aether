@@ -106,22 +106,22 @@ and sharing one credential home per member, so a reboot that interrupted
 several of a member's runs still relaunches each one into its own
 conversation.
 
-Three cases never resume the pinned conversation, because the relaunch
-could not read the transcript behind it. `claude --resume` on an ID it
-cannot find prints `No conversation found with session ID: <id>` and exits
-1, which would fail the relaunch outright.
+Two cases do not resume the pinned conversation. `claude --resume` on an ID it
+cannot find prints `No conversation found with session ID: <id>` and exits 1,
+which would fail the relaunch outright.
 
-The first two open a fresh conversation instead:
+The first opens a fresh conversation instead:
 
 - The run was interrupted before its agent ever started (a `queued` or
   `provisioning` row). The ID is stamped when the row is created, so it
   names a conversation the harness never opened.
-- The relaunch is by someone other than the run's owner. Steering others is
-  allowed by default and a handoff transfers the run, but the container
-  mounts the actor's credential home while the transcript lives in the
-  owner's.
+- The relaunch changes agent accounts. A normal run relaunched directly by
+  another member uses that member's account, whose home lacks the transcript.
+  An account distinct from the run owner, whether selected at launch or left
+  by a handoff, stays pinned; the owner can relaunch and resume it only while
+  they have access.
 
-The third is refused: relaunching one interrupted row twice while the first
+The second is refused: relaunching one interrupted row twice while the first
 relaunch is still active fails with `agent conversation already resumed by
 active run <id>`. Two agents appending to one transcript is not a
 recoverable state, and the checkout guard never catches it because every

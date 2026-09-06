@@ -1,10 +1,11 @@
 # Member environment home
 
 Each member has one server-owned home directory under `<data>/homes/<member>`.
-Aether mounts it read-write as `$HOME` in every container that member receives,
-including agent runs, workspace shells, and the environment terminal. Every
-container also starts from that member's saved image, or the standard image
-when none is saved.
+Aether mounts it read-write as `$HOME` in the member's environment terminal and
+every run using that member's agent account, including the run's shell tabs.
+Those containers also start from that member's saved image, or the standard
+image when none is saved. An explicit account share permits another member's
+run to use both; see [teams.md](teams.md#agent-accounts).
 
 ## What persists
 
@@ -34,7 +35,7 @@ install the agent into `~/.local/bin`, and complete the vendor login there:
 aether terminal
 ```
 
-After setup, every container for that member sees the same executable and login
+After setup, every run using that account sees the same executable and login
 state. A member-defined agent also records its launch arguments for later runs.
 The terminal command ships in this release series.
 

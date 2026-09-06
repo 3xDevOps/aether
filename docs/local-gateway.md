@@ -31,15 +31,22 @@ initial browser tab). The printed URL is
 
 ### Agent OAuth logins
 
-When an agent prints an OAuth URL, open it in your browser. Forward the
-callback port from the run or environment terminal:
+When an agent prints an OAuth URL in the dashboard, click it. If the URL
+contains an HTTP loopback callback, the dashboard opens a blank browser tab,
+starts the local forward, and only then loads the authorization page. The
+forward targets the run or environment terminal where the link appeared.
+
+For a CLI terminal, or as a dashboard fallback, forward the callback port
+before completing authorization:
 
 ```sh
 aether forward <run-id|terminal> 1455
 ```
 
 The local port defaults to the container port; use `--local <port>` only when
-the OAuth redirect URI is configured for a different local port.
+the OAuth redirect URI is configured for a different local port. Starting the
+same dashboard forward again is a no-op, so repeated clicks keep the listener
+ready.
 
 `--json` prints exactly one line and then serves:
 
@@ -320,7 +327,7 @@ authority.
 | `daemon.install` | `{"server":"host:port","repo":"..."}` (`repo` defaults to the linked one; the unit gets the linked `--key`) | `{"unit_path":"...","note":"..."}` |
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
 | `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"searched":["/usr/local/bin",...],"warning":"...","repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`. The verb first widens the gateway's `PATH` from your login shell (`$SHELL -l -i`, bounded to 5 seconds), so agents installed through a shell profile or since the gateway started are found; `searched` is the resulting `PATH` as a list of folders (always present, may be empty); `warning` is present only when the login shell could not be asked, carrying that error verbatim (the standard folders `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, and `~/.bun/bin` were still checked); `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
-| `forward.start` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"state":"active"}` |
+| `forward.start` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"state":"active"}`; idempotent for the same target and port |
 | `forward.stop` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"state":"stopped"}` |
 | `forward.status` | `{}` | `{"forwards":[{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"conns":1}]}` sorted by target, then port |
 | `update.check` | `{}` | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `cli_path` and `install_method` absent when the binary could not be probed) |
@@ -671,8 +678,8 @@ needs.
 
 1. Client sends one **text** frame with the attach header (the run comes
    from the path). The header must arrive within 10 seconds or the socket
-   is closed. Write is opt-in - the header of a read-only mirror is just
-   `{}`:
+   is closed. The dashboard requests write on first entry; a CLI read-only
+   mirror sends `{}`:
 
    ```json
    {"write":true,"cols":120,"rows":40}
