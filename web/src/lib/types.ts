@@ -482,6 +482,14 @@ export interface LinkStatus {
   active?: string
 }
 
+/** link.apply: the server identity linked to this local gateway. */
+export interface LinkApplyResult {
+  addr: string
+  user: string
+  member: { id: string; display_name: string; role: string }
+  key_generated?: string
+}
+
 /** link.repo: the repo just linked and the git remote written into it. */
 export interface LinkRepoResult {
   repo: string

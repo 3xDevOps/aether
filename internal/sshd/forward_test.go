@@ -90,6 +90,58 @@ func TestDirectTCPIPOwnerEchoAndHalfClose(t *testing.T) {
 	}
 }
 
+func TestDirectTCPIPTerminalTarget(t *testing.T) {
+	e := newTestEnv(t, nil)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	e.runs.setTerminalAddr("127.0.0.1")
+	serverDone := make(chan error, 1)
+	go func() {
+		conn, aerr := listener.Accept()
+		if aerr != nil {
+			serverDone <- aerr
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, copyErr := io.Copy(conn, conn)
+		serverDone <- copyErr
+	}()
+
+	client := e.dial(t)
+	ch, reqs, err := client.OpenChannel("direct-tcpip", ssh.Marshal(forwardTestPayload{
+		DestHost: "terminal",
+		DestPort: uint32(listener.Addr().(*net.TCPAddr).Port),
+		OrigHost: "127.0.0.1",
+	}))
+	if err != nil {
+		t.Fatalf("OpenChannel: %v", err)
+	}
+	go func() {
+		for range reqs {
+		}
+	}()
+	defer func() { _ = ch.Close() }()
+	if _, err := ch.Write([]byte("hello")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := readForwardBytes(t, ch, 5); string(got) != "hello" {
+		t.Fatalf("echo = %q, want hello", got)
+	}
+	_ = ch.CloseWrite()
+	if err := <-serverDone; err != nil {
+		t.Fatalf("echo server: %v", err)
+	}
+}
+
+func TestDirectTCPIPRejectsUnavailableTerminal(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.runs.terminalAddrErr = errors.New("not running")
+	assertForwardRejected(t, e.dial(t), forwardTestPayload{DestHost: "terminal", DestPort: 1}, "environment terminal is not running")
+}
+
 func TestDirectTCPIPRejectsUnknownRun(t *testing.T) {
 	e := newTestEnv(t, nil)
 	client := e.dial(t)
@@ -112,7 +164,7 @@ func TestDirectTCPIPRejectsProtectedRunCollaborator(t *testing.T) {
 
 func TestDirectTCPIPRejectsNonRunDestination(t *testing.T) {
 	e := newTestEnv(t, nil)
-	assertForwardRejected(t, e.dial(t), forwardTestPayload{DestHost: "127.0.0.1", DestPort: 1}, "port forwarding targets must be run:<run-id>")
+	assertForwardRejected(t, e.dial(t), forwardTestPayload{DestHost: "127.0.0.1", DestPort: 1}, "port forwarding targets must be run:<run-id> or terminal")
 }
 
 func TestDirectTCPIPRejectsViewer(t *testing.T) {

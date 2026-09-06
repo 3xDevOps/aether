@@ -265,6 +265,13 @@ func (h *Host) Inject(ctx context.Context, key SessionKey, actorName, actorColor
 	return s.inject(actorName, actorColor, message)
 }
 
+// ReplayWriter is implemented by an attach conn that wants to be told where
+// scrollback replay ends. WriteReplay is called exactly once per attach,
+// before any other Write, possibly with an empty slice.
+type ReplayWriter interface {
+	WriteReplay(p []byte) (int, error)
+}
+
 // Attach connects conn to the session's PTY and blocks until conn's read
 // side returns EOF or an error, ctx is done, the session ends (returns nil),
 // or the host closes. Reads from conn are keystrokes (discarded when

@@ -28,9 +28,9 @@ var localVerbs = []string{
 	"forward.start",
 	"forward.status",
 	"forward.stop",
+	"link.apply",
 	"link.repo",
 	"link.status",
-	"link.switch",
 	"profile.preview",
 	"profile.push",
 	"pull",
@@ -132,6 +132,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 		"daemon.install":  (*Gateway).localDaemonInstall,
 		"daemon.status":   (*Gateway).localDaemonStatus,
 		"env.harnesses":   (*Gateway).localEnvHarnesses,
+		"link.apply":      (*Gateway).localLinkApply,
 		"link.repo":       (*Gateway).localLinkRepo,
 		"link.switch":     (*Gateway).localLinkSwitch,
 		"link.status":     (*Gateway).localLinkStatus,
@@ -213,12 +214,49 @@ func (g *Gateway) localLinkStatus(*http.Request, []byte) (any, *protocol.Error) 
 		Links: namedLinks(cfg), Active: cfg.Active}, nil
 }
 
-// localLinkSwitch always refuses: the gateway's SSH identity, host-key
-// verification, and every WebSocket bridge are bound to the backend built
-// at process start, so swapping servers in-place would leave live event
-// streams and attach sessions pointed at the old host. Switching is a
-// process restart. The verb exists so the SPA can probe it and render
-// the instruction verbatim.
+func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		Addr   string `json:"addr"`
+		Invite string `json:"invite"`
+		Name   string `json:"name"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	if params.Addr == "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "addr is required"}
+	}
+	prev := g.local.snapshot()
+	result, err := cli.Link(cli.LinkOptions{
+		Addr:   params.Addr,
+		Invite: params.Invite,
+		Name:   params.Name,
+	}, prev)
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	}
+	cfg := result.Config
+	if err := cli.Save(cfg); err != nil {
+		_ = result.Conn.Close()
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	g.local.mu.Lock()
+	g.local.cacheConfig(cfg)
+	g.local.mu.Unlock()
+	g.cfg.Backend.Relink(cfg, result.Conn)
+	return struct {
+		Addr         string          `json:"addr"`
+		User         string          `json:"user"`
+		Member       protocol.Member `json:"member"`
+		KeyGenerated string          `json:"key_generated,omitempty"`
+	}{Addr: cfg.Addr, User: cfg.User, Member: result.Info.Member, KeyGenerated: result.KeyGenerated}, nil
+}
+
+// localLinkSwitch always refuses. link.apply relinks in place because the
+// dashboard has nothing open yet; switching a linked gateway would leave
+// every live event stream and attach session pointed at the old host, so
+// it stays a process restart. The verb exists so the SPA can probe it and
+// render the instruction verbatim.
 func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Name string `json:"name"`
@@ -559,61 +597,61 @@ func (g *Gateway) localSyncStatus(*http.Request, []byte) (any, *protocol.Error) 
 
 func (g *Gateway) localForwardStart(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
-		RunID string `json:"run_id"`
-		Port  uint32 `json:"port"`
+		Target string `json:"target"`
+		Port   uint32 `json:"port"`
 	}
 	if perr := decodeParams(body, &params); perr != nil {
 		return nil, perr
 	}
-	if params.RunID == "" {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "run_id is required"}
+	if !validForwardTarget(params.Target) {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "target must be run:<run-id> or terminal"}
 	}
 	if params.Port < 1 || params.Port > 65535 {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "port must be between 1 and 65535"}
 	}
-	err := g.local.forward.Start(params.RunID, int(params.Port), func() (io.ReadWriteCloser, error) {
-		return g.cfg.Backend.Forward(params.RunID, params.Port)
+	err := g.local.forward.Start(params.Target, int(params.Port), func() (io.ReadWriteCloser, error) {
+		return g.cfg.Backend.Forward(params.Target, params.Port)
 	})
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	}
 	return struct {
-		RunID     string `json:"run_id"`
+		Target    string `json:"target"`
 		Port      uint32 `json:"port"`
 		LocalPort uint32 `json:"local_port"`
 		State     string `json:"state"`
-	}{RunID: params.RunID, Port: params.Port, LocalPort: params.Port, State: "active"}, nil
+	}{Target: params.Target, Port: params.Port, LocalPort: params.Port, State: "active"}, nil
 }
 
 func (g *Gateway) localForwardStop(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
-		RunID string `json:"run_id"`
-		Port  uint32 `json:"port"`
+		Target string `json:"target"`
+		Port   uint32 `json:"port"`
 	}
 	if perr := decodeParams(body, &params); perr != nil {
 		return nil, perr
 	}
-	if params.RunID == "" {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "run_id is required"}
+	if !validForwardTarget(params.Target) {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "target must be run:<run-id> or terminal"}
 	}
 	if params.Port < 1 || params.Port > 65535 {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "port must be between 1 and 65535"}
 	}
-	if err := g.local.forward.Stop(params.RunID, int(params.Port)); err != nil {
+	if err := g.local.forward.Stop(params.Target, int(params.Port)); err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	}
 	return struct {
-		RunID string `json:"run_id"`
-		Port  uint32 `json:"port"`
-		State string `json:"state"`
-	}{RunID: params.RunID, Port: params.Port, State: "stopped"}, nil
+		Target string `json:"target"`
+		Port   uint32 `json:"port"`
+		State  string `json:"state"`
+	}{Target: params.Target, Port: params.Port, State: "stopped"}, nil
 }
 
 func (g *Gateway) localForwardStatus(*http.Request, []byte) (any, *protocol.Error) {
 	forwards := g.local.forward.Status()
 	sort.Slice(forwards, func(i, j int) bool {
-		if forwards[i].RunID != forwards[j].RunID {
-			return forwards[i].RunID < forwards[j].RunID
+		if forwards[i].Target != forwards[j].Target {
+			return forwards[i].Target < forwards[j].Target
 		}
 		return forwards[i].Port < forwards[j].Port
 	})

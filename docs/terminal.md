@@ -18,11 +18,18 @@ aether terminal stop
 
 In the dashboard, open the terminal dock on the run board. The first open starts
 the environment. The dock reconnects and replays terminal output when the page
-or network reconnects. Closing a tab only detaches it; opening that tab again
-reattaches to its shell.
+or network reconnects. The stream ack identifies the replay byte count, so the
+dashboard mutes terminal-generated replies until that scrollback is parsed.
+Closing a tab only detaches it; opening that tab again reattaches to its shell.
 
 The Agents setup step uses the same dock and types the install command for you.
 Complete the vendor login there, then return to the wizard.
+
+## Sign in to agents
+
+Forward the callback port from the environment terminal dock, then complete the
+login there. Select **Save environment** so later runs inherit the login state.
+See [environments.md](environments.md) for the saved environment lifecycle.
 
 ## Save your environment
 

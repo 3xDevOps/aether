@@ -119,7 +119,14 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, member dom
 	if p.err != nil {
 		err, delay := p.err, p.errDelay
 		p.mu.Unlock()
-		time.Sleep(delay)
+		// A delayed error models a failure after the ack: the replay
+		// boundary goes out first, then the attach dies.
+		if delay > 0 {
+			if rw, ok := conn.(ptyhost.ReplayWriter); ok {
+				_, _ = rw.WriteReplay(nil)
+			}
+			time.Sleep(delay)
+		}
 		return err
 	}
 	gate := p.gate
@@ -136,11 +143,16 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, member dom
 	replay := p.replay
 	p.mu.Unlock()
 
-	if len(replay) > 0 {
+	if rw, ok := conn.(ptyhost.ReplayWriter); ok {
+		if _, err := rw.WriteReplay(replay); err != nil {
+			return nil
+		}
+	} else if len(replay) > 0 {
 		if _, err := conn.Write(replay); err != nil {
 			return nil
 		}
 	}
+
 	readDone := make(chan struct{})
 	go func() {
 		defer close(readDone)
@@ -190,12 +202,14 @@ func (p *fakePTY) setErr(err error) {
 
 // fakeRuns records RunController calls and returns the configured error.
 type fakeRuns struct {
-	mu      sync.Mutex
-	err     error
-	addr    string
-	addrErr error
-	calls   []string
-	paused  map[domain.RunID]bool
+	mu              sync.Mutex
+	err             error
+	addr            string
+	addrErr         error
+	terminalAddr    string
+	terminalAddrErr error
+	calls           []string
+	paused          map[domain.RunID]bool
 }
 
 func (f *fakeRuns) record(call string) error {
@@ -238,6 +252,23 @@ func (f *fakeRuns) ContainerAddr(_ context.Context, run domain.RunID) (string, e
 		return "", f.addrErr
 	}
 	return f.addr, nil
+}
+func (f *fakeRuns) TerminalContainerAddr(_ context.Context, member domain.MemberID) (string, error) {
+	if err := f.record(fmt.Sprintf("terminal-container-addr:%s", member)); err != nil {
+		return "", err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.terminalAddrErr != nil {
+		return "", f.terminalAddrErr
+	}
+	return f.terminalAddr, nil
+}
+
+func (f *fakeRuns) setTerminalAddr(addr string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.terminalAddr = addr
 }
 func (f *fakeRuns) setAddr(addr string) {
 	f.mu.Lock()

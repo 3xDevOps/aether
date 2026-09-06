@@ -33,8 +33,11 @@ describe('terminal clipboard keys', () => {
     const writeText = vi.fn(async () => {})
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
     const { handler } = mount('picked text')
+    const event = key({ code: 'KeyC', ctrlKey: true, shiftKey: true })
+    const preventDefault = vi.spyOn(event, 'preventDefault')
 
-    expect(handler(key({ code: 'KeyC', ctrlKey: true, shiftKey: true }))).toBe(false)
+    expect(handler(event)).toBe(false)
+    expect(preventDefault).toHaveBeenCalledOnce()
     // The writeText call happens synchronously inside the handler's promise.
     expect(writeText).toHaveBeenCalledWith('picked text')
   })
@@ -44,20 +47,29 @@ describe('terminal clipboard keys', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
     const withSelection = mount('selected')
     const noSelection = mount('')
+    const selectedEvent = key({ code: 'KeyC', ctrlKey: true })
+    const emptyEvent = key({ code: 'KeyC', ctrlKey: true })
+    const selectedPreventDefault = vi.spyOn(selectedEvent, 'preventDefault')
+    const emptyPreventDefault = vi.spyOn(emptyEvent, 'preventDefault')
 
     // With a selection the user means copy; without one it is the interrupt
     // and must reach the terminal untouched.
-    expect(withSelection.handler(key({ code: 'KeyC', ctrlKey: true }))).toBe(false)
+    expect(withSelection.handler(selectedEvent)).toBe(false)
+    expect(selectedPreventDefault).toHaveBeenCalledOnce()
     expect(writeText).toHaveBeenCalledWith('selected')
-    expect(noSelection.handler(key({ code: 'KeyC', ctrlKey: true }))).toBe(true)
+    expect(noSelection.handler(emptyEvent)).toBe(true)
+    expect(emptyPreventDefault).not.toHaveBeenCalled()
   })
 
-  it('pastes clipboard text on ctrl+shift+v', () => {
+  it('pastes clipboard text on ctrl+shift+v and prevents native paste', () => {
     const readText = vi.fn(async () => 'from the clipboard')
     vi.stubGlobal('navigator', { ...navigator, clipboard: { readText } })
     const { handler, paste } = mount('')
+    const event = key({ code: 'KeyV', ctrlKey: true, shiftKey: true })
+    const preventDefault = vi.spyOn(event, 'preventDefault')
 
-    expect(handler(key({ code: 'KeyV', ctrlKey: true, shiftKey: true }))).toBe(false)
+    expect(handler(event)).toBe(false)
+    expect(preventDefault).toHaveBeenCalledOnce()
     expect(readText).toHaveBeenCalled()
     // The read resolves in a microtask; flush it before asserting.
     return vi.waitFor(() => expect(paste).toHaveBeenCalledWith('from the clipboard'))

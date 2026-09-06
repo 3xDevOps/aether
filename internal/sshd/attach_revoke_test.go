@@ -239,12 +239,20 @@ func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
 // and receives the membership-revoked exit status.
 func TestTerminalDropsOnMembershipRevocation(t *testing.T) {
 	e := revocableEnv(t)
+	e.pty.replay = []byte("scrollback")
 	// A fresh collaborator with no runs: deleting the run owner would trip
 	// the runs foreign key, and revocation is about membership, not runs.
 	collab, cm := addMember(t, e, "Terminal user", domain.RoleCollaborator, false)
 	c, ack := rawTerminal(t, e, collab, true, "main")
-	if !ack.OK || ack.Tab != "main" || ack.Cols != 80 || ack.Rows != 24 {
-		t.Fatalf("terminal ack = %+v, want main 80x24", ack)
+	if !ack.OK || ack.Tab != "main" || ack.Cols != 80 || ack.Rows != 24 || ack.Replay != len(e.pty.replay) {
+		t.Fatalf("terminal ack = %+v, want main 80x24 with replay %d", ack, len(e.pty.replay))
+	}
+	replay := make([]byte, len(e.pty.replay))
+	if _, err := io.ReadFull(c.r, replay); err != nil {
+		t.Fatalf("read terminal replay: %v", err)
+	}
+	if string(replay) != string(e.pty.replay) {
+		t.Fatalf("terminal replay = %q, want %q", replay, e.pty.replay)
 	}
 	if calls := e.runs.Calls(); len(calls) < 2 ||
 		calls[len(calls)-2] != "terminal:"+string(cm.ID) ||

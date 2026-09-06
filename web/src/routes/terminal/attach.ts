@@ -34,11 +34,14 @@ interface AttachAck {
   error?: string
   cols?: number
   rows?: number
+  replay?: number
 }
 
+export type AttachDataKind = 'replay' | 'replay-end' | 'live'
+
 export interface AttachHandlers {
-  /** Terminal output, in arrival order. */
-  onData?: (chunk: Uint8Array) => void
+  /** Terminal output, tagged as replay, replay-end, or live. */
+  onData?: (chunk: Uint8Array, kind: AttachDataKind) => void
   /**
    * A fresh attach was accepted. The server replays the recent transcript
    * straight after, so the caller clears what it has rather than appending a
@@ -67,6 +70,44 @@ export interface Attachment {
   close: () => void
 }
 
+/**
+ * Writes tagged output into xterm and tracks whether terminal-generated input
+ * must be dropped. Replayed scrollback can hold queries (DA, DSR, OSC colour
+ * reads) that xterm answers as if the shell had just asked; the answers must
+ * not reach the PTY. xterm runs write callbacks after the chunk is parsed,
+ * so unmuting from the replay-end callback covers every reply the replay
+ * provoked.
+ */
+export function replayGate(write: (chunk: Uint8Array, done?: () => void) => void) {
+  let muted = false
+  // A reopen mid-replay leaves the previous replay-end callback pending in
+  // xterm's write queue; the generation lets it expire instead of unmuting
+  // the replay that replaced it.
+  let generation = 0
+  return {
+    muted: () => muted,
+    unmute: () => {
+      muted = false
+      generation++
+    },
+    write: (chunk: Uint8Array, kind: AttachDataKind) => {
+      if (kind === 'live') {
+        write(chunk)
+        return
+      }
+      muted = true
+      if (kind === 'replay-end') {
+        const current = generation
+        write(chunk, () => {
+          if (generation === current) muted = false
+        })
+      } else {
+        write(chunk)
+      }
+    },
+  }
+}
+
 /** Connect to a terminal socket, re-reading its URL before every reconnect. */
 export function connectAttach(socketURL: () => string, h: AttachHandlers): Attachment {
   let socket: WebSocket | null = null
@@ -78,6 +119,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   // Sticky for the life of the attachment: once the server has said this
   // member cannot steer, every reconnect is a mirror.
   let writeDenied = false
+  let replayRemaining = 0
 
   const open = () => {
     if (disposed) return
@@ -107,7 +149,20 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     }
     ws.onmessage = (msg) => {
       if (typeof msg.data !== 'string') {
-        h.onData?.(new Uint8Array(msg.data as ArrayBuffer))
+        const chunk = new Uint8Array(msg.data as ArrayBuffer)
+        if (replayRemaining <= 0) {
+          h.onData?.(chunk, 'live')
+          return
+        }
+        const replayLength = Math.min(chunk.length, replayRemaining)
+        replayRemaining -= replayLength
+        h.onData?.(
+          chunk.subarray(0, replayLength),
+          replayRemaining === 0 ? 'replay-end' : 'replay',
+        )
+        if (replayLength < chunk.length) {
+          h.onData?.(chunk.subarray(replayLength), 'live')
+        }
         return
       }
       let ack: AttachAck
@@ -116,6 +171,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       } catch {
         return
       }
+      replayRemaining = ack.ok && ack.replay !== undefined && ack.replay > 0 ? ack.replay : 0
       if (ack.ok) {
         attached = true
         attempt = 0
@@ -140,7 +196,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     }
     ws.onclose = (ev) => {
       socket = null
-// 1000 is the terminal process ending. A caller that owns tab
+      replayRemaining = 0
+      // 1000 is the terminal process ending. A caller that owns tab
       // lifecycle (the shell dock) takes over; everyone else who gets the
       // gateway's named "session ended" close - the agent exited, or a
       // replay of a finished run's transcript drained - stays put, since a

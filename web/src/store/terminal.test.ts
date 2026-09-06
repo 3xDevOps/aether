@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useStore } from '@/store'
 import {
+  emitShellSocketData,
   initialRunShellDock,
   registerShellSocket,
+  subscribeShellSocket,
   type RunShellSocket,
 } from '@/store/terminal'
 
@@ -47,6 +49,19 @@ describe('run-shell dock state', () => {
       activeTab: 't2',
     })
     expect(useStore.getState().openShellTab('run_1')).toBe('t1')
+  })
+
+  it('delivers shell output kinds to subscribers', () => {
+    const received: Array<[Uint8Array, 'replay' | 'replay-end' | 'live']> = []
+    const unsubscribe = subscribeShellSocket('run_1', 't1', (chunk, kind) => {
+      received.push([chunk, kind])
+    })
+    const replay = new Uint8Array([1, 2])
+
+    emitShellSocketData('run_1', 't1', replay, 'replay-end')
+
+    expect(received).toEqual([[replay, 'replay-end']])
+    unsubscribe()
   })
 
   it('records a shell refusal without changing the tab list', () => {

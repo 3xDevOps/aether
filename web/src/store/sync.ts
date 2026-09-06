@@ -5,7 +5,9 @@ import { api, ApiError, type Api } from '@/lib/api'
 import { backoff, connectEvents } from '@/lib/stream'
 import type {
   Event,
+  GatewayCapabilities,
   GitBranchPayload,
+  LinkStatus,
   OverlapPayload,
   RunDiffPayload,
   RunProtectedPayload,
@@ -277,6 +279,19 @@ export async function applyEvent(
   return true
 }
 
+async function probeUnlinkedLocal(
+  client: Api,
+): Promise<{ capabilities: GatewayCapabilities; status: LinkStatus } | null> {
+  try {
+    const capabilities = await client.capabilities()
+    if (!capabilities.local?.includes('link.status')) return null
+    const status = await client.localLinkStatus()
+    return status.server_configured ? null : { capabilities, status }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Subscribes, hydrates and follows the event stream for as long as the app is
  * mounted. Returns a disposer.
@@ -304,6 +319,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   let subscribed = false
   const queue: Event[] = []
   let chain: Promise<void> = Promise.resolve()
+  let stopStream: () => void = () => {}
 
   const drain = async () => {
     while (!disposed && !hydrating && queue.length > 0) {
@@ -335,59 +351,76 @@ export function connect(store: RootStore, client: Api = api): () => void {
     pump()
   }
 
-  const stopStream = connectEvents({
-    onEvent: (ev) => {
-      queue.push(ev)
-      pump()
-    },
-    onState: (state) => {
-      store.getState().setConnection(state)
-      if (
-        state === 'offline' &&
-        !store.getState().hydrated &&
-        !store.getState().hydrationError
-      ) {
-        // The stream cannot even be established and nothing has been fetched:
-        // say so, rather than animating skeletons forever. An error already
-        // recorded - a 401 hydration, a dead token - is more precise than
-        // this one, so it stays.
-        store.getState().setHydrated(false, 'the server is unreachable')
-      }
-      if (state !== 'live') return
-      // The subscription is installed. Hydrate behind it on the first connect,
-      // and again on a reconnect that has no cursor to replay from - or one
-      // that came while the server was replacing its own binaries, because
-      // that is a server that may have just re-executed on a new version.
-      // Only a fresh server.info says it did, and the update banner and the
-      // notice in the status bar both end on that answer.
-      const s = store.getState()
-      if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress)) {
-        void load()
-      }
-      subscribed = true
-    },
-    onUnreachable: (kind, detail) => {
-      // The gateway answered and named the failing hop: either this
-      // machine's own network, or the SSH tunnel to aether-server. Either
-      // way the gateway itself is fine.
-      const s = store.getState()
-      s.setUnreachable(kind)
-      // A refused subscribe never goes live, so hydration never runs and
-      // nothing else will ever record what happened. Keep an error already
-      // recorded: a dead token is more precise than a dead hop.
-      if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
-    },
-    onDead: (reason) => {
-      // The token died, not the server: the stream has stopped for good, and
-      // only a fresh token brings it back. The flag is what lets the panes
-      // say so instead of claiming a retry that will never come, and the
-      // pending hydrate retry is cancelled so a later 401 cannot overwrite
-      // the recovery hint.
-      if (retryTimer) clearTimeout(retryTimer)
-      store.getState().setStreamDead()
-      store.getState().setHydrated(false, `${reason}; mint one with \`aether gui\``)
-    },
-    afterSeq: () => store.getState().lastSeq,
+  const startStream = () => {
+    stopStream = connectEvents({
+      onEvent: (ev) => {
+        queue.push(ev)
+        pump()
+      },
+      onState: (state) => {
+        store.getState().setConnection(state)
+        if (
+          state === 'offline' &&
+          !store.getState().hydrated &&
+          !store.getState().hydrationError
+        ) {
+          // The stream cannot even be established and nothing has been fetched:
+          // say so, rather than animating skeletons forever. An error already
+          // recorded - a 401 hydration, a dead token - is more precise than
+          // this one, so it stays.
+          store.getState().setHydrated(false, 'the server is unreachable')
+        }
+        if (state !== 'live') return
+        // The subscription is installed. Hydrate behind it on the first connect,
+        // and again on a reconnect that has no cursor to replay from - or one
+        // that came while the server was replacing its own binaries, because
+        // that is a server that may have just re-executed on a new version.
+        // Only a fresh server.info says it did, and the update banner and the
+        // notice in the status bar both end on that answer.
+        const s = store.getState()
+        if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress)) {
+          void load()
+        }
+        subscribed = true
+      },
+      onUnreachable: (kind, detail) => {
+        // The gateway answered and named the failing hop: either this
+        // machine's own network, or the SSH tunnel to aether-server. Either
+        // way the gateway itself is fine.
+        const s = store.getState()
+        s.setUnreachable(kind)
+        // A refused subscribe never goes live, so hydration never runs and
+        // nothing else will ever record what happened. Keep an error already
+        // recorded: a dead token is more precise than a dead hop.
+        if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
+      },
+      onDead: (reason) => {
+        // The token died, not the server: the stream has stopped for good, and
+        // only a fresh token brings it back. The flag is what lets the panes
+        // say so instead of claiming a retry that will never come, and the
+        // pending hydrate retry is cancelled so a later 401 cannot overwrite
+        // the recovery hint.
+        if (retryTimer) clearTimeout(retryTimer)
+        store.getState().setStreamDead()
+        store.getState().setHydrated(false, `${reason}; mint one with \`aether gui\``)
+      },
+      afterSeq: () => store.getState().lastSeq,
+    })
+  }
+
+  void probeUnlinkedLocal(client).then((probe) => {
+    if (disposed) return
+    if (probe) {
+      // No server to connect to yet: the onboarding wizard links first.
+      store.getState().setCapabilities(probe.capabilities)
+      store.getState().setLinkStatus(probe.status)
+      store.getState().setConnection('offline')
+      store.getState().setHydrated(true)
+      store.getState().setUnreachable(null)
+      store.setState({ route: { name: 'onboarding', params: {} } })
+      return
+    }
+    startStream()
   })
 
   return () => {

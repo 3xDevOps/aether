@@ -28,6 +28,40 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('xterm links', () => {
+  it('opens OSC 8 links in a new browser tab without a confirm dialog', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const confirm = vi.spyOn(window, 'confirm')
+    let ready: Terminal | null = null
+    const view = render(<Probe onReady={(terminal) => (ready = terminal)} />)
+    await waitFor(() => expect(ready).not.toBeNull())
+
+    const oscURL = 'https://osc.example/path'
+    ready!.write(`\x1b]8;;${oscURL}\x07OSC link\x1b]8;;\x07`)
+    ready!.options.linkHandler?.activate(new MouseEvent('click'), oscURL, {
+      start: { x: 0, y: 0 },
+      end: { x: 8, y: 0 },
+    })
+
+    expect(open).toHaveBeenCalledWith(oscURL, '_blank', 'noopener,noreferrer')
+    expect(confirm).not.toHaveBeenCalled()
+    view.unmount()
+    open.mockRestore()
+    confirm.mockRestore()
+  })
+
+  it('registers a link provider so plain URLs are clickable', async () => {
+    const register = vi.spyOn(Terminal.prototype, 'registerLinkProvider')
+    let ready: Terminal | null = null
+    const view = render(<Probe onReady={(terminal) => (ready = terminal)} />)
+    await waitFor(() => expect(ready).not.toBeNull())
+
+    expect(register).toHaveBeenCalledTimes(1)
+    view.unmount()
+    register.mockRestore()
+  })
+})
+
 describe('xterm replay scrollback', () => {
   it('keeps the first numbered line after replaying more than 64 KiB', async () => {
     let ready: Terminal | null = null

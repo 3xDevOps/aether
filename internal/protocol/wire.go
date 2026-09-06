@@ -302,11 +302,13 @@ type AttachRequest struct {
 // AttachResponse acknowledges an AttachRequest with the effective
 // geometry; on failure the server sends OK false with a code and closes.
 type AttachResponse struct {
-	OK    bool   `json:"ok"`
-	Cols  uint   `json:"cols,omitempty"`
-	Rows  uint   `json:"rows,omitempty"`
-	Code  int    `json:"code,omitempty"`
-	Error string `json:"error,omitempty"`
+	OK   bool `json:"ok"`
+	Cols uint `json:"cols,omitempty"`
+	Rows uint `json:"rows,omitempty"`
+	// Replay is the number of bytes of scrollback replay that follow the ack before live output.
+	Replay int    `json:"replay,omitempty"`
+	Code   int    `json:"code,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // Exit statuses of the attach subsystem. 0 is the run's terminal session

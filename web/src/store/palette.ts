@@ -8,8 +8,10 @@ export interface PaletteSlice {
   paletteDialog: PaletteDialog | null
   /** The run a form acts on; the launch form has none. */
   paletteRunID: string | null
+  paletteForwardTarget: string | null
   togglePalette: (open?: boolean) => void
   openPaletteDialog: (dialog: PaletteDialog, runID?: string) => void
+  openForwardDialog: (target: string) => void
   closePaletteDialog: () => void
 }
 
@@ -17,8 +19,11 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
   paletteOpen: false,
   paletteDialog: null,
   paletteRunID: null,
+  paletteForwardTarget: null,
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
   openPaletteDialog: (dialog, runID) =>
-    set({ paletteOpen: false, paletteDialog: dialog, paletteRunID: runID ?? null }),
-  closePaletteDialog: () => set({ paletteDialog: null, paletteRunID: null }),
+    set({ paletteOpen: false, paletteDialog: dialog, paletteRunID: runID ?? null, paletteForwardTarget: null }),
+  openForwardDialog: (target) =>
+    set({ paletteOpen: false, paletteDialog: 'forward', paletteRunID: null, paletteForwardTarget: target }),
+  closePaletteDialog: () => set({ paletteDialog: null, paletteRunID: null, paletteForwardTarget: null }),
 })

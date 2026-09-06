@@ -15,6 +15,7 @@ import type {
   EnvScanStatus,
   EnvSaveResult,
   GatewayCapabilities,
+  LinkApplyResult,
   LinkRepoResult,
   LinkStatus,
   Member,
@@ -133,7 +134,7 @@ async function local<T>(
 }
 
 export interface LocalForward {
-  run_id: string
+  target: string
   port: number
   local_port: number
 }
@@ -143,7 +144,7 @@ export interface LocalForwardStartResult extends LocalForward {
 }
 
 export interface LocalForwardStopResult {
-  run_id: string
+  target: string
   port: number
   state: 'stopped'
 }
@@ -460,6 +461,8 @@ export const api = {
   capabilities: () => get<GatewayCapabilities>('/capabilities'),
   // The local gateway's client-machine verbs; see the `local` helper.
   localLinkStatus: () => local<LinkStatus>('link.status'),
+  localLinkApply: (params: { addr: string; invite?: string; name?: string }) =>
+    local<LinkApplyResult>('link.apply', params),
   localLinkRepo: (repo: string, workspaceID?: string) =>
     local<LinkRepoResult>('link.repo', { repo, workspace_id: workspaceID }),
   // link.switch never succeeds: the gateway's SSH identity is fixed at
@@ -479,10 +482,10 @@ export const api = {
     local<SyncSessionState>('sync.start', { run_id: runID, force }),
   localSyncStop: (runID: string) =>
     local<SyncSessionState>('sync.stop', { run_id: runID }),
-  localForwardStart: (runID: string, port: number) =>
-    local<LocalForwardStartResult>('forward.start', { run_id: runID, port }),
-  localForwardStop: (runID: string, port: number) =>
-    local<LocalForwardStopResult>('forward.stop', { run_id: runID, port }),
+  localForwardStart: (target: string, port: number) =>
+    local<LocalForwardStartResult>('forward.start', { target, port }),
+  localForwardStop: (target: string, port: number) =>
+    local<LocalForwardStopResult>('forward.stop', { target, port }),
   localForwardStatus: () => local<LocalForwardStatusResult>('forward.status'),
   localSyncStatus: () => local<SyncStatusResult>('sync.status'),
   localDaemonInstall: (server: string, repo: string) =>

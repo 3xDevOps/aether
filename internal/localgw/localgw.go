@@ -51,10 +51,17 @@ type Backend interface {
 	Terminal(req protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error)
 	// Sync opens the sync subsystem's raw mutagen endpoint stream.
 	Sync(runID string, force bool) (io.ReadWriteCloser, error)
-	// Forward opens one direct-tcpip channel to a run container port.
-	Forward(runID string, port uint32) (io.ReadWriteCloser, error)
+	// Forward opens one direct-tcpip channel to a forwarding target.
+	Forward(target string, port uint32) (io.ReadWriteCloser, error)
+	// Relink swaps the saved config and live connection without restarting.
+	Relink(cfg cli.Config, conn *cli.Conn)
 	// Close releases the backend's shared connection.
 	Close() error
+}
+
+func validForwardTarget(target string) bool {
+	return target == cli.TerminalForwardTarget ||
+		(strings.HasPrefix(target, "run:") && len(strings.TrimPrefix(target, "run:")) > 0)
 }
 
 // Config wires the local gateway to its backend and static assets.

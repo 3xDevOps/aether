@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { useStore } from '@/store'
 import {
+  emitEnvTerminalSocketData,
   hasEnvTerminalLineSent,
   initialEnvTerminal,
   markEnvTerminalLineSent,
   registerEnvTerminalSocket,
+  subscribeEnvTerminalSocket,
   unregisterEnvTerminalSocket,
   type EnvTerminalSocket,
 } from '@/store/env-terminal'
@@ -30,6 +32,19 @@ describe('environment terminal slice', () => {
     state.closeEnvTerminalTab('t2')
     expect(useStore.getState().envTerminal.tabs).toEqual(['main'])
     expect(useStore.getState().envTerminal.activeTab).toBe('main')
+  })
+
+  it('delivers environment output kinds to subscribers', () => {
+    const received: Array<[Uint8Array, 'replay' | 'replay-end' | 'live']> = []
+    const unsubscribe = subscribeEnvTerminalSocket('main', (chunk, kind) => {
+      received.push([chunk, kind])
+    })
+    const replay = new Uint8Array([1, 2])
+
+    emitEnvTerminalSocketData('main', replay, 'replay-end')
+
+    expect(received).toEqual([[replay, 'replay-end']])
+    unsubscribe()
   })
 
   it('sends a complete line through the selected tab socket', () => {

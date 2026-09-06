@@ -116,7 +116,7 @@ function main() {
     if (!bin) {
       fatal(
         'aether CLI not found',
-        'The desktop app needs the aether CLI installed and linked.\n\n' +
+        'The desktop app needs the aether CLI installed.\n\n' +
           'Install it (see docs/install.md), or set AETHER_BIN to the binary.',
       )
       return
@@ -292,14 +292,28 @@ function main() {
 
     // The window is a browser locked to the gateway origin: anything else
     // opens in the user's real browser, never in this privileged shell.
+    const openExternalURL = (target) => {
+      try {
+        const protocol = new URL(target).protocol
+        if (protocol === 'http:' || protocol === 'https:') shell.openExternal(target)
+      } catch {
+        // Invalid navigation targets are denied without launching anything.
+      }
+    }
     win.webContents.setWindowOpenHandler(({ url: target }) => {
-      shell.openExternal(target)
+      openExternalURL(target)
       return { action: 'deny' }
     })
     win.webContents.on('will-navigate', (event, target) => {
-      if (new URL(target).origin !== gatewayOrigin) {
+      let sameGateway = false
+      try {
+        sameGateway = new URL(target).origin === gatewayOrigin
+      } catch {
+        // Invalid navigation targets are denied without launching anything.
+      }
+      if (!sameGateway) {
         event.preventDefault()
-        shell.openExternal(target)
+        openExternalURL(target)
       }
     })
 

@@ -98,26 +98,63 @@ describe('onboarding wizard', () => {
     expect(client.workspaceListFull).toHaveBeenCalled()
   })
 
-  it('offers a retry with terminal instructions when not linked', async () => {
+  it('links an unlinked gateway in the app and steps to the workspace picker', async () => {
     const client = fakeApi({
-      localLinkStatus: vi.fn(async () => ({
-        server_configured: false,
-        linked: false,
-        addr: '',
-        user: '',
-        repo: '',
+      localLinkStatus: vi
+        .fn()
+        .mockResolvedValueOnce({
+          server_configured: false,
+          linked: false,
+          addr: '',
+          user: '',
+          repo: '',
+        })
+        .mockResolvedValue({
+          server_configured: true,
+          linked: true,
+          addr: 'host:2222',
+          user: 'alice',
+          repo: '',
+        }),
+      localLinkApply: vi.fn(async () => ({
+        addr: 'host:2222',
+        user: 'aether',
+        member: { id: 'member_1', display_name: 'Alice', role: 'admin' },
+        key_generated: '/home/alice/.ssh/id_ed25519',
       })),
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
 
-    // The gateway has no SSH identity yet; the wizard says to link from a
-    // terminal and re-checks on demand.
-    expect(await screen.findByText(/aether link/)).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(client.localLinkStatus).toHaveBeenCalledTimes(2)
+    expect(await screen.findByLabelText('Server address')).toBeDefined()
+    fireEvent.change(screen.getByLabelText('Server address'), {
+      target: { value: 'host:2222' },
+    })
+    fireEvent.change(screen.getByLabelText('Invite code'), {
+      target: { value: 'invite-123' },
+    })
+    fireEvent.change(screen.getByLabelText('Your name'), {
+      target: { value: 'Alice' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }))
+
+    expect(client.localLinkApply).toHaveBeenCalledWith({
+      addr: 'host:2222',
+      invite: 'invite-123',
+      name: 'Alice',
+    })
+    const summary = await screen.findByText(/^Linked to/)
+    expect(summary.textContent).toBe('Linked to host:2222 as Alice (admin).')
+    expect(screen.getByText(/^Created SSH key/).textContent).toBe(
+      'Created SSH key /home/alice/.ssh/id_ed25519.',
+    )
+    expect(useStore.getState().connectionEpoch).toBe(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
+      '2. Workspace',
+    )
   })
-  it('shows a configured server without a repository and opens the repo prompt', async () => {
+  it('shows a configured server without a repository and opens the workspace picker', async () => {
     const client = fakeApi({
       localLinkStatus: vi.fn(async () => ({
         server_configured: true,
@@ -132,14 +169,20 @@ describe('onboarding wizard', () => {
 
     expect(await screen.findByText('host:2222')).toBeDefined()
     expect(screen.getByText('alice')).toBeDefined()
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue to repository' }),
-    )
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
-    expect(await screen.findByLabelText('Repository path')).toBeDefined()
-    expect(screen.queryByRole('button', { name: 'Back to Workspace' })).toBeNull()
+    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+    expect(screen.queryByLabelText('Repository path')).toBeNull()
   })
+  it('returns to the workspace step when a persisted repo step has no workspace', async () => {
+    seed({ onboardingStep: 2, onboardingWorkspace: '' })
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
+    expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
+      '2. Workspace',
+    )
+    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+  })
   it('rechecks link status when the window regains focus', async () => {
     let status = {
       server_configured: false,
@@ -153,7 +196,7 @@ describe('onboarding wizard', () => {
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    expect(await screen.findByText(/aether link/)).toBeDefined()
+    expect(await screen.findByLabelText('Server address')).toBeDefined()
 
     status = {
       server_configured: true,
@@ -188,6 +231,7 @@ describe('onboarding wizard', () => {
         base_branch: 'trunk',
         environment: {},
       })
+      expect(useStore.getState().activeWorkspace).toBe(workspace.id)
     })
   })
 
@@ -209,6 +253,8 @@ describe('onboarding wizard', () => {
       '/home/alice/code/myproject',
       workspace.id,
     )
+    expect(client.localLinkStatus).toHaveBeenCalledTimes(2)
+    expect(useStore.getState().linkStatus?.repo).toBe('/src/repo')
     const cmd = screen.getByLabelText<HTMLInputElement>('Push command')
     expect(cmd.value).toContain('git push -u aether')
   })

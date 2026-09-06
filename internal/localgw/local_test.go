@@ -67,12 +67,14 @@ func (b *verbStubBackend) Forward(string, uint32) (io.ReadWriteCloser, error) {
 	return client, nil
 }
 
+func (b *verbStubBackend) Relink(cli.Config, *cli.Conn) {}
+
 func TestLocalForwardLifecycle(t *testing.T) {
 	port := freeLocalForwardPort(t)
 	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{})
 	defer func() { _ = g.Close() }()
 
-	rec := do(g, http.MethodPost, "/local/v1/forward.start", `{"run_id":"run_1","port":`+strconv.Itoa(port)+`}`, true)
+	rec := do(g, http.MethodPost, "/local/v1/forward.start", `{"target":"run:run_1","port":`+strconv.Itoa(port)+`}`, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("forward.start = %d: %s", rec.Code, rec.Body)
 	}
@@ -93,10 +95,10 @@ func TestLocalForwardLifecycle(t *testing.T) {
 	_ = conn.Close()
 
 	rec = do(g, http.MethodPost, "/local/v1/forward.status", `{}`, true)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"run_id":"run_1"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"target":"run:run_1"`) {
 		t.Fatalf("forward.status = %d: %s", rec.Code, rec.Body)
 	}
-	rec = do(g, http.MethodPost, "/local/v1/forward.stop", `{"run_id":"run_1","port":`+strconv.Itoa(port)+`}`, true)
+	rec = do(g, http.MethodPost, "/local/v1/forward.stop", `{"target":"run:run_1","port":`+strconv.Itoa(port)+`}`, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("forward.stop = %d: %s", rec.Code, rec.Body)
 	}
@@ -109,11 +111,50 @@ func TestLocalForwardLifecycle(t *testing.T) {
 func TestLocalForwardValidatesParams(t *testing.T) {
 	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{})
 	defer func() { _ = g.Close() }()
-	for _, body := range []string{`{}`, `{"run_id":"run_1"}`, `{"run_id":"run_1","port":0}`, `{"run_id":"run_1","port":65536}`} {
+	for _, body := range []string{`{}`, `{"target":"run:run_1"}`, `{"target":"bad","port":1}`, `{"target":"run:run_1","port":0}`, `{"target":"run:run_1","port":65536}`} {
 		rec := do(g, http.MethodPost, "/local/v1/forward.start", body, true)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("body %s: status = %d, want 400: %s", body, rec.Code, rec.Body)
 		}
+	}
+}
+
+func TestLocalLinkApplyValidatesAddr(t *testing.T) {
+	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{})
+	defer func() { _ = g.Close() }()
+	rec := do(g, http.MethodPost, "/local/v1/link.apply", `{}`, true)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("link.apply missing addr = %d: %s", rec.Code, rec.Body)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidParams || perr.Message != "addr is required" {
+		t.Fatalf("error = %+v", perr)
+	}
+}
+
+func TestLocalLinkApplySurfacesDialError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AETHER_CONFIG_DIR", filepath.Join(dir, "config"))
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	t.Setenv("AppData", filepath.Join(dir, "AppData"))
+	t.Setenv("SSH_AUTH_SOCK", "")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{})
+	defer func() { _ = g.Close() }()
+	rec := do(g, http.MethodPost, "/local/v1/link.apply", `{"addr":"`+addr+`"}`, true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("link.apply dial failure = %d: %s", rec.Code, rec.Body)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, "cli: dial "+addr) {
+		t.Fatalf("error = %+v", perr)
 	}
 }
 

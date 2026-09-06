@@ -19,10 +19,10 @@ func TestForwardManagerForwardsConnectionsAndTracksStatus(t *testing.T) {
 		}()
 		return client, nil
 	}
-	if err := manager.Start("run-1", port, dial); err != nil {
+	if err := manager.Start("run:run-1", port, dial); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if err := manager.Start("run-1", port, dial); err == nil {
+	if err := manager.Start("run:run-1", port, dial); err == nil {
 		t.Fatal("duplicate Start succeeded")
 	}
 
@@ -45,7 +45,7 @@ func TestForwardManagerForwardsConnectionsAndTracksStatus(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for {
 		status := manager.Status()
-		if len(status) == 1 && status[0].RunID == "run-1" && status[0].Port == port && status[0].LocalPort == port && status[0].Conns == 1 {
+		if len(status) == 1 && status[0].Target == "run:run-1" && status[0].Port == port && status[0].LocalPort == port && status[0].Conns == 1 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -53,7 +53,7 @@ func TestForwardManagerForwardsConnectionsAndTracksStatus(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if err := manager.Stop("run-1", port); err != nil {
+	if err := manager.Stop("run:run-1", port); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 	if got := manager.Status(); len(got) != 0 {

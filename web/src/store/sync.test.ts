@@ -633,6 +633,33 @@ describe('connect', () => {
     await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
     stop()
   })
+  it('hydrates onboarding directly for an unlinked local gateway', async () => {
+    const store = createRootStore()
+    const client = fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events', 'attach'],
+        local: ['link.status'],
+      })),
+      localLinkStatus: vi.fn(async () => ({
+        server_configured: false,
+        linked: false,
+        addr: '',
+        user: '',
+        repo: '',
+      })),
+    })
+    const stop = connect(store, client)
+
+    await vi.waitFor(() => expect(client.localLinkStatus).toHaveBeenCalled())
+    expect(store.getState().hydrated).toBe(true)
+    expect(store.getState().route.name).toBe('onboarding')
+    expect(store.getState().linkStatus?.server_configured).toBe(false)
+    expect(client.serverInfo).not.toHaveBeenCalled()
+    expect(StubSocket.opened).toHaveLength(0)
+    stop()
+  })
 
   it('holds events that land mid-hydration and applies them after the snapshot', async () => {
     let resolveRuns: (runs: Run[]) => void = () => {}

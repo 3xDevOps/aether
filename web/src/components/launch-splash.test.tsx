@@ -18,10 +18,10 @@ describe('LaunchSplash', () => {
     expect(screen.getByRole('img', { name: 'Aether' })).toBeTruthy()
     expect(screen.getByTestId('launch-splash-stars')).toBeTruthy()
     expect(screen.getByTestId('launch-splash-shooting-stars')).toBeTruthy()
-    act(() => vi.advanceTimersByTime(1500))
+    act(() => vi.advanceTimersByTime(2000))
     expect(splash?.classList.contains('launch-splash--leaving')).toBe(true)
 
-    act(() => vi.advanceTimersByTime(350))
+    act(() => vi.advanceTimersByTime(250))
     expect(container.firstElementChild).toBeNull()
   })
 })

@@ -66,7 +66,9 @@ func (b *wsStubBackend) Sync(string, bool) (io.ReadWriteCloser, error) {
 func (b *wsStubBackend) Forward(string, uint32) (io.ReadWriteCloser, error) {
 	return nil, errors.New("not implemented")
 }
-func (b *wsStubBackend) Close() error { return nil }
+
+func (b *wsStubBackend) Relink(cli.Config, *cli.Conn) {}
+func (b *wsStubBackend) Close() error                 { return nil }
 
 func (b *wsStubBackend) recordedAttach() protocol.AttachRequest {
 	b.mu.Lock()

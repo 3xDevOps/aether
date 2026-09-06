@@ -11,6 +11,7 @@ import type { Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
 import type {
   AgentInfo,
+  LinkApplyResult,
   LinkRepoResult,
   LinkStatus,
   RepoPushResult,
@@ -27,9 +28,8 @@ const pane =
   'max-h-64 overflow-x-auto overflow-y-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
 
 /**
- * Step 1: is this machine linked? A server link without a repository skips
- * directly to the repository form; the gateway resolves its sole workspace
- * when the user submits that form.
+ * Step 1: link this machine to a server. The gateway's local link status
+ * determines whether the in-app link form or the linked summary is shown.
  */
 export function LinkStep({
   client,
@@ -40,16 +40,22 @@ export function LinkStep({
 }) {
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const [status, setStatus] = useState<LinkStatus | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
+  const [linkError, setLinkError] = useState<string | null>(null)
+  const [address, setAddress] = useState('')
+  const [invite, setInvite] = useState('')
+  const [name, setName] = useState('')
+  const [linking, setLinking] = useState(false)
+  const [success, setSuccess] = useState<LinkApplyResult | null>(null)
 
   const check = useCallback(async () => {
-    setError(null)
+    setStatusError(null)
     try {
       const next = await client.localLinkStatus()
       setStatus(next)
       setLinkStatus(next)
     } catch (err) {
-      setError(message(err))
+      setStatusError(message(err))
     }
   }, [client, setLinkStatus])
 
@@ -60,34 +66,104 @@ export function LinkStep({
     return () => window.removeEventListener('focus', onFocus)
   }, [check])
 
-  const loading = useDelayed(status === null && error === null)
-  const serverConfigured = status !== null && status.server_configured
+  const link = async () => {
+    setLinking(true)
+    setLinkError(null)
+    try {
+      const next = await client.localLinkApply({
+        addr: address.trim(),
+        ...(invite.trim() ? { invite: invite.trim() } : {}),
+        ...(name.trim() ? { name: name.trim() } : {}),
+      })
+      setSuccess(next)
+      useStore.getState().reconnect()
+      await check()
+    } catch (err) {
+      setLinkError(message(err))
+    } finally {
+      setLinking(false)
+    }
+  }
+
+  const loading = useDelayed(status === null && statusError === null)
+  const serverConfigured = status?.server_configured === true
 
   return (
     <section aria-label="Link" className="space-y-3">
       <h2 className="text-sm font-medium">Link to your server</h2>
       {loading && <Skeleton className="h-16 w-full" />}
-      {error && <p className="text-xs text-state-failed">{error}</p>}
-      {status && !serverConfigured && (
+      {statusError && <p className="text-xs text-state-failed">{statusError}</p>}
+      {statusError && (
+        <Button size="sm" variant="outline" onClick={() => void check()}>
+          Retry
+        </Button>
+      )}
+      {success && (
         <div className="space-y-2 text-sm">
           <p>
-            This machine is not linked yet. The gateway needs an SSH identity
-            before the GUI can talk to a server, so the first link happens in a
-            terminal:
+            Linked to <span className="font-mono">{success.addr}</span> as{' '}
+            <span className="font-medium">{success.member.display_name}</span> (
+            {success.member.role}).
           </p>
-          <pre className="rounded-md border bg-card px-3 py-2 font-mono text-xs">
-            aether link &lt;server-host&gt;:2222
-          </pre>
-          <p className="text-muted-foreground">
-            The first identity to link a fresh server becomes the admin. Once
-            the command reports success, retry here.
-          </p>
-          <Button size="sm" variant="outline" onClick={() => void check()}>
-            Retry
+          {success.key_generated && (
+            <p>
+              Created SSH key <span className="font-mono">{success.key_generated}</span>.
+            </p>
+          )}
+          <Button size="sm" onClick={() => onNext(1)}>
+            Continue
           </Button>
         </div>
       )}
-      {status && serverConfigured && !status.linked && (
+      {status && !serverConfigured && !success && (
+        <form
+          className="space-y-3 text-sm"
+          aria-label="Link server"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void link()
+          }}
+        >
+          <label className="block space-y-1">
+            Server address
+            <input
+              className={field}
+              required
+              placeholder="server-host:2222"
+              value={address}
+              disabled={linking}
+              onChange={(e) => setAddress(e.target.value)}
+            />
+          </label>
+          <label className="block space-y-1">
+            Invite code
+            <input
+              className={field}
+              value={invite}
+              disabled={linking}
+              onChange={(e) => setInvite(e.target.value)}
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Leave empty on a fresh server, where the first identity to link
+            becomes the admin, or on a tailnet server.
+          </p>
+          <label className="block space-y-1">
+            Your name
+            <input
+              className={field}
+              value={name}
+              disabled={linking}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <Button type="submit" size="sm" disabled={linking || !address.trim()}>
+            {linking ? 'Linking...' : 'Link'}
+          </Button>
+          {linkError && <p className="text-xs text-state-failed">{linkError}</p>}
+        </form>
+      )}
+      {status && serverConfigured && !status.linked && !success && (
         <div className="space-y-2 text-sm">
           <p>
             Connected to <span className="font-mono">{status.addr}</span> as{' '}
@@ -96,12 +172,12 @@ export function LinkStep({
           <p className="text-muted-foreground">
             No repository is linked yet. Continue to connect one.
           </p>
-          <Button size="sm" onClick={() => onNext(2)}>
-            Continue to repository
+          <Button size="sm" onClick={() => onNext(1)}>
+            Continue
           </Button>
         </div>
       )}
-      {status && serverConfigured && status.linked && (
+      {status && serverConfigured && status.linked && !success && (
         <>
           <p className="text-sm">
             Linked to <span className="font-mono">{status.addr}</span> as{' '}
@@ -262,6 +338,7 @@ export function RepoStep({
   const [result, setResult] = useState<LinkRepoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const setLinkStatus = useStore((s) => s.setLinkStatus)
   // The push runs on its own flag: a failed push must not disable the link
   // form the user may want to correct, and the reverse.
   const [pushing, setPushing] = useState(false)
@@ -282,6 +359,7 @@ export function RepoStep({
     setError(null)
     try {
       setResult(await client.localLinkRepo(repo.trim(), workspace?.id))
+      void client.localLinkStatus().then(setLinkStatus).catch(() => undefined)
     } catch (err) {
       setError(message(err))
     } finally {

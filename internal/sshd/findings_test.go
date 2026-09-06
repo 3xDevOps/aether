@@ -189,14 +189,14 @@ func TestServeContextCancelClosesConnections(t *testing.T) {
 }
 
 // TestAttachLateErrorReportsFailure reproduces the swallowed late attach
-// failure: when Attach errors after the ack grace, the client must still
-// be able to distinguish the failure from a clean session end (which is
+// failure: when Attach errors after the ack, the client must still be able
+// to distinguish the failure from a clean session end (which is
 // exit-status 0).
 func TestAttachLateErrorReportsFailure(t *testing.T) {
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errWriteDenied)
 	e.pty.mu.Lock()
-	e.pty.errDelay = 2 * attachAckGrace
+	e.pty.errDelay = 50 * time.Millisecond
 	e.pty.mu.Unlock()
 
 	ch, reqs, err := e.dial(t).OpenChannel("session", nil)

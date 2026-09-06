@@ -1,5 +1,5 @@
 import type { TerminalStatusResult } from '@/lib/types'
-import type { Attachment } from '@/routes/terminal/attach'
+import type { AttachDataKind, Attachment } from '@/routes/terminal/attach'
 import type { SliceCreator } from '@/store/slice'
 
 /** The server's persistent member environment and its attached tabs. */
@@ -25,7 +25,10 @@ export const initialEnvTerminal: EnvTerminalState = {
 export type EnvTerminalSocket = Attachment
 
 const sockets = new Map<string, EnvTerminalSocket>()
-const listeners = new Map<string, Set<(chunk: Uint8Array) => void>>()
+const listeners = new Map<
+  string,
+  Set<(chunk: Uint8Array, kind: AttachDataKind) => void>
+>()
 const ready = new Set<string>()
 const pendingLines = new Map<string, string[]>()
 const sentLines = new Map<string, Set<string>>()
@@ -71,9 +74,10 @@ export function getEnvTerminalSocket(tab: string): EnvTerminalSocket | undefined
 
 export function subscribeEnvTerminalSocket(
   tab: string,
-  onData: (chunk: Uint8Array) => void,
+  onData: (chunk: Uint8Array, kind: AttachDataKind) => void,
 ): () => void {
-  const bucket = listeners.get(tab) ?? new Set<(chunk: Uint8Array) => void>()
+  const bucket =
+    listeners.get(tab) ?? new Set<(chunk: Uint8Array, kind: AttachDataKind) => void>()
   bucket.add(onData)
   listeners.set(tab, bucket)
   return () => {
@@ -82,8 +86,12 @@ export function subscribeEnvTerminalSocket(
   }
 }
 
-export function emitEnvTerminalSocketData(tab: string, chunk: Uint8Array): void {
-  listeners.get(tab)?.forEach((listener) => listener(chunk))
+export function emitEnvTerminalSocketData(
+  tab: string,
+  chunk: Uint8Array,
+  kind: AttachDataKind,
+): void {
+  listeners.get(tab)?.forEach((listener) => listener(chunk, kind))
 }
 
 export function unregisterEnvTerminalSocket(tab: string): void {

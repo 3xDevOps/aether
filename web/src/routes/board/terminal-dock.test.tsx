@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 import { api } from '@/lib/api'
 import { TerminalDock } from '@/routes/board/terminal-dock'
+import type * as attachModule from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { initialEnvTerminal } from '@/store/env-terminal'
 
@@ -20,7 +21,8 @@ const attach = vi.hoisted(() => ({
 vi.mock('@/components/xterm-host', () => ({
   useXterm: () => xterm,
 }))
-vi.mock('@/routes/terminal/attach', () => ({
+vi.mock('@/routes/terminal/attach', async (importOriginal) => ({
+  ...(await importOriginal<typeof attachModule>()),
   connectAttach: (
     _socketURL: () => string,
     handlers: {
@@ -51,6 +53,9 @@ describe('environment terminal dock', () => {
     useStore.setState({
       envTerminal: initialEnvTerminal,
       terminalDockHeight: 280,
+      capabilities: null,
+      paletteDialog: null,
+      paletteForwardTarget: null,
     })
   })
 
@@ -73,6 +78,24 @@ describe('environment terminal dock', () => {
 
     expect(await screen.findByRole('button', { name: 'Save environment' })).toBeDefined()
     expect(screen.getByText('Installs here reach agents after you save.')).toBeDefined()
+  })
+
+  it('opens the environment forward dialog when forwarding is available', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({
+      capabilities: {
+        gateway: 'local',
+        methods: [],
+        ws: [],
+        local: ['forward.start'],
+      },
+    })
+    render(<TerminalDock />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Forward port' }))
+
+    expect(useStore.getState().paletteDialog).toBe('forward')
+    expect(useStore.getState().paletteForwardTarget).toBe('terminal')
   })
 
   it('confirms before stopping the running environment', async () => {

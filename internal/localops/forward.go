@@ -8,17 +8,17 @@ import (
 	"sync"
 )
 
-// ForwardSession is one local TCP listener forwarding to a run container.
+// ForwardSession is one local TCP listener forwarding to a target container.
 type ForwardSession struct {
-	RunID     string `json:"run_id"`
+	Target    string `json:"target"`
 	Port      int    `json:"port"`
 	LocalPort int    `json:"local_port"`
 	Conns     int    `json:"conns"`
 }
 
 type forwardKey struct {
-	runID string
-	port  int
+	target string
+	port   int
 }
 
 type forwardEntry struct {
@@ -47,9 +47,9 @@ func NewForwardManager() *ForwardManager {
 
 // Start listens on the requested loopback port and forwards each accepted
 // connection through a fresh stream returned by dial.
-func (m *ForwardManager) Start(runID string, port int, dial func() (io.ReadWriteCloser, error)) error {
-	if runID == "" {
-		return errors.New("localops: run_id is required")
+func (m *ForwardManager) Start(target string, port int, dial func() (io.ReadWriteCloser, error)) error {
+	if target == "" {
+		return errors.New("localops: target is required")
 	}
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("localops: port must be between 1 and 65535")
@@ -58,11 +58,11 @@ func (m *ForwardManager) Start(runID string, port int, dial func() (io.ReadWrite
 		return errors.New("localops: dial is required")
 	}
 
-	key := forwardKey{runID: runID, port: port}
+	key := forwardKey{target: target, port: port}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.sessions[key]; ok {
-		return fmt.Errorf("localops: forward for run %s port %d is already active", runID, port)
+		return fmt.Errorf("localops: forward for target %s port %d is already active", target, port)
 	}
 	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprint(port)))
 	if err != nil {
@@ -133,13 +133,13 @@ func (m *ForwardManager) remove(entry *forwardEntry, fc *forwardConn) {
 }
 
 // Stop closes a listener and all of its active connections.
-func (m *ForwardManager) Stop(runID string, port int) error {
-	key := forwardKey{runID: runID, port: port}
+func (m *ForwardManager) Stop(target string, port int) error {
+	key := forwardKey{target: target, port: port}
 	m.mu.Lock()
 	entry, ok := m.sessions[key]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("localops: no forward for run %s port %d", runID, port)
+		return fmt.Errorf("localops: no forward for target %s port %d", target, port)
 	}
 	entry.stopped = true
 	delete(m.sessions, key)
@@ -169,7 +169,7 @@ func (m *ForwardManager) Close() {
 	}
 	m.mu.Unlock()
 	for _, key := range keys {
-		_ = m.Stop(key.runID, key.port)
+		_ = m.Stop(key.target, key.port)
 	}
 }
 
@@ -180,7 +180,7 @@ func (m *ForwardManager) Status() []ForwardSession {
 	out := make([]ForwardSession, 0, len(m.sessions))
 	for key, entry := range m.sessions {
 		out = append(out, ForwardSession{
-			RunID:     key.runID,
+			Target:    key.target,
 			Port:      key.port,
 			LocalPort: key.port,
 			Conns:     len(entry.conns),

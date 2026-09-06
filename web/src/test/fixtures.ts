@@ -366,6 +366,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       user: 'alice',
       repo: '/src/repo',
     })),
+    localLinkApply: vi.fn(async () => ({
+      addr: 'host:2222',
+      user: 'aether',
+      member: { id: alice.id, display_name: alice.display_name, role: 'admin' },
+    })),
     localLinkRepo: vi.fn(async () => ({
       repo: '/src/repo',
       remote: 'aether',
@@ -405,14 +410,14 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       state: 'stopped',
     })),
     localSyncStatus: vi.fn(async () => ({ sessions: [] })),
-    localForwardStart: vi.fn(async (runID: string, port: number) => ({
-      run_id: runID,
+    localForwardStart: vi.fn(async (target: string, port: number) => ({
+      target,
       port,
       local_port: port,
       state: 'active' as const,
     })),
-    localForwardStop: vi.fn(async (runID: string, port: number) => ({
-      run_id: runID,
+    localForwardStop: vi.fn(async (target: string, port: number) => ({
+      target,
       port,
       state: 'stopped' as const,
     })),

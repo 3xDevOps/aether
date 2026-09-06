@@ -28,6 +28,9 @@ type RunController interface {
 	// ContainerAddr resolves the network address of a supervised run
 	// container.
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
+	// TerminalContainerAddr resolves the network address of a member's
+	// supervised environment terminal container.
+	TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	DeleteRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Pause(ctx context.Context, run domain.RunID, actor domain.MemberID) error

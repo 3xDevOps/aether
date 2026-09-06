@@ -5,17 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"golang.org/x/crypto/ssh"
-
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
-// --key picks the private key the link dials with, and the path is saved
-// so every later command that dials the server uses the same key.
-// Relative paths are resolved now, because the next command runs from
-// wherever the user happens to be.
+// --key is validated and resolved to an absolute path while parsing, then
+// passed to cli.Link as the key choice so saved-key inheritance stays there.
 func TestParseLinkArgsKey(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -32,26 +25,18 @@ func TestParseLinkArgsKey(t *testing.T) {
 		t.Fatalf("parseLinkArgs: %v", err)
 	}
 	want := filepath.Join(cwd, "deploy_key")
-	if opts.cfg.Key != want {
-		t.Errorf("cfg.Key = %q, want %q", opts.cfg.Key, want)
+	if opts.key != want {
+		t.Errorf("key = %q, want %q", opts.key, want)
 	}
 
-	saved := linkConfig(opts.cfg, cli.Config{}, opts.name)
-	if saved.Key != want {
-		t.Errorf("saved Key = %q, want %q", saved.Key, want)
-	}
-	if len(saved.Links) != 1 || saved.Links[0].Key != want {
-		t.Errorf("saved profile = %+v, want Key %q", saved.Links, want)
-	}
-
-	// Without --key the config stays empty, so cli.Config falls back to
-	// ~/.ssh/id_ed25519 or to the key a previous link saved.
+	// Without --key the choice stays empty, so cli.Link falls back to the
+	// key a previous link saved or to ~/.ssh/id_ed25519.
 	opts, err = parseLinkArgs([]string{"my-server"})
 	if err != nil {
 		t.Fatalf("parseLinkArgs without --key: %v", err)
 	}
-	if opts.cfg.Key != "" {
-		t.Errorf("cfg.Key = %q, want empty without --key", opts.cfg.Key)
+	if opts.key != "" {
+		t.Errorf("key = %q, want empty without --key", opts.key)
 	}
 }
 
@@ -68,185 +53,5 @@ func TestParseLinkArgsMissingKey(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to mention %q", err, want)
 		}
-	}
-}
-
-// Re-linking without --key must keep the key the last link saved, for the
-// default link and for a named profile: dropping it would silently send
-// the next command back to ~/.ssh/id_ed25519.
-func TestSavedKeyCarriesForward(t *testing.T) {
-	prev := cli.Config{
-		Addr: "old:2222",
-		Key:  "/keys/default",
-		Links: []cli.NamedLink{
-			{Name: "prod", Addr: "prod:2222", Key: "/keys/prod"},
-			{Name: "staging", Addr: "staging:2222"},
-		},
-	}
-
-	cases := []struct {
-		name string
-		want string
-	}{
-		{name: "", want: "/keys/default"},
-		{name: "prod", want: "/keys/prod"},
-		// The profile saved no key of its own, so Named falls back to
-		// the default link's.
-		{name: "staging", want: "/keys/default"},
-		// A profile that does not exist yet has nothing but the default.
-		{name: "new", want: "/keys/default"},
-	}
-	for _, tc := range cases {
-		if got := savedKey(prev, tc.name); got != tc.want {
-			t.Errorf("savedKey(%q) = %q, want %q", tc.name, got, tc.want)
-		}
-	}
-	if got := savedKey(cli.Config{}, "prod"); got != "" {
-		t.Errorf("savedKey on a first link = %q, want empty", got)
-	}
-}
-
-// linkConfig without --name must not touch the profile list beyond
-// carrying it forward; with --name it snapshots the fresh link under
-// that name, replacing an existing profile of the same name.
-func TestLinkConfig(t *testing.T) {
-	prev := cli.Config{
-		Addr:  "old:2222",
-		Links: []cli.NamedLink{{Name: "prod", Addr: "old:2222"}},
-	}
-	fresh := cli.Config{Addr: "new:2222", User: "aether", Repo: "/src/repo"}
-
-	// No name: top-level fields change, saved profiles ride along untouched.
-	got := linkConfig(fresh, prev, "")
-	if got.Addr != "new:2222" || len(got.Links) != 1 || got.Links[0].Addr != "old:2222" {
-		t.Fatalf("no-name linkConfig = %+v", got)
-	}
-
-	// New name: the fresh link is snapshotted alongside the existing one.
-	got = linkConfig(fresh, prev, "staging")
-	if len(got.Links) != 2 {
-		t.Fatalf("staging linkConfig links = %+v", got.Links)
-	}
-	want := cli.NamedLink{Name: "staging", Addr: "new:2222", User: "aether", Repo: "/src/repo", AutoKey: true}
-	if got.Links[1] != want {
-		t.Fatalf("snapshot = %+v, want %+v", got.Links[1], want)
-	}
-
-	// Existing name: the profile is replaced, not duplicated.
-	got = linkConfig(fresh, prev, "prod")
-	if len(got.Links) != 1 || got.Links[0].Addr != "new:2222" {
-		t.Fatalf("re-link prod links = %+v", got.Links)
-	}
-
-	// No previous config at all (first link).
-	got = linkConfig(fresh, cli.Config{}, "prod")
-	if len(got.Links) != 1 || got.Links[0].Name != "prod" {
-		t.Fatalf("first-link links = %+v", got.Links)
-	}
-}
-
-// --key is remembered per profile: an explicit path is stored absolute,
-// a relink without the flag keeps what was saved for that profile, --key
-// auto forgets it, and a public-key file is refused before anything is
-// dialed.
-func TestLinkKeyPersistsAndRelinks(t *testing.T) {
-	home := testhome.Isolate(t)
-	key := testhome.Ed25519Key(t)
-	private := filepath.Join(home, "work_key")
-	signer := testhome.WriteSSHKey(t, private, key, "")
-	public := private + ".pub"
-	if err := os.WriteFile(public, ssh.MarshalAuthorizedKey(signer.PublicKey()), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Fresh link with a relative --key: saved absolute. The test runs from
-	// the key's directory because the temp dir and the checkout can sit on
-	// different Windows drives, where no relative path joins them.
-	t.Chdir(home)
-	got, err := linkKey("work_key", cli.Config{}, "")
-	if err != nil {
-		t.Fatalf("linkKey(work_key): %v", err)
-	}
-	if got != private {
-		t.Fatalf("linkKey = %q, want absolute %q", got, private)
-	}
-
-	// The saved config carries the key at the top level and in a named
-	// profile, without the discovery marker, and Named hands it back.
-	cfg := linkConfig(cli.Config{Addr: "h:2222", User: "aether", Key: private}, cli.Config{}, "prod")
-	if cfg.Key != private || len(cfg.Links) != 1 || cfg.Links[0].Key != private || cfg.Links[0].AutoKey {
-		t.Fatalf("saved config = %+v", cfg)
-	}
-	if named, ok := cfg.Named("prod"); !ok || named.Key != private {
-		t.Fatalf("Named(prod) = %+v, %v", named, ok)
-	}
-
-	// Relinking without --key keeps the profile's saved key, and only
-	// that profile's.
-	if got, _ = linkKey("", cfg, ""); got != private {
-		t.Errorf("default relink key = %q, want %q", got, private)
-	}
-	if got, _ = linkKey("", cfg, "prod"); got != private {
-		t.Errorf("prod relink key = %q, want %q", got, private)
-	}
-	if got, _ = linkKey("", cli.Config{Links: cfg.Links}, "staging"); got != "" {
-		t.Errorf("staging relink key = %q, want discovery", got)
-	}
-
-	// --key auto forgets the saved key for the link being relinked, and
-	// the cleared choice persists: the next relink stays on discovery.
-	if got, err = linkKey("auto", cfg, "prod"); err != nil || got != "" {
-		t.Errorf("linkKey(auto, prod) = %q, %v; want discovery", got, err)
-	}
-	if got, err = linkKey("auto", cfg, ""); err != nil || got != "" {
-		t.Errorf("linkKey(auto) = %q, %v; want discovery", got, err)
-	}
-	cleared := linkConfig(cli.Config{Addr: "h:2222", User: "aether"}, cfg, "prod")
-	if cleared.Key != "" || len(cleared.Links) != 1 || cleared.Links[0].Key != "" || !cleared.Links[0].AutoKey {
-		t.Fatalf("config after --key auto = %+v", cleared)
-	}
-	if named, ok := cleared.Named("prod"); !ok || named.Key != "" {
-		t.Errorf("Named(prod) after --key auto = %+v, %v; want discovery", named, ok)
-	}
-	if got, _ = linkKey("", cleared, "prod"); got != "" {
-		t.Errorf("prod relink after --key auto = %q, want discovery", got)
-	}
-	// The marker holds even once the default link picks a file: prod
-	// keeps discovering, and relinking it keeps that choice.
-	cleared.Key = private
-	if named, _ := cleared.Named("prod"); named.Key != "" {
-		t.Errorf("Named(prod) with default key = %q, want discovery", named.Key)
-	}
-	if got, _ = linkKey("", cleared, "prod"); got != "" {
-		t.Errorf("prod relink with default key = %q, want discovery", got)
-	}
-
-	// A profile saved before keys were recorded per profile inherits the
-	// top-level key; relinking it without --key keeps that key in effect
-	// and writes it into the profile.
-	legacy := cli.Config{Addr: "h:2222", Key: private, Links: []cli.NamedLink{{Name: "old", Addr: "old:2222"}}}
-	if got, _ = linkKey("", legacy, "old"); got != private {
-		t.Errorf("legacy relink key = %q, want inherited %q", got, private)
-	}
-	relinked := linkConfig(cli.Config{Addr: "old:2222", User: "aether", Key: private}, legacy, "old")
-	if l := relinked.Links[0]; l.Key != private || l.AutoKey {
-		t.Errorf("relinked legacy profile = %+v, want key %q", l, private)
-	}
-	// With no top-level key either, the legacy profile was discovering,
-	// and a relink records that explicitly.
-	legacy.Key = ""
-	if got, _ = linkKey("", legacy, "old"); got != "" {
-		t.Errorf("keyless legacy relink key = %q, want discovery", got)
-	}
-	if l := linkConfig(cli.Config{Addr: "old:2222", User: "aether"}, legacy, "old").Links[0]; l.Key != "" || !l.AutoKey {
-		t.Errorf("relinked keyless legacy profile = %+v, want AutoKey", l)
-	}
-
-	// The wrong half of the key pair is a clear error, not a parse failure.
-	if _, err := linkKey(public, cli.Config{}, ""); err == nil || !strings.Contains(err.Error(), "is a public key") {
-		t.Errorf("linkKey(%s) = %v, want public-key rejection", public, err)
-	}
-	if _, err := linkKey(filepath.Join(home, "missing"), cli.Config{}, ""); err == nil || !strings.Contains(err.Error(), "not found") {
-		t.Errorf("linkKey(missing) = %v, want not found", err)
 	}
 }

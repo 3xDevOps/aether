@@ -41,6 +41,7 @@ export interface CommandDeps {
   api: Api
   navigate: (name: string, params?: Record<string, string>) => void
   openDialog: (dialog: PaletteDialog, runID?: string) => void
+  openForwardDialog: (target: string) => void
   ackAll: () => void
   /** Keeps a pull's git output for the diff tab to show. */
   recordPull: (runID: string, result: PullResult) => void
@@ -193,7 +194,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         label: 'Forward a port...',
         short: 'Forward',
         Icon: Cable,
-        perform: (d) => d.openDialog('forward', id),
+        perform: (d) => d.openForwardDialog(`run:${id}`),
       })
     }
   }
@@ -357,6 +358,7 @@ export function useCommandRunner(
 ): (command: Command) => Promise<void> {
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
+  const openForwardDialog = useStore((s) => s.openForwardDialog)
   const ackAll = useStore((s) => s.ackAll)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
@@ -369,6 +371,7 @@ export function useCommandRunner(
         api,
         navigate,
         openDialog,
+        openForwardDialog,
         ackAll,
         recordPull,
         removeRun,
@@ -383,6 +386,6 @@ export function useCommandRunner(
         toast.error(`${done} failed: ${message(err)}`)
       }
     },
-    [ackAll, navigate, onDone, onTemplates, openDialog, recordPull, removeRun],
+    [ackAll, navigate, onDone, onTemplates, openDialog, openForwardDialog, recordPull, removeRun],
   )
 }

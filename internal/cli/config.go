@@ -5,6 +5,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -137,6 +138,9 @@ func Path() (string, error) {
 	return filepath.Join(dir, "aether", "config.json"), nil
 }
 
+// ErrNotLinked reports that no local server link has been saved.
+var ErrNotLinked = errors.New("not linked; run aether link <addr>")
+
 // Load reads the linked-server config. Missing files surface as a
 // "not linked" error.
 func Load() (Config, error) {
@@ -147,7 +151,7 @@ func Load() (Config, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Config{}, fmt.Errorf("not linked; run aether link <addr>")
+			return Config{}, ErrNotLinked
 		}
 		return Config{}, fmt.Errorf("cli: read config: %w", err)
 	}

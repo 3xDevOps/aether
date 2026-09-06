@@ -5,7 +5,8 @@ import type { Terminal } from '@xterm/xterm'
  * shell pane: Ctrl+Shift+C copies the selection, Ctrl+Shift+V pastes, and a
  * plain Ctrl+C copies instead of sending SIGINT when a selection exists.
  * Plain Ctrl+V stays native - the browser's paste event reaches xterm's
- * textarea on its own.
+ * textarea on its own. Ctrl+Shift+V must prevent the native paste or the
+ * text arrives twice.
  *
  * Shortcuts key off physical key codes so a remapped keyboard layout cannot
  * move them.
@@ -16,10 +17,12 @@ export function attachClipboardKeys(term: Terminal): void {
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') {
+      ev.preventDefault()
       void copySelection(term)
       return false
     }
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyV') {
+      ev.preventDefault()
       void pasteClipboard(term)
       return false
     }
@@ -33,6 +36,7 @@ export function attachClipboardKeys(term: Terminal): void {
     ) {
       // A selection means the user wants it copied. Without one, Ctrl+C is
       // the interrupt and must reach the terminal untouched.
+      ev.preventDefault()
       void copySelection(term)
       return false
     }

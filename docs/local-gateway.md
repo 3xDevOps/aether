@@ -32,10 +32,10 @@ initial browser tab). The printed URL is
 ### Agent OAuth logins
 
 When an agent prints an OAuth URL, open it in your browser. Forward the
-callback port so the browser redirect reaches the run container, for example:
+callback port from the run or environment terminal:
 
 ```sh
-aether forward <run-id> 1455
+aether forward <run-id|terminal> 1455
 ```
 
 The local port defaults to the container port; use `--local <port>` only when
@@ -153,7 +153,7 @@ audit history.
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","forward.start",
-          "forward.status","forward.stop","link.repo","link.status",
+          "forward.status","forward.stop","link.apply","link.repo","link.status",
           "link.switch","profile.preview","profile.push","pull","pull.switch",
           "repo.push","repo.sync","sync.start","sync.status","sync.stop",
           "update.apply","update.check","update.status"],
@@ -304,6 +304,7 @@ authority.
 
 | Verb | Request | Response |
 | --- | --- | --- |
+| `link.apply` | `{"addr":"host[:port]","invite":"...","name":"..."}` (`invite` and `name` optional) | `{"addr":"host:2222","user":"aether","member":{"id":"...","display_name":"...","role":"..."},"key_generated":"/home/u/.ssh/id_ed25519"}` (`key_generated` omitted when no key was created) |
 | `link.status` | `{}` | `{"server_configured":bool,"linked":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"..."}],"active":"..."}` (`links`/`active` present only with named profiles; `server_configured` reports a configured server even when no repository is linked) |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
@@ -319,12 +320,17 @@ authority.
 | `daemon.install` | `{"server":"host:port","repo":"..."}` (`repo` defaults to the linked one; the unit gets the linked `--key`) | `{"unit_path":"...","note":"..."}` |
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
 | `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"searched":["/usr/local/bin",...],"warning":"...","repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`. The verb first widens the gateway's `PATH` from your login shell (`$SHELL -l -i`, bounded to 5 seconds), so agents installed through a shell profile or since the gateway started are found; `searched` is the resulting `PATH` as a list of folders (always present, may be empty); `warning` is present only when the login shell could not be asked, carrying that error verbatim (the standard folders `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, and `~/.bun/bin` were still checked); `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
-| `forward.start` | `{"run_id":"...","port":1455}` | `{"run_id":"...","port":1455,"local_port":1455,"state":"active"}` |
-| `forward.stop` | `{"run_id":"...","port":1455}` | `{"run_id":"...","port":1455,"state":"stopped"}` |
-| `forward.status` | `{}` | `{"forwards":[{"run_id":"...","port":1455,"local_port":1455,"conns":1}]}` sorted by run ID, then port |
+| `forward.start` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"state":"active"}` |
+| `forward.stop` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"state":"stopped"}` |
+| `forward.status` | `{}` | `{"forwards":[{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"conns":1}]}` sorted by target, then port |
 | `update.check` | `{}` | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `cli_path` and `install_method` absent when the binary could not be probed) |
 | `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
 | `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
+
+`link.apply` saves the link and swaps the gateway connection in place, so
+subsequent API and WebSocket requests use the new server without a restart. If
+no SSH key is offered and the server requires one, it may create
+`~/.ssh/id_ed25519` and its `.pub` file.
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
   must carry (the onboarding wizard sends the one just picked). Without
@@ -672,11 +678,14 @@ needs.
    {"write":true,"cols":120,"rows":40}
    ```
 
-2. Server answers one **text** frame: `{"ok":true,"cols":120,"rows":40}`,
-   or `{"ok":false,"code":-32001,"error":"..."}` followed by a close.
-   A write attach is refused with `-32001` unless the member holds the
-   **steer** capability on that run; dropping `"write"` always works for
-   a member who can see the run. An unknown run is refused with `-32000`.
+2. Server answers one **text** frame: `{"ok":true,"cols":120,"rows":40,"replay":4096}`,
+   or `{"ok":false,"code":-32001,"error":"..."}` followed by a close. The
+   optional `replay` value is the number of binary scrollback bytes that follow
+   the ack before live output; clients should mute terminal-generated replies
+   until those bytes have been parsed. A write attach is refused with `-32001`
+   unless the member holds the **steer** capability on that run; dropping
+   `"write"` always works for a member who can see the run. An unknown run is
+   refused with `-32000`.
    A finished run attaches as a read-only replay of its recorded
    transcript, ending with the session-end close below; only a run whose
    session is transiently missing (server recovery in progress) or whose
@@ -724,10 +733,13 @@ The member environment terminal uses the same binary-output and JSON-control
 framing as run attaches. The `tab` query is `main` or a client-selected name
 matching `^[a-z0-9-]{1,32}$`.
 
-1. The client sends one text header with `cols` and `rows`. The gateway
-   ensures the member's environment container and the requested shell.
-2. The gateway answers `{"ok":true,"tab":"main","cols":120,"rows":40}` or a
-   JSON error followed by a close. At most six tabs may be active.
+1. Client sends one text header with `cols` and `rows`. The gateway ensures the
+   member's environment container and the requested shell.
+2. The gateway answers `{"ok":true,"tab":"main","cols":120,"rows":40,"replay":4096}`
+   or a JSON error followed by a close. When present, `replay` is the number
+   of binary scrollback bytes that follow the ack before live output; clients
+   should mute terminal-generated replies until those bytes have been parsed.
+   At most six tabs may be active.
 3. Output is binary. Input and resize are text frames:
 
    ```json
