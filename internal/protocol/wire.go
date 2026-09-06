@@ -16,12 +16,15 @@ type Run struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
 	MemberID    string `json:"member_id"`
-	Task        string `json:"task"`
-	Title       string `json:"title,omitempty"`
-	Harness     string `json:"harness"`
-	Mode        string `json:"mode"`
-	Status      string `json:"status"`
-	Reason      string `json:"reason,omitempty"`
+	// AccountMemberID identifies the member whose environment and vendor
+	// credentials back the run. MemberID remains the run owner and actor.
+	AccountMemberID string `json:"account_member_id"`
+	Task            string `json:"task"`
+	Title           string `json:"title,omitempty"`
+	Harness         string `json:"harness"`
+	Mode            string `json:"mode"`
+	Status          string `json:"status"`
+	Reason          string `json:"reason,omitempty"`
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused            bool    `json:"paused"`
@@ -91,6 +94,7 @@ func RunFromDomain(r *domain.Run) Run {
 		ID:                string(r.ID),
 		WorkspaceID:       string(r.WorkspaceID),
 		MemberID:          string(r.MemberID),
+		AccountMemberID:   string(r.AccountMember()),
 		Task:              r.Task,
 		Title:             r.Title,
 		Harness:           r.Harness,
@@ -175,6 +179,19 @@ type MemberApproveResult struct {
 	Member Member `json:"member"`
 }
 
+// AccountListResult reports the accounts the caller may launch with and the
+// members currently allowed to launch with the caller's account.
+type AccountListResult struct {
+	Accounts   []Member `json:"accounts"`
+	SharedWith []Member `json:"shared_with"`
+}
+
+// AccountMemberParams addresses the other side of an account share. For
+// account.share/revoke the authenticated caller is always the account owner.
+type AccountMemberParams struct {
+	MemberID string `json:"member_id"`
+}
+
 // MemberColorParams are the params of member.color: set a member's
 // attribution color. MemberID empty means the caller; setting anyone
 // else's color requires the admin role.
@@ -197,6 +214,9 @@ type RunLaunchParams struct {
 	Task        string `json:"task,omitempty"`
 	Harness     string `json:"harness"`
 	Mode        string `json:"mode,omitempty"`
+	// AccountMemberID selects an account explicitly shared with the caller.
+	// Empty means the caller's own account.
+	AccountMemberID string `json:"account_member_id,omitempty"`
 }
 
 // RunListParams are the params of run.list.
@@ -387,6 +407,12 @@ type AgentRegisterResult struct {
 // AgentListResult is the result of agent.list.
 type AgentListResult struct {
 	Agents []AgentInfo `json:"agents"`
+}
+
+// AgentListParams selects the shared account whose member-defined harnesses
+// should be listed. Empty means the caller's own account.
+type AgentListParams struct {
+	AccountMemberID string `json:"account_member_id,omitempty"`
 }
 
 // AgentInfo is one entry of agent.list; Source is "shipped" or "member".

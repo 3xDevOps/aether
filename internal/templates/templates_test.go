@@ -20,7 +20,7 @@ type recordingLauncher struct {
 	tasks []string
 }
 
-func (l *recordingLauncher) Launch(_ context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (l *recordingLauncher) Launch(_ context.Context, workspace domain.WorkspaceID, member, _ domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.tasks = append(l.tasks, task)

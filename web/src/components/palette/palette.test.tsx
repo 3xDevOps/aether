@@ -4,7 +4,7 @@ import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
-import { alice, bob, otherWorkspace, run, vera, workspace } from '@/test/fixtures'
+import { agentInfo, alice, bob, otherWorkspace, run, vera, workspace } from '@/test/fixtures'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -42,6 +42,11 @@ beforeEach(() => {
     capabilities: null,
   })
   vi.clearAllMocks()
+  vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
+  vi.mocked(api.agentList).mockResolvedValue([
+    agentInfo(),
+    agentInfo({ name: 'myagent', source: 'member', install_script: undefined }),
+  ])
 })
 
 function open() {
@@ -152,6 +157,35 @@ describe('command palette', () => {
     expect(api.agentList).toHaveBeenCalled()
     // The deployment escape hatch stays reachable alongside the roster.
     expect(screen.getByRole('option', { name: 'custom' })).toBeTruthy()
+  })
+
+  it('launches with the selected shared account and its agent roster', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({
+      accounts: [alice, bob],
+      shared_with: [],
+    })
+    vi.mocked(api.agentList).mockImplementation(async (accountID) =>
+      accountID === bob.id
+        ? [agentInfo({ name: 'bob-agent', source: 'member', install_script: undefined })]
+        : [agentInfo()],
+    )
+    open()
+
+    fireEvent.click(await screen.findByText('Launch a run...'))
+    fireEvent.change(await screen.findByLabelText('Account'), {
+      target: { value: bob.id },
+    })
+    await screen.findByRole('option', { name: 'bob-agent' })
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+
+    await waitFor(() =>
+      expect(api.runLaunch).toHaveBeenCalledWith({
+        workspace_id: workspace.id,
+        harness: 'bob-agent',
+        account_member_id: bob.id,
+      }),
+    )
+    expect(api.agentList).toHaveBeenCalledWith(bob.id)
   })
 
   it('launches a templated run into the active workspace', async () => {

@@ -27,9 +27,11 @@ Complete the vendor login there, then return to the wizard.
 
 ## Sign in to agents
 
-Forward the callback port from the environment terminal dock, then complete the
-login there. Select **Save environment** so later runs inherit the login state.
-See [environments.md](environments.md) for the saved environment lifecycle.
+In the dashboard, click the OAuth URL printed in the terminal. For loopback
+callbacks, Aether starts the local forward before it opens the authorization
+page. In the CLI, run `aether forward terminal <callback-port>` before
+completing the browser flow. Device-code logins need no forward. Login state
+under your home is available to later runs without saving the environment.
 
 ## Save your environment
 

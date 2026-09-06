@@ -689,7 +689,9 @@ The dashboard Settings page can run the same sync once, on demand.
 
 Member homes are server-owned state. Back up the database, `homes/`, and
 `profiles/` when recovery of installed agents, login state, and synced profiles
-matters. Each member home is mounted only in that member's containers.
+matters. Each member home is mounted only in that member's environment terminal
+and runs using their account, including runs launched through an explicit
+account share.
 
 Three consequences worth knowing:
 

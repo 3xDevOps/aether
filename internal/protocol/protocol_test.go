@@ -39,15 +39,15 @@ func TestRunWireShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"id", "workspace_id", "member_id", "task", "title", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused"} {
+	for _, k := range []string{"id", "workspace_id", "member_id", "account_member_id", "task", "title", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("run wire form missing key %q", k)
 		}
 	}
 	// paused is deliberately not omitempty: absence means "gateway too old
 	// to know", so an unpaused run must still serialize paused:false.
-	if len(m) != 13 {
-		t.Errorf("run wire form has %d keys, want 13: %v", len(m), m)
+	if len(m) != 14 {
+		t.Errorf("run wire form has %d keys, want 14: %v", len(m), m)
 	}
 	if m["title"] != "Run title" {
 		t.Errorf("title = %v, want Run title", m["title"])

@@ -11,9 +11,10 @@ Two rules shape everything below:
 1. **Aether does not install agents for you.** A member runs the displayed
    vendor install command in their environment terminal. The command should
    install the executable into `~/.local/bin`.
-2. **Aether never handles your vendor credentials.** Logins happen through the
-   vendor's own flow, in a terminal Aether hands you, exactly as on a new
-   laptop. Tokens are never extracted, synced, or proxied.
+2. **Aether does not extract or sync vendor credentials.** Logins happen
+   through the vendor's own flow in an Aether terminal. Credentials remain in
+   the member home; an explicit account share mounts that whole home into a
+   recipient's run.
 
 ## Shipped harnesses
 
@@ -123,9 +124,16 @@ templates first (`<name> {task}` and `<name> -p {task}` by default). Install the
 executable into `~/.local/bin` using the vendor's documented procedure, then
 complete its login.
 
-The environment terminal has no browser. Use the harness's headless or
-device-code login option, which prints a URL and a code to complete in your own
-browser. The terminal command ships in this release series.
+The environment terminal has no browser. Open the URL it prints in your own
+browser. In the dashboard, clicking an OAuth URL with a loopback redirect
+starts the matching callback forward before the authorization page opens. With
+the CLI, start it explicitly before completing the browser flow:
+
+```sh
+aether forward terminal <callback-port>
+```
+
+Device-code flows do not need a callback forward.
 
 ### Setup details
 
@@ -133,11 +141,11 @@ The login commands below run in the environment terminal:
 
 Three things to know:
 
-- **There is no browser in the container.** Use the harness's headless or
-  device-code login option, the one that prints a URL and a code you complete
-  in your own browser.
-- **Logins are per member and shared across that member's runs**, the same way
-  two terminals on one laptop share a login. Never across members.
+- **There is no browser in the container.** Open the printed URL on the machine
+  running `aether gui` or the CLI.
+- **Logins belong to one member account.** They reach another member's run only
+  through the account owner's explicit grant described in
+  [teams.md](teams.md#agent-accounts).
 - If you skip the login part, the agent's own login prompt simply appears in
   the run's PTY. Attach with `aether attach <run>` and complete it there; it
   persists the same way.

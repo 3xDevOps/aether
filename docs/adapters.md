@@ -21,7 +21,7 @@ one entry to the `profiles` map:
 | `TUIArgs` | Argv for the interactive TUI. Use `TaskPlaceholder` (`{task}`) where the prompt goes. |
 | `HeadlessArgs` | Argv for the machine-readable mode. Same placeholder. |
 | `EnvPassthrough` | Environment variables copied from the server process into run containers when set. API keys only. |
-| `CredentialPaths` | Home-relative directories holding native login state. Persisted per member and mounted read-write into every run. Directories, not files. |
+| `CredentialPaths` | Home-relative directories holding native login state. Persisted with the member account and mounted read-write into every run using that account. Directories, not files. |
 | `LocalRoot` | Home-relative directory captured by profile sync. Empty means the harness has no profile sync. |
 | `DenyNames` | Basenames profile sync always excludes - credential files, token caches, keychains. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |

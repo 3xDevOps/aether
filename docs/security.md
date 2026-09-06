@@ -21,9 +21,18 @@ second sandbox inside it.
   restrictions applied inside it: the mount policy, the network it can see, and
   the credentials mounted into it.
 
-Each member's persistent home is mounted only into that member's containers.
-The server never mounts one member's home into another member's run or terminal,
-even when both members use the same workspace or harness.
+Each member's persistent home is mounted only into that member's environment
+terminal and runs that use their agent account. Account sharing is the sole
+exception: `aether account share <member-id>` lets that member launch runs with
+the owner's home, saved image, profile, custom harness definitions, and vendor
+login. This is equivalent to handing them every credential and file in that
+home. The grant is directional, explicit, and never implied by the admin role.
+The authenticated launcher remains the run owner and Git author; usage and
+cost are attributed to the selected account.
+
+Revoking a grant blocks later launches and relaunches. It does not stop an
+already-running container or remove the home mounted into it. Stop those runs
+before revoking access when immediate removal matters.
 
 ### Hostile agents
 
@@ -84,6 +93,11 @@ live environment container and does not require Steer. The server resolves
 addresses itself and dials only the requested container port. Arbitrary hosts
 and ports are not targets, and reverse forwarding is disabled: global
 forwarding requests are denied.
+
+The local dashboard recognizes OAuth authorization links whose redirect URI is
+an HTTP loopback address. It binds the matching local callback port before
+opening the authorization page, then forwards that port only to the terminal
+where the link appeared. Other links keep the normal browser behavior.
 
 ## Conflict coordination
 

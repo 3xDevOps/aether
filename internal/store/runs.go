@@ -27,6 +27,7 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 	if err := validateRun(r, "create"); err != nil {
 		return err
 	}
+	r.AccountMemberID = r.AccountMember()
 	id, ts, err := prepareCreate(r.CreatedAt)
 	if err != nil {
 		return err
@@ -48,12 +49,12 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 		return fmt.Errorf("store: create run: last commit at: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status,
+		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
 		                   harness_session_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
 	); err != nil {
@@ -70,7 +71,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		startedAt, finishedAt *int64
 		lastCommitAt          *int64
 	)
-	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.Task, &r.Harness,
+	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.AccountMemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID); err != nil {
@@ -85,7 +86,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	return &r, nil
 }
 
-const runCols = `id, workspace_id, member_id, task, harness, mode, status,
+const runCols = `id, workspace_id, member_id, account_member_id, task, harness, mode, status,
 	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id,
 	title, last_commit, last_commit_at, harness_session_id`
 
@@ -146,6 +147,7 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err := validateRun(r, "update"); err != nil {
 		return err
 	}
+	r.AccountMemberID = r.AccountMember()
 	startedAt, err := encodeTimePtr(r.StartedAt)
 	if err != nil {
 		return fmt.Errorf("store: update run: started at: %w", err)
@@ -159,13 +161,13 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		return fmt.Errorf("store: update run: last commit at: %w", err)
 	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE runs SET workspace_id = ?, member_id = ?, task = ?, harness = ?,
+		`UPDATE runs SET workspace_id = ?, member_id = ?, account_member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
 		     profile_snapshot_id = ?, title = ?, last_commit = ?, last_commit_at = ?,
 		     harness_session_id = ?
 		 WHERE id = ?`,
-		r.WorkspaceID, r.MemberID, r.Task, r.Harness, r.Mode, r.Status,
+		r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID, r.ID,
 	))

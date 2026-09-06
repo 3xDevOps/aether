@@ -11,6 +11,9 @@ import { useStore } from '@/store'
 export function RunView({ params }: RouteProps) {
   const run = useStore((s) => s.runs[params.runId])
   const owner = useStore((s) => (run ? s.members[run.member_id] : undefined))
+  const account = useStore((s) =>
+    run?.account_member_id ? s.members[run.account_member_id] : undefined,
+  )
   const pendingApproval = useStore((s) =>
     pendingApprovalRuns(s.inbox).has(params.runId),
   )
@@ -57,6 +60,14 @@ export function RunView({ params }: RouteProps) {
         <dd style={{ color: owner?.color }}>
           {owner?.display_name ?? run.member_id}
         </dd>
+        {run.account_member_id && run.account_member_id !== run.member_id && (
+          <>
+            <dt className="text-muted-foreground">Agent account</dt>
+            <dd style={{ color: account?.color }}>
+              {account?.display_name ?? run.account_member_id}
+            </dd>
+          </>
+        )}
         <dt className="text-muted-foreground">Created</dt>
         <dd>{timeAgo(run.created_at)}</dd>
         <dt className="text-muted-foreground">Changed</dt>

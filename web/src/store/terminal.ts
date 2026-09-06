@@ -19,7 +19,7 @@ export interface TerminalState {
 
 export const initialTerminal: TerminalState = {
   connection: 'connecting',
-  write: false,
+  write: true,
   steerDenied: false,
   message: null,
   refused: false,

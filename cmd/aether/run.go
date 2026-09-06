@@ -21,6 +21,7 @@ func runRun(args []string) error {
 	agent := fs.String("agent", "", "harness name")
 	mode := fs.String("mode", "tui", "tui or headless")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
+	account := fs.String("account", "", "member ID whose shared agent account to use")
 	template := fs.String("template", "", "launch a saved task template instead of a prompt")
 	params := kvFlag{}
 	fs.Var(params, "param", "value for a template parameter, name=value (repeatable)")
@@ -38,8 +39,8 @@ func runRun(args []string) error {
 		task = fs.Arg(0)
 	}
 	if *template != "" {
-		if task != "" || *agent != "" {
-			return fmt.Errorf("--template launches a saved definition: drop the task prompt and --agent")
+		if task != "" || *agent != "" || *account != "" {
+			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, and --account")
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
@@ -49,7 +50,7 @@ func runRun(args []string) error {
 	// A taskless launch drops you into the agent's interactive TUI. Headless
 	// has no interactive surface, so it still needs a prompt.
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode tui|headless] [--workspace]\n   (a task is required with --mode headless)\n   or: aether run --template <name> [--param k=v] [--workspace]")
+		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode tui|headless] [--workspace] [--account <member-id>]\n   (a task is required with --mode headless)\n   or: aether run --template <name> [--param k=v] [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, *workspace)
@@ -58,10 +59,11 @@ func runRun(args []string) error {
 		}
 		var res protocol.RunResult
 		if err := c.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-			WorkspaceID: wsID,
-			Task:        task,
-			Harness:     *agent,
-			Mode:        *mode,
+			WorkspaceID:     wsID,
+			Task:            task,
+			Harness:         *agent,
+			Mode:            *mode,
+			AccountMemberID: *account,
 		}, &res); err != nil {
 			return err
 		}

@@ -15,6 +15,8 @@ export interface Run {
   id: string
   workspace_id: string
   member_id: string
+  /** Account backing the run; absent on servers predating account sharing. */
+  account_member_id?: string
   task: string
   /** Latest terminal title, omitted by older servers and for empty titles. */
   title?: string
@@ -49,6 +51,13 @@ export interface Member {
   color: string
   role: 'viewer' | 'collaborator' | 'admin'
   pending?: boolean
+}
+
+export interface AccountAccess {
+  /** Accounts the caller may select at launch, including their own. */
+  accounts: Member[]
+  /** Members the caller has allowed to use their account. */
+  shared_with: Member[]
 }
 
 export interface ServerInfo {

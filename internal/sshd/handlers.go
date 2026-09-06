@@ -114,7 +114,11 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Task == "" && mode == domain.LaunchHeadless {
 		return nil, invalidParams("task is required in headless mode")
 	}
-	run, err := s.cfg.Runs.Launch(ctx, domain.WorkspaceID(p.WorkspaceID), member, p.Task, p.Harness, mode)
+	account, perr := s.launchAccount(ctx, member, p.AccountMemberID)
+	if perr != nil {
+		return nil, perr
+	}
+	run, err := s.cfg.Runs.Launch(ctx, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -263,6 +267,13 @@ func (s *Server) runClose(ctx context.Context, member domain.MemberID, params js
 func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	id, perr := runIDParams(params)
 	if perr != nil {
+		return nil, perr
+	}
+	old, err := s.cfg.Store.GetRun(ctx, id)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if _, perr := s.launchAccount(ctx, member, string(old.RelaunchAccount(member))); perr != nil {
 		return nil, perr
 	}
 	run, err := s.cfg.Runs.Relaunch(ctx, id, member)

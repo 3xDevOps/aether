@@ -245,9 +245,8 @@ admin affordance now needs both predicates: the gateway can carry the method
 *and* the caller holds the admin role. Reads are gated on capability only, so
 the roster itself is reachable on the remote dashboard - `member.list` is
 allowlisted, `member.approve` is not, and both the sidebar link and the
-palette's Go-to entry gate on `member.list`. A non-admin gets the roster
-read-only, with the header saying so rather than leaving them to infer it from
-absent buttons.
+palette's Go-to entry gate on `member.list`. A non-admin cannot edit membership
+or roles but can grant or revoke access to their own agent account.
 
 Every request goes through `src/lib/api.ts` - the only module that knows route
 shapes, the bearer token, and error decoding. It carries exactly the methods
@@ -404,7 +403,10 @@ workspace's templates over `template.list` and starts the run with
 `template.launch` (both on `lib/api.ts` like every other call), then reveals
 it.
 
-The launch form asks for a task, a harness and a mode. The task is optional in
+The launch form asks for an account, a task, a harness and a mode. `account.list`
+puts the caller first, followed by accounts explicitly shared with them. A
+shared selection makes `agent.list` return that account's custom definitions
+and sends its ID as `account_member_id` on `run.launch`. The task is optional in
 interactive mode - a taskless launch drops the member into the agent's TUI
 with no seeded prompt - and required in headless, which has no interactive
 surface, so the form disables Launch and says why rather than sending a
@@ -449,11 +451,11 @@ shows the hint **Installs here reach agents after you save.**
 terminal and event stream reconnect on the same jittered schedule, and it
   splits large input (a paste) into several ordered frames under the gateway's
   64 KiB frame cap, never splitting a surrogate pair.
-- **Mirror by default for the agent.** The agent header carries no `write` key
-  unless the user asks to steer; the toggle reattaches rather than upgrading
-  in place. Whether the member may steer is the server's answer, never the
-  client's guess: a `-32001` refusal drops the request back to a mirror and
-  disables the toggle. A finished run attaches as a read-only replay of its
+- **Steer on entry.** The agent header requests `write` on the first attach and
+  the active button carries a short pulse animation; the toggle reattaches
+  rather than upgrading in place. Whether the member may steer is the server's
+  answer, never the client's guess: a `-32001` refusal drops the request back
+  to a mirror and disables the toggle. A finished run attaches as a read-only replay of its
   recorded transcript, which ends with a 1000 close, reason `session ended` -
   the signal to stop reconnecting rather than loop replay -> EOF -> replay.
   Every other refusal (unknown run, transiently missing terminal) stops the
@@ -883,7 +885,8 @@ off through a real `workspace.timeline` pause and resume run through
 `applyEvent`, a slot contributor reaching the card, and the palette jumping,
 switching the active workspace and opening it, steering from a run-detail tab,
 withholding both pause and resume while the paused state is unknown, launching
-into the active workspace, and offering only members who can own a run as
+into the active workspace with either the caller's or a shared account, and
+offering only members who can own a run as
 handoff targets, never a viewer. The buttons that render the same list are
 covered where they live: the run action bar showing pause, resume or neither
 as the pause state is known, asking before a kill and only then killing,

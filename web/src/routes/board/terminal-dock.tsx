@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { Dock } from '@/components/dock'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
@@ -12,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { openOAuthLink } from '@/lib/oauth-forward'
 import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
@@ -78,6 +80,16 @@ export function TerminalDock({
     onResize: (cols, rows) => {
       const tab = activeTabRef.current
       if (tab) getEnvTerminalSocket(tab)?.resize(cols, rows)
+    },
+    onLink: (uri) => {
+      if (!capability.hasLocal('forward.start')) return false
+      return openOAuthLink(
+        rpc,
+        'terminal',
+        uri,
+        (port) => toast.success(`OAuth callback ready on localhost:${port}`),
+        (err) => toast.error(`OAuth callback forward failed: ${message(err)}`),
+      )
     },
   })
   terminalRef.current = terminal

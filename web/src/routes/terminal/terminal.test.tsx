@@ -47,25 +47,24 @@ afterEach(() => {
 })
 
 describe('terminal view', () => {
-  it('mirrors by default and steers only when the user asks', () => {
+  it('steers by default and lets the user return to a mirror', () => {
     const view = mount()
     attached()
 
-    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
     expect(screen.getByText('Attached')).toBeDefined()
+    expect(screen.getByText('Steering')).toBeDefined()
 
-    fireEvent.click(screen.getByText('Take control'))
+    fireEvent.click(screen.getByText('Steering'))
     attached()
 
-    expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
-    expect(screen.getByText('Steering')).toBeDefined()
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    expect(screen.getByText('Take control')).toBeDefined()
     view.unmount()
   })
 
   it('disables the toggle and says why when the server denies steering', () => {
     const view = mount()
-    attached()
-    fireEvent.click(screen.getByText('Take control'))
     act(() => StubSocket.last().onopen?.())
 
     act(() =>
@@ -85,8 +84,8 @@ describe('terminal view', () => {
   })
 
   it('starts every attach from the server, not from the last one', () => {
-    // What a previous visit to this tab left behind: no steer, a refusal and
-    // its message. A fresh attach must answer for itself.
+    // What a previous visit to this tab left behind: a steer denial, refusal,
+    // and message. A fresh attach must ask to steer and answer for itself.
     const view = mount({
       steerDenied: true,
       refused: true,
@@ -94,7 +93,7 @@ describe('terminal view', () => {
     })
     attached()
 
-    const toggle = screen.getByText('Take control') as HTMLButtonElement
+    const toggle = screen.getByText('Steering') as HTMLButtonElement
     expect(toggle.disabled).toBe(false)
     expect(screen.queryByText('no live terminal')).toBeNull()
     expect(screen.queryByText('Retry')).toBeNull()

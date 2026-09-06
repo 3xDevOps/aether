@@ -231,12 +231,12 @@ func (f *fakeRuns) Calls() []string {
 	return append([]string(nil), f.calls...)
 }
 
-func (f *fakeRuns) Launch(_ context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (f *fakeRuns) Launch(_ context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	if err := f.record(fmt.Sprintf("launch:%s:%s:%s:%s:%s", workspace, member, task, harness, mode)); err != nil {
 		return nil, err
 	}
 	return &domain.Run{
-		ID: "run_new", WorkspaceID: workspace, MemberID: member, Task: task,
+		ID: "run_new", WorkspaceID: workspace, MemberID: member, AccountMemberID: account, Task: task,
 		Harness: harness, Mode: mode, Status: domain.RunQueued,
 		CreatedAt: time.Now().UTC(),
 	}, nil

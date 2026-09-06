@@ -37,6 +37,6 @@ func init() {
 // built first.
 type guardedRuns struct{ ssh *sshd.Config }
 
-func (g guardedRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
-	return g.ssh.Runs.Launch(ctx, workspace, member, task, harness, mode)
+func (g guardedRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+	return g.ssh.Runs.Launch(ctx, workspace, member, account, task, harness, mode)
 }

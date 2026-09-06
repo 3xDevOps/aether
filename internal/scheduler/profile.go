@@ -20,7 +20,7 @@ func (s *Scheduler) pinLatestProfile(ctx context.Context, run *domain.Run) error
 	if s.cfg.Profiles == nil {
 		return nil
 	}
-	snap, err := s.cfg.Profiles.Latest(ctx, string(run.MemberID), run.Harness)
+	snap, err := s.cfg.Profiles.Latest(ctx, string(run.AccountMember()), run.Harness)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil

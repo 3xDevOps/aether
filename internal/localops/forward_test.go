@@ -25,6 +25,9 @@ func TestForwardManagerForwardsConnectionsAndTracksStatus(t *testing.T) {
 	if err := manager.Start("run:run-1", port, dial); err == nil {
 		t.Fatal("duplicate Start succeeded")
 	}
+	if err := manager.Ensure("run:run-1", port, dial); err != nil {
+		t.Fatalf("Ensure existing: %v", err)
+	}
 
 	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {

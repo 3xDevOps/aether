@@ -37,11 +37,11 @@ type budgetGate struct {
 	store store.Store
 }
 
-func (g budgetGate) Launch(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (g budgetGate) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	if err := g.svc.Admit(ctx, workspace, member); err != nil {
 		return nil, err
 	}
-	return g.RunController.Launch(ctx, workspace, member, task, harness, mode)
+	return g.RunController.Launch(ctx, workspace, member, account, task, harness, mode)
 }
 
 // Relaunch starts a fresh run from a finished one, so it is admitted like

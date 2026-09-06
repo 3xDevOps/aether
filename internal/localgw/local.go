@@ -609,7 +609,7 @@ func (g *Gateway) localForwardStart(_ *http.Request, body []byte) (any, *protoco
 	if params.Port < 1 || params.Port > 65535 {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "port must be between 1 and 65535"}
 	}
-	err := g.local.forward.Start(params.Target, int(params.Port), func() (io.ReadWriteCloser, error) {
+	err := g.local.forward.Ensure(params.Target, int(params.Port), func() (io.ReadWriteCloser, error) {
 		return g.cfg.Backend.Forward(params.Target, params.Port)
 	})
 	if err != nil {

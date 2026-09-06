@@ -487,9 +487,9 @@ func pinSession(argv []string, profile harness.Profile) ([]string, string) {
 //   - The agent never started. recoverUnstarted interrupts queued and
 //     provisioning rows too, and the ID is stamped when the row is created,
 //     so it names a conversation the harness never opened.
-//   - The relaunch is not by the run's owner. Steering others is allowed by
-//     default and a handoff transfers the row, but the container mounts the
-//     actor's credential home while the transcript lives in the owner's.
+//   - The relaunch changes agent accounts. A normal run relaunched by another
+//     member uses that member's home, where the old transcript is absent. An
+//     explicitly shared account stays pinned and can resume across handoff.
 //
 // claude --resume on an ID it cannot find prints "No conversation found
 // with session ID: <id>" and exits 1, which would fail the relaunch
@@ -498,11 +498,11 @@ func pinSession(argv []string, profile harness.Profile) ([]string, string) {
 // A row with no pinned session at all - a harness that cannot pin, or a row
 // written before pinning existed - keeps ResumeFlag's best effort. That
 // fallback is sticky: there is no earlier ID left to recover.
-func resumeSession(argv []string, profile harness.Profile, old *domain.Run, actor domain.MemberID) ([]string, string) {
+func resumeSession(argv []string, profile harness.Profile, old *domain.Run, account domain.MemberID) ([]string, string) {
 	if old.HarnessSessionID == "" || profile.SessionResumeFlag == "" {
 		return harness.WithFlag(argv, profile.ResumeFlag, ""), ""
 	}
-	if old.StartedAt == nil || old.MemberID != actor {
+	if old.StartedAt == nil || old.AccountMember() != account {
 		return pinSession(argv, profile)
 	}
 	return harness.WithFlag(argv, profile.SessionResumeFlag, old.HarnessSessionID), old.HarnessSessionID
@@ -551,6 +551,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	maps.Copy(env, plan.Env)
 	env["AETHER_RUN_ID"] = string(run.ID)
 	env["AETHER_WORKSPACE_ID"] = string(run.WorkspaceID)
+	env["AETHER_ACCOUNT_MEMBER_ID"] = string(run.AccountMember())
 	env["GIT_AUTHOR_NAME"] = member.DisplayName
 	env["GIT_COMMITTER_NAME"] = member.DisplayName
 	env["GIT_AUTHOR_EMAIL"] = string(member.ID) + "@aether.local"
