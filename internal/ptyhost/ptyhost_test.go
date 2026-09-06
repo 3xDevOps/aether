@@ -314,6 +314,14 @@ func TestAttachReplayWriterReceivesTailBeforeLiveOutput(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	att.writeOutput(t, "scrollback")
+	// The pump delivers output asynchronously; a plain attach observing the
+	// bytes proves they reached the ring before the ReplayWriter attaches.
+	probe := startAttach(t, h, run, "probe", 80, 24, true)
+	waitFor(t, "scrollback in ring", func() bool { return probe.out.String() == "scrollback" })
+	probe.detach()
+	if err := probe.wait(t); err != nil {
+		t.Fatalf("probe detach returned %v, want nil", err)
+	}
 
 	kr, kw := io.Pipe()
 	conn := &replayConn{r: kr}
