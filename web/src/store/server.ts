@@ -62,6 +62,8 @@ export interface ServerSlice {
    * legacy server that does not serve the endpoint. */
   capabilities: GatewayCapabilities | null
   connection: ConnectionState
+  /** Changes whenever a caller needs to restart the connection lifecycle. */
+  connectionEpoch: number
   /** Highest event sequence applied; the cursor a reconnect replays from. */
   lastSeq: number
   hydrated: boolean
@@ -97,11 +99,23 @@ export interface ServerSlice {
   /** Applies one update phase, from an event or from an RPC result. */
   applyServerUpdate: (payload: ServerUpdatePayload) => void
   resetConnection: () => void
+  reconnect: () => void
 }
 
-export const createServerSlice: SliceCreator<ServerSlice> = (set) => ({
+export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
+  const resetConnection = () =>
+    set({
+      connection: 'connecting',
+      lastSeq: 0,
+      hydrated: false,
+      hydrationError: null,
+      streamDead: false,
+      unreachable: null,
+    })
+  return {
   info: null,
   capabilities: null,
+  connectionEpoch: 0,
   connection: 'connecting',
   lastSeq: 0,
   hydrated: false,
@@ -143,13 +157,10 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => ({
         ? {}
         : { serverUpdateProgress: payload },
     ),
-  resetConnection: () =>
-    set({
-      connection: 'connecting',
-      lastSeq: 0,
-      hydrated: false,
-      hydrationError: null,
-      streamDead: false,
-      unreachable: null,
-    }),
-})
+  resetConnection,
+  reconnect: () => {
+    resetConnection()
+    set((s) => ({ connectionEpoch: s.connectionEpoch + 1 }))
+  },
+}
+}

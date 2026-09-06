@@ -20,7 +20,7 @@ const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 export function ForwardDialog() {
-  const runID = useStore((s) => s.paletteRunID)
+  const target = useStore((s) => s.paletteForwardTarget)
   const close = useStore((s) => s.closePaletteDialog)
   const [port, setPort] = useState('1455')
   const [forwards, setForwards] = useState<LocalForwardStatusResult['forwards']>([])
@@ -30,16 +30,16 @@ export function ForwardDialog() {
   const [error, setError] = useState<string | null>(null)
 
   const refresh = async () => {
-    if (!runID) return
+    if (!target) return
     const result = await api.localForwardStatus()
-    setForwards(result.forwards.filter((forward) => forward.run_id === runID))
+    setForwards(result.forwards.filter((forward) => forward.target === target))
   }
 
   useEffect(() => {
     let live = true
     setLoading(true)
     setError(null)
-    if (!runID) {
+    if (!target) {
       setLoading(false)
       return () => {
         live = false
@@ -49,7 +49,7 @@ export function ForwardDialog() {
       .localForwardStatus()
       .then((result) => {
         if (!live) return
-        setForwards(result.forwards.filter((forward) => forward.run_id === runID))
+        setForwards(result.forwards.filter((forward) => forward.target === target))
       })
       .catch((err) => {
         if (!live) return
@@ -63,10 +63,10 @@ export function ForwardDialog() {
     return () => {
       live = false
     }
-  }, [runID])
+  }, [target])
 
   const start = async () => {
-    if (!runID) return
+    if (!target) return
     const value = Number(port)
     if (!Number.isInteger(value) || value < 1 || value > 65535) {
       const detail = 'Port must be between 1 and 65535'
@@ -77,7 +77,7 @@ export function ForwardDialog() {
     setStarting(true)
     setError(null)
     try {
-      await api.localForwardStart(runID, value)
+      await api.localForwardStart(target, value)
       await refresh()
       toast.success('Port forwarding started')
     } catch (err) {
@@ -90,11 +90,11 @@ export function ForwardDialog() {
   }
 
   const stop = async (forwardPort: number) => {
-    if (!runID) return
+    if (!target) return
     setStopping(forwardPort)
     setError(null)
     try {
-      await api.localForwardStop(runID, forwardPort)
+      await api.localForwardStop(target, forwardPort)
       await refresh()
       toast.success('Port forwarding stopped')
     } catch (err) {
@@ -110,7 +110,11 @@ export function ForwardDialog() {
     <Dialog open onOpenChange={close}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Forward a port</DialogTitle>
+          <DialogTitle>
+            {target?.startsWith('run:')
+              ? 'Forward a port from this run'
+              : 'Forward a port from your environment'}
+          </DialogTitle>
           <DialogDescription>
             Makes a port inside the agent's machine reachable at localhost on this computer - needed for browser logins like codex login (port 1455).
           </DialogDescription>
@@ -150,7 +154,7 @@ export function ForwardDialog() {
             ) : (
               forwards.map((forward) => (
                 <div
-                  key={`${forward.run_id}:${forward.port}`}
+                  key={`${forward.target}:${forward.port}`}
                   className="flex items-center justify-between gap-3 text-sm"
                 >
                   <span>
@@ -179,7 +183,7 @@ export function ForwardDialog() {
           <Button
             type="submit"
             form="forward-port"
-            disabled={starting || !runID}
+            disabled={starting || !target}
           >
             {starting ? 'Starting...' : 'Start'}
           </Button>

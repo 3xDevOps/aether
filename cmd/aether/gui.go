@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -40,7 +41,11 @@ func runGUI(args []string) error {
 	}
 	cfg, err := cli.Load()
 	if err != nil {
-		return err
+		if !errors.Is(err, cli.ErrNotLinked) {
+			return err
+		}
+		// The dashboard's onboarding wizard links through link.apply.
+		cfg = cli.Config{}
 	}
 	if *server != "" {
 		named, ok := cfg.Named(*server)

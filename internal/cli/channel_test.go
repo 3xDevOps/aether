@@ -216,7 +216,7 @@ func TestForwardOpensDirectTCPIPChannel(t *testing.T) {
 	}
 	defer func() { _ = client.Close() }()
 
-	stream, err := (&Conn{client: client}).Forward("run_1", 1455)
+	stream, err := (&Conn{client: client}).Forward("run:run_1", 1455)
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
 	}

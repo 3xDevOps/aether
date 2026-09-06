@@ -1,8 +1,9 @@
-import { type Attachment, codeDenied, connectAttach } from '@/routes/terminal/attach'
+import { type Attachment, codeDenied, connectAttach, replayGate } from '@/routes/terminal/attach'
 import type { ConnectionState } from '@/lib/stream'
 import { StubSocket } from '@/test/stub-socket'
 
 let output: string[] = []
+let outputKinds: Array<[string, string]> = []
 let states: ConnectionState[] = []
 let attaches = 0
 let refusal: string | null = null
@@ -11,13 +12,18 @@ let write = false
 
 function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
   output = []
+  outputKinds = []
   states = []
   attaches = 0
   refusal = null
   denied = false
   const socketURL = typeof url === 'function' ? url : () => url
   return connectAttach(socketURL, {
-    onData: (chunk) => output.push(new TextDecoder().decode(chunk)),
+    onData: (chunk, kind) => {
+      const text = new TextDecoder().decode(chunk)
+      output.push(text)
+      outputKinds.push([kind, text])
+    },
     onAttached: () => {
       attaches++
     },
@@ -72,6 +78,35 @@ describe('connectAttach', () => {
     expect(socket.frames()[1]).toEqual({ type: 'input', data: 'x' })
     a.close()
   })
+  it('splits replay bytes from live output at the acknowledged boundary', () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ replay: 5 })
+
+    socket.onmessage?.({ data: new TextEncoder().encode('abc').buffer })
+    socket.onmessage?.({ data: new TextEncoder().encode('defg').buffer })
+
+    expect(outputKinds).toEqual([
+      ['replay', 'abc'],
+      ['replay-end', 'de'],
+      ['live', 'fg'],
+    ])
+    a.close()
+  })
+
+  it('marks output live when an attach ack has no replay', () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack()
+
+    socket.onmessage?.({ data: new TextEncoder().encode('live').buffer })
+
+    expect(outputKinds).toEqual([['live', 'live']])
+    a.close()
+  })
+
   it('reads the caller URL again when reconnecting', () => {
     let tab = 'main'
     const a = attach(() => `/ws/terminal?tab=${tab}`)
@@ -338,5 +373,33 @@ describe('connectAttach', () => {
     expect(states[states.length - 1]).toBe('offline')
     expect(refusal).toBeNull()
     a.close()
+  })
+})
+
+describe('replayGate', () => {
+  it('mutes input from the first replay byte until the replay-end write has parsed', () => {
+    const done: Array<(() => void) | undefined> = []
+    const gate = replayGate((_chunk, cb) => done.push(cb))
+    const bytes = new Uint8Array([1])
+
+    expect(gate.muted()).toBe(false)
+    gate.write(bytes, 'replay')
+    expect(gate.muted()).toBe(true)
+    gate.write(bytes, 'replay-end')
+    expect(gate.muted()).toBe(true)
+    // Live output arriving before xterm has parsed the replay must not unmute.
+    gate.write(bytes, 'live')
+    expect(gate.muted()).toBe(true)
+
+    expect(done[0]).toBeUndefined()
+    done[1]?.()
+    expect(gate.muted()).toBe(false)
+  })
+
+  it('unmutes on demand so a dropped socket mid-replay never leaves input dead', () => {
+    const gate = replayGate(() => {})
+    gate.write(new Uint8Array([1]), 'replay')
+    gate.unmute()
+    expect(gate.muted()).toBe(false)
   })
 })

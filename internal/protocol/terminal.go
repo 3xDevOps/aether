@@ -9,12 +9,14 @@ type TerminalRequest struct {
 
 // TerminalResponse is the result of a terminal control operation.
 type TerminalResponse struct {
-	OK    bool   `json:"ok"`
-	Tab   string `json:"tab,omitempty"`
-	Cols  uint   `json:"cols,omitempty"`
-	Rows  uint   `json:"rows,omitempty"`
-	Code  int    `json:"code,omitempty"`
-	Error string `json:"error,omitempty"`
+	OK   bool   `json:"ok"`
+	Tab  string `json:"tab,omitempty"`
+	Cols uint   `json:"cols,omitempty"`
+	Rows uint   `json:"rows,omitempty"`
+	// Replay is the number of bytes of scrollback replay that follow the ack before live output.
+	Replay int    `json:"replay,omitempty"`
+	Code   int    `json:"code,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // TerminalStatusResult is the wire form of domain.TerminalStatus.

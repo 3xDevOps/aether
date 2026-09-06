@@ -29,30 +29,41 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 		rejectDirectTCPIP(nc, ssh.Prohibited, "invalid port forwarding payload")
 		return
 	}
-	if !strings.HasPrefix(payload.DestHost, "run:") {
-		rejectDirectTCPIP(nc, ssh.Prohibited, "port forwarding targets must be run:<run-id>")
-		return
-	}
-	runID := domain.RunID(strings.TrimPrefix(payload.DestHost, "run:"))
-	if runID == "" {
-		rejectDirectTCPIP(nc, ssh.Prohibited, "run not found")
-		return
-	}
 	if payload.DestPort == 0 || payload.DestPort > 65535 {
 		rejectDirectTCPIP(nc, ssh.Prohibited, "destination port must be between 1 and 65535")
 		return
 	}
-	if err := checkSteer(ctx, s.cfg.Store, member, runID); err != nil {
-		reason := err.Error()
-		if errors.Is(err, store.ErrNotFound) {
-			reason = "run not found"
+	var addr string
+	switch {
+	case payload.DestHost == "terminal":
+		if err := s.checkMember(ctx, member); err != nil {
+			rejectDirectTCPIP(nc, ssh.Prohibited, rpcError(err).Message)
+			return
 		}
-		rejectDirectTCPIP(nc, ssh.Prohibited, reason)
-		return
-	}
-	addr, err := s.cfg.Runs.ContainerAddr(ctx, runID)
-	if err != nil || addr == "" {
-		rejectDirectTCPIP(nc, ssh.Prohibited, "run has no live container")
+		var err error
+		addr, err = s.cfg.Runs.TerminalContainerAddr(ctx, member)
+		if err != nil || addr == "" {
+			rejectDirectTCPIP(nc, ssh.Prohibited, "environment terminal is not running")
+			return
+		}
+	case strings.HasPrefix(payload.DestHost, "run:") && strings.TrimPrefix(payload.DestHost, "run:") != "":
+		runID := domain.RunID(strings.TrimPrefix(payload.DestHost, "run:"))
+		if err := checkSteer(ctx, s.cfg.Store, member, runID); err != nil {
+			reason := err.Error()
+			if errors.Is(err, store.ErrNotFound) {
+				reason = "run not found"
+			}
+			rejectDirectTCPIP(nc, ssh.Prohibited, reason)
+			return
+		}
+		var err error
+		addr, err = s.cfg.Runs.ContainerAddr(ctx, runID)
+		if err != nil || addr == "" {
+			rejectDirectTCPIP(nc, ssh.Prohibited, "run has no live container")
+			return
+		}
+	default:
+		rejectDirectTCPIP(nc, ssh.Prohibited, "port forwarding targets must be run:<run-id> or terminal")
 		return
 	}
 	tcpConn, err := net.DialTimeout("tcp", net.JoinHostPort(addr, strconv.Itoa(int(payload.DestPort))), 10*time.Second)

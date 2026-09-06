@@ -3,7 +3,7 @@ import { Dock } from '@/components/dock'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
-import { type Attachment, connectAttach } from '@/routes/terminal/attach'
+import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import {
   emitShellSocketData,
@@ -32,9 +32,11 @@ export function RunDock({ runID }: { runID: string }) {
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
   const terminalRef = useRef<XtermController['terminal']>(null)
+  const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
   const { hostRef, terminal } = useXterm({
-    enabled: activeTab !== null && dock.refusedMessage === null,
+    enabled: activeTab !== null && !dock.collapsed && dock.refusedMessage === null,
     onData: (data) => {
+      if (gate.current.muted()) return
       const tab = activeTabRef.current
       if (tab) getShellSocket(runID, tab)?.send(data)
     },
@@ -57,15 +59,24 @@ export function RunDock({ runID }: { runID: string }) {
     let attachment: Attachment | null = existing ?? null
     if (!attachment) {
       attachment = connectAttach(() => api.attachShellSocket(runID, socketKey), {
-        onData: (chunk) => emitShellSocketData(runID, socketKey, chunk),
+        onData: (chunk, kind) =>
+          emitShellSocketData(runID, socketKey, chunk, kind),
         onAttached: () => {
           // Reattach replay restores the tab's full history, so a tab switch
           // may remount its xterm instead of preserving old instances. A
-          // background tab reconnecting must never wipe the active tab.
-          if (activeTabRef.current === socketKey) terminalRef.current?.reset()
+          // background tab reconnecting must never wipe the active tab or
+          // unmute its replay.
+          if (activeTabRef.current === socketKey) {
+            gate.current.unmute()
+            terminalRef.current?.reset()
+          }
           setShellRefused(runID, null)
         },
-        onState: () => {},
+        onState: (connection) => {
+          if (connection === 'offline' && activeTabRef.current === socketKey) {
+            gate.current.unmute()
+          }
+        },
         // The server's message names the actual limit (steer, tab cap,
         // paused run); a lost steer capability always means the fixed
         // refusal sentence.
@@ -81,9 +92,7 @@ export function RunDock({ runID }: { runID: string }) {
       registerShellSocket(runID, socketKey, attachment)
     }
 
-    const unsubscribe = subscribeShellSocket(runID, socketKey, (chunk) => {
-      terminalRef.current?.write(chunk)
-    })
+    const unsubscribe = subscribeShellSocket(runID, socketKey, gate.current.write)
     if (existing) attachment.reopen()
     return unsubscribe
   }, [activeTab, dock.refusedMessage, removeShellTab, runID, setShellRefused, terminal])

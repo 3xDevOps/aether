@@ -7,15 +7,21 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Forward opens a direct-tcpip channel to a run container port.
-func (c *Conn) Forward(runID string, port uint32) (io.ReadWriteCloser, error) {
+const TerminalForwardTarget = "terminal"
+
+func RunForwardTarget(runID string) string {
+	return "run:" + runID
+}
+
+// Forward opens a direct-tcpip channel to a forwarding target.
+func (c *Conn) Forward(target string, port uint32) (io.ReadWriteCloser, error) {
 	payload := struct {
 		DestHost string
 		DestPort uint32
 		OrigHost string
 		OrigPort uint32
 	}{
-		DestHost: "run:" + runID,
+		DestHost: target,
 		DestPort: port,
 		OrigHost: "127.0.0.1",
 	}

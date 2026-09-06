@@ -132,6 +132,52 @@ type testConn struct {
 func (c *testConn) Read(p []byte) (int, error)  { return c.r.Read(p) }
 func (c *testConn) Write(p []byte) (int, error) { return c.w.Write(p) }
 
+type replayConn struct {
+	r io.Reader
+
+	mu      sync.Mutex
+	replays [][]byte
+	writes  [][]byte
+}
+
+func (c *replayConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+func (c *replayConn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.writes = append(c.writes, append([]byte(nil), p...))
+	return len(p), nil
+}
+
+func (c *replayConn) WriteReplay(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.replays = append(c.replays, append([]byte(nil), p...))
+	return len(p), nil
+}
+
+func (c *replayConn) replayBytes() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([][]byte, len(c.replays))
+	for i := range c.replays {
+		out[i] = append([]byte(nil), c.replays[i]...)
+	}
+	return out
+}
+
+func (c *replayConn) writeBytes() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([][]byte, len(c.writes))
+	for i := range c.writes {
+		out[i] = append([]byte(nil), c.writes[i]...)
+	}
+	return out
+}
+
+var _ ReplayWriter = (*replayConn)(nil)
+
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -257,6 +303,57 @@ func TestAttachPassthroughAndReattach(t *testing.T) {
 	}
 	if got := b.out.String(); got != "alphabetagamma" {
 		t.Fatalf("second client output = %q", got)
+	}
+}
+
+func TestAttachReplayWriterReceivesTailBeforeLiveOutput(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-replay-writer")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	att.writeOutput(t, "scrollback")
+	// The pump delivers output asynchronously; a plain attach observing the
+	// bytes proves they reached the ring before the ReplayWriter attaches.
+	probe := startAttach(t, h, run, "probe", 80, 24, true)
+	waitFor(t, "scrollback in ring", func() bool { return probe.out.String() == "scrollback" })
+	probe.detach()
+	if err := probe.wait(t); err != nil {
+		t.Fatalf("probe detach returned %v, want nil", err)
+	}
+
+	kr, kw := io.Pipe()
+	conn := &replayConn{r: kr}
+	resize := make(chan [2]uint)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- h.Attach(context.Background(), RunSession(run), "member", 80, 24, true, conn, resize)
+	}()
+	t.Cleanup(func() {
+		_ = kw.Close()
+		_ = kr.Close()
+	})
+
+	waitFor(t, "replay callback", func() bool { return len(conn.replayBytes()) == 1 })
+	replays := conn.replayBytes()
+	if got := string(replays[0]); got != "scrollback" {
+		t.Fatalf("replay = %q, want scrollback", got)
+	}
+
+	att.writeOutput(t, " live")
+	waitFor(t, "live output", func() bool { return len(conn.writeBytes()) == 1 })
+	writes := conn.writeBytes()
+	if got := string(writes[0]); got != " live" {
+		t.Fatalf("live output = %q, want %q", got, " live")
+	}
+	if len(conn.replayBytes()) != 1 {
+		t.Fatalf("replay callback count = %d, want 1", len(conn.replayBytes()))
+	}
+
+	_ = kw.Close()
+	if err := <-errCh; err != nil {
+		t.Fatalf("attach returned %v, want nil", err)
 	}
 }
 

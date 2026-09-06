@@ -43,6 +43,17 @@ func (b *sshBackend) Close() error {
 	return conn.Close()
 }
 
+// Relink replaces the backend's config and live connection in place.
+func (b *sshBackend) Relink(cfg cli.Config, conn *cli.Conn) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn != nil {
+		_ = b.conn.Close()
+	}
+	b.cfg = cfg
+	b.conn = conn
+}
+
 // live returns the shared connection, dialing when there is none yet. A
 // dial failure comes back already classified so every surface that dials
 // (Call, Events, Attach, Terminal, Sync) reports it identically.
@@ -264,8 +275,8 @@ func (b *sshBackend) Sync(runID string, force bool) (io.ReadWriteCloser, error) 
 	return stream(b, func(c *cli.Conn) (io.ReadWriteCloser, error) { return c.Sync(runID, force) })
 }
 
-func (b *sshBackend) Forward(runID string, port uint32) (io.ReadWriteCloser, error) {
+func (b *sshBackend) Forward(target string, port uint32) (io.ReadWriteCloser, error) {
 	return stream(b, func(c *cli.Conn) (io.ReadWriteCloser, error) {
-		return c.Forward(runID, port)
+		return c.Forward(target, port)
 	})
 }

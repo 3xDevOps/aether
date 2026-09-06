@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef, useState } from 'react'
@@ -128,11 +129,13 @@ export function useXterm({
     // glyph-atlas positions under heavy glyph churn, garbling scrolled rows
     // until a forced refresh (xtermjs/xterm.js#6038; the fix is unreleased).
     // The DOM renderer never desyncs and keeps up with agent TUI streams.
+    const openLink = (uri: string) => window.open(uri, '_blank', 'noopener,noreferrer')
     const created = new Terminal({
       fontSize: 12,
       fontFamily: terminalFontFamily,
       scrollback: 50_000,
       cursorBlink: false,
+      linkHandler: { activate: (_event, uri) => openLink(uri) },
     })
 
     let active = true
@@ -141,6 +144,7 @@ export function useXterm({
       if (!active) return
       const fit = new FitAddon()
       created.loadAddon(fit)
+      created.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)))
       created.open(host)
       attachClipboardKeys(created)
 

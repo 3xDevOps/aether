@@ -12,8 +12,9 @@ import {
 } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { type Attachment, connectAttach } from '@/routes/terminal/attach'
+import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 import {
   emitEnvTerminalSocketData,
   getEnvTerminalSocket,
@@ -45,6 +46,8 @@ export function TerminalDock({
   const rpc = client
   const dock = useStore((s) => s.envTerminal ?? initialEnvTerminal)
   const terminalDockHeight = useStore((s) => s.terminalDockHeight)
+  const openForwardDialog = useStore((s) => s.openForwardDialog)
+  const capability = useCapability()
   const openTab = useStore((s) => s.openEnvTerminalTab)
   const closeTab = useStore((s) => s.closeEnvTerminalTab)
   const selectTab = useStore((s) => s.selectEnvTerminalTab)
@@ -63,10 +66,12 @@ export function TerminalDock({
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
   const terminalRef = useRef<XtermController['terminal']>(null)
+  const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
 
   const { hostRef, terminal } = useXterm({
-    enabled: activeTab !== null,
+    enabled: activeTab !== null && !dock.collapsed,
     onData: (data) => {
+      if (gate.current.muted()) return
       const tab = activeTabRef.current
       if (tab) getEnvTerminalSocket(tab)?.send(data)
     },
@@ -134,14 +139,22 @@ export function TerminalDock({
       attachment = existing
     } else {
       attachment = connectAttach(() => rpc.terminalSocket(socketKey), {
-        onData: (chunk) => emitEnvTerminalSocketData(socketKey, chunk),
+        onData: (chunk, kind) =>
+          emitEnvTerminalSocketData(socketKey, chunk, kind),
         onAttached: () => {
           setEnvTerminalSocketReady(socketKey, true)
-          if (activeTabRef.current === socketKey) terminalRef.current?.reset()
+          if (activeTabRef.current === socketKey) {
+            gate.current.unmute()
+            terminalRef.current?.reset()
+          }
           const status = useStore.getState().envTerminal.status
           setStatus({ ...(status ?? { running: false, tabs: [] }), running: true }, null)
         },
-        onState: () => {},
+        onState: (connection) => {
+          if (connection === 'offline' && activeTabRef.current === socketKey) {
+            gate.current.unmute()
+          }
+        },
         onRefused: (detail) => setStatus(useStore.getState().envTerminal.status, detail),
         onWriteDenied: () =>
           setStatus(useStore.getState().envTerminal.status, 'Terminal input was denied'),
@@ -164,9 +177,7 @@ export function TerminalDock({
     }
 
     setEnvTerminalSocketReady(socketKey, false)
-    const unsubscribe = subscribeEnvTerminalSocket(socketKey, (chunk) => {
-      terminalRef.current?.write(chunk)
-    })
+    const unsubscribe = subscribeEnvTerminalSocket(socketKey, gate.current.write)
     if (existing) attachment.reopen()
     return () => {
       unsubscribe()
@@ -241,6 +252,17 @@ export function TerminalDock({
           (dock.status?.running || dock.tabs.length > 0) && (
             <div className="flex items-center gap-1">
               {dock.status?.running && (
+                <>
+                {capability.hasLocal('forward.start') && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => openForwardDialog('terminal')}
+                  >
+                    Forward port
+                  </Button>
+                )}
                 <Button
                   type="button"
                   size="sm"
@@ -250,6 +272,7 @@ export function TerminalDock({
                 >
                   {saving ? 'Saving...' : 'Save environment'}
                 </Button>
+                </>
               )}
               <Button
                 type="button"

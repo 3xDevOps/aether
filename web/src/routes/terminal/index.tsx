@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react'
 import { RunActions } from '@/components/run-actions'
-import { useXterm } from '@/components/xterm-host'
+import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
-import { type Attachment, connectAttach } from '@/routes/terminal/attach'
+import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
 import { RunDock } from '@/routes/terminal/run-dock'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
@@ -32,16 +32,20 @@ function TerminalView({ params }: RouteProps) {
 
   const known = run !== undefined
   const attachRef = useRef<Attachment | null>(null)
+  const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
+  const terminalRef = useRef<XtermController['terminal']>(null)
   // Read at connect time by the attachment, so a toggle takes effect on the
   // reattach without re-running the terminal's own effect.
   const writeRef = useRef(state.write)
   writeRef.current = state.write
   const { hostRef, terminal } = useXterm({
     enabled: known,
-    onData: (data) => attachRef.current?.send(data),
+    onData: (data) => {
+      if (!gate.current.muted()) attachRef.current?.send(data)
+    },
     onResize: (cols, rows) => attachRef.current?.resize(cols, rows),
   })
-
+  terminalRef.current = terminal
   useEffect(() => {
     if (!terminal) return
 
@@ -52,15 +56,19 @@ function TerminalView({ params }: RouteProps) {
     writeRef.current = initialTerminal.write
 
     const attachment = connectAttach(() => api.attachSocket(runID), {
-      onData: (chunk) => terminal.write(chunk),
+      onData: gate.current.write,
       // Every attach starts with the server's transcript replay, so the pane
       // is never blank - and clearing first keeps a reconnect from stacking a
       // second copy of the scrollback under the first.
       onAttached: () => {
+        gate.current.unmute()
         terminal.reset()
         setTerminal(runID, { message: null, refused: false })
       },
-      onState: (connection) => setTerminal(runID, { connection }),
+      onState: (connection) => {
+        if (connection === 'offline') gate.current.unmute()
+        setTerminal(runID, { connection })
+      },
       onRefused: (message) => setTerminal(runID, { message, refused: true }),
       onWriteDenied: () => setTerminal(runID, { steerDenied: true, write: false }),
       geometry: () => ({ cols: terminal.cols, rows: terminal.rows }),

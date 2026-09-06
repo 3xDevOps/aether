@@ -14,6 +14,7 @@ export function App() {
   const unreachable = useStore((s) => s.unreachable)
   const hydrated = useStore((s) => s.hydrated)
   const gatewayRestarting = useStore((s) => s.gatewayRestarting)
+  const epoch = useStore((s) => s.connectionEpoch)
   const resetConnection = useStore((s) => s.resetConnection)
   const theme = useStore((s) => s.theme)
   // Bumping this remounts the connection effect, which is what a retry is:
@@ -21,7 +22,7 @@ export function App() {
   // session token held in memory.
   const [attempt, setAttempt] = useState(0)
 
-  useEffect(() => connect(useStore), [attempt])
+  useEffect(() => connect(useStore), [attempt, epoch])
 
   // Nothing has loaded and the failure is total: the page below says what
   // broke and how to fix it, and there is no shell left to toast over. An

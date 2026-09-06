@@ -245,9 +245,9 @@ Two things to know:
   the CLI. Details in [install.md](install.md#desktop-app).
 - **It is not a standalone client.** The app does not bundle `aether`; it
   launches `aether gui` from your `PATH`, and the dashboard lives inside that
-  CLI binary. So install ([step 1](#1-install)) and link
-  ([step 3](#3-link-from-your-machine)) first. When you update the CLI, the
-  window picks up the new dashboard without rebuilding the app.
+  CLI binary. Install the CLI ([step 1](#1-install)); on an unlinked machine,
+  the app opens its onboarding wizard and links from there. When you update
+  the CLI, the window picks up the new dashboard without rebuilding the app.
 
 In the dashboard: a workspace switcher over the runs in scope, a board
 bucketed by what needs attention, a live terminal mirror per run, the diff
@@ -384,7 +384,7 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 
 | Symptom | Cause |
 | --- | --- |
-| `not linked; run aether link <addr>` | No `~/.config/aether/config.json` (`%AppData%\aether\config.json` on Windows) on this machine yet. |
+| `not linked; run aether link <addr>` | CLI commands that need a server have no saved link. The desktop app opens its onboarding wizard and can link from there. |
 | `no Aether member for this key` | The server already has an admin, so you are not the first member. Get an invite: [teams.md](teams.md). |
 | `unable to authenticate, attempted methods [none]` | The CLI had no key to offer: none at `~/.ssh/id_ed25519` and no ssh-agent. The same error names the key when one was found but could not be used - read the rest of the line. On Windows, check `Get-Service ssh-agent` and look for the key at `%USERPROFILE%\.ssh\id_ed25519`. |
 | `<path> is passphrase-protected; add it to ssh-agent (ssh-add <path>) or pass --key <unencrypted key>` | The key exists but the CLI cannot decrypt it; it does not prompt for a passphrase. Run `ssh-add <path>`, or point at an unencrypted key with `aether link <addr> --key <path>`. |

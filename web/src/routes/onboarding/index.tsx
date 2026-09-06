@@ -33,11 +33,18 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const setOnboardingStep = useStore((s) => s.setOnboardingStep)
   const setOnboardingWorkspace = useStore((s) => s.setOnboardingWorkspace)
   const upsertWorkspace = useStore((s) => s.upsertWorkspace)
+  const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
   const onboardingWorkspace = useStore((s) => s.onboardingWorkspace)
   const workspaces = useStore((s) => s.workspaces)
   const workspace = onboardingWorkspace ? workspaces[onboardingWorkspace] ?? null : null
   const [step, setStepState] = useState(() =>
-    Math.max(0, Math.min(steps.length - 1, persistedStep)),
+    Math.max(
+      0,
+      Math.min(
+        steps.length - 1,
+        persistedStep >= 2 && !onboardingWorkspace ? 1 : persistedStep,
+      ),
+    ),
   )
   // The harness the Agents step set up, so the first run starts on the one
   // that is actually logged in. Empty until a setup shell exits cleanly.
@@ -96,6 +103,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             onNext={(w) => {
               upsertWorkspace(w)
               setOnboardingWorkspace(w.id)
+              setActiveWorkspace(w.id)
               setStep(2)
             }}
           />

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,6 +218,14 @@ func useTempConfigDir(t *testing.T) {
 	}
 	if rel, err := filepath.Rel(dir, path); err != nil || strings.HasPrefix(rel, "..") {
 		t.Fatalf("config path %s escaped %s", path, dir)
+	}
+}
+
+func TestLoadMissingReturnsErrNotLinked(t *testing.T) {
+	useTempConfigDir(t)
+	_, err := Load()
+	if !errors.Is(err, ErrNotLinked) {
+		t.Fatalf("Load missing config error = %v, want ErrNotLinked", err)
 	}
 }
 

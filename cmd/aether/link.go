@@ -3,10 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/term"
 
@@ -24,92 +22,6 @@ func init() {
 	})
 }
 
-// defaultSSHPort is the aether-server default listen port, appended when
-// linking by a bare MagicDNS hostname.
-const defaultSSHPort = "2222"
-
-// normalizeAddr gives a bare host the default aether-server port so the
-// result is always the host:port that cli.Dial hands to the TCP dialer.
-// Bare MagicDNS names, FQDNs, IPv4 and IPv6 literals (bracketed or not)
-// all pick up ":2222"; anything that already carries a port passes
-// through untouched.
-func normalizeAddr(addr string) string {
-	if addr == "" {
-		return addr
-	}
-	if host, port, err := net.SplitHostPort(addr); err == nil {
-		if port != "" {
-			return addr
-		}
-		return net.JoinHostPort(host, defaultSSHPort)
-	}
-	// No port at all. Unwrap a matched IPv6 bracket pair so JoinHostPort
-	// puts back exactly one pair.
-	host := addr
-	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-		host = host[1 : len(host)-1]
-	}
-	return net.JoinHostPort(host, defaultSSHPort)
-}
-
-// savedKey is the private key a previous link left in effect for this
-// profile. A recorded profile choice wins; legacy or new profiles without
-// one inherit the top-level choice.
-func savedKey(prev cli.Config, name string) string {
-	if name == "" {
-		return prev.Key
-	}
-	named, ok := prev.Named(name)
-	if ok {
-		return named.Key
-	}
-	return prev.Key
-}
-
-// autoKey clears a saved choice so the link returns to automatic discovery.
-const autoKey = "auto"
-
-// linkKey resolves a key choice for a link. Explicit paths are validated
-// before dialing; "auto" clears a saved choice.
-func linkKey(choice string, prev cli.Config, name string) (string, error) {
-	switch choice {
-	case "":
-		return savedKey(prev, name), nil
-	case autoKey:
-		return "", nil
-	}
-	path, err := filepath.Abs(choice)
-	if err != nil {
-		return "", err
-	}
-	if err := cli.CheckKey(path); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-// linkConfig is the config `aether link` saves: the fresh link cfg
-// carrying forward previously saved profiles - Save overwrites the whole
-// file - plus, when name is non-empty, a snapshot of cfg upserted under
-// that name. Without a name the top-level fields change exactly as before
-// profiles existed. A named link records whether it used automatic
-// discovery so a later default-link key never narrows that profile.
-func linkConfig(cfg, prev cli.Config, name string) cli.Config {
-	cfg.Links = prev.Links
-	if name == "" {
-		return cfg
-	}
-	return cli.UpsertLink(cfg, cli.NamedLink{
-		Name:       name,
-		Addr:       cfg.Addr,
-		User:       cfg.User,
-		Key:        cfg.Key,
-		AutoKey:    cfg.Key == "",
-		Repo:       cfg.Repo,
-		KnownHosts: cfg.KnownHosts,
-	})
-}
-
 // absolutePath resolves a path flag against the current directory, because
 // the saved config is read again from wherever the next command runs.
 func absolutePath(path string) (string, error) {
@@ -119,10 +31,11 @@ func absolutePath(path string) (string, error) {
 	return filepath.Abs(path)
 }
 
-// linkOptions is one parsed `aether link` command line: the config the
-// link will dial with and save, plus the flags that steer the run itself.
+// linkOptions is one parsed `aether link` command line. key is the resolved
+// --key path, "auto", or empty (inherit the saved key).
 type linkOptions struct {
-	cfg       cli.Config
+	addr      string
+	repo      string
 	key       string
 	invite    string
 	name      string
@@ -135,7 +48,7 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 	name := fs.String("name", "", "profile label for this link (also the display name when joining via invite)")
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
 	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
-	key := fs.String("key", "", "SSH private key to authenticate with (default ~/.ssh/id_ed25519); saved in the config for later commands")
+	keyFlag := fs.String("key", "", "SSH private key to authenticate with (default ~/.ssh/id_ed25519); saved in the config for later commands")
 	addr, err := parseLeadingArg(fs, args)
 	if err != nil || addr == "" {
 		return linkOptions{}, fmt.Errorf("usage: aether link <addr> [--invite] [--key] [--name] [--repo] [--workspace]")
@@ -144,29 +57,25 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 	if err != nil {
 		return linkOptions{}, err
 	}
-	keyChoice := *key
-	var keyPath string
-	if keyChoice != autoKey {
-		keyPath, err = absolutePath(keyChoice)
-		if err != nil {
+	key := *keyFlag
+	if key != "" && key != cli.AutoKey {
+		if key, err = filepath.Abs(key); err != nil {
 			return linkOptions{}, err
 		}
 		// Fail on the path the user typed, before a handshake turns it into
 		// an authentication failure that names no file.
-		if keyPath != "" {
-			if _, err := os.Stat(keyPath); err != nil {
-				return linkOptions{}, fmt.Errorf("link --key: %w", err)
-			}
+		if _, err := os.Stat(key); err != nil {
+			return linkOptions{}, fmt.Errorf("link --key: %w", err)
 		}
 	}
 	return linkOptions{
-		cfg:       cli.Config{Addr: normalizeAddr(addr), Repo: repoPath, Key: keyPath, User: "aether"},
-		key:       keyChoice,
+		addr:      addr,
+		repo:      repoPath,
+		key:       key,
 		invite:    *invite,
 		name:      *name,
 		workspace: *workspace,
 	}, nil
-
 }
 
 func runLink(args []string) error {
@@ -178,47 +87,43 @@ func runLink(args []string) error {
 	if loadErr != nil {
 		prev = cli.Config{}
 	}
-	cfg := opts.cfg
-	if cfg.Key, err = linkKey(opts.key, prev, opts.name); err != nil {
-		return err
-	}
-	var conn *cli.Conn
-	if opts.invite != "" {
-		conn, err = cli.DialInvite(cfg, opts.invite, opts.name)
-	} else {
-		conn, err = cli.Dial(cfg)
-	}
+	result, err := cli.Link(cli.LinkOptions{
+		Addr:   opts.addr,
+		Key:    opts.key,
+		Invite: opts.invite,
+		Name:   opts.name,
+	}, prev)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
-
-	c, err := conn.Control()
-	if err != nil {
+	defer func() { _ = result.Conn.Close() }()
+	cfg := result.Config
+	cfg.Repo = opts.repo
+	if opts.name != "" {
+		for i := range cfg.Links {
+			if cfg.Links[i].Name == opts.name {
+				cfg.Links[i].Repo = cfg.Repo
+				break
+			}
+		}
+	}
+	if err = cli.Save(cfg); err != nil {
 		return err
 	}
-	defer func() { _ = c.Close() }()
-
-	var info protocol.ServerInfoResult
-	if err = c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
-		return err
-	}
-	if info.ProtocolVersion != protocol.Version {
-		return fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
-	}
-
-	if err = cli.Save(linkConfig(cfg, prev, opts.name)); err != nil {
-		return err
-	}
-	who := info.Member.DisplayName
+	who := result.Info.Member.DisplayName
 	if term.IsTerminal(int(os.Stdout.Fd())) {
-		who = attribution.Sprint(info.Member.Color, who)
+		who = attribution.Sprint(result.Info.Member.Color, who)
 	}
-	fmt.Printf("linked to %s as %s (%s)\n", cfg.Addr, who, info.Member.Role)
+	fmt.Printf("linked to %s as %s (%s)\n", cfg.Addr, who, result.Info.Member.Role)
 
 	if cfg.Repo == "" {
 		return nil
 	}
+	c, err := result.Conn.Control()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close() }()
 	var wl protocol.WorkspaceListResult
 	if callErr := c.Call(protocol.MethodWorkspaceList, struct{}{}, &wl); callErr != nil {
 		return callErr

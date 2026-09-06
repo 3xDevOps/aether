@@ -284,8 +284,8 @@ func TestAttachRoundTrip(t *testing.T) {
 	}
 	var ack protocol.AttachResponse
 	readJSONLine(t, r, &ack)
-	if !ack.OK || ack.Cols != 100 || ack.Rows != 40 {
-		t.Fatalf("ack = %+v, want ok with pty-req geometry 100x40", ack)
+	if !ack.OK || ack.Cols != 100 || ack.Rows != 40 || ack.Replay != len(e.pty.replay) {
+		t.Fatalf("ack = %+v, want ok with pty-req geometry 100x40 and replay %d", ack, len(e.pty.replay))
 	}
 
 	buf := make([]byte, len(e.pty.replay))

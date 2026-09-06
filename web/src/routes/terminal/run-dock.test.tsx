@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { Terminal } from '@xterm/xterm'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import { useStore } from '@/store'
@@ -59,6 +60,28 @@ describe('run-shell dock', () => {
     expect(socket.url).toBe('ws://localhost/ws/attach/run_1?shell=t1')
     act(() => socket.onopen?.())
     expect(socket.frames()[0]).toMatchObject({ write: true })
+    view.unmount()
+  })
+
+  it('recreates the terminal host after collapsing and expanding the dock', async () => {
+    const open = vi.spyOn(Terminal.prototype, 'open')
+    const view = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
+    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
+    const hostCount = () =>
+      view.container.querySelectorAll('div.h-full.min-h-0.bg-background.p-2').length
+    const opened = open.mock.calls.length
+
+    expect(hostCount()).toBe(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse terminal dock' }))
+    expect(hostCount()).toBe(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand terminal dock' }))
+
+    await waitFor(() => {
+      expect(hostCount()).toBe(2)
+      expect(open.mock.calls.length).toBeGreaterThan(opened)
+    })
+    open.mockRestore()
     view.unmount()
   })
 

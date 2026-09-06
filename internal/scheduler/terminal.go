@@ -62,6 +62,20 @@ func (s *Scheduler) terminalLock(member domain.MemberID) *sync.Mutex {
 	return lock
 }
 
+// TerminalContainerAddr returns the network address of a supervised member
+// terminal container.
+func (s *Scheduler) TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error) {
+	s.mu.Lock()
+	entry := s.terminals[member]
+	if entry == nil {
+		s.mu.Unlock()
+		return "", errors.New("environment terminal is not running")
+	}
+	containerID := entry.containerID
+	s.mu.Unlock()
+	return s.cfg.Runtime.ContainerIP(ctx, containerID)
+}
+
 // EnsureTerminal creates or adopts one long-lived terminal container for a member.
 func (s *Scheduler) EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
 	lock := s.terminalLock(member)

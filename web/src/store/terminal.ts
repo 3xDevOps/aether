@@ -1,5 +1,5 @@
 import type { ConnectionState } from '@/lib/stream'
-import type { Attachment } from '@/routes/terminal/attach'
+import type { AttachDataKind, Attachment } from '@/routes/terminal/attach'
 import type { SliceCreator } from '@/store/slice'
 
 /**
@@ -62,12 +62,13 @@ export function getShellSocket(runID: string, tab: string): RunShellSocket | und
 export function subscribeShellSocket(
   runID: string,
   tab: string,
-  onData: (chunk: Uint8Array) => void,
+  onData: (chunk: Uint8Array, kind: AttachDataKind) => void,
 ): () => void {
   // A socket remains owned by this module while the route changes. Output is
   // delivered only to the currently mounted terminal host.
   const key = shellSocketKey(runID, tab)
-  const listeners = shellSocketListeners.get(key) ?? new Set<(chunk: Uint8Array) => void>()
+  const listeners =
+    shellSocketListeners.get(key) ?? new Set<(chunk: Uint8Array, kind: AttachDataKind) => void>()
   listeners.add(onData)
   shellSocketListeners.set(key, listeners)
   return () => {
@@ -76,11 +77,21 @@ export function subscribeShellSocket(
   }
 }
 
-function emitShellSocketData(runID: string, tab: string, chunk: Uint8Array): void {
-  shellSocketListeners.get(shellSocketKey(runID, tab))?.forEach((listener) => listener(chunk))
+function emitShellSocketData(
+  runID: string,
+  tab: string,
+  chunk: Uint8Array,
+  kind: AttachDataKind,
+): void {
+  shellSocketListeners
+    .get(shellSocketKey(runID, tab))
+    ?.forEach((listener) => listener(chunk, kind))
 }
 
-const shellSocketListeners = new Map<string, Set<(chunk: Uint8Array) => void>>()
+const shellSocketListeners = new Map<
+  string,
+  Set<(chunk: Uint8Array, kind: AttachDataKind) => void>
+>()
 
 export function unregisterShellSocket(runID: string, tab: string): void {
   const key = shellSocketKey(runID, tab)

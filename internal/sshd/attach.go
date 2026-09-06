@@ -19,10 +19,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
-// attachAckGrace is how long serveAttach waits for the PTY host to either
-// fail fast or produce output before acknowledging the attach anyway.
-const attachAckGrace = 200 * time.Millisecond
-
 // The two reasons the re-validation drops a live attach. Each maps to its
 // own exit status so the client can tell the member why they were
 // detached, and whether a read-only attach would still work.
@@ -92,26 +88,22 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	// with a cause; the cause picks the exit status once Attach returns.
 	attachCtx, revoke := context.WithCancelCause(ctx)
 	defer revoke(nil)
-	conn := newAttachConn(ch, r, protocol.AttachResponse{OK: true, Cols: cols, Rows: rows})
+	ack := &protocol.AttachResponse{OK: true, Cols: cols, Rows: rows}
+	conn := newAttachConn(ch, r, ack)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- s.cfg.PTY.Attach(attachCtx, key, member, cols, rows, readOnly, conn, st.resize)
 	}()
 
+	// The PTY host acks through the conn once it knows the replay boundary
+	// (WriteReplay), or fails before that; there is no third outcome, so
+	// acking on a timer would only ever lose the boundary.
 	var attachErr error
 	returned := false
 	select {
 	case attachErr = <-errCh:
 		returned = true
 	case <-conn.first:
-	case <-time.After(attachAckGrace):
-		// The grace timer can race a failing Attach; prefer the error so
-		// the client gets {"ok":false} instead of a bogus ack.
-		select {
-		case attachErr = <-errCh:
-			returned = true
-		default:
-		}
 	}
 	if returned && attachErr != nil {
 		if !conn.okSent() {
@@ -244,31 +236,54 @@ func (s *Server) publishPresence(run *domain.Run, member domain.MemberID, state 
 }
 
 // attachConn is the io.ReadWriter handed to PTYAttacher.Attach. It delays
-// the {"ok":true} acknowledgment until just before the first PTY byte so
-// negotiation output and stream bytes can never interleave.
+// the acknowledgment until the PTY host identifies the replay boundary.
 type attachConn struct {
 	ch    ssh.Channel
 	r     *bufio.Reader
-	ok    []byte
+	ack   any
 	mu    sync.Mutex
 	sent  bool
 	first chan struct{}
 }
 
-func newAttachConn(ch ssh.Channel, r *bufio.Reader, ok protocol.AttachResponse) *attachConn {
-	line, _ := json.Marshal(ok)
-	return &attachConn{ch: ch, r: r, ok: append(line, '\n'), first: make(chan struct{})}
+func newAttachConn(ch ssh.Channel, r *bufio.Reader, ack any) *attachConn {
+	return &attachConn{ch: ch, r: r, ack: ack, first: make(chan struct{})}
 }
 
 func (c *attachConn) sendOK() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.sendOKLocked()
+}
+
+func (c *attachConn) sendOKLocked() {
 	if c.sent {
 		return
 	}
+	line, _ := json.Marshal(c.ack)
 	c.sent = true
-	_, _ = c.ch.Write(c.ok)
+	_, _ = c.ch.Write(append(line, '\n'))
 	close(c.first)
+}
+
+func (c *attachConn) setReplayLocked(n int) {
+	switch ack := c.ack.(type) {
+	case *protocol.AttachResponse:
+		ack.Replay = n
+	case *protocol.TerminalResponse:
+		ack.Replay = n
+	}
+}
+
+func (c *attachConn) WriteReplay(p []byte) (int, error) {
+	c.mu.Lock()
+	c.setReplayLocked(len(p))
+	c.sendOKLocked()
+	c.mu.Unlock()
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return c.ch.Write(p)
 }
 
 func (c *attachConn) okSent() bool {

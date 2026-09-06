@@ -173,9 +173,7 @@ func (s *session) addClient(c *client) error {
 	if s.ended {
 		return ErrSessionEnded
 	}
-	if tail := s.ring.bytes(); len(tail) > 0 {
-		c.enqueue(tail)
-	}
+	c.replay = s.ring.bytes()
 	s.clients[c] = struct{}{}
 	if !c.readOnly {
 		s.reconcileLocked(true)
@@ -444,6 +442,7 @@ type client struct {
 	readOnly bool
 	cols     uint // guarded by session.mu
 	rows     uint // guarded by session.mu
+	replay   []byte
 
 	mu     sync.Mutex
 	cond   *sync.Cond
@@ -503,6 +502,19 @@ func (c *client) getErr() error {
 // writeLoop pumps buffered output to conn until the client is closed and
 // drained (returning the closing error) or a conn write fails.
 func (c *client) writeLoop() error {
+	replay := c.replay
+	c.replay = nil
+	if rw, ok := c.conn.(ReplayWriter); ok {
+		if _, err := rw.WriteReplay(replay); err != nil {
+			c.close(err)
+			return err
+		}
+	} else if len(replay) > 0 {
+		if _, err := c.conn.Write(replay); err != nil {
+			c.close(err)
+			return err
+		}
+	}
 	for {
 		c.mu.Lock()
 		for len(c.buf) == 0 && !c.closed {

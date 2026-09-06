@@ -19,24 +19,25 @@ beforeEach(() => {
   vi.clearAllMocks()
   forwardMocks.localForwardStatus.mockResolvedValue({
     forwards: [
-      { run_id: 'run_1', port: 1455, local_port: 1455, conns: 1 },
-      { run_id: 'run_2', port: 3000, local_port: 3000, conns: 0 },
+      { target: 'run:run_1', port: 1455, local_port: 1455, conns: 1 },
+      { target: 'run:run_2', port: 3000, local_port: 3000, conns: 0 },
     ],
   })
   forwardMocks.localForwardStart.mockResolvedValue({
-    run_id: 'run_1',
+    target: 'run:run_1',
     port: 1455,
     local_port: 1455,
     state: 'active',
   })
   forwardMocks.localForwardStop.mockResolvedValue({
-    run_id: 'run_1',
+    target: 'run:run_1',
     port: 1455,
     state: 'stopped',
   })
   useStore.setState({
     paletteDialog: 'forward',
-    paletteRunID: 'run_1',
+    paletteRunID: null,
+    paletteForwardTarget: 'run:run_1',
   })
 })
 
@@ -53,12 +54,12 @@ describe('forward dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Start' }))
     await waitFor(() =>
-      expect(api.localForwardStart).toHaveBeenCalledWith('run_1', 1455),
+      expect(api.localForwardStart).toHaveBeenCalledWith('run:run_1', 1455),
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     await waitFor(() =>
-      expect(api.localForwardStop).toHaveBeenCalledWith('run_1', 1455),
+      expect(api.localForwardStop).toHaveBeenCalledWith('run:run_1', 1455),
     )
   })
 })

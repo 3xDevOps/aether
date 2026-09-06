@@ -64,6 +64,27 @@ func TestEnsureTerminalCreatesPersistentContainer(t *testing.T) {
 	}
 }
 
+func TestTerminalContainerAddrReturnsLiveContainerIP(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.rt.containerIP = "192.0.2.44"
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	addr, err := e.sched.TerminalContainerAddr(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("TerminalContainerAddr: %v", err)
+	}
+	if addr != "192.0.2.44" {
+		t.Fatalf("TerminalContainerAddr = %q, want 192.0.2.44", addr)
+	}
+	if err := e.sched.StopTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("StopTerminal: %v", err)
+	}
+	if _, err := e.sched.TerminalContainerAddr(t.Context(), e.member.ID); err == nil || err.Error() != "environment terminal is not running" {
+		t.Fatalf("TerminalContainerAddr after stop = %v", err)
+	}
+}
+
 func TestEnsureTerminalTabRetriesShellFallback(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
 	if _, err := e.sched.EnsureTerminal(context.Background(), e.member.ID); err != nil {
