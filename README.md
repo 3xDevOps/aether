@@ -4,7 +4,7 @@
 
 # Aether - Multiplayer Cloud Agent Runtime
 
-**A self-hosted development environment for AI coding agents running in the cloud.**
+**A self-hosted development environment for AI coding agents running in the cloud, for teams & *multiplayer* control.**
 
 [![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-6EE7D6?style=flat-square)](go.mod)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-4A6FA5?style=flat-square)](LICENSE)
@@ -22,53 +22,48 @@
 
 ---
 
-Aether is a **self-hosted** development environment for AI coding agents running in the cloud. It offers agent-agnostic sandboxed environments that can be hosted **anywhere** and be controlled by **anyone** on your team.
+Aether is a **self-hosted** development environment for long-running AI coding agents in the cloud. It offers agent-agnostic sandboxed environments that can be hosted **anywhere** and be controlled by **anyone** on your team.  
+</br>
+Leaving your laptop open for your agents is no longer needed. 
+
+# Installation 
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
-aether link my-server
-aether run "fix the flaky auth test" --agent claude
 ```
+Aether installs in two places: a **desktop client** & CLI for your laptop/PC, and a **server framework** for where you intend to run your agents - a home server, PC, or an old laptop repurposed to be on all day long. 
 
-That is the shape of it, not the full setup - a workspace, a repo push, and
-an agent login come first. The install script asks whether the machine is your
-server or a client and finishes that side's setup before handing the prompt
-back, so the first line does more than download. The
-[quickstart](docs/quickstart.md) is the real path. The install script covers
-Linux and macOS; Windows clients download the release binary
-([install.md](docs/install.md#manual-install)).
+The server framework will run on any Linux device. The install script covers Linux and macOS clients, while Windows clients can download the release binary instead. The install script handles installations on both sides and asks whether the current machine is your server or a client. 
 
-[10-minute quickstart →](docs/quickstart.md)
+**Next, see [docs/quickstart.md](docs/quickstart.md) to set up your first workspace and link your codebase, tools, and CLI agents.** 
 
-## Why
+For manual installation or uninstallation, see [install.md](docs/install.md#manual-install).
 
-Laptops are bad hosts for agent fleets. Agents eat CPU, RAM and battery even
-when the model is remote, and every workflow dies when the lid closes. The
-hosted alternatives fix that by taking your source code and charging per seat.
+## Well, why is this needed? 
+
+Laptops are bad hosts for agent fleets. Agents eat a lot of resources even
+when the model is served from remote, and every workflow dies or freezes when you close the laptop lid. 
+
+Alternatively, you could also pay money in addition to your (already massive) inference bill by using commercialized hosting services to keep your agents running. They take your source code and charge you on a per-seat basis.
 
 Aether is the third option: **your hardware, your code, agents that keep working
 while you sleep.**
 
-- **Nothing local is running.** Agents run in containers on the server. Close
-  the laptop; branches pile up; the sync daemon catches up when you reconnect.
+- **Multiplayer by design.** Several people, one server. **See and steer each other's agents in real time, with every act
+  attributed.**
+- **Agents run continuously in remote containers.** Agents run in containers on the server. Launch them once, close your laptop laptop and they still continue to work. 
 - **Results arrive as git branches.** Every run gets its own worktree and
-  branch. You pull, review, and merge - Aether never merges anything itself.
-- **Your agents, not generic ones.** Your skills, plugins and custom commands
-  are mirrored to the server per member. Logins happen through each vendor's own
-  flow and are never extracted or proxied.
-- **A team can share one machine.** Several people, one server, everyone's runs
-  side by side - see and steer each other's agents in real time, with every act
-  attributed.
-- **Solo stays frictionless.** Team features are present, never in the way.
-  Linking a fresh server makes you the admin; that is the entire account setup.
+  branch. You can pull, review, and merge - or set your agent up with Git & Github on Aether
+  to let them handle Git operations autonomously. 
+- **Your agents, your setup.** Your skills, plugins and custom commands
+  are mirrored to the server on a per-user basis. Logins stay on the remote that you own, through each vendor's own
+  authentication flow, and are never extracted or proxied.
+- **Full support for solo developers.** Team features are present, never in the way.
+  Linking a fresh server makes you its administrator, giving you full control for your solo workflow. 
 
 ## Dashboard
 
-`aether gui` serves the dashboard from your own machine: a loopback listener,
-a browser tab carrying a per-process token, and your own SSH key as the
-identity, so every command the CLI can run works from the page. The desktop
-app is the same thing with the window supplied. Nothing is exposed to your
-network, and there is no separate login.
+The desktop app builds on top of the CLI and serves the dashboard and control entrypoint from your own client machine. 
 
 Inside: a workspace switcher, a run board bucketed by what needs attention, a
 live read-only terminal mirror of any run, per-run diff timelines, the event
@@ -77,15 +72,7 @@ disk gauge. Launch, inject, pause, kill, close, relaunch and handoff all call
 the same methods the CLI does, with the same permission checks and timeline
 attribution.
 
-For the raw thing, `aether attach <run>` is a byte-for-byte PTY passthrough -
-every native keybind, theme and mouse mode of the agent's own TUI, over SSH.
-
 ## Supported agents
-
-Claude Code, Codex, and opencode ship in the harness registry, plus a
-deterministic `fake` harness for testing the whole lifecycle without a vendor
-account. Adding another is one map entry:
-[docs/adapters.md](docs/adapters.md).
 
 Aether does not install agents - install the agent CLI in your member
 environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
