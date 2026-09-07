@@ -35,7 +35,7 @@ export function AgentWizard({
   /** The harness to set up, when the caller already knows it (onboarding).
    * The form is skipped and the setup instructions show straight away. */
   harness?: string
-  /** The setup confirmation registered the agent; the caller refetches. */
+  /** Installation was verified; the caller refetches. */
   onRegistered: () => void
   onCancel: () => void
   /** API client used by an embedded wizard or test fixture. */
@@ -81,6 +81,12 @@ export function AgentWizard({
           headless_args: splitArgv(headlessValue),
         })
       }
+      const listed = await client.agentList()
+      if (!listed.some((agent) => agent.name === trimmed && agent.installed === true)) {
+        throw new Error(
+          `agent.list: ${trimmed} is not detected as installed in your account's ~/.local/bin. Finish the installation in the environment terminal, then try again.`,
+        )
+      }
       onRegistered()
       setStep('done')
     } catch (err) {
@@ -93,9 +99,12 @@ export function AgentWizard({
   if (step === 'done') {
     return (
       <div className="space-y-3 rounded-md border p-4">
-        <p className="text-sm font-medium">Agent registered</p>
+        <p className="text-sm font-medium">
+          {shipped ? 'Agent installed' : 'Agent registered'}
+        </p>
         <p className="text-sm text-muted-foreground">
-          {trimmed} is ready. Its login and user-local files persist in your member home.
+          {trimmed} is available in the run launcher. Its executable and user-local files
+          persist in your member home. Vendor login is checked by the agent when it starts.
         </p>
         <Button size="sm" onClick={onCancel}>
           Close
@@ -146,7 +155,7 @@ export function AgentWizard({
         {error && <p className="text-xs text-state-failed">{error}</p>}
         <div className="flex gap-2">
           <Button type="button" size="sm" onClick={() => void finish()} disabled={busy}>
-            {busy ? 'Registering...' : "I've installed and logged in"}
+            {busy ? 'Checking installation...' : "I've installed and logged in"}
           </Button>
           <Button
             type="button"
@@ -158,7 +167,6 @@ export function AgentWizard({
             Back
           </Button>
         </div>
-        {/* Step 2 replaces these instructions with the terminal dock. */}
       </div>
     )
   }
