@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
-import { alice, run, workspace } from '@/test/fixtures'
+import { agentInfo, alice, run, workspace } from '@/test/fixtures'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -21,6 +21,7 @@ vi.stubGlobal(
 )
 
 beforeEach(() => {
+  vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
     activeWorkspace: workspace.id,
@@ -51,6 +52,31 @@ function setTask(task: string) {
 }
 
 describe('launch dialog', () => {
+  it('shows discovery errors and refreshes the list after recovery', async () => {
+    vi.mocked(api.agentList).mockRejectedValue(new Error('agent.list: connection closed'))
+    render(<LaunchDialog />)
+    expect((await screen.findByRole('alert')).textContent).toBe('agent.list: connection closed')
+    expect(screen.queryByText(/No installed agents detected/)).toBeNull()
+
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh harnesses' }))
+    await screen.findByRole('option', { name: 'claude' })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('discovers a completed installation without restarting the app', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
+    render(<LaunchDialog />)
+    await screen.findByText(/No installed agents detected/)
+    expect(screen.queryByRole('option', { name: 'claude' })).toBeNull()
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh harnesses' }))
+    await screen.findByRole('option', { name: 'claude' })
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({
+      workspace_id: workspace.id, harness: 'claude',
+    }))
+  })
   it('seeds the agent with a task in the default interactive mode', async () => {
     await open()
 

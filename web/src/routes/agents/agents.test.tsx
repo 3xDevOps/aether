@@ -10,6 +10,7 @@ import {
   registerEnvTerminalSocket,
 } from '@/store/env-terminal'
 import { StubSocket } from '@/test/stub-socket'
+import { agentInfo } from '@/test/fixtures'
 // vi.mock factories are hoisted above static imports, so the fixture module
 // must be loaded inside the factory (same as terminal.test.tsx).
 vi.mock('@/lib/api', async () => {
@@ -35,6 +36,9 @@ class NoResizeObserver {
 }
 
 beforeEach(() => {
+  vi.mocked(api.agentList).mockResolvedValue([
+    agentInfo(), agentInfo({ name: 'myagent', source: 'member', installed: false }),
+  ])
   StubSocket.install()
   vi.stubGlobal('ResizeObserver', NoResizeObserver)
   useStore.setState({
@@ -63,6 +67,8 @@ describe('agents view', () => {
     expect(screen.getByText('shipped')).toBeDefined()
     expect(screen.getByText('myagent')).toBeDefined()
     expect(screen.getByText('member')).toBeDefined()
+    expect(screen.getByText('Installed')).toBeDefined()
+    expect(screen.getByText('Not installed')).toBeDefined()
     view.unmount()
   })
 
@@ -181,6 +187,9 @@ describe('agents view', () => {
     fireEvent.click(screen.getByText('Continue'))
     await flush()
 
+    vi.mocked(api.agentList).mockResolvedValue([
+      agentInfo({ name: 'mycli', source: 'member' }),
+    ])
     fireEvent.click(screen.getByText("I've installed and logged in"))
     await flush()
 
@@ -191,6 +200,37 @@ describe('agents view', () => {
       headless_args: ['mycli', '-p', '{task}'],
     })
     expect(screen.getByText('Agent registered')).toBeDefined()
+    view.unmount()
+  })
+
+  it('verifies shipped installation before reporting success and allows retry', async () => {
+    const onRegistered = vi.fn()
+    const view = render(<AgentWizard agents={[agentInfo()]} harness="claude"
+      onRegistered={onRegistered} onCancel={vi.fn()} client={api} />)
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
+    fireEvent.click(screen.getByText("I've installed and logged in"))
+    await flush()
+    expect(screen.getByText(/claude is not detected as installed/)).toBeDefined()
+    expect(onRegistered).not.toHaveBeenCalled()
+    expect(screen.queryByText('Agent installed')).toBeNull()
+
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
+    fireEvent.click(screen.getByText("I've installed and logged in"))
+    await flush()
+    expect(screen.getByText('Agent installed')).toBeDefined()
+    expect(onRegistered).toHaveBeenCalledOnce()
+    view.unmount()
+  })
+
+  it('shows discovery errors instead of declaring the shipped agent ready', async () => {
+    const onRegistered = vi.fn()
+    const view = render(<AgentWizard agents={[agentInfo()]} harness="claude"
+      onRegistered={onRegistered} onCancel={vi.fn()} client={api} />)
+    vi.mocked(api.agentList).mockRejectedValue(new Error('agent.list: connection closed'))
+    fireEvent.click(screen.getByText("I've installed and logged in"))
+    await flush()
+    expect(screen.getByText('agent.list: connection closed')).toBeDefined()
+    expect(onRegistered).not.toHaveBeenCalled()
     view.unmount()
   })
 
