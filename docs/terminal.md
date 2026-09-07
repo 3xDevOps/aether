@@ -25,7 +25,9 @@ dashboard mutes terminal-generated replies until that scrollback is parsed.
 Closing a tab only detaches it; opening that tab again reattaches to its shell.
 
 The Agents setup step uses the same dock and types the install command for you.
-Complete the vendor login there, then return to the wizard.
+Complete the vendor login there, then return to the wizard. Its **I've
+installed and logged in** button runs `env save` for you, so that step does
+not need the **Save environment** button below.
 
 ## Sign in to agents
 

@@ -151,9 +151,13 @@ aether agent add claude
 ```
 
 For a shipped agent, the dashboard's Agents step opens the live environment
-terminal dock and types its vendor install script. From the CLI, open the
-terminal, run the script, install into `~/.local/bin`, and complete the vendor
-login there:
+terminal dock and types its vendor install script. The dock says
+**Starting your environment container** while Docker starts it, then the
+shell appears. When you press **I've installed and logged in**, the wizard
+checks the executable is on the server and runs `env save` for you, naming
+the saved image. It cannot check the vendor login; the agent does that when
+it starts. From the CLI, open the terminal, run the script, install into
+`~/.local/bin`, and complete the vendor login there:
 
 ```sh
 aether terminal

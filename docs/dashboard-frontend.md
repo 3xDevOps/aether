@@ -727,8 +727,13 @@ account has not installed them, so the list is not a "set up" badge - and **Set
 up** embeds the same `AgentWizard` the Agents page uses, driven with the
 harness and workspace already known so it opens the `agent-setup` shell
 without a form. Setup confirmation checks `agent.list` for an installed
-executable before handing the harness to the First run step, which preselects
-it. A missing executable or failed request keeps setup open for retry.
+executable, then runs `env.save` - the call the dock's **Save environment**
+button makes - before handing the harness to the First run step, which
+preselects it. The save is the point: an executable that exists only in the
+running container is not in the image runs start from. The done screen names
+the saved image. A missing executable, a failed check or a failed save keeps
+setup open for retry with the real error. The vendor login is not checkable
+from here, and the copy says so.
 
 Part B (`ProfileImport`) previews each harness configuration on this machine
 with `profile.preview`, showing the category counts and, behind an expander,
@@ -947,9 +952,13 @@ denied, the confirmation an admin must clear before giving up their own admin
 role, and a non-admin getting the same roster as read-only text with no admin
 verbs - which the sidebar and the palette match by keeping Members reachable
 behind the narrow remote allowlist while every other admin entry stays
-hidden. The onboarding wizard walks all five steps against the stub API. The
+hidden. The onboarding wizard walks all five steps against the stub API, and
+covers what navigation must not lose: Back leaving the Agents setup screen
+before it leaves the step, and the Repository step still showing its
+connected clone and push result after a walk away and back. The
 Agents step tests setup-capable harness detection, the live terminal dock,
-profile previews and exclusions, profile recommendations, cancellation,
+the environment save that follows a confirmed install, profile previews and
+exclusions, profile recommendations, cancellation,
 secret and plugin guards, push refusals, and the optional skip paths. The diff
 tab covers the parser on the shapes that would break it - a deletion, a new
 file, a removed line that reads exactly like a file marker - then the fetch,
