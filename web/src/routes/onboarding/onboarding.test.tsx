@@ -33,6 +33,7 @@ function seed(extra: Partial<RootState> = {}) {
     onboarded: false,
     onboardingStep: 0,
     onboardingWorkspace: '',
+    onboardingRepo: null,
     ...extra,
   })
 }
@@ -324,6 +325,33 @@ describe('onboarding wizard', () => {
     expect(
       screen.getByLabelText<HTMLInputElement>('Push command').value,
     ).toBe('git push -u aether main')
+  })
+
+  it('remembers the connected repository when the user walks back to it', async () => {
+    const client = fakeApi()
+    await toPushChoice(client)
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+    await screen.findByText(/Pushed/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByRole('region', { name: 'Agents' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+
+    // The connected state, not the blank form: the remote is already
+    // written and the push already happened.
+    expect(await screen.findByRole('region', { name: 'Repository' })).toBeDefined()
+    expect(screen.queryByLabelText('Repository path')).toBeNull()
+    expect(screen.getByText('/home/alice/code/myproject')).toBeDefined()
+    expect(screen.getByText(/Pushed/)).toBeDefined()
+    expect(client.localLinkRepo).toHaveBeenCalledTimes(1)
+
+    // Re-pointing is the way back to the form, with the old path to edit.
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a different repository' }),
+    )
+    expect(
+      screen.getByLabelText<HTMLInputElement>('Repository path').value,
+    ).toBe('/home/alice/code/myproject')
   })
 
   it('falls back to the copy-paste push when the gateway cannot push', async () => {

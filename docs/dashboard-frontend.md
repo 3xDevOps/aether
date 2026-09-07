@@ -686,7 +686,14 @@ copyable command still there. The branch is the workspace's base branch,
 so a workspace created with `--base` seeds the branch its runs fork from.
 An older gateway without the verb shows only the copyable command.
 
-The UI slice persists the current step and selected workspace. Hydration reads
+What the step settled - the clone path, the remote the gateway wrote, and
+git's push answer - lives on the UI slice as `onboardingRepo`, not in the
+component. Returning to the step shows that connected repo with **Use a
+different repository** to go back to the form, prefilled with the old path;
+a blank form there would ask again for a remote that already exists.
+
+The UI slice persists the current step, the selected workspace and the
+connected repository. Hydration reads
 `link.status` first: a linked local gateway is marked onboarded before the
 redirect decision, so a linked machine never re-enters onboarding after a fresh
 GUI launch. An unlinked local gateway still routes here when `onboarded` is

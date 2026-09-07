@@ -138,7 +138,9 @@ In the dashboard, the onboarding wizard's Repository step does both for
 you: it adds the remote, then its **Push now** button runs that push in
 your clone and keeps git's own output on the page. It runs the same push
 with `--no-follow-tags`, so the command above also sends your tags if you
-have `push.followTags` set.
+have `push.followTags` set. The step remembers the repository it connected,
+so walking back to it shows the connected clone and its push result with
+**Use a different repository** to re-point, not an empty form.
 
 ## 5. Set up your agent
 
