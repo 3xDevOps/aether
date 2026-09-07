@@ -675,6 +675,13 @@ serves the client-machine verbs (the capability descriptor lists
 broken wizard. Link, Workspace, Repository and First run live in `steps.tsx`;
 Agents is `agents-step.tsx` with its second half in `profile-import.tsx`.
 
+Navigation is two levels: the step index, and one sub-screen name owned by
+whichever step has sub-screens. The Agents step's setup screen is the only
+one today, and the wizard holds it, so **Back** closes an open sub-screen
+first and leaves the step only from the step's own screen. A step with
+sub-screens takes them as `setup` and `onSetup` rather than keeping them in
+its own state.
+
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
 button that runs the push in the clone. Success names the branch that

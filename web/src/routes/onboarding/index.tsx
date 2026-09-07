@@ -4,6 +4,11 @@
 // whole route gates on the link.status local verb; a remote gateway gets an
 // empty state, not a broken wizard. Step and workspace choices persist so a
 // reload resumes where the user left off.
+//
+// Navigation is two levels and nothing more: a step index, and a sub-screen
+// name owned by whichever step has one. Back closes the sub-screen first and
+// only then leaves the step, so a step's own screens never fall through to
+// the previous step.
 
 import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
@@ -49,9 +54,12 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   // The harness the Agents step set up, so the first run starts on the one
   // that is actually logged in. Empty until a setup shell exits cleanly.
   const [setUpHarness, setSetUpHarness] = useState('')
+  // The open sub-screen of the current step; empty is the step's own screen.
+  const [subStep, setSubStep] = useState('')
 
   const setStep = (next: number) => {
     setStepState(next)
+    setSubStep('')
     setOnboardingStep(next)
   }
 
@@ -121,6 +129,8 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             client={client}
             caps={caps}
             workspace={workspace}
+            setup={subStep}
+            onSetup={setSubStep}
             onReady={setSetUpHarness}
             onNext={() => setStep(4)}
           />
@@ -134,11 +144,11 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           />
         )}
 
-        {step > 0 && (
+        {(step > 0 || subStep !== '') && (
           <button
             type="button"
             className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-            onClick={() => setStep(step - 1)}
+            onClick={() => (subStep ? setSubStep('') : setStep(step - 1))}
           >
             Back
           </button>
