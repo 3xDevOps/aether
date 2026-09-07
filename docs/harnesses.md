@@ -309,8 +309,8 @@ stopped.
   so it drops that one file and reports it as `vendored-secret` - the rest
   of the plugin, and the rest of your profile, still sync. Both are matched
   on the directory prefix alone, so a plugin update that moves the version
-  segment changes nothing. Everywhere else, a finding still refuses the
-  push.
+  segment changes nothing. Everywhere else a finding is reported as
+  `secret`, and drops that one file too.
 - **Default excludes.** Aether skips what a harness writes for itself as it
   runs - transcripts, telemetry, scratch trees - rather than anything you
   configured:
@@ -324,13 +324,33 @@ stopped.
   before your `.aether-profile-ignore`, so that file has the last word: a
   line `!projects/` in it syncs the directory anyway.
 
-`--allow-secret` has no dashboard equivalent, deliberately. A scanner finding
-in a file you wrote refuses the push there and names the file and the line:
-the fix is on the machine the file lives on. Overriding a false positive stays
-a CLI act, where `--workspace` records who overrode what, and on which
-timeline. `--allow-secret` also carries a file the plugin rule dropped, if
-you want that one on the server; `aether profile push` prints the exact
-command next to each such file.
+A scanner finding never refuses a push. It drops the one file it named and
+reports it, so the dashboard lists that file on the harness row before the
+import button and you import the rest in one click.
+
+`aether profile push` has no screen to show a finding on before it uploads,
+so it refuses while a finding in a file you wrote is unacknowledged, and
+prints the path, what the scanner matched, and both ways forward:
+
+```
+profile push: 1 secret scanner finding is in files you wrote. Remove the secret, or say what to do with each file:
+  skills/deploy/README.md: secret detected (curl-auth-header) at 12:2
+    leave it out:   aether profile push --agent claude --skip-secret skills/deploy/README.md
+    send it anyway: aether profile push --agent claude --allow-secret skills/deploy/README.md --workspace <workspace>
+```
+
+Both flags are repeatable. `--skip-secret <file>` leaves that file out and
+pushes everything else. `--allow-secret <file>` carries it. A
+`vendored-secret` finding is never counted here - nobody can edit a
+secret-shaped string out of a package the harness installed - so it is
+reported and skipped with no flag needed. `--allow-secret` carries one of
+those too, if you want that file on the server; `aether profile push` prints
+the exact command next to each such file.
+
+`--allow-secret` has no dashboard equivalent, deliberately. Removing the
+secret happens on the machine the file lives on, and overriding a false
+positive stays a CLI act, where `--workspace` records who overrode what, and
+on which timeline.
 
 - The synced directory is the harness's profile root from the table above.
 - A run **pins** the latest snapshot when it is provisioned. Pushing mid-run
@@ -340,13 +360,10 @@ command next to each such file.
   back down.**
 - **Secrets never sync.** Two independent guards, both on by default: a
   per-harness credential denylist (`.credentials.json`, `auth.json`,
-  `.claude.json`, ...) and a client-side content scan that blocks any push
-  containing key material, naming the file and the match. A flagged file is
-  never uploaded, whether the finding refuses the push or - inside
-  `plugins/cache/` and `plugins/marketplaces/` - only drops that file.
-  `--allow-secret <file>` overrides a
-  false positive and records the override on the workspace timeline. It
-  requires `--workspace` outright - no single-workspace default - so the
+  `.claude.json`, ...) and a client-side content scan that names the file
+  and the match. A flagged file is never uploaded unless `--allow-secret
+  <file>` names it, which records the override on the workspace timeline.
+  It requires `--workspace` outright - no single-workspace default - so the
   override always names the timeline it is attributable on.
 
 ## Adding a harness

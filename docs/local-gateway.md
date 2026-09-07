@@ -390,9 +390,8 @@ no SSH key is offered and the server requires one, it may create
    "excluded":[{"path":".credentials.json","reason":"credential",
                 "detail":"credential file excluded for claude"},
                {"path":"notes/key.txt","reason":"secret",
-                "detail":"secret detected (aws-access-key) at line 3"}],
-   "excluded_total":2,
-   "blocked":false}
+                "detail":"secret detected (aws-access-key) at 3:9"}],
+   "excluded_total":2}
   ```
 
   Categories, in the order they are reported: `memory` (standing
@@ -403,8 +402,7 @@ no SSH key is offered and the server requires one, it may create
   `reason` on an exclusion is `credential` (a denylisted basename),
   `secret` (a content-scanner finding in a file the user wrote),
   `vendored-secret` (a finding inside a plugin tree the harness installs
-  into - claude's `plugins/cache/` and `plugins/marketplaces/` - where
-  that file is dropped and the push still runs), `ignored` (an
+  into - claude's `plugins/cache/` and `plugins/marketplaces/`), `ignored` (an
   `.aether-profile-ignore` match, or one of the per-harness defaults in
   [harnesses.md](harnesses.md)), `symlink` (a link out of the profile
   root, skipped rather than followed - its target is never opened),
@@ -426,13 +424,14 @@ no SSH key is offered and the server requires one, it may create
   preview take minutes. The caps are the server's own
   (`internal/profile`), so the preview offers exactly the files a push
   can carry.
-- `blocked` is true when a push would be **refused outright** rather than
-  partially carried. A `secret` is the only such condition: it is the one
-  thing whose fix has to happen on this machine, and the one with a CLI
-  override. `blocked_reason`, `blocked_path` and `blocked_detail` name it.
-  Every other exclusion - symlink escapes, `vendored-secret`, and both
-  size caps - lets the push succeed carrying what is left, and
-  `profile.push` answers with a `skipped` list naming what it dropped.
+- No exclusion refuses a push. Every one of them - both secret reasons,
+  symlink escapes, and both size caps - lets the push succeed carrying
+  what is left, so `excluded` and `excluded_total` are the whole preview
+  and there is no field a caller has to check before offering the import.
+  The two secret reasons differ only in what a caller can offer the user:
+  a `secret` is in a file the user wrote and can edit, a
+  `vendored-secret` is a string in a package the harness installed. Both
+  carry the scanner's rule and location in `detail`.
 - `present:false` - this machine has no profile root for that harness -
   is a normal answer with zero counts, not an error. A harness name the
   registry does not know, or one with no profile sync, answers `-32602`.
@@ -441,16 +440,13 @@ no SSH key is offered and the server requires one, it may create
   discovery, the same per-harness credential denylist, the same secret
   scanner, and the same content-addressed delta against the server's
   current head. **It takes no allow-secret parameter.** A scanner finding
-  in a file the user wrote refuses the push with `-32002` naming the file
-  and the line, because the file has to be fixed on the machine it lives
-  on; the `--allow-secret` override stays on the CLI, where `--workspace`
-  makes it attributable on a timeline. A finding in vendored plugin
-  content drops that file and the push runs. A missing profile root
-  refuses with `-32002` too. `skipped` carries every exclusion the walk
-  made without refusing - the size caps, symlink escapes, and
-  `vendored-secret` - in the same shape `profile.preview` uses: the push
-  succeeded without those files, so this is the only place the caller
-  learns they are not on the server.
+  drops the one file it named and the push runs; carrying a flagged file
+  anyway stays on the CLI, where `--workspace` makes it attributable on a
+  timeline. A missing profile root refuses with `-32002`. `skipped`
+  carries every exclusion the walk made - both secret reasons, the size
+  caps, and symlink escapes - in the same shape `profile.preview` uses:
+  the push succeeded without those files, so this is the only place the
+  caller learns they are not on the server.
 - Both verbs walk the whole profile root, and both stop when the request
   is cancelled: a client that closes the connection stops the work on
   this machine, rather than only stopping its own wait.

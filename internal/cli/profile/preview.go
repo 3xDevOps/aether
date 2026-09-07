@@ -82,7 +82,8 @@ type Exclusion struct {
 
 // Preview is what a push of one harness profile would carry: the files
 // grouped into categories, and everything the guards left out. Nothing is
-// uploaded to produce it.
+// uploaded to produce it, and nothing in it can refuse a push: a preview
+// that reports exclusions is still a preview of a push that runs.
 type Preview struct {
 	Harness string `json:"harness"`
 	Root    string `json:"root"`
@@ -97,27 +98,6 @@ type Preview struct {
 	// how many there were.
 	Excluded      []Exclusion `json:"excluded"`
 	ExcludedTotal int         `json:"excluded_total"`
-	// Blocked is true when a push of this profile would be refused rather
-	// than partially carried. It covers every condition Discover aborts
-	// on, so a preview can never promise files a push then refuses.
-	Blocked bool `json:"blocked"`
-	// BlockedReason is the Exclude constant behind Blocked, and
-	// BlockedDetail the sentence for the user. Only a secret finding has
-	// a CLI override, so a surface offering one keys off the reason
-	// rather than assuming.
-	BlockedReason string `json:"blocked_reason,omitempty"`
-	BlockedPath   string `json:"blocked_path,omitempty"`
-	BlockedDetail string `json:"blocked_detail,omitempty"`
-}
-
-// blocksPush reports whether an exclusion reason is one discoverRoot
-// aborts on rather than skips. It is the single place the two agree, so
-// adding an aborting reason to the walk cannot leave the preview behind.
-// A scanner finding in a file the user wrote is the only one: everything
-// else - symlink escapes, and findings in vendored third-party content -
-// is carried in the skipped list instead.
-func blocksPush(reason string) bool {
-	return reason == ExcludeSecret
 }
 
 // CategoryNames returns the categories the preview found files in, in
@@ -133,9 +113,7 @@ func (p Preview) CategoryNames() []string {
 // Inventory reports what `aether profile push --agent <harness>` would
 // upload from this machine, and what it would leave behind, without
 // uploading anything. It runs the same walk Discover runs, so the two can
-// never disagree about the denylist, the ignore file, or the scanner; a
-// finding is recorded here instead of aborting, because the point of a
-// preview is to show the user the file they have to fix.
+// never disagree about the denylist, the ignore file, or the scanner.
 func Inventory(ctx context.Context, harnessName string) (Preview, error) {
 	root, prof, err := LocalDir(harnessName)
 	if err != nil {
@@ -155,24 +133,7 @@ func Inventory(ctx context.Context, harnessName string) (Preview, error) {
 	groups := map[string]*Category{}
 	walkErr := walkRoot(ctx, root, prof, nil, func(f visited) error {
 		if f.Reason != "" {
-			detail := f.Detail
-			// A vendored verdict already carries its location, in the
-			// middle of the sentence where it reads as part of the rule
-			// rather than trailing after it.
-			if f.Reason == ExcludeSecret && f.Finding.Location != "" {
-				detail += " at " + f.Finding.Location
-			}
-			preview.Excluded = append(preview.Excluded, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: detail})
-			// Whatever aborts a push must block the preview, or the
-			// preview promises files the push then refuses. The first
-			// such finding is the one the user has to fix, so it is the
-			// one named.
-			if blocksPush(f.Reason) && !preview.Blocked {
-				preview.Blocked = true
-				preview.BlockedReason = f.Reason
-				preview.BlockedPath = f.Rel
-				preview.BlockedDetail = detail
-			}
+			preview.Excluded = append(preview.Excluded, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: f.Detail})
 			return nil
 		}
 		name := Classify(f.Rel)

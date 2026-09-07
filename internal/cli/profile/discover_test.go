@@ -127,26 +127,6 @@ func TestDiscoverSymlinkEscapeSkipped(t *testing.T) {
 	}
 }
 
-func TestDiscoverEmbeddedTokenBlocked(t *testing.T) {
-	root := setupClaudeRoot(t)
-	fixture, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustWrite(t, filepath.Join(root, "settings.json"), string(fixture))
-	_, err = Discover(t.Context(), "claude", nil)
-	if err == nil {
-		t.Fatal("expected secret finding")
-	}
-	var de *DiscoverError
-	if !asDiscover(err, &de) || !strings.Contains(err.Error(), "secret detected") {
-		t.Fatalf("err = %v, want secret detected", err)
-	}
-	if de.Path != "settings.json" || de.Location == "" {
-		t.Fatalf("finding path/location = %s %s", de.Path, de.Location)
-	}
-}
-
 func TestDiscoverAllowSecretSucceeds(t *testing.T) {
 	root := setupClaudeRoot(t)
 	fixture, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
@@ -200,17 +180,6 @@ func names(files []LocalFile) map[string]LocalFile {
 	return out
 }
 
-func asDiscover(err error, de **DiscoverError) bool {
-	if err == nil {
-		return false
-	}
-	e, ok := err.(*DiscoverError)
-	if ok {
-		*de = e
-	}
-	return ok
-}
-
 func TestDiscoverAllowSecretDoesNotMatchBasenameAlone(t *testing.T) {
 	root := setupClaudeRoot(t)
 	fixture, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
@@ -219,13 +188,15 @@ func TestDiscoverAllowSecretDoesNotMatchBasenameAlone(t *testing.T) {
 	}
 	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
 	mustWrite(t, filepath.Join(root, "nested", "settings.json"), string(fixture))
-	_, err = Discover(t.Context(), "claude", []string{"settings.json"})
-	if err == nil {
+	files, skipped, err := DiscoverFiles(t.Context(), "claude", []string{"settings.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := names(files)["nested/settings.json"]; ok {
 		t.Fatal("basename allow should not cover nested/settings.json")
 	}
-	var de *DiscoverError
-	if !asDiscover(err, &de) || de.Path != "nested/settings.json" {
-		t.Fatalf("err = %v", err)
+	if len(skipped) != 1 || skipped[0].Path != "nested/settings.json" || skipped[0].Reason != ExcludeSecret {
+		t.Fatalf("skipped = %+v, want nested/settings.json", skipped)
 	}
 }
 
@@ -309,9 +280,10 @@ func TestDiscoverVendoredPluginFindingSkipsWithoutRefusing(t *testing.T) {
 }
 
 // The vendored carve-out is the plugin trees claude installs into. A
-// file the user wrote still refuses the push, including a file named
-// plugins/cache itself and one elsewhere under plugins/.
-func TestDiscoverOwnSecretStillRefusesOutsidePluginTrees(t *testing.T) {
+// file the user wrote is reported as their own secret to remove,
+// including a file named plugins/cache itself and one elsewhere under
+// plugins/.
+func TestDiscoverOwnSecretOutsidePluginTrees(t *testing.T) {
 	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
 	if err != nil {
 		t.Fatal(err)
@@ -321,13 +293,15 @@ func TestDiscoverOwnSecretStillRefusesOutsidePluginTrees(t *testing.T) {
 			root := setupClaudeRoot(t)
 			mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
 			mustWrite(t, filepath.Join(root, filepath.FromSlash(rel)), string(secret))
-			if _, err := Discover(t.Context(), "claude", nil); err == nil {
-				t.Fatalf("a finding in %s must refuse the push", rel)
-			} else {
-				var de *DiscoverError
-				if !asDiscover(err, &de) || de.Path != rel {
-					t.Fatalf("err = %v", err)
-				}
+			files, skipped, err := DiscoverFiles(t.Context(), "claude", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := names(files)["settings.json"]; !ok {
+				t.Errorf("settings.json was not carried: %v", names(files))
+			}
+			if len(skipped) != 1 || skipped[0].Path != rel || skipped[0].Reason != ExcludeSecret {
+				t.Fatalf("skipped = %+v, want %s as the user's own secret", skipped, rel)
 			}
 		})
 	}
@@ -355,7 +329,7 @@ func TestDiscoverAllowSecretCarriesVendoredFile(t *testing.T) {
 
 // vendoredRoots is keyed by harness, and only claude installs plugins
 // into those trees. The same path under another harness's profile root
-// is a directory the user made, so it still refuses the push.
+// is a directory the user made, so the finding is reported as theirs.
 func TestDiscoverVendoredRootsAreClaudeOnly(t *testing.T) {
 	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
 	if err != nil {
@@ -367,11 +341,79 @@ func TestDiscoverVendoredRootsAreClaudeOnly(t *testing.T) {
 			root := setupHarnessRoot(t, name)
 			mustWrite(t, filepath.Join(root, filepath.FromSlash(rel)), string(secret))
 
-			_, err := Discover(t.Context(), name, nil)
-			var de *DiscoverError
-			if !asDiscover(err, &de) || de.Path != rel {
-				t.Fatalf("err = %v, want %s to refuse the push under %s", err, rel, name)
+			_, skipped, err := DiscoverFiles(t.Context(), name, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(skipped) != 1 || skipped[0].Path != rel || skipped[0].Reason != ExcludeSecret {
+				t.Fatalf("skipped = %+v, want %s as the user's own secret under %s", skipped, rel, name)
 			}
 		})
+	}
+}
+
+// A secret in a file the user wrote used to refuse the whole walk, so one
+// curl example under skills/ kept every other file off the server. It now
+// drops that one file and reports it, the way a vendored finding does.
+func TestDiscoverOwnSecretDropsOnlyThatFile(t *testing.T) {
+	root := setupClaudeRoot(t)
+	fixture, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
+	mustWrite(t, filepath.Join(root, "skills", "deploy", "README.md"), string(fixture))
+
+	files, skipped, err := DiscoverFiles(t.Context(), "claude", nil)
+	if err != nil {
+		t.Fatalf("a secret in the user's own file refused the whole profile: %v", err)
+	}
+	got := names(files)
+	if _, ok := got["settings.json"]; !ok {
+		t.Errorf("settings.json was not carried: %v", got)
+	}
+	if _, ok := got["skills/deploy/README.md"]; ok {
+		t.Error("the flagged file was carried")
+	}
+	if len(skipped) != 1 || skipped[0].Path != "skills/deploy/README.md" || skipped[0].Reason != ExcludeSecret {
+		t.Fatalf("skipped = %+v, want the flagged file", skipped)
+	}
+	// The member has to be able to find the line, so the reported detail
+	// carries the scanner's rule and location, not just "secret".
+	if !strings.Contains(skipped[0].Detail, "secret detected") || !strings.Contains(skipped[0].Detail, " at ") {
+		t.Fatalf("detail = %q, want the rule and location", skipped[0].Detail)
+	}
+}
+
+// A terminal shows the member nothing before it uploads, so the CLI has
+// to hear them name each flagged file. A plugin's own fixture is never
+// counted: there is no secret in it for anyone to remove.
+func TestUnacknowledgedSecrets(t *testing.T) {
+	root := setupClaudeRoot(t)
+	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vendored := vendoredFixture("6.3.0")
+	mustWrite(t, filepath.Join(root, "skills", "deploy", "README.md"), string(secret))
+	mustWrite(t, filepath.Join(root, filepath.FromSlash(vendored)), string(secret))
+
+	_, skipped, err := DiscoverFiles(t.Context(), "claude", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flagged, err := UnacknowledgedSecrets("claude", skipped, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(flagged) != 1 || flagged[0].Path != "skills/deploy/README.md" {
+		t.Fatalf("flagged = %+v, want the file the member wrote", flagged)
+	}
+	named, err := UnacknowledgedSecrets("claude", skipped, []string{"skills/deploy/README.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(named) != 0 {
+		t.Fatalf("flagged = %+v after --skip-secret named it", named)
 	}
 }

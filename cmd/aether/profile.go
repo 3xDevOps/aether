@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"strings"
 
 	cliprofile "github.com/3xDevOps/Aether/internal/cli/profile"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -45,13 +47,14 @@ func profilePush(args []string) error {
 	fs := flag.NewFlagSet("profile push", flag.ExitOnError)
 	agent := fs.String("agent", "", "harness name")
 	workspace := fs.String("workspace", "", "optional workspace ID for --allow-secret audit")
-	var allow stringList
-	fs.Var(&allow, "allow-secret", "allow a scanned secret in this file (repeatable)")
+	var allow, skip stringList
+	fs.Var(&allow, "allow-secret", "send this file even though the scanner flagged it (repeatable)")
+	fs.Var(&skip, "skip-secret", "leave this flagged file out and push the rest (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *agent == "" {
-		return fmt.Errorf("usage: aether profile push --agent <harness> [--allow-secret <file> ...]")
+		return fmt.Errorf("usage: aether profile push --agent <harness> [--skip-secret <file> ...] [--allow-secret <file> ...]")
 	}
 	if len(allow) > 0 && *workspace == "" {
 		return fmt.Errorf("profile push: --allow-secret requires --workspace")
@@ -59,6 +62,13 @@ func profilePush(args []string) error {
 	files, skipped, err := cliprofile.DiscoverFiles(context.Background(), *agent, allow)
 	if err != nil {
 		return err
+	}
+	flagged, err := cliprofile.UnacknowledgedSecrets(*agent, skipped, skip)
+	if err != nil {
+		return err
+	}
+	if len(flagged) > 0 {
+		return secretRefusal(*agent, flagged)
 	}
 	// A file left out for its size would otherwise land on the server, so
 	// say which ones did not and why, before the snapshot line.
@@ -119,4 +129,24 @@ func profileRollback(args []string) error {
 		fmt.Printf("snapshot %s digest %s\n", snap.ID, snap.Digest)
 		return nil
 	})
+}
+
+// secretRefusal is the message for scanner findings in the member's own
+// files. The push leaves those files out on its own, but a terminal has
+// no screen to show them on before the upload, so the member picks per
+// file: remove the secret and push again, drop the file, or send it. The
+// dashboard makes the same choice by showing the finding on the harness
+// row before the import button.
+func secretRefusal(harnessName string, flagged []cliprofile.Exclusion) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "profile push: %s in files you wrote. "+
+		"Remove the secret, or say what to do with each file:",
+		plural(len(flagged), "secret scanner finding"))
+	for _, f := range flagged {
+		fmt.Fprintf(&b, "\n  %s: %s", f.Path, f.Detail)
+		fmt.Fprintf(&b, "\n    leave it out:   aether profile push --agent %s --skip-secret %s", harnessName, f.Path)
+		fmt.Fprintf(&b, "\n    send it anyway: aether profile push --agent %s --allow-secret %s --workspace <workspace>",
+			harnessName, f.Path)
+	}
+	return errors.New(b.String())
 }

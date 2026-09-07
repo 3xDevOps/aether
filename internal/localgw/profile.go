@@ -2,8 +2,6 @@ package localgw
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/3xDevOps/Aether/internal/cli/profile"
@@ -46,9 +44,9 @@ func (g *Gateway) localProfilePreview(r *http.Request, body []byte) (any, *proto
 // content-addressed delta against the server's current head.
 //
 // There is no allow_secret parameter and the gateway never builds one: a
-// scanner finding refuses the push here and names the CLI command that
-// can override it, where --workspace makes the override attributable to
-// a workspace timeline entry.
+// scanner finding leaves that one file out and reports it in Skipped,
+// and sending it anyway stays on the CLI, where --workspace makes the
+// override attributable to a workspace timeline entry.
 func (g *Gateway) localProfilePush(r *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Harness string `json:"harness"`
@@ -59,16 +57,15 @@ func (g *Gateway) localProfilePush(r *http.Request, body []byte) (any, *protocol
 	if params.Harness == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "harness is required"}
 	}
-	root, _, err := profile.LocalDir(params.Harness)
-	if err != nil {
+	if _, _, err := profile.LocalDir(params.Harness); err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
 	files, skipped, err := profile.DiscoverFiles(r.Context(), params.Harness, nil)
 	if err != nil {
-		// The harness name is already valid, so everything Discover
-		// refuses - a finding, a symlink escape, a root that is not
-		// there - is the state of the user's own profile directory.
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: pushRefusal(root, params.Harness, err)}
+		// The harness name is already valid, so a discovery failure is
+		// the state of the user's own profile directory: a root that is
+		// not there, or one this process cannot read.
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	}
 	pushParams, err := json.Marshal(profile.PushParams(g.knownDigests(r, params.Harness), params.Harness, files, nil, ""))
 	if err != nil {
@@ -99,10 +96,10 @@ func (g *Gateway) localProfilePush(r *http.Request, body []byte) (any, *protocol
 		Digest:     pushed.Snapshot.Digest,
 		Files:      len(files),
 		Bytes:      totalBytes,
-		// What the walk left behind without refusing: the size caps,
-		// symlinks out of the root, and findings in vendored plugin
-		// content. The push succeeded without them, so this is the only
-		// place the user learns they are not on the server.
+		// What the walk left behind: the size caps, symlinks out of the
+		// root, and scanner findings. The push succeeded without them,
+		// so this is the only place the user learns they are not on the
+		// server.
 		Skipped: skipped,
 	}, nil
 }
@@ -125,20 +122,4 @@ func (g *Gateway) knownDigests(r *http.Request, harness string) map[string]struc
 		return nil
 	}
 	return profile.KnownDigests(status)
-}
-
-// pushRefusal turns a discovery failure into the sentence the dashboard
-// shows. A scanner finding names the file, the line, and the terminal
-// command that can override it; everything else speaks for itself.
-func pushRefusal(root, harness string, err error) string {
-	var de *profile.DiscoverError
-	// Only a scanner finding carries a location. A symlink escape does
-	// not, and --allow-secret cannot re-include one, so it gets no
-	// override advice.
-	if !errors.As(err, &de) || de.Location == "" {
-		return err.Error()
-	}
-	return fmt.Sprintf("%s in %s:%s; remove it from %s, or push from a terminal with: "+
-		"aether profile push --agent %s --allow-secret %s --workspace <workspace>",
-		de.Message, de.Path, de.Location, root, harness, de.Path)
 }

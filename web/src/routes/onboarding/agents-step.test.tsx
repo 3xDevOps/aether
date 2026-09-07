@@ -353,19 +353,22 @@ describe('agents step', () => {
     ).toBeDefined()
   })
 
-  it('refuses to push a blocked preview and names the flagged file', async () => {
+  it('leaves the member\'s own flagged file out and still imports the rest', async () => {
+    // A README with a curl -H "Authorization: ..." example is a finding in
+    // a file the member wrote. It costs that one file, never the harness,
+    // and the row has to say so without the expander being opened.
     const client = fakeApi({
       localProfilePreview: vi.fn(async (harness: string) =>
         harness === 'claude'
           ? profilePreview({
-              blocked: true,
               excluded: [
                 {
-                  path: 'notes/key.txt',
+                  path: 'skills/cloudflare-deploy/README.md',
                   reason: 'secret',
-                  detail: 'secret detected (aws-access-key) at line 3',
+                  detail: 'secret detected (curl-auth-header) at 12:2',
                 },
               ],
+              excluded_total: 1,
             })
           : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
       ),
@@ -373,28 +376,61 @@ describe('agents step', () => {
     renderStep(client)
     await look()
 
-    // No checkbox at all: the push is refused server-side, so offering it
-    // would be a lie.
+    // The callout is on the row itself, not inside the expander: the
+    // member has to see it without opening anything.
+    const line = await screen.findByText(/1 file you wrote tripped/)
+    const callout = line.parentElement as HTMLElement
+    expect(callout.closest('details')).toBeNull()
     expect(
-      await screen.findByText(
-        'notes/key.txt: secret detected (aws-access-key) at line 3',
-      ),
+      within(callout).getByText('skills/cloudflare-deploy/README.md'),
     ).toBeDefined()
     expect(
-      screen.queryByRole('checkbox', {
-        name: 'Bring Claude Code configuration',
-      }),
-    ).toBeNull()
-    // The fix is local, and the override lives on the CLI.
+      within(callout).getByText(/secret detected \(curl-auth-header\) at 12:2/),
+    ).toBeDefined()
+    // An uncapped list gives an exact count, so no hedge.
+    expect(screen.queryByText(/At least/)).toBeNull()
+
+    // Nothing is blocked: the harness is importable with that file left out.
+    const box = screen.getByRole('checkbox', {
+      name: 'Bring Claude Code configuration',
+    })
+    // Sending it anyway is still the CLI's override.
     expect(
       screen.getByText(
-        `aether profile push --agent claude --allow-secret notes/key.txt --workspace ${workspace.id}`,
+        `aether profile push --agent claude --allow-secret skills/cloudflare-deploy/README.md --workspace ${workspace.id}`,
       ),
     ).toBeDefined()
+
+    fireEvent.click(box)
+    fireEvent.click(screen.getByRole('button', { name: 'Import selected' }))
+    await waitFor(() => {
+      expect(client.localProfilePush).toHaveBeenCalledWith('claude')
+    })
+  })
+
+  it('hedges its own-file count when the gateway capped the list', async () => {
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: 'skills/cloudflare-deploy/README.md',
+                  reason: 'secret',
+                  detail: 'secret detected (curl-auth-header) at 12:2',
+                },
+              ],
+              excluded_total: 1403,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
     expect(
-      screen.getByRole('button', { name: 'Import selected' }),
-    ).toHaveProperty('disabled', true)
-    expect(client.localProfilePush).not.toHaveBeenCalled()
+      await screen.findByText(/At least 1 file you wrote tripped/),
+    ).toBeDefined()
   })
 
   it('names a plugin-tree finding by where it lives and still imports', async () => {

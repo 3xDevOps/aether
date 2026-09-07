@@ -14,15 +14,19 @@ import (
 	profilesvc "github.com/3xDevOps/Aether/internal/profile"
 )
 
-// Why a file was left out of a push. Discover turns only a secret in a
-// file the user wrote into a blocking error; every other reason - a
-// symlink escape and a finding in vendored content included - is
-// reported and skipped. Inventory reports every reason to the user.
+// Why a file was left out of a push. No reason refuses a push: every one
+// of them drops the file it names and is reported, so a single bad file
+// can never decide that the rest of a profile stays off the server.
+// Inventory reports every reason to the user.
 const (
 	// ExcludeCredential is a basename on the harness credential denylist.
 	ExcludeCredential = "credential"
 	// ExcludeSecret is a content-scanner finding in a file the user
-	// wrote. It refuses the whole push: the fix is on this machine.
+	// wrote. That one file is dropped and reported with the scanner's
+	// rule and location, so the member can remove the secret and push
+	// again, or pass --allow-secret if the match is a documentation
+	// example. It used to refuse the whole push, which let one curl
+	// example in a README keep every other file off the server.
 	ExcludeSecret = "secret"
 	// ExcludeVendoredSecret is a content-scanner finding inside one of
 	// the harness's vendoredRoots - third-party content the user did not
@@ -119,10 +123,6 @@ type visited struct {
 	Content []byte
 	Reason  string
 	Detail  string
-	// Finding carries the scanner hit behind an ExcludeSecret or an
-	// ExcludeVendoredSecret, so callers can name the file and the
-	// location.
-	Finding Finding
 }
 
 // candidate is a file that survived pass one: everything about it is
@@ -140,8 +140,7 @@ type candidate struct {
 // escape rejection, regular-file check, size caps, content scan - and
 // hands every entry to visit with its verdict. allowed names files whose
 // scanner findings pass (the CLI's --allow-secret); Inventory passes
-// none. A visit error aborts the walk and is returned unchanged, which is
-// how Discover stops at the first blocking finding.
+// none. A visit error aborts the walk and is returned unchanged.
 //
 // It runs in two passes. The first stats and classifies the tree without
 // opening anything. The second reads what survived, in category priority
@@ -307,7 +306,6 @@ func readCandidates(ctx context.Context, harnessName string, candidates []candid
 		file := visited{Rel: c.rel, Abs: c.abs, Mode: c.mode, Size: c.size, Content: content}
 		if findings := scanContent(c.rel, content); len(findings) > 0 && !allowed[c.rel] && !allowed[c.abs] {
 			file.Content = nil
-			file.Finding = findings[0]
 			file.Reason, file.Detail = findingVerdict(harnessName, c.rel, findings[0])
 		}
 		if err := visit(file); err != nil {
@@ -317,22 +315,22 @@ func readCandidates(ctx context.Context, harnessName string, candidates []candid
 	return nil
 }
 
-// findingVerdict decides what a scanner hit means for the push. In a
-// file the user wrote it is a secret to remove, and it refuses the push.
-// In vendored content it is a string inside a plugin package: that file
-// is dropped, so its bytes still never leave the machine, and the push
-// carries everything else.
+// findingVerdict decides what a scanner hit means for the push. Either
+// way the flagged file is dropped and its bytes stay on this machine;
+// the two reasons differ only in what the member can do about it. In a
+// file they wrote it is theirs to remove or to allow; in vendored
+// content it is a string inside a plugin package they did not write.
 //
-// A vendored verdict carries the location itself, because it is never
-// turned into a DiscoverError - the caller that would have supplied the
-// line has only the skipped list to print.
+// Both verdicts carry the location, because neither is ever turned into
+// an error - the caller that would have supplied the line has only the
+// skipped list to print.
 func findingVerdict(harnessName, rel string, finding Finding) (string, string) {
 	rule := "secret detected (" + finding.Kind + ")"
-	if !isVendored(harnessName, rel) {
-		return ExcludeSecret, rule
-	}
 	if finding.Location != "" {
 		rule += " at " + finding.Location
+	}
+	if !isVendored(harnessName, rel) {
+		return ExcludeSecret, rule
 	}
 	return ExcludeVendoredSecret, rule +
 		" in third-party plugin content; this file is left out and the rest of the profile still syncs"

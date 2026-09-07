@@ -516,8 +516,8 @@ export const api = {
   localProfilePreview: (harness: string, signal?: AbortSignal) =>
     local<ProfilePreview>('profile.preview', { harness }, signal),
   /** Pushes this member's configuration for one harness. There is no
-   * allow-secret parameter: a scanner finding refuses the push, and the
-   * override lives on the CLI. */
+   * allow-secret parameter: a scanner finding leaves that one file out
+   * and reports it, and sending it anyway lives on the CLI. */
   localProfilePush: (harness: string) =>
     local<ProfilePushResult>('profile.push', { harness }),
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),

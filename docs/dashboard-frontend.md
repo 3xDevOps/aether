@@ -723,13 +723,16 @@ error on that harness's row; only the `-32602` that means "this harness does
 not sync a profile" is silent, and the "nothing to bring" line renders only
 when every harness answered without one. Checkboxes start unchecked: approving calls
 `profile.push` once per checked harness, one at a time, and a refusal lands
-on its own row while the rest still run. A `blocked` preview gets no
-checkbox at all - the row names the condition from `blocked_reason` and shows
-the flagged file, and offers the `--allow-secret` command only for a scanner
-finding, since a symlink escape has no override. That override is
-deliberately not in the dashboard. A `vendored-secret` exclusion never
-blocks: the row says how many files inside installed plugins tripped the
-scanner and that they are third-party, and the harness stays importable.
+on its own row while the rest still run. No preview can refuse an import.
+A `secret` exclusion is a finding in a file the member wrote, so the row
+names each one above the checkbox with what the scanner matched - five
+paths, then a count deferring to the expander - and the harness still
+imports without those files. A `vendored-secret` exclusion reads as the
+member's own secret in a flat list, so the row instead says how many files
+inside installed plugins tripped the scanner and that they are
+third-party. Sending a flagged file anyway is deliberately not in the
+dashboard: the row prints the `aether profile push --allow-secret` command
+for it, which needs `--workspace` to be attributable.
 Where a setup-capable harness is installed locally,
 **Ask an agent** runs the `profile` scan over
 `/ws/envscan`, streams the agent's output, and pre-checks what it

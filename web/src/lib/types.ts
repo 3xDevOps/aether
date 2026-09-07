@@ -404,9 +404,9 @@ export interface ProfilePreviewCategory {
 
 /** Why a file was left out of a profile push. `too-large` and
  * `over-budget` are the server's size caps, applied before the file is
- * ever read. `secret` is a scanner finding in a file the user wrote and
- * refuses the push; `vendored-secret` is one inside third-party content
- * the harness installed, which drops that file and lets the rest sync. */
+ * ever read. `secret` is a scanner finding in a file the user wrote;
+ * `vendored-secret` is one inside third-party content the harness
+ * installed. Both drop that one file and let the rest sync. */
 export type ProfileExcludeReason =
   | 'credential'
   | 'secret'
@@ -427,11 +427,9 @@ export interface ProfileExclusion {
 /**
  * profile.preview: the discovery a push would run, uploading nothing.
  * `present` is false when this machine has no profile root for the harness
- * - a normal answer, not an error. `blocked` is true when the push would
- * be refused outright rather than partially carried; `blocked_reason`,
- * `blocked_path` and `blocked_detail` name which condition and where.
- * Only a `secret` has a CLI override, so a surface offering one must read
- * the reason rather than assume.
+ * - a normal answer, not an error. Nothing a preview reports refuses a
+ * push: every guard drops the file it caught and carries the rest, so
+ * `excluded` is the whole of what a surface has to explain.
  */
 export interface ProfilePreview {
   harness: string
@@ -443,10 +441,6 @@ export interface ProfilePreview {
   /** Capped; `excluded_total` is how many there were. */
   excluded?: ProfileExclusion[]
   excluded_total?: number
-  blocked: boolean
-  blocked_reason?: ProfileExcludeReason
-  blocked_path?: string
-  blocked_detail?: string
 }
 
 /** profile.push: the snapshot the push created, and the files the size
