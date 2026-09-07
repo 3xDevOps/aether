@@ -6,7 +6,7 @@ export type GroupBy = 'status' | 'member'
 /** The three things an update banner can be about. */
 export type UpdateKind = 'cli' | 'server' | 'shell'
 
-/** Where the center view is pointed. Route names come from the registry. */
+/** Where the center view is pointed. */
 export interface Route {
   name: string
   params: Record<string, string>
@@ -31,6 +31,12 @@ export interface UiSlice {
    */
   activeWorkspace: string
   groupBy: GroupBy
+  /**
+   * The last harness successfully used for each agent account. This is a
+   * preference, not run state: it survives run cleanup and gives a launch
+   * form with no run history the same default the member chose last time.
+   */
+  lastHarnessByAccount: Record<string, string>
   route: Route
   /**
    * Which version of each update banner the member has already dismissed,
@@ -48,6 +54,7 @@ export interface UiSlice {
   setOnboardingWorkspace: (workspaceID: string) => void
   setActiveWorkspace: (workspaceID: string) => void
   setGroupBy: (groupBy: GroupBy) => void
+  rememberHarness: (accountID: string, harness: string) => void
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
   /** Brings every dismissed banner back; the status bar's badge calls it. */
@@ -65,6 +72,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   onboardingWorkspace: '',
   activeWorkspace: '',
   groupBy: 'status',
+  lastHarnessByAccount: {},
   route: { name: 'board', params: {} },
   dismissedUpdates: { cli: '', server: '', shell: '' },
   setTheme: (theme) => set({ theme }),
@@ -84,8 +92,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   setOnboardingStep: (onboardingStep) => set({ onboardingStep }),
   setOnboardingWorkspace: (onboardingWorkspace) => set({ onboardingWorkspace }),
   // Switching scope carries the workspace route with it. Otherwise the
-  // switcher would say one workspace while the open view, its budget
-  // dialog and its settings dialog still acted on another.
+  // switcher would say one workspace while the open view, its budget dialog
+  // and its settings dialog still acted on another.
   setActiveWorkspace: (workspaceID) =>
     set((s) => ({
       activeWorkspace: workspaceID,
@@ -95,6 +103,12 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
           : s.route,
     })),
   setGroupBy: (groupBy) => set({ groupBy }),
+  rememberHarness: (accountID, harness) => {
+    if (!accountID || !harness) return
+    set((s) => ({
+      lastHarnessByAccount: { ...s.lastHarnessByAccount, [accountID]: harness },
+    }))
+  },
   // Revealing a run acknowledges it, wherever the reveal came from: every
   // surface routes through this one call, so this is the only place the ack
   // belongs. Opening a workspace also makes it the active scope, so the

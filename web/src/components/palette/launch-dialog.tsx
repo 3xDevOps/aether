@@ -15,9 +15,8 @@ import type { AgentInfo, Member } from '@/lib/types'
 import { useStore } from '@/store'
 
 // The harness roster comes from agent.list so member-registered agents are
-// launchable, not just the shipped names. "custom" is the deployment escape
-// hatch, always offered; an unknown name is refused by the server, not here.
-
+// launchable, not just the shipped names. "custom" remains the deployment
+// escape hatch; shipped and member entries are filtered to installed tools.
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
@@ -30,6 +29,8 @@ export function LaunchDialog() {
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
   const upsertRun = useStore((s) => s.upsertRun)
+  const rememberHarness = useStore((s) => s.rememberHarness)
+  const lastHarnessByAccount = useStore((s) => s.lastHarnessByAccount)
   const runs = useStore((s) => s.runs)
   const self = useStore((s) => s.info?.member)
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
@@ -42,16 +43,20 @@ export function LaunchDialog() {
   const ownAccountID = self?.id ?? accounts[0]?.id
   const lastUsedHarness = useMemo(() => {
     const accountID = account || ownAccountID
+    const remembered = accountID ? lastHarnessByAccount[accountID] : undefined
+    if (remembered) return remembered
     return Object.values(runs)
       .filter((run) => (run.account_member_id ?? run.member_id) === accountID)
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
       .find((run) => run.harness)?.harness
-  }, [account, ownAccountID, runs])
+  }, [account, lastHarnessByAccount, ownAccountID, runs])
   // The server's rule: a taskless launch lands the member in the agent's
   // interactive TUI, but headless has no interactive surface, so it needs a
   // task to have anything to do. Say so here rather than sending a request
   // the gateway will refuse.
   const needsTask = mode === 'headless' && task.trim() === ''
+  const installedAgents = agents?.filter((agent) => agent.installed === true) ?? []
+  const harnessLoading = agents === null
 
   useEffect(() => {
     let live = true
@@ -79,7 +84,7 @@ export function LaunchDialog() {
       .then((list) => {
         if (!live) return
         setAgents(list)
-        const installed = list.filter((agent) => agent.installed !== false)
+        const installed = list.filter((agent) => agent.installed === true)
         setHarness((current) => {
           if (current && installed.some((agent) => agent.name === current)) {
             return current
@@ -116,6 +121,7 @@ export function LaunchDialog() {
           ? { account_member_id: account }
           : {}),
       })
+      rememberHarness(account || ownAccountID || '', harness)
       // Seed the store so the terminal view attaches without a refetch.
       upsertRun(run)
       close()
@@ -191,15 +197,14 @@ export function LaunchDialog() {
               <select
                 className={field}
                 value={harness}
+                disabled={harnessLoading || launching}
                 onChange={(e) => setHarness(e.target.value)}
               >
-                {(agents ?? [])
-                  .filter((a) => a.installed !== false)
-                  .map((a) => (
-                    <option key={a.name} value={a.name}>
-                      {a.name}
-                    </option>
-                  ))}
+                {installedAgents.map((agent) => (
+                  <option key={agent.name} value={agent.name}>
+                    {agent.name}
+                  </option>
+                ))}
                 <option value="custom">custom</option>
               </select>
             </label>

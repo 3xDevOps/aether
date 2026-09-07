@@ -77,6 +77,17 @@ describe('terminal view', () => {
     view.unmount()
   })
 
+  it('keeps replay-only finished runs out of steering mode', () => {
+    const view = mount()
+    act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
+    act(() => StubSocket.last().onopen?.())
+
+    const toggle = screen.getByText('Take control') as HTMLButtonElement
+    expect(toggle.disabled).toBe(true)
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    view.unmount()
+  })
+
   it('disables the toggle and says why when the server denies steering', () => {
     const view = mount()
     act(() => StubSocket.last().onopen?.())

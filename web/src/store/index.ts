@@ -70,6 +70,7 @@ export function createRootStore() {
           runDockHeight: s.runDockHeight,
           activeWorkspace: s.activeWorkspace,
           groupBy: s.groupBy,
+          lastHarnessByAccount: s.lastHarnessByAccount,
           dismissedUpdates: s.dismissedUpdates,
           onboarded: s.onboarded,
           onboardingStep: s.onboardingStep,

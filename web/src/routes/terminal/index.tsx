@@ -66,10 +66,9 @@ function TerminalView({ params }: RouteProps) {
   useEffect(() => {
     if (!terminal) return
 
-    // A new attach answers for itself: the last one's refusal and steer denial
-    // must not decide what this one shows, or a run whose steer was granted in
-    // between stays greyed out until a reload.
-    const ownerSteering = run?.member_id === self.id
+    // Only a live run can be steered. Finished-run attaches replay history
+    // read-only, so an owner must not see a false "Steering" state.
+    const ownerSteering = run?.status === 'running' && run.member_id === self.id
     setTerminal(runID, { ...initialTerminal, write: ownerSteering })
     writeRef.current = ownerSteering
 
@@ -98,7 +97,7 @@ function TerminalView({ params }: RouteProps) {
       attachment.close()
       attachRef.current = null
     }
-  }, [run?.member_id, runID, self.id, setTerminal, terminal])
+  }, [run?.member_id, run?.status, runID, self.id, setTerminal, terminal])
 
   if (!run) {
     return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
@@ -135,8 +134,8 @@ function TerminalView({ params }: RouteProps) {
         <Button
           size="sm"
           variant={state.write ? 'default' : 'outline'}
+          disabled={state.steerDenied || run.status !== 'running'}
           className="relative"
-          disabled={state.steerDenied}
           onClick={toggleWrite}
         >
           {state.write ? 'Steering' : 'Take control'}
