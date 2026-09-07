@@ -450,7 +450,11 @@ host and relies on transcript replay to restore its content.
 The board's `TerminalDock` exposes **Save environment** while the member's
 terminal is running, and its Stop dialog includes the destructive **Reset to
 standard** action. When the terminal is running and `saved_image` is empty, it
-shows the hint **Installs here reach agents after you save.**
+shows the hint **Installs here reach agents after you save.** From the moment
+a tab opens until its attach is acked, a spinner and **Starting your
+environment container** cover the terminal, because Docker can take seconds to
+start the container and the xterm host is blank until then. A refused or
+failed start replaces the terminal with the gateway's own error instead.
 
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the

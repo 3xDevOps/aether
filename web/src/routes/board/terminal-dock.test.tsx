@@ -167,6 +167,33 @@ describe('environment terminal dock', () => {
     expect(screen.queryByText('Installs here reach agents after you save.')).toBeNull()
   })
 
+  it('shows the starting indicator until the terminal attaches', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+
+    expect(await screen.findByRole('status')).toBeDefined()
+    expect(screen.getByText('Starting your environment container')).toBeDefined()
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+
+    act(() => attach.handlers?.onAttached(true))
+
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(screen.queryByText('Starting your environment container')).toBeNull()
+  })
+
+  it('shows the real start failure instead of the starting indicator', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    act(() => attach.handlers?.onRefused('start environment: no space left on device'))
+
+    expect(
+      await screen.findByText('start environment: no space left on device'),
+    ).toBeDefined()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
   it('shows an attach refusal with open tabs and clears it after attaching', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     render(<TerminalDock />)
