@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	cliprofile "github.com/3xDevOps/Aether/internal/cli/profile"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -140,6 +141,25 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	}
 	if len(status.Files) != 1 || status.Files[0].Path != "skill.md" {
 		t.Fatalf("snapshot files = %+v, want [skill.md]", status.Files)
+	}
+
+	// A zero-byte file goes up and comes back down as a zero-byte file.
+	// The params come from the client's own delta builder, so this is the
+	// shape `aether profile push` sends rather than a hand-made one.
+	empty := cliprofile.PushParams(nil, "claude", []cliprofile.LocalFile{
+		{Path: "skill.md", Mode: 0o644, Content: []byte("skill-v1\n")},
+		{Path: ".keep", Mode: 0o644},
+	}, nil, "")
+	var withEmpty protocol.ProfilePushResult
+	if err := ctrl.Call(protocol.MethodProfilePush, empty, &withEmpty); err != nil {
+		t.Fatalf("profile.push with an empty file: %v", err)
+	}
+	info, serr := os.Stat(filepath.Join(memberHome, ".keep"))
+	if serr != nil {
+		t.Fatalf("materialized .keep: %v", serr)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("materialized .keep size = %d, want 0", info.Size())
 	}
 
 	// Run 1 uses the member's persistent home, which contains the pushed

@@ -187,3 +187,37 @@ func TestPruneKeepsPinnedRunSnapshot(t *testing.T) {
 		t.Fatalf("pinned snapshot pruned: %v", err)
 	}
 }
+
+func TestProfileSnapshotEmptyFile(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	m := mustCreateMember(t, db)
+
+	snap := &domain.ProfileSnapshot{MemberID: m.ID, Harness: "claude", Digest: "d-empty"}
+	files := []ProfileFile{
+		{Path: ".keep", Mode: 0o644, Content: nil},
+		{Path: "settings.json", Mode: 0o644, Content: []byte{}},
+	}
+	if err := db.SaveProfileSnapshot(ctx, snap, files); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	stored, err := db.GetProfileFiles(ctx, snap.ID)
+	if err != nil {
+		t.Fatalf("GetFiles: %v", err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("files = %d, want 2", len(stored))
+	}
+	for _, f := range stored {
+		if len(f.Content) != 0 {
+			t.Fatalf("%s content = %q, want empty", f.Path, f.Content)
+		}
+	}
+
+	// The empty blob is content-addressed, so a second snapshot reusing it
+	// must still save.
+	other := &domain.ProfileSnapshot{MemberID: m.ID, Harness: "claude", Digest: "d-empty-2"}
+	if err := db.SaveProfileSnapshot(ctx, other, []ProfileFile{{Path: "other.keep", Mode: 0o644, Content: nil}}); err != nil {
+		t.Fatalf("Save sharing empty blob: %v", err)
+	}
+}

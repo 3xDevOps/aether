@@ -72,10 +72,16 @@ func (d *DB) SaveProfileSnapshot(ctx context.Context, s *domain.ProfileSnapshot,
 	for _, f := range files {
 		blob := sha256.Sum256(f.Content)
 		digest := hex.EncodeToString(blob[:])
+		// The driver binds a nil slice as NULL, which profile_blobs.content
+		// rejects; an empty file has to reach it as an empty blob.
+		content := f.Content
+		if content == nil {
+			content = []byte{}
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO profile_blobs (digest, content) VALUES (?, ?)
 			 ON CONFLICT (digest) DO NOTHING`,
-			digest, f.Content,
+			digest, content,
 		); err != nil {
 			return fmt.Errorf("store: save profile blob: %w", err)
 		}
