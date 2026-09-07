@@ -91,15 +91,20 @@ requires a task.
 
 | Harness | tui | headless |
 | --- | --- | --- |
-| `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --dangerously-skip-permissions {task}` |
+| `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |
 | `pi` | `pi {task}` | `pi -p {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
 
-These are the vendors' own flags, and vendors rename them. If a launch fails
-with an unknown-flag error, the installed CLI has drifted from the registry.
+These are the vendors' own flags, and vendors rename them and tighten how
+they combine - `claude` now refuses `--output-format stream-json` unless
+`--verbose` comes with it. If a launch fails with the CLI rejecting its own
+arguments, the installed CLI has drifted from the registry.
 Update the registry or install a compatible CLI in the member's environment
 terminal. The installed executable lives in that member's environment home.
+An argv override replaces the shipped template wholesale, so a registry fix
+never reaches it: a deployment's `--harness-definitions` entry that redefines
+a shipped harness has to be updated on its own.
 
 ## Setting up an agent
 

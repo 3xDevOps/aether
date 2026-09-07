@@ -229,9 +229,12 @@ type Profile struct {
 // credentials or key passthrough.
 var profiles = map[string]Profile{
 	"claude": {
-		Name:            "claude",
-		TUIArgs:         []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
-		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--dangerously-skip-permissions", TaskPlaceholder},
+		Name:    "claude",
+		TUIArgs: []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
+		// Claude Code refuses "--print --output-format stream-json" without
+		// --verbose. The flag only adds records to the stream; the envelope
+		// the adapter parses is unchanged.
+		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY"},
 		CredentialPaths: []string{".claude"},
 		LocalRoot:       ".claude",

@@ -114,15 +114,26 @@ func runSmoke(t *testing.T, image string, argv []string, env map[string]string) 
 	}
 }
 
-// assertNoUsageError fails when the harness rejected its flags: every
-// shipped CLI prints a recognizable usage/unknown-flag error and exits.
-func assertNoUsageError(t *testing.T, name, mode, output string) {
+// argvRejections are the ways a CLI refuses the argv it was handed. An
+// unknown flag is only half of it: a parser also refuses a combination of
+// flags it understands individually, which is how Claude Code started
+// rejecting "--output-format stream-json" without "--verbose" and broke
+// every headless claude run.
+var argvRejections = []string{
+	"unknown option", "unknown flag", "unrecognized argument",
+	"unexpected argument", "no such option", "usage:",
+	"requires --", "only works with --",
+}
+
+// assertArgvAccepted fails when the harness rejected its flags: every
+// shipped CLI prints a recognizable rejection and exits.
+func assertArgvAccepted(t *testing.T, name, mode, output string) {
 	t.Helper()
 	if output == "" {
 		t.Fatalf("%s %s: no output", name, mode)
 	}
 	lower := strings.ToLower(output)
-	for _, marker := range []string{"unknown option", "unknown flag", "unrecognized argument", "unexpected argument", "no such option", "usage:"} {
+	for _, marker := range argvRejections {
 		if strings.Contains(lower, marker) {
 			t.Fatalf("%s %s: flags rejected:\n%s", name, mode, output)
 		}
@@ -137,11 +148,11 @@ func smokeBothModes(t *testing.T, name string, env map[string]string) {
 	}
 	t.Run("tui", func(t *testing.T) {
 		out := runSmoke(t, image, Argv(p.TUIArgs, smokeTask), env)
-		assertNoUsageError(t, name, "tui", out)
+		assertArgvAccepted(t, name, "tui", out)
 	})
 	t.Run("headless", func(t *testing.T) {
 		out := runSmoke(t, image, Argv(p.HeadlessArgs, smokeTask), env)
-		assertNoUsageError(t, name, "headless", out)
+		assertArgvAccepted(t, name, "headless", out)
 	})
 	if p.MCPConfigFlag == "" {
 		return
@@ -156,7 +167,7 @@ func smokeBothModes(t *testing.T, name string, env map[string]string) {
 	for mode, template := range map[string][]string{"tui": p.TUIArgs, "headless": p.HeadlessArgs} {
 		t.Run("mcp-config-"+mode, func(t *testing.T) {
 			argv := append(Argv(template, smokeTask), p.MCPArgs("/run/aether/mcp.json")...)
-			assertNoUsageError(t, name, "mcp-config-"+mode, runSmoke(t, image, argv, env))
+			assertArgvAccepted(t, name, "mcp-config-"+mode, runSmoke(t, image, argv, env))
 		})
 	}
 }
@@ -190,11 +201,11 @@ func TestSmokeCodexFlags(t *testing.T) {
 
 	t.Run("tui", func(t *testing.T) {
 		out := runSmoke(t, image, Argv(p.TUIArgs, smokeTask), env)
-		assertNoUsageError(t, "codex", "tui", out)
+		assertArgvAccepted(t, "codex", "tui", out)
 	})
 	t.Run("headless-json", func(t *testing.T) {
 		out := runSmoke(t, image, Argv(p.HeadlessArgs, smokeTask), env)
-		assertNoUsageError(t, "codex", "headless", out)
+		assertArgvAccepted(t, "codex", "headless", out)
 		if !strings.Contains(out, "{") {
 			t.Fatalf("codex headless produced no JSON:\n%s", out)
 		}
