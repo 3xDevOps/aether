@@ -207,9 +207,12 @@
     position: absolute;
     top: 50%;
     left: calc(100% + 0.25rem);
+    z-index: 1;
     display: block;
     width: 0.25rem;
     height: 0.25rem;
+    color: var(--primary);
+    pointer-events: none;
     border-radius: 999px;
     background: currentColor;
     box-shadow: 0 0 0.35rem currentColor;
