@@ -2,7 +2,8 @@
 // Aether starts each supported agent CLI. A profile carries the argv
 // templates for tui and headless modes (auto/full-permission flags applied
 // by default), the environment variables that pass plain API keys from
-// server-side config into run containers, the container-side paths holding
+// server-side config into run containers and the fixed ones the CLI needs to
+// start there at all, the container-side paths holding
 // the harness's native login state (persisted per member under
 // <data>/homes/<member-id>/ and bind-mounted read-write into every run), an
 // explicit numeric uid:gid mapping for images whose configured user is named
@@ -170,6 +171,11 @@ type Profile struct {
 	// process into run containers when set (plain API-key harnesses;
 	// keys are never baked into images).
 	EnvPassthrough []string
+	// Env are fixed environment variables every container run of this
+	// harness needs. Unlike EnvPassthrough they carry no server-side
+	// value: they state a launch requirement of the CLI itself, so a
+	// workspace variable never overrides them.
+	Env map[string]string
 	// CredentialPaths are home-relative paths holding the harness's native
 	// login state (e.g. ".claude"). They are persisted in the member's
 	// shared home and available read-write in every run. This is the
@@ -234,8 +240,13 @@ var profiles = map[string]Profile{
 		// Claude Code refuses "--print --output-format stream-json" without
 		// --verbose. The flag only adds records to the stream; the envelope
 		// the adapter parses is unchanged.
-		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
-		EnvPassthrough:  []string{"ANTHROPIC_API_KEY"},
+		HeadlessArgs:   []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
+		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
+		// Runs execute as root on the standard image, and Claude Code
+		// refuses --dangerously-skip-permissions as root unless the
+		// environment declares a sandbox. The run container is that
+		// sandbox.
+		Env:             map[string]string{"IS_SANDBOX": "1"},
 		CredentialPaths: []string{".claude"},
 		LocalRoot:       ".claude",
 		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},

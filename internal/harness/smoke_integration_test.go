@@ -5,7 +5,9 @@ package harness
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +127,16 @@ var argvRejections = []string{
 	"requires --", "only works with --",
 }
 
+// authFailures are how a harness reports reaching its provider without
+// credentials. Reaching authentication proves the CLI accepted the argv
+// and started work. opencode is absent on purpose: it resolves provider
+// credentials from several places and can succeed with no login of its
+// own, so there is nothing to assert.
+var authFailures = map[string][]string{
+	"claude": {"authentication_failed", "not logged in", "invalid api key"},
+	"codex":  {"401", "unauthorized"},
+}
+
 // assertArgvAccepted fails when the harness rejected its flags: every
 // shipped CLI prints a recognizable rejection and exits.
 func assertArgvAccepted(t *testing.T, name, mode, output string) {
@@ -172,8 +184,18 @@ func smokeBothModes(t *testing.T, name string, env map[string]string) {
 	}
 }
 
-func passthroughEnv(p Profile) map[string]string {
+// launchEnv is what the scheduler puts in every container regardless of
+// credentials: TERM and the harness's own launch requirements
+// (Profile.Env). Setting anything here that a real run does not get would
+// make these tests prove something about a container Aether never starts.
+func launchEnv(p Profile) map[string]string {
 	env := map[string]string{"TERM": "xterm-256color"}
+	maps.Copy(env, p.Env)
+	return env
+}
+
+func passthroughEnv(p Profile) map[string]string {
+	env := launchEnv(p)
 	for _, k := range p.EnvPassthrough {
 		if v := os.Getenv(k); v != "" {
 			env[k] = v
@@ -210,4 +232,28 @@ func TestSmokeCodexFlags(t *testing.T) {
 			t.Fatalf("codex headless produced no JSON:\n%s", out)
 		}
 	})
+}
+
+// TestSmokeHeadlessNoLogin runs each shipped headless argv with no
+// credentials in the environment and requires the run to die of
+// authentication, never of argument parsing. That is the whole point: a
+// CLI that reached its provider parsed and accepted the template Aether
+// ships, so a vendor tightening the parser fails here instead of in every
+// headless run.
+func TestSmokeHeadlessNoLogin(t *testing.T) {
+	for _, name := range []string{"claude", "codex"} {
+		t.Run(name, func(t *testing.T) {
+			image := smokeImage(t, name)
+			p, ok := Lookup(name)
+			if !ok {
+				t.Fatalf("Lookup(%q) missing", name)
+			}
+			out := runSmoke(t, image, Argv(p.HeadlessArgs, smokeTask), launchEnv(p))
+			assertArgvAccepted(t, name, "headless-no-login", out)
+			lower := strings.ToLower(out)
+			if !slices.ContainsFunc(authFailures[name], func(m string) bool { return strings.Contains(lower, m) }) {
+				t.Fatalf("%s headless with no login did not fail authentication:\n%s", name, out)
+			}
+		})
+	}
 }

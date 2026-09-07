@@ -96,6 +96,11 @@ requires a task.
 | `pi` | `pi {task}` | `pi -p {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
 
+Every `claude` run and terminal also gets `IS_SANDBOX=1`: runs execute as
+root on the standard image, and Claude Code refuses
+`--dangerously-skip-permissions` as root unless the environment says the
+container is a sandbox, which it is ([security.md](security.md)).
+
 These are the vendors' own flags, and vendors rename them and tighten how
 they combine - `claude` now refuses `--output-format stream-json` unless
 `--verbose` comes with it. If a launch fails with the CLI rejecting its own

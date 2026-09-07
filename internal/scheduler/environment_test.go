@@ -93,3 +93,27 @@ func TestBuildEnvironmentPlanRejectsMissingSavedMemberImage(t *testing.T) {
 		t.Fatalf("missing image error = %v, want saved tag and reset command", err)
 	}
 }
+
+// A harness's fixed launch requirement reaches the container and outranks
+// a workspace variable: claude refuses --dangerously-skip-permissions as
+// root unless IS_SANDBOX declares the container a sandbox, so a workspace
+// that unsets it would leave the agent unable to start.
+func TestBuildEnvironmentPlanAppliesHarnessLaunchEnv(t *testing.T) {
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest"}}
+	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{
+		Variables: map[string]string{"IS_SANDBOX": "0"},
+	}}
+	claude, ok := harness.Lookup("claude")
+	if !ok {
+		t.Fatal("claude is not in the registry")
+	}
+	for _, purpose := range []EnvironmentPurpose{EnvironmentPurposeRun, EnvironmentPurposeTerminal} {
+		plan, err := s.BuildEnvironmentPlan(context.Background(), nil, ws, &domain.Member{ID: "member"}, claude, purpose)
+		if err != nil {
+			t.Fatalf("BuildEnvironmentPlan(%q): %v", purpose, err)
+		}
+		if plan.Env["IS_SANDBOX"] != "1" {
+			t.Fatalf("purpose %q IS_SANDBOX = %q, want 1", purpose, plan.Env["IS_SANDBOX"])
+		}
+	}
+}
