@@ -171,10 +171,12 @@ exists to stop a disk from filling, not to stop the server.
 
 ### Agent stall or crash
 
-No agent output and no file changes past `--stall-threshold` parks the run at
-`needs-attention` with a reason that leads with `stalled:`. A crash marks it
-`failed`. Either way the worktree and transcript are preserved and the
-partial work is committed as `wip:`.
+No agent output and no file changes past `--stall-threshold` parks a run at
+`needs-attention` with a reason that leads with `stalled:`. A headless agent
+crash marks the run `failed`; a TUI agent remains inside its run shell so you
+can recover without losing the container. Either way the worktree and
+transcript are preserved and a failed run's partial work is committed as
+`wip:`.
 
 The notification path from there:
 
@@ -183,9 +185,11 @@ The notification path from there:
 - **CLI**: `aether runs` prints a notice when any run is waiting;
   `aether runs --attention` lists only those.
 
-A clean agent exit also parks at `needs-attention` - the results are
-committed and waiting to be looked at - so the badge is "runs that want a
-human", not "runs that broke".
+If the first TUI agent crashes, exits because of a quota, or is interrupted
+with Ctrl-C, the run stays alive in a login shell with the agent's exit status
+printed in the terminal. Start another installed agent in the same checkout,
+or type `exit` to finish the run. Aether then commits the latest work to the
+run's branch and parks it in `needs-attention`.
 
 ### SSH drop mid-attach
 

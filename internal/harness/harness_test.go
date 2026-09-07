@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestRegistryShipsSixProfiles(t *testing.T) {
-	want := []string{"amp", "claude", "codex", "custom", "opencode", "pi"}
+func TestRegistryShipsFiveProfiles(t *testing.T) {
+	want := []string{"claude", "codex", "custom", "opencode", "pi"}
 	var got []string
 	for _, p := range Profiles() {
 		got = append(got, p.Name)
@@ -27,7 +27,6 @@ func TestProfileDefaults(t *testing.T) {
 		"codex":    "--dangerously-bypass-approvals-and-sandbox",
 		"opencode": "", // opencode has no permission prompt flag to bypass
 		"pi":       "", // pi has no permission prompt flag to bypass
-		"amp":      "--dangerously-allow-all",
 	}
 	for name, flag := range autoFlags {
 		p, ok := Lookup(name)
@@ -80,7 +79,6 @@ func TestLocalRootAndDenyNames(t *testing.T) {
 		"codex":    ".codex",
 		"opencode": ".local/share/opencode",
 		"pi":       ".pi",
-		"amp":      ".config/amp",
 		"custom":   "",
 	}
 	for name, root := range wantRoot {
@@ -104,12 +102,12 @@ func TestLocalRootAndDenyNames(t *testing.T) {
 }
 
 // TestSetupHarnesses pins the environment-setup subset: exactly claude,
-// codex, pi, amp, in that order. Later tasks and the dashboard treat this
+// codex, pi, in that order. Later tasks and the dashboard treat this
 // list as the authority on which harnesses may drive environment setup;
 // opencode, custom, and fake stay launchable for runs but are never offered
 // here.
 func TestSetupHarnesses(t *testing.T) {
-	want := []string{"claude", "codex", "pi", "amp"}
+	want := []string{"claude", "codex", "pi"}
 	var got []string
 	for _, p := range SetupHarnesses() {
 		got = append(got, p.Name)
@@ -134,10 +132,10 @@ func TestSetupHarnesses(t *testing.T) {
 	}
 }
 
-// The new setup-capable profiles must carry the same invariants the rest of
-// the registry holds: home-relative credential paths, a deny list covering
-// their token files, and an install script that stays inside ~/.local.
-func TestPiAndAmpProfiles(t *testing.T) {
+// The setup-capable profiles must carry the same invariants the rest of the
+// registry holds: home-relative credential paths, a deny list covering their
+// token files, and an install script that stays inside ~/.local.
+func TestPiProfile(t *testing.T) {
 	pi, ok := Lookup("pi")
 	if !ok {
 		t.Fatal("pi profile missing")
@@ -158,24 +156,7 @@ func TestPiAndAmpProfiles(t *testing.T) {
 		t.Errorf("pi install script %q must pass --ignore-scripts per the vendor's instruction", pi.InstallScript)
 	}
 
-	amp, ok := Lookup("amp")
-	if !ok {
-		t.Fatal("amp profile missing")
-	}
-	if !slices.Equal(amp.EnvPassthrough, []string{"AMP_API_KEY"}) {
-		t.Errorf("amp env passthrough = %v", amp.EnvPassthrough)
-	}
-	// amp keeps settings under ~/.config/amp and XDG data (secrets.json,
-	// state.json) under ~/.local/share/amp; both must persist per member.
-	if !slices.Equal(amp.CredentialPaths, []string{".config/amp", ".local/share/amp"}) {
-		t.Errorf("amp credential paths = %v", amp.CredentialPaths)
-	}
-	for _, denied := range []string{"secrets.json", "state.json"} {
-		if !slices.Contains(amp.DenyNames, denied) {
-			t.Errorf("amp deny names %v missing %q", amp.DenyNames, denied)
-		}
-	}
-	for _, p := range []Profile{pi, amp} {
+	for _, p := range []Profile{pi} {
 		if !strings.Contains(p.InstallScript, "--prefix \"$HOME/.local\"") {
 			t.Errorf("%s install script %q must install into ~/.local", p.Name, p.InstallScript)
 		}

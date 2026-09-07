@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,7 @@ export function LaunchDialog() {
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
   const upsertRun = useStore((s) => s.upsertRun)
+  const runs = useStore((s) => s.runs)
   const self = useStore((s) => s.info?.member)
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [account, setAccount] = useState(self?.id ?? '')
@@ -39,6 +40,13 @@ export function LaunchDialog() {
   const [mode, setMode] = useState<LaunchMode>('tui')
   const [launching, setLaunching] = useState(false)
   const ownAccountID = self?.id ?? accounts[0]?.id
+  const lastUsedHarness = useMemo(() => {
+    const accountID = account || ownAccountID
+    return Object.values(runs)
+      .filter((run) => (run.account_member_id ?? run.member_id) === accountID)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .find((run) => run.harness)?.harness
+  }, [account, ownAccountID, runs])
   // The server's rule: a taskless launch lands the member in the agent's
   // interactive TUI, but headless has no interactive surface, so it needs a
   // task to have anything to do. Say so here rather than sending a request
@@ -71,7 +79,16 @@ export function LaunchDialog() {
       .then((list) => {
         if (!live) return
         setAgents(list)
-        setHarness(list[0]?.name ?? 'custom')
+        const installed = list.filter((agent) => agent.installed !== false)
+        setHarness((current) => {
+          if (current && installed.some((agent) => agent.name === current)) {
+            return current
+          }
+          if (lastUsedHarness && installed.some((agent) => agent.name === lastUsedHarness)) {
+            return lastUsedHarness
+          }
+          return installed[0]?.name ?? 'custom'
+        })
       })
       .catch(() => {
         if (!live) return
@@ -81,7 +98,7 @@ export function LaunchDialog() {
     return () => {
       live = false
     }
-  }, [account, ownAccountID])
+  }, [account, lastUsedHarness, ownAccountID])
 
   const launch = async () => {
     setLaunching(true)
@@ -176,11 +193,13 @@ export function LaunchDialog() {
                 value={harness}
                 onChange={(e) => setHarness(e.target.value)}
               >
-                {(agents ?? []).map((a) => (
-                  <option key={a.name} value={a.name}>
-                    {a.name}
-                  </option>
-                ))}
+                {(agents ?? [])
+                  .filter((a) => a.installed !== false)
+                  .map((a) => (
+                    <option key={a.name} value={a.name}>
+                      {a.name}
+                    </option>
+                  ))}
                 <option value="custom">custom</option>
               </select>
             </label>

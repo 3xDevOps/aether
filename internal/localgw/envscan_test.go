@@ -123,7 +123,7 @@ func TestLocalEnvHarnesses(t *testing.T) {
 	if got.Warning != "" {
 		t.Errorf("warning = %q, want none", got.Warning)
 	}
-	wantNames := []string{"claude", "codex", "pi", "amp"}
+	wantNames := []string{"claude", "codex", "pi"}
 	if len(got.Harnesses) != len(wantNames) {
 		t.Fatalf("harnesses = %+v, want %v", got.Harnesses, wantNames)
 	}

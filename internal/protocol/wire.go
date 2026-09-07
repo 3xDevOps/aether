@@ -417,8 +417,9 @@ type AgentListParams struct {
 
 // AgentInfo is one entry of agent.list; Source is "shipped" or "member".
 type AgentInfo struct {
-	Name   string `json:"name"`
-	Source string `json:"source"`
+	Name      string `json:"name"`
+	Source    string `json:"source"`
+	Installed bool   `json:"installed"`
 	// InstallScript is the shipped harness's vendor install command. It is
 	// empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`

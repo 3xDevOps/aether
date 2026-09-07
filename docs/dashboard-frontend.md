@@ -413,8 +413,12 @@ surface, so the form disables Launch and says why rather than sending a
 request the gateway will refuse (`runLaunch` in `internal/sshd/handlers.go` is
 the same rule). Only what was actually chosen goes on the wire: an empty task
 and the default `tui` mode are the server's own defaults. The harness list
-comes from `agent.list`, plus the always-offered `custom` escape hatch; a name
-the server does not know is refused by the server, not by the form.
+comes from the installed entries in `agent.list`, plus the always-offered
+`custom` escape hatch. `agent.list` reports installation from the selected
+account's persistent `~/.local/bin`; uninstalled shipped entries remain
+visible on the Agents page so setup can install them. The launch form also
+remembers the most recently used installed harness for each account and falls
+back to the first installed entry.
 
 Neither launch form asks which workspace to launch into: both take
 `activeWorkspace` and say where the run will land, naming the workspace and its
@@ -698,8 +702,8 @@ scan.
 Part A lists the setup-capable harnesses from `env.harnesses` against
 `agent.list`, saying for each whether it is installed on this machine and
 whether the server lists that name. The copy states what those two signals
-actually mean - every shipped harness is on `agent.list` whether or not this
-member has logged one in, so the list is not a "set up" badge - and **Set
+actually mean - `agent.list` includes shipped harnesses even when the server
+account has not installed them, so the list is not a "set up" badge - and **Set
 up** embeds the same `AgentWizard` the Agents page uses, driven with the
 harness and workspace already known so it opens the `agent-setup` shell
 without a form. A clean exit refetches `agent.list` and hands the harness to

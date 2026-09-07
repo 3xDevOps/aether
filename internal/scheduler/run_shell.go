@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 var (
@@ -21,6 +23,8 @@ var (
 )
 
 var runShellTabName = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
+
+const runShellRecoveryWait = 5 * time.Second
 
 // EnsureRunShellTab starts an interactive shell process in a running run
 // container unless that tab already has a live PTY session.
@@ -37,15 +41,50 @@ func (s *Scheduler) EnsureRunShellTab(ctx context.Context, run domain.RunID, tab
 		lock = &sync.Mutex{}
 		s.runShellLocks[run] = lock
 	}
-	entry := s.runs[run]
-	if entry == nil || entry.status != domain.RunRunning || entry.paused || entry.containerID == "" {
-		s.mu.Unlock()
-		return fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
-	}
-	containerID := entry.containerID
 	s.mu.Unlock()
 	lock.Lock()
 	defer lock.Unlock()
+
+	var containerID runtime.ID
+	deadline := time.NewTimer(runShellRecoveryWait)
+	defer deadline.Stop()
+	retry := time.NewTicker(50 * time.Millisecond)
+	defer retry.Stop()
+	for {
+		s.mu.Lock()
+		entry := s.runs[run]
+		switch {
+		case entry == nil:
+			s.mu.Unlock()
+			stored, err := s.cfg.Store.GetRun(ctx, run)
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					return fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
+				}
+				return fmt.Errorf("scheduler: find run shell %s: %w", run, err)
+			}
+			if stored.Status != domain.RunRunning {
+				return fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
+			}
+		case entry.status != domain.RunRunning || entry.paused || entry.containerID == "":
+			s.mu.Unlock()
+			return fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
+		default:
+			containerID = entry.containerID
+			s.mu.Unlock()
+			goto live
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
+		case <-retry.C:
+		}
+	}
+
+live:
 
 	key := ptyhost.RunShellSession(run, tab)
 	active := s.cfg.PTY.ActiveSessions(string(ptyhost.RunShellSession(run, "")))

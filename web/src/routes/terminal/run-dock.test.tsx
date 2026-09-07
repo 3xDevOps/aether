@@ -117,4 +117,13 @@ describe('run-shell dock', () => {
     expect(useStore.getState().shellDocks.run_1.tabs).toEqual([])
     view.unmount()
   })
+
+  it('does not offer shell tabs after the run container is gone', () => {
+    const view = mount()
+    act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
+
+    expect(screen.queryByRole('button', { name: 'Open shell' })).toBeNull()
+    expect(screen.getByText(/Run shell unavailable/)).toBeDefined()
+    view.unmount()
+  })
 })

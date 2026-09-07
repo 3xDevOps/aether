@@ -23,7 +23,6 @@ Two rules shape everything below:
 | `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | yes (`--mcp-config`) | by session ID (`--session-id`, `--resume`) | yes |
 | `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | no | no | yes |
 | `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | best effort (`--continue`) | yes |
-| `amp` | Amp | `~/.config/amp`, `~/.local/share/amp` | `~/.config/amp` | `AMP_API_KEY` | no | no | yes |
 | `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | no | no |
 | `fake` | a script you name | - | - | - | no | no | no |
 | `custom` | deployment-supplied | - | - | - | no | no | no |
@@ -33,7 +32,7 @@ or `/home/aether` for a non-root image user).
 
 The **Env setup** column marks harnesses that can participate in onboarding:
 running the local `profile` scan and opening the agent setup shell. Exactly
-claude, codex, pi, and amp qualify; everything else stays launchable for runs
+claude, codex, and pi qualify; everything else stays launchable for runs
 but is not offered in those onboarding flows.
 
 Only harnesses with an **MCP** column of `yes` can be pointed at the in-container
@@ -74,10 +73,14 @@ transcript plus the diff timeline, which is always enough. Adding an adapter is
 
 `--mode tui` (the default) runs the agent's native interactive TUI in a
 persistent server-side PTY: `aether attach <run>` puts you in it from the
-CLI, and the dashboard navigates there automatically on launch. `--mode
-headless` runs its machine-readable mode. Full-permission flags are applied by default in both -
-the agent is in a container, and the container is the boundary
-([security.md](security.md)).
+CLI, and the dashboard navigates there automatically on launch. A successful
+TUI process finishes the run normally. If it exits unsuccessfully, including
+after Ctrl-C, a quota error, or a crash, the run stays alive and returns to a
+login shell in the same container, so you can start another installed agent
+in the same checkout. Type `exit` in that shell to finish the run.
+`--mode headless` runs the agent's machine-readable mode and exits with it.
+Full-permission flags are applied by default in both - the agent is in a
+container, and the container is the boundary ([security.md](security.md)).
 
 The task prompt is optional in tui mode: launch without one and you land in
 the agent's bare interactive TUI, exactly as if you had started the CLI
@@ -91,7 +94,6 @@ requires a task.
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |
 | `pi` | `pi {task}` | `pi -p {task}` |
-| `amp` | `amp --dangerously-allow-all {task}` | `amp --dangerously-allow-all -x {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
 
 These are the vendors' own flags, and vendors rename them. If a launch fails
@@ -177,14 +179,6 @@ Inside `aether terminal`, start the CLI and use its `/login` command to pick
 a provider. Tokens land in `~/.pi/agent/auth.json` under the member home, and
 the token files are excluded from profile sync. `ANTHROPIC_API_KEY` or
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
-
-### Amp
-
-Inside `aether terminal`, run `amp login`, which prints a URL to open in your
-own browser. Settings live under `~/.config/amp` and secrets under
-`~/.local/share/amp`; Aether persists both in the member home and profile sync
-refuses the secret files. `AMP_API_KEY` in the server environment is the
-API-key alternative.
 
 ### opencode
 

@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -245,8 +247,8 @@ func TestHappyPath(t *testing.T) {
 	if run.Worktree != e.git.checkoutPath(run.ID) {
 		t.Fatalf("run.Worktree = %q", run.Worktree)
 	}
-	if got := c.spec.Command; len(got) != 2 || got[0] != "fake-agent" || got[1] != "fix the auth bug" {
-		t.Fatalf("container command = %v", got)
+	if got, want := c.spec.Command, []string{"fake-agent", "fix the auth bug"}; !slices.Equal(got, want) {
+		t.Fatalf("container command = %v, want %v", got, want)
 	}
 	if !c.spec.TTY {
 		t.Fatal("container spec must set TTY")
@@ -319,6 +321,41 @@ func TestHappyPath(t *testing.T) {
 	final := e.waitStoreStatus(t, run.ID, domain.RunMerged)
 	if final.FinishedAt == nil {
 		t.Fatal("terminal run must have FinishedAt")
+	}
+}
+
+func TestHeadlessContainerKeepsTheAgentAsTheMainProcess(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run := &domain.Run{ID: "run-headless", Mode: domain.LaunchHeadless}
+	plan := &EnvironmentPlan{Env: map[string]string{}}
+	spec := e.sched.containerSpec(run, e.member, []string{"agent", "--json"}, plan)
+	if want := []string{"agent", "--json"}; !slices.Equal(spec.Command, want) {
+		t.Fatalf("headless container command = %v, want %v", spec.Command, want)
+	}
+}
+
+func TestPersistentAgentReturnsToTheRunShell(t *testing.T) {
+	command := persistentAgentCommand([]string{"/bin/sh", "-c", "exit 42"})
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Stdin = strings.NewReader("printf 'second agent\n'\nexit\n")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("persistent agent command: %v; output: %s", err, output)
+	}
+	text := string(output)
+	if !strings.Contains(text, "Aether agent exited with status 42") || !strings.Contains(text, "second agent") {
+		t.Fatalf("persistent agent output = %q", text)
+	}
+}
+
+func TestPersistentAgentCleanExitEndsTheContainer(t *testing.T) {
+	command := persistentAgentCommand([]string{"/bin/sh", "-c", "exit 0"})
+	output, err := exec.Command(command[0], command[1:]...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("persistent clean exit: %v; output: %s", err, output)
+	}
+	if strings.Contains(string(output), "Start another agent") {
+		t.Fatalf("clean exit opened the recovery shell: %q", output)
 	}
 }
 

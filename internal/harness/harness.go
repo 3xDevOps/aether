@@ -276,21 +276,6 @@ var profiles = map[string]Profile{
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
 	},
-	"amp": {
-		Name: "amp",
-		// amp takes the message as a trailing positional in interactive
-		// mode and refuses a seeded prompt that collides with one of its
-		// subcommand names; real task prompts contain spaces and never do.
-		TUIArgs:        []string{"amp", "--dangerously-allow-all", TaskPlaceholder},
-		HeadlessArgs:   []string{"amp", "--dangerously-allow-all", "-x", TaskPlaceholder},
-		EnvPassthrough: []string{"AMP_API_KEY"},
-		// Settings live under ~/.config/amp; XDG data (secrets.json,
-		// state.json) under ~/.local/share/amp in the member's home.
-		CredentialPaths: []string{".config/amp", ".local/share/amp"},
-		LocalRoot:       ".config/amp",
-		DenyNames:       []string{"secrets.json", "state.json"},
-		InstallScript:   "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @ampcode/cli",
-	},
 	"opencode": {
 		Name:            "opencode",
 		TUIArgs:         []string{"opencode", "--prompt=" + TaskPlaceholder},
@@ -327,8 +312,8 @@ func Profiles() []Profile {
 // and the deterministic fake harness is a scheduler registration, not a
 // registry profile.
 func SetupHarnesses() []Profile {
-	out := make([]Profile, 0, 4)
-	for _, name := range []string{"claude", "codex", "pi", "amp"} {
+	out := make([]Profile, 0, 3)
+	for _, name := range []string{"claude", "codex", "pi"} {
 		p, ok := profiles[name]
 		if !ok {
 			panic(fmt.Sprintf("harness: setup harness %q missing from the registry", name))

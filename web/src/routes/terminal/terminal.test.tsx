@@ -5,7 +5,7 @@ import '@/routes/terminal'
 import { codeDenied } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { initialTerminal, type TerminalState } from '@/store/terminal'
-import { run } from '@/test/fixtures'
+import { bob, run, serverInfo } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
 vi.mock('@/lib/api', async () => {
@@ -24,7 +24,10 @@ function mount(seed: Partial<TerminalState> = {}) {
   const View = lookupRoute('terminal')
   if (!View) throw new Error('terminal route not registered')
   useStore.getState().upsertRun(run())
-  useStore.setState({ terminals: { run_1: { ...initialTerminal, ...seed } } })
+  useStore.setState({
+    info: serverInfo,
+    terminals: { run_1: { ...initialTerminal, ...seed } },
+  })
   return render(<View params={{ runId: 'run_1' }} />)
 }
 
@@ -60,6 +63,17 @@ describe('terminal view', () => {
 
     expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
     expect(screen.getByText('Take control')).toBeDefined()
+    view.unmount()
+  })
+
+  it('opens another member run as a mirror until they take control', () => {
+    const view = mount()
+    act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
+    attached()
+
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    expect(screen.getByText('Take control')).toBeDefined()
+    expect(screen.queryByText('Steering')).toBeNull()
     view.unmount()
   })
 

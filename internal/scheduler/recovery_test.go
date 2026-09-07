@@ -623,7 +623,7 @@ func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	if launched == nil {
 		t.Fatal("no container for the launched run")
 	}
-	wantLaunch := []string{"claude", "--session-id", session, "--dangerously-skip-permissions", "resume me"}
+	wantLaunch := persistentAgentCommand([]string{"claude", "--session-id", session, "--dangerously-skip-permissions", "resume me"})
 	if !slices.Equal(launched.spec.Command, wantLaunch) {
 		t.Fatalf("launch argv = %v, want the pinned session: %v", launched.spec.Command, wantLaunch)
 	}
@@ -646,7 +646,7 @@ func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	if c == nil {
 		t.Fatal("no container for the relaunched run")
 	}
-	want := []string{"claude", "--resume", session, "--dangerously-skip-permissions", "resume me"}
+	want := persistentAgentCommand([]string{"claude", "--resume", session, "--dangerously-skip-permissions", "resume me"})
 	if !slices.Equal(c.spec.Command, want) {
 		t.Fatalf("relaunch of an interrupted run = %v, want %v", c.spec.Command, want)
 	}
@@ -935,7 +935,7 @@ func TestRelaunchWithoutAPinnedSessionFallsBackToContinue(t *testing.T) {
 	if c == nil {
 		t.Fatal("no container for the relaunched run")
 	}
-	want := []string{"claude", "--continue", "--dangerously-skip-permissions", "resume me"}
+	want := persistentAgentCommand([]string{"claude", "--continue", "--dangerously-skip-permissions", "resume me"})
 	if !slices.Equal(c.spec.Command, want) {
 		t.Fatalf("relaunch without a pinned session = %v, want %v", c.spec.Command, want)
 	}

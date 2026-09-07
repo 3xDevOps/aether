@@ -69,7 +69,7 @@ type Config struct {
 	// half-written checkout is worse than a refused one.
 	MinFreeBytes int64
 	// Harnesses overrides or extends the shipped harness registry
-	// (internal/harness: claude, codex, pi, amp, opencode, custom); "fake"
+	// (internal/harness: claude, codex, pi, opencode, custom); "fake"
 	// (the deterministic e2e agent) is registered here by default. An
 	// override replaces the registry argv but retains the profile's user,
 	// environment passthrough, resume, and coordination settings. Member
@@ -556,6 +556,13 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env["GIT_COMMITTER_NAME"] = member.DisplayName
 	env["GIT_AUTHOR_EMAIL"] = string(member.ID) + "@aether.local"
 	env["GIT_COMMITTER_EMAIL"] = string(member.ID) + "@aether.local"
+	command := argv
+	// The fake harness is a deterministic lifecycle fixture: its exit codes
+	// are assertions in the integration suite, not an installed agent a user
+	// can replace after an interruption.
+	if run.Mode == domain.LaunchTUI && run.Harness != "fake" {
+		command = persistentAgentCommand(argv)
+	}
 	return runtime.Spec{
 		Name:              string(run.ID),
 		Image:             plan.Image,
@@ -564,12 +571,33 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		WorktreeHostPath:  run.Worktree,
 		WorktreeMountPath: s.cfg.WorktreeMount,
 		WorkingDir:        s.cfg.WorktreeMount,
-		Command:           argv,
+		Command:           command,
 		TTY:               true,
 		Mounts:            plan.Mounts,
 		User:              plan.User,
 		CreationKey:       string(run.ID),
 	}
+}
+
+// persistentAgentCommand keeps the run container available after the first
+// agent process exits. The agent still owns the run PTY, but its exit returns
+// the same PTY to a login shell so a member can start another installed agent
+// without losing the run checkout or its shell tabs.
+// The wrapper ignores SIGINT because the PTY sends Ctrl-C to its foreground
+// process group; external commands still receive their normal SIGINT action.
+func persistentAgentCommand(argv []string) []string {
+	const script = `trap ':' INT
+"$@"
+status=$?
+if [ "$status" -eq 0 ]; then
+	exit 0
+fi
+printf '\nAether agent exited with status %s. Start another agent or type exit.\n' "$status"
+if [ -x /bin/bash ]; then
+	exec /bin/bash -l
+fi
+exec /bin/sh -l`
+	return append([]string{"/bin/sh", "-c", script, "aether-agent"}, argv...)
 }
 
 // taskLine reduces a task to its commit-message form: first line only,

@@ -77,7 +77,7 @@ describe('run-shell dock state', () => {
 })
 
 describe('run terminal steering', () => {
-  it('asks to steer on first entry', () => {
-    expect(initialTerminal.write).toBe(true)
+  it('starts as a mirror until the terminal view identifies the owner', () => {
+    expect(initialTerminal.write).toBe(false)
   })
 })
