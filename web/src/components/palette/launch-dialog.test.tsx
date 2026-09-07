@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
-import { run, workspace } from '@/test/fixtures'
+import { alice, run, workspace } from '@/test/fixtures'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -28,6 +28,7 @@ beforeEach(() => {
     paletteRunID: null,
     route: { name: 'board', params: {} },
     runs: {},
+    lastHarnessByAccount: {},
   })
   vi.clearAllMocks()
 })
@@ -64,6 +65,7 @@ describe('launch dialog', () => {
         task: 'rewrite the checkout flow',
       }),
     )
+    expect(useStore.getState().lastHarnessByAccount[alice.id]).toBe('claude')
   })
 
   it('only offers installed agents and remembers the latest one used', async () => {
@@ -77,6 +79,21 @@ describe('launch dialog', () => {
     await open()
 
     expect(screen.queryByRole('option', { name: 'codex' })).toBeNull()
+    await waitFor(() =>
+      expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('myagent'),
+    )
+  })
+
+  it('prefers the remembered installed harness over run history', async () => {
+    useStore.setState({ lastHarnessByAccount: { [alice.id]: 'myagent' } })
+    useStore.getState().upsertRun(run({ harness: 'claude' }))
+    vi.mocked(api.agentList).mockResolvedValue([
+      { name: 'claude', source: 'shipped', installed: true },
+      { name: 'myagent', source: 'member', installed: true },
+    ])
+
+    await open()
+
     await waitFor(() =>
       expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('myagent'),
     )
