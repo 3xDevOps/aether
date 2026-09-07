@@ -202,3 +202,132 @@ func TestAgentListReportsExecutablesInTheMemberHome(t *testing.T) {
 		t.Fatal("codex should not be installed")
 	}
 }
+
+func TestAgentListResolvesContainerSymlinks(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name      string
+		target    string
+		installed bool
+	}{
+		{"root home", "/root/.local/share/claude/versions/test", true},
+		{"non-root home", "/home/aether/.local/share/claude/versions/test", true},
+		{"relative", "../share/claude/versions/test", true},
+		{"directory symlink", "/root/.local/share/alias/test", true},
+		{"symlink then parent", "/root/.local/share/alias/../versions/test", true},
+		{"broken", "/root/.local/share/claude/versions/missing", false},
+		{"directory", "/root/.local/share/claude/versions", false},
+		{"not executable", "/root/.local/share/claude/versions/plain", false},
+		{"loop", "claude", false},
+		{"host absolute path", outside, false},
+		{"relative escape", "../../../../../" + outside[1:], false},
+		{"absolute escape", "/root/../" + outside[1:], false},
+		{"home prefix lookalike", "/root-other/tool", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, member := newAgentTestServer(t)
+			homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.cfg.Homes = homes
+			home, err := homes.Path(member.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, dir := range []string{".local/bin", ".local/share/claude/versions"} {
+				if err := os.MkdirAll(filepath.Join(home, dir), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(home, ".local/share/claude/versions/test"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(tt.target, filepath.Join(home, ".local/bin/claude")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("/root/.local/share/claude/versions", filepath.Join(home, ".local/share/alias")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(home, ".local/share/claude/versions/plain"), []byte("plain"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// A fresh handler must discover an existing installation without registration.
+			s = &Server{cfg: s.cfg}
+			result, perr := s.agentList(context.Background(), member.ID, nil)
+			if perr != nil {
+				t.Fatal(perr)
+			}
+			for _, agent := range result.(protocol.AgentListResult).Agents {
+				if agent.Name == "claude" && agent.Installed != tt.installed {
+					t.Fatalf("claude installed = %v, want %v", agent.Installed, tt.installed)
+				}
+			}
+		})
+	}
+}
+
+func TestAgentListDiscoversSharedAccountInstallations(t *testing.T) {
+	s, owner := newAgentTestServer(t)
+	ctx := context.Background()
+	grantee := &domain.Member{DisplayName: "grantee", TailnetLogin: "grantee@example.com", Role: domain.RoleCollaborator}
+	if err := s.cfg.Store.CreateMember(ctx, grantee); err != nil {
+		t.Fatal(err)
+	}
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Homes = homes
+	home, err := homes.Path(owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(home, ".local/bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(home, "agent-version"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"claude", "mybot"} {
+		if err = os.Symlink("/root/agent-version", filepath.Join(home, ".local/bin", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, perr := callAgentRegister(t, s, owner.ID, validAgentDefinition()); perr != nil {
+		t.Fatal(perr)
+	}
+	raw, err := json.Marshal(protocol.AgentListParams{AccountMemberID: string(owner.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := s.agentList(ctx, grantee.ID, raw); perr == nil || perr.Code != protocol.CodeDenied {
+		t.Fatalf("unshared account discovery = %v, want denied", perr)
+	}
+	if err := s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, perr := s.agentList(ctx, grantee.ID, raw)
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	installed := map[string]bool{}
+	for _, agent := range result.(protocol.AgentListResult).Agents {
+		installed[agent.Name] = agent.Installed
+	}
+	if !installed["claude"] || !installed["mybot"] {
+		t.Fatalf("shared account installations = %v", installed)
+	}
+	result, perr = s.agentList(ctx, grantee.ID, nil)
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	for _, agent := range result.(protocol.AgentListResult).Agents {
+		if agent.Installed || agent.Name == "mybot" {
+			t.Fatalf("owner installation leaked into grantee's own account: %+v", agent)
+		}
+	}
+}

@@ -419,6 +419,8 @@ account's persistent `~/.local/bin`; uninstalled shipped entries remain
 visible on the Agents page so setup can install them. The launch form also
 remembers the most recently used installed harness for each account and falls
 back to the first installed entry.
+A failed list request shows its error. **Refresh harnesses** retries discovery
+after a connection failure or an installation completed in another terminal.
 
 Neither launch form asks which workspace to launch into: both take
 `activeWorkspace` and say where the run will land, naming the workspace and its
@@ -706,8 +708,9 @@ actually mean - `agent.list` includes shipped harnesses even when the server
 account has not installed them, so the list is not a "set up" badge - and **Set
 up** embeds the same `AgentWizard` the Agents page uses, driven with the
 harness and workspace already known so it opens the `agent-setup` shell
-without a form. A clean exit refetches `agent.list` and hands the harness to
-the First run step, which preselects it.
+without a form. Setup confirmation checks `agent.list` for an installed
+executable before handing the harness to the First run step, which preselects
+it. A missing executable or failed request keeps setup open for retry.
 
 Part B (`ProfileImport`) previews each harness configuration on this machine
 with `profile.preview`, showing the category counts and, behind an expander,

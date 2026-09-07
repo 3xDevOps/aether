@@ -51,6 +51,13 @@ function AgentsView() {
             {agents.map((a) => (
               <li key={a.name} className="flex items-center gap-2 px-3 py-2 text-sm">
                 <span className="flex-1 truncate">{a.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {a.installed === true
+                    ? 'Installed'
+                    : a.installed === false
+                      ? 'Not installed'
+                      : 'Installation status unavailable'}
+                </span>
                 <span className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground">
                   {a.source === 'shipped' ? 'shipped' : 'member'}
                 </span>
@@ -63,6 +70,11 @@ function AgentsView() {
             )}
           </ul>
         )}
+        <div>
+          <Button size="sm" variant="outline" onClick={refetch}>
+            Refresh agents
+          </Button>
+        </div>
         {adding ? (
           <AgentWizard
             agents={agents ?? []}

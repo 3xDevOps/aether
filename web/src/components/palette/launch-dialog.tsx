@@ -36,6 +36,8 @@ export function LaunchDialog() {
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [account, setAccount] = useState(self?.id ?? '')
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
+  const [agentError, setAgentError] = useState<string | null>(null)
+  const [agentRefresh, setAgentRefresh] = useState(0)
   const [harness, setHarness] = useState('')
   const [task, setTask] = useState('')
   const [mode, setMode] = useState<LaunchMode>('tui')
@@ -74,10 +76,9 @@ export function LaunchDialog() {
   }, [])
 
   useEffect(() => {
-    // agent.list is the roster this server can run. A failed fetch still
-    // leaves the "custom" escape hatch selectable below.
     let live = true
     setAgents(null)
+    setAgentError(null)
     setHarness('')
     api
       .agentList(account && account !== ownAccountID ? account : undefined)
@@ -95,15 +96,16 @@ export function LaunchDialog() {
           return installed[0]?.name ?? 'custom'
         })
       })
-      .catch(() => {
+      .catch((err) => {
         if (!live) return
         setAgents([])
+        setAgentError(message(err))
         setHarness('custom')
       })
     return () => {
       live = false
     }
-  }, [account, lastUsedHarness, ownAccountID])
+  }, [account, lastUsedHarness, ownAccountID, agentRefresh])
 
   const launch = async () => {
     setLaunching(true)
@@ -220,6 +222,24 @@ export function LaunchDialog() {
               </select>
             </label>
           </div>
+          {agentError && (
+            <p role="alert" className="text-xs text-state-failed">{agentError}</p>
+          )}
+          {!harnessLoading && !agentError && installedAgents.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              No installed agents detected in this account. Install an agent in its
+              environment terminal, then refresh the harness list.
+            </p>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={harnessLoading || launching}
+            onClick={() => setAgentRefresh((current) => current + 1)}
+          >
+            Refresh harnesses
+          </Button>
           {account && account !== ownAccountID && (
             <p className="text-xs text-muted-foreground">
               This run uses the selected member&apos;s environment, agent login,

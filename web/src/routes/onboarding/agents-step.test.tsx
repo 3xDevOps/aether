@@ -242,8 +242,8 @@ describe('agents step', () => {
     )
     await act(async () => {})
 
-    expect(screen.getByText('Agent registered')).toBeDefined()
-    expect(vi.mocked(client.agentList).mock.calls.length).toBe(listCalls + 1)
+    expect(screen.getByText('Agent installed')).toBeDefined()
+    expect(vi.mocked(client.agentList).mock.calls.length).toBe(listCalls + 2)
     expect(onReady).toHaveBeenCalledWith('claude')
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))

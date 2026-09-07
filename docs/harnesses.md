@@ -121,6 +121,13 @@ terminal, and return to the dashboard. The login and executable are in your
 member home, so every container for that member sees them. A member-defined
 name also records a launch definition under that member.
 
+The dashboard's **I've installed and logged in** button checks `agent.list`
+before confirming installation. The Agents page shows **Installed** or
+**Not installed** for your account. These checks verify the executable;
+the agent verifies its vendor login when it starts. Shipped agents need no
+separate registration record. Other members can use the installation only
+after you share your account; see [teams.md](teams.md#agent-accounts).
+
 For an unshipped name the command asks for interactive and headless launch
 templates first (`<name> {task}` and `<name> -p {task}` by default). Install the
 executable into `~/.local/bin` using the vendor's documented procedure, then
