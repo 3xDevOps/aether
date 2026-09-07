@@ -129,6 +129,7 @@ export function agentInfo(over: Partial<AgentInfo> = {}): AgentInfo {
   return {
     name: 'claude',
     source: 'shipped',
+    installed: true,
     install_script: 'curl -fsSL https://claude.ai/install.sh | bash',
     ...over,
   }
@@ -456,7 +457,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
         { name: 'claude', installed: true },
         { name: 'codex', installed: false },
         { name: 'pi', installed: false },
-        { name: 'amp', installed: false },
       ],
       searched: ['/usr/local/bin', '/home/alice/.local/bin'],
       repo_path: '/src/repo',

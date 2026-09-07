@@ -18,6 +18,7 @@ const maxShellTabs = 4
 const shellRefusal = 'You can view this run but not open a shell in it'
 
 export function RunDock({ runID }: { runID: string }) {
+  const run = useStore((s) => s.runs[runID])
   const dock = useStore((s) => s.shellDocks[runID] ?? initialRunShellDock)
   const runDockHeight = useStore((s) => s.runDockHeight)
   const openShellTab = useStore((s) => s.openShellTab)
@@ -29,6 +30,7 @@ export function RunDock({ runID }: { runID: string }) {
   const removeShellTab = useStore((s) => s.removeShellTab)
 
   const activeTab = dock.activeTab
+  const canOpenShell = run?.status === 'running'
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
   const terminalRef = useRef<XtermController['terminal']>(null)
@@ -97,24 +99,29 @@ export function RunDock({ runID }: { runID: string }) {
     return unsubscribe
   }, [activeTab, dock.refusedMessage, removeShellTab, runID, setShellRefused, terminal])
 
-  const tabs = dock.tabs.map((tab) => ({ id: tab, label: tab }))
+  const tabs = canOpenShell ? dock.tabs.map((tab) => ({ id: tab, label: tab })) : []
   const open = () => openShellTab(runID)
   const addDisabled = dock.tabs.length >= maxShellTabs
 
   return (
     <Dock
       tabs={tabs}
-      activeTab={activeTab ?? ''}
+      activeTab={canOpenShell ? activeTab ?? '' : ''}
       onSelectTab={(tab) => selectShellTab(runID, tab)}
-      onAddTab={open}
-      addDisabled={addDisabled}
+      onAddTab={canOpenShell ? open : undefined}
+      addDisabled={addDisabled || !canOpenShell}
       onCloseTab={(tab) => closeShellTab(runID, tab)}
       height={runDockHeight}
       onHeightChange={setRunDockHeight}
       collapsed={dock.collapsed}
       onToggleCollapse={() => setDockCollapsed(runID, !dock.collapsed)}
     >
-      {dock.refusedMessage !== null ? (
+      {!canOpenShell ? (
+        <div className="p-3 text-sm text-muted-foreground">
+          Run shell unavailable: this run has no live container. The Terminal
+          tab replays its recorded output.
+        </div>
+      ) : dock.refusedMessage !== null ? (
         <div className="p-3 text-sm text-muted-foreground">{dock.refusedMessage}</div>
       ) : activeTab === null ? (
         <div className="p-3">

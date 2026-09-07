@@ -715,7 +715,7 @@ needs.
    `steer permission withdrawn`; the SPA reconnects as a read-only mirror.
    A member removed or set back to pending closes with **1008**, reason
    `membership withdrawn`, and the SPA stops reconnecting. The run's
-   terminal session ending - the agent exiting, or a finished run's replay
+   terminal session ending - the run shell exiting, or a finished run's replay
    draining - closes with **1000**, reason `session ended`, and the SPA
    stops reconnecting; any other end closes with **1011**.
 
@@ -732,7 +732,11 @@ The shell starts in `/workspace`. When it exits, the socket closes normally
 with **1000** and the tab name is free to reopen with a fresh shell.
 Closing the socket only detaches: the shell keeps running, still counts
 toward the four-tab cap, and reconnecting the same tab name reattaches to
-it. Every shell ends with the run's container.
+it. Every shell ends with the run's container. An unsuccessful initial TUI
+agent exit returns the session to a login shell, so another installed agent
+can use the same run checkout. A run shell can only be opened while the
+container is live; finished runs expose their recorded terminal output but do
+not create new shell tabs.
 
 ### `GET /ws/terminal?tab=<tab>`
 

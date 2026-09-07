@@ -339,6 +339,8 @@ export interface WorkspaceSelector {
 export interface AgentInfo {
   name: string
   source: 'shipped' | 'member'
+  /** Whether the account's persistent environment contains the executable. */
+  installed?: boolean
   /** Vendor installer command for shipped harnesses, when available. */
   install_script?: string
 }

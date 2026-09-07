@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -83,6 +85,7 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		agents = append(agents, protocol.AgentInfo{
 			Name:          p.Name,
 			Source:        "shipped",
+			Installed:     s.agentInstalled(account, p.TUIArgs[0]),
 			InstallScript: p.InstallScript,
 		})
 	}
@@ -91,10 +94,35 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		return nil, rpcError(serr)
 	}
 	for _, row := range rows {
-		agents = append(agents, protocol.AgentInfo{Name: row.Name, Source: "member"})
+		var def harness.Definition
+		if err := json.Unmarshal(row.Definition, &def); err != nil {
+			return nil, rpcError(fmt.Errorf("decode harness %q definition: %w", row.Name, err))
+		}
+		agents = append(agents, protocol.AgentInfo{
+			Name:      row.Name,
+			Source:    "member",
+			Installed: s.agentInstalled(account, def.Executable),
+		})
 	}
 	// Shipped names and a member's rows are each sorted, but the merged
 	// view must be sorted by name across both sources.
 	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
 	return protocol.AgentListResult{Agents: agents}, nil
+}
+
+// agentInstalled checks the installation location documented by the shipped
+// installers. The member home is mounted at the environment container's
+// HOME, so this check is shared by runs and the environment terminal. A nil
+// home manager is used by narrow handler tests that do not model containers;
+// those tests retain the old roster-only answer.
+func (s *Server) agentInstalled(member domain.MemberID, executable string) bool {
+	if s.cfg.Homes == nil {
+		return true
+	}
+	home, err := s.cfg.Homes.Path(member)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(home, ".local", "bin", executable))
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }

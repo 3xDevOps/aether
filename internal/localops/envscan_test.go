@@ -111,7 +111,6 @@ func TestDetectHarnesses(t *testing.T) {
 		{Name: "claude", Installed: true},
 		{Name: "codex", Installed: false},
 		{Name: "pi", Installed: true},
-		{Name: "amp", Installed: false},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("DetectHarnesses returned %d entries, want %d: %+v", len(got), len(want), got)

@@ -14,7 +14,7 @@ import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/at
 import { RunDock } from '@/routes/terminal/run-dock'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { useCapability, useSelf } from '@/store/hooks'
 import { initialTerminal } from '@/store/terminal'
 
 const connectionLabel: Record<string, string> = {
@@ -35,6 +35,7 @@ function TerminalView({ params }: RouteProps) {
   const state = useStore((s) => s.terminals[runID] ?? initialTerminal)
   const setTerminal = useStore((s) => s.setTerminal)
   const capability = useCapability()
+  const self = useSelf()
 
   const known = run !== undefined
   const attachRef = useRef<Attachment | null>(null)
@@ -68,8 +69,9 @@ function TerminalView({ params }: RouteProps) {
     // A new attach answers for itself: the last one's refusal and steer denial
     // must not decide what this one shows, or a run whose steer was granted in
     // between stays greyed out until a reload.
-    setTerminal(runID, initialTerminal)
-    writeRef.current = initialTerminal.write
+    const ownerSteering = run?.member_id === self.id
+    setTerminal(runID, { ...initialTerminal, write: ownerSteering })
+    writeRef.current = ownerSteering
 
     const attachment = connectAttach(() => api.attachSocket(runID), {
       onData: gate.current.write,
@@ -96,7 +98,7 @@ function TerminalView({ params }: RouteProps) {
       attachment.close()
       attachRef.current = null
     }
-  }, [runID, setTerminal, terminal])
+  }, [run?.member_id, runID, self.id, setTerminal, terminal])
 
   if (!run) {
     return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
@@ -117,7 +119,7 @@ function TerminalView({ params }: RouteProps) {
     <div className="flex h-full flex-col">
       <ViewHeader
         title={runLabel(run)}
-        subtitle={run.branch}
+        subtitle={`${run.harness} · ${run.branch}`}
         actions={<RunActions run={run} />}
       />
       <RunTabs runID={runID} active="terminal" />
@@ -133,11 +135,12 @@ function TerminalView({ params }: RouteProps) {
         <Button
           size="sm"
           variant={state.write ? 'default' : 'outline'}
+          className="relative"
           disabled={state.steerDenied}
           onClick={toggleWrite}
         >
-          {state.write && <span aria-hidden className="steering-signal" />}
           {state.write ? 'Steering' : 'Take control'}
+          {state.write && <span aria-hidden className="steering-signal" />}
         </Button>
         {state.steerDenied && (
           <span className="text-muted-foreground">

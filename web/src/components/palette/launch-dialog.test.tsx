@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
-import { workspace } from '@/test/fixtures'
+import { run, workspace } from '@/test/fixtures'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -27,6 +27,7 @@ beforeEach(() => {
     paletteDialog: 'launch',
     paletteRunID: null,
     route: { name: 'board', params: {} },
+    runs: {},
   })
   vi.clearAllMocks()
 })
@@ -35,6 +36,9 @@ beforeEach(() => {
 async function open() {
   render(<LaunchDialog />)
   await screen.findByRole('option', { name: 'claude' })
+  await waitFor(() =>
+    expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).not.toBe(''),
+  )
 }
 
 function setMode(mode: string) {
@@ -59,6 +63,22 @@ describe('launch dialog', () => {
         harness: 'claude',
         task: 'rewrite the checkout flow',
       }),
+    )
+  })
+
+  it('only offers installed agents and remembers the latest one used', async () => {
+    useStore.getState().upsertRun(run({ harness: 'myagent' }))
+    vi.mocked(api.agentList).mockResolvedValue([
+      { name: 'claude', source: 'shipped', installed: true },
+      { name: 'codex', source: 'shipped', installed: false },
+      { name: 'myagent', source: 'member', installed: true },
+    ])
+
+    await open()
+
+    expect(screen.queryByRole('option', { name: 'codex' })).toBeNull()
+    await waitFor(() =>
+      expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('myagent'),
     )
   })
 

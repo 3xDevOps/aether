@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -57,6 +58,25 @@ func TestEnsureRunShellTabRejectsInvalidAndMissingRuns(t *testing.T) {
 	run, _ := e.launchFake(t, "shell validation")
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "Bad_tab", 80, 24); err == nil || !strings.Contains(err.Error(), "tab") {
 		t.Fatalf("invalid tab error = %v", err)
+	}
+}
+
+func TestEnsureRunShellTabWaitsForRecovery(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "recover shell")
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	delete(e.sched.runs, run.ID)
+	e.sched.mu.Unlock()
+	go func() {
+		time.Sleep(75 * time.Millisecond)
+		e.sched.mu.Lock()
+		e.sched.runs[run.ID] = entry
+		e.sched.mu.Unlock()
+	}()
+
+	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "recovered", 80, 24); err != nil {
+		t.Fatalf("EnsureRunShellTab during recovery: %v", err)
 	}
 }
 

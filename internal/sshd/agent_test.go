@@ -3,12 +3,14 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -162,5 +164,41 @@ func TestAgentListFreshMemberReturnsShippedSet(t *testing.T) {
 	}
 	if got["custom"] {
 		t.Fatal("agentList must exclude the custom escape hatch")
+	}
+}
+
+func TestAgentListReportsExecutablesInTheMemberHome(t *testing.T) {
+	s, member := newAgentTestServer(t)
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Homes = homes
+	home, err := homes.Path(member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, rpcErr := s.agentList(context.Background(), member.ID, nil)
+	if rpcErr != nil {
+		t.Fatalf("agentList: %+v", rpcErr)
+	}
+	list := result.(protocol.AgentListResult)
+	installed := make(map[string]bool, len(list.Agents))
+	for _, agent := range list.Agents {
+		installed[agent.Name] = agent.Installed
+	}
+	if !installed["claude"] {
+		t.Fatal("claude should be installed")
+	}
+	if installed["codex"] {
+		t.Fatal("codex should not be installed")
 	}
 }

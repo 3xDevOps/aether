@@ -22,6 +22,9 @@ terminal turns that layer into your member image so later runs get it; see
 ## Setting up an agent
 
 The dashboard and CLI list the shipped harnesses and member-defined agents.
+The launch form only offers agents whose executable is installed in the
+selected account's `~/.local/bin`; the Agents page still lists uninstalled
+shipped harnesses so you can set them up.
 Choose an agent once:
 
 ```sh

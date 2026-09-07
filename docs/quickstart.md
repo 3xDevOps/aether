@@ -269,8 +269,11 @@ everyone watching sees who said it.
 
 ## 8. Pull the result
 
-When the agent exits, its latest work is committed to the run's branch and the
-run parks in `needs-attention`.
+When the first TUI agent exits unsuccessfully, the run stays alive in a login
+shell. Start another installed agent in the same checkout if needed, then type
+`exit` to finish the run. A successful TUI exit finishes the run directly.
+Aether commits the latest work to the run's branch and parks the run in
+`needs-attention`.
 
 ```sh
 aether pull <run-id>

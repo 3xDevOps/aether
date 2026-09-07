@@ -48,5 +48,4 @@ export const friendly: Record<string, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
   pi: 'pi',
-  amp: 'Amp',
 }
