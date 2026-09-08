@@ -79,18 +79,28 @@ describe('launch dialog', () => {
       workspace_id: workspace.id, harness: 'claude',
     }))
   })
-  it('refuses to launch, and offers setup, when nothing is installed', async () => {
+  it('offers setup, and the pinned custom harness, when nothing is installed', async () => {
     vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
     render(<LaunchDialog />)
 
     await screen.findByText('No agent is installed in this account.')
-    // No dangling field to pick the deployment escape hatch out of.
-    expect(screen.queryByLabelText('Agent')).toBeNull()
-    expect(screen.queryByRole('option', { name: 'custom' })).toBeNull()
+    const agent = screen.getByLabelText('Agent') as HTMLSelectElement
+    // Nothing is picked for the member, so the launch stays blocked.
+    expect(agent.value).toBe('')
+    expect(screen.queryByRole('option', { name: 'claude' })).toBeNull()
     expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(
       true,
     )
     expect(screen.getByRole('button', { name: 'Set up an agent' })).toBeDefined()
+
+    // A deployment can pin "custom" with --harness-definitions, which no
+    // account install can satisfy, so it stays launchable by hand.
+    fireEvent.change(agent, { target: { value: 'custom' } })
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    )
   })
 
   it('sends a local gateway to the onboarding wizard at its Agents step', async () => {
@@ -118,12 +128,14 @@ describe('launch dialog', () => {
     expect(useStore.getState().paletteDialog).toBeNull()
   })
 
-  it('keeps launch disabled when the agent list fails', async () => {
+  it('keeps launch disabled, and setup hidden, when the agent list fails', async () => {
     vi.mocked(api.agentList).mockRejectedValue(new Error('agent.list: connection closed'))
     render(<LaunchDialog />)
 
     expect((await screen.findByRole('alert')).textContent).toBe('agent.list: connection closed')
-    expect(screen.queryByRole('option', { name: 'custom' })).toBeNull()
+    // Setup cannot fix a gateway that did not answer.
+    expect(screen.queryByRole('button', { name: 'Set up an agent' })).toBeNull()
+    expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).toBe('')
     expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(
       true,
     )

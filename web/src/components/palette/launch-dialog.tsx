@@ -17,9 +17,9 @@ import { useCapability } from '@/store/hooks'
 
 // The harness roster comes from agent.list so member-registered agents are
 // launchable, not just the shipped names; shipped and member entries are
-// filtered to installed tools. "custom" is the deployment escape hatch, and
-// it is offered only alongside an installed agent: with nothing installed a
-// launch has no executable to run, so the field is replaced by setup.
+// filtered to installed tools. agent.list never reports "custom" - it is the
+// harness a deployment pins with --harness-definitions rather than a tool in
+// the member's account - so the field offers it unconditionally.
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
@@ -209,24 +209,23 @@ export function LaunchDialog() {
                 ))}
               </select>
             </label>
-            {!noAgents && (
-              <label className="flex-1 space-y-1 text-sm">
-                Agent
-                <select
-                  className={field}
-                  value={harness}
-                  disabled={harnessLoading || launching}
-                  onChange={(e) => setHarness(e.target.value)}
-                >
-                  {installedAgents.map((agent) => (
-                    <option key={agent.name} value={agent.name}>
-                      {agent.name}
-                    </option>
-                  ))}
-                  {installedAgents.length > 0 && <option value="custom">custom</option>}
-                </select>
-              </label>
-            )}
+            <label className="flex-1 space-y-1 text-sm">
+              Agent
+              <select
+                className={field}
+                value={harness}
+                disabled={harnessLoading || launching}
+                onChange={(e) => setHarness(e.target.value)}
+              >
+                <option value="">Choose an agent</option>
+                {installedAgents.map((agent) => (
+                  <option key={agent.name} value={agent.name}>
+                    {agent.name}
+                  </option>
+                ))}
+                <option value="custom">custom</option>
+              </select>
+            </label>
             <label className="flex-1 space-y-1 text-sm">
               Mode
               <select
