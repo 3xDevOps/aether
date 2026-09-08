@@ -754,14 +754,14 @@ The UI slice persists the resume point, the selected workspace and the
 connected repository. The step is stored by name rather than by position, so
 inserting a step - as "Git identity" was - never relocates someone who is
 mid-wizard. The persisted state is versioned, and one migration in
-`web/src/store/index.ts` covers both older shapes: version 0 stored a push
-answer from before the comparison, which matches none of the four states, so
-it is dropped rather than rehydrating a blank panel, and versions 0 and 1
-both stored the resume point as an index, so those numbers are read back as
-the steps they named. Anything it cannot place starts over. Repository is
-where the workspace first becomes load-bearing, so resuming onto it or any
-later step without one falls back to the workspace picker; the steps before
-it resume where they were.
+`web/src/store/index.ts` covers every older shape: versions 0 through 2 stored
+the resume point as an index, so those numbers are read back as the steps they
+named, and versions 0 and 1 stored a Repository answer this build cannot use -
+version 0's predates the comparison states and version 1's carries no link id -
+so it is dropped rather than rehydrating a blank panel. Anything it cannot
+place starts over. Repository is where the workspace first becomes
+load-bearing, so resuming onto it or any later step without one falls back to
+the workspace picker; the steps before it resume where they were.
 
 Hydration reads `link.status` first: a linked local gateway is marked
 onboarded before the redirect decision, so a linked machine never re-enters
@@ -1029,10 +1029,11 @@ typing that survives a late prefill, a field cleared on purpose staying
 empty, the refusal to save half an identity, and a server-info refresh
 landing mid-save without losing either change. The persisted resume point is
 covered from both sides: in the store, a version 0 payload losing its stale
-push answer and nothing else, a version 1 payload keeping its repository
-answer while its step is renamed, every old index mapping to the step it
-named, an unplaceable value starting over, and a name this version wrote
-left alone; in the wizard, every step from Repository on falling back to the
+push answer and nothing else, a version 1 payload losing an answer with no
+link id, a version 2 payload keeping its answer while its step is renamed,
+every old index mapping to the step it named at every version behind this
+one, an unplaceable value starting over, and a payload at this version left
+untouched; in the wizard, every step from Repository on falling back to the
 workspace picker when no workspace survived, the steps before it resuming
 where they were, and a resumed Repository step holding its connected clone
 through a walk back to Workspace and a walk forward past Git identity. The
