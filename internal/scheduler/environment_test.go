@@ -97,7 +97,9 @@ func TestBuildEnvironmentPlanRejectsMissingSavedMemberImage(t *testing.T) {
 // A harness's fixed launch requirement reaches the container and outranks
 // a workspace variable: claude refuses --dangerously-skip-permissions as
 // root unless IS_SANDBOX declares the container a sandbox, so a workspace
-// that unsets it would leave the agent unable to start.
+// that unsets it would leave the agent unable to start. Only runs carry a
+// harness; the environment terminal passes an empty profile and gets none
+// of this.
 func TestBuildEnvironmentPlanAppliesHarnessLaunchEnv(t *testing.T) {
 	s := &Scheduler{cfg: Config{StandardImage: "standard:latest"}}
 	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{
@@ -107,13 +109,11 @@ func TestBuildEnvironmentPlanAppliesHarnessLaunchEnv(t *testing.T) {
 	if !ok {
 		t.Fatal("claude is not in the registry")
 	}
-	for _, purpose := range []EnvironmentPurpose{EnvironmentPurposeRun, EnvironmentPurposeTerminal} {
-		plan, err := s.BuildEnvironmentPlan(context.Background(), nil, ws, &domain.Member{ID: "member"}, claude, purpose)
-		if err != nil {
-			t.Fatalf("BuildEnvironmentPlan(%q): %v", purpose, err)
-		}
-		if plan.Env["IS_SANDBOX"] != "1" {
-			t.Fatalf("purpose %q IS_SANDBOX = %q, want 1", purpose, plan.Env["IS_SANDBOX"])
-		}
+	plan, err := s.BuildEnvironmentPlan(context.Background(), nil, ws, &domain.Member{ID: "member"}, claude, EnvironmentPurposeRun)
+	if err != nil {
+		t.Fatalf("BuildEnvironmentPlan: %v", err)
+	}
+	if plan.Env["IS_SANDBOX"] != "1" {
+		t.Fatalf("IS_SANDBOX = %q, want 1", plan.Env["IS_SANDBOX"])
 	}
 }
