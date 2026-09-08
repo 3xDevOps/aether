@@ -729,9 +729,14 @@ git's push answer, and the fast-forward once one has run - lives on the UI
 slice as `onboardingRepo`, not in the component. Each answer is written onto
 the record as it stands in the store rather than the one captured at render,
 so a push and a fast-forward started from the same screen cannot lose each
-other's result. Returning to the step shows that connected repo with **Use a
-different repository** to go back to the form, prefilled with the old path; a
-blank form there would ask again for a remote that already exists.
+other's result. Each answer also carries the clone it ran against: a member
+who re-points, or picks another workspace, while a request is in flight has
+that answer - and its error - dropped rather than merged onto the repository
+that replaced it, and the new form starts with its own push button rather
+than the old request's spinner. Returning to the step shows that connected
+repo with **Use a different repository** to go back to the form, prefilled
+with the old path; a blank form there would ask again for a remote that
+already exists.
 
 The UI slice persists the current step, the selected workspace and the
 connected repository. The persisted state is versioned: version 0 stored a
