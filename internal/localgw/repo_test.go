@@ -491,3 +491,30 @@ func TestLocalRepoFastForwardRefusesAnEditItWouldOverwrite(t *testing.T) {
 		t.Fatalf("the refused fast-forward moved main to %s, want %s", after, before)
 	}
 }
+
+// The base branch checked out in a second worktree is a local state the
+// member resolves in their own repository, so it answers the same
+// invalid-state refusal as a dirty checkout rather than an internal error.
+func TestLocalRepoFastForwardRefusesABranchHeldByAnotherWorktree(t *testing.T) {
+	g, _, wsID := behindGateway(t)
+	local := g.local.snapshot().Repo
+	before := localGit(t, local, "rev-parse", "main")
+	localGit(t, local, "switch", "-c", "feature")
+	held := filepath.Join(t.TempDir(), "held")
+	localGit(t, local, "worktree", "add", held, "main")
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.fast-forward", pushBody(t, wsID), true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState {
+		t.Fatalf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(perr.Message, held) || !strings.Contains(perr.Message, "merge --ff-only") {
+		t.Fatalf("message does not name the worktree and the fix: %q", perr.Message)
+	}
+	if after := localGit(t, local, "rev-parse", "main"); after != before {
+		t.Fatalf("the refused fast-forward moved main to %s, want %s", after, before)
+	}
+}

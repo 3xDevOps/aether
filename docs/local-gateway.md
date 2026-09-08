@@ -398,6 +398,12 @@ no SSH key is offered and the server requires one, it may create
   (`Your local changes to the following files would be overwritten by
   merge`). `current` reports whether the checkout is on that branch and
   `dirty` reports uncommitted changes afterwards.
+- A `<base>` checked out in one of the repository's linked worktrees is
+  refused instead, with `-32002`: git will not move a branch from outside
+  the worktree holding it, and no other worktree is ever written to. The
+  message names that worktree and the
+  `git -C <worktree> merge --ff-only aether/<base>` that catches it up
+  there. `pull` refuses a run branch held by another worktree the same way.
 - `repo.fast-forward` refuses with `-32002` (invalid state) on the same
   local preconditions as `repo.push`, and in every state but `behind`,
   naming what to do instead: the workspace has no branch named `<base>` yet

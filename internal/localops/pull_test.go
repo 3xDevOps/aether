@@ -216,3 +216,39 @@ func TestPullCommandShapesFetch(t *testing.T) {
 		}
 	}
 }
+
+// A run branch checked out in a second worktree. Git refuses to move it
+// from here, and the double failure that used to produce said nothing a
+// member could act on.
+func TestPullRefusesARunBranchHeldByAnotherWorktree(t *testing.T) {
+	requireGit(t)
+	local, remote := scratchRepos(t, "run-branch")
+	git(t, local, "switch", "-c", "main")
+	git(t, local, "remote", "add", "aether", remote)
+	if _, err := pull(local, remote, "run-branch"); err != nil {
+		t.Fatalf("first pull: %v", err)
+	}
+	before := git(t, local, "rev-parse", "run-branch")
+	other := filepath.Join(t.TempDir(), "held")
+	git(t, local, "worktree", "add", other, "run-branch")
+	if err := writeTestFile(filepath.Join(remote, "second.txt"), "second\n"); err != nil {
+		t.Fatal(err)
+	}
+	git(t, remote, "add", "second.txt")
+	git(t, remote, "commit", "-m", "second")
+
+	_, err := pull(local, remote, "run-branch")
+	if err == nil {
+		t.Fatal("pull moved a branch another worktree has checked out")
+	}
+	if !strings.Contains(err.Error(), other) || !strings.Contains(err.Error(), "merge --ff-only") {
+		t.Fatalf("message does not name the worktree and the fix: %q", err)
+	}
+	// One refusal, not git's two failed attempts pasted together.
+	if strings.Count(err.Error(), "cannot force update") > 1 {
+		t.Fatalf("message repeats git's failure: %q", err)
+	}
+	if got := git(t, local, "rev-parse", "run-branch"); got != before {
+		t.Fatalf("run-branch moved to %s, want %s", got, before)
+	}
+}

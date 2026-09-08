@@ -76,9 +76,16 @@ func pull(repo, url, branch string) (PullResult, error) {
 // wants that; a member's own base branch does not, because its upstream
 // is their real remote and moving it would redirect their next git pull.
 func advanceBranch(repo, branch string, track bool) (bool, string, error) {
+	current := currentBranch(repo) == branch
+	if !current {
+		if held := branchWorktree(repo, branch); held != "" {
+			return false, "", pushRefusal{branch + " is checked out in the worktree at " + held +
+				"; git will not move a branch from outside the worktree that holds it. Switch that worktree to another branch, or run `git -C " +
+				held + " merge --ff-only aether/" + branch + "` there."}
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
 	defer cancel()
-	current := currentBranch(repo) == branch
 	var out []byte
 	var err error
 	if current {
@@ -112,6 +119,31 @@ func advanceBranch(repo, branch string, track bool) (bool, string, error) {
 		return current, string(out), fmt.Errorf("git %s: %w: %s", action, err, strings.TrimSpace(string(out)))
 	}
 	return current, string(out), nil
+}
+
+// branchWorktree names a linked worktree of repo that has branch checked
+// out, or "" when none does. Git refuses `git branch --force` for a
+// branch checked out anywhere in the repository, so the move has to be
+// refused before it is attempted; this repository's own working tree is
+// not one of those, because there the branch is fast-forwarded in place.
+func branchWorktree(repo, branch string) string {
+	out, err := exec.Command("git", "-C", repo, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return ""
+	}
+	self, _ := gitLine(repo, "rev-parse", "--show-toplevel")
+	path := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, "worktree "); ok {
+			path = rest
+			continue
+		}
+		if line == "branch refs/heads/"+branch && path != self {
+			return path
+		}
+	}
+	return ""
 }
 
 func remoteExists(repo, remote string) bool {

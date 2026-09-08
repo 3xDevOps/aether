@@ -323,3 +323,40 @@ func TestFastForwardKeepsTheBranchUpstream(t *testing.T) {
 		t.Fatalf("branch.main.merge = %q", got)
 	}
 }
+
+// A member whose base branch is checked out in a second worktree. Git
+// refuses to move a branch from outside the worktree that holds it, and
+// that is a local state the member resolves, not a server failure.
+func TestFastForwardRefusesABranchHeldByAnotherWorktree(t *testing.T) {
+	requireGit(t)
+	clone, remote, base := seededClone(t)
+	advance(t, remote)
+	git(t, clone, "switch", "-c", "feature")
+	other := filepath.Join(t.TempDir(), "held")
+	git(t, clone, "worktree", "add", other, "main")
+
+	_, err := FastForward(clone, "main")
+	if err == nil {
+		t.Fatal("FastForward moved a branch another worktree has checked out")
+	}
+	if !errors.Is(err, ErrPushPrecondition) {
+		t.Fatalf("err = %v, want a precondition refusal", err)
+	}
+	if !strings.Contains(err.Error(), other) || !strings.Contains(err.Error(), "main") {
+		t.Fatalf("message names neither the worktree nor the branch: %q", err)
+	}
+	// Nothing was created here, so the message must not blame branch
+	// creation, and it must say what the member does next.
+	if strings.Contains(err.Error(), "create local branch") {
+		t.Fatalf("message blames the wrong action: %q", err)
+	}
+	if !strings.Contains(err.Error(), "merge --ff-only") {
+		t.Fatalf("message does not say what to do next: %q", err)
+	}
+	if got := git(t, clone, "rev-parse", "main"); got != base {
+		t.Fatalf("main moved to %s, want %s", got, base)
+	}
+	if got := git(t, other, "rev-parse", "HEAD"); got != base {
+		t.Fatalf("the other worktree moved to %s, want %s", got, base)
+	}
+}
