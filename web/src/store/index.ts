@@ -106,14 +106,16 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 3,
+        version: 4,
         // Every version before 2 stored a Repository step record this build
         // cannot use: version 0's push answer predates the comparison state
         // the step renders, and version 1 has no link id to tell one
         // connection from the next. Dropping it puts the step back on its
         // push offer, which asks the gateway again. Every version before 3
         // stored the resume point as an index, so the number is read back
-        // as the step it meant.
+        // as the step it meant. Every version before 4 has no furthest step:
+        // the resume point is the only evidence of how far the member got,
+        // and without it the header would turn every later step inert.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
@@ -129,6 +131,9 @@ export function createRootStore() {
               typeof step === 'number' && v0OnboardingSteps[step]
                 ? v0OnboardingSteps[step]
                 : onboardingSteps[0]
+          }
+          if (version < 4 && state.onboardingStep) {
+            state.onboardingFurthest = state.onboardingStep
           }
           return state
         },

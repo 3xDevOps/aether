@@ -275,12 +275,34 @@ describe('a persisted store from an older release', () => {
     window.localStorage.removeItem('aether.ui')
   })
 
-  it('leaves a payload at this version untouched', () => {
+  it('reads the furthest step from the resume point it was stored without', () => {
+    // Version 3 has no furthest step. Left at the slice default it would be
+    // Link, and the first backward jump would turn every later step inert.
     window.localStorage.setItem(
       'aether.ui',
       JSON.stringify({ state: { onboardingStep: 'Agents' }, version: 3 }),
     )
-    expect(createRootStore().getState().onboardingStep).toBe('Agents')
+
+    const migrated = createRootStore().getState()
+
+    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingFurthest).toBe('Agents')
+    window.localStorage.removeItem('aether.ui')
+  })
+
+  it('leaves a payload at this version untouched', () => {
+    window.localStorage.setItem(
+      'aether.ui',
+      JSON.stringify({
+        state: { onboardingStep: 'Agents', onboardingFurthest: 'First run' },
+        version: 4,
+      }),
+    )
+
+    const migrated = createRootStore().getState()
+
+    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingFurthest).toBe('First run')
     window.localStorage.removeItem('aether.ui')
   })
 })
