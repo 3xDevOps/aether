@@ -200,15 +200,25 @@ type GitIdentity struct {
 const fallbackGitEmailDomain = "@aether.local"
 
 // GitIdentity returns what commits for this member are authored as: the
-// git name and email they set, each falling back to the display name and
-// the member's aether.local address.
+// git name and email they set, falling back to the display name and the
+// member's aether.local address.
+//
+// Every half is validated here rather than trusted from the row. A display
+// name is member-supplied and never checked - it comes out of the SSH
+// username an invite is redeemed with - and one holding angle brackets
+// would put a second address inside the "Name <email>" form, which git and
+// GitHub both resolve to the first one they see. A member id credits
+// nobody, which is the honest answer; crediting the wrong account is not.
 func (m *Member) GitIdentity() GitIdentity {
-	id := GitIdentity{Name: m.GitName, Email: m.GitEmail}
-	if id.Name == "" {
+	id := GitIdentity{Name: string(m.ID), Email: string(m.ID) + fallbackGitEmailDomain}
+	switch {
+	case ValidGitName(m.GitName):
+		id.Name = m.GitName
+	case ValidGitName(m.DisplayName):
 		id.Name = m.DisplayName
 	}
-	if id.Email == "" {
-		id.Email = string(m.ID) + fallbackGitEmailDomain
+	if ValidGitEmail(m.GitEmail) {
+		id.Email = m.GitEmail
 	}
 	return id
 }
@@ -220,10 +230,16 @@ func (g GitIdentity) String() string { return g.Name + " <" + g.Email + ">" }
 func (g GitIdentity) Trailer() string { return "Co-authored-by: " + g.String() }
 
 // ValidGitName reports whether name is usable as a git author name: no
-// angle brackets, which would break the "Name <email>" form, and no
-// control characters, which would break the trailer's single line.
+// angle brackets, which would put a second address in the "Name <email>"
+// form, no control character, which would break the trailer's single
+// line, and no surrounding space, which git strips anyway.
 func ValidGitName(name string) bool {
-	return name != "" && strings.TrimSpace(name) == name && !strings.ContainsAny(name, "<>\n\r")
+	if name == "" || strings.TrimSpace(name) != name {
+		return false
+	}
+	return !strings.ContainsFunc(name, func(r rune) bool {
+		return r == '<' || r == '>' || isGitControl(r)
+	})
 }
 
 // ValidGitEmail reports whether email is usable as a git author address:
@@ -234,8 +250,15 @@ func ValidGitEmail(email string) bool {
 	if at <= 0 || at == len(email)-1 || strings.Count(email, "@") != 1 {
 		return false
 	}
-	return !strings.ContainsAny(email, " <>\n\r\t")
+	return !strings.ContainsFunc(email, func(r rune) bool {
+		return r == '<' || r == '>' || r == ' ' || isGitControl(r)
+	})
 }
+
+// isGitControl reports whether r is a control character. Git's own author
+// parsing stops at a line break, and the rest would render as escape
+// bytes in every log and trailer that carries the name.
+func isGitControl(r rune) bool { return r < 0x20 || r == 0x7f }
 
 // Terminal is the persistent per-member environment container.
 type Terminal struct {

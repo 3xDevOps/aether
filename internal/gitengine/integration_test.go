@@ -1121,3 +1121,44 @@ func TestDiffWatchPublishesCommitWithoutTreeEvent(t *testing.T) {
 		t.Fatalf("published commit = %s, want %s", payload.Commit, head)
 	}
 }
+
+// A display name is member-supplied and never validated, and git reads the
+// first <...> in an author as the address. A name like
+// "Eve <attacker@evil.com>" would therefore author every commit of that
+// member's runs as an address they do not hold, and GitHub would link it to
+// whoever does. The identity falls back to the member id instead, which
+// credits nobody - the honest answer.
+func TestCommitAllRefusesAForgedDisplayName(t *testing.T) {
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	for i, displayName := range []string{
+		"Eve <attacker@evil.com>",
+		"Eve\nCo-authored-by: Eve <attacker@evil.com>",
+	} {
+		run := domain.RunID(fmt.Sprintf("forge%d", i))
+		checkout, _, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "forged")
+		if err != nil {
+			t.Fatalf("CreateRunCheckout: %v", err)
+		}
+		if werr := os.WriteFile(filepath.Join(checkout, "new.txt"), []byte("hi\n"), 0o644); werr != nil {
+			t.Fatal(werr)
+		}
+		id := (&domain.Member{ID: "m_eve", DisplayName: displayName}).GitIdentity()
+		if _, cerr := e.CommitAll(ctx, run, "wip: forged\n\n"+id.Trailer(), id); cerr != nil {
+			t.Fatalf("CommitAll with display name %q: %v", displayName, cerr)
+		}
+		if got, _ := e.git(ctx, checkout, "log", "-1", "--format=%ae"); got != "m_eve@aether.local" {
+			t.Errorf("display name %q authored the commit as %q", displayName, got)
+		}
+		if got, _ := e.git(ctx, checkout, "log", "-1", "--format=%an"); got != "m_eve" {
+			t.Errorf("display name %q named the author %q", displayName, got)
+		}
+		trailer, _ := e.git(ctx, checkout, "log", "-1", "--format=%(trailers:key=Co-authored-by,valueonly)")
+		if trailer != "m_eve <m_eve@aether.local>" {
+			t.Errorf("display name %q produced the trailer %q", displayName, trailer)
+		}
+	}
+}
