@@ -24,7 +24,7 @@ export interface Binaries {
  * stale binary would test a stale dashboard.
  */
 export function binaries(): Binaries {
-  const dir = process.env.AETHER_E2E_BIN_DIR ?? path.join(repoRoot, 'dist')
+  const dir = path.join(repoRoot, 'dist')
   const found = {
     server: path.join(dir, 'aether-server'),
     cli: path.join(dir, 'aether'),
