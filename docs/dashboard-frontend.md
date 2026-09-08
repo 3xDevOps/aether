@@ -159,11 +159,13 @@ keeps the browser's own chrome.
 It reads the same `window.aetherDesktop` bridge and a `sessionStorage` key, so
 it belongs to a shell window opening rather than to loading: a browser tab
 never sees it, and neither does a reload inside a window already open. It
-leaves as soon as the store reports hydrated - or reports that the hydrate
-failed, so `ConnectionError` is never behind a night sky that never ends -
-after a 600ms minimum that keeps a fast start from flickering. It is
-decoration, so it is `aria-hidden` and announces nothing, and
-`prefers-reduced-motion` skips it entirely.
+leaves as soon as the store reports hydrated or that the hydrate failed, after
+a 600ms minimum that keeps a fast start from flickering, and after 2.5s
+whatever the store says: a socket that hangs reports neither, and the splash
+covers the frameless window's title bar, so nothing else would bring the
+window controls and `ConnectionError` back. It is decoration, so it is
+`aria-hidden` and announces nothing, and `prefers-reduced-motion` skips it
+entirely.
 
 ## Data flow
 
@@ -713,16 +715,18 @@ sub-screen first and leaves the step only from the step's own screen. A step
 with sub-screens takes them as `setup` and `onSetup` rather than keeping them
 in its own state.
 
-The wizard owns that Back button, but every step renders it in the same place:
-the wizard passes it down as a `back` node and each step puts it in its own
-action row, beside Create workspace, Skip for now or Launch. A step as tall as
-Agents with the terminal dock open would otherwise push a control sitting
-under the step content off the bottom of the window.
+The wizard owns that Back button but passes it down as a `back` node, and each
+step puts it in its own action row, beside Create workspace, Skip for now or
+Launch. Those rows stick to the bottom of the wizard's scroller, so a step as
+tall as Agents with the terminal dock open cannot push the way on and the way
+back off screen. The exception is the Repository step before a clone is
+connected, where Back sits in the path form beside **Add remote**; that screen
+is one field long.
 
 In the step header, every step the member has already reached carries a check
-and is a button that jumps back to it, so walking backwards does not strand
-them on a step they cannot leave. The current step and the ones never reached
-are inert text.
+and is a button that jumps to it, forwards as well as back, so walking
+backwards does not strand them on a step they cannot leave. The current step
+and the ones never reached are inert text.
 
 The Git identity step collects the name and email the member's commits are
 authored as, saved on the server with `member.git`. Where the gateway serves
@@ -788,15 +792,18 @@ repo with **Use a different repository** to go back to the form, prefilled
 with the old path; a blank form there would ask again for a remote that
 already exists.
 
-The UI slice persists the resume point, the selected workspace and the
-connected repository. The step is stored by name rather than by position, so
-inserting a step - as "Git identity" was - never relocates someone who is
-mid-wizard. The persisted state is versioned, and one migration in
-`web/src/store/index.ts` covers every older shape: versions 0 through 2 stored
-the resume point as an index, so those numbers are read back as the steps they
-named, and versions 0 and 1 stored a Repository answer this build cannot use -
-version 0's predates the comparison states and version 1's carries no link id -
-so it is dropped rather than rehydrating a blank panel. Anything it cannot
+The UI slice persists the resume point, the furthest step reached, the selected
+workspace, the connected repository and the First run draft; `setOnboarded` and
+navigating away from the wizard clear all five. The step is stored by name
+rather than by position, so inserting a step - as "Git identity" was - never
+relocates someone who is mid-wizard. The persisted state is versioned, and one
+migration in `web/src/store/index.ts` covers every older shape: versions 0
+through 2 stored the resume point as an index, so those numbers are read back
+as the steps they named; versions 0 and 1 stored a Repository answer this build
+cannot use - version 0's predates the comparison states and version 1's carries
+no link id - so it is dropped rather than rehydrating a blank panel; and
+version 3 has no furthest step, so the resume point becomes it, or the first
+backward jump would turn every later step inert. Anything it cannot
 place starts over. Repository is where the workspace first becomes
 load-bearing, so resuming onto it or any later step without one falls back to
 the workspace picker; the steps before it resume where they were.
@@ -903,7 +910,7 @@ button, because a gateway that could not answer is not the same fact as an
 account with nothing installed.
 
 The step's "No agent subscription yet?" note points at the CLI and stays on
-screen in every state; "Prove the plumbing without an agent subscription" in
+screen once a workspace is chosen; "Prove the plumbing without an agent subscription" in
 [quickstart.md](quickstart.md) covers what `fake` is and how to launch it.
 
 ## Update prompts

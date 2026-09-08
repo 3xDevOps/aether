@@ -231,9 +231,9 @@ attaches the server's output to the report.
 | `onboarding-first-run` | Launching the first run on an agent installed into the member's environment home, and watching it reach needs-attention with its work committed; and, with nothing installed, the step offering "Set up an agent" instead of a picker and sending the reader back to Agents |
 | `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through, and the Git identity step reached in both directions between Link and Workspace |
 
-`onboarding-agents`, `onboarding-github` and `onboarding-first-run` need a
-reachable Docker daemon and skip without one, the way the Go suite skips its
-container scenarios. The other four need only git.
+`onboarding-agents`, `onboarding-github` and `onboarding-first-run`'s launch
+scenario need a reachable Docker daemon and skip without one, the way the Go
+suite skips its container scenarios. The rest need only git.
 
 ### Adding a step to the wizard
 
