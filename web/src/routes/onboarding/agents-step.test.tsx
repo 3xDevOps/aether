@@ -786,10 +786,9 @@ describe('the harness the step set up', () => {
     await act(async () => {})
     expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
 
-    // The wizard's own Back is the last one on the page; the setup screen
-    // carries one of its own.
-    const backs = screen.getAllByRole('button', { name: 'Back' })
-    fireEvent.click(backs[backs.length - 1])
+    // One Back, the wizard's: an embedded setup screen has no form of its
+    // own to go back to.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
     // Back to the harness list, still on step four.
     expect(

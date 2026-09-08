@@ -180,15 +180,19 @@ export function AgentWizard({
                 ? 'Saving environment...'
                 : "I've installed and logged in"}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => (harness ? onCancel() : setStep('form'))}
-            disabled={busy}
-          >
-            Back
-          </Button>
+          {/* Embedded with a harness there is no form to go back to, and
+              the host wizard carries the only Back. */}
+          {!harness && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setStep('form')}
+              disabled={busy}
+            >
+              Back
+            </Button>
+          )}
         </div>
       </div>
     )

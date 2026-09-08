@@ -144,7 +144,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           />
         )}
 
-        {(step > 0 || subStep !== '') && (
+        {step > 0 && (
           <button
             type="button"
             className="text-xs text-muted-foreground underline-offset-2 hover:underline"
