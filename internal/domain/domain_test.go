@@ -191,11 +191,39 @@ func TestValidOrigin(t *testing.T) {
 		"ext::sh -c whoami",
 		"file:///srv/git/app.git",
 		"git@github.com/acme/app.git",
+		// scp-like in shape, an ssh option in effect: only the leading-dash
+		// rule stands between this and git running upload-pack of its own.
+		"-upload-pack@evil.example:acme/app.git",
 		"https://example.com/" + strings.Repeat("a", 1024),
 	}
 	for _, url := range invalid {
 		if ValidOrigin(url) {
 			t.Errorf("ValidOrigin(%q) = true, want false", url)
+		}
+	}
+}
+
+// A run pushes to github.com over https, so the SSH spellings of a
+// github.com remote are recorded as the https URL; everything else,
+// including SSH on another host, is recorded as typed.
+func TestNormalizeOrigin(t *testing.T) {
+	const https = "https://github.com/acme/app.git"
+	cases := map[string]string{
+		"git@github.com:acme/app.git":           https,
+		"git@github.com:/acme/app.git":          https,
+		"ssh://git@github.com/acme/app.git":     https,
+		"ssh://github.com/acme/app.git":         https,
+		"ssh://git@github.com:22/acme/app.git":  https,
+		https:                                   https,
+		"ssh://git@github.com:443/acme/app.git": "ssh://git@github.com:443/acme/app.git",
+		"git@gitlab.com:acme/app.git":           "git@gitlab.com:acme/app.git",
+		"ssh://git@gitlab.com/acme/app.git":     "ssh://git@gitlab.com/acme/app.git",
+		"/srv/repo.git":                         "/srv/repo.git",
+		"":                                      "",
+	}
+	for origin, want := range cases {
+		if got := NormalizeOrigin(origin); got != want {
+			t.Errorf("NormalizeOrigin(%q) = %q, want %q", origin, got, want)
 		}
 	}
 }

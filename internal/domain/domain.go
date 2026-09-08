@@ -196,6 +196,35 @@ func ValidOrigin(url string) bool {
 	return scpLikeOrigin.MatchString(url)
 }
 
+// NormalizeOrigin rewrites a github.com origin written in either of git's
+// SSH forms - git@github.com:acme/app.git and
+// ssh://[git@]github.com[:22]/acme/app.git - to
+// https://github.com/acme/app.git. A run authenticates to github.com over
+// https only, so an SSH origin recorded as typed could never be pushed to
+// from a container. Every other origin, an SSH URL on another host
+// included, is returned unchanged: only github.com's https form is known
+// to address the same repository.
+func NormalizeOrigin(origin string) string {
+	var authority, path string
+	if rest, ok := strings.CutPrefix(origin, "ssh://"); ok {
+		var found bool
+		if authority, path, found = strings.Cut(rest, "/"); !found {
+			return origin
+		}
+	} else if scpLikeOrigin.MatchString(origin) {
+		authority, path, _ = strings.Cut(origin, ":")
+	} else {
+		return origin
+	}
+	if _, host, ok := strings.Cut(authority, "@"); ok {
+		authority = host
+	}
+	if strings.TrimSuffix(authority, ":22") != "github.com" {
+		return origin
+	}
+	return "https://github.com/" + strings.TrimPrefix(path, "/")
+}
+
 // Member is a person. Identity is the SSH public key, the tailnet login
 // resolved via Tailscale WhoIs, or both - either may be empty, never both.
 // The color is the stable attribution color used everywhere in the UI.

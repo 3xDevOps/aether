@@ -64,6 +64,28 @@ func TestWorkspaceOrigin(t *testing.T) {
 		t.Fatalf("stored origin = %q, want the rejected call to have changed nothing", stored.Origin)
 	}
 
+	// An SSH clone's origin is recorded as the https URL a run can push to,
+	// and the answer shows the recorded form.
+	var rewritten protocol.WorkspaceOriginResult
+	if err = cc.Call(protocol.MethodWorkspaceOrigin, protocol.WorkspaceOriginParams{
+		WorkspaceID: string(e.ws.ID), Origin: "git@github.com:acme/app.git",
+	}, &rewritten); err != nil {
+		t.Fatalf("scp-like workspace.origin: %v", err)
+	}
+	if rewritten.Workspace.Origin != origin {
+		t.Fatalf("result origin = %q, want the https form %q", rewritten.Workspace.Origin, origin)
+	}
+	stored, err = e.store.GetWorkspace(ctx, e.ws.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if stored.Origin != origin {
+		t.Fatalf("stored origin = %q, want the https form %q", stored.Origin, origin)
+	}
+	if note := waitTimelineNote(t, sub); note != "workspace origin set to "+origin {
+		t.Fatalf("scp-like timeline note = %q", note)
+	}
+
 	var cleared protocol.WorkspaceOriginResult
 	if err := cc.Call(protocol.MethodWorkspaceOrigin, protocol.WorkspaceOriginParams{
 		WorkspaceID: string(e.ws.ID), Origin: "",

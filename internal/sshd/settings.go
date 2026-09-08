@@ -55,8 +55,9 @@ func (s *Server) workspaceSettings(ctx context.Context, member domain.MemberID, 
 
 // workspaceOrigin sets the upstream git URL the workspace's run checkouts
 // push to (collaborator or admin; the guard has already checked Push
-// against the workspace). The change is stamped into the workspace
-// timeline attributed to the caller.
+// against the workspace). This is the one place an origin is normalized,
+// so every caller records the same URL. The change is stamped into the
+// workspace timeline attributed to the caller.
 func (s *Server) workspaceOrigin(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.WorkspaceOriginParams](params)
 	if perr != nil {
@@ -65,11 +66,15 @@ func (s *Server) workspaceOrigin(ctx context.Context, member domain.MemberID, pa
 	if p.WorkspaceID == "" {
 		return nil, invalidParams("workspace_id is required")
 	}
+	// The raw input is what gets validated: normalization would turn an
+	// option-shaped scp form into an innocent https URL, and the caller
+	// should hear that the input was refused.
 	if !domain.ValidOrigin(p.Origin) {
 		return nil, invalidParams("origin must be empty or a git URL (https://, http://, ssh://, git://, an absolute path, or user@host:path)")
 	}
+	origin := domain.NormalizeOrigin(p.Origin)
 	id := domain.WorkspaceID(p.WorkspaceID)
-	if err := s.cfg.Store.SetWorkspaceOrigin(ctx, id, p.Origin); err != nil {
+	if err := s.cfg.Store.SetWorkspaceOrigin(ctx, id, origin); err != nil {
 		return nil, rpcError(err)
 	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, id)
