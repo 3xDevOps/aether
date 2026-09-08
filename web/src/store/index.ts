@@ -75,6 +75,7 @@ export function createRootStore() {
           onboarded: s.onboarded,
           onboardingStep: s.onboardingStep,
           onboardingWorkspace: s.onboardingWorkspace,
+          onboardingRepo: s.onboardingRepo,
         }),
       },
     ),

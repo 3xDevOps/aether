@@ -43,12 +43,19 @@ export function AgentsStep({
   client,
   caps,
   workspace,
+  setup,
+  onSetup,
   onNext,
   onReady,
 }: {
   client: Api
   caps: Capability
   workspace: Workspace | null
+  /** The harness whose setup instructions are open; the step renders
+   * nothing else while they are, and empty is the harness list. The wizard
+   * owns it so Back closes this screen before it leaves the step. */
+  setup: string
+  onSetup: (harness: string) => void
   /** Advances the wizard; every state here can reach it. */
   onNext: () => void
   /** Names the harness whose setup was just confirmed, so the First run
@@ -60,9 +67,6 @@ export function AgentsStep({
   const [repoPath, setRepoPath] = useState<string | undefined>(undefined)
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [agentsError, setAgentsError] = useState<string | null>(null)
-  // The harness whose setup instructions are open; the step renders
-  // nothing else while they are.
-  const [setup, setSetup] = useState<string | null>(null)
   const [done, setDone] = useState<string[]>([])
 
   const loadHarnesses = useCallback(() => {
@@ -126,7 +130,7 @@ export function AgentsStep({
             onReady(setup)
             loadAgents()
           }}
-          onCancel={() => setSetup(null)}
+          onCancel={() => onSetup('')}
         />
         {onward}
       </section>
@@ -142,8 +146,8 @@ export function AgentsStep({
           harness names it can launch - every shipped harness is on that
           list whether or not you have installed and logged one in. Setup
           installs the agent into your environment home, once for every
-          workspace, and it is safe to re-run. When the install is done,
-          press Save environment in the terminal dock so runs get it too.
+          workspace, and it is safe to re-run. Confirming the install saves
+          your environment, so runs start with the agent already there.
         </p>
         {loading && <Skeleton className="h-16 w-full" />}
         {listError && (
@@ -190,7 +194,7 @@ export function AgentsStep({
                       size="sm"
                       variant="outline"
                       aria-label={`Set up ${label}`}
-                      onClick={() => setSetup(h.name)}
+                      onClick={() => onSetup(h.name)}
                     >
                       Set up
                     </Button>

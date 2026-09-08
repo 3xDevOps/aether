@@ -17,13 +17,18 @@ aether terminal stop
 ```
 
 In the dashboard, open the terminal dock on the run board. The first open starts
-the environment. The dock reconnects and replays terminal output when the page
-or network reconnects. The stream ack identifies the replay byte count, so the
+the environment; the dock says **Starting your environment container** until
+the shell attaches, and shows the server's own error if the start fails. Later
+tabs and tab switches reach a container that is already up, so those say
+**Connecting to your environment**. The dock reconnects and replays terminal
+output when the page or network reconnects. The stream ack identifies the replay byte count, so the
 dashboard mutes terminal-generated replies until that scrollback is parsed.
 Closing a tab only detaches it; opening that tab again reattaches to its shell.
 
 The Agents setup step uses the same dock and types the install command for you.
-Complete the vendor login there, then return to the wizard.
+Complete the vendor login there, then return to the wizard. Its **I've
+installed and logged in** button runs `env save` for you, so that step does
+not need the **Save environment** button below.
 
 ## Sign in to agents
 

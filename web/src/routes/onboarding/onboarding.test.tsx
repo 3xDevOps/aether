@@ -3,7 +3,13 @@ import type { Api } from '@/lib/api'
 import type { GatewayCapabilities } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { useStore, type RootState } from '@/store'
-import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
+import {
+  alice,
+  fakeApi,
+  otherWorkspace,
+  serverInfo,
+  workspace,
+} from '@/test/fixtures'
 
 // The local gateway's descriptor: full method map, event and attach sockets,
 // plus the client-machine verbs the wizard rides on.
@@ -33,6 +39,7 @@ function seed(extra: Partial<RootState> = {}) {
     onboarded: false,
     onboardingStep: 0,
     onboardingWorkspace: '',
+    onboardingRepo: null,
     ...extra,
   })
 }
@@ -324,6 +331,53 @@ describe('onboarding wizard', () => {
     expect(
       screen.getByLabelText<HTMLInputElement>('Push command').value,
     ).toBe('git push -u aether main')
+  })
+
+  it('remembers the connected repository when the user walks back to it', async () => {
+    const client = fakeApi()
+    await toPushChoice(client)
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+    await screen.findByText(/Pushed/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByRole('region', { name: 'Agents' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+
+    // The connected state, not the blank form: the remote is already
+    // written and the push already happened.
+    expect(await screen.findByRole('region', { name: 'Repository' })).toBeDefined()
+    expect(screen.queryByLabelText('Repository path')).toBeNull()
+    expect(screen.getByText('/home/alice/code/myproject')).toBeDefined()
+    expect(screen.getByText(/Pushed/)).toBeDefined()
+    expect(client.localLinkRepo).toHaveBeenCalledTimes(1)
+
+    // Re-pointing is the way back to the form, with the old path to edit.
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a different repository' }),
+    )
+    expect(
+      screen.getByLabelText<HTMLInputElement>('Repository path').value,
+    ).toBe('/home/alice/code/myproject')
+  })
+
+  it('forgets the connected repository when the workspace changes', async () => {
+    // A remote points at one workspace. Changing the workspace after
+    // connecting leaves that answer stale, and the new one is unseeded.
+    const client = fakeApi()
+    await toPushChoice(client)
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+    await screen.findByText(/Pushed/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: `Use ${otherWorkspace.name}` }),
+    )
+
+    expect(await screen.findByRole('region', { name: 'Repository' })).toBeDefined()
+    expect(screen.getByLabelText<HTMLInputElement>('Repository path').value).toBe('')
+    expect(screen.queryByText('ssh://alice@host:2222/wsp_1')).toBeNull()
+    expect(screen.queryByText(/Pushed/)).toBeNull()
+    expect(client.localLinkRepo).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to the copy-paste push when the gateway cannot push', async () => {
