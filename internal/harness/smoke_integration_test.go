@@ -15,31 +15,66 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// Real-harness smoke tests: launch each shipped profile's actual CLI in
-// both modes and verify the flags are accepted and output flows. They
-// need images with the real agent CLIs installed (and login state for
-// subscription harnesses), so each is gated on an env var naming its
-// image: AETHER_SMOKE_IMAGE_CLAUDE, AETHER_SMOKE_IMAGE_CODEX,
-// AETHER_SMOKE_IMAGE_OPENCODE. Unset = skipped,
-// so plain `make test-integration` on a Docker-only host still passes;
-// CI provides the images.
+// Real-harness smoke tests: launch each shipped profile's actual CLI and
+// verify the argv Aether ships is still the argv that CLI accepts. Each is
+// gated on an env var naming an image, and there are two kinds:
+//
+//   - AETHER_SMOKE_IMAGE_<NAME> carries the CLI *and that harness's login
+//     state*, so the agent can be driven far enough to produce output. No
+//     public CI job has those credentials; run these by hand.
+//   - AETHER_SMOKE_IMAGE_<NAME>_NOLOGIN carries the CLI and nothing else.
+//     TestSmokeHeadlessNoLogin needs exactly that - it asserts the run dies
+//     of missing credentials rather than of argument parsing - so this is
+//     the one CI sets, from the image built by images/smoke/Dockerfile.
+//
+// Unset = skipped, so plain `make test-integration` on a Docker-only host
+// still passes. See docs/testing.md to run them locally.
 
 const smokeTask = "Reply with exactly the word pong and nothing else."
 
-func smokeImage(t *testing.T, name string) string {
+// smokeImage resolves one gate variable. It returns false rather than
+// skipping so a caller can decide whether a missing image skips the whole
+// test: a parent whose every subtest skipped must report skipped, not the
+// PASS that hid this suite's absence from CI.
+func smokeImage(name, suffix string) (string, bool) {
+	img := os.Getenv("AETHER_SMOKE_IMAGE_" + strings.ToUpper(name) + suffix)
+	return img, img != ""
+}
+
+func requireSmokeImage(t *testing.T, name string) string {
 	t.Helper()
-	img := os.Getenv("AETHER_SMOKE_IMAGE_" + strings.ToUpper(name))
-	if img == "" {
-		t.Skipf("AETHER_SMOKE_IMAGE_%s unset; real-harness smoke needs an image with the %s CLI", strings.ToUpper(name), name)
+	img, ok := smokeImage(name, "")
+	if !ok {
+		t.Skipf("AETHER_SMOKE_IMAGE_%s unset; real-harness smoke needs an image with the %s CLI and its login state", strings.ToUpper(name), name)
 	}
 	return img
 }
 
 // runSmoke launches argv in image on a TTY and returns the first chunk of
-// output, failing if the process produces nothing before the deadline
-// (unknown flags make these CLIs exit immediately with a usage error,
-// which shows up in the output and fails the assertion in the caller).
+// output, giving up once the output settles: a TUI never exits, so
+// quiescence is the only way back. A CLI that refuses its arguments has
+// already printed the refusal by then.
 func runSmoke(t *testing.T, image string, argv []string, env map[string]string) string {
+	t.Helper()
+	out, _ := smokeRun(t, image, argv, env, false)
+	return out
+}
+
+// runSmokeToExit reads argv's output to the end and returns it with the
+// process exit code. Every headless launch exits on its own, and only by
+// waiting for that is the code meaningful - stopping at quiescence would
+// report "still running" whenever an agent paused mid-answer for longer
+// than the quiet window.
+func runSmokeToExit(t *testing.T, image string, argv []string, env map[string]string) (string, int) {
+	t.Helper()
+	return smokeRun(t, image, argv, env, true)
+}
+
+// exitStillRunning is the code reported for a process that had not exited
+// when smokeRun stopped reading it.
+const exitStillRunning = -1
+
+func smokeRun(t *testing.T, image string, argv []string, env map[string]string, waitForExit bool) (string, int) {
 	t.Helper()
 	d, err := runtime.NewDocker(runtime.WithLabels(map[string]string{"aether.test": t.Name()}))
 	if err != nil {
@@ -87,27 +122,37 @@ func runSmoke(t *testing.T, image string, argv []string, env map[string]string) 
 			}
 		}
 	}()
-	// Accumulate until the stream ends, the output settles (2s quiet after
-	// the first chunk), or the overall deadline hits. TUIs never exit, so
-	// quiescence is the normal path.
 	var b strings.Builder
 	first := time.After(2 * time.Minute)
 	for {
+		// Quiescence only ends the read when the caller is not waiting for
+		// an exit code; 2s after the first chunk is enough for a CLI that
+		// refuses its arguments to have said so.
 		var quiet <-chan time.Time
-		if b.Len() > 0 {
+		if b.Len() > 0 && !waitForExit {
 			quiet = time.After(2 * time.Second)
 		}
 		select {
 		case chunk, ok := <-chunks:
 			if !ok {
-				return b.String()
+				// The stream closed, so the process is gone and Wait
+				// returns its code without blocking.
+				status, waitErr := d.Wait(ctx, id)
+				if waitErr != nil {
+					t.Fatalf("Wait: %v", waitErr)
+				}
+				return b.String(), status.Code
 			}
-			b.WriteString(chunk)
-			if b.Len() >= 32<<10 {
-				return b.String()
+			// Keep draining past the cap so a chatty agent still reaches
+			// its exit rather than stalling on a full pipe.
+			if b.Len() < 32<<10 {
+				b.WriteString(chunk)
+			}
+			if b.Len() >= 32<<10 && !waitForExit {
+				return b.String(), exitStillRunning
 			}
 		case <-quiet:
-			return b.String()
+			return b.String(), exitStillRunning
 		case <-first:
 			t.Fatal("no output before deadline")
 		case <-ctx.Done():
@@ -120,21 +165,42 @@ func runSmoke(t *testing.T, image string, argv []string, env map[string]string) 
 // unknown flag is only half of it: a parser also refuses a combination of
 // flags it understands individually, which is how Claude Code started
 // rejecting "--output-format stream-json" without "--verbose" and broke
-// every headless claude run.
+// every headless claude run. Three CLIs written in three languages phrase
+// this three ways and none of them promises to keep its wording, so the
+// list is broad on purpose: a phrasing added early costs nothing, and a
+// missing one costs a release.
 var argvRejections = []string{
-	"unknown option", "unknown flag", "unrecognized argument",
+	"unknown option", "unknown flag", "unknown argument", "unknown command",
+	"unrecognized argument", "unrecognized option", "invalid option",
 	"unexpected argument", "no such option", "usage:",
-	"requires --", "only works with --",
+	"flag provided but not defined",
+	// A refused flag combination, which is how Claude Code broke every
+	// headless run, and how opencode says it: yargs prints its whole help
+	// table and no error sentence at all, so the help table is the error.
+	"requires --", "only works with --", "show help",
 }
 
-// authFailures are how a harness reports reaching its provider without
-// credentials. Reaching authentication proves the CLI accepted the argv
-// and started work. opencode is absent on purpose: it resolves provider
-// credentials from several places and can succeed with no login of its
-// own, so there is nothing to assert.
-var authFailures = map[string][]string{
-	"claude": {"authentication_failed", "not logged in", "invalid api key"},
-	"codex":  {"401", "unauthorized"},
+// noLoginProof is what a harness must show, with no credentials anywhere,
+// to prove it accepted the shipped argv and got as far as real work. A
+// refused command line shows none of it.
+type noLoginProof struct {
+	// output holds substrings, any one of which is that proof.
+	output []string
+	// cleanExit accepts a zero exit code as the same proof, for a harness
+	// that can finish the task with no login at all.
+	cleanExit bool
+}
+
+// Claude Code and codex must authenticate, so being turned away by the
+// provider is the proof: only a CLI that parsed its argv gets that far.
+// opencode needs no login of its own - it answers from a bundled provider -
+// so it proves the same thing by finishing, or, when that provider is
+// unreachable, by still printing the session header it prints only once the
+// command is accepted.
+var noLoginProofs = map[string]noLoginProof{
+	"claude":   {output: []string{"authentication_failed", "not logged in", "invalid api key"}},
+	"codex":    {output: []string{"401", "unauthorized"}},
+	"opencode": {output: []string{"> build"}, cleanExit: true},
 }
 
 // assertArgvAccepted fails when the harness rejected its flags: every
@@ -153,7 +219,7 @@ func assertArgvAccepted(t *testing.T, name, mode, output string) {
 }
 
 func smokeBothModes(t *testing.T, name string, env map[string]string) {
-	image := smokeImage(t, name)
+	image := requireSmokeImage(t, name)
 	p, ok := Lookup(name)
 	if !ok {
 		t.Fatalf("Lookup(%q) missing", name)
@@ -217,7 +283,7 @@ func TestSmokeOpencode(t *testing.T) {
 // Codex flags are verified independently of the shared harness: its
 // headless mode must emit JSON lines, pinning `exec --json`.
 func TestSmokeCodexFlags(t *testing.T) {
-	image := smokeImage(t, "codex")
+	image := requireSmokeImage(t, "codex")
 	p, _ := Lookup("codex")
 	env := passthroughEnv(p)
 
@@ -234,25 +300,37 @@ func TestSmokeCodexFlags(t *testing.T) {
 	})
 }
 
-// TestSmokeHeadlessNoLogin runs each shipped headless argv with no
-// credentials in the environment and requires the run to die of
-// authentication, never of argument parsing. That is the whole point: a
-// CLI that reached its provider parsed and accepted the template Aether
-// ships, so a vendor tightening the parser fails here instead of in every
-// headless run.
+// TestSmokeHeadlessNoLogin is the drift guard: it runs each shipped
+// headless argv against the current CLI with no credentials at all and
+// requires the run to fail for want of a login, never for want of a
+// parseable command line. A vendor tightening its parser fails here instead
+// of in every run.
+//
+// It is the one smoke test CI can run, because it is the one that needs no
+// login state; .github/workflows/ci.yml builds images/smoke/Dockerfile and
+// points the _NOLOGIN variables at it.
 func TestSmokeHeadlessNoLogin(t *testing.T) {
-	for _, name := range []string{"claude", "codex"} {
+	names := slices.Sorted(maps.Keys(noLoginProofs))
+	if !slices.ContainsFunc(names, func(n string) bool { _, ok := smokeImage(n, "_NOLOGIN"); return ok }) {
+		t.Skip("no AETHER_SMOKE_IMAGE_*_NOLOGIN set; the argv drift guard needs an image with the agent CLIs and no credentials (docs/testing.md)")
+	}
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
-			image := smokeImage(t, name)
-			p, ok := Lookup(name)
+			image, ok := smokeImage(name, "_NOLOGIN")
 			if !ok {
+				t.Skipf("AETHER_SMOKE_IMAGE_%s_NOLOGIN unset", strings.ToUpper(name))
+			}
+			p, found := Lookup(name)
+			if !found {
 				t.Fatalf("Lookup(%q) missing", name)
 			}
-			out := runSmoke(t, image, Argv(p.HeadlessArgs, smokeTask), launchEnv(p))
+			want := noLoginProofs[name]
+			out, exit := runSmokeToExit(t, image, Argv(p.HeadlessArgs, smokeTask), launchEnv(p))
 			assertArgvAccepted(t, name, "headless-no-login", out)
 			lower := strings.ToLower(out)
-			if !slices.ContainsFunc(authFailures[name], func(m string) bool { return strings.Contains(lower, m) }) {
-				t.Fatalf("%s headless with no login did not fail authentication:\n%s", name, out)
+			started := slices.ContainsFunc(want.output, func(m string) bool { return strings.Contains(lower, m) })
+			if !started && !(want.cleanExit && exit == 0) {
+				t.Fatalf("%s headless with no login never got past its own argument parsing (exit %d):\n%s", name, exit, out)
 			}
 		})
 	}
