@@ -372,12 +372,8 @@ export const api = {
     call<{ member: Member }>('member.color', { color }).then((r) => r.member),
   /** Sets the git identity commits made in this member's runs are authored
    * as. An empty name or email clears that half back to the fallback. */
-  memberGit: (name: string, email: string, memberID?: string) =>
-    call<{ member: Member }>('member.git', {
-      member_id: memberID,
-      name,
-      email,
-    }).then((r) => r.member),
+  memberGit: (name: string, email: string) =>
+    call<{ member: Member }>('member.git', { name, email }).then((r) => r.member),
   /** Sets another member's role; admin only, and never the last admin. */
   memberRole: (memberID: string, role: Member['role']) =>
     call<{ member: Member }>('member.role', { member_id: memberID, role }).then(
