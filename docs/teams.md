@@ -93,16 +93,17 @@ aether member role 01m04mqes1z7wsdk4s90tx0pgg viewer
 set 01m04mqes1z7wsdk4s90tx0pgg dana to viewer
 ```
 
-`member list`, `member approve`, `member color`, `member role` and `member
-remove` are the member surface. Two rules hold no matter what you type. **The
-last admin can neither be removed nor demoted** - `refusing to delete the last
-admin` and `refusing to demote the last admin` - because a server with no admin
-has no way back. **A role change lands on connections that are already open**,
-not at next login: the role is re-read from the store on every request, so a
-demotion takes effect mid-session. A live write attach is re-checked every few
-seconds and dropped when steer goes away - `detached: you can no longer steer
-this run` - and `aether attach --read-only` still shows the terminal
-afterwards. Removing a member ends every attach and live sync of theirs.
+`member list`, `member approve`, `member color`, `member git`, `member role`
+and `member remove` are the member surface. Two rules hold no matter what you
+type. **The last admin can neither be removed nor demoted** - `refusing to
+delete the last admin` and `refusing to demote the last admin` - because a
+server with no admin has no way back. **A role change lands on connections
+that are already open**, not at next login: the role is re-read from the
+store on every request, so a demotion takes effect mid-session. A live write
+attach is re-checked every few seconds and dropped when steer goes away -
+`detached: you can no longer steer this run` - and `aether attach
+--read-only` still shows the terminal afterwards. Removing a member ends
+every attach and live sync of theirs.
 
 Setting someone to the role they already hold is a harmless no-op, and a
 pending member's role can be changed before they are approved - approval and
@@ -265,17 +266,29 @@ onboarding wizard and shown or changed with `aether member git`. The agent
 in a run container commits with the run owner's identity, and the commits
 Aether makes itself when a run finishes, is killed, or is recovered are
 authored as the run owner with Aether as the committer. A member who has set
-no identity keeps the fallback: their display name at
-`<member-id>@aether.local`, which maps to no upstream account.
+no identity keeps the fallback: their display name, or their member id when
+the display name cannot be a git author name, at `<member-id>@aether.local`,
+which maps to no upstream account.
 
-Whoever else steers a run is credited as a co-author of it. Injecting a
-message or typing into one of a run's terminals adds that member, once, to
-the run's steerers; every commit Aether makes for the run then ends with one
-`Co-authored-by:` trailer per steerer. The run's own agent gets the same list
-in `/run/aether/co-authors` and is told in its task prompt to end its commits
-and pull requests with those lines - see
+Whoever else steers a run is credited as a co-author of it. Steering is
+injecting a message or typing into the run's own agent terminal - a shell
+tab in the run's container is not steering - and it adds that member, once,
+to the run's steerers. Every commit Aether makes for the run then ends with
+one `Co-authored-by:` trailer per steerer, deduplicated by address, so two
+members sharing one address produce a single line. The run's own agent gets
+the same list in `/run/aether/co-authors` and is told in its task prompt to
+end its commits and pull requests with those lines - see
 [coordination.md](coordination.md). The run owner is the author, never their
-own co-author, and a handoff moves that line with the ownership.
+own co-author. A handoff swaps those two roles: the incoming owner becomes
+the author and leaves the trailers, the outgoing owner joins the steerers,
+and `/run/aether/co-authors` is rewritten so the agent credits the same
+people the branch does.
+
+One limitation. Changing a git identity while a run is live refreshes that
+run's `/run/aether/co-authors`, but the container's `GIT_AUTHOR_*` and
+`GIT_COMMITTER_*` are fixed when the container is created, so the agent's own
+commits in that run keep the identity it started with. Later runs use the new
+one.
 
 ### Conflict radar
 

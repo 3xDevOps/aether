@@ -35,6 +35,17 @@ Revoking a grant blocks later launches and relaunches. It does not stop an
 already-running container or remove the home mounted into it. Stop those runs
 before revoking access when immediate removal matters.
 
+Real names and email addresses cross into the container with the run. The
+run owner's git identity is in the container's `GIT_AUTHOR_*` and
+`GIT_COMMITTER_*`, and `/run/aether/co-authors` holds one
+`Co-authored-by: Name <email>` line per member who steered the run, readable
+by the agent like any other file under the coordination mount. That is what
+makes the commits worth anything: a merged branch credits a real account only
+if it carries that account's address. An operator who does not want a
+member's address inside run containers leaves that member's git identity
+unset, which keeps the synthetic `<member-id>@aether.local` fallback and
+credits nobody upstream.
+
 ### Hostile agents
 
 If you run agents you do not trust, put the `--data-dir` on a filesystem
@@ -111,9 +122,10 @@ stances are these.
   gets its own socket at `/run/aether/coord2.sock`; whoever connects on it *is*
   that run. There is nothing inside the container to steal, and nothing to
   rotate. The host-side modes (`0700` on the coordination root, `0755` on the
-  per-run directory, `0666` on the socket, `0444` on the config, `0555` on the
-  staged binary) are a contract with a semi-trusted container that may not run
-  as root - they are not the access control. Both container paths are reserved:
+  per-run directory, `0666` on the socket, `0444` on the config and the
+  co-author list, `0555` on the staged binary) are a contract with a
+  semi-trusted container that may not run as root - they are not the access
+  control. Both container paths are reserved:
   `runtime.ValidateMounts` refuses any caller-supplied mount that targets or
   nests under them, so a credential home cannot shadow either.
 - **The socket exposes three methods and no control verbs.** `coord.status`,

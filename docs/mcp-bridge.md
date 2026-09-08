@@ -15,6 +15,7 @@ framing anywhere.
 /opt/aether/aether-server   read-only  the staged bridge binary
 /run/aether/                read-only  the run's coordination directory
 /run/aether/coord2.sock                the socket the bridge dials (wire v2)
+/run/aether/co-authors      read-only  the trailers to end commits with
 ```
 
 Both are Aether-owned container paths. `runtime.ValidateMounts` refuses any

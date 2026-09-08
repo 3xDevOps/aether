@@ -24,14 +24,18 @@ its content belongs to the harness registry (`mcp-bridge.md`).
 
 `co-authors` holds one `Co-authored-by: Name <email>` line per member other
 than the run's owner who has steered the run - injected a message, or typed
-into one of its terminals. The agent is told in its task prompt to read
-`/run/aether/co-authors` before each commit and to end every commit message,
-and the description of any pull request it opens, with exactly those lines.
-The file is created empty at provision and rewritten each time someone new
-steers, so an agent re-reads it rather than caching it. Like `mcp.json` it is
-read-only in the container: who is credited is the server's answer, not the
-agent's. The same trailers go on the commits Aether makes itself at run end,
-so the branch is credited whether or not the agent cooperated - see
+into the run's own agent terminal. The agent is told in its task prompt to
+read `/run/aether/co-authors` before each commit and to end every commit
+message, and the description of any pull request it opens, with exactly those
+lines; a missing or empty file means it adds none, so a run whose
+provisioning failed asks the agent for nothing. The file is created empty at
+provision and rewritten each time someone new steers and on every handoff -
+which adds the outgoing owner and drops the incoming one - so an agent
+re-reads it rather than caching it. Each rewrite is a temp file and a rename,
+so a reader never catches the path missing. Like `mcp.json` it is read-only
+in the container: who is credited is the server's answer, not the agent's.
+The same trailers go on the commits Aether makes itself at run end, so the
+branch is credited whether or not the agent cooperated - see
 [teams.md](teams.md).
 
 The per-run directory is what the container sees (at `/run/aether`), and
