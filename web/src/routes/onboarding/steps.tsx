@@ -30,7 +30,7 @@ const field =
  * of reach is the reason Back moved here.
  */
 export const actionRow =
-  'sticky bottom-0 z-10 -mx-4 flex gap-2 border-t bg-background px-4 py-3'
+  'sticky bottom-0 z-10 -mx-4 -mb-4 flex gap-2 border-t bg-background px-4 pb-7 pt-3'
 
 // Raw command output - git's, and gh's on the Connect GitHub screen:
 // scrollable, wrapped, never truncated.
@@ -808,9 +808,20 @@ export function FirstRunStep({
         if (!live) return
         const installed = list.filter((a) => a.installed === true)
         setAgents(installed)
-        if (defaultHarness && installed.some((a) => a.name === defaultHarness)) {
-          setDraft({ ...useStore.getState().onboardingFirstRun, harness: defaultHarness })
-        }
+        // The draft is persisted, so it can name an agent this account no
+        // longer has: an offer the picker cannot show and the server would
+        // refuse. What the member chose wins over the one the Agents step
+        // just set up.
+        const current = useStore.getState().onboardingFirstRun
+        const kept = installed.some((a) => a.name === current.harness)
+          ? current.harness
+          : ''
+        const harness =
+          kept ||
+          (defaultHarness && installed.some((a) => a.name === defaultHarness)
+            ? defaultHarness
+            : '')
+        if (harness !== current.harness) setDraft({ ...current, harness })
       })
       .catch((err) => {
         if (!live) return

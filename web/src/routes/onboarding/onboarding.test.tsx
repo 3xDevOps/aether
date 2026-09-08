@@ -14,6 +14,7 @@ import type {
   RepoPushState,
 } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
+import { FirstRunStep } from '@/routes/onboarding/steps'
 import { useStore, type RootState } from '@/store'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 import {
@@ -1269,11 +1270,55 @@ describe('onboarding wizard', () => {
   })
 
   it('leaves a step it has never reached inert in the header', () => {
-    seed()
+    seed({ onboardingStep: 'Git identity', onboardingFurthest: 'Workspace' })
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
     const steps = screen.getByLabelText('Steps')
-    expect(within(steps).queryAllByRole('button')).toHaveLength(0)
+    const names = within(steps)
+      .getAllByRole('button')
+      .map((chip) => chip.getAttribute('aria-label'))
+
+    expect(names).toEqual([
+      '1. Link, done - go to this step',
+      '3. Workspace, done - go to this step',
+    ])
+  })
+
+  it('drops a draft agent this account no longer has installed', async () => {
+    // The draft is persisted, so it outlives the account that could run it.
+    seed({ onboardingFirstRun: { harness: 'claude', task: 'write a result file' } })
+    const client = fakeApi({
+      agentList: vi.fn(async () => [
+        agentInfo({ installed: false }),
+        agentInfo({ name: 'codex', installed: true }),
+      ]),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe('')
+    })
+    expect(useStore.getState().onboardingFirstRun.harness).toBe('')
+    expect(
+      screen.getByRole('button', { name: 'Launch' }),
+    ).toHaveProperty('disabled', true)
+  })
+
+  it('keeps the agent the member picked over the one Agents set up', async () => {
+    seed({ onboardingFirstRun: { harness: 'myagent', task: 'write a file' } })
+    render(
+      <FirstRunStep
+        client={fakeApi()}
+        workspace={workspace}
+        defaultHarness="claude"
+        onBackToAgents={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe('myagent')
+    })
   })
 
   it('keeps the first run draft when the header jumps away and back', async () => {
