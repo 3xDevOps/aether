@@ -639,6 +639,30 @@ describe('onboarding wizard', () => {
     expect(useStore.getState().linkStatus?.repo).toBe('/src/repo')
     const cmd = screen.getByLabelText<HTMLInputElement>('Push command')
     expect(cmd.value).toContain('git push -u aether')
+    // This clone had no pushable origin to record, so the step claims none.
+    expect(screen.queryByText(/Runs push to/)).toBeNull()
+  })
+
+  it('names the upstream origin the link recorded', async () => {
+    const client = fakeApi({
+      localLinkRepo: vi.fn(async () => ({
+        repo: '/src/repo',
+        remote: 'aether',
+        url: 'ssh://alice@host:2222/wsp_1',
+        origin: 'https://github.com/acme/app.git',
+      })),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toRepoStep()
+
+    fireEvent.change(await screen.findByLabelText('Repository path'), {
+      target: { value: '/home/alice/code/myproject' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+
+    expect(await screen.findByText(/Runs push to/)).toBeDefined()
+    expect(screen.getByText('https://github.com/acme/app.git')).toBeDefined()
   })
 
   /** Adds the remote, leaving the step on its push choices. */

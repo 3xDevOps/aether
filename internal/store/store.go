@@ -49,6 +49,10 @@ type Store interface {
 	// field untouched.
 	SetWorkspaceSteerOthers(ctx context.Context, id domain.WorkspaceID, steerOthers string) error
 
+	// SetWorkspaceOrigin sets only the workspace's upstream git URL,
+	// leaving every other field untouched. "" clears it.
+	SetWorkspaceOrigin(ctx context.Context, id domain.WorkspaceID, origin string) error
+
 	CreateMember(ctx context.Context, m *domain.Member) error
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetMemberByPublicKey(ctx context.Context, publicKey string) (*domain.Member, error)

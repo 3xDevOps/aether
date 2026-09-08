@@ -681,14 +681,16 @@ gateway serves the client-machine verbs (the capability descriptor lists
 `link.status`); a remote monitor gets an explanatory empty state instead of a
 broken wizard. Link, Workspace, Repository and First run live in `steps.tsx`;
 Git identity is `git-identity-step.tsx`, and Agents is `agents-step.tsx` with
-its second half in `profile-import.tsx`.
+its GitHub part in `github-connect.tsx` and its configuration import in
+`profile-import.tsx`.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
-whichever step has sub-screens. The Agents step's setup screen is the only
-one today, and the wizard holds it, so **Back** closes an open sub-screen
-first and leaves the step only from the step's own screen. A step with
-sub-screens takes them as `setup` and `onSetup` rather than keeping them in
-its own state.
+whichever step has sub-screens. The Agents step owns both of today's - a
+harness's setup screen, named by the harness, and the GitHub connect screen,
+named `@github` - and the wizard holds the name, so **Back** closes an open
+sub-screen first and leaves the step only from the step's own screen. A step
+with sub-screens takes them as `setup` and `onSetup` rather than keeping them
+in its own state.
 
 The Git identity step collects the name and email the member's commits are
 authored as, saved on the server with `member.git`. Where the gateway serves
@@ -704,6 +706,10 @@ button. The gateway compares the clone's base branch with the workspace's
 copy before pushing and answers with one of four states, so the second
 member to join a workspace reads what happened instead of git's
 `! [rejected] main -> main (fetch first)`.
+
+When `link.repo` answers an `origin`, the connected line adds `Runs push to
+<origin>`: the upstream a run pushes to, the same one `aether link --repo`
+prints. A link that recorded none says nothing about one.
 
 `pushed` names the branch that landed; `up-to-date` names the commit the
 workspace already has. Both keep git's output in a "What git did" panel,
@@ -773,7 +779,7 @@ The Link step distinguishes no configured server, a server with no repository,
 and a fully linked server. It refreshes on Retry and when the window regains
 focus, so a separate `aether link` command appears without restarting the GUI.
 
-The Agents step has two optional halves and never blocks: **Skip for now**
+The Agents step has three optional parts and never blocks: **Skip for now**
 is reachable from every state, including an open setup shell and a failed
 scan.
 
@@ -792,6 +798,35 @@ running container is not in the image runs start from. The done screen names
 the saved image. A missing executable, a failed check or a failed save keeps
 setup open for retry with the real error. The vendor login is not checkable
 from here, and the copy says so.
+
+Between the two, `github-connect.tsx` connects the member's GitHub account.
+The closed `<section aria-label="Connect GitHub">` says what a connection
+buys - runs push branches and open pull requests as the member, and commits
+are signed with a key kept in their environment home - and **Connect GitHub**
+opens the sub-screen. The sub-screen mounts the same `TerminalDock` the setup
+screen uses, with `initialLine` set to `gh auth login --hostname github.com
+--git-protocol https --web --scopes admin:ssh_signing_key`, echoes that
+command in a code block for anyone who would rather type it, and says what
+that login looks like from inside a container: gh asks the member to press
+Enter to open a browser and then reports that it could not open one, so the
+member presses Enter, ignores the failure and opens the printed URL with the
+one-time code. **I've logged in** calls `github.connect`, which does the
+non-interactive rest on the server; success names the account and the
+signing key's fingerprint, and **Close** returns to the step, which then
+reads "Connected in this session as `<login>`" - the connection is React
+state that a reload loses, said the way the agent rows say "Set up in this
+session". A connection counts the way a set-up agent does for the step's
+primary **Continue**. Server refusals - most often "not logged in to
+github.com in the environment terminal" - render verbatim in the same
+monospace pane the Repository step gives git's output, because gh's answer
+runs to several lines, and leave the screen open to retry.
+
+Where the gateway serves no terminal socket the screen gives the CLI path
+and nothing else: `aether terminal`, the same `gh auth login`, then `aether
+github connect`. There is no **I've logged in** button there - with no
+terminal to log in through, the whole flow is the CLI's. The login command
+itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
+assert one string.
 
 Part B (`ProfileImport`) previews each harness configuration on this machine
 with `profile.preview`, showing the category counts and, behind an expander,
@@ -1038,7 +1073,10 @@ workspace picker when no workspace survived, the steps before it resuming
 where they were, and a resumed Repository step holding its connected clone
 through a walk back to Workspace and a walk forward past Git identity. The
 Agents step tests setup-capable harness detection, the live terminal dock,
-the environment save that follows a confirmed install, profile previews and
+the environment save that follows a confirmed install, the GitHub connect
+screen - the login command reaching the dock, the account and fingerprint it
+reports, a refusal rendered verbatim, the CLI path without a terminal socket,
+and Back closing it without leaving the step - profile previews and
 exclusions, profile recommendations, cancellation,
 secret and plugin guards, push refusals, and the optional skip paths. The diff
 tab covers the parser on the shapes that would break it - a deletion, a new

@@ -390,7 +390,7 @@ func TestCheckoutGC(t *testing.T) {
 		if err := e.db.CreateRun(ctx, r); err != nil {
 			t.Fatalf("CreateRun: %v", err)
 		}
-		path, _, err := e.git.CreateRunCheckout(ctx, e.ws.ID, r.ID, "main", task)
+		path, _, err := e.git.CreateRunCheckout(ctx, e.ws.ID, r.ID, "main", task, "")
 		if err != nil {
 			t.Fatalf("CreateRunCheckout: %v", err)
 		}

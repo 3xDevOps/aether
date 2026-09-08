@@ -119,7 +119,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, err
 	}
 	defer s.finishPending(next.ID, pending)
-	checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, next.ID, old.Branch, next.Task)
+	checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, next.ID, old.Branch, next.Task, ws.Origin)
 	if err != nil {
 		s.failRelaunch(next, actor, fmt.Errorf("create checkout: %w", err))
 		return nil, err

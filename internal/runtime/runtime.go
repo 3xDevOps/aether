@@ -231,6 +231,14 @@ type Runtime interface {
 	// exit 126/127 surfaces as *ExecExitError so callers can retry with
 	// /bin/sh -l.
 	ExecTTY(ctx context.Context, id ID, argv []string, workDir string, cols, rows uint) (Attachment, error)
+	// Exec runs argv to completion inside a running container without a
+	// TTY and reports its exit code, stdout and stderr. The
+	// process runs as the container's configured user with the
+	// container's environment. A nonzero exit is reported in exitCode,
+	// not as an error; err covers only failures to run the process at
+	// all - including a command whose output passes the 1 MiB the two
+	// streams share, which is refused rather than buffered.
+	Exec(ctx context.Context, id ID, argv []string, workDir string) (exitCode int, stdout, stderr string, err error)
 	// Wait blocks until the main process exits and reports its exit code.
 	Wait(ctx context.Context, id ID) (ExitStatus, error)
 	// FindByCreationKey returns the container created with

@@ -23,8 +23,9 @@ import type { OnboardingRepo } from '@/store/ui'
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
-// Raw git output: scrollable, wrapped, never truncated.
-const pane =
+// Raw command output - git's, and gh's on the Connect GitHub screen:
+// scrollable, wrapped, never truncated.
+export const pane =
   'max-h-64 overflow-x-auto overflow-y-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
 
 const short = (commit: string) => commit.slice(0, 7)
@@ -544,6 +545,12 @@ export function RepoStep({
             Remote <span className="font-mono">{connected.remote.remote}</span>{' '}
             points at{' '}
             <span className="font-mono">{connected.remote.url}</span>.{' '}
+            {connected.remote.origin && (
+              <>
+                Runs push to{' '}
+                <span className="font-mono">{connected.remote.origin}</span>.{' '}
+              </>
+            )}
             {pushed?.state === 'pushed' && (
               <>
                 Pushed <span className="font-mono">{pushed.branch}</span> to{' '}

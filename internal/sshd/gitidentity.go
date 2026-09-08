@@ -45,5 +45,24 @@ func (s *Server) memberGit(ctx context.Context, member domain.MemberID, params j
 	// pick this up; its GIT_AUTHOR_* cannot - that is baked into the
 	// container at creation.
 	s.cfg.Runs.RefreshMemberCoAuthors(ctx, target)
+	if rerr := s.refreshHomeGitIdentity(ctx, m); rerr != nil {
+		return nil, rpcError(rerr)
+	}
 	return protocol.MemberGitResult{Member: protocol.MemberFromDomain(m)}, nil
+}
+
+// refreshHomeGitIdentity rewrites the identity in the member home's
+// .gitconfig after they change it. Only a member who has connected GitHub
+// has one: the file is written by that flow, and rewriting it for anyone
+// else would create settings pointing at a signing key that does not
+// exist.
+func (s *Server) refreshHomeGitIdentity(ctx context.Context, m *domain.Member) error {
+	if s.cfg.Homes == nil {
+		return nil
+	}
+	has, err := s.cfg.Homes.HasSigningKey(m.ID)
+	if err != nil || !has {
+		return err
+	}
+	return s.cfg.Homes.ConfigureGit(ctx, m.ID, m.GitIdentity())
 }

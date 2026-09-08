@@ -151,7 +151,7 @@ func TestListCheckoutSkipsMissingAndSymlinkLeaves(t *testing.T) {
 	gitFileTest(t, source, "add", "-A")
 	gitFileTest(t, source, "commit", "-q", "-m", "seed")
 	gitFileTest(t, source, "push", "-q", repo, "main")
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "list files")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "list files", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestReadFileRunCheckoutShowsUncommittedEdit(t *testing.T) {
 	gitFileTest(t, source, "commit", "-q", "-m", "seed")
 	gitFileTest(t, source, "push", "-q", repo, "main")
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "read files")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "read files", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestListTreeAndFileDiff(t *testing.T) {
 		t.Fatalf("ListTree pkg = %+v", entries)
 	}
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "diff files")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "diff files", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}

@@ -15,12 +15,17 @@ ghcr.io/3xdevops/aether-standard:<tag>
 ```
 
 Its contents are pinned in `images/standard/Dockerfile`: Ubuntu 24.04 with
-bash, build-essential, certificates, curl, findutils, Git, grep, jq,
-pkg-config, Python 3 with venv, ripgrep, sudo, unzip, Go, Node and npm via
-fnm, uv, and Rust via rustup. The server selects this image through
-`--standard-image`; the default is the image matching the server build. Teams
-that need a shared baseline can publish their own image and point
-`--standard-image` at it.
+bash, build-essential, certificates, curl, findutils, Git, the GitHub CLI,
+grep, jq, the OpenSSH client, pkg-config, Python 3 with venv, ripgrep, sudo,
+unzip, Go, Node and npm via fnm, uv, and Rust via rustup. The server selects
+this image through `--standard-image`; the default is the image matching the
+server build. Teams that need a shared baseline can publish their own image
+and point `--standard-image` at it.
+
+The image ships `gh` and `ssh-keygen` for GitHub's sake: connecting GitHub
+in the environment terminal and signing commits inside a run need them, so
+nothing has to be installed first. A team publishing its own standard image
+should keep both.
 
 Workspace creation does not choose an image. The command needs only the
 workspace name and, optionally, its base branch:
@@ -34,9 +39,9 @@ aether workspace init <name> --base <branch>
 
 Open the environment terminal with `aether terminal` or from the dashboard's
 terminal dock. This is where a member installs system tools and language
-runtimes, for example with `sudo apt-get install -y gh`, Homebrew, or a
-language toolchain. The terminal is a persistent shell with the member home
-mounted at `$HOME`.
+runtimes, for example with `sudo apt-get install -y postgresql-client`,
+Homebrew, or a language toolchain. The terminal is a persistent shell with
+the member home mounted at `$HOME`.
 
 Until the environment is saved, only the member home is shared with runs. The
 container layer outside `$HOME` belongs to that terminal container and is not

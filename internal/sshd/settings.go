@@ -12,6 +12,7 @@ import (
 
 func init() {
 	registerGuarded(protocol.MethodWorkspaceSettings, permissions.WorkspaceAdmin, nil, (*Server).workspaceSettings)
+	registerGuarded(protocol.MethodWorkspaceOrigin, permissions.Push, workspaceTarget, (*Server).workspaceOrigin)
 	registerGuarded(protocol.MethodRunProtect, permissions.Protect, runTarget, (*Server).runProtect)
 }
 
@@ -50,6 +51,49 @@ func (s *Server) workspaceSettings(ctx context.Context, member domain.MemberID, 
 		},
 	})
 	return protocol.WorkspaceSettingsResult{Workspace: protocol.WorkspaceFromDomain(ws)}, nil
+}
+
+// workspaceOrigin sets the upstream git URL the workspace's run checkouts
+// push to (collaborator or admin; the guard has already checked Push
+// against the workspace). This is the one place an origin is normalized,
+// so every caller records the same URL. The change is stamped into the
+// workspace timeline attributed to the caller.
+func (s *Server) workspaceOrigin(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.WorkspaceOriginParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.WorkspaceID == "" {
+		return nil, invalidParams("workspace_id is required")
+	}
+	// The raw input is what gets validated: normalization would turn an
+	// option-shaped scp form into an innocent https URL, and the caller
+	// should hear that the input was refused.
+	if !domain.ValidOrigin(p.Origin) {
+		return nil, invalidParams("origin must be empty or a git URL (https://, http://, ssh://, git://, an absolute path, or user@host:path)")
+	}
+	origin := domain.NormalizeOrigin(p.Origin)
+	id := domain.WorkspaceID(p.WorkspaceID)
+	if err := s.cfg.Store.SetWorkspaceOrigin(ctx, id, origin); err != nil {
+		return nil, rpcError(err)
+	}
+	ws, err := s.cfg.Store.GetWorkspace(ctx, id)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	note := "workspace origin cleared"
+	if ws.Origin != "" {
+		note = "workspace origin set to " + ws.Origin
+	}
+	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
+		WorkspaceID: ws.ID,
+		ActorID:     member,
+		Payload: events.TimelinePayload{
+			Kind:    events.TimelineNote,
+			Message: note,
+		},
+	})
+	return protocol.WorkspaceOriginResult{Workspace: protocol.WorkspaceFromDomain(ws)}, nil
 }
 
 // runProtect toggles a run's protected flag (owner or admin; the guard has

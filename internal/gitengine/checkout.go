@@ -97,7 +97,13 @@ func (e *Engine) checkBranchName(ctx context.Context, branch string) error {
 // works identically inside the run container) and creates the run branch
 // from baseBranch. Errors if baseBranch has no commits or the checkout
 // already exists.
-func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, task string) (checkoutPath, branch string, err error) {
+//
+// A non-empty origin repoints the clone's `origin` remote at the
+// workspace's upstream, so a push or a pull request from inside the run
+// reaches it. The clone leaves origin pointing at the server-side bare
+// repo path, which does not exist inside the run container; an empty
+// origin leaves that as git made it.
+func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, task, origin string) (checkoutPath, branch string, err error) {
 	repo, err := e.existingRepoPath(ws)
 	if err != nil {
 		return "", "", err
@@ -146,6 +152,12 @@ func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 		if _, err := e.git(ctx, checkoutPath, "config", key, val); err != nil {
 			cleanup()
 			return "", "", err
+		}
+	}
+	if origin != "" {
+		if _, err := e.git(ctx, checkoutPath, "remote", "set-url", "origin", origin); err != nil {
+			cleanup()
+			return "", "", fmt.Errorf("gitengine: point run %s origin at %s: %w", run, origin, err)
 		}
 	}
 	if err := e.writeRunMeta(run, runMeta{Base: base, Branch: branch, Workspace: ws}); err != nil {
@@ -233,7 +245,8 @@ func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceI
 
 // CommitAll stages and commits everything in the run's checkout, authored
 // as author and committed as Aether. Returns "", nil when the tree is
-// clean; a zero author leaves Aether as both.
+// clean; a zero author leaves Aether as both. A non-empty signingKey is
+// the OpenSSH private key the commit is signed with.
 //
 // The checkout - .git included - is agent-writable, so anything in it
 // that names a command to run is hostile input that must never execute
@@ -242,7 +255,14 @@ func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceI
 // worktree so a planted .gitattributes cannot select a clean filter, and
 // .git/info/attributes (which GIT_ATTR_SOURCE does not override) is
 // removed outright - it is plumbing no agent legitimately writes.
-func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity) (commit string, err error) {
+//
+// Signing is decided here for the same reason, key or no key: a planted
+// commit.gpgsign=true with gpg.ssh.program pointing into the worktree
+// would have git run that program as the server. Every one of the three
+// settings is therefore passed on the command line, which outranks the
+// checkout's config, and the key itself is copied to a private temp file
+// - never named at a path inside the checkout or the member home.
+func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (commit string, err error) {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return "", err
@@ -276,7 +296,21 @@ func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string
 	// The committer is Aether - this commit is the server's act - while the
 	// author is the member the run belongs to, so the branch credits a
 	// person. A run whose owner cannot be resolved keeps Aether as both.
-	args := []string{"-c", "user.name=Aether", "-c", "user.email=aether@localhost", "commit", "-m", message}
+	args := []string{
+		"-c", "user.name=Aether", "-c", "user.email=aether@localhost",
+		"-c", "gpg.format=ssh", "-c", "gpg.ssh.program=ssh-keygen",
+	}
+	if len(signingKey) > 0 {
+		keyPath, cleanup, keyErr := writeTempSigningKey(signingKey)
+		if keyErr != nil {
+			return "", keyErr
+		}
+		defer cleanup()
+		args = append(args, "-c", "user.signingkey="+keyPath, "-c", "commit.gpgsign=true")
+	} else {
+		args = append(args, "-c", "commit.gpgsign=false")
+	}
+	args = append(args, "commit", "-m", message)
 	if author.Name != "" && author.Email != "" {
 		args = append(args, "--author="+author.String())
 	}
@@ -284,6 +318,27 @@ func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string
 		return "", err
 	}
 	return git("rev-parse", "HEAD")
+}
+
+// writeTempSigningKey copies key into a private file of the server's own
+// so ssh-keygen has a path to read it from. The returned cleanup removes
+// it; callers defer it so the key never outlives the commit.
+func writeTempSigningKey(key []byte) (path string, cleanup func(), err error) {
+	f, err := os.CreateTemp("", "aether-signing-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("gitengine: stage signing key: %w", err)
+	}
+	cleanup = func() { _ = os.Remove(f.Name()) }
+	if _, err := f.Write(key); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("gitengine: stage signing key: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("gitengine: stage signing key: %w", err)
+	}
+	return f.Name(), cleanup, nil
 }
 
 // PublishRunBranch fetches the run's branch from its checkout into the

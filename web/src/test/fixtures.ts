@@ -299,6 +299,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     terminalStop: vi.fn(async () => ({})),
     envSave: vi.fn(async () => ({ image: 'aether/member-1:123' })),
     envReset: vi.fn(async () => ({})),
+    githubConnect: vi.fn(async () => ({
+      login: 'octocat',
+      signing_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI aether mbr_1',
+      fingerprint: 'SHA256:9wPnHRtG0DPQNo8VYbC2mSczRRRUYY7NoLgTHTAlYFA',
+    })),
     terminalSocket: vi.fn(
       (tab: string) => `ws://localhost/ws/terminal?tab=${encodeURIComponent(tab)}`,
     ),

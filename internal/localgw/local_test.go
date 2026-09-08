@@ -370,7 +370,7 @@ func TestLocalLinkRepoKeepsNewRepoForActiveNamedProfile(t *testing.T) {
 	if !ok {
 		t.Fatal("initial named link missing")
 	}
-	g := newVerbGateway(t, &verbStubBackend{}, selected)
+	g := newVerbGateway(t, workspaceListBackend(`{"id":"ws_1","name":"app","base_branch":"main","created_at":""}`), selected)
 	// Force the next disk write to be observable without depending on the
 	// filesystem timestamp resolution.
 	g.local.mtime = time.Unix(1, 0)
@@ -726,5 +726,123 @@ func TestLocalSyncStartRequiresLinkedRepo(t *testing.T) {
 	}
 	if perr := decodeError(t, rec.Body.Bytes()); perr.Code != protocol.CodeInvalidState {
 		t.Fatalf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	}
+}
+
+// workspaceListBackend answers workspace.list with the given workspace
+// objects, which is what link.repo reads to decide whether the workspace
+// already names an upstream.
+func workspaceListBackend(workspaces ...string) *verbStubBackend {
+	return &verbStubBackend{apiStubBackend: apiStubBackend{results: map[string]json.RawMessage{
+		protocol.MethodWorkspaceList: json.RawMessage(`{"workspaces":[` + strings.Join(workspaces, ",") + `]}`),
+	}}}
+}
+
+// originCall returns the workspace.origin params link.repo sent, or "" if
+// it sent none.
+func originCall(b *verbStubBackend) string {
+	for _, c := range b.recorded() {
+		if c.method == protocol.MethodWorkspaceOrigin {
+			return c.params
+		}
+	}
+	return ""
+}
+
+// linkRepoWithOrigin links a scratch clone whose origin is upstream and
+// returns the backend and the decoded response.
+func linkRepoWithOrigin(t *testing.T, backend *verbStubBackend, upstream string) map[string]any {
+	t.Helper()
+	useTempConfigDir(t)
+	g := newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice"})
+	t.Cleanup(func() { _ = g.Close() })
+	repo := t.TempDir()
+	localGit(t, repo, "init")
+	if upstream != "" {
+		localGit(t, repo, "remote", "add", "origin", upstream)
+	}
+	body := `{"repo":` + strconv.Quote(repo) + `,"workspace_id":"ws_1"}`
+	rec := do(g, http.MethodPost, "/local/v1/link.repo", body, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("link.repo = %d: %s", rec.Code, rec.Body)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode link.repo response: %v", err)
+	}
+	return got
+}
+
+// A workspace with no upstream learns it from the clone being linked, and
+// the response carries it so the caller can show where runs will push.
+func TestLocalLinkRepoRecordsTheClonesOrigin(t *testing.T) {
+	const upstream = "https://github.com/acme/app.git"
+	backend := workspaceListBackend(`{"id":"ws_1","name":"app","base_branch":"main","created_at":""}`)
+	got := linkRepoWithOrigin(t, backend, upstream)
+
+	if got["origin"] != upstream {
+		t.Fatalf("response origin = %v, want %q", got["origin"], upstream)
+	}
+	want := `{"workspace_id":"ws_1","origin":"` + upstream + `"}`
+	if call := originCall(backend); call != want {
+		t.Fatalf("workspace.origin params = %s, want %s", call, want)
+	}
+}
+
+// The server's answer is shared by everyone, so one developer's clone
+// never overwrites an upstream the workspace already names.
+func TestLocalLinkRepoLeavesAnExistingOriginAlone(t *testing.T) {
+	const recorded = "https://github.com/acme/app.git"
+	backend := workspaceListBackend(
+		`{"id":"ws_1","name":"app","base_branch":"main","origin":"` + recorded + `","created_at":""}`)
+	got := linkRepoWithOrigin(t, backend, "https://github.com/someone/fork.git")
+
+	if got["origin"] != recorded {
+		t.Fatalf("response origin = %v, want the recorded %q", got["origin"], recorded)
+	}
+	if call := originCall(backend); call != "" {
+		t.Fatalf("workspace.origin called with %s, want no call", call)
+	}
+}
+
+// Recording the origin is a bonus the link never fails over: a viewer is
+// denied it, and a URL the server will not take is refused. Either way the
+// remote is written, the link answers 200, and the response omits origin.
+func TestLocalLinkRepoToleratesARefusedOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		perr *protocol.Error
+	}{
+		{"viewer", &protocol.Error{Code: protocol.CodeDenied, Message: "pushing to a workspace requires the collaborator role"}},
+		{"rejected origin", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "origin must be empty or a git URL"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := workspaceListBackend(`{"id":"ws_1","name":"app","base_branch":"main","created_at":""}`)
+			backend.errs = map[string]*protocol.Error{protocol.MethodWorkspaceOrigin: tc.perr}
+			got := linkRepoWithOrigin(t, backend, "https://github.com/acme/app.git")
+
+			if got["remote"] != "aether" {
+				t.Fatalf("response remote = %v, want the remote still written", got["remote"])
+			}
+			if _, ok := got["origin"]; ok {
+				t.Fatalf("response carries origin %v, want the key omitted", got["origin"])
+			}
+			if originCall(backend) == "" {
+				t.Fatal("workspace.origin was never attempted")
+			}
+		})
+	}
+}
+
+// A clone with no origin of its own records nothing.
+func TestLocalLinkRepoWithoutAnOriginRecordsNothing(t *testing.T) {
+	backend := workspaceListBackend(`{"id":"ws_1","name":"app","base_branch":"main","created_at":""}`)
+	got := linkRepoWithOrigin(t, backend, "")
+
+	if _, ok := got["origin"]; ok {
+		t.Fatalf("response carries origin %v, want the key omitted", got["origin"])
+	}
+	if call := originCall(backend); call != "" {
+		t.Fatalf("workspace.origin called with %s, want no call", call)
 	}
 }

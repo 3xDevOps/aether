@@ -39,13 +39,21 @@ Complete the vendor login there, then return to the wizard. Its **I've
 installed and logged in** button runs `env save` for you, so that step does
 not need the **Save environment** button below.
 
+That step's **Connect GitHub** button opens the same dock and types the `gh
+auth login` command instead. Finish the device login in your browser, then
+**I've logged in** runs the rest of the connection and reports the account
+and the signing key it registered. See
+[environment-home.md](environment-home.md#connect-github).
+
 ## Sign in to agents
 
 In the dashboard, click the OAuth URL printed in the terminal. For loopback
 callbacks, Aether starts the local forward before it opens the authorization
 page. In the CLI, run `aether forward terminal <callback-port>` before
-completing the browser flow. Device-code logins need no forward. Login state
-under your home is available to later runs without saving the environment.
+completing the browser flow. Device-code logins need no forward, `gh auth
+login --web` among them: gh prints a one-time code and a URL you open on
+your own machine, and nothing calls back to the terminal. Login state under
+your home is available to later runs without saving the environment.
 
 ## Save your environment
 

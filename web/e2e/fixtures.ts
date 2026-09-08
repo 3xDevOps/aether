@@ -59,7 +59,51 @@ export interface Aether {
    * Git identity step offers as the default.
    */
   giveGitIdentity: (member: Member, name: string, email: string) => void
+  /**
+   * Puts the stub `gh` in a member's environment home. GitHub itself is not
+   * under test here; what the connect path does around it is.
+   */
+  installStubGh: (memberID: string) => void
 }
+
+/**
+ * A stub `gh` for the environment container: busybox `sh`, so no bashisms.
+ * It answers exactly the login a member types and the three invocations
+ * `github.connect` makes, records every call so the spec can assert the
+ * argv, and fails loudly on anything else rather than passing silently when
+ * an invocation changes. `auth setup-git` writes the credential block real
+ * gh writes, which is the shape the server's own `.gitconfig` edits must
+ * leave alone.
+ */
+const stubGh = `#!/bin/sh
+echo "$*" >> "$HOME/gh-calls.log"
+case "$1 $2" in
+"auth login")
+	echo "! First copy your one-time code: ABCD-1234"
+	;;
+"auth status")
+	echo '{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"admin:ssh_signing_key, gist, read:org, repo"}]}}'
+	;;
+"auth setup-git")
+	printf '[credential "https://github.com"]\\n\\thelper = !gh auth git-credential\\n' >> "$HOME/.gitconfig"
+	;;
+"ssh-key add")
+	cp "$3" "$HOME/gh-registered-key"
+	;;
+"ssh-key list")
+	# The SHA256 fingerprint of the registered key, the way ssh-keygen -l
+	# prints it: base64 of the digest of the decoded key blob, unpadded.
+	# busybox has no ssh-keygen, so the digest is spelled out.
+	hex=$(awk '{print $2}' "$HOME/gh-registered-key" | base64 -d | sha256sum | cut -d' ' -f1)
+	fp=$(printf "$(printf %s "$hex" | sed 's/../\\\\x&/g')" | base64 | tr -d '=\n')
+	printf 'aether\tSHA256:%s\t2026-01-01T00:00:00Z\t1\tsigning\n' "$fp"
+	;;
+*)
+	echo "gh: unsupported invocation: $*" >&2
+	exit 1
+	;;
+esac
+`
 
 /**
  * What this test's server may still own in Docker, asked for before the
@@ -126,6 +170,13 @@ export const test = base.extend<{ aether: Aether }>({
         const bin = path.join(server.memberHome(memberID), '.local', 'bin')
         mkdirSync(bin, { recursive: true })
         writeFileSync(path.join(bin, executable), '#!/bin/sh\n', { mode: 0o755 })
+      },
+      installStubGh: (memberID) => {
+        // The environment terminal's PATH puts ~/.local/bin first, and
+        // docker exec inherits it, so both halves of the connect reach this.
+        const bin = path.join(server.memberHome(memberID), '.local', 'bin')
+        mkdirSync(bin, { recursive: true })
+        writeFileSync(path.join(bin, 'gh'), stubGh, { mode: 0o755 })
       },
     })
 

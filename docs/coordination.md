@@ -39,6 +39,11 @@ agent is told in its task prompt to read `/run/aether/co-authors` before
 each commit and to end every commit message, and the description of any pull
 request it opens, with exactly those lines; a missing or empty file means it
 adds none, so a run whose provisioning failed asks the agent for nothing.
+Opening that pull request is something the agent can do from the run itself
+once the member has connected GitHub: the checkout's `origin` points at the
+workspace's upstream repository when one was recorded, and the member home
+carries the gh login (see
+[environment-home.md](environment-home.md#connect-github)).
 Provisioning writes the list as it stands, so a recovered run starts with
 the steerers it already had rather than empty. A relaunch is a new run row
 and `run_steerers` is keyed by run, so a relaunched run starts with its

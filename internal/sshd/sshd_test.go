@@ -369,6 +369,17 @@ func (f *fakeRuns) ResetEnvironment(_ context.Context, member domain.MemberID) e
 	return f.record(fmt.Sprintf("env-reset:%s", member))
 }
 
+func (f *fakeRuns) ConnectGitHub(_ context.Context, member domain.MemberID) (domain.GitHubConnection, error) {
+	if err := f.record(fmt.Sprintf("github-connect:%s", member)); err != nil {
+		return domain.GitHubConnection{}, err
+	}
+	return domain.GitHubConnection{
+		Login:       "octocat",
+		SigningKey:  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample aether " + string(member),
+		Fingerprint: "SHA256:Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm8",
+	}, nil
+}
+
 func (f *fakeRuns) HoldShell() func() { return func() {} }
 
 type testEnv struct {

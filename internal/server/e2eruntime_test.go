@@ -316,6 +316,16 @@ func (r *e2eRuntime) ExecTTY(ctx context.Context, id runtime.ID, _ []string, _ s
 	return r.Attach(ctx, id)
 }
 
+// Exec has no in-process equivalent: the scripted agents are Go, not a
+// filesystem with programs to run. It answers like a shell that found no
+// command so a caller sees a refusal, not a fabricated success.
+func (r *e2eRuntime) Exec(_ context.Context, id runtime.ID, _ []string, _ string) (int, string, string, error) {
+	if _, err := r.get(id); err != nil {
+		return 0, "", "", err
+	}
+	return 127, "", "exec: not supported by the e2e runtime", nil
+}
+
 func (r *e2eRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
 	c, err := r.get(id)
 	if err != nil {

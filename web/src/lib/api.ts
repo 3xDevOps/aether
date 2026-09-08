@@ -16,6 +16,7 @@ import type {
   EnvScanStatus,
   EnvSaveResult,
   GatewayCapabilities,
+  GitHubConnectResult,
   GitIdentity,
   LinkApplyResult,
   LinkRepoResult,
@@ -538,6 +539,10 @@ export const api = {
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
   envSave: () => call<EnvSaveResult>('env.save', {}),
   envReset: () => call<unknown>('env.reset', {}),
+  /** Finishes the GitHub connection the member started with `gh auth login`
+   * in their environment terminal: git credentials there, a signing key in
+   * their environment home, and that key registered on the account. */
+  githubConnect: () => call<GitHubConnectResult>('github.connect', {}),
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),

@@ -284,11 +284,51 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
 	g.local.cacheConfig(cfg)
+	origin, perr := g.recordWorkspaceOrigin(r, wsID, cfg.Repo)
+	if perr != nil {
+		return nil, perr
+	}
 	return struct {
 		Repo   string `json:"repo"`
 		Remote string `json:"remote"`
 		URL    string `json:"url"`
-	}{Repo: cfg.Repo, Remote: "aether", URL: url}, nil
+		Origin string `json:"origin,omitempty"`
+	}{Repo: cfg.Repo, Remote: "aether", URL: url, Origin: origin}, nil
+}
+
+// recordWorkspaceOrigin teaches the workspace where the just-linked clone
+// pushes, so runs reach the same upstream. It only ever fills a blank: a
+// workspace that already names an origin keeps it, because the server's
+// answer is shared by everyone and this clone is one developer's.
+// Returns the workspace's origin afterwards, or "" when the server would
+// not take it: a viewer may not set one, and an origin the server rejects
+// is not one this link should fail over.
+func (g *Gateway) recordWorkspaceOrigin(r *http.Request, wsID, repo string) (string, *protocol.Error) {
+	ws, perr := g.pickWorkspace(r, wsID)
+	if perr != nil {
+		return "", perr
+	}
+	if ws.Origin != "" {
+		return ws.Origin, nil
+	}
+	origin, err := localops.OriginURL(repo)
+	if err != nil {
+		return "", &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	if origin == "" {
+		return "", nil
+	}
+	params, err := json.Marshal(protocol.WorkspaceOriginParams{WorkspaceID: wsID, Origin: origin})
+	if err != nil {
+		return "", &protocol.Error{Code: protocol.CodeInternal, Message: "encode workspace.origin params: " + err.Error()}
+	}
+	if _, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodWorkspaceOrigin, params); perr != nil {
+		if perr.Code == protocol.CodeDenied || perr.Code == protocol.CodeInvalidParams {
+			return "", nil
+		}
+		return "", perr
+	}
+	return origin, nil
 }
 
 // resolveWorkspace picks the workspace whose ID the git remote URL must

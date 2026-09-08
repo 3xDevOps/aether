@@ -9,6 +9,7 @@ package localops
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -45,6 +46,27 @@ func LinkRepo(cfg cli.Config, repo, workspaceID string) (cli.Config, string, err
 		return cfg, "", err
 	}
 	return cfg, url, nil
+}
+
+// OriginURL reports where repo's `origin` remote points, or "" when the
+// repository has no origin. This is the upstream a workspace records so
+// that runs push and open pull requests against the same place the
+// developer's own clone does.
+func OriginURL(repo string) (string, error) {
+	names, err := remotes(repo)
+	if err != nil {
+		return "", fmt.Errorf("localops: read remotes of %s: %w", repo, err)
+	}
+	if !slices.Contains(names, "origin") {
+		return "", nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "remote", "get-url", "origin").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("localops: git remote get-url origin in %s: %w: %s", repo, err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // GitRemote adds the `aether` remote to repo pointing at url, or updates

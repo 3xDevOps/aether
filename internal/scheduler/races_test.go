@@ -168,7 +168,7 @@ func TestRecoveryDestroysProvisioningContainer(t *testing.T) {
 	if err := e.db.CreateRun(ctx, r); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	path, branch, err := e.git.CreateRunCheckout(ctx, e.ws.ID, r.ID, "main", r.Task)
+	path, branch, err := e.git.CreateRunCheckout(ctx, e.ws.ID, r.ID, "main", r.Task, "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
 	if err := e.db.CreateRun(ctx, old); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	path, branch, err := e.git.CreateRunCheckout(ctx, e.ws.ID, old.ID, "main", old.Task)
+	path, branch, err := e.git.CreateRunCheckout(ctx, e.ws.ID, old.ID, "main", old.Task, "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}

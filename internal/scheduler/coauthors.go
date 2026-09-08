@@ -108,10 +108,23 @@ func (s *Scheduler) containerCoAuthors(ctx context.Context, run *domain.Run, aut
 // committed - losing the commit would be worse than losing the byline.
 func (s *Scheduler) commitAll(ctx context.Context, run domain.RunID, message string) (string, error) {
 	var author domain.GitIdentity
+	var signingKey []byte
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
 		slog.Warn("scheduler: resolve run for commit author", "run", run, "error", err)
 	} else {
+		// The run's owner is both who the commit is authored as and whose
+		// key signs it. A key the server cannot read, or cannot use,
+		// costs the signature, not the commit: SigningKey answers nil for
+		// an unparsable one, and a read error is logged here.
+		if s.cfg.Homes != nil {
+			key, kerr := s.cfg.Homes.SigningKey(r.MemberID)
+			if kerr != nil {
+				slog.Warn("scheduler: read commit signing key", "run", run, "error", kerr)
+			} else {
+				signingKey = key
+			}
+		}
 		if owner, oerr := s.cfg.Store.GetMember(ctx, r.MemberID); oerr != nil {
 			slog.Warn("scheduler: resolve commit author", "run", run, "error", oerr)
 		} else {
@@ -125,7 +138,7 @@ func (s *Scheduler) commitAll(ctx context.Context, run domain.RunID, message str
 			message += "\n\n" + strings.Join(trailers, "\n")
 		}
 	}
-	return s.cfg.Git.CommitAll(ctx, run, message, author)
+	return s.cfg.Git.CommitAll(ctx, run, message, author, signingKey)
 }
 
 // RecordSteer notes that a member other than the run's owner steered it -

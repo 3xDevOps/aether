@@ -236,7 +236,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 
 func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
 	if !reuseCheckout {
-		checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, run.ID, ws.BaseBranch, run.Task)
+		checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, run.ID, ws.BaseBranch, run.Task, ws.Origin)
 		if err != nil {
 			return fmt.Errorf("create checkout: %w", err)
 		}

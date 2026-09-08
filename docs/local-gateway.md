@@ -269,11 +269,12 @@ server was not told where the data directory is, or the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
 zero anywhere else).
 
-### `run.patch`, `server.disk`, and files on the control channel
+### Control-channel methods this gateway calls
 
-The two `GET` endpoints above and the files methods below are backed by SSH
-control-channel methods, because this gateway proxies the whole API shape over
-SSH and needs these reads without a listener on the server.
+The two `GET` endpoints above are backed by SSH control-channel methods, as
+are the file reads and the member and workspace writes below. This gateway
+proxies the whole API shape over SSH, so it needs all of them without a
+listener on the server.
 
 | Method | Params | Result |
 | --- | --- | --- |
@@ -286,6 +287,8 @@ SSH and needs these reads without a listener on the server.
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
+| `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
+| `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit. `from` and `to` select
@@ -300,6 +303,17 @@ SSH and needs these reads without a listener on the server.
   unavailable. All three files methods also answer `-32602` for a rejected
   path. The underlying errors name server-side paths,
   so they are not echoed to the client.
+- `github.connect` is member-scoped and takes no parameters: it acts on the
+  calling member's own environment terminal. It runs `gh` inside that
+  container, so it answers `-32002` (invalid state) when the terminal is not
+  running, and again when gh is not logged in to `github.com` there - that
+  second message ends with gh's own reason for the account, such as `HTTP
+  401: Bad credentials`, so the dashboard and the CLI can show what gh said
+  rather than a summary. `signing_key` is the public key line and
+  `fingerprint` its `SHA256:` fingerprint; the private key never leaves the
+  server. The dashboard's Agents step calls this after the member
+  finishes `gh auth login` in the terminal dock; see
+  [environment-home.md](environment-home.md#connect-github).
 
 ## `/local/v1` verbs
 
@@ -314,7 +328,7 @@ authority.
 | `link.apply` | `{"addr":"host[:port]","invite":"...","name":"..."}` (`invite` and `name` optional) | `{"addr":"host:2222","user":"aether","member":{"id":"...","display_name":"...","role":"..."},"key_generated":"/home/u/.ssh/id_ed25519"}` (`key_generated` omitted when no key was created) |
 | `link.status` | `{}` | `{"server_configured":bool,"linked":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"..."}],"active":"..."}` (`links`/`active` present only with named profiles; `server_configured` reports a configured server even when no repository is linked) |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
-| `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
+| `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace's upstream afterwards, omitted when it has none) |
 | `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
 | `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
 | `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422,"skipped":[...]}` |

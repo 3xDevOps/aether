@@ -515,6 +515,11 @@ are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
   environment terminal and run is a container. Agent installation happens in
   the member's environment terminal.
 - **git** on the host. Bare repos, run checkouts, and diffs are real git.
+- **`ssh-keygen`** on the host, from the OpenSSH client package
+  (`openssh-client` on Debian and Ubuntu). Git uses it to sign the commits
+  Aether makes at the end of a run once a member has connected GitHub; see
+  [environment-home.md](environment-home.md#connect-github). `aether github
+  connect` refuses rather than generating a key it could not sign with.
 - Optionally **Tailscale**, which is the recommended way to make the SSH port
   reachable and the recommended identity layer. See
   [networking.md](networking.md).
@@ -681,7 +686,7 @@ The dashboard Settings page can run the same sync once, on demand.
 | `repos/` | One bare git repo per workspace. |
 | `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
 | `transcripts/` | Per-run PTY recordings (asciicast v2). |
-| `homes/<member>/` | One persistent environment home per member. |
+| `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, synced profile files, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run conflict-coordination sockets, recreated each run. |
@@ -689,8 +694,13 @@ The dashboard Settings page can run the same sync once, on demand.
 
 Member homes are server-owned state. Back up the database, `homes/`, and
 `profiles/` when recovery of installed agents, login state, and synced profiles
-matters. Each member home is mounted only in that member's environment terminal
-and runs using their account, including runs launched through an explicit
+matters. That backup carries credentials: every member's vendor logins, their
+GitHub token, and their commit signing key are files under `homes/`, so treat
+it as secret material and store it accordingly
+([security.md](security.md#github-credentials-and-signing-keys)).
+
+Each member home is mounted only in that member's environment terminal and
+runs using their account, including runs launched through an explicit
 account share.
 
 Three consequences worth knowing:

@@ -7,9 +7,11 @@
 package domain
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type (
@@ -142,7 +144,11 @@ type Workspace struct {
 	// run; SteerOthersAdminsOnly restricts steering and killing another
 	// member's run to its owner and admins.
 	SteerOthers string
-	CreatedAt   time.Time
+	// Origin is the upstream git URL run checkouts push to; "" when the
+	// workspace has none, in which case a checkout keeps the origin its
+	// clone made.
+	Origin    string
+	CreatedAt time.Time
 }
 
 // DefaultBaseBranch is the branch a workspace falls back to when none was
@@ -156,6 +162,67 @@ const SteerOthersAdminsOnly = "admins_only"
 // ValidSteerOthers reports whether v is a defined SteerOthers value.
 func ValidSteerOthers(v string) bool {
 	return v == "" || v == SteerOthersAdminsOnly
+}
+
+// originPrefixes are the URL schemes a workspace origin may use, plus the
+// absolute-path form for a local upstream.
+var originPrefixes = []string{"https://", "http://", "ssh://", "git://", "/"}
+
+// scpLikeOrigin matches git's scp-like remote form (user@host:path).
+var scpLikeOrigin = regexp.MustCompile(`^[A-Za-z0-9._-]+@[^:/\s]+:`)
+
+// ValidOrigin reports whether url is usable as a workspace origin. The
+// empty string is valid and clears the origin. Otherwise the value is
+// handed to git as a remote URL inside a run container, so it must be one
+// line with no whitespace, and must not start with "-", which git would
+// read as an option rather than a URL.
+func ValidOrigin(url string) bool {
+	if url == "" {
+		return true
+	}
+	if len(url) > 1024 || strings.HasPrefix(url, "-") {
+		return false
+	}
+	if strings.ContainsFunc(url, func(r rune) bool {
+		return unicode.IsSpace(r) || isGitControl(r)
+	}) {
+		return false
+	}
+	for _, prefix := range originPrefixes {
+		if strings.HasPrefix(url, prefix) {
+			return true
+		}
+	}
+	return scpLikeOrigin.MatchString(url)
+}
+
+// NormalizeOrigin rewrites a github.com origin written in either of git's
+// SSH forms - git@github.com:acme/app.git and
+// ssh://[git@]github.com[:22]/acme/app.git - to
+// https://github.com/acme/app.git. A run authenticates to github.com over
+// https only, so an SSH origin recorded as typed could never be pushed to
+// from a container. Every other origin, an SSH URL on another host
+// included, is returned unchanged: only github.com's https form is known
+// to address the same repository.
+func NormalizeOrigin(origin string) string {
+	var authority, path string
+	if rest, ok := strings.CutPrefix(origin, "ssh://"); ok {
+		var found bool
+		if authority, path, found = strings.Cut(rest, "/"); !found {
+			return origin
+		}
+	} else if scpLikeOrigin.MatchString(origin) {
+		authority, path, _ = strings.Cut(origin, ":")
+	} else {
+		return origin
+	}
+	if _, host, ok := strings.Cut(authority, "@"); ok {
+		authority = host
+	}
+	if strings.TrimSuffix(authority, ":22") != "github.com" {
+		return origin
+	}
+	return "https://github.com/" + strings.TrimPrefix(path, "/")
 }
 
 // Member is a person. Identity is the SSH public key, the tailnet login
@@ -259,6 +326,16 @@ func ValidGitEmail(email string) bool {
 // parsing stops at a line break, and the rest would render as escape
 // bytes in every log and trailer that carries the name.
 func isGitControl(r rune) bool { return r < 0x20 || r == 0x7f }
+
+// GitHubConnection is the outcome of connecting a member's environment to
+// github.com: the account gh is logged in as, the public half of the
+// commit signing key kept in that member's environment home, and its
+// SHA256 fingerprint as GitHub shows it.
+type GitHubConnection struct {
+	Login       string
+	SigningKey  string
+	Fingerprint string
+}
 
 // Terminal is the persistent per-member environment container.
 type Terminal struct {

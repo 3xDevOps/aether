@@ -24,7 +24,7 @@ func TestRunPatchRendersSnapshotInterval(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "interval diffs")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "interval diffs", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestSnapshotStoreSurvivesAStaleIndexLock(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "stale lock")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "stale lock", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestSnapshotLeavesTheCheckoutGitAlone(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "read only git")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "read only git", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRangePatchRefusesACommitID(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "commit ids")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "commit ids", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestDiffWatchResumesItsIntervalChainAfterARestart(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "restart")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "restart", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}

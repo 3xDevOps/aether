@@ -16,8 +16,8 @@ import (
 // The scheduler's and sshd's consumer-side seam interfaces, copied verbatim
 // from the Wave 1 contract (§4): *Engine must satisfy both exactly.
 type schedulerGitEngine interface {
-	CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, task string) (checkoutPath, branch string, err error)
-	CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity) (commit string, err error)
+	CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, task, origin string) (checkoutPath, branch string, err error)
+	CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (commit string, err error)
 	PublishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error)
 	RemoveRunCheckout(ctx context.Context, run domain.RunID) error
 	StartDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error
@@ -104,10 +104,10 @@ func TestMissingRepoAndCheckoutErrors(t *testing.T) {
 	if _, err := e.ReceivePack(ctx, "nope", strings.NewReader(""), io.Discard, io.Discard); !errors.Is(err, ErrRepoNotFound) {
 		t.Errorf("ReceivePack missing repo: %v, want ErrRepoNotFound", err)
 	}
-	if _, _, err := e.CreateRunCheckout(ctx, "nope", "r1", "main", "task"); !errors.Is(err, ErrRepoNotFound) {
+	if _, _, err := e.CreateRunCheckout(ctx, "nope", "r1", "main", "task", ""); !errors.Is(err, ErrRepoNotFound) {
 		t.Errorf("CreateRunCheckout missing repo: %v, want ErrRepoNotFound", err)
 	}
-	if _, err := e.CommitAll(ctx, "r1", "msg", domain.GitIdentity{}); !errors.Is(err, ErrCheckoutNotFound) {
+	if _, err := e.CommitAll(ctx, "r1", "msg", domain.GitIdentity{}, nil); !errors.Is(err, ErrCheckoutNotFound) {
 		t.Errorf("CommitAll missing checkout: %v, want ErrCheckoutNotFound", err)
 	}
 	if _, err := e.PublishRunBranch(ctx, "r1"); !errors.Is(err, ErrCheckoutNotFound) {

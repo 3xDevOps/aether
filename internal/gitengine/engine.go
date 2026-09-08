@@ -322,6 +322,12 @@ func (e *Engine) gitIn(ctx context.Context, dir string, env []string, args ...st
 
 // gitEnv is the sanitized environment for every git invocation: PATH for
 // tool discovery, no user or system config, no inherited GIT_* variables.
+//
+// GIT_TERMINAL_PROMPT stops git itself from asking; the askpass pair stops
+// ssh-keygen from asking. A member home is agent-writable, so the signing
+// key CommitAll is handed can be a passphrase-protected one, and without
+// these the server blocks on /dev/tty forever whenever it was started from
+// a terminal.
 func gitEnv() []string {
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
@@ -329,6 +335,8 @@ func gitEnv() []string {
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_TERMINAL_PROMPT=0",
+		"SSH_ASKPASS=/bin/false",
+		"SSH_ASKPASS_REQUIRE=force",
 		"LC_ALL=C",
 	}
 }

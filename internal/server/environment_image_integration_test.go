@@ -16,7 +16,9 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 )
 
@@ -127,6 +129,27 @@ func TestIntegrationMemberEnvironmentImage(t *testing.T) {
 		t.Fatalf("run before save saw %q, want absent", got)
 	}
 
+	// Everything the GitHub connection keeps in the member home, plus a
+	// gh token, all of it inside the running container's $HOME mount.
+	homes, err := memberhome.New(filepath.Join(dataDir, "homes"))
+	if err != nil {
+		t.Fatalf("open the member homes: %v", err)
+	}
+	if _, err = homes.EnsureSigningKey(memberA.ID); err != nil {
+		t.Fatalf("generate the signing key: %v", err)
+	}
+	if err = homes.ConfigureGit(ctx, memberA.ID, memberA.GitIdentity()); err != nil {
+		t.Fatalf("configure git in the member home: %v", err)
+	}
+	homeA, err := homes.Path(memberA.ID)
+	if err != nil {
+		t.Fatalf("resolve the member home: %v", err)
+	}
+	if err = os.MkdirAll(filepath.Join(homeA, ".config", "gh"), 0o700); err != nil {
+		t.Fatalf("create the gh config directory: %v", err)
+	}
+	writeFile(t, filepath.Join(homeA, ".config", "gh", "hosts.yml"), "github.com:\n    oauth_token: fake-token\n")
+
 	var saved protocol.EnvSaveResult
 	if err := ctrlA.Call(protocol.MethodEnvSave, struct{}{}, &saved); err != nil {
 		t.Fatalf("env.save: %v", err)
@@ -145,6 +168,7 @@ func TestIntegrationMemberEnvironmentImage(t *testing.T) {
 	if m, err := srv.Store().GetMember(ctx, memberA.ID); err != nil || m.Image != saved.Image {
 		t.Fatalf("stored member image = %q (err %v), want %q", m.Image, err, saved.Image)
 	}
+	assertImageExcludesHome(ctx, t, rt, saved.Image)
 
 	// The member's runs now start from the saved image; another member's
 	// runs do not.
@@ -201,4 +225,41 @@ func TestIntegrationMemberEnvironmentImage(t *testing.T) {
 		t.Fatal("server did not shut down")
 	}
 	verifyNoLeaks(t)
+}
+
+// assertImageExcludesHome starts a container from the saved image with no
+// member home mounted and reports every credential-shaped file it finds:
+// the home is a bind mount, and a bind mount is one thing docker commit
+// never captures.
+func assertImageExcludesHome(ctx context.Context, t *testing.T, rt runtime.Runtime, image string) {
+	t.Helper()
+	id, err := rt.Create(ctx, runtime.Spec{
+		Name:    "saved-image-scan",
+		Image:   image,
+		Command: []string{"sleep", "120"},
+	})
+	if err != nil {
+		t.Fatalf("create a container from the saved image: %v", err)
+	}
+	defer func() {
+		if derr := rt.Destroy(context.WithoutCancel(ctx), id); derr != nil {
+			t.Errorf("destroy the scan container: %v", derr)
+		}
+	}()
+	if serr := rt.Start(ctx, id); serr != nil {
+		t.Fatalf("start a container from the saved image: %v", serr)
+	}
+	const scan = `for p in /root/.ssh/aether_signing /root/.gitconfig /root/.config/gh/hosts.yml; do
+	[ -e "$p" ] && echo "present:$p"
+done
+grep -rls fake-token /root /home /etc /opt /tmp /var
+echo scan-done
+`
+	code, stdout, stderr, err := rt.Exec(ctx, id, []string{"sh", "-c", scan}, "/")
+	if err != nil {
+		t.Fatalf("scan the saved image: %v", err)
+	}
+	if code != 0 || strings.TrimSpace(stdout) != "scan-done" {
+		t.Errorf("the saved image carries the member home: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
 }
