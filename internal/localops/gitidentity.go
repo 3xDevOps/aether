@@ -38,13 +38,18 @@ func gitConfigValue(ctx context.Context, key string) (string, error) {
 	// hold the gateway request open until the timeout fired.
 	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
 	cmd.WaitDelay = 5 * time.Second
-	out, err := cmd.CombinedOutput()
+	// Output, not CombinedOutput: anything git says on stderr would end up
+	// inside the name or address this prefills.
+	out, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() == 1 {
-			return "", nil
+		if errors.As(err, &exit) {
+			if exit.ExitCode() == 1 {
+				return "", nil
+			}
+			return "", fmt.Errorf("git config --get %s: %w: %s", key, err, strings.TrimSpace(string(exit.Stderr)))
 		}
-		return "", fmt.Errorf("git config --get %s: %w: %s", key, err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("git config --get %s: %w", key, err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
