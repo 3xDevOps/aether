@@ -55,6 +55,9 @@ type RunController interface {
 	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
 	SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error)
 	ResetEnvironment(ctx context.Context, member domain.MemberID) error
+	// ConnectGitHub finishes the GitHub login the member started with gh
+	// auth login in their environment terminal.
+	ConnectGitHub(ctx context.Context, member domain.MemberID) (domain.GitHubConnection, error)
 	// HoldShell counts one live interactive terminal attach for the
 	// self-update idle check; the returned func releases it.
 	HoldShell() func()

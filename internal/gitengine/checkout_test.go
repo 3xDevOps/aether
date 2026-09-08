@@ -26,9 +26,18 @@ func runCheckoutGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(output))
 }
 
-func TestCommitAllIgnoresCheckoutHooksAndFilters(t *testing.T) {
-	e := newUnitEngine(t)
-	checkout := filepath.Join(e.cfg.CheckoutsDir, "run-hostile")
+// hostileCheckout builds a run checkout whose .git/config, .gitattributes
+// and .git/info/attributes all try to make the server run a program of the
+// agent's choosing during CommitAll. Each planted program writes a marker
+// file; CommitAll must leave every marker unwritten.
+type hostileCheckout struct {
+	path    string
+	markers map[string]string
+}
+
+func newHostileCheckout(t *testing.T, e *Engine, run domain.RunID) hostileCheckout {
+	t.Helper()
+	checkout := filepath.Join(e.cfg.CheckoutsDir, string(run))
 	if err := os.MkdirAll(checkout, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -40,23 +49,35 @@ func TestCommitAllIgnoresCheckoutHooksAndFilters(t *testing.T) {
 	runCheckoutGit(t, checkout, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
 
 	markerDir := t.TempDir()
-	hookMarker := filepath.Join(markerDir, "hook-ran")
-	filterMarker := filepath.Join(markerDir, "filter-ran")
+	markers := map[string]string{
+		"hook":   filepath.Join(markerDir, "hook-ran"),
+		"filter": filepath.Join(markerDir, "filter-ran"),
+		"gpg":    filepath.Join(markerDir, "gpg-ran"),
+	}
 	hooks := filepath.Join(markerDir, "hooks")
 	if err := os.Mkdir(hooks, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	hook := filepath.Join(hooks, "pre-commit")
-	if err := os.WriteFile(hook, []byte("#!/bin/sh\nprintf hook > "+hookMarker+"\n"), 0o755); err != nil {
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nprintf hook > "+markers["hook"]+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	clean := filepath.Join(markerDir, "clean-filter")
-	if err := os.WriteFile(clean, []byte("#!/bin/sh\nprintf filter > "+filterMarker+"\ncat\n"), 0o755); err != nil {
+	if err := os.WriteFile(clean, []byte("#!/bin/sh\nprintf filter > "+markers["filter"]+"\ncat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A signing program the agent chose: git would run it as the server
+	// unless CommitAll pins gpg.ssh.program itself.
+	signer := filepath.Join(markerDir, "signer")
+	if err := os.WriteFile(signer, []byte("#!/bin/sh\nprintf gpg > "+markers["gpg"]+"\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	runCheckoutGit(t, checkout, "config", "core.hooksPath", hooks)
 	runCheckoutGit(t, checkout, "config", "filter.hostile.clean", clean)
 	runCheckoutGit(t, checkout, "config", "filter.hostile.required", "true")
+	runCheckoutGit(t, checkout, "config", "commit.gpgsign", "true")
+	runCheckoutGit(t, checkout, "config", "gpg.format", "ssh")
+	runCheckoutGit(t, checkout, "config", "gpg.ssh.program", signer)
 	if err := os.WriteFile(filepath.Join(checkout, ".gitattributes"), []byte("payload filter=hostile\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -71,24 +92,146 @@ func TestCommitAllIgnoresCheckoutHooksAndFilters(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "payload"), []byte("after\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return hostileCheckout{path: checkout, markers: markers}
+}
 
-	commit, err := e.CommitAll(t.Context(), domain.RunID("run-hostile"), "server commit", domain.GitIdentity{})
+func (h hostileCheckout) assertNothingRan(t *testing.T) {
+	t.Helper()
+	for name, marker := range h.markers {
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Errorf("planted %s program ran, marker stat = %v", name, err)
+		}
+	}
+}
+
+func TestCommitAllIgnoresCheckoutHooksAndFilters(t *testing.T) {
+	e := newUnitEngine(t)
+	hostile := newHostileCheckout(t, e, "run-hostile")
+
+	commit, err := e.CommitAll(t.Context(), domain.RunID("run-hostile"), "server commit", domain.GitIdentity{}, nil)
 	if err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
 	if commit == "" {
 		t.Fatal("CommitAll returned an empty commit")
 	}
-	if _, err := os.Stat(hookMarker); !os.IsNotExist(err) {
-		t.Fatalf("pre-commit hook ran, marker stat = %v", err)
-	}
-	if _, err := os.Stat(filterMarker); !os.IsNotExist(err) {
-		t.Fatalf("clean filter ran, marker stat = %v", err)
-	}
-	if got := runCheckoutGit(t, checkout, "show", "--format=", "--no-ext-diff", "HEAD:payload"); got != "after" {
+	hostile.assertNothingRan(t)
+	if got := runCheckoutGit(t, hostile.path, "show", "--format=", "--no-ext-diff", "HEAD:payload"); got != "after" {
 		t.Fatalf("committed payload = %q, want after", got)
 	}
-	if got := runCheckoutGit(t, checkout, "show", "--format=", "--no-ext-diff", "HEAD:.gitattributes"); got != "payload filter=hostile" {
+	if got := runCheckoutGit(t, hostile.path, "show", "--format=", "--no-ext-diff", "HEAD:.gitattributes"); got != "payload filter=hostile" {
 		t.Fatalf("committed attributes = %q, want hostile attribute", got)
 	}
+	// Without a key the commit is unsigned, whatever the checkout's own
+	// config asked for.
+	if got := runCheckoutGit(t, hostile.path, "log", "-1", "--format=%G?"); got != "N" {
+		t.Fatalf("signature status = %q, want N (unsigned)", got)
+	}
+}
+
+// The member's key signs the commit, the checkout's planted signing
+// program still never runs, and nothing of the key is left on disk.
+func TestCommitAllSignsWithTheMemberKey(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("ssh-keygen is not on PATH")
+	}
+	e := newUnitEngine(t)
+	hostile := newHostileCheckout(t, e, "run-signed")
+
+	keyDir := t.TempDir()
+	keyPath := filepath.Join(keyDir, "signing")
+	sign := exec.CommandContext(t.Context(), "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "aether member-1", "-f", keyPath)
+	if out, err := sign.CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen: %v: %s", err, out)
+	}
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := os.ReadFile(keyPath + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	author := domain.GitIdentity{Name: "Ada Lovelace", Email: "ada@example.com"}
+	before := tempSigningKeyFiles(t)
+
+	commit, err := e.CommitAll(t.Context(), domain.RunID("run-signed"), "server commit", author, key)
+	if err != nil {
+		t.Fatalf("CommitAll: %v", err)
+	}
+	if commit == "" {
+		t.Fatal("CommitAll returned an empty commit")
+	}
+	hostile.assertNothingRan(t)
+
+	allowed := filepath.Join(keyDir, "allowed_signers")
+	if err := os.WriteFile(allowed, []byte(author.Email+" "+string(pub)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runCheckoutGit(t, hostile.path, "-c", "gpg.format=ssh", "-c", "gpg.ssh.program=ssh-keygen",
+		"-c", "gpg.ssh.allowedSignersFile="+allowed, "verify-commit", commit)
+
+	if after := tempSigningKeyFiles(t); len(after) != len(before) {
+		t.Errorf("staged signing keys left behind: %v, want %v", after, before)
+	}
+}
+
+// tempSigningKeyFiles lists the signing key files CommitAll stages in the
+// server's temp directory, so a test can see one is not left behind.
+func tempSigningKeyFiles(t *testing.T) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(os.TempDir(), "aether-signing-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return matches
+}
+
+// A run checkout's `origin` remote is where a push or a pull request from
+// inside the run goes. The clone points it at the server-side bare repo
+// path, which does not exist in the run container, so a workspace origin
+// has to replace it - and no workspace origin has to leave it alone.
+func TestCreateRunCheckoutPointsOriginAtTheWorkspaceUpstream(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := t.Context()
+	repo, err := e.InitWorkspaceRepo(ctx, "ws1")
+	if err != nil {
+		t.Fatalf("InitWorkspaceRepo: %v", err)
+	}
+	seedBareMain(t, e, "ws1")
+
+	const upstream = "https://github.com/acme/app.git"
+	withOrigin, _, err := e.CreateRunCheckout(ctx, "ws1", "run-origin", "main", "push me", upstream)
+	if err != nil {
+		t.Fatalf("CreateRunCheckout with an origin: %v", err)
+	}
+	if got := runCheckoutGit(t, withOrigin, "remote", "get-url", "origin"); got != upstream {
+		t.Errorf("origin = %q, want %q", got, upstream)
+	}
+
+	bare, _, err := e.CreateRunCheckout(ctx, "ws1", "run-bare", "main", "no upstream", "")
+	if err != nil {
+		t.Fatalf("CreateRunCheckout without an origin: %v", err)
+	}
+	if got := runCheckoutGit(t, bare, "remote", "get-url", "origin"); got != repo {
+		t.Errorf("origin = %q, want the clone's own %q", got, repo)
+	}
+}
+
+// seedBareMain gives the workspace bare repo one commit on main, which is
+// the base branch CreateRunCheckout cuts from.
+func seedBareMain(t *testing.T, e *Engine, ws domain.WorkspaceID) {
+	t.Helper()
+	repo, err := e.repoPath(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	runCheckoutGit(t, work, "init", "--initial-branch=main", work)
+	if err := os.WriteFile(filepath.Join(work, "file.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runCheckoutGit(t, work, "add", "-A")
+	runCheckoutGit(t, work, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+	runCheckoutGit(t, work, "push", repo, "main")
 }

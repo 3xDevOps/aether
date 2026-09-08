@@ -176,3 +176,28 @@ func TestGitRemoteAddsThenUpdates(t *testing.T) {
 		t.Fatalf("remote after set-url = %q", got)
 	}
 }
+
+func TestOriginURL(t *testing.T) {
+	requireGit(t)
+	repo := t.TempDir()
+	git(t, repo, "init")
+
+	got, err := OriginURL(repo)
+	if err != nil || got != "" {
+		t.Fatalf("OriginURL without an origin = (%q, %v), want (\"\", nil)", got, err)
+	}
+
+	const upstream = "https://github.com/acme/app.git"
+	git(t, repo, "remote", "add", "origin", upstream)
+	got, err = OriginURL(repo)
+	if err != nil {
+		t.Fatalf("OriginURL: %v", err)
+	}
+	if got != upstream {
+		t.Fatalf("OriginURL = %q, want %q", got, upstream)
+	}
+
+	if _, err := OriginURL(filepath.Join(repo, "not-a-repo")); err == nil {
+		t.Fatal("OriginURL outside a repository should fail")
+	}
+}

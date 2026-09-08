@@ -73,7 +73,7 @@ func rpcError(err error) *protocol.Error {
 	case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab):
 		code = protocol.CodeInvalidParams
 	case errors.Is(err, errInvalidTransition), errors.Is(err, scheduler.ErrTerminalTabLimit),
-		errors.Is(err, scheduler.ErrTerminalNotRunning):
+		errors.Is(err, scheduler.ErrTerminalNotRunning), errors.Is(err, scheduler.ErrGitHubNotLoggedIn):
 		code = protocol.CodeInvalidState
 	case errors.Is(err, errWriteDenied), errors.Is(err, errMemberRemoved),
 		errors.Is(err, errMemberPending), errors.Is(err, permissions.ErrDenied):

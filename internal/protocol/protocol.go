@@ -68,6 +68,9 @@ const (
 	MethodEnvSave = "env.save"
 	// MethodEnvReset stops the caller's environment terminal and returns it to the standard image.
 	MethodEnvReset = "env.reset"
+	// MethodGitHubConnect finishes the GitHub login the caller started
+	// with gh auth login in their environment terminal.
+	MethodGitHubConnect = "github.connect"
 )
 
 // Custom agent (harness) onboarding methods.
@@ -80,6 +83,8 @@ const (
 const (
 	// MethodWorkspaceSettings updates workspace settings (admin only).
 	MethodWorkspaceSettings = "workspace.settings"
+	// MethodWorkspaceOrigin sets the upstream git URL run checkouts push to.
+	MethodWorkspaceOrigin = "workspace.origin"
 	// MethodRunProtect toggles a run's protected flag (owner or admin).
 	MethodRunProtect = "run.protect"
 	// MethodSyncConflict reports a live-overlay sync conflict so both

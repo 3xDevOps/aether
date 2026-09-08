@@ -675,6 +675,10 @@ CREATE TABLE run_steerers (
 	PRIMARY KEY (run_id, member_id)
 );
 `,
+	// v23: the upstream git URL a workspace's run checkouts push to.
+	`
+ALTER TABLE workspaces ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

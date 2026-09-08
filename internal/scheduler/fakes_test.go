@@ -41,7 +41,11 @@ type fakeRuntime struct {
 	// immediate shell-executable failure.
 	execTTYHook func(context.Context, runtime.ID, []string, string, uint, uint) (runtime.Attachment, error)
 	execCalls   []fakeExecTTYCall
-	attaches    int
+	// execHandler answers Exec with an exit code and stdout; the default
+	// is exit 0 with no output, and nothing ever writes stderr.
+	execHandler  func(id runtime.ID, argv []string) (int, string, error)
+	execRunCalls []fakeExecCall
+	attaches     int
 	// images is the fake daemon's local image registry.
 	images map[string]string
 }
@@ -57,6 +61,12 @@ type fakeExecTTYCall struct {
 	workDir string
 	cols    uint
 	rows    uint
+}
+
+type fakeExecCall struct {
+	id      runtime.ID
+	argv    []string
+	workDir string
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -285,6 +295,24 @@ func (r *fakeRuntime) attachForExec(ctx context.Context, id runtime.ID, _ []stri
 	return att, nil
 }
 
+func (r *fakeRuntime) Exec(_ context.Context, id runtime.ID, argv []string, workDir string) (int, string, string, error) {
+	r.mu.Lock()
+	r.execRunCalls = append(r.execRunCalls, fakeExecCall{id: id, argv: slices.Clone(argv), workDir: workDir})
+	handler := r.execHandler
+	r.mu.Unlock()
+	if handler == nil {
+		return 0, "", "", nil
+	}
+	code, stdout, err := handler(id, argv)
+	return code, stdout, "", err
+}
+
+func (r *fakeRuntime) execRuns() []fakeExecCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.execRunCalls)
+}
+
 func (r *fakeRuntime) execTTYCalls() []fakeExecTTYCall {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -463,6 +491,7 @@ type fakeGit struct {
 	watching          map[domain.RunID]domain.WorkspaceID
 	lastFile          map[domain.RunID]time.Time
 	bases             map[domain.RunID]string
+	origins           map[domain.RunID]string
 	workspaceByRun    map[domain.RunID]domain.WorkspaceID
 	branchByRun       map[domain.RunID]string
 	publishedBranches map[domain.WorkspaceID]map[string]bool
@@ -471,6 +500,7 @@ type fakeGit struct {
 	createHook        func(run domain.RunID)
 	commitHook        func(run domain.RunID, message string) // runs at the top of CommitAll
 	authors           map[domain.RunID][]domain.GitIdentity
+	signed            map[domain.RunID][]bool
 }
 
 func newFakeGit(root string) *fakeGit {
@@ -481,10 +511,12 @@ func newFakeGit(root string) *fakeGit {
 		watching:          make(map[domain.RunID]domain.WorkspaceID),
 		lastFile:          make(map[domain.RunID]time.Time),
 		bases:             make(map[domain.RunID]string),
+		origins:           make(map[domain.RunID]string),
 		workspaceByRun:    make(map[domain.RunID]domain.WorkspaceID),
 		branchByRun:       make(map[domain.RunID]string),
 		publishedBranches: make(map[domain.WorkspaceID]map[string]bool),
 		authors:           make(map[domain.RunID][]domain.GitIdentity),
+		signed:            make(map[domain.RunID][]bool),
 	}
 }
 
@@ -492,7 +524,7 @@ func (g *fakeGit) checkoutPath(run domain.RunID) string {
 	return filepath.Join(g.root, string(run))
 }
 
-func (g *fakeGit) CreateRunCheckout(_ context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, _ string) (string, string, error) {
+func (g *fakeGit) CreateRunCheckout(_ context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, _, origin string) (string, string, error) {
 	hook := g.createHook
 	if hook != nil {
 		hook(run)
@@ -508,6 +540,7 @@ func (g *fakeGit) CreateRunCheckout(_ context.Context, ws domain.WorkspaceID, ru
 	}
 	branch := "aether/run-" + string(run)
 	g.bases[run] = baseBranch
+	g.origins[run] = origin
 	g.workspaceByRun[run] = ws
 	g.branchByRun[run] = branch
 	return path, branch, nil
@@ -528,7 +561,13 @@ func (g *fakeGit) baseBranchFor(run domain.RunID) string {
 	return g.bases[run]
 }
 
-func (g *fakeGit) CommitAll(_ context.Context, run domain.RunID, message string, author domain.GitIdentity) (string, error) {
+func (g *fakeGit) originFor(run domain.RunID) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.origins[run]
+}
+
+func (g *fakeGit) CommitAll(_ context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (string, error) {
 	if g.commitHook != nil {
 		g.commitHook(run, message)
 	}
@@ -536,7 +575,16 @@ func (g *fakeGit) CommitAll(_ context.Context, run domain.RunID, message string,
 	defer g.mu.Unlock()
 	g.commits[run] = append(g.commits[run], message)
 	g.authors[run] = append(g.authors[run], author)
+	g.signed[run] = append(g.signed[run], len(signingKey) > 0)
 	return fmt.Sprintf("commit-%d", len(g.commits[run])), nil
+}
+
+// commitSignings reports, per CommitAll call for the run, whether a
+// signing key was passed.
+func (g *fakeGit) commitSignings(run domain.RunID) []bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.signed[run])
 }
 
 func (g *fakeGit) PublishRunBranch(_ context.Context, run domain.RunID) (string, error) {

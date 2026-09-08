@@ -223,7 +223,7 @@ func TestCheckoutLifecycle(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "Fix the Auth bug!")
+	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "Fix the Auth bug!", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -242,15 +242,15 @@ func TestCheckoutLifecycle(t *testing.T) {
 	}
 
 	// Duplicate create and bad base branch both fail.
-	if _, _, dupErr := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "x"); dupErr == nil {
+	if _, _, dupErr := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "x", ""); dupErr == nil {
 		t.Error("duplicate CreateRunCheckout should fail")
 	}
-	if _, _, baseErr := e.CreateRunCheckout(ctx, "ws1", "run2", "no-such-branch", "x"); baseErr == nil {
+	if _, _, baseErr := e.CreateRunCheckout(ctx, "ws1", "run2", "no-such-branch", "x", ""); baseErr == nil {
 		t.Error("CreateRunCheckout from unborn base should fail")
 	}
 
 	// Clean tree: CommitAll is a no-op.
-	if noop, noopErr := e.CommitAll(ctx, "run1", "aether: noop", domain.GitIdentity{}); noopErr != nil || noop != "" {
+	if noop, noopErr := e.CommitAll(ctx, "run1", "aether: noop", domain.GitIdentity{}, nil); noopErr != nil || noop != "" {
 		t.Fatalf("clean CommitAll = (%q, %v), want (\"\", nil)", noop, noopErr)
 	}
 
@@ -260,7 +260,7 @@ func TestCheckoutLifecycle(t *testing.T) {
 	}
 	owner := domain.GitIdentity{Name: "Ada Lovelace", Email: "ada@example.com"}
 	commit, err := e.CommitAll(ctx, "run1",
-		"wip: fix the auth bug\n\nCo-authored-by: Bob <bob@example.com>", owner)
+		"wip: fix the auth bug\n\nCo-authored-by: Bob <bob@example.com>", owner, nil)
 	if err != nil || len(commit) != 40 {
 		t.Fatalf("CommitAll = (%q, %v)", commit, err)
 	}
@@ -324,7 +324,7 @@ func TestRunBranchFallsBackToTheFullIDOnCollision(t *testing.T) {
 
 	const first = "01m0h6tym4y65102a721nq0jf3"
 	const colliding = "01m0aaaaaaaaaaaaaaaaanq0jf3" // same last six characters
-	_, firstBranch, err := e.CreateRunCheckout(ctx, "ws1", first, "main", "Fix the Auth bug!")
+	_, firstBranch, err := e.CreateRunCheckout(ctx, "ws1", first, "main", "Fix the Auth bug!", "")
 	if err != nil {
 		t.Fatalf("first run: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestRunBranchFallsBackToTheFullIDOnCollision(t *testing.T) {
 		t.Fatalf("first branch = %q, want the short-id form", firstBranch)
 	}
 
-	_, branch, err := e.CreateRunCheckout(ctx, "ws1", colliding, "main", "Fix the Auth bug!")
+	_, branch, err := e.CreateRunCheckout(ctx, "ws1", colliding, "main", "Fix the Auth bug!", "")
 	if err != nil {
 		t.Fatalf("colliding run: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestFailedCheckoutReleasesItsBranchName(t *testing.T) {
 	if err := os.MkdirAll(sidecar, 0o700); err != nil {
 		t.Fatalf("occupy the sidecar path: %v", err)
 	}
-	_, _, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "Fix the Auth bug!")
+	_, _, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "Fix the Auth bug!", "")
 	if err == nil {
 		t.Fatal("checkout with an unwritable sidecar path succeeded, want a failure")
 	}
@@ -388,7 +388,7 @@ func TestFailedCheckoutReleasesItsBranchName(t *testing.T) {
 		t.Fatal("a failed checkout left its branch name reserved")
 	}
 	// The name is free, so a retry gets the readable form back.
-	_, branch, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "Fix the Auth bug!")
+	_, branch, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "Fix the Auth bug!", "")
 	if err != nil {
 		t.Fatalf("retry after failure: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestAgentCannotRedirectPublish(t *testing.T) {
 	seedWorkspace(t, e, url, "ws2")
 	ctx := t.Context()
 
-	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "attack")
+	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "attack", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestAgentCannotRedirectPublish(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "hostile.txt"), []byte("pwned\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	hostile, err := e.CommitAll(ctx, "run1", "hostile", domain.GitIdentity{})
+	hostile, err := e.CommitAll(ctx, "run1", "hostile", domain.GitIdentity{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +474,7 @@ func TestConcurrentRunsOneWorkspace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			run := domain.RunID(fmt.Sprintf("run%d", i))
-			checkout, _, err := e.CreateRunCheckout(ctx, "ws1", run, "main", fmt.Sprintf("task %d", i))
+			checkout, _, err := e.CreateRunCheckout(ctx, "ws1", run, "main", fmt.Sprintf("task %d", i), "")
 			if err != nil {
 				errs <- fmt.Errorf("%s create: %w", run, err)
 				return
@@ -483,7 +483,7 @@ func TestConcurrentRunsOneWorkspace(t *testing.T) {
 				errs <- err
 				return
 			}
-			if _, err := e.CommitAll(ctx, run, "aether: work", domain.GitIdentity{}); err != nil {
+			if _, err := e.CommitAll(ctx, run, "aether: work", domain.GitIdentity{}, nil); err != nil {
 				errs <- fmt.Errorf("%s commit: %w", run, err)
 				return
 			}
@@ -541,7 +541,7 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "watch me")
+	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "watch me", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -748,7 +748,7 @@ func TestReceivePackDeniesBranchDeletion(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	if _, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "artifact"); err != nil {
+	if _, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "artifact", ""); err != nil {
 		t.Fatal(err)
 	}
 	tip, err := e.PublishRunBranch(ctx, "run1")
@@ -779,7 +779,7 @@ func TestDiffStatsHostilePaths(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "hostile")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "hostile", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -858,7 +858,7 @@ func TestReceivePackPublishesGitBranch(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	_, branch, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "pushed from client")
+	_, branch, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "pushed from client", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -905,14 +905,14 @@ func TestReceivePackPublishesGitBranch(t *testing.T) {
 func publishRun(t *testing.T, e *Engine, ws domain.WorkspaceID, run domain.RunID, task string) (branch, tip string) {
 	t.Helper()
 	ctx := t.Context()
-	checkout, branch, err := e.CreateRunCheckout(ctx, ws, run, "main", task)
+	checkout, branch, err := e.CreateRunCheckout(ctx, ws, run, "main", task, "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("wip\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.CommitAll(ctx, run, "wip", domain.GitIdentity{}); err != nil {
+	if _, err := e.CommitAll(ctx, run, "wip", domain.GitIdentity{}, nil); err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
 	tip, err = e.PublishRunBranch(ctx, run)
@@ -1010,7 +1010,7 @@ func TestServerRewriteKeepsOldTipInReflog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "rewritten.txt"), []byte("v2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	newTip, err := e.CommitAll(ctx, "run1", "rewritten", domain.GitIdentity{})
+	newTip, err := e.CommitAll(ctx, "run1", "rewritten", domain.GitIdentity{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1081,7 +1081,7 @@ func TestDiffWatchPublishesCommitWithoutTreeEvent(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run-commit-only", "main", "watch me")
+	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run-commit-only", "main", "watch me", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1139,7 +1139,7 @@ func TestCommitAllRefusesAForgedDisplayName(t *testing.T) {
 		"Eve\nCo-authored-by: Eve <attacker@evil.com>",
 	} {
 		run := domain.RunID(fmt.Sprintf("forge%d", i))
-		checkout, _, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "forged")
+		checkout, _, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "forged", "")
 		if err != nil {
 			t.Fatalf("CreateRunCheckout: %v", err)
 		}
@@ -1147,7 +1147,7 @@ func TestCommitAllRefusesAForgedDisplayName(t *testing.T) {
 			t.Fatal(werr)
 		}
 		id := (&domain.Member{ID: "m_eve", DisplayName: displayName}).GitIdentity()
-		if _, cerr := e.CommitAll(ctx, run, "wip: forged\n\n"+id.Trailer(), id); cerr != nil {
+		if _, cerr := e.CommitAll(ctx, run, "wip: forged\n\n"+id.Trailer(), id, nil); cerr != nil {
 			t.Fatalf("CommitAll with display name %q: %v", displayName, cerr)
 		}
 		if got, _ := e.git(ctx, checkout, "log", "-1", "--format=%ae"); got != "m_eve@aether.local" {

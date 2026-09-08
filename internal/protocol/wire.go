@@ -45,7 +45,10 @@ type Workspace struct {
 	Name        string `json:"name"`
 	BaseBranch  string `json:"base_branch"`
 	SteerOthers string `json:"steer_others,omitempty"`
-	CreatedAt   string `json:"created_at"`
+	// Origin is the upstream git URL run checkouts push to; absent when
+	// the workspace has none.
+	Origin    string `json:"origin,omitempty"`
+	CreatedAt string `json:"created_at"`
 }
 
 // Member is the wire form of a member. Pending appears only while the
@@ -124,6 +127,7 @@ func WorkspaceFromDomain(w *domain.Workspace) Workspace {
 		Name:        w.Name,
 		BaseBranch:  w.BaseBranch,
 		SteerOthers: w.SteerOthers,
+		Origin:      w.Origin,
 		CreatedAt:   rfc3339(w.CreatedAt),
 	}
 }
@@ -226,6 +230,15 @@ type MemberGitResult struct {
 	Member Member `json:"member"`
 }
 
+// GitHubConnectResult is the result of github.connect: the account the
+// environment terminal is logged in to, and the commit signing key now
+// registered on it.
+type GitHubConnectResult struct {
+	Login       string `json:"login"`
+	SigningKey  string `json:"signing_key"`
+	Fingerprint string `json:"fingerprint"`
+}
+
 // RunLaunchParams are the params of run.launch. Task is optional in the
 // default tui mode - an empty task drops the member into the agent's
 // interactive TUI with no seeded prompt - but required in headless mode,
@@ -299,6 +312,18 @@ type WorkspaceSettingsParams struct {
 
 // WorkspaceSettingsResult is the result of workspace.settings.
 type WorkspaceSettingsResult struct {
+	Workspace Workspace `json:"workspace"`
+}
+
+// WorkspaceOriginParams are the params of workspace.origin. Origin is the
+// upstream git URL run checkouts push to; "" clears it.
+type WorkspaceOriginParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	Origin      string `json:"origin"`
+}
+
+// WorkspaceOriginResult is the result of workspace.origin.
+type WorkspaceOriginResult struct {
 	Workspace Workspace `json:"workspace"`
 }
 

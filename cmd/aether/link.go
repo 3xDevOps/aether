@@ -151,5 +151,31 @@ func runLink(args []string) error {
 		return err
 	}
 	fmt.Printf("git remote aether -> %s\n", url)
+	return recordWorkspaceOrigin(c, wl.Workspaces, wsID, cfg.Repo)
+}
+
+// recordWorkspaceOrigin teaches the workspace where the linked clone
+// pushes, so runs reach the same upstream. It only ever fills a blank: an
+// origin the workspace already names is shared by everyone on the server,
+// and this clone is one developer's.
+func recordWorkspaceOrigin(c *protocol.Client, list []protocol.Workspace, wsID, repo string) error {
+	ws, ok := workspaceByID(list, wsID)
+	if !ok || ws.Origin != "" {
+		return nil
+	}
+	origin, err := localops.OriginURL(repo)
+	if err != nil {
+		return err
+	}
+	if origin == "" {
+		return nil
+	}
+	var res protocol.WorkspaceOriginResult
+	if err := c.Call(protocol.MethodWorkspaceOrigin, protocol.WorkspaceOriginParams{
+		WorkspaceID: wsID, Origin: origin,
+	}, &res); err != nil {
+		return err
+	}
+	fmt.Printf("workspace origin -> %s\n", res.Workspace.Origin)
 	return nil
 }

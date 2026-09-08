@@ -153,14 +153,21 @@ func TestMemberHomePersistsAcrossContainers(t *testing.T) {
 	verifyNoLeaks(t)
 }
 
-// fetchRunFile fetches a run's branch over the SSH git transport and
-// returns one file's content from its tip.
-func fetchRunFile(t *testing.T, ctrl *protocol.Client, dir string, env []string, repoURL, runID, name string) string {
+// fetchRunBranch fetches a run's branch over the SSH git transport into
+// dir, leaving its tip at FETCH_HEAD.
+func fetchRunBranch(t *testing.T, ctrl *protocol.Client, dir string, env []string, repoURL, runID string) {
 	t.Helper()
 	var pull protocol.RunPullResult
 	if err := ctrl.Call(protocol.MethodRunPull, protocol.RunIDParams{RunID: runID}, &pull); err != nil {
 		t.Fatalf("run.pull %s: %v", runID, err)
 	}
 	runGit(t, dir, env, "fetch", "-q", repoURL, pull.Branch)
+}
+
+// fetchRunFile fetches a run's branch over the SSH git transport and
+// returns one file's content from its tip.
+func fetchRunFile(t *testing.T, ctrl *protocol.Client, dir string, env []string, repoURL, runID, name string) string {
+	t.Helper()
+	fetchRunBranch(t, ctrl, dir, env, repoURL, runID)
 	return runGit(t, dir, env, "show", "FETCH_HEAD:"+name)
 }

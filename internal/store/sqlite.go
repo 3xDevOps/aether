@@ -207,9 +207,9 @@ func (d *DB) CreateWorkspace(ctx context.Context, w *domain.Workspace) error {
 		return fmt.Errorf("store: create workspace: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		id, w.Name, createdAt, string(environment), baseBranch, w.SteerOthers,
+		`INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, w.Name, createdAt, string(environment), baseBranch, w.SteerOthers, w.Origin,
 	); err != nil {
 		return fmt.Errorf("store: create workspace: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -223,7 +223,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (*domain.Workspace, erro
 		environment string
 		createdAt   int64
 	)
-	if err := row.Scan(&w.ID, &w.Name, &createdAt, &environment, &w.BaseBranch, &w.SteerOthers); err != nil {
+	if err := row.Scan(&w.ID, &w.Name, &createdAt, &environment, &w.BaseBranch, &w.SteerOthers, &w.Origin); err != nil {
 		return nil, err
 	}
 	if environment != "" && environment != "{}" {
@@ -235,7 +235,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (*domain.Workspace, erro
 	return &w, nil
 }
 
-const workspaceCols = `id, name, created_at, environment, base_branch, steer_others`
+const workspaceCols = `id, name, created_at, environment, base_branch, steer_others, origin`
 
 func (d *DB) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
 	w, err := scanWorkspace(d.db.QueryRowContext(ctx,
@@ -275,9 +275,9 @@ func (d *DB) UpdateWorkspace(ctx context.Context, w *domain.Workspace) error {
 		return fmt.Errorf("store: encode workspace environment: %w", err)
 	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE workspaces SET name = ?, environment = ?, base_branch = ?, steer_others = ?
+		`UPDATE workspaces SET name = ?, environment = ?, base_branch = ?, steer_others = ?, origin = ?
 		 WHERE id = ?`,
-		w.Name, string(environment), baseBranch, w.SteerOthers, w.ID))
+		w.Name, string(environment), baseBranch, w.SteerOthers, w.Origin, w.ID))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update workspace: %w", mapConstraint(err, ErrNotFound))
 	} else if err == nil {
@@ -294,6 +294,18 @@ func (d *DB) SetWorkspaceSteerOthers(ctx context.Context, id domain.WorkspaceID,
 		`UPDATE workspaces SET steer_others = ? WHERE id = ?`, steerOthers, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: set workspace steer_others: %w", err)
+	}
+	return err
+}
+
+func (d *DB) SetWorkspaceOrigin(ctx context.Context, id domain.WorkspaceID, origin string) error {
+	if !domain.ValidOrigin(origin) {
+		return fmt.Errorf("store: set workspace origin: invalid url %q", origin)
+	}
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE workspaces SET origin = ? WHERE id = ?`, origin, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set workspace origin: %w", err)
 	}
 	return err
 }

@@ -53,7 +53,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "render diffs")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "render diffs", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 
 	// A committed change, so the patch has to reach past HEAD to the base.
 	write("keep.txt", "one\ntwo\n")
-	if _, err := e.CommitAll(ctx, "run1", "wip: edit", domain.GitIdentity{}); err != nil {
+	if _, err := e.CommitAll(ctx, "run1", "wip: edit", domain.GitIdentity{}, nil); err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
 	// Then uncommitted work: a further tracked edit, a brand new file, the
@@ -170,7 +170,7 @@ func TestRunPatchColonInDataDir(t *testing.T) {
 	seedWorkspace(t, e, url, "ws1")
 	ctx := t.Context()
 
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "colon path")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "colon path", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}

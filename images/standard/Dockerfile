@@ -7,6 +7,7 @@ ARG NODE_VERSION=24.20.0
 ARG FNM_VERSION=1.39.0
 ARG UV_VERSION=0.12.7
 ARG RUST_VERSION=1.98.0
+ARG GH_VERSION=2.100.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -20,6 +21,7 @@ RUN apt-get update \
         git \
         grep \
         jq \
+        openssh-client \
         pkg-config \
         python3 \
         python3-venv \
@@ -54,6 +56,19 @@ RUN case "$(dpkg --print-architecture)" in \
             "/usr/local/bin/${tool}"; \
     done \
     && chmod -R a+rX "${FNM_DIR}"
+
+# The GitHub CLI from the pinned release tarball; the binary alone is
+# kept, on PATH for every uid via /usr/local/bin.
+RUN case "$(dpkg --print-architecture)" in \
+        amd64) gh_arch=amd64 ;; \
+        arm64) gh_arch=arm64 ;; \
+        *) echo "unsupported architecture for gh" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/gh.tar.gz \
+        "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${gh_arch}.tar.gz" \
+    && tar -xzf /tmp/gh.tar.gz -C /tmp \
+    && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${gh_arch}/bin/gh" /usr/local/bin/gh \
+    && rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${gh_arch}"
 
 # uv's standalone binary; its installer only fetches and unpacks the
 # pinned release.

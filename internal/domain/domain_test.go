@@ -165,3 +165,37 @@ func TestGitIdentityIgnoresAnUnusableStoredValue(t *testing.T) {
 		t.Fatalf("GitIdentity() = %v, want the display name at the fallback address", got)
 	}
 }
+
+func TestValidOrigin(t *testing.T) {
+	valid := []string{
+		"",
+		"https://github.com/acme/app.git",
+		"http://git.internal/acme/app.git",
+		"ssh://git@github.com/acme/app.git",
+		"git://git.internal/acme/app.git",
+		"/srv/git/app.git",
+		"git@github.com:acme/app.git",
+		"my-user.name_1@host.example:acme/app.git",
+	}
+	for _, url := range valid {
+		if !ValidOrigin(url) {
+			t.Errorf("ValidOrigin(%q) = false, want true", url)
+		}
+	}
+	invalid := []string{
+		"github.com/acme/app.git",
+		"--upload-pack=/bin/sh",
+		"-oProxyCommand=touch /tmp/pwned",
+		"https://example.com/a b.git",
+		"https://example.com/a.git\nssh://evil",
+		"ext::sh -c whoami",
+		"file:///srv/git/app.git",
+		"git@github.com/acme/app.git",
+		"https://example.com/" + strings.Repeat("a", 1024),
+	}
+	for _, url := range invalid {
+		if ValidOrigin(url) {
+			t.Errorf("ValidOrigin(%q) = true, want false", url)
+		}
+	}
+}
