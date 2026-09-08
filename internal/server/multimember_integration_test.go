@@ -288,11 +288,21 @@ func TestIntegrationMultiMember(t *testing.T) {
 	if after.Run.MemberID != cam.ID {
 		t.Fatalf("run owner after handoff = %s, want %s", after.Run.MemberID, cam.ID)
 	}
-	waitEvent(t, sub, &seen, "handoff entry", func(e events.Event) bool {
+	handoff := waitEvent(t, sub, &seen, "handoff entry", func(e events.Event) bool {
 		p, ok := e.Payload.(events.TimelinePayload)
 		return ok && string(e.RunID) == collab.ID && e.ActorID == domain.MemberID(bo.ID) &&
 			p.Kind == events.TimelineHandoff && p.Message == cam.ID
 	})
+	// The credit follows the transfer that caused it. Stamped the other way
+	// round the feed would say Bo was credited before anyone could see why.
+	credit := waitEvent(t, sub, &seen, "co-author entry", func(e events.Event) bool {
+		p, ok := e.Payload.(events.TimelinePayload)
+		return ok && string(e.RunID) == collab.ID && e.ActorID == domain.MemberID(bo.ID) &&
+			p.Kind == events.TimelineCoAuthor
+	})
+	if credit.Seq <= handoff.Seq {
+		t.Fatalf("co-author entry is seq %d, want it after the handoff at seq %d", credit.Seq, handoff.Seq)
+	}
 	// Giving a run away is itself the credit: Bo has not steered since the
 	// handoff, so this is the transfer's line and not a steer's.
 	steerers, err := srv.Store().ListRunSteerers(ctx, domain.RunID(collab.ID))
