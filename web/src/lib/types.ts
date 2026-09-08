@@ -6,6 +6,7 @@ export type RunStatus =
   | 'provisioning'
   | 'running'
   | 'needs-attention'
+  | 'completed'
   | 'merged'
   | 'abandoned'
   | 'failed'

@@ -19,7 +19,7 @@ const runs: Record<string, RunRecord> = {
     id: 'done',
     workspace_id: otherWorkspace.id,
     member_id: bob.id,
-    status: 'merged',
+    status: 'completed',
     finished_at: '2026-08-14T10:30:00Z',
   }),
 }

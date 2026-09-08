@@ -93,6 +93,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
 
 function isTerminal(status: RunStatus): boolean {
   return (
+    status === 'completed' ||
     status === 'merged' ||
     status === 'abandoned' ||
     status === 'failed' ||

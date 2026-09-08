@@ -370,9 +370,8 @@ be an invention.
 
 `src/routes/board/` is the default center view: the active workspace's run
 cards in the three buckets the GUI spec copies from Orca. `needs-attention` is
-Needs you (both stalls and clean exits waiting on `run.close` - the card's
-reason line tells them apart), `queued`/`provisioning`/`running` is Working,
-the terminal statuses are Done.
+Needs You for a live stalled run, `queued`/`provisioning`/`running` is Working,
+and `completed` plus the final statuses are Done.
 An active run whose approval request is still pending also presents as
 needs-attention on the board and in the sidebar - the pause is invisible in
 the domain status, so `runState` takes a pending flag fed from the approval
@@ -417,10 +416,9 @@ Two things the buckets do not come from the run status alone:
 **The Needs you reason survives a fetch.** `protocol.Run` carries `reason` -
 the last `run.status` reason, persisted with the run and sanitized
 server-side - so a run that was already in needs-attention when the tab
-loaded shows its reason line, and the card tells a stall from a clean exit
-waiting on `run.close`. `toRecord` in `src/store/runs.ts` prefers the wire
-reason and falls back to the previously stored one only when the fetch
-omits it and the status has not changed (a legacy gateway); a live
+loaded shows its live-stall reason. `toRecord` in `src/store/runs.ts` prefers
+the wire reason and falls back to the previously stored one only when the
+fetch omits it and the status has not changed (a legacy gateway); a live
 `run.status` event still overwrites it with the event payload's reason. An
 approval pause keeps its fallback: a card with an empty reason uses its
 oldest pending request's action as the summary.
@@ -436,21 +434,13 @@ verb rather than offering the one the server would refuse.
 
 `src/lib/commands.ts` holds every verb the dashboard can perform - the run
 verbs (pause/resume, send a message to the agent, close as merged or abandoned
-when a run needs attention, kill, delete, protect/unprotect, relaunch, pull
-branch, hand off) and the board verbs (open the board or the list, launch,
+at any stage that holds a record, kill, delete, protect/unprotect, relaunch,
+pull branch, hand off) and the board verbs (open the board or the list, launch,
 launch from a template, mark all seen) - as data: an id, a label, an icon, the
 capability gate, and the call itself. `useCommandRunner()` performs one and
 reports the outcome the same way everywhere: gateway verbs toast their
 past-tense name or the server's refusal verbatim. Deleting a run also removes
-it from the local run map after the server confirms deletion; other run state
-is still reported by the event stream.
-
-Kill and Delete stay available to members with the `Kill` capability for
-every run status. Killing a terminal run is a safe no-op; deleting removes
-the run's checkout, transcripts and durable run-owned records.
-
-Two surfaces render that one list, so a label or a gate can never drift:
-
+it from the local run map after the server confirms deletion.
 - **The command palette** (`src/components/palette/`) is the cmdk palette:
   `⌘K`/`Ctrl+K` anywhere, or the button it registers into the `statusbar`
   slot (it has no home of its own in the shell, and the dialog portals out of
@@ -481,16 +471,16 @@ tooltip, because the action bar is intentionally compact.
 
 **Who may do what is asked twice.** `src/lib/permissions.ts` mirrors
 `internal/permissions`: the role table, plus the two restrictions on top of it
-(a protected run limits steer and kill to its owner and admins, and a
-workspace with `steer_others=admins_only` does the same for others' runs).
-The server is still the authority and checks every call again, but a button
-one click from a denial is worse than no button, so the command list asks the
-same questions first. A viewer sees nothing that mutates a run; hand off and
-protect need the run's owner or an admin. Before hydration the caller's own
-record has not arrived, and the mirror answers yes rather than making the
-shell's buttons appear a beat late. Pull is the exception that is not a
-question for this policy at all: it is the desktop gateway fetching into the
-repository on this machine, so it answers to `hasLocal('pull')` alone.
+(a protected run limits steer and every Kill-policy action to its owner and
+admins, and a workspace with `steer_others=admins_only` does the same for
+others' runs). The server is still the authority and checks every call again,
+but a button one click from a denial is worse than no button, so the command
+list asks the same questions first. A viewer sees nothing that mutates a run;
+hand off and protect need the run's owner or an admin. Before hydration the
+caller's own record has not arrived, and the mirror answers yes rather than
+making the shell's buttons appear a beat late. Pull is the exception that is
+not a question for this policy at all: it is the desktop gateway fetching into
+the repository on this machine, so it answers to `hasLocal('pull')` alone.
 
 ### The forms
 
@@ -1278,6 +1268,7 @@ into the active workspace with either the caller's or a shared account, and
 offering only members who can own a run as
 handoff targets, never a viewer. The buttons that render the same list are
 covered where they live: the run action bar showing pause, resume or neither
+<<<<<<< HEAD
 as the pause state is known, asking before a kill and only then killing,
 offering the hand-off targets who may own a run and no button at all when
 there are none, and gating pull and relaunch; the sidebar offering New run to
@@ -1324,6 +1315,37 @@ instead of being guessed at, the refresh covering every workspace rather than
 only the ones with live runs, the heartbeat claiming only the workspace in
 view, an over-cap workspace staying in the readout after its last run
 finishes, and the feed opening its window at the log head, walking it back
+=======
+as the pause state is known, asking before a kill and delete and only then
+calling them, offering the hand-off targets who may own a run and no button at
+all when there are none, and gating pull and relaunch; the sidebar offering New
+run to a member who may start one and not to a viewer, and All runs opening the
+flat list; the board header opening the launch form and an empty workspace
+saying so once rather than three times; and the launch form refusing a
+headless run with no task while sending nothing the server already defaults.
+The palette covers the ending-action matrix: Delete for every status, Kill
+only while queued, provisioning, or running, and Close only for completed
+runs, where it chooses merged or abandoned. The sidebar also covers the
+switcher naming a sole workspace instead of offering a picker, a switch
+rescoping the run list, and the attention badge counting.
+The permission mirror is exercised through the bar rather than on its own: a
+viewer is offered nothing that mutates a run, a collaborator may steer, kill,
+and delete another member's run but not give it away or protect it, and a
+protected run and an `admins_only` workspace both hide those Kill-policy verbs
+from everyone but the owner. Two more cover the shared runner: a refused kill
+toasts the server's message verbatim, and a slow pull locks the whole bar,
+names the ref it fetched and leaves its git output on the store for the diff
+tab. The shell test clicks New run in the sidebar and finds the real form,
+which is what proves the host is the shell's rather than the palette's. The
+team surfaces are driven through the same stub
+API: the status bar reading roster, queue and budget and rendering all three,
+the approval badge and watcher avatars reaching a real run card, a decision
+going out as `approval.decide` and coming back attributed, a steer refusal
+surfacing instead of being guessed at, the refresh covering every workspace
+rather than only the ones with live runs, the heartbeat claiming only the
+workspace in view, an over-cap workspace staying in the readout after its last
+run finishes, and the feed opening its window at the log head, walking it back
+>>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
 without re-reading, narrowing on a filter, and abandoning a page that belongs
 to filters the user has left. The Members roster is rendered both ways: an
 admin approving, inviting and changing another member's role with the roster

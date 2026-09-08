@@ -172,7 +172,7 @@ func TestRunCarriesCoordinationAssets(t *testing.T) {
 	}
 
 	container.exitNow(0)
-	waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	// The assets outlive the status change on purpose: they are only let go
 	// once the container itself has been destroyed.
 	waitFor(t, "coordination release", func() bool {

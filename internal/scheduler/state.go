@@ -15,9 +15,9 @@ import (
 )
 
 // legalTransition encodes the pinned lifecycle table (Wave 1 contract
-// §6.6). Terminal states never transition.
+// §6.6). Final dispositions never transition.
 func legalTransition(from, to domain.RunStatus) bool {
-	if from.Terminal() || !to.Valid() {
+	if from.Final() || !to.Valid() {
 		return false
 	}
 	switch to {
@@ -27,16 +27,22 @@ func legalTransition(from, to domain.RunStatus) bool {
 		// Provisioned, or a stalled-but-alive run whose activity resumed.
 		return from == domain.RunProvisioning || from == domain.RunNeedsAttention
 	case domain.RunNeedsAttention:
-		// Stall or agent exit; exit from an already-stalled run re-enters
-		// with a new reason.
+		// A live run stalls while the agent still has a container.
+		return from == domain.RunRunning || from == domain.RunNeedsAttention
+	case domain.RunCompleted:
 		return from == domain.RunRunning || from == domain.RunNeedsAttention
 	case domain.RunFailed:
 		return from == domain.RunProvisioning || from == domain.RunRunning ||
 			from == domain.RunNeedsAttention
 	case domain.RunMerged:
-		return from == domain.RunNeedsAttention
-	case domain.RunAbandoned, domain.RunInterrupted:
-		return true // any non-terminal state
+		return from == domain.RunCompleted
+	case domain.RunAbandoned:
+		return from == domain.RunQueued || from == domain.RunProvisioning ||
+			from == domain.RunRunning || from == domain.RunNeedsAttention ||
+			from == domain.RunCompleted
+	case domain.RunInterrupted:
+		return from == domain.RunQueued || from == domain.RunProvisioning ||
+			from == domain.RunRunning || from == domain.RunNeedsAttention
 	}
 	return false
 }
@@ -96,7 +102,7 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, work
 	if to == domain.RunRunning && from == domain.RunProvisioning {
 		startedAt = &now
 	}
-	if to.Terminal() {
+	if to.Terminal() && !from.Terminal() {
 		finishedAt = &now
 	}
 	public := publicRunStatusReason(reason)

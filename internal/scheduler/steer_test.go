@@ -9,7 +9,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
 func TestKill(t *testing.T) {
@@ -241,15 +240,19 @@ func TestCloseRunStopsStalledContainer(t *testing.T) {
 	run, _ := e.launchFake(t, "task")
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 
-	// CloseRun on the stalled-but-alive run: outcome sticks, container is
-	// stopped, cleanup happens, exit handling does not overwrite.
-	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); err != nil {
-		t.Fatalf("CloseRun: %v", err)
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("CloseRun on stalled run: %v, want ErrInvalidTransition", err)
+	}
+	if err := e.sched.Kill(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Kill stalled run: %v", err)
 	}
 	waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
 	r := e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
 	if r.FinishedAt == nil {
-		t.Fatal("closed run must have FinishedAt")
+		t.Fatal("killed run must have FinishedAt")
+	}
+	if err := e.sched.DeleteRun(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
 	}
 }
 
@@ -323,16 +326,22 @@ func TestInjectLiveStalledNeedsAttention(t *testing.T) {
 	}
 }
 
-func TestInjectCleanExitedNeedsAttention(t *testing.T) {
+func TestInjectCleanExitedCompleted(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
 	run, c := e.launchFake(t, "task")
 	c.exitNow(0)
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	waitFor(t, "completed run removed from supervision", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		_, ok := e.sched.runs[run.ID]
+		return !ok
+	})
 
 	err := e.sched.Inject(ctx, run.ID, e.member.ID, "too late")
-	if !errors.Is(err, ptyhost.ErrNoSession) {
-		t.Fatalf("Inject clean-exited = %v, want ptyhost.ErrNoSession", err)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("Inject completed = %v, want ErrInvalidTransition", err)
 	}
 }

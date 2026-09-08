@@ -150,15 +150,10 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 }
 
 // replayableStatus reports whether a run without a PTY session is
-// permanently without one - finished or interrupted - rather than caught
-// in a transient provisioning or recovery window.
+// durably sessionless rather than caught in a transient provisioning,
+// recovery, or stalled-but-live window.
 func replayableStatus(st domain.RunStatus) bool {
-	switch st {
-	case domain.RunQueued, domain.RunProvisioning, domain.RunRunning:
-		return false
-	default:
-		return true
-	}
+	return st.Terminal()
 }
 
 // serveReplay streams a finished run's recorded transcript as the attach's

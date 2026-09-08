@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 const (
@@ -153,10 +156,11 @@ func (s *Scheduler) failRelaunch(run *domain.Run, actor domain.MemberID, cause e
 	}
 }
 
-// recoverRuns reconciles the store's non-terminal runs against the
+// recoverRuns reconciles the store's runtime-active runs against the
 // runtime's actual containers on startup (§6.8): resume supervision where
 // the container still runs, otherwise preserve the work and mark the run
-// interrupted.
+// interrupted. Terminal rows never regain runtime supervision; lingering
+// sidecars for them are cleaned up separately.
 func (s *Scheduler) recoverRuns(ctx context.Context) error {
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
 	if err != nil {
@@ -176,11 +180,52 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 			s.recoverSupervised(ctx, r)
 		}
 	}
+	s.cleanupTerminalSidecars(ctx)
 	// The sidecars that survived reconciliation are the live references to
 	// staged bridge binaries; anything they no longer name is a build no
 	// container holds.
 	s.collectStagedBridges()
 	return nil
+}
+
+// cleanupTerminalSidecars closes the crash window after a terminal status
+// persisted but before the final container destroy and sidecar removal.
+// Completed rows are terminal for recovery even though they remain closable.
+func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
+	entries, err := os.ReadDir(s.cfg.StateDir)
+	if err != nil {
+		slog.Warn("scheduler: list sidecars during recovery", "error", err)
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		run := domain.RunID(strings.TrimSuffix(entry.Name(), ".json"))
+		r, err := s.cfg.Store.GetRun(ctx, run)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				sc, serr := s.readSidecar(run)
+				if serr != nil {
+					slog.Warn("scheduler: read deleted terminal sidecar", "run", run, "error", serr)
+					continue
+				}
+				s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run)
+				continue
+			}
+			slog.Warn("scheduler: load sidecar run during recovery", "run", run, "error", err)
+			continue
+		}
+		if !r.Status.Terminal() {
+			continue
+		}
+		sc, err := s.readSidecar(run)
+		if err != nil {
+			slog.Warn("scheduler: read terminal sidecar during recovery", "run", run, "error", err)
+			continue
+		}
+		s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run)
+	}
 }
 
 // recoverUnstarted handles queued/provisioning rows whose launch died with
@@ -238,6 +283,12 @@ func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {
 }
 
 func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
+	if r.Status.Terminal() {
+		if sc, err := s.readSidecar(r.ID); err == nil {
+			s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), r.ID)
+		}
+		return
+	}
 	sc, err := s.readSidecar(r.ID)
 	if err != nil {
 		s.interrupt(ctx, r)
@@ -276,22 +327,32 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 	}
 }
 
-func (s *Scheduler) finalizeObservedExit(_ context.Context, r *domain.Run, sc sidecar) {
+func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc sidecar) {
 	entry := s.entryFromSidecar(r, sc)
-	if exitAlreadyRecorded(r, sc) {
+	s.mu.Lock()
+	if s.runs[r.ID] != nil {
+		s.mu.Unlock()
+		return
+	}
+	// Kill and Close both use s.mu to serialize their status write. Read
+	// the durable status while holding that same lock, then register the
+	// recovered entry before releasing it so a concurrent Kill cannot win
+	// unsupervised and be overwritten by the observed clean exit.
+	fresh, err := s.cfg.Store.GetRun(ctx, r.ID)
+	if err != nil {
+		s.mu.Unlock()
+		slog.Warn("scheduler: reload observed-exit run", "run", r.ID, "error", err)
+		return
+	}
+	if fresh.Status.Terminal() {
+		s.mu.Unlock()
 		s.cleanupLeftoverContainer(context.Background(), entry.containerID, r.ID)
 		return
 	}
+	entry.status = fresh.Status
+	s.runs[r.ID] = entry
+	s.mu.Unlock()
 	s.finalize(entry, sc.ExitCode)
-}
-
-func exitAlreadyRecorded(r *domain.Run, sc sidecar) bool {
-	if r.Status.Terminal() {
-		return true
-	}
-	// Clean exit parks at needs-attention, which is still active: destroy
-	// and drop the sidecar without re-attaching or flipping to interrupted.
-	return sc.ExitCode == 0 && !sc.KillRequested && r.Status == domain.RunNeedsAttention
 }
 
 func (s *Scheduler) cleanupLeftoverContainer(ctx context.Context, cid runtime.ID, run domain.RunID) {
@@ -363,7 +424,6 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		containerID:    runtime.ID(sc.ContainerID),
 		task:           r.Task,
 		memberID:       r.AccountMember(),
-		harness:        r.Harness,
 		status:         r.Status,
 		startedAt:      started,
 		paused:         sc.Paused,

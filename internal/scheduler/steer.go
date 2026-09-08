@@ -112,7 +112,6 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 		s.mu.Lock()
 		entry := s.runs[run]
 		pending := s.pending[run]
-		alreadyKilling := entry != nil && entry.killRequested
 		terminal := entry != nil && entry.status.Terminal()
 		var done <-chan struct{}
 		if entry != nil {
@@ -128,7 +127,7 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 			continue
 		}
 		if entry != nil {
-			if !terminal && !alreadyKilling {
+			if !terminal {
 				if err := s.Kill(ctx, run, actor); err != nil {
 					return err
 				}
@@ -243,10 +242,7 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 	return entry != nil && entry.paused
 }
 
-// Inject writes a steering message into a live agent's PTY, attributed
-// to the actor, and stamps the act into the workspace timeline. A live
-// supervised run in running or needs-attention is accepted; a clean-exited
-// needs-attention run has no PTY and returns ptyhost.ErrNoSession.
+// Inject writes a steering message to the live run agent's PTY.
 func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -280,45 +276,36 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	return nil
 }
 
-// CloseRun resolves a needs-attention run to its human-decided outcome:
-// merged or abandoned, reason "closed". Any other source state or outcome
-// is an invalid transition.
+// CloseRun resolves a completed run to its human-decided outcome: merged or
+// abandoned, reason "closed". A live needs-attention run can resume and is
+// not closable. Completed runs have no container to stop.
 func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error {
 	if outcome != domain.RunMerged && outcome != domain.RunAbandoned {
 		return fmt.Errorf("%w: close outcome must be merged or abandoned, got %q", ErrInvalidTransition, outcome)
 	}
 	s.mu.Lock()
 	if entry := s.runs[run]; entry != nil {
-		if entry.status != domain.RunNeedsAttention {
+		if entry.status != domain.RunCompleted {
 			s.mu.Unlock()
-			return fmt.Errorf("%w: close requires needs-attention, run is %s", ErrInvalidTransition, entry.status)
+			return fmt.Errorf("%w: close requires completed, run is %s", ErrInvalidTransition, entry.status)
 		}
-		err := s.transitionLocked(ctx, run, entry.workspaceID, domain.RunNeedsAttention, outcome, "closed", actor)
-		cid := entry.containerID
+		err := s.transitionLocked(ctx, run, entry.workspaceID, domain.RunCompleted, outcome, "closed", actor)
 		s.mu.Unlock()
-		if err != nil {
-			return err
-		}
-		// Closed while the (stalled but alive) container still runs: stop
-		// it; the wait goroutine commits partial work and cleans up.
-		if serr := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); serr != nil {
-			slog.Warn("scheduler: stop container on close", "run", run, "error", serr)
-		}
-		return nil
+		return err
 	}
 	// Unsupervised: the status is read and transitioned under s.mu so a
 	// concurrent Kill or CloseRun cannot both win and overwrite each
-	// other's terminal state.
+	// other's terminal disposition.
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
 		s.mu.Unlock()
 		return err
 	}
-	if r.Status != domain.RunNeedsAttention {
+	if r.Status != domain.RunCompleted {
 		s.mu.Unlock()
-		return fmt.Errorf("%w: close requires needs-attention, run is %s", ErrInvalidTransition, r.Status)
+		return fmt.Errorf("%w: close requires completed, run is %s", ErrInvalidTransition, r.Status)
 	}
-	err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
+	err = s.transitionLocked(ctx, run, r.WorkspaceID, domain.RunCompleted, outcome, "closed", actor)
 	s.mu.Unlock()
 	return err
 }

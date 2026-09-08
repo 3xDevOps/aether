@@ -26,8 +26,9 @@ var runShellTabName = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
 const runShellRecoveryWait = 5 * time.Second
 
-// EnsureRunShellTab starts an interactive shell process in a running run
-// container unless that tab already has a live PTY session.
+// EnsureRunShellTab starts an interactive shell process in a running or
+// stalled-but-live run container unless that tab already has a live PTY
+// session.
 func (s *Scheduler) EnsureRunShellTab(ctx context.Context, run domain.RunID, tab string, cols, rows uint) error {
 	if !runShellTabName.MatchString(tab) {
 		return fmt.Errorf("%w: %q must match ^[a-z0-9-]{1,32}$", ErrInvalidRunShellTab, tab)
@@ -63,10 +64,16 @@ func (s *Scheduler) EnsureRunShellTab(ctx context.Context, run domain.RunID, tab
 				}
 				return fmt.Errorf("scheduler: find run shell %s: %w", run, err)
 			}
-			if stored.Status != domain.RunRunning {
+			if stored.Status != domain.RunRunning && stored.Status != domain.RunNeedsAttention {
 				return fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
 			}
-		case entry.status != domain.RunRunning || entry.paused || entry.containerID == "":
+			sc, sidecarErr := s.readSidecar(run)
+			if sidecarErr == nil && !sc.Paused && !sc.ExitObserved && sc.ContainerID != "" {
+				containerID = runtime.ID(sc.ContainerID)
+				goto live
+			}
+		case (entry.status != domain.RunRunning && entry.status != domain.RunNeedsAttention) ||
+			entry.paused || entry.containerID == "":
 			s.mu.Unlock()
 			return fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
 		default:

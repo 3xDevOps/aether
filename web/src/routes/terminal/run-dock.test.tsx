@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
+import type { RunStatus } from '@/lib/types'
 import { useStore } from '@/store'
 import {
   initialRunShellDock,
@@ -30,14 +31,23 @@ class NoResizeObserver {
   disconnect() {}
 }
 
+<<<<<<< HEAD
 function mount(dock: Partial<RunShellDockState> = {}) {
+=======
+function mount(status: RunStatus = 'running') {
+>>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
   const View = lookupRoute('terminal')
   if (!View) throw new Error('terminal route not registered')
-  useStore.getState().upsertRun(run())
+  useStore.getState().upsertRun(run({ status }))
   useStore.setState({
     terminals: {},
+<<<<<<< HEAD
     // The dock ships collapsed; these cases are about what it shows open.
     shellDocks: { run_1: { ...initialRunShellDock, collapsed: false, ...dock } },
+=======
+    pausedRuns: { run_1: false },
+    shellDocks: { run_1: { ...initialRunShellDock } },
+>>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
   })
   return render(<View params={{ runId: 'run_1' }} />)
 }
@@ -52,8 +62,8 @@ afterEach(() => {
 })
 
 describe('run-shell dock', () => {
-  it('opens a write-required shell tab at the encoded run URL', async () => {
-    const view = mount()
+  it('opens a forced writable shell tab for a stalled live run', async () => {
+    const view = mount('needs-attention')
 
     fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
     await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
@@ -120,6 +130,7 @@ describe('run-shell dock', () => {
     view.unmount()
   })
 
+<<<<<<< HEAD
   it('starts collapsed and opens from the header toggle', () => {
     useStore.getState().upsertRun(run())
     useStore.setState({ terminals: {}, shellDocks: {} })
@@ -182,6 +193,19 @@ describe('run-shell dock', () => {
   it('does not offer shell tabs after the run container is gone', () => {
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
+=======
+  it('waits for pause state instead of offering a rejected shell', () => {
+    const view = mount('needs-attention')
+    act(() => useStore.setState({ pausedRuns: {} }))
+
+    expect(screen.queryByRole('button', { name: 'Open shell' })).toBeNull()
+    expect(screen.getByText('Run shell unavailable: waiting for the run pause state.')).toBeDefined()
+    view.unmount()
+  })
+
+  it('does not offer shell tabs after a completed run loses its container', () => {
+    const view = mount('completed')
+>>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
 
     expect(screen.queryByRole('button', { name: 'Open shell' })).toBeNull()
     expect(screen.getByText(/Run shell unavailable/)).toBeDefined()

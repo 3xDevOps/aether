@@ -1329,3 +1329,13 @@ func TestReplayTranscript(t *testing.T) {
 		t.Fatalf("Replay unknown run = %v, want os.ErrNotExist", err)
 	}
 }
+
+func TestBannerTextEscapesTerminalControls(t *testing.T) {
+	got := bannerText("Ana\x1b]52;c;secret\a\n\u009b31m")
+	if got != `Ana\x1B]52;c;secret\x07\x0A\x9B31m` {
+		t.Fatalf("bannerText = %q", got)
+	}
+	if strings.ContainsAny(got, "\x1b\a\n\r") {
+		t.Fatalf("bannerText retained terminal control bytes: %q", got)
+	}
+}

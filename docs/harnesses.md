@@ -18,14 +18,14 @@ Two rules shape everything below:
 
 ## Shipped harnesses
 
-| `--agent` | CLI | Login state | Profile sync root | API key env | Launch env | MCP | Resume | Env setup |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | by session ID (`--session-id`, `--resume`) | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | no | yes |
-| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | best effort (`--continue`) | yes |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | no | no |
-| `fake` | a script you name | - | - | - | - | no | no | no |
-| `custom` | deployment-supplied | - | - | - | - | no | no | no |
+| `--agent` | CLI | Login state | Profile sync root | API key env | Launch env | MCP | Resume | Steering | Env setup |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | by session ID (`--session-id`, `--resume`) | PTY | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | no | PTY | yes |
+| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | best effort (`--continue`) | PTY | yes |
+| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | no | HTTP TUI API | no |
+| `fake` | a script you name | - | - | - | - | no | no | PTY | no |
+| `custom` | deployment-supplied | - | - | - | - | no | no | PTY | no |
 
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user).
@@ -69,6 +69,13 @@ never has any of these appended - nothing checks the override is still that
 CLI. Relaunching a run that finished on its own never resumes; it gets a
 session of its own. See [failure-handling.md](failure-handling.md).
 
+## Steering delivery
+
+`run.inject` writes a message and an Enter key to the run agent's PTY. It is
+terminal input, not a harness API: each native TUI decides when and how to
+submit it. Aether records the delivery only after the complete stdin write
+succeeds and renders the attribution without terminal control bytes.
+
 Only `claude` has a **structured-output adapter** today, so its headless runs
 produce typed tool-call and token events. Everything else degrades to the PTY
 transcript plus the diff timeline, which is always enough. Adding an adapter is
@@ -78,11 +85,11 @@ transcript plus the diff timeline, which is always enough. Adding an adapter is
 
 `--mode tui` (the default) runs the agent's native interactive TUI in a
 persistent server-side PTY: `aether attach <run>` puts you in it from the
-CLI, and the dashboard navigates there automatically on launch. A successful
-TUI process finishes the run normally. If it exits unsuccessfully, including
-after Ctrl-C, a quota error, or a crash, the run stays alive and returns to a
-login shell in the same container, so you can start another installed agent
-in the same checkout. Type `exit` in that shell to finish the run.
+CLI, and the dashboard navigates there automatically on launch. The native
+TUI process is supervised directly: Aether never replaces it with a login
+shell in the run container. A clean exit commits the result to the run branch,
+destroys the run container, and marks the run `completed`; an unsuccessful
+exit is likewise handled by supervision rather than leaving a shell behind.
 `--mode headless` runs the agent's machine-readable mode and exits with it.
 Full-permission flags are applied by default in both - the agent is in a
 container, and the container is the boundary ([security.md](security.md)).
@@ -101,13 +108,10 @@ receives changes: the stored task, the branch slug, and every CLI and
 dashboard surface keep what the member typed. See
 [coordination.md](coordination.md).
 
-| Harness | tui | headless |
-| --- | --- | --- |
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |
 | `pi` | `pi {task}` | `pi -p {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
-
 Every `claude` **run** also gets `IS_SANDBOX=1`. Runs execute as root on the
 standard image, and Claude Code refuses `--dangerously-skip-permissions` as
 root; that variable is a vendor internal, not a supported interface, and the

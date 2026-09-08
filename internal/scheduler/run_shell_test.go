@@ -80,6 +80,28 @@ func TestEnsureRunShellTabWaitsForRecovery(t *testing.T) {
 	}
 }
 
+func TestEnsureRunShellTabCreatesAndReconnectsForStalledLiveRun(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "stalled shell")
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	err := e.sched.transitionLocked(t.Context(), run.ID, entry.workspaceID, entry.status, domain.RunNeedsAttention, "stalled: test", "")
+	e.sched.mu.Unlock()
+	if err != nil {
+		t.Fatalf("mark run stalled: %v", err)
+	}
+
+	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "stalled", 80, 24); err != nil {
+		t.Fatalf("create shell for stalled run: %v", err)
+	}
+	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "stalled", 80, 24); err != nil {
+		t.Fatalf("reconnect shell for stalled run: %v", err)
+	}
+	if got := len(e.rt.execTTYCalls()); got != 1 {
+		t.Fatalf("ExecTTY calls = %d, want 1 after reconnect", got)
+	}
+}
+
 func TestEnsureRunShellTabEnforcesFourTabLimitAndIsIdempotent(t *testing.T) {
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "shell limit")
@@ -99,12 +121,17 @@ func TestEnsureRunShellTabEnforcesFourTabLimitAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestEnsureRunShellTabRejectsPausedRun(t *testing.T) {
+func TestEnsureRunShellTabRejectsPausedStalledRun(t *testing.T) {
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "paused shell")
 	e.sched.mu.Lock()
-	e.sched.runs[run.ID].paused = true
+	entry := e.sched.runs[run.ID]
+	err := e.sched.transitionLocked(t.Context(), run.ID, entry.workspaceID, entry.status, domain.RunNeedsAttention, "stalled: test", "")
+	entry.paused = true
 	e.sched.mu.Unlock()
+	if err != nil {
+		t.Fatalf("mark run stalled: %v", err)
+	}
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "paused", 80, 24); !errors.Is(err, ptyhost.ErrNoSession) {
 		t.Fatalf("paused run error = %v, want ErrNoSession", err)
 	}
@@ -117,7 +144,7 @@ func TestFinalizeStopsRunShellTabs(t *testing.T) {
 		t.Fatalf("EnsureRunShellTab: %v", err)
 	}
 	c.exitNow(0)
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	prefixes := e.pty.stoppedPrefixesSnapshot()
 	want := "run-shell:" + string(run.ID) + ":"
 	for _, prefix := range prefixes {
@@ -126,4 +153,33 @@ func TestFinalizeStopsRunShellTabs(t *testing.T) {
 		}
 	}
 	t.Fatalf("prefix stops = %v, want %q", prefixes, want)
+}
+
+func TestEnsureRunShellTabRejectsCompletedRun(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, c := e.launchFake(t, "completed shell")
+	c.exitNow(0)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+
+	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "completed", 80, 24); !errors.Is(err, ptyhost.ErrNoSession) {
+		t.Fatalf("completed run error = %v, want ErrNoSession", err)
+	}
+	if got := len(e.rt.execTTYCalls()); got != 0 {
+		t.Fatalf("ExecTTY calls = %d, want none for completed run", got)
+	}
+}
+
+func TestEnsureRunShellUsesLiveSidecarBeforeRecoveryRegistersRun(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "recover sidecar shell")
+	e.sched.mu.Lock()
+	delete(e.sched.runs, run.ID)
+	e.sched.mu.Unlock()
+
+	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "recovery-sidecar", 80, 24); err != nil {
+		t.Fatalf("EnsureRunShellTab from live sidecar: %v", err)
+	}
+	if got := len(e.rt.execTTYCalls()); got != 1 {
+		t.Fatalf("ExecTTY calls = %d, want 1", got)
+	}
 }

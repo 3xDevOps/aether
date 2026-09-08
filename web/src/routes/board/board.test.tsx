@@ -49,7 +49,7 @@ const queued = run({
 const merged = run({
   id: 'run_merged',
   task: 'landed already',
-  status: 'merged',
+  status: 'completed',
   finished_at: '2026-08-14T10:30:00Z',
 })
 const elsewhere = run({

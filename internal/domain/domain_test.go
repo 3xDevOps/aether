@@ -19,7 +19,7 @@ func TestTerminalTypes(t *testing.T) {
 }
 
 func TestRunStatusTerminal(t *testing.T) {
-	terminal := []RunStatus{RunMerged, RunAbandoned, RunFailed, RunInterrupted}
+	terminal := []RunStatus{RunCompleted, RunMerged, RunAbandoned, RunFailed, RunInterrupted}
 	for _, s := range terminal {
 		if !s.Terminal() {
 			t.Errorf("%q.Terminal() = false, want true", s)
@@ -33,9 +33,20 @@ func TestRunStatusTerminal(t *testing.T) {
 	}
 }
 
+func TestRunStatusFinal(t *testing.T) {
+	if RunCompleted.Final() {
+		t.Error("completed.Final() = true, want false")
+	}
+	for _, s := range []RunStatus{RunMerged, RunAbandoned, RunFailed, RunInterrupted} {
+		if !s.Final() {
+			t.Errorf("%q.Final() = false, want true", s)
+		}
+	}
+}
+
 func TestRunStatusValid(t *testing.T) {
 	all := []RunStatus{
-		RunQueued, RunProvisioning, RunRunning, RunNeedsAttention,
+		RunQueued, RunProvisioning, RunRunning, RunNeedsAttention, RunCompleted,
 		RunMerged, RunAbandoned, RunFailed, RunInterrupted,
 	}
 	for _, s := range all {
@@ -59,8 +70,8 @@ func TestAllRunStatusesComplete(t *testing.T) {
 		}
 		seen[s] = true
 	}
-	if len(AllRunStatuses) != 8 {
-		t.Errorf("AllRunStatuses has %d entries, want 8", len(AllRunStatuses))
+	if len(AllRunStatuses) != 9 {
+		t.Errorf("AllRunStatuses has %d entries, want 9", len(AllRunStatuses))
 	}
 }
 

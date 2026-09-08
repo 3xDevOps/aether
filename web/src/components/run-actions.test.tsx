@@ -116,9 +116,9 @@ test('kill asks first, then calls run.kill', async () => {
   expect(useStore.getState().runs[record.id]?.status).toBe('running')
 })
 
-test('delete asks first, calls run.delete, and removes the run', async () => {
-  // Delete is a post-mortem action: only a finished run offers it.
-  const record = seed({ run: { status: 'failed' } })
+test('delete asks first, calls run.delete, and removes a live run', async () => {
+  // Delete is authorized by the Kill policy, not by lifecycle status.
+  const record = seed({ run: { status: 'queued' } })
   render(<RunActions run={record} />)
 
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
@@ -177,7 +177,7 @@ test('relaunch is offered on a finished run only', () => {
   unmount()
   render(<RunActions run={seed({ run: { status: 'merged' } })} />)
   expect(screen.getByRole('button', { name: 'Relaunch' })).toBeTruthy()
-  // A finished agent has nothing to kill; Delete is the remaining end.
+  // A finished agent has nothing to kill, but remains deletable.
   expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
 })
@@ -275,8 +275,8 @@ test('a viewer is offered nothing to change', () => {
   expect(screen.getByRole('button', { name: 'Pull' })).toBeTruthy()
 })
 
-// A collaborator may steer and kill somebody else's run, but handing it on
-// and protecting it belong to its owner and to admins.
+// A collaborator may steer, kill, and delete somebody else's run, but handing
+// it on and protecting it belong to its owner and to admins.
 test('a collaborator on another member run may steer it but not give it away', () => {
   render(
     <RunActions
@@ -286,10 +286,14 @@ test('a collaborator on another member run may steer it but not give it away', (
 
   expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
+<<<<<<< HEAD
   // Steering a run includes typing into it, which the bar calls Send.
   expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy()
   // Delete is reserved for runs that already ended.
   expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
+=======
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
+>>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
   expect(screen.queryByRole('button', { name: 'Protect' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()
 })
@@ -314,6 +318,7 @@ test('an admin keeps every verb on a protected run in an admins-only workspace',
   expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Unprotect' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Hand off' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
 })
 
 // The two restrictions the policy adds on top of the role table.
@@ -325,6 +330,7 @@ test('a protected run and an admins-only workspace close steering to others', ()
   )
   expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
   unmount()
 
   render(
@@ -339,6 +345,7 @@ test('a protected run and an admins-only workspace close steering to others', ()
   )
   expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
 })
 
 // jsdom evaluates no container query, so the row here keeps every button a

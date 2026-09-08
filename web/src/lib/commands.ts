@@ -199,10 +199,9 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     }
   }
 
-  // One ending action per lifecycle stage: a live agent is killed, a run
-  // waiting on review is closed (the dialog asks merged or abandoned), and
-  // only a run that has already ended can be deleted.
-  if (run.status === 'needs-attention' && mayKill) {
+  // Kill only a live agent. A completed run is ready for its disposition
+  // (the dialog asks merged or abandoned); Delete is safe at every stage.
+  if (run.status === 'completed' && mayKill) {
     list.push({
       id: 'close',
       label: 'Close run...',
@@ -228,7 +227,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     })
   }
 
-  if ((finished || run.status === 'needs-attention') && mayKill) {
+  if (mayKill) {
     list.push({
       id: 'delete',
       label: 'Delete run',

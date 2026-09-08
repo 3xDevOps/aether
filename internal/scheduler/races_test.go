@@ -78,15 +78,15 @@ func TestKillDuringProvisioning(t *testing.T) {
 }
 
 // TestConcurrentCloseAndKill pins that racing terminal transitions on a
-// parked needs-attention run resolve to one terminal status. Kill is
-// idempotent after another terminal transition wins.
+// completed run resolve to one terminal status. Kill may lose after another
+// terminal transition wins.
 func TestConcurrentCloseAndKill(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
-	run, c := e.launchFake(t, "parked work")
+	run, c := e.launchFake(t, "finished work")
 	c.exitNow(0)
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)

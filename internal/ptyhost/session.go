@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -291,8 +292,26 @@ func (s *session) writeStdin(p []byte) bool {
 	return err == nil
 }
 
+func (s *session) annotateInjection(actorName, actorColor, message string) error {
+	safeActor, safeMessage := bannerText(actorName), bannerText(message)
+	banner := renderBanner(safeActor, actorColor, safeMessage)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return ErrNoSession
+	}
+	if s.ended {
+		return ErrSessionEnded
+	}
+	s.tr.output(banner)
+	s.tr.marker("inject by " + safeActor + ": " + safeMessage)
+	for c := range s.clients {
+		c.enqueue(banner)
+	}
+	return nil
+}
+
 func (s *session) inject(actorName, actorColor, message string) error {
-	banner := renderBanner(actorName, actorColor, message)
 	line := []byte(message + "\r")
 	s.stdinMu.Lock()
 	defer s.stdinMu.Unlock()
@@ -309,16 +328,18 @@ func (s *session) inject(actorName, actorColor, message string) error {
 	// lastOut: stall detection reads that clock, and counting the server's
 	// own bytes would clear a stall for an agent that never answered.
 	s.expectEcho(line, time.Now())
-	s.tr.output(banner)
-	s.tr.marker("inject by " + actorName + ": " + message)
-	for c := range s.clients {
-		c.enqueue(banner)
-	}
 	s.mu.Unlock()
-
-	if _, err := s.stdin.Write(line); err != nil {
+	n, err := s.stdin.Write(line)
+	if err != nil {
 		s.dropEcho()
 		return fmt.Errorf("ptyhost: inject stdin write: %w", err)
+	}
+	if n != len(line) {
+		s.dropEcho()
+		return fmt.Errorf("ptyhost: inject stdin write: %w", io.ErrShortWrite)
+	}
+	if err := s.annotateInjection(actorName, actorColor, message); err != nil {
+		return err
 	}
 	return nil
 }
@@ -389,7 +410,7 @@ func (s *session) consumeEcho(p []byte, now time.Time) bool {
 	return n < len(p)
 }
 
-// renderBanner renders the attributed injection banner shown to viewers and
+// renderBanner renders an attributed injection banner shown to viewers and
 // recorded in the transcript; it is never written to the agent's input.
 func renderBanner(actorName, actorColor, message string) []byte {
 	var b bytes.Buffer
@@ -397,6 +418,20 @@ func renderBanner(actorName, actorColor, message string) []byte {
 	b.WriteString(attribution.ANSI(actorColor))
 	fmt.Fprintf(&b, "\x1b[7m ▸ %s injects \x1b[0m %s\r\n", actorName, message)
 	return b.Bytes()
+}
+
+// bannerText keeps user-controlled message bytes from becoming terminal
+// control sequences in the transcript or another member's terminal.
+func bannerText(text string) string {
+	var b strings.Builder
+	for _, r := range text {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+			fmt.Fprintf(&b, "\\x%02X", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // ring keeps the last max bytes of raw PTY output for replay-on-attach.

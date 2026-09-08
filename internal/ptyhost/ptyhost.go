@@ -262,10 +262,10 @@ func (h *Host) Replay(run domain.RunID) (io.ReadCloser, error) {
 	return &replayReader{f: f, br: bufio.NewReader(f)}, nil
 }
 
-// Inject writes an attributed banner to every attachment and the transcript,
-// then writes message plus a carriage return to the session's stdin. The
-// banner never reaches the agent's input, and neither it nor the echo the
-// terminal sends back advances LastOutput. Authorization is the caller's.
+// Inject writes message plus a carriage return to the session's stdin, then
+// records an attributed banner after the complete write succeeds. The banner
+// never reaches the agent's input, and neither it nor the terminal's echo
+// advances LastOutput. Authorization is the caller's.
 func (h *Host) Inject(ctx context.Context, key SessionKey, actorName, actorColor, message string) error {
 	_ = ctx
 	s := h.lookup(key)

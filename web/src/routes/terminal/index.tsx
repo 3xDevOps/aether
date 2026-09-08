@@ -23,10 +23,9 @@ const connectionLabel: Record<string, string> = {
   offline: 'Offline',
 }
 
-/** Statuses that can still gain a live terminal session. Mirrors the
- * server's replay gate: anything past these is permanently sessionless, so
- * a refusal there means no transcript exists to replay either. */
-const liveStatuses = ['queued', 'provisioning', 'running']
+/** Statuses that can still gain a live terminal session. Completed and final
+ * runs can only replay a recorded terminal, if one exists. */
+const liveStatuses = ['queued', 'provisioning', 'running', 'needs-attention']
 
 function TerminalView({ params }: RouteProps) {
   const runID = params.runId
@@ -72,9 +71,11 @@ function TerminalView({ params }: RouteProps) {
   useEffect(() => {
     if (!terminal) return
 
-    // Only a live run can be steered. Finished-run attaches replay history
-    // read-only, so an owner must not see a false "Steering" state.
-    const ownerSteering = run?.status === 'running' && run.member_id === self.id
+    // A stalled run still has a live, recoverable agent session. Completed
+    // and final-run attaches replay history read-only.
+    const ownerSteering =
+      (run?.status === 'running' || run?.status === 'needs-attention') &&
+      run?.member_id === self.id
     setTerminal(runID, { ...initialTerminal, write: ownerSteering })
     writeRef.current = ownerSteering
     askedForControl.current = false
@@ -143,7 +144,10 @@ function TerminalView({ params }: RouteProps) {
         <Button
           size="sm"
           variant={state.write ? 'default' : 'outline'}
-          disabled={state.steerDenied || run.status !== 'running'}
+          disabled={
+            state.steerDenied ||
+            (run.status !== 'running' && run.status !== 'needs-attention')
+          }
           className="relative"
           onClick={toggleWrite}
         >

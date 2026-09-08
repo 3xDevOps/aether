@@ -83,6 +83,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
+<<<<<<< HEAD
   it('says what a mirror is until the member has taken control once', () => {
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
@@ -132,10 +133,14 @@ describe('terminal view', () => {
   })
 
   it('keeps replay-only finished runs out of steering mode', () => {
+=======
+  it('keeps a live stalled run in steering mode', () => {
+>>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
-    act(() => StubSocket.last().onopen?.())
+    attached()
 
+<<<<<<< HEAD
     const toggle = screen.getByText('Take control') as HTMLButtonElement
     expect(toggle.disabled).toBe(true)
     // A finished run cannot be steered at all, so the reason is on screen
@@ -144,6 +149,10 @@ describe('terminal view', () => {
     expect(screen.getByText('This run is not running')).toBeDefined()
     expect(screen.queryByText('Read-only mirror. Take control to type into the agent.')).toBeNull()
     expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+=======
+    expect(screen.getByText('Steering')).toBeDefined()
+    expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
+>>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
     view.unmount()
   })
 
@@ -217,6 +226,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
+<<<<<<< HEAD
   // Switching runs keeps the same view mounted, so the pane has to be cleared
   // by the switch: a finished run with no recorded terminal is refused, and a
   // refusal never acks, so it would show the previous run's output for good.
@@ -283,8 +293,11 @@ describe('terminal view', () => {
   })
 
   it('says a finished run has ended instead of echoing the refusal', () => {
+=======
+  it('says a completed run has ended instead of echoing the refusal', () => {
+>>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
     const view = mount()
-    act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
+    act(() => useStore.getState().upsertRun(run({ status: 'completed' })))
     act(() => StubSocket.last().onopen?.())
     act(() =>
       StubSocket.last().onmessage?.({
