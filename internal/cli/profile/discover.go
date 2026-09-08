@@ -116,11 +116,11 @@ func statRoot(root string) error {
 // or --allow-secret carries it. Findings in vendored plugin content are
 // not included: nobody can remove a secret-shaped string from a package
 // the harness installed.
-func UnacknowledgedSecrets(harnessName string, skipped []Exclusion, skipSecret []string) ([]Exclusion, error) {
-	root, _, err := LocalDir(harnessName)
-	if err != nil {
-		return nil, err
-	}
+//
+// root is the profile root the exclusions came from, so skipSecret takes
+// the same spellings --allow-secret does: relative to the root, or
+// absolute.
+func UnacknowledgedSecrets(root string, skipped []Exclusion, skipSecret []string) []Exclusion {
 	named := allowSet(root, skipSecret)
 	var out []Exclusion
 	for _, s := range skipped {
@@ -128,5 +128,5 @@ func UnacknowledgedSecrets(harnessName string, skipped []Exclusion, skipSecret [
 			out = append(out, s)
 		}
 	}
-	return out, nil
+	return out
 }

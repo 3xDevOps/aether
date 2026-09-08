@@ -324,16 +324,16 @@ stopped.
   before your `.aether-profile-ignore`, so that file has the last word: a
   line `!projects/` in it syncs the directory anyway.
 
-A scanner finding never refuses a push. It drops the one file it named and
-reports it, so the dashboard lists that file on the harness row before the
-import button and you import the rest in one click.
+A scanner finding never keeps the rest of a profile off the server. It drops
+the one file it named and reports it, so the dashboard lists that file on the
+harness row before the import button and you import the rest in one click.
 
 `aether profile push` has no screen to show a finding on before it uploads,
 so it refuses while a finding in a file you wrote is unacknowledged, and
 prints the path, what the scanner matched, and both ways forward:
 
 ```
-profile push: 1 secret scanner finding is in files you wrote. Remove the secret, or say what to do with each file:
+profile push: the secret scanner flagged a file you wrote. Remove the secret, or say what to do with it:
   skills/deploy/README.md: secret detected (curl-auth-header) at 12:2
     leave it out:   aether profile push --agent claude --skip-secret skills/deploy/README.md
     send it anyway: aether profile push --agent claude --allow-secret skills/deploy/README.md --workspace <workspace>

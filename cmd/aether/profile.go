@@ -59,19 +59,19 @@ func profilePush(args []string) error {
 	if len(allow) > 0 && *workspace == "" {
 		return fmt.Errorf("profile push: --allow-secret requires --workspace")
 	}
+	root, _, err := cliprofile.LocalDir(*agent)
+	if err != nil {
+		return err
+	}
 	files, skipped, err := cliprofile.DiscoverFiles(context.Background(), *agent, allow)
 	if err != nil {
 		return err
 	}
-	flagged, err := cliprofile.UnacknowledgedSecrets(*agent, skipped, skip)
-	if err != nil {
-		return err
-	}
-	if len(flagged) > 0 {
-		return secretRefusal(*agent, flagged)
-	}
 	// A file left out for its size would otherwise land on the server, so
-	// say which ones did not and why, before the snapshot line.
+	// say which ones did not and why, before the snapshot line. This runs
+	// before the refusal below, so a member answering a finding of their
+	// own still sees every other file the walk dropped, and the command
+	// that carries a plugin's own file.
 	for _, s := range skipped {
 		fmt.Printf("skipped %s: %s\n", s.Path, s.Detail)
 		// docs/harnesses.md promises --allow-secret still carries a file
@@ -82,6 +82,9 @@ func profilePush(args []string) error {
 			fmt.Printf("  to send it anyway: aether profile push --agent %s --allow-secret %s --workspace <workspace>\n",
 				*agent, s.Path)
 		}
+	}
+	if flagged := cliprofile.UnacknowledgedSecrets(root, skipped, skip); len(flagged) > 0 {
+		return secretRefusal(*agent, flagged)
 	}
 	return withControl(func(c *protocol.Client) error {
 		snap, err := cliprofile.Push(c, *agent, files, allow, *workspace)
@@ -139,9 +142,13 @@ func profileRollback(args []string) error {
 // row before the import button.
 func secretRefusal(harnessName string, flagged []cliprofile.Exclusion) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "profile push: %s in files you wrote. "+
-		"Remove the secret, or say what to do with each file:",
-		plural(len(flagged), "secret scanner finding"))
+	head := fmt.Sprintf("profile push: the secret scanner flagged %d files you wrote. "+
+		"Remove the secrets, or say what to do with each file:", len(flagged))
+	if len(flagged) == 1 {
+		head = "profile push: the secret scanner flagged a file you wrote. " +
+			"Remove the secret, or say what to do with it:"
+	}
+	b.WriteString(head)
 	for _, f := range flagged {
 		fmt.Fprintf(&b, "\n  %s: %s", f.Path, f.Detail)
 		fmt.Fprintf(&b, "\n    leave it out:   aether profile push --agent %s --skip-secret %s", harnessName, f.Path)

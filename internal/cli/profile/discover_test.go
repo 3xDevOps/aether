@@ -402,18 +402,16 @@ func TestUnacknowledgedSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	flagged, err := UnacknowledgedSecrets("claude", skipped, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	flagged := UnacknowledgedSecrets(root, skipped, nil)
 	if len(flagged) != 1 || flagged[0].Path != "skills/deploy/README.md" {
 		t.Fatalf("flagged = %+v, want the file the member wrote", flagged)
 	}
-	named, err := UnacknowledgedSecrets("claude", skipped, []string{"skills/deploy/README.md"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(named) != 0 {
+	if named := UnacknowledgedSecrets(root, skipped, []string{"skills/deploy/README.md"}); len(named) != 0 {
 		t.Fatalf("flagged = %+v after --skip-secret named it", named)
+	}
+	// An absolute path answers it too, the way --allow-secret takes one.
+	abs := filepath.Join(root, "skills", "deploy", "README.md")
+	if named := UnacknowledgedSecrets(root, skipped, []string{abs}); len(named) != 0 {
+		t.Fatalf("flagged = %+v after --skip-secret named %s", named, abs)
 	}
 }
