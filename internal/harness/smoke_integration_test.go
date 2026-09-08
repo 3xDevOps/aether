@@ -4,6 +4,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -122,42 +123,90 @@ func smokeRun(t *testing.T, image string, argv []string, env map[string]string, 
 			}
 		}
 	}()
+	out, closed, err := collectOutput(ctx, chunks, waitForExit, 2*time.Minute, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !closed {
+		return out, exitStillRunning
+	}
+	// The stream closed, so the process is gone and Wait returns its code
+	// without blocking.
+	status, waitErr := d.Wait(ctx, id)
+	if waitErr != nil {
+		t.Fatalf("Wait: %v", waitErr)
+	}
+	return out, status.Code
+}
+
+// collectOutput reads chunks until the run gives an answer and reports
+// whether the stream closed, which is the caller's cue that the process
+// is gone and its exit code is there to be read. firstOutput bounds the
+// wait for anything at all; quietFor ends the read once output has
+// settled, and only when the caller is not waiting for an exit code.
+func collectOutput(ctx context.Context, chunks <-chan string, waitForExit bool, firstOutput, quietFor time.Duration) (string, bool, error) {
 	var b strings.Builder
-	first := time.After(2 * time.Minute)
+	first := time.After(firstOutput)
 	for {
-		// Quiescence only ends the read when the caller is not waiting for
-		// an exit code; 2s after the first chunk is enough for a CLI that
-		// refuses its arguments to have said so.
 		var quiet <-chan time.Time
 		if b.Len() > 0 && !waitForExit {
-			quiet = time.After(2 * time.Second)
+			quiet = time.After(quietFor)
 		}
 		select {
 		case chunk, ok := <-chunks:
 			if !ok {
-				// The stream closed, so the process is gone and Wait
-				// returns its code without blocking.
-				status, waitErr := d.Wait(ctx, id)
-				if waitErr != nil {
-					t.Fatalf("Wait: %v", waitErr)
-				}
-				return b.String(), status.Code
+				return b.String(), true, nil
 			}
+			// The first-output deadline has done its job; left armed it
+			// would kill a headless run that printed and then kept working
+			// past it.
+			first = nil
 			// Keep draining past the cap so a chatty agent still reaches
 			// its exit rather than stalling on a full pipe.
 			if b.Len() < 32<<10 {
 				b.WriteString(chunk)
 			}
 			if b.Len() >= 32<<10 && !waitForExit {
-				return b.String(), exitStillRunning
+				return b.String(), false, nil
 			}
 		case <-quiet:
-			return b.String(), exitStillRunning
+			return b.String(), false, nil
 		case <-first:
-			t.Fatal("no output before deadline")
+			return b.String(), false, errors.New("no output before deadline")
 		case <-ctx.Done():
-			t.Fatal("context deadline before output")
+			return b.String(), false, errors.New("context deadline before output")
 		}
+	}
+}
+
+// A headless run that prints and then works on past the first-output
+// deadline is healthy: the deadline bounds the wait for anything at all,
+// not the run. Leaving it armed failed TestSmokeHeadlessNoLogin on any
+// CLI that took more than two minutes to reach the provider.
+func TestCollectOutputClearsFirstDeadlineAfterOutput(t *testing.T) {
+	chunks := make(chan string, 1)
+	chunks <- "starting\n"
+	type result struct {
+		out    string
+		closed bool
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, closed, err := collectOutput(t.Context(), chunks, true, 50*time.Millisecond, time.Second)
+		done <- result{out, closed, err}
+	}()
+
+	select {
+	case got := <-done:
+		t.Fatalf("collector stopped at the first-output deadline: %+v", got)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	close(chunks)
+	got := <-done
+	if got.err != nil || !got.closed || got.out != "starting\n" {
+		t.Fatalf("collector = %+v, want the chunk and a closed stream", got)
 	}
 }
 
