@@ -10,11 +10,12 @@ import { binaries } from './paths'
 import { type Child, portOpen, reservePort, start, waitFor } from './process'
 
 /**
- * The image every container in this suite starts from. The Go integration
- * suite runs on busybox for the same reason: the published standard image
- * is a large pull that proves nothing the scheduler path does not.
+ * The image every container in this suite starts from, pinned to the tag
+ * `internal/runtime`'s integration tests already use so a run of either
+ * suite warms the other's pull. The published standard image is a large
+ * download that proves nothing the scheduler path does not.
  */
-const standardImage = 'busybox:1.37'
+const standardImage = 'busybox:1.36'
 
 /**
  * The argv the `fake` harness runs, read from the server's environment at

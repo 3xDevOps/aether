@@ -178,8 +178,9 @@ tears it down with everything it created:
 
 - One `aether-server` child process on its own loopback SSH port, with a
   temporary data directory, `AETHER_FAKE_AGENT="sh /workspace/agent.sh"` in
-  its environment and `--standard-image busybox:1.37` - the same cheap image
-  the Go suite runs containers on. Nothing is seeded into the store: the
+  its environment and `--standard-image busybox:1.36` - the tag
+  `internal/runtime`'s integration tests already pin, so a run of either
+  suite warms the other's pull. Nothing is seeded into the store: the
   first identity to authenticate becomes the admin, which is what the
   wizard's Link step does.
 - One `aether gui` per member, each with its own `HOME` and
