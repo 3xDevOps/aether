@@ -40,6 +40,12 @@ web/node_modules/
 web/dist/*
 !web/dist/.gitkeep
 
+# Dashboard end-to-end suite. Playwright writes a failure's screenshot and
+# trace to the first and the HTML report to the second; the browsers it
+# downloads live in ~/.cache/ms-playwright and never reach the tree.
+web/test-results/
+web/playwright-report/
+
 # Desktop shell. Dependencies and installers stay out of git; the Electron
 # build is reproducible from desktop/package.json. No npm lockfile is
 # committed either - the repo toolchain is Bun, which cannot write one.

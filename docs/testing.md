@@ -19,6 +19,11 @@ Layers, per the design spec's testing strategy:
   run with `make test-integration` (real Docker, real git). CI runs them
   on every PR in the `integration` job of `.github/workflows/ci.yml`;
   that job is the merge gate the E2E suite owns.
+- **Dashboard end-to-end tests** live in `web/e2e/` and run with
+  `make test-e2e`: a real browser driving the shipped SPA against a real
+  `aether gui` gateway and a real `aether-server`. They own the paths a
+  person walks in the dashboard, which no Go test and no jsdom test
+  reaches. CI runs them in the `dashboard-e2e` job.
 
 ## The E2E scenario suite
 
@@ -35,7 +40,7 @@ Scenarios:
 | Test | Scenario |
 | --- | --- |
 | `TestIntegrationEndToEnd` (`integration_test.go`) | Solo lifecycle, the acceptance gate: seed over git push -> launch -> attach -> detach -> reattach -> steer -> finish -> pull, with the bus traffic checked against the Wave 1 contract |
-| Gateway (`internal/localgw`) | The `aether gui` HTTP/WS surface, covered by unit tests against a stub backend rather than a server E2E: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror and steer channels (`ws_test.go`) |
+| Gateway (`internal/localgw`) | The `aether gui` HTTP/WS surface, covered at this layer by unit tests against a stub backend: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror and steer channels (`ws_test.go`). A real gateway against a real server is the dashboard suite below |
 | `TestIntegrationMultiMember` (`multimember_integration_test.go`) | Three clients: tailnet initial join and invite-code key joins, WhoIs-down fallback with banner, remote administration, steering another member's run, presence roster, handoff, approval inbox, budget cap and override, agent crash -> `failed` + `wip:` commit |
 | `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Profile sync and harness logins: a login in the environment terminal persists into two runs, push -> next run sees it, mid-run push never touches a running agent, denylisted credential names refused from pushes (Docker only - it needs a real terminal) |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
@@ -149,6 +154,80 @@ reporting a pass with nothing run.
 
 `pi` has no smoke test: it is not in the smoke image, so nothing pins its
 template. Adding it is one more install line and one more map entry.
+
+## The dashboard end-to-end suite
+
+`web/e2e/` drives the dashboard the way a person does: a Chromium browser on
+the SPA the CLI embeds, talking to a real `aether gui` gateway, which proxies
+every call over a real SSH connection to a real `aether-server`. Playwright
+is the runner, pinned to an exact version in `web/package.json`.
+
+```sh
+(cd web && bunx playwright install chromium)   # once, from the repo root
+make test-e2e
+```
+
+`make test-e2e` builds the dashboard and both binaries first. The CLI serves
+the SPA out of its own embedded `web/dist`, so a stale binary would test a
+stale dashboard.
+
+### What each test gets
+
+The `aether` fixture (`web/e2e/fixtures.ts`) builds one stack per test and
+tears it down with everything it created:
+
+- One `aether-server` child process on its own loopback SSH port, with a
+  temporary data directory, `AETHER_FAKE_AGENT="sh /workspace/agent.sh"` in
+  its environment and `--standard-image busybox:1.36` - the tag
+  `internal/runtime`'s integration tests already pin, so a run of either
+  suite warms the other's pull. Nothing is seeded into the store: the
+  first identity to authenticate becomes the admin, which is what the
+  wizard's Link step does.
+- One `aether gui` per member, each with its own `HOME` and
+  `AETHER_CONFIG_DIR`, so the SSH key the Link step generates, the
+  `known_hosts` entry it writes, the saved link config and the agent
+  configuration a profile push reads all belong to that member and never
+  touch the developer's own. `PATH` and `SHELL` are fixed too, because
+  `env.harnesses` reports what is installed on this machine and that answer
+  has to be the same on a laptop and on a runner.
+- Real git repositories on disk, seeded with the `agent.sh` the fake harness
+  runs.
+
+Each gateway's git runs under an explicit `GIT_SSH_COMMAND`: OpenSSH resolves
+`~` from the password database rather than from `HOME`, so without it git
+would look for the member's key and `known_hosts` in the real user's home and
+fail host key verification.
+
+The server under test is the shipped binary, so its containers carry only the
+production `aether.managed` label - there is no test label to sweep on.
+Teardown asks the server for its members and runs, then removes those
+containers by name, along with the `aether/member-<member-id>` images an
+environment save commits. A failed test keeps its scratch directory and
+attaches the server's output to the report.
+
+### Scenarios
+
+| Spec | Scenario |
+| --- | --- |
+| `onboarding-first-member` | A fresh server: link (first identity becomes admin, SSH key generated), create the workspace, point the step at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
+| `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
+| `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |
+| `onboarding-configuration` | Bringing a member's own agent configuration across, from a fixture home holding an empty file and a file the secret scanner flags: the flagged file is named on the row and left out, everything else imports |
+| `onboarding-first-run` | Launching the first run on the fake harness and watching it reach needs-attention with its work committed |
+| `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through |
+
+`onboarding-agents` and `onboarding-first-run` need a reachable Docker
+daemon and skip without one, the way the Go suite skips its container
+scenarios. The other four need only git.
+
+### Adding a step to the wizard
+
+`web/e2e/pages/wizard.ts` is the page-object layer, and a new wizard step is
+one class and one field. Give the class the `aria-label` of the step's
+`<section>` and the actions that step offers, add its label to `stepNames` in
+the order the header lists it, and hang it off `OnboardingWizard`. Every
+locator a step builds is scoped to its own section, so nothing else in the
+suite changes.
 
 ## Failure-table coverage
 
