@@ -71,10 +71,11 @@ type Config struct {
 	// Harnesses overrides or extends the shipped harness registry
 	// (internal/harness: claude, codex, pi, opencode, custom); "fake"
 	// (the deterministic e2e agent) is registered here by default. An
-	// override replaces the registry argv but retains the profile's user,
-	// environment passthrough, resume, and coordination settings. Member
-	// definitions shape argv inside that member's own container and do not
-	// leak across members.
+	// override replaces the registry argv and keeps the profile's user, key
+	// passthrough, and launch environment; it drops the registry's resume
+	// and coordination flags, which would be appended to an argv nothing
+	// has checked. Member definitions shape argv inside that member's own
+	// container and do not leak across members.
 	Harnesses map[string]HarnessSpec
 	// ServerBinary is the server binary staged into run containers to
 	// serve the MCP bridge (docs/mcp-bridge.md). Empty means

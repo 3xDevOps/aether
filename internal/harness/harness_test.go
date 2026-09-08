@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -389,4 +390,41 @@ func TestValidateMemberDefinition(t *testing.T) {
 func validWith(base Definition, mutate func(*Definition)) Definition {
 	mutate(&base)
 	return base
+}
+
+// An admin override that renames a shipped harness's executable keeps the
+// registry's environment contract: the key passthrough and the variables
+// the CLI needs to start at all. Losing them turns a working override into
+// an agent that cannot authenticate or cannot launch, with nothing in the
+// argv to explain it.
+func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
+	claude, ok := Lookup("claude")
+	if !ok {
+		t.Fatal("claude is not in the registry")
+	}
+	if len(claude.EnvPassthrough) == 0 || len(claude.Env) == 0 {
+		t.Fatalf("claude declares no environment to carry: %+v", claude)
+	}
+	override := Definition{
+		Name:         "claude",
+		TUIArgs:      []string{"claude-wrapper", TaskPlaceholder},
+		HeadlessArgs: []string{"claude-wrapper", "-p", TaskPlaceholder},
+		Executable:   "claude-wrapper",
+	}.Profile()
+	if !slices.Equal(override.EnvPassthrough, claude.EnvPassthrough) {
+		t.Errorf("override passthrough = %v, want %v", override.EnvPassthrough, claude.EnvPassthrough)
+	}
+	if !maps.Equal(override.Env, claude.Env) {
+		t.Errorf("override env = %v, want %v", override.Env, claude.Env)
+	}
+	// The copy must not alias the registry: a caller editing an override's
+	// environment would otherwise change every later launch.
+	override.Env["IS_SANDBOX"] = "0"
+	if again, _ := Lookup("claude"); again.Env["IS_SANDBOX"] != "1" {
+		t.Fatalf("registry claude env mutated through an override: %v", again.Env)
+	}
+	// An unshipped name has no registry entry to inherit from.
+	if unknown := (Definition{Name: "omp", Executable: "omp"}).Profile(); len(unknown.Env) != 0 || len(unknown.EnvPassthrough) != 0 {
+		t.Fatalf("unshipped definition inherited environment: %+v", unknown)
+	}
 }

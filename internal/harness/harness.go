@@ -2,16 +2,16 @@
 // Aether starts each supported agent CLI. A profile carries the argv
 // templates for tui and headless modes (auto/full-permission flags applied
 // by default), the environment variables that pass plain API keys from
-// server-side config into run containers, the container-side paths holding
-// the harness's native login state (persisted per member under
-// <data>/homes/<member-id>/ and bind-mounted read-write into every run), an
-// explicit numeric uid:gid mapping for images whose configured user is named
-// rather than numeric, whether the harness can be pointed at an MCP server
-// config at launch (how conflict coordination reaches the agent; see
-// docs/mcp-bridge.md), and how it names a conversation so a relaunch resumes
-// the interrupted run's own: a session ID pinned at launch where the CLI
-// supports one, and "continue whatever ran here last" where it does not (see
-// docs/failure-handling.md).
+// server-side config into run containers and the fixed ones the CLI needs to
+// start there at all, the container-side paths holding the harness's native
+// login state (persisted per member under <data>/homes/<member-id>/ and
+// bind-mounted read-write into every run), an explicit numeric uid:gid
+// mapping for images whose configured user is named rather than numeric,
+// whether the harness can be pointed at an MCP server config at launch (how
+// conflict coordination reaches the agent; see docs/mcp-bridge.md), and how
+// it names a conversation so a relaunch resumes the interrupted run's own: a
+// session ID pinned at launch where the CLI supports one, and "continue
+// whatever ran here last" where it does not (see docs/failure-handling.md).
 //
 // The registry is a map and a few functions, not a plugin system.
 package harness
@@ -19,6 +19,7 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strconv"
@@ -146,9 +147,16 @@ func isPathWithin(candidate, root string) bool {
 }
 
 // Profile converts a generic definition to the launch profile used by the
-// scheduler and mount code.
+// scheduler and mount code. A definition names the argv and the paths, not
+// the CLI's environment, so the registry entry of the same name still
+// supplies EnvPassthrough and Env: an override that renames the executable
+// must not silently drop the key passthrough or a variable the CLI needs to
+// start at all. Unlike the registry's MCP, session, and resume flags, which
+// an override drops because they are appended to an argv nothing has
+// checked, these never touch the command line. A name the registry does not
+// know contributes nothing.
 func (d Definition) Profile() Profile {
-	return Profile{
+	p := Profile{
 		Name:            d.Name,
 		TUIArgs:         append([]string(nil), d.TUIArgs...),
 		HeadlessArgs:    append([]string(nil), d.HeadlessArgs...),
@@ -156,6 +164,11 @@ func (d Definition) Profile() Profile {
 		LocalRoot:       d.ProfileRoot,
 		DenyNames:       append([]string(nil), d.DenyNames...),
 	}
+	if registered, ok := profiles[d.Name]; ok {
+		p.EnvPassthrough = append([]string(nil), registered.EnvPassthrough...)
+		p.Env = maps.Clone(registered.Env)
+	}
+	return p
 }
 
 // Profile is one agent harness's launch profile.
@@ -170,6 +183,11 @@ type Profile struct {
 	// process into run containers when set (plain API-key harnesses;
 	// keys are never baked into images).
 	EnvPassthrough []string
+	// Env are fixed environment variables every container run of this
+	// harness needs. Unlike EnvPassthrough they carry no server-side
+	// value: they state a launch requirement of the CLI itself, so a
+	// workspace variable never overrides them.
+	Env map[string]string
 	// CredentialPaths are home-relative paths holding the harness's native
 	// login state (e.g. ".claude"). They are persisted in the member's
 	// shared home and available read-write in every run. This is the
@@ -229,10 +247,18 @@ type Profile struct {
 // credentials or key passthrough.
 var profiles = map[string]Profile{
 	"claude": {
-		Name:            "claude",
-		TUIArgs:         []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
-		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--dangerously-skip-permissions", TaskPlaceholder},
-		EnvPassthrough:  []string{"ANTHROPIC_API_KEY"},
+		Name:    "claude",
+		TUIArgs: []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
+		// Claude Code refuses "--print --output-format stream-json" without
+		// --verbose. The flag only adds records to the stream; the envelope
+		// the adapter parses is unchanged.
+		HeadlessArgs:   []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
+		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
+		// Runs execute as root on the standard image, and Claude Code
+		// refuses --dangerously-skip-permissions as root unless the
+		// environment declares a sandbox. The run container is that
+		// sandbox.
+		Env:             map[string]string{"IS_SANDBOX": "1"},
 		CredentialPaths: []string{".claude"},
 		LocalRoot:       ".claude",
 		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},
