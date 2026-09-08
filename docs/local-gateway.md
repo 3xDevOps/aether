@@ -161,7 +161,7 @@ audit history.
 {"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","forward.start",
           "forward.status","forward.stop","link.apply","link.repo","link.status",
-          "link.switch","profile.preview","profile.push","pull","pull.switch",
+          "profile.preview","profile.push","pull","pull.switch",
           "repo.fast-forward","repo.push","repo.sync","sync.start","sync.status",
           "sync.stop","update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
@@ -346,10 +346,12 @@ no SSH key is offered and the server requires one, it may create
   workspace resolves implicitly; none or several answers `-32002`
   (invalid state) and is resolved server-side or with the CLI's
   `--workspace` flag first.
-- `repo.push` seeds the workspace. It first fetches the
-  workspace's copy of `<base>` from the `aether` remote and compares it with
-  the local branch, where `<base>` is that workspace's base branch. `state`
-  reports one of four findings:
+- `repo.push` seeds the workspace. It first asks the `aether` remote for
+  its copy of `<base>` with `git ls-remote --heads`, where `<base>` is that
+  workspace's base branch. Only when the remote answers a tip does it fetch
+  that branch into `refs/remotes/aether/<base>` and compare the two; on a
+  fresh workspace no fetch runs at all. `state` reports one of four
+  findings:
   - `pushed` - the workspace had no such branch, or the local branch was
     ahead. The push ran.
   - `up-to-date` - both tips are the same commit. Nothing was pushed.
@@ -359,8 +361,11 @@ no SSH key is offered and the server requires one, it may create
 - `local_commit` and `workspace_commit` are the two branch tips as full
   40-hex commit ids, `workspace_commit` the empty string when the workspace
   has no such branch yet. `ahead` and `behind` count the local branch's
-  commits relative to the workspace branch, measured before any push.
-  `output` is everything git printed: the fetch, plus the push when one ran.
+  commits relative to the workspace branch, measured before any push. Both
+  are 0 unless the workspace already carried the branch and the two tips
+  differ, so `pushed` on a fresh workspace and `up-to-date` always report 0
+  and 0. `output` is everything git printed: the fetch when one ran, plus
+  the push when one ran.
 - The push itself is one
   `git push --no-follow-tags -u aether refs/heads/<base>:refs/heads/<base>`
   in the linked repository. The same sole-workspace rule as `link.repo`
@@ -373,14 +378,19 @@ no SSH key is offered and the server requires one, it may create
   (the message names the branch that is checked out instead), has no
   `aether` remote yet, or has an `aether` remote pointing at a different
   workspace than the one asked for - the branch would come from one
-  workspace and the objects would land in another. A push git ran and the
-  server rejected - branch protection, a missing key - answers `-32603`
-  carrying git's own stderr.
-- `repo.fast-forward` resolves the `behind` state: it fetches the same
-  `<base>` from `aether` and fast-forwards the local branch onto the
-  workspace's tip. Fast-forward only - it never merges the workspace's
-  history into the local branch and never rewrites it. `commit` is the local
-  branch tip afterwards, as a full 40-hex commit id.
+  workspace and the objects would land in another. A failed `ls-remote`,
+  fetch or push answers `-32603` carrying git's own output: an unreachable
+  server or a key git could not use fails the compare before any push, and
+  a push the server rejected for branch protection fails after it.
+- `repo.fast-forward` resolves the `behind` state: it compares exactly as
+  `repo.push` does, then advances the local branch to the workspace's tip.
+  Fast-forward only - it writes no merge commit and never rewrites commits
+  already on the local branch. `commit` is the local branch tip afterwards,
+  as a full 40-hex commit id.
+- The branch keeps whatever upstream it already had. A member's `<base>`
+  usually tracks their own remote, and a catch-up that repointed it at the
+  workspace would redirect their next `git pull`; only run branches
+  `pull` creates track `aether`.
 - Another branch checked out does not stop it: exactly as `pull` does, it
   updates the branch ref and leaves the working tree alone. When `<base>` is
   the checked-out branch, git fast-forwards it in place and refuses when
@@ -388,11 +398,17 @@ no SSH key is offered and the server requires one, it may create
   (`Your local changes to the following files would be overwritten by
   merge`). `current` reports whether the checkout is on that branch and
   `dirty` reports uncommitted changes afterwards.
-- `repo.fast-forward` refuses with `-32002` (invalid state) on the same local
-  preconditions as `repo.push`, and when the workspace branch is not a
-  descendant of the local branch - a `diverged` pair is resolved by hand with
-  git. Otherwise a failed git command answers `-32603` carrying git's own
-  output.
+- `repo.fast-forward` refuses with `-32002` (invalid state) on the same
+  local preconditions as `repo.push`, and in every state but `behind`,
+  naming what to do instead: the workspace has no branch named `<base>` yet
+  and it is pushed instead; `<base>` already matches the workspace and there
+  is nothing to fast-forward; `<base>` is ahead of the workspace and it is
+  pushed instead; or both sides moved on, so no fast-forward is possible and
+  the member rebases onto `aether/<base>` or merges it, then pushes.
+  A local branch move git itself refused, most often that uncommitted
+  change, answers `-32002` too, carrying git's message, because the member
+  fixes it in their own repository. Only a failed fetch - an unreachable
+  server, a key git could not use - answers `-32603`.
 - `repo.sync` fetches `<base>` with
   `git fetch --no-tags origin <base>`, then pushes
   `refs/remotes/origin/<base>:refs/heads/<base>` to `aether` without force.
@@ -403,12 +419,15 @@ no SSH key is offered and the server requires one, it may create
   repository, no `origin` remote, no `aether` remote, or the `aether` remote
   points at another workspace. A failed fetch or push answers `-32603`
   carrying git's own output, including non-fast-forward refusals.
-- `repo.push` including its fetch, `repo.fast-forward`, and `repo.sync` are
-  bounded at ten minutes and run with `GIT_TERMINAL_PROMPT=0`, so git cannot
-  block on its own credential prompt. That does not reach `ssh`: a
-  passphrase-protected key with no agent still waits on ssh's own prompt
-  until the ten minutes are up. Load the key into an agent before pushing,
-  fast-forwarding, or syncing from the dashboard.
+- Every git command that dials a remote is bounded at ten minutes and runs
+  with `GIT_TERMINAL_PROMPT=0`, so git cannot block on its own credential
+  prompt. The bound covers the compare and the push separately, so a
+  `repo.push` that compares and then pushes can take twenty minutes;
+  `repo.fast-forward` bounds its compare at ten and finishes locally, and
+  `repo.sync` bounds its fetch and push together at ten. The bound does not
+  reach `ssh`: a passphrase-protected key with no agent still waits on
+  ssh's own prompt until the ten minutes are up. Load the key into an agent
+  before pushing, fast-forwarding, or syncing from the dashboard.
 - `profile.preview` runs the discovery `aether profile push --agent
   <harness>` would run and uploads nothing. It reports what a push would
   carry, grouped into categories a developer recognizes, and everything

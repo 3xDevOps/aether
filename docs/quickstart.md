@@ -135,22 +135,22 @@ sends the workspace's base branch; replace `main` if you created the
 workspace with `--base`.
 
 In the dashboard, the onboarding wizard's Repository step does both for
-you: it adds the remote, then its **Push now** button runs that push in
-your clone and keeps git's own output on the page. It runs the same push
-with `--no-follow-tags`, so the command above also sends your tags if you
-have `push.followTags` set. The step remembers the repository it connected,
-so walking back to it shows the connected clone and its push result with
-**Use a different repository** to re-point, not an empty form.
+you: it adds the remote, then its **Push now** button compares your clone
+with the workspace and pushes when there is something to push, keeping git's
+own output on the page. It runs the same push with `--no-follow-tags`, so the
+command above also sends your tags if you have `push.followTags` set. The step
+remembers the repository it connected, so walking back to it shows the
+connected clone and its push result with **Use a different repository** to
+re-point, not an empty form.
 
-**Push now** compares your clone with the workspace first. A fresh workspace
-has no branch there yet, so it pushes. A member joining a workspace someone
-else already seeded gets a report instead of a failed push: the same commit
-on both sides, the workspace ahead of the clone - a **Fast-forward my clone**
-button catches the clone up, fast-forward only - or the two diverged, where
-the wizard prints the git commands to resolve it by hand. It never merges the
-workspace's history into your branch and never force-pushes. The
-`git push -u aether main` above is unchanged; this is the button's behavior.
-See [teams.md](teams.md#workspaces) for that case.
+A fresh workspace has no branch there yet, so the button pushes. A member
+joining a workspace someone else already seeded gets a report instead of a
+failed push: the same commit on both sides; the workspace ahead of the clone,
+where a **Fast-forward my clone** button catches the clone up, fast-forward
+only; or the two diverged, where the wizard prints the git commands to resolve
+it by hand. A fast-forward writes no merge commit and never rewrites your own
+commits, and nothing here force-pushes. See
+[teams.md](teams.md#workspaces) for that case.
 
 ## 5. Set up your agent
 
