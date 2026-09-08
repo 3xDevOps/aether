@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 // Request is one file to install with administrator privileges.
@@ -112,17 +114,17 @@ func ShellCommand(req Request) (string, error) {
 	template := filepath.Join(filepath.Dir(req.Dst), ".aether.update.XXXXXX")
 	steps := []string{
 		"set -e",
-		"t=$(" + mktemp + " " + shellQuote(template) + ")",
-		"trap " + shellQuote(rm+` -f "$t"`) + " EXIT",
-		install + " -m 0600 " + shellQuote(req.Src) + ` "$t"`,
+		"t=$(" + mktemp + " " + shellquote.QuoteAlways(template) + ")",
+		"trap " + shellquote.QuoteAlways(rm+` -f "$t"`) + " EXIT",
+		install + " -m 0600 " + shellquote.QuoteAlways(req.Src) + ` "$t"`,
 		// LibreSSL prints `SHA256(path)= <hex>`, OpenSSL 3 prints
 		// `SHA2-256(path)= <hex>`; the last word is the digest in both.
 		"h=$(" + openssl + ` dgst -sha256 "$t")`,
-		`[ "${h##* }" = ` + shellQuote(req.SHA256) + " ] || { " +
-			echo + " " + shellQuote("copied binary does not match the release checksum") + " >&2; " +
+		`[ "${h##* }" = ` + shellquote.QuoteAlways(req.SHA256) + " ] || { " +
+			echo + " " + shellquote.QuoteAlways("copied binary does not match the release checksum") + " >&2; " +
 			"exit " + strconv.Itoa(ExitChecksumMismatch) + "; }",
 		chmod + ` 0755 "$t"`,
-		mv + ` -f "$t" ` + shellQuote(req.Dst),
+		mv + ` -f "$t" ` + shellquote.QuoteAlways(req.Dst),
 	}
 	return strings.Join(steps, "; "), nil
 }
@@ -170,12 +172,6 @@ func plainText(what, s string) error {
 		}
 	}
 	return nil
-}
-
-// shellQuote single-quotes s for POSIX sh: everything inside single quotes
-// is literal, and an embedded quote is closed, escaped and reopened.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // appleScriptQuote escapes s for an AppleScript string literal, whose only

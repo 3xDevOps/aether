@@ -37,3 +37,19 @@ func TestPath(t *testing.T) {
 		}
 	}
 }
+
+// A generated script quotes every value it carries, so QuoteAlways holds
+// even for a string Quote would have left bare.
+func TestQuoteAlways(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{"/usr/local/bin/aether", "'/usr/local/bin/aether'"},
+		{"", "''"},
+		{`/tmp/it's odd`, `'/tmp/it'\''s odd'`},
+	} {
+		if got := QuoteAlways(tc.in); got != tc.want {
+			t.Errorf("QuoteAlways(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
