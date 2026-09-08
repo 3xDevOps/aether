@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 // PullResult describes the run branch after it has been fetched and either
@@ -131,15 +132,21 @@ type heldWorktree struct {
 // A live worktree is a place the member can catch the branch up; a
 // prunable one is a directory that no longer exists, so telling them to
 // run anything in it would be telling them to run nothing.
+//
+// The commands are written to be pasted, so every value in one is a shell
+// argument: a worktree path holding a space would otherwise split, and a
+// branch name may legally carry `$`, `;` and parentheses, which git's own
+// ref rules allow and a shell does not ignore. The path in the opening
+// sentence is prose rather than a command, so it stays bare.
 func (h heldWorktree) refusal(repo, branch string) string {
 	msg := branch + " is checked out in the worktree at " + h.path +
 		"; git will not move a branch from outside the worktree that holds it. "
 	if h.prunable {
-		return msg + "Git can no longer find that directory, so run `git -C " + repo +
+		return msg + "Git can no longer find that directory, so run `git -C " + shellquote.Quote(repo) +
 			" worktree prune` to drop the record, then try again."
 	}
 	return msg + "Switch that worktree to another branch, or run `git -C " +
-		h.path + " merge --ff-only aether/" + branch + "` there."
+		shellquote.Quote(h.path) + " merge --ff-only " + shellquote.Quote("aether/"+branch) + "` there."
 }
 
 // branchWorktree names a linked worktree of repo that has branch checked

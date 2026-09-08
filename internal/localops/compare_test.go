@@ -408,3 +408,49 @@ func TestFastForwardNamesAWorktreePathWithANewline(t *testing.T) {
 		t.Fatalf("message does not name the whole worktree path: %q", err)
 	}
 }
+
+// The refusal's commands are written to be pasted, so every value in one
+// arrives as a single shell argument. A path holding a space is what a
+// bare interpolation splits in two.
+func TestWorktreeRefusalQuotesTheCommandsItPrints(t *testing.T) {
+	const repo = "/home/a b/clone"
+	const held = "/home/a b/held worktree"
+	for _, tc := range []struct {
+		name string
+		in   heldWorktree
+		want string
+	}{
+		{
+			name: "live worktree",
+			in:   heldWorktree{path: held},
+			want: "`git -C '/home/a b/held worktree' merge --ff-only aether/main`",
+		},
+		{
+			name: "prunable worktree",
+			in:   heldWorktree{path: held, prunable: true},
+			want: "`git -C '/home/a b/clone' worktree prune`",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.in.refusal(repo, "main")
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("refusal does not carry %s:\n%s", tc.want, got)
+			}
+			// The path in the opening sentence names where the branch is;
+			// it is prose, not a command, so it stays readable.
+			if !strings.HasPrefix(got, "main is checked out in the worktree at "+held+";") {
+				t.Fatalf("refusal does not open by naming the worktree: %s", got)
+			}
+		})
+	}
+}
+
+// A branch name may legally carry shell syntax - git's ref rules forbid
+// spaces but allow `$`, `;` and parentheses - so the ref is an argument
+// too, not just the paths.
+func TestWorktreeRefusalQuotesTheBranchRef(t *testing.T) {
+	got := heldWorktree{path: "/w"}.refusal("/repo", "fix/$(whoami)")
+	if !strings.Contains(got, "merge --ff-only 'aether/fix/$(whoami)'") {
+		t.Fatalf("refusal leaves the ref open to substitution: %s", got)
+	}
+}
