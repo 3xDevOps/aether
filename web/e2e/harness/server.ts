@@ -25,20 +25,32 @@ const standardImage = 'busybox:1.36'
 const fakeAgent = 'sh /workspace/agent.sh'
 
 /**
- * Whether a Docker daemon answers, the way the Go integration suite probes
- * for one. Synchronous so a spec file can skip itself at collection time
- * rather than after its fixtures have already started a server.
+ * Whether the `docker` CLI can reach a daemon. This deliberately probes the
+ * CLI rather than the API socket the server itself uses: teardown removes
+ * the containers and images a test left behind by shelling out to `docker`,
+ * so a host with the socket but no CLI cannot run this suite either way.
+ * The same answer therefore gates both the container scenarios and the
+ * cleanup.
+ *
+ * Synchronous so a spec file can skip itself at collection time rather than
+ * after its fixtures have already started a server, and answered once per
+ * worker because every teardown asks.
  */
+let reachable: boolean | undefined
+
 export function dockerReachable(): boolean {
-  try {
-    execFileSync('docker', ['info', '--format', '{{.ServerVersion}}'], {
-      timeout: 10_000,
-      stdio: 'ignore',
-    })
-    return true
-  } catch {
-    return false
+  if (reachable === undefined) {
+    try {
+      execFileSync('docker', ['info', '--format', '{{.ServerVersion}}'], {
+        timeout: 10_000,
+        stdio: 'ignore',
+      })
+      reachable = true
+    } catch {
+      reachable = false
+    }
   }
+  return reachable
 }
 
 export interface Server {

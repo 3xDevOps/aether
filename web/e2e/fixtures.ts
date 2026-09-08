@@ -20,7 +20,7 @@ import {
 import { type Gateway, startGateway } from './harness/gateway'
 import { cloneRepo, seedRepo } from './harness/git'
 import { scratchDir } from './harness/paths'
-import { type Server, startServer } from './harness/server'
+import { dockerReachable, type Server, startServer } from './harness/server'
 
 const testdata = path.resolve(fileURLToPath(new URL('./testdata', import.meta.url)))
 
@@ -121,8 +121,12 @@ export const test = base.extend<{ aether: Aether }>({
     const { containers, memberIDs } = await leftovers(gateways)
     await Promise.all(gateways.map((g) => g.stop()))
     await server.stop()
-    await removeContainers(containers)
-    await removeMemberImages(memberIDs)
+    // A scenario that never needed Docker left nothing in it, and the
+    // sweep would only report a missing CLI it never used.
+    if (dockerReachable()) {
+      await removeContainers(containers)
+      await removeMemberImages(memberIDs)
+    }
     // A failed test keeps its data directory, server log and repositories.
     if (testInfo.status === testInfo.expectedStatus) {
       rmSync(dir, { recursive: true, force: true })
