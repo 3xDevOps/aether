@@ -396,9 +396,21 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     localPullSwitch: vi.fn(async (runID: string) => ({
       branch: runID,
     })),
+    localRepoFastForward: vi.fn(async () => ({
+      branch: 'main',
+      commit: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b',
+      current: true,
+      dirty: false,
+      output: 'From ssh://alice@host:2222/wsp_1\n * branch main -> FETCH_HEAD',
+    })),
     localRepoPush: vi.fn(async () => ({
       branch: 'main',
       remote: 'aether',
+      state: 'pushed' as const,
+      local_commit: '9f1c2ab3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9',
+      workspace_commit: '',
+      ahead: 1,
+      behind: 0,
       output:
         'To ssh://alice@host:2222/wsp_1\n * [new branch] main -> main',
     })),

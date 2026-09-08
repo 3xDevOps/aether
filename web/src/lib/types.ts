@@ -521,10 +521,28 @@ export interface PullResult {
 export interface PullSwitchResult {
   branch: string
 }
-/** repo.push: the base branch seeded into the workspace. */
+/** How the clone's base branch compared with the workspace's copy. */
+export type RepoPushState = 'pushed' | 'up-to-date' | 'behind' | 'diverged'
+
+/** repo.push: the comparison the gateway made, and the push if one ran. */
 export interface RepoPushResult {
   branch: string
   remote: string
+  state: RepoPushState
+  local_commit: string
+  /** Empty when the workspace has no such branch yet. */
+  workspace_commit: string
+  ahead: number
+  behind: number
+  output: string
+}
+
+/** repo.fast-forward: the clone's base branch moved up to the workspace. */
+export interface RepoFastForwardResult {
+  branch: string
+  commit: string
+  current: boolean
+  dirty: boolean
   output: string
 }
 

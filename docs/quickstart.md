@@ -142,6 +142,16 @@ have `push.followTags` set. The step remembers the repository it connected,
 so walking back to it shows the connected clone and its push result with
 **Use a different repository** to re-point, not an empty form.
 
+**Push now** compares your clone with the workspace first. A fresh workspace
+has no branch there yet, so it pushes. A member joining a workspace someone
+else already seeded gets a report instead of a failed push: the same commit
+on both sides, the workspace ahead of the clone - a **Fast-forward my clone**
+button catches the clone up, fast-forward only - or the two diverged, where
+the wizard prints the git commands to resolve it by hand. It never merges the
+workspace's history into your branch and never force-pushes. The
+`git push -u aether main` above is unchanged; this is the button's behavior.
+See [teams.md](teams.md#workspaces) for that case.
+
 ## 5. Set up your agent
 
 Choose an agent once:

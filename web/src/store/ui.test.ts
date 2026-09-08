@@ -46,6 +46,7 @@ describe('workspace scope and route stay in sync', () => {
         path: '/home/alice/code/myproject',
         remote: { repo: '/home/alice/code/myproject', remote: 'aether', url: 'ssh://host/wsp_1' },
         push: null,
+        fastForward: null,
       },
     })
 

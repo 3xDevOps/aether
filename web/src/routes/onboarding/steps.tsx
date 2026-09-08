@@ -25,6 +25,9 @@ const field =
 const pane =
   'max-h-64 overflow-x-auto overflow-y-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
 
+const short = (commit: string) => commit.slice(0, 7)
+const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`
+
 /**
  * Step 1: link this machine to a server. The gateway's local link status
  * determines whether the in-app link form or the linked summary is shown.
@@ -316,10 +319,12 @@ export function WorkspaceStep({
 
 /**
  * Step 3: point a local clone at the workspace. The gateway adds the
- * `aether` git remote and, where the repo.push verb is served, runs the
- * first push from here, keeping git's own answer on the page; without the
- * verb the push stays a copy-paste command. Either way the history is the
- * user's: nothing rewrites it.
+ * `aether` git remote and, where the repo.push verb is served, compares the
+ * clone with the workspace and pushes only when the clone is ahead, keeping
+ * git's own answer on the page; without the verb the push stays a
+ * copy-paste command. A workspace that is ahead is answered by a
+ * fast-forward of the clone. Either way the history is the user's: nothing
+ * rewrites it, and a divergence is resolved by hand.
  */
 export function RepoStep({
   client,
@@ -350,6 +355,8 @@ export function RepoStep({
   // form the user may want to correct, and the reverse.
   const [pushing, setPushing] = useState(false)
   const [pushError, setPushError] = useState<string | null>(null)
+  const [forwarding, setForwarding] = useState(false)
+  const [forwardError, setForwardError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const cmdRef = useRef<HTMLInputElement>(null)
 
@@ -360,6 +367,13 @@ export function RepoStep({
   const canPush = caps.hasLocal('repo.push')
   const absolute = repo.trim().startsWith('/')
   const pushed = connected?.push ?? null
+  const forwarded = connected?.fastForward ?? null
+  // Settled means the workspace and the clone agree: nothing is left to
+  // push, so Continue is the primary action and the push offer is gone.
+  const settled =
+    forwarded !== null ||
+    pushed?.state === 'pushed' ||
+    pushed?.state === 'up-to-date'
 
   const link = async () => {
     const path = repo.trim()
@@ -371,6 +385,7 @@ export function RepoStep({
         path,
         remote: await client.localLinkRepo(path, workspace?.id),
         push: null,
+        fastForward: null,
       })
       void client.localLinkStatus().then(setLinkStatus).catch(() => undefined)
     } catch (err) {
@@ -397,11 +412,26 @@ export function RepoStep({
     }
   }
 
+  const fastForward = async () => {
+    if (!connected) return
+    setForwarding(true)
+    setForwardError(null)
+    try {
+      const result = await client.localRepoFastForward(workspace?.id)
+      setConnected({ ...connected, fastForward: result })
+    } catch (err) {
+      setForwardError(message(err))
+    } finally {
+      setForwarding(false)
+    }
+  }
+
   const repoint = () => {
     setRepo(connected?.path ?? '')
     setConnected(null)
     setError(null)
     setPushError(null)
+    setForwardError(null)
   }
 
   const copy = async () => {
@@ -462,19 +492,114 @@ export function RepoStep({
             Remote <span className="font-mono">{connected.remote.remote}</span>{' '}
             points at{' '}
             <span className="font-mono">{connected.remote.url}</span>.{' '}
-            {pushed ? (
+            {pushed?.state === 'pushed' && (
               <>
                 Pushed <span className="font-mono">{pushed.branch}</span> to{' '}
                 <span className="font-mono">{pushed.remote}</span>.
               </>
-            ) : (
+            )}
+            {pushed?.state === 'up-to-date' && (
+              <>
+                Workspace already has{' '}
+                <span className="font-mono">{pushed.branch}</span> at{' '}
+                <span className="font-mono">
+                  {short(pushed.workspace_commit)}
+                </span>
+                . Nothing to push.
+              </>
+            )}
+            {!pushed && (
               <>
                 Seed the workspace with{' '}
                 <span className="font-mono">{branch}</span>:
               </>
             )}
           </p>
-          {pushed ? (
+          {pushed?.state === 'behind' && !forwarded && (
+            <div className="space-y-2">
+              <p className="text-sm">
+                The workspace is {commits(pushed.behind)} ahead of your clone.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Your clone{' '}
+                <span className="font-mono">{short(pushed.local_commit)}</span>{' '}
+                - workspace{' '}
+                <span className="font-mono">
+                  {short(pushed.workspace_commit)}
+                </span>
+                .
+              </p>
+              <Button
+                size="sm"
+                disabled={forwarding}
+                onClick={() => void fastForward()}
+              >
+                {forwarding ? 'Fast-forwarding...' : 'Fast-forward my clone'}
+              </Button>
+              {forwardError && (
+                <div className="space-y-1">
+                  <p className="text-xs text-state-failed">
+                    The fast-forward failed:
+                  </p>
+                  <pre className={`rounded-md border bg-card ${pane}`}>
+                    {forwardError}
+                  </pre>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Fast-forward only. Your history is never merged or rewritten.
+              </p>
+            </div>
+          )}
+          {pushed?.state === 'diverged' && (
+            <div className="space-y-2">
+              <p className="text-sm">
+                Your clone and the workspace have both moved on:{' '}
+                {commits(pushed.ahead)} here, {pushed.behind} there. Aether
+                never force-pushes.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Your clone{' '}
+                <span className="font-mono">{short(pushed.local_commit)}</span>{' '}
+                - workspace{' '}
+                <span className="font-mono">
+                  {short(pushed.workspace_commit)}
+                </span>
+                .
+              </p>
+              <p className="text-sm">Resolve it by hand, then push again:</p>
+              <pre className={`rounded-md border bg-card ${pane}`}>
+                {[
+                  `git fetch ${pushed.remote} ${pushed.branch}`,
+                  `git log --oneline --left-right ${pushed.branch}...${pushed.remote}/${pushed.branch}`,
+                  `git rebase ${pushed.remote}/${pushed.branch}`,
+                  `git push ${pushed.remote} ${pushed.branch}`,
+                ].join('\n')}
+              </pre>
+            </div>
+          )}
+          {forwarded && (
+            <p className="text-sm">
+              {forwarded.current ? (
+                <>
+                  Fast-forwarded{' '}
+                  <span className="font-mono">{forwarded.branch}</span> to{' '}
+                  <span className="font-mono">{short(forwarded.commit)}</span>.
+                </>
+              ) : (
+                <>
+                  Updated <span className="font-mono">{forwarded.branch}</span>{' '}
+                  to{' '}
+                  <span className="font-mono">{short(forwarded.commit)}</span>.
+                  Another branch is checked out, so your working tree is
+                  untouched.
+                </>
+              )}
+              {forwarded.dirty &&
+                ' Your working tree still has uncommitted changes.'}
+            </p>
+          )}
+          {settled ? (
             // Git's own answer, open: "Everything up-to-date" and "[new
             // branch]" both mean success and say different things, and the
             // reader who needs that distinction is the one who would not
@@ -484,7 +609,7 @@ export function RepoStep({
                 What git did
               </summary>
               <pre className={pane}>
-                {pushed.output.trim() || 'git printed nothing.'}
+                {(forwarded ?? pushed)?.output.trim() || 'git printed nothing.'}
               </pre>
             </details>
           ) : (
@@ -531,7 +656,7 @@ export function RepoStep({
           <div className="flex gap-2">
             <Button
               size="sm"
-              variant={canPush && !pushed ? 'outline' : 'default'}
+              variant={canPush && !settled ? 'outline' : 'default'}
               onClick={onNext}
             >
               Continue

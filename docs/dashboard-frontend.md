@@ -691,20 +691,36 @@ its own state.
 
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
-button that runs the push in the clone. Success names the branch that
-landed and keeps git's output in a "What git did" panel, open on arrival
-because `Everything up-to-date` and `[new branch]` are both success and
-mean different things; Continue then moves on. A refusal keeps the user on
-the step with git's own output in a monospace block, both retry and the
-copyable command still there. The branch is the workspace's base branch,
-so a workspace created with `--base` seeds the branch its runs fork from.
-An older gateway without the verb shows only the copyable command.
+button. The gateway compares the clone's base branch with the workspace's
+copy before pushing and answers with one of four states, so the second
+member to join a workspace reads what happened instead of git's
+`! [rejected] main -> main (fetch first)`.
 
-What the step settled - the clone path, the remote the gateway wrote, and
-git's push answer - lives on the UI slice as `onboardingRepo`, not in the
-component. Returning to the step shows that connected repo with **Use a
-different repository** to go back to the form, prefilled with the old path;
-a blank form there would ask again for a remote that already exists.
+`pushed` names the branch that landed; `up-to-date` names the commit the
+workspace already has. Both keep git's output in a "What git did" panel,
+open on arrival because `Everything up-to-date` and `[new branch]` are both
+success and mean different things, and Continue moves on.
+
+`behind` means the workspace is ahead. The step names both tips and offers
+**Fast-forward my clone**, which runs `repo.fast-forward` and then reports
+the new tip, whether that branch was the checked-out one, and whether the
+working tree is dirty. `diverged` means both sides moved on: the step names
+both tips and prints the fetch, log, rebase and push commands to resolve it
+by hand, with no button, because Aether never force-pushes. Neither state
+takes away **Push now** or the copyable command, so a retry after resolving
+works. A refusal keeps the user on the step with git's own output in a
+monospace block.
+
+The branch is the workspace's base branch, so a workspace created with
+`--base` seeds the branch its runs fork from. A gateway that does not serve
+`repo.push` - the server-served dashboard - shows only the copyable command.
+
+What the step settled - the clone path, the remote the gateway wrote,
+git's push answer, and the fast-forward once one has run - lives on the UI
+slice as `onboardingRepo`, not in the component. Returning to the step
+shows that connected repo with **Use a different repository** to go back to
+the form, prefilled with the old path; a blank form there would ask again
+for a remote that already exists.
 
 The UI slice persists the current step, the selected workspace and the
 connected repository. Hydration reads

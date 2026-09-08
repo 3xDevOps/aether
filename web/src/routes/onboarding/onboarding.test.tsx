@@ -1,6 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Api } from '@/lib/api'
-import type { GatewayCapabilities } from '@/lib/types'
+import type {
+  GatewayCapabilities,
+  RepoPushResult,
+  RepoPushState,
+} from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { useStore, type RootState } from '@/store'
 import {
@@ -17,13 +21,41 @@ const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
   ws: ['events', 'attach', 'terminal'],
-  local: ['link.status', 'link.repo', 'pull', 'repo.push', 'daemon.status'],
+  local: [
+    'link.status',
+    'link.repo',
+    'pull',
+    'repo.push',
+    'repo.fast-forward',
+    'daemon.status',
+  ],
 }
 
 /** The same gateway one release older: it cannot push for the user. */
 const noPushCaps: GatewayCapabilities = {
   ...localCaps,
   local: ['link.status', 'link.repo', 'pull', 'daemon.status'],
+}
+
+const localTip = '9f1c2ab3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9'
+const workspaceTip = '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b'
+
+/** A repo.push answer that compared the two tips and pushed nothing. */
+function compared(
+  state: RepoPushState,
+  over: Partial<RepoPushResult> = {},
+): RepoPushResult {
+  return {
+    branch: 'main',
+    remote: 'aether',
+    state,
+    local_commit: localTip,
+    workspace_commit: workspaceTip,
+    ahead: 0,
+    behind: 0,
+    output: 'From ssh://alice@host:2222/wsp_1\n * branch main -> FETCH_HEAD',
+    ...over,
+  }
 }
 
 function seed(extra: Partial<RootState> = {}) {
@@ -267,8 +299,8 @@ describe('onboarding wizard', () => {
   })
 
   /** Adds the remote, leaving the step on its push choices. */
-  async function toPushChoice(client: Api) {
-    seed()
+  async function toPushChoice(client: Api, extra: Partial<RootState> = {}) {
+    seed(extra)
     render(<OnboardingRoute params={{}} client={client} />)
     await toRepoStep()
     fireEvent.change(await screen.findByLabelText('Repository path'), {
@@ -331,6 +363,124 @@ describe('onboarding wizard', () => {
     expect(
       screen.getByLabelText<HTMLInputElement>('Push command').value,
     ).toBe('git push -u aether main')
+  })
+
+  it('reports a workspace that already has the branch', async () => {
+    const client = fakeApi({
+      localRepoPush: vi.fn(async () =>
+        compared('up-to-date', { workspace_commit: localTip }),
+      ),
+    })
+    await toPushChoice(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+
+    // Nothing was pushed, and the step is settled: the tip the workspace
+    // already carries is the whole answer.
+    const settled = await screen.findByText(/Workspace already has/)
+    expect(settled.textContent).toContain(
+      'Workspace already has main at 9f1c2ab. Nothing to push.',
+    )
+    expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
+    expect(
+      screen.getByText(/FETCH_HEAD/).closest('details')?.open,
+    ).toBe(true)
+  })
+
+  it('fast-forwards the clone when the workspace is ahead', async () => {
+    const client = fakeApi({
+      localRepoPush: vi.fn(async () => compared('behind', { behind: 2 })),
+    })
+    await toPushChoice(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+
+    expect(
+      await screen.findByText('The workspace is 2 commits ahead of your clone.'),
+    ).toBeDefined()
+    expect(screen.getByText('9f1c2ab')).toBeDefined()
+    expect(screen.getByText('1a2b3c4')).toBeDefined()
+    // The push offer stays: resolving by hand and retrying must still work.
+    expect(screen.getByRole('button', { name: 'Push now' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fast-forward my clone' }))
+
+    await waitFor(() => {
+      expect(client.localRepoFastForward).toHaveBeenCalledWith(workspace.id)
+    })
+    const settled = await screen.findByText(/Fast-forwarded/)
+    expect(settled.textContent).toBe('Fast-forwarded main to 1a2b3c4.')
+    expect(
+      screen.queryByRole('button', { name: 'Fast-forward my clone' }),
+    ).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
+
+    // The answer outlives the step: walking back shows it settled rather
+    // than offering the button a second time.
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByRole('region', { name: 'Agents' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(await screen.findByText(/Fast-forwarded/)).toBeDefined()
+    expect(client.localRepoFastForward).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the working tree alone when another branch is checked out', async () => {
+    const client = fakeApi({
+      localRepoPush: vi.fn(async () => compared('behind', { behind: 1 })),
+      localRepoFastForward: vi.fn(async () => ({
+        branch: 'main',
+        commit: workspaceTip,
+        current: false,
+        dirty: true,
+        output: 'From ssh://alice@host:2222/wsp_1\n * branch main -> FETCH_HEAD',
+      })),
+    })
+    await toPushChoice(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+    expect(
+      await screen.findByText('The workspace is 1 commit ahead of your clone.'),
+    ).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Fast-forward my clone' }))
+
+    // The ref moved, the checkout did not, and the dirty tree is named:
+    // all three are things the user has to know before the next step.
+    const settled = await screen.findByText(/Updated/)
+    expect(settled.textContent).toBe(
+      'Updated main to 1a2b3c4. Another branch is checked out, so your ' +
+        'working tree is untouched. Your working tree still has uncommitted ' +
+        'changes.',
+    )
+  })
+
+  it('hands a diverged clone the commands to resolve it', async () => {
+    const client = fakeApi({
+      localRepoPush: vi.fn(async () =>
+        compared('diverged', { ahead: 1, behind: 2 }),
+      ),
+    })
+    await toPushChoice(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+
+    const explained = await screen.findByText(/both moved on/)
+    expect(explained.textContent).toBe(
+      'Your clone and the workspace have both moved on: 1 commit here, 2 ' +
+        'there. Aether never force-pushes.',
+    )
+    expect(screen.getByText('9f1c2ab')).toBeDefined()
+    expect(screen.getByText('1a2b3c4')).toBeDefined()
+    // A fast-forward would lose the local commits, so it is not offered.
+    expect(
+      screen.queryByRole('button', { name: 'Fast-forward my clone' }),
+    ).toBeNull()
+    expect(screen.getByText(/git rebase/).textContent).toBe(
+      'git fetch aether main\n' +
+        'git log --oneline --left-right main...aether/main\n' +
+        'git rebase aether/main\n' +
+        'git push aether main',
+    )
+    expect(screen.getByRole('button', { name: 'Push now' })).toBeDefined()
   })
 
   it('remembers the connected repository when the user walks back to it', async () => {
