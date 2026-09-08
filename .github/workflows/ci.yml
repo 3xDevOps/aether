@@ -57,6 +57,9 @@ jobs:
           go-version-file: go.mod
           cache: ${{ github.event_name != 'pull_request_target' }}
       # `make build` builds the embedded dashboard SPA before Go compiles.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
@@ -144,6 +147,9 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
@@ -174,6 +180,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: ${{ github.event_name != 'pull_request_target' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
@@ -322,6 +331,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: ${{ github.event_name != 'pull_request_target' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
