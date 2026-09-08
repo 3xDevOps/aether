@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react'
-import { useCallback } from 'react'
+import { useCallback, useId } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -16,9 +16,7 @@ export interface DockProps {
   onSelectTab: (id: string) => void
   onAddTab?: () => void
   /** The dock's own tab ceiling; the limit text names this number. */
-  maxTabs?: number
-  /** Disables the add control for a reason other than the tab ceiling. */
-  addDisabled?: boolean
+  maxTabs: number
   onCloseTab?: (id: string) => void
   height: number
   onHeightChange: (height: number) => void
@@ -40,7 +38,6 @@ export function Dock({
   onSelectTab,
   onAddTab,
   maxTabs,
-  addDisabled = false,
   onCloseTab,
   height,
   onHeightChange,
@@ -49,7 +46,8 @@ export function Dock({
   actions,
   children,
 }: DockProps) {
-  const atLimit = maxTabs !== undefined && tabs.length >= maxTabs
+  const atLimit = tabs.length >= maxTabs
+  const limitID = useId()
 
   const startResize = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -127,7 +125,8 @@ export function Dock({
               variant="ghost"
               size="icon"
               aria-label="Add terminal tab"
-              disabled={addDisabled || atLimit}
+              aria-describedby={atLimit ? limitID : undefined}
+              disabled={atLimit}
               onClick={onAddTab}
             >
               <Plus />
@@ -136,7 +135,9 @@ export function Dock({
           {atLimit && (
             // A disabled control shows no tooltip, so the ceiling is written
             // out instead of hidden in a title attribute.
-            <span className="px-1 text-xs text-muted-foreground">At most {maxTabs} tabs</span>
+            <span id={limitID} className="px-1 text-xs text-muted-foreground">
+              At most {maxTabs} tabs
+            </span>
           )}
         </div>
         {actions}

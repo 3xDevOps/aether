@@ -22,14 +22,14 @@ describe('clampDockHeight', () => {
   })
 })
 describe('Dock controls', () => {
-  it('disables the add control when the caller reaches its cap', () => {
+  it('names its own ceiling and disables the add control at it', () => {
     render(
       createElement(Dock, {
-        tabs: [],
-        activeTab: '',
+        tabs: [{ id: 't1', label: 't1' }, { id: 't2', label: 't2' }],
+        activeTab: 't1',
         onSelectTab: vi.fn(),
         onAddTab: vi.fn(),
-        addDisabled: true,
+        maxTabs: 2,
         height: 240,
         onHeightChange: vi.fn(),
         collapsed: false,
@@ -37,8 +37,11 @@ describe('Dock controls', () => {
         children: createElement('div'),
       }),
     )
-    expect((screen.getByRole('button', { name: 'Add terminal tab' }) as HTMLButtonElement).disabled).toBe(
-      true,
-    )
+    const add = screen.getByRole('button', { name: 'Add terminal tab' }) as HTMLButtonElement
+    expect(add.disabled).toBe(true)
+    // The sentence is what a member reads; the button points at it, because
+    // a disabled control has no tooltip to carry the reason.
+    const limit = screen.getByText('At most 2 tabs')
+    expect(add.getAttribute('aria-describedby')).toBe(limit.id)
   })
 })

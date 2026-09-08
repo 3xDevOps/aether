@@ -111,7 +111,6 @@ export function RunDock({ runID }: { runID: string }) {
       onSelectTab={(tab) => selectShellTab(runID, tab)}
       onAddTab={canOpenShell ? open : undefined}
       maxTabs={maxShellTabs}
-      addDisabled={!canOpenShell}
       onCloseTab={(tab) => closeShellTab(runID, tab)}
       height={runDockHeight}
       onHeightChange={setRunDockHeight}
