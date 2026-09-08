@@ -12,7 +12,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 // DesktopApp is an installed desktop shell.
@@ -56,6 +58,43 @@ func DesktopBuildDir() (string, error) {
 	return filepath.Join(cache, "aether", "desktop-build"), nil
 }
 
+// lockDesktopBuild serializes builds over one build directory. The lock is
+// an exclusive advisory lock on a lock file in the directory, held by the
+// kernel for the build's lifetime: a holder that crashes releases it
+// without any staleness guessing, and no two builders can hold it at
+// once. The pid is written for diagnostics only. Unlock releases the
+// range and closes the handle, which lets the empty file be removed on
+// platforms where an open handle blocks deletion (Windows). The returned
+// unlock is safe to call more than once.
+func lockDesktopBuild(ctx context.Context, buildDir string) (func(), error) {
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		return nil, fmt.Errorf("localops: create desktop build dir: %w", err)
+	}
+	lockPath := filepath.Join(buildDir, ".build-lock")
+	f, err := openLockFile(lockPath)
+	if err != nil {
+		return nil, fmt.Errorf("localops: lock desktop build dir: %w", err)
+	}
+	release, err := lockFileExclusive(ctx, f)
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("localops: desktop build dir %s is locked by another build: %w", buildDir, err)
+	}
+	_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			_ = release()
+			_ = f.Close()
+			// Only the holder removes it: a concurrent builder that
+			// created its own lock meanwhile must not lose it.
+			if p, rerr := os.ReadFile(lockPath); rerr == nil && strings.TrimSpace(string(p)) == strconv.Itoa(os.Getpid()) {
+				_ = os.Remove(lockPath)
+			}
+		})
+	}, nil
+}
+
 // The phases a desktop build reports, in the order BuildDesktop and
 // `aether gui build` run them. `--json` prints one line per phase and the
 // gateway turns them into the dashboard's progress line, so these strings
@@ -81,16 +120,25 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 	if phase == nil {
 		phase = func(string) {}
 	}
+	// Builds over one build directory are serialized: two invocations
+	// sharing the cache - several runner accounts on one machine, or two
+	// terminals - would otherwise race npm install in the same
+	// node_modules and corrupt it.
+	unlock, err := lockDesktopBuild(ctx, buildDir)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	phase(PhaseUnpacking)
-	if err := writeTree(buildDir, src); err != nil {
+	if err = writeTree(buildDir, src); err != nil {
 		return "", fmt.Errorf("localops: write shell sources: %w", err)
 	}
-	if err := stampShellVersion(buildDir, cliVersion); err != nil {
+	if err = stampShellVersion(buildDir, cliVersion); err != nil {
 		return "", err
 	}
 	// Stale output from an earlier build must not be mistaken for this one.
 	dist := filepath.Join(buildDir, "dist")
-	if err := os.RemoveAll(dist); err != nil {
+	if err = os.RemoveAll(dist); err != nil {
 		return "", fmt.Errorf("localops: clear %s: %w", dist, err)
 	}
 
