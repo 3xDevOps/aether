@@ -20,3 +20,20 @@ func TestQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestPath(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{"skills/deploy/README.md", "skills/deploy/README.md"},
+		{"-x.md", "./-x.md"},
+		{"--allow-secret", "./--allow-secret"},
+		{"-a b.md", "'./-a b.md'"},
+		// Only a leading dash reads as a flag; one inside a path does not.
+		{"skills/my-skill/README.md", "skills/my-skill/README.md"},
+	} {
+		if got := Path(tc.in); got != tc.want {
+			t.Errorf("Path(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

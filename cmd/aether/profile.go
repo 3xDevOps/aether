@@ -81,7 +81,7 @@ func profilePush(args []string) error {
 		// retyped.
 		if s.Reason == cliprofile.ExcludeVendoredSecret {
 			fmt.Printf("  to send it anyway: aether profile push --agent %s --allow-secret %s --workspace <workspace>\n",
-				*agent, shellquote.Quote(s.Path))
+				*agent, shellquote.Path(s.Path))
 		}
 	}
 	if flagged := cliprofile.UnacknowledgedSecrets(root, skipped, skip); len(flagged) > 0 {
@@ -152,9 +152,9 @@ func secretRefusal(harnessName string, flagged []cliprofile.Exclusion) error {
 	b.WriteString(head)
 	for _, f := range flagged {
 		fmt.Fprintf(&b, "\n  %s: %s", f.Path, f.Detail)
-		fmt.Fprintf(&b, "\n    leave it out:   aether profile push --agent %s --skip-secret %s", harnessName, shellquote.Quote(f.Path))
+		fmt.Fprintf(&b, "\n    leave it out:   aether profile push --agent %s --skip-secret %s", harnessName, shellquote.Path(f.Path))
 		fmt.Fprintf(&b, "\n    send it anyway: aether profile push --agent %s --allow-secret %s --workspace <workspace>",
-			harnessName, shellquote.Quote(f.Path))
+			harnessName, shellquote.Path(f.Path))
 	}
 	return errors.New(b.String())
 }

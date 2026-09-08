@@ -123,6 +123,9 @@ func TestSecretRefusalQuotesPathsForTheShell(t *testing.T) {
 	for _, tc := range []struct{ path, want string }{
 		{"skills/deploy notes/README.md", "'skills/deploy notes/README.md'"},
 		{"skills/o'brien/README.md", `'skills/o'\''brien/README.md'`},
+		// Quoting cannot keep a leading dash out of flag parsing, so the
+		// path is written relative to the current directory instead.
+		{"-x.md", "./-x.md"},
 	} {
 		err := secretRefusal("claude", []cliprofile.Exclusion{{Path: tc.path, Detail: "secret detected"}})
 		for _, want := range []string{

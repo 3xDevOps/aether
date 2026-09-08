@@ -579,6 +579,35 @@ describe('agents step', () => {
     ).toBeDefined()
   })
 
+  it('writes a flagged path starting with a dash relative to the directory', async () => {
+    // Quoting cannot help here: the shell strips the quotes and the flag
+    // parser still reads the leading dash as another flag.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: '-x.md',
+                  reason: 'secret',
+                  detail: 'secret detected (curl-auth-header) at 1:2',
+                },
+              ],
+              excluded_total: 1,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(
+      await screen.findByText(
+        `aether profile push --agent claude --allow-secret ./-x.md --workspace ${workspace.id}`,
+      ),
+    ).toBeDefined()
+  })
+
   it('names a plugin-tree finding by where it lives and still imports', async () => {
     // A plugin ships its own test fixtures, and one of them holding a
     // secret-shaped string is nothing the user can fix in their own
