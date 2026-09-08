@@ -53,11 +53,29 @@ func pull(repo, url, branch string) (PullResult, error) {
 		return result, err
 	}
 
-	result.Current = currentBranch(repo) == branch
+	current, opOutput, err := advanceBranch(repo, branch)
+	result.Current, result.Output = current, result.Output+opOutput
+	if err != nil {
+		return result, err
+	}
+	result.Dirty, err = worktreeDirty(repo)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
 
-	var opOutput []byte
-	if result.Current {
-		opOutput, err = exec.Command("git", "-C", repo, "merge", "--ff-only", "aether/"+branch).CombinedOutput()
+// advanceBranch moves branch onto the already fetched
+// refs/remotes/aether/<branch>: a fast-forward merge when that branch is
+// checked out, and otherwise a ref update that leaves the working tree
+// alone. It reports whether the branch was the checked-out one and
+// everything git printed.
+func advanceBranch(repo, branch string) (bool, string, error) {
+	current := currentBranch(repo) == branch
+	var out []byte
+	var err error
+	if current {
+		out, err = exec.Command("git", "-C", repo, "merge", "--ff-only", "aether/"+branch).CombinedOutput()
 	} else {
 		args := []string{"-C", repo, "branch", "--force"}
 		tracked := remoteExists(repo, "aether")
@@ -65,27 +83,22 @@ func pull(repo, url, branch string) (PullResult, error) {
 			args = append(args, "--track")
 		}
 		args = append(args, branch, "aether/"+branch)
-		opOutput, err = exec.Command("git", args...).CombinedOutput()
+		out, err = exec.Command("git", args...).CombinedOutput()
 		if err != nil && tracked {
 			fallback := exec.Command("git", "-C", repo, "branch", "--force", branch, "aether/"+branch)
 			var fallbackOutput []byte
 			fallbackOutput, err = fallback.CombinedOutput()
-			opOutput = append(opOutput, fallbackOutput...)
+			out = append(out, fallbackOutput...)
 		}
 	}
-	result.Output += string(opOutput)
 	if err != nil {
 		action := "create local branch"
-		if result.Current {
+		if current {
 			action = "fast-forward branch"
 		}
-		return result, fmt.Errorf("git %s: %w: %s", action, err, strings.TrimSpace(string(opOutput)))
+		return current, string(out), fmt.Errorf("git %s: %w: %s", action, err, strings.TrimSpace(string(out)))
 	}
-	result.Dirty, err = worktreeDirty(repo)
-	if err != nil {
-		return result, err
-	}
-	return result, nil
+	return current, string(out), nil
 }
 
 func remoteExists(repo, remote string) bool {

@@ -162,8 +162,8 @@ audit history.
  "local":["daemon.install","daemon.status","env.harnesses","forward.start",
           "forward.status","forward.stop","link.apply","link.repo","link.status",
           "link.switch","profile.preview","profile.push","pull","pull.switch",
-          "repo.push","repo.sync","sync.start","sync.status","sync.stop",
-          "update.apply","update.check","update.status"],
+          "repo.fast-forward","repo.push","repo.sync","sync.start","sync.status",
+          "sync.stop","update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -319,7 +319,8 @@ authority.
 | `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422,"skipped":[...]}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |
 | `pull.switch` | `{"run_id":"..."}` | `{"branch":"..."}` |
-| `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","output":"..."}` |
+| `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","state":"pushed"\|"up-to-date"\|"behind"\|"diverged","local_commit":"...","workspace_commit":"...","ahead":0,"behind":0,"output":"..."}` |
+| `repo.fast-forward` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","commit":"...","current":bool,"dirty":bool,"output":"..."}` |
 | `repo.sync` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
 | `sync.stop` | `{"run_id":"..."}` | `{"run_id":"...","state":"stopped"}` |
@@ -345,15 +346,28 @@ no SSH key is offered and the server requires one, it may create
   workspace resolves implicitly; none or several answers `-32002`
   (invalid state) and is resolved server-side or with the CLI's
   `--workspace` flag first.
-- `repo.push` seeds the workspace: one
+- `repo.push` seeds the workspace. It first fetches the
+  workspace's copy of `<base>` from the `aether` remote and compares it with
+  the local branch, where `<base>` is that workspace's base branch. `state`
+  reports one of four findings:
+  - `pushed` - the workspace had no such branch, or the local branch was
+    ahead. The push ran.
+  - `up-to-date` - both tips are the same commit. Nothing was pushed.
+  - `behind` - the workspace is ahead of the clone. Nothing was pushed;
+    `repo.fast-forward` catches the clone up.
+  - `diverged` - both moved on. Nothing was pushed, nothing forced.
+- `local_commit` and `workspace_commit` are the two branch tips as full
+  40-hex commit ids, `workspace_commit` the empty string when the workspace
+  has no such branch yet. `ahead` and `behind` count the local branch's
+  commits relative to the workspace branch, measured before any push.
+  `output` is everything git printed: the fetch, plus the push when one ran.
+- The push itself is one
   `git push --no-follow-tags -u aether refs/heads/<base>:refs/heads/<base>`
-  in the linked repository, where `<base>` is that workspace's base
-  branch. The same sole-workspace rule as `link.repo` applies when
-  `workspace_id` is omitted; unlike `link.repo`, a `workspace_id` no
-  workspace carries is refused. The refspec is fully qualified so the
-  push carries that one branch and nothing else: no force, no second ref,
-  and no tags even where `push.followTags` is set. `output` is everything
-  git printed.
+  in the linked repository. The same sole-workspace rule as `link.repo`
+  applies when `workspace_id` is omitted; unlike `link.repo`, a
+  `workspace_id` no workspace carries is refused. The refspec is fully
+  qualified so the push carries that one branch and nothing else: no force,
+  no second ref, and no tags even where `push.followTags` is set.
 - `repo.push` refuses with `-32002` (invalid state), naming the next step,
   when the repository has no commits, has no local branch named `<base>`
   (the message names the branch that is checked out instead), has no
@@ -362,6 +376,23 @@ no SSH key is offered and the server requires one, it may create
   workspace and the objects would land in another. A push git ran and the
   server rejected - branch protection, a missing key - answers `-32603`
   carrying git's own stderr.
+- `repo.fast-forward` resolves the `behind` state: it fetches the same
+  `<base>` from `aether` and fast-forwards the local branch onto the
+  workspace's tip. Fast-forward only - it never merges the workspace's
+  history into the local branch and never rewrites it. `commit` is the local
+  branch tip afterwards, as a full 40-hex commit id.
+- Another branch checked out does not stop it: exactly as `pull` does, it
+  updates the branch ref and leaves the working tree alone. When `<base>` is
+  the checked-out branch, git fast-forwards it in place and refuses when
+  that would overwrite an uncommitted change, in git's own words
+  (`Your local changes to the following files would be overwritten by
+  merge`). `current` reports whether the checkout is on that branch and
+  `dirty` reports uncommitted changes afterwards.
+- `repo.fast-forward` refuses with `-32002` (invalid state) on the same local
+  preconditions as `repo.push`, and when the workspace branch is not a
+  descendant of the local branch - a `diverged` pair is resolved by hand with
+  git. Otherwise a failed git command answers `-32603` carrying git's own
+  output.
 - `repo.sync` fetches `<base>` with
   `git fetch --no-tags origin <base>`, then pushes
   `refs/remotes/origin/<base>:refs/heads/<base>` to `aether` without force.
@@ -372,11 +403,12 @@ no SSH key is offered and the server requires one, it may create
   repository, no `origin` remote, no `aether` remote, or the `aether` remote
   points at another workspace. A failed fetch or push answers `-32603`
   carrying git's own output, including non-fast-forward refusals.
-- `repo.push` and `repo.sync` are bounded at ten minutes and run with
-  `GIT_TERMINAL_PROMPT=0`, so git cannot block on its own credential
-  prompt. That does not reach `ssh`: a passphrase-protected key with no
-  agent still waits on ssh's own prompt until the ten minutes are up. Load
-  the key into an agent before pushing or syncing from the dashboard.
+- `repo.push` including its fetch, `repo.fast-forward`, and `repo.sync` are
+  bounded at ten minutes and run with `GIT_TERMINAL_PROMPT=0`, so git cannot
+  block on its own credential prompt. That does not reach `ssh`: a
+  passphrase-protected key with no agent still waits on ssh's own prompt
+  until the ten minutes are up. Load the key into an agent before pushing,
+  fast-forwarding, or syncing from the dashboard.
 - `profile.preview` runs the discovery `aether profile push --agent
   <harness>` would run and uploads nothing. It reports what a push would
   carry, grouped into categories a developer recognizes, and everything
@@ -459,9 +491,8 @@ no SSH key is offered and the server requires one, it may create
   `current` reports whether the checkout is on that branch and `dirty` reports
   uncommitted changes after the operation. `pull.switch` refuses a dirty
   checkout and switches to the pulled branch when it is clean.
-- `pull`, `pull.switch`, `repo.push`, `sync.start`, and `sync.stop` refuse with
-  `-32002`
-  when no repo is linked.
+- `pull`, `pull.switch`, `repo.push`, `repo.fast-forward`, `sync.start`, and
+  `sync.stop` refuse with `-32002` when no repo is linked.
 - A sync session's states are `starting` (the overlay is dialing the run
   worktree), `running`, `stopped`, `conflict` (with the conflict text in
   `conflict`), and `error`. A conflict is also reported to the server as a

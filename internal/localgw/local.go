@@ -35,6 +35,7 @@ var localVerbs = []string{
 	"profile.push",
 	"pull",
 	"pull.switch",
+	"repo.fast-forward",
 	"repo.push",
 	"repo.sync",
 	"sync.start",
@@ -129,28 +130,29 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 	}
 	verb := r.PathValue("verb")
 	handler, ok := map[string]func(*Gateway, *http.Request, []byte) (any, *protocol.Error){
-		"daemon.install":  (*Gateway).localDaemonInstall,
-		"daemon.status":   (*Gateway).localDaemonStatus,
-		"env.harnesses":   (*Gateway).localEnvHarnesses,
-		"link.apply":      (*Gateway).localLinkApply,
-		"link.repo":       (*Gateway).localLinkRepo,
-		"link.switch":     (*Gateway).localLinkSwitch,
-		"link.status":     (*Gateway).localLinkStatus,
-		"profile.preview": (*Gateway).localProfilePreview,
-		"profile.push":    (*Gateway).localProfilePush,
-		"pull":            (*Gateway).localPull,
-		"pull.switch":     (*Gateway).localPullSwitch,
-		"repo.push":       (*Gateway).localRepoPush,
-		"repo.sync":       (*Gateway).localRepoSync,
-		"forward.start":   (*Gateway).localForwardStart,
-		"forward.status":  (*Gateway).localForwardStatus,
-		"forward.stop":    (*Gateway).localForwardStop,
-		"sync.start":      (*Gateway).localSyncStart,
-		"sync.status":     (*Gateway).localSyncStatus,
-		"sync.stop":       (*Gateway).localSyncStop,
-		"update.apply":    (*Gateway).localUpdateApply,
-		"update.check":    (*Gateway).localUpdateCheck,
-		"update.status":   (*Gateway).localUpdateStatus,
+		"daemon.install":    (*Gateway).localDaemonInstall,
+		"daemon.status":     (*Gateway).localDaemonStatus,
+		"env.harnesses":     (*Gateway).localEnvHarnesses,
+		"link.apply":        (*Gateway).localLinkApply,
+		"link.repo":         (*Gateway).localLinkRepo,
+		"link.switch":       (*Gateway).localLinkSwitch,
+		"link.status":       (*Gateway).localLinkStatus,
+		"profile.preview":   (*Gateway).localProfilePreview,
+		"profile.push":      (*Gateway).localProfilePush,
+		"pull":              (*Gateway).localPull,
+		"pull.switch":       (*Gateway).localPullSwitch,
+		"repo.fast-forward": (*Gateway).localRepoFastForward,
+		"repo.push":         (*Gateway).localRepoPush,
+		"repo.sync":         (*Gateway).localRepoSync,
+		"forward.start":     (*Gateway).localForwardStart,
+		"forward.status":    (*Gateway).localForwardStatus,
+		"forward.stop":      (*Gateway).localForwardStop,
+		"sync.start":        (*Gateway).localSyncStart,
+		"sync.status":       (*Gateway).localSyncStatus,
+		"sync.stop":         (*Gateway).localSyncStop,
+		"update.apply":      (*Gateway).localUpdateApply,
+		"update.check":      (*Gateway).localUpdateCheck,
+		"update.status":     (*Gateway).localUpdateStatus,
 	}[verb]
 	if !ok {
 		webgate.WriteError(w, http.StatusNotFound, &protocol.Error{
@@ -349,76 +351,130 @@ func (g *Gateway) pickWorkspace(r *http.Request, wsID string) (protocol.Workspac
 	}
 }
 
+// repoWorkspace resolves what every repo verb needs before it runs git:
+// the link config with a repository in it, and the workspace whose base
+// branch the verb acts on, checked against where the `aether` remote
+// actually points.
+func (g *Gateway) repoWorkspace(r *http.Request, body []byte) (cli.Config, protocol.Workspace, *protocol.Error) {
+	var params struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return cli.Config{}, protocol.Workspace{}, perr
+	}
+	cfg := g.local.snapshot()
+	if cfg.Repo == "" {
+		return cfg, protocol.Workspace{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
+	}
+	ws, perr := g.pickWorkspace(r, params.WorkspaceID)
+	if perr != nil {
+		return cfg, ws, perr
+	}
+	if ws.BaseBranch == "" {
+		return cfg, ws, &protocol.Error{Code: protocol.CodeInvalidState, Message: "workspace " + ws.Name + " has no base branch"}
+	}
+	return cfg, ws, checkRemoteWorkspace(cfg, ws)
+}
+
+// repoGitError maps a localops failure onto the wire: a state the user
+// fixes in their own repository is invalid state, anything git ran and
+// lost is internal, carrying git's own words either way.
+func repoGitError(err error) *protocol.Error {
+	switch {
+	case errors.Is(err, localops.ErrPushPrecondition):
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	case err != nil:
+		return &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	return nil
+}
+
 // localRepoPush seeds the workspace with the push the quickstart used to
 // ask the user to run in a terminal: one `git push -u aether <base>` in
 // the linked repository, never forced and never carrying a second ref.
 // The branch is the workspace's own base branch, so a workspace created
 // with `--base` seeds the branch its runs actually fork from.
+//
+// It compares before it pushes. A workspace someone else already seeded
+// leaves a later member's clone behind it, where a plain push is
+// rejected with "fetch first"; reporting that state is what lets the
+// caller offer a fast-forward instead of failing. Only a clone that is
+// ahead, or a workspace with no such branch, is pushed.
 func (g *Gateway) localRepoPush(r *http.Request, body []byte) (any, *protocol.Error) {
-	var params struct {
-		WorkspaceID string `json:"workspace_id"`
-	}
-	if perr := decodeParams(body, &params); perr != nil {
-		return nil, perr
-	}
-	cfg := g.local.snapshot()
-	if cfg.Repo == "" {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
-	}
-	ws, perr := g.pickWorkspace(r, params.WorkspaceID)
+	cfg, ws, perr := g.repoWorkspace(r, body)
 	if perr != nil {
 		return nil, perr
 	}
-	if ws.BaseBranch == "" {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "workspace " + ws.Name + " has no base branch"}
-	}
-	if perr := checkRemoteWorkspace(cfg, ws); perr != nil {
+	comparison, err := localops.CompareBranch(cfg.Repo, ws.BaseBranch)
+	if perr := repoGitError(err); perr != nil {
 		return nil, perr
 	}
-	output, err := localops.Push(cfg.Repo, ws.BaseBranch)
-	switch {
-	case errors.Is(err, localops.ErrPushPrecondition):
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
-	case err != nil:
-		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	result := struct {
+		Branch          string `json:"branch"`
+		Remote          string `json:"remote"`
+		State           string `json:"state"`
+		LocalCommit     string `json:"local_commit"`
+		WorkspaceCommit string `json:"workspace_commit"`
+		Ahead           int    `json:"ahead"`
+		Behind          int    `json:"behind"`
+		Output          string `json:"output"`
+	}{
+		Branch: ws.BaseBranch, Remote: "aether",
+		LocalCommit: comparison.Local, WorkspaceCommit: comparison.Workspace,
+		Ahead: comparison.Ahead, Behind: comparison.Behind, Output: comparison.Output,
+	}
+	switch comparison.State {
+	case localops.BranchMissing, localops.BranchAhead:
+		output, err := localops.Push(cfg.Repo, ws.BaseBranch)
+		result.Output += output
+		if perr := repoGitError(err); perr != nil {
+			return nil, perr
+		}
+		result.State = "pushed"
+	case localops.BranchSame:
+		result.State = "up-to-date"
+	case localops.BranchBehind:
+		result.State = "behind"
+	default:
+		result.State = "diverged"
+	}
+	return result, nil
+}
+
+// localRepoFastForward catches the linked clone's base branch up with the
+// workspace's copy of it. It is the follow-up to a `repo.push` that
+// answered `behind`, and it fast-forwards only: a diverged branch is
+// refused, because choosing between a rebase and a merge is the member's
+// call to make in their own repository.
+func (g *Gateway) localRepoFastForward(r *http.Request, body []byte) (any, *protocol.Error) {
+	cfg, ws, perr := g.repoWorkspace(r, body)
+	if perr != nil {
+		return nil, perr
+	}
+	result, err := localops.FastForward(cfg.Repo, ws.BaseBranch)
+	if perr := repoGitError(err); perr != nil {
+		return nil, perr
 	}
 	return struct {
-		Branch string `json:"branch"`
-		Remote string `json:"remote"`
-		Output string `json:"output"`
-	}{Branch: ws.BaseBranch, Remote: "aether", Output: output}, nil
+		Branch  string `json:"branch"`
+		Commit  string `json:"commit"`
+		Current bool   `json:"current"`
+		Dirty   bool   `json:"dirty"`
+		Output  string `json:"output"`
+	}{Branch: result.Branch, Commit: result.Commit, Current: result.Current, Dirty: result.Dirty, Output: result.Output}, nil
 }
 
 // localRepoSync fetches the workspace base branch from the repository's
 // origin remote and advances the matching server branch without touching the
 // local branch or working tree.
 func (g *Gateway) localRepoSync(r *http.Request, body []byte) (any, *protocol.Error) {
-	var params struct {
-		WorkspaceID string `json:"workspace_id"`
-	}
-	if perr := decodeParams(body, &params); perr != nil {
-		return nil, perr
-	}
-	cfg := g.local.snapshot()
-	if cfg.Repo == "" {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
-	}
-	ws, perr := g.pickWorkspace(r, params.WorkspaceID)
+	cfg, ws, perr := g.repoWorkspace(r, body)
 	if perr != nil {
 		return nil, perr
 	}
-	if ws.BaseBranch == "" {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "workspace " + ws.Name + " has no base branch"}
-	}
-	if perr := checkRemoteWorkspace(cfg, ws); perr != nil {
-		return nil, perr
-	}
 	output, err := localops.SyncBase(cfg.Repo, ws.BaseBranch)
-	switch {
-	case errors.Is(err, localops.ErrPushPrecondition):
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
-	case err != nil:
-		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	if perr := repoGitError(err); perr != nil {
+		return nil, perr
 	}
 	return struct {
 		Branch string `json:"branch"`
