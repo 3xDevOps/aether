@@ -44,6 +44,7 @@ vi.mock('@/lib/api', () => ({
   },
 }))
 
+
 describe('environment terminal dock', () => {
   beforeEach(() => {
     useStore.getState().resetEnvTerminal()
@@ -243,4 +244,15 @@ describe('environment terminal dock', () => {
     expect(await screen.findByText('Your environment starts on first open')).toBeDefined()
   })
 
+  it('names the real tab ceiling when every environment tab is open', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+
+    const add = await screen.findByRole('button', { name: 'Add terminal tab' })
+    for (let n = 0; n < 5; n++) fireEvent.click(add)
+    await waitFor(() => expect(useStore.getState().envTerminal.tabs).toHaveLength(6))
+
+    expect(screen.getByText('At most 6 tabs')).toBeDefined()
+    expect((add as HTMLButtonElement).disabled).toBe(true)
+  })
 })

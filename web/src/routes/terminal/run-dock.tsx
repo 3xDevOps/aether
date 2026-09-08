@@ -103,7 +103,6 @@ export function RunDock({ runID }: { runID: string }) {
 
   const tabs = canOpenShell ? dock.tabs.map((tab) => ({ id: tab, label: tab })) : []
   const open = () => openShellTab(runID)
-  const addDisabled = dock.tabs.length >= maxShellTabs
 
   return (
     <Dock
@@ -111,7 +110,8 @@ export function RunDock({ runID }: { runID: string }) {
       activeTab={canOpenShell ? activeTab ?? '' : ''}
       onSelectTab={(tab) => selectShellTab(runID, tab)}
       onAddTab={canOpenShell ? open : undefined}
-      addDisabled={addDisabled || !canOpenShell}
+      maxTabs={maxShellTabs}
+      addDisabled={!canOpenShell}
       onCloseTab={(tab) => closeShellTab(runID, tab)}
       height={runDockHeight}
       onHeightChange={setRunDockHeight}

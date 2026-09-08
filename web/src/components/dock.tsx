@@ -15,6 +15,9 @@ export interface DockProps {
   activeTab: string
   onSelectTab: (id: string) => void
   onAddTab?: () => void
+  /** The dock's own tab ceiling; the limit text names this number. */
+  maxTabs?: number
+  /** Disables the add control for a reason other than the tab ceiling. */
   addDisabled?: boolean
   onCloseTab?: (id: string) => void
   height: number
@@ -36,6 +39,7 @@ export function Dock({
   activeTab,
   onSelectTab,
   onAddTab,
+  maxTabs,
   addDisabled = false,
   onCloseTab,
   height,
@@ -45,6 +49,8 @@ export function Dock({
   actions,
   children,
 }: DockProps) {
+  const atLimit = maxTabs !== undefined && tabs.length >= maxTabs
+
   const startResize = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       event.preventDefault()
@@ -121,12 +127,16 @@ export function Dock({
               variant="ghost"
               size="icon"
               aria-label="Add terminal tab"
-              title={addDisabled ? 'At most 4 tabs' : undefined}
-              disabled={addDisabled}
+              disabled={addDisabled || atLimit}
               onClick={onAddTab}
             >
               <Plus />
             </Button>
+          )}
+          {atLimit && (
+            // A disabled control shows no tooltip, so the ceiling is written
+            // out instead of hidden in a title attribute.
+            <span className="px-1 text-xs text-muted-foreground">At most {maxTabs} tabs</span>
           )}
         </div>
         {actions}

@@ -254,7 +254,6 @@ export function TerminalDock({
   const tabs = dock.tabs.map((tab) => ({ id: tab, label: tab, permanent: tab === 'main' }))
   const empty = dock.tabs.length === 0 && dock.status?.running !== true
   const loading = dock.status === null && dock.statusError === null
-  const addDisabled = dock.tabs.length >= maxTabs
 
   return (
     <>
@@ -263,7 +262,7 @@ export function TerminalDock({
         activeTab={activeTab ?? ''}
         onSelectTab={selectTab}
         onAddTab={openTab}
-        addDisabled={addDisabled}
+        maxTabs={maxTabs}
         onCloseTab={closeTab}
         height={terminalDockHeight}
         onHeightChange={setHeight}

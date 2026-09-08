@@ -133,6 +133,22 @@ describe('run-shell dock', () => {
     view.unmount()
   })
 
+  it('names the real tab ceiling when every shell tab is open', async () => {
+    const view = mount()
+    for (let n = 0; n < 4; n++) {
+      fireEvent.click(
+        screen.getByRole('button', { name: n === 0 ? 'Open shell' : 'Add terminal tab' }),
+      )
+      await waitFor(() => expect(useStore.getState().shellDocks.run_1.tabs).toHaveLength(n + 1))
+    }
+
+    expect(screen.getByText('At most 4 tabs')).toBeDefined()
+    expect(
+      (screen.getByRole('button', { name: 'Add terminal tab' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    view.unmount()
+  })
+
   it('does not offer shell tabs after the run container is gone', () => {
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
