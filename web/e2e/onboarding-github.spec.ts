@@ -82,6 +82,6 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   // says who it connected as.
   await wizard.back().click()
   await wizard.expectStep('Agents')
-  await expect(github.section).toContainText('Connected as octocat')
+  await expect(github.section).toContainText('Connected in this session as octocat')
   await expect(wizard.agents.connectGitHub()).toBeVisible()
 })
