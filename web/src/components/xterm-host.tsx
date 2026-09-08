@@ -145,6 +145,7 @@ export function useXterm({
   // rather than from each caller.
   const fontSize = useStore((s) => s.terminalFontSize)
   const fitRef = useRef<FitAddon | null>(null)
+  const appliedFontSize = useRef(fontSize)
   onDataRef.current = onData
   onResizeRef.current = onResize
   onLinkRef.current = onLink
@@ -163,7 +164,7 @@ export function useXterm({
     const created = new Terminal({
       // Read rather than watched: rebuilding the terminal on a zoom step
       // would throw its scrollback away, so the size is applied below.
-      fontSize: useStore.getState().terminalFontSize,
+      fontSize: (appliedFontSize.current = useStore.getState().terminalFontSize),
       fontFamily: terminalFontFamily,
       scrollback: 50_000,
       cursorBlink: false,
@@ -243,9 +244,11 @@ export function useXterm({
   }, [enabled, host])
 
   // A zoom step changes the cell size, so the pane has to be re-fitted and
-  // the new geometry sent to the shell; nothing else observes the resize.
+  // the new geometry sent to the shell; nothing else observes the resize. A
+  // terminal that was just built at this size is already fitted.
   useEffect(() => {
-    if (!terminal) return
+    if (!terminal || appliedFontSize.current === fontSize) return
+    appliedFontSize.current = fontSize
     terminal.options.fontSize = fontSize
     fitRef.current?.fit()
     onResizeRef.current?.(terminal.cols, terminal.rows)
