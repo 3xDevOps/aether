@@ -264,11 +264,23 @@ describe('a persisted store from an older release', () => {
     expect(resumeFrom(0, undefined)).toBe('Link')
   })
 
-  it('leaves a name written by this version alone', () => {
+  it('runs the migrate on every version behind this one', () => {
+    // Zustand calls migrate only when the stored version is older than the
+    // configured one, so a payload seeded at the current version proves
+    // nothing about it. All three older versions stored an index, and each
+    // has to come back as the step it named.
+    expect(resumeFrom(0, 3)).toBe('Agents')
+    expect(resumeFrom(1, 3)).toBe('Agents')
+    expect(resumeFrom(2, 3)).toBe('Agents')
+    window.localStorage.removeItem('aether.ui')
+  })
+
+  it('leaves a payload at this version untouched', () => {
     window.localStorage.setItem(
       'aether.ui',
       JSON.stringify({ state: { onboardingStep: 'Agents' }, version: 3 }),
     )
     expect(createRootStore().getState().onboardingStep).toBe('Agents')
+    window.localStorage.removeItem('aether.ui')
   })
 })

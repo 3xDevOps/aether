@@ -113,18 +113,19 @@ export function createRootStore() {
         // stored the resume point as an index, so the number is read back
         // as the step it meant.
         migrate: (persisted, version): PersistedState => {
-          const stored = (persisted ?? {}) as PersistedState & {
-            onboardingStep?: unknown
-          }
-          const state: PersistedState = { ...stored }
+          const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
             delete state.onboardingRepo
           }
           if (version < 3) {
-            const index = stored.onboardingStep
+            // Read the step through a view of its own: intersecting it with
+            // PersistedState collapses the field back to the current name
+            // type, and the compiler then stops checking this conversion.
+            const step = (persisted as { onboardingStep?: unknown } | null)
+              ?.onboardingStep
             state.onboardingStep =
-              typeof index === 'number' && v0OnboardingSteps[index]
-                ? v0OnboardingSteps[index]
+              typeof step === 'number' && v0OnboardingSteps[step]
+                ? v0OnboardingSteps[step]
                 : onboardingSteps[0]
           }
           return state
