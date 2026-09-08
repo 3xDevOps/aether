@@ -3,7 +3,10 @@ package scheduler
 import (
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -170,17 +173,15 @@ func TestRunCoAuthorsFileTracksSteerers(t *testing.T) {
 	}
 }
 
-// A handoff swaps the author and one of the co-authors. The commit path
-// recomputes per commit, but the file the agent reads does not - left
-// alone it would have the new owner instruct their own agent to credit
-// them as their own co-author, and would drop the outgoing owner, who did
-// the work, from the branch entirely.
+// A handoff swaps who authors what. Aether's own commits follow the run
+// and are authored as its new owner; the container's author was frozen
+// when it was created and does not move, so the agent keeps committing as
+// whoever launched the run.
 //
-// The container's own author does not move with the run: it was frozen
-// when the container was created. So after the handoff the agent is still
-// committing as the outgoing owner, and the file must not tell it to
-// credit that address - while Aether's own commit, authored as the new
-// owner, must.
+// The file the agent reads has to answer both: it credits everyone the run
+// involves less the address that container already authors as. Before the
+// handoff the owner is that address and drops out; after it the incoming
+// owner is on no commit the agent writes unless the file says so.
 func TestHandoffRewritesTheCoAuthorList(t *testing.T) {
 	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
 	e := newTestEnv(t, withServerBinary(staged))
@@ -192,6 +193,8 @@ func TestHandoffRewritesTheCoAuthorList(t *testing.T) {
 
 	run, _ := e.launchFake(t, "add OAuth login")
 	e.sched.RecordSteer(t.Context(), run.ID, bob.ID)
+	// Ada owns the run and the container authors as Ada, so only Bob is
+	// left to credit.
 	if got := coord.trailers(run.ID); !slices.Equal(got, []string{"Co-authored-by: Bob Steer <bob@example.com>"}) {
 		t.Fatalf("co-authors before the handoff = %v", got)
 	}
@@ -201,12 +204,13 @@ func TestHandoffRewritesTheCoAuthorList(t *testing.T) {
 	}
 	e.sched.RecordHandoff(t.Context(), run.ID, e.member.ID)
 
-	// Bob owns the run and the agent still commits as Ada, so there is
-	// nobody left for the agent to credit.
-	if got := coord.trailers(run.ID); len(got) != 0 {
-		t.Errorf("co-authors after the handoff = %v, want none: the agent commits as Ada already", got)
+	// Bob owns the run now and the agent still commits as Ada, so Bob is
+	// who those commits have to credit.
+	want := []string{"Co-authored-by: Bob Steer <bob@example.com>"}
+	if got := coord.trailers(run.ID); !slices.Equal(got, want) {
+		t.Errorf("co-authors after the handoff = %v, want %v", got, want)
 	}
-	// Aether's own commit is authored as Bob, so it does credit Ada.
+	// Aether's own commit is authored as Bob, so it credits Ada instead.
 	if _, err := e.sched.commitAll(t.Context(), run.ID, "aether: add OAuth login"); err != nil {
 		t.Fatalf("commitAll: %v", err)
 	}
@@ -282,5 +286,73 @@ func TestGitIdentityChangeRefreshesLiveRuns(t *testing.T) {
 	e.sched.RefreshMemberCoAuthors(t.Context(), e.member.ID)
 	if got := coord.writes(run.ID); got != before {
 		t.Errorf("an unrelated identity change rewrote the list %d times", got-before)
+	}
+}
+
+// probeWindow is how long the concurrent-steer probe waits to see whether
+// the second refresh runs ahead of the first. With the lock it never does,
+// so the window is always spent; without it the second write lands well
+// inside it and the probe fails.
+const probeWindow = 250 * time.Millisecond
+
+// Two members steering at once is a real path: the PTY host dispatches its
+// input callback on a goroutine of its own. Each refresh reads the steerers
+// and then writes them, so without a lock around the pair the one that read
+// first can land last and drop whoever it did not see.
+func TestConcurrentSteersBothReachTheCoAuthorList(t *testing.T) {
+	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
+	e := newTestEnv(t, withServerBinary(staged))
+	coord, _ := withCoordination(t, e)
+	bob := newSteerer(t, e, "Bob", "Bob Steer", "bob@example.com")
+	carol := newSteerer(t, e, "Carol", "Carol Steer", "carol@example.com")
+	run, _ := e.launchFake(t, "add OAuth login")
+
+	// Installed after the launch so provisioning's own write is not the one
+	// that gets held.
+	held := make(chan struct{})
+	release := make(chan struct{})
+	second := make(chan struct{})
+	var writers atomic.Int32
+	coord.beforeWrite = func() {
+		switch writers.Add(1) {
+		case 1:
+			close(held)
+			<-release
+		case 2:
+			close(second)
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		e.sched.RecordSteer(t.Context(), run.ID, bob.ID)
+	}()
+	<-held
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		e.sched.RecordSteer(t.Context(), run.ID, carol.ID)
+	}()
+	// Under the lock the second refresh cannot reach the write at all while
+	// the first holds it, so this window is expected to expire. Without the
+	// lock it writes immediately and the first then overwrites it.
+	select {
+	case <-second:
+	case <-time.After(probeWindow):
+	}
+	close(release)
+	wg.Wait()
+
+	want := []string{
+		"Co-authored-by: Bob Steer <bob@example.com>",
+		"Co-authored-by: Carol Steer <carol@example.com>",
+	}
+	got := slices.Clone(coord.trailers(run.ID))
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("co-authors after two concurrent steers = %v, want Bob and Carol", got)
 	}
 }

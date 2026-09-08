@@ -22,6 +22,11 @@ type fakeCoordinator struct {
 	root string
 	err  error
 
+	// beforeWrite runs inside WriteCoAuthors, after the caller has read the
+	// steerers and before the list lands, which is the window a test can
+	// hold a writer in.
+	beforeWrite func()
+
 	mu             sync.Mutex
 	released       []domain.RunID
 	coAuthors      map[domain.RunID][]string
@@ -42,6 +47,9 @@ func (f *fakeCoordinator) Provision(_ context.Context, run domain.RunID, _ []byt
 func (f *fakeCoordinator) WriteCoAuthors(run domain.RunID, trailers []string) error {
 	if f.err != nil {
 		return f.err
+	}
+	if f.beforeWrite != nil {
+		f.beforeWrite()
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
