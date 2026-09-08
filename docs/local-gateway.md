@@ -358,6 +358,13 @@ no SSH key is offered and the server requires one, it may create
   - `behind` - the workspace is ahead of the clone. Nothing was pushed;
     `repo.fast-forward` catches the clone up.
   - `diverged` - both moved on. Nothing was pushed, nothing forced.
+- Another member can advance the workspace branch in the window between the
+  compare and the push, and git then rejects the push as a non-fast-forward.
+  `repo.push` compares once more and answers `behind` or `diverged` from
+  that second compare; `output` carries git's rejection and the second
+  compare's fetch. When the second compare does not explain the rejection -
+  it answers `missing`, `same`, or `ahead` - the push failure stands as
+  `-32603`, because nothing landed and no `state` may suggest otherwise.
 - `local_commit` and `workspace_commit` are the two branch tips as full
   40-hex commit ids, `workspace_commit` the empty string when the workspace
   has no such branch yet. `ahead` and `behind` count the local branch's
@@ -381,7 +388,8 @@ no SSH key is offered and the server requires one, it may create
   workspace and the objects would land in another. A failed `ls-remote`,
   fetch or push answers `-32603` carrying git's own output: an unreachable
   server or a key git could not use fails the compare before any push, and
-  a push the server rejected for branch protection fails after it.
+  a push the server rejected for branch protection fails after it. The one
+  push failure that is not an error is the non-fast-forward rejection above.
 - `repo.fast-forward` resolves the `behind` state: it compares exactly as
   `repo.push` does, then advances the local branch to the workspace's tip.
   Fast-forward only - it writes no merge commit and never rewrites commits

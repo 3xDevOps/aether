@@ -248,3 +248,33 @@ func TestPushRefusesAFolderThatIsNotARepository(t *testing.T) {
 		t.Fatalf("error drops git's stderr: %v", err)
 	}
 }
+
+// The push the compare said was safe, running after the workspace branch
+// moved on. Git rejects it as a non-fast-forward, and that rejection is
+// the caller's cue to compare again rather than a failure to report.
+func TestPushReportsANonFastForwardRejection(t *testing.T) {
+	requireGit(t)
+	clone, remote, _ := seededClone(t)
+	advance(t, remote)
+
+	_, err := Push(clone, "main")
+	if !errors.Is(err, ErrPushRejected) {
+		t.Fatalf("err = %v, want a non-fast-forward rejection", err)
+	}
+	// It is not a state the repository could have refused up front.
+	if errors.Is(err, ErrPushPrecondition) {
+		t.Fatalf("err = %v, want it kept apart from the local preconditions", err)
+	}
+	if !strings.Contains(err.Error(), "git push") || !strings.Contains(err.Error(), "[rejected]") {
+		t.Fatalf("error drops git's own words: %v", err)
+	}
+
+	// The reason is on the ref status line, so a member who turned git's
+	// hints off is classified the same way.
+	git(t, clone, "config", "advice.pushNonFastForward", "false")
+	git(t, clone, "config", "advice.pushUpdateRejected", "false")
+	git(t, clone, "config", "advice.pushFetchFirst", "false")
+	if _, err = Push(clone, "main"); !errors.Is(err, ErrPushRejected) {
+		t.Fatalf("err = %v with git's hints off, want a non-fast-forward rejection", err)
+	}
+}

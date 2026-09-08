@@ -427,6 +427,21 @@ func (g *Gateway) localRepoPush(r *http.Request, body []byte) (any, *protocol.Er
 	case localops.BranchMissing, localops.BranchAhead:
 		output, err := localops.Push(cfg.Repo, ws.BaseBranch)
 		result.Output += output
+		if errors.Is(err, localops.ErrPushRejected) {
+			// Another member moved the workspace branch between the
+			// compare and the push, so git answered the "fetch first"
+			// this verb exists to replace. Compare again and report what
+			// the caller can act on; when the second compare no longer
+			// explains the rejection, git's own words stand rather than a
+			// state that claims a push that never landed.
+			again, cmpErr := localops.CompareBranch(cfg.Repo, ws.BaseBranch)
+			if cmpErr == nil && (again.State == localops.BranchBehind || again.State == localops.BranchDiverged) {
+				result.Output += again.Output
+				result.WorkspaceCommit, result.Ahead, result.Behind = again.Workspace, again.Ahead, again.Behind
+				result.State = string(again.State)
+				return result, nil
+			}
+		}
 		if perr := repoGitError(err); perr != nil {
 			return nil, perr
 		}
