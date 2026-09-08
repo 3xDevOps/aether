@@ -15,9 +15,19 @@ import (
 )
 
 // legalTransition encodes the pinned lifecycle table (Wave 1 contract
-// §6.6). Final dispositions never transition.
+// §6.6). The close disposition comes first: any state that holds a record
+// may be resolved as merged or abandoned on a human's say-so - live runs
+// are stopped first, finished ones re-labeled. Everything else: final
+// dispositions never transition.
 func legalTransition(from, to domain.RunStatus) bool {
-	if from.Final() || !to.Valid() {
+	if !to.Valid() {
+		return false
+	}
+	switch to {
+	case domain.RunMerged, domain.RunAbandoned:
+		return true
+	}
+	if from.Final() || !from.Valid() {
 		return false
 	}
 	switch to {
@@ -34,12 +44,6 @@ func legalTransition(from, to domain.RunStatus) bool {
 	case domain.RunFailed:
 		return from == domain.RunProvisioning || from == domain.RunRunning ||
 			from == domain.RunNeedsAttention
-	case domain.RunMerged:
-		return from == domain.RunCompleted
-	case domain.RunAbandoned:
-		return from == domain.RunQueued || from == domain.RunProvisioning ||
-			from == domain.RunRunning || from == domain.RunNeedsAttention ||
-			from == domain.RunCompleted
 	case domain.RunInterrupted:
 		return from == domain.RunQueued || from == domain.RunProvisioning ||
 			from == domain.RunRunning || from == domain.RunNeedsAttention

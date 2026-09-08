@@ -8,6 +8,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -244,7 +245,9 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 	return entry != nil && entry.paused
 }
 
-// Inject writes a steering message to the live run agent's PTY.
+// Inject writes a steering message to the live run agent's PTY, ending
+// with the harness's submit sequence so the text reaches the agent's
+// conversation rather than sitting in its input box.
 func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -270,7 +273,15 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	if err != nil {
 		return err
 	}
-	if err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), m.DisplayName, m.Color, message); err != nil {
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return err
+	}
+	submit := "\r"
+	if p, ok := harness.Lookup(r.Harness); ok {
+		submit = p.SteerSuffix()
+	}
+	if err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), m.DisplayName, m.Color, message, submit); err != nil {
 		return err
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, message)
@@ -278,36 +289,72 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	return nil
 }
 
-// CloseRun resolves a completed run to its human-decided outcome: merged or
-// abandoned, reason "closed". A live needs-attention run can resume and is
-// not closable. Completed runs have no container to stop.
+// CloseRun resolves a run's outcome on a human's say-so from any state
+// that holds a record. A live run is stopped first: the disposition lands
+// before the agent's exit so the board says what was decided, and
+// finalization then skips its own already-terminal transition while still
+// destroying the container and sidecar. A finished run is re-labeled in
+// place. Provisioning runs have no record yet to close; use Delete or
+// wait out the startup.
 func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error {
 	if outcome != domain.RunMerged && outcome != domain.RunAbandoned {
 		return fmt.Errorf("%w: close outcome must be merged or abandoned, got %q", ErrInvalidTransition, outcome)
 	}
 	s.mu.Lock()
-	if entry := s.runs[run]; entry != nil {
-		if entry.status != domain.RunCompleted {
+	if pending := s.pending[run]; pending != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
+	}
+	entry := s.runs[run]
+	if entry == nil {
+		// Unsupervised: the status is read and transitioned under s.mu so
+		// a concurrent Kill or CloseRun cannot both win and overwrite
+		// each other's terminal disposition.
+		r, err := s.cfg.Store.GetRun(ctx, run)
+		if err != nil {
 			s.mu.Unlock()
-			return fmt.Errorf("%w: close requires completed, run is %s", ErrInvalidTransition, entry.status)
+			return err
 		}
-		err := s.transitionLocked(ctx, run, entry.workspaceID, domain.RunCompleted, outcome, "closed", actor)
+		if r.Status == domain.RunQueued {
+			s.mu.Unlock()
+			return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
+		}
+		if r.Status == outcome {
+			s.mu.Unlock()
+			return nil
+		}
+		var cid runtime.ID
+		if sc, serr := s.readSidecar(run); serr == nil {
+			cid = runtime.ID(sc.ContainerID)
+		}
+		err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
 		s.mu.Unlock()
-		return err
+		if err != nil {
+			return err
+		}
+		s.stopCloseContainer(ctx, cid)
+		return nil
 	}
-	// Unsupervised: the status is read and transitioned under s.mu so a
-	// concurrent Kill or CloseRun cannot both win and overwrite each
-	// other's terminal disposition.
-	r, err := s.cfg.Store.GetRun(ctx, run)
-	if err != nil {
+	workspace := entry.workspaceID
+	cid := entry.containerID
+	if entry.status == outcome {
 		s.mu.Unlock()
-		return err
+		return nil
 	}
-	if r.Status != domain.RunCompleted {
-		s.mu.Unlock()
-		return fmt.Errorf("%w: close requires completed, run is %s", ErrInvalidTransition, r.Status)
-	}
-	err = s.transitionLocked(ctx, run, r.WorkspaceID, domain.RunCompleted, outcome, "closed", actor)
+	err := s.transitionLocked(ctx, run, workspace, entry.status, outcome, "closed", actor)
 	s.mu.Unlock()
-	return err
+	if err != nil {
+		return err
+	}
+	s.stopCloseContainer(ctx, cid)
+	return nil
+}
+
+func (s *Scheduler) stopCloseContainer(ctx context.Context, cid runtime.ID) {
+	if cid == "" {
+		return
+	}
+	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		slog.Warn("scheduler: stop container behind closed run", "container", cid, "error", err)
+	}
 }

@@ -222,7 +222,44 @@ func TestInject(t *testing.T) {
 	}
 }
 
-func TestCloseRunStopsStalledContainer(t *testing.T) {
+// The submit sequence is the harness's: a harness that steers with a
+// second Enter gets it, so steered text reaches the conversation instead
+// of sitting in the agent's input box.
+func TestInjectUsesHarnessSubmitSequence(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+
+	run, c := e.launchFake(t, "task")
+	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "one enter"); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	waitFor(t, "stdin delivery", func() bool {
+		return strings.HasSuffix(c.stdinString(), "one enter\r")
+	})
+
+	opencode, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "task", "opencode", domain.LaunchTUI)
+	if err != nil {
+		t.Fatalf("Launch opencode: %v", err)
+	}
+	if err := e.sched.Inject(ctx, opencode.ID, e.member.ID, "two enters"); err != nil {
+		t.Fatalf("Inject opencode: %v", err)
+	}
+	inj := e.pty.injected()
+	var last *fakeInject
+	for i := range inj {
+		if inj[i].run == opencode.ID {
+			last = &inj[i]
+		}
+	}
+	if last == nil || last.submit != "\r\r" {
+		t.Fatalf("opencode injects = %+v, want submit %q", inj, "\r\r")
+	}
+}
+
+// CloseRun resolves a stalled run's disposition directly: the status
+// moves to the outcome before the agent's exit, the container is torn
+// down, and finalization still cleans up behind the expected race.
+func TestCloseRunResolvesStalledRun(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = 40 * time.Millisecond
 		cfg.PollInterval = 10 * time.Millisecond
@@ -241,19 +278,44 @@ func TestCloseRunStopsStalledContainer(t *testing.T) {
 	run, _ := e.launchFake(t, "task")
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 
-	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("CloseRun on stalled run: %v, want ErrInvalidTransition", err)
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun on stalled run: %v", err)
 	}
-	if err := e.sched.Kill(ctx, run.ID, e.member.ID); err != nil {
-		t.Fatalf("Kill stalled run: %v", err)
+	r := e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	if r.FinishedAt == nil {
+		t.Fatal("closed run must have FinishedAt")
 	}
 	waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
-	r := e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
-	if r.FinishedAt == nil {
-		t.Fatal("killed run must have FinishedAt")
-	}
+	waitFor(t, "entry removed", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.runs[run.ID] == nil
+	})
 	if err := e.sched.DeleteRun(ctx, run.ID, e.member.ID); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
+	}
+}
+
+// A finished run is re-labeled in place by the close disposition, and a
+// second close at the same outcome is a no-op.
+func TestCloseRunRelabelsFinishedRun(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+
+	run, c := e.launchFake(t, "task")
+	c.exitNow(0)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); err != nil {
+		t.Fatalf("CloseRun completed to abandoned: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun abandoned to merged: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun at the same outcome: %v", err)
 	}
 }
 

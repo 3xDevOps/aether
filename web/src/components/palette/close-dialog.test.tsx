@@ -39,8 +39,9 @@ describe('close dialog', () => {
   })
 })
 
-// Delete is server-safe throughout the lifecycle. Kill applies only while an
-// agent is live, and close selects a disposition only after it has completed.
+// Delete is server-safe throughout the lifecycle. Close resolves the
+// outcome from any state that holds a record; only a queued run (no
+// record yet) cannot be closed.
 describe('ending commands by stage', () => {
   const ids = (
     status:
@@ -62,29 +63,26 @@ describe('ending commands by stage', () => {
       self: { id: 'mem_alice' as string, role: 'collaborator' as const },
     }).map((command) => command.id)
 
-  it('offers delete for every status, kill only while live, and close only when completed', () => {
+  it('offers delete and close at every stage with a record, kill only while live', () => {
     for (const status of ['queued', 'provisioning', 'running'] as const) {
       const live = ids(status)
       expect(live).toContain('kill')
       expect(live).toContain('delete')
-      expect(live).not.toContain('close')
     }
-
-    const stalled = ids('needs-attention')
-    expect(stalled).not.toContain('kill')
-    expect(stalled).toContain('delete')
-    expect(stalled).not.toContain('close')
-
-    const completed = ids('completed')
-    expect(completed).not.toContain('kill')
-    expect(completed).toContain('close')
-    expect(completed).toContain('delete')
-
-    for (const status of ['merged', 'abandoned', 'failed', 'interrupted'] as const) {
-      const final = ids(status)
-      expect(final).not.toContain('kill')
-      expect(final).not.toContain('close')
-      expect(final).toContain('delete')
+    // Queued has no record to close yet.
+    expect(ids('queued')).not.toContain('close')
+    for (const status of [
+      'provisioning',
+      'running',
+      'needs-attention',
+      'completed',
+      'merged',
+      'abandoned',
+      'failed',
+      'interrupted',
+    ] as const) {
+      expect(ids(status)).toContain('close')
+      expect(ids(status)).toContain('delete')
     }
   })
 

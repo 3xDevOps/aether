@@ -199,9 +199,10 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     }
   }
 
-  // Kill only a live agent. A completed run is ready for its disposition
-  // (the dialog asks merged or abandoned); Delete is safe at every stage.
-  if (run.status === 'completed' && mayKill) {
+  // Close resolves the outcome from any state that holds a record: a live
+  // run is stopped first, a finished one re-labeled. The dialog asks
+  // merged or abandoned; Delete stays safe at every stage.
+  if (run.status !== 'queued' && mayKill) {
     list.push({
       id: 'close',
       label: 'Close run...',
