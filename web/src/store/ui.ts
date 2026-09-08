@@ -1,4 +1,5 @@
 import { clampDockHeight } from '@/components/dock'
+import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
 import type {
   LinkRepoResult,
   RepoFastForwardResult,
@@ -89,6 +90,8 @@ export interface UiSlice {
   sidebarCollapsed: boolean
   terminalDockHeight: number
   runDockHeight: number
+  /** Zoom level shared by every terminal, in pixels. */
+  terminalFontSize: number
   onboarded: boolean
   onboardingStep: OnboardingStep
   /**
@@ -127,6 +130,7 @@ export interface UiSlice {
   setSidebarWidth: (width: number) => void
   setTerminalDockHeight: (height: number) => void
   setRunDockHeight: (height: number) => void
+  setTerminalFontSize: (size: number) => void
   toggleSidebar: () => void
   setOnboarded: (onboarded: boolean) => void
   setOnboardingStep: (step: OnboardingStep) => void
@@ -148,6 +152,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   sidebarCollapsed: false,
   terminalDockHeight: 280,
   runDockHeight: 240,
+  terminalFontSize: defaultTerminalFontSize,
   onboarded: false,
   onboardingStep: 'Link',
   onboardingFurthest: 'Link',
@@ -166,6 +171,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
     }),
   setTerminalDockHeight: (height) => set({ terminalDockHeight: clampDockHeight(height) }),
   setRunDockHeight: (height) => set({ runDockHeight: clampDockHeight(height) }),
+  setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setOnboarded: (onboarded) =>
     set(

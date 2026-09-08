@@ -4,8 +4,14 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
-import { terminalFontFamily, whenTerminalFontReady } from '@/lib/term-font'
-import { attachClipboardKeys } from '@/lib/term-clipboard'
+import {
+  defaultTerminalFontSize,
+  terminalFontFamily,
+  terminalZoomKey,
+  whenTerminalFontReady,
+} from '@/lib/term-font'
+import { clipboardKeys } from '@/lib/term-clipboard'
+import { useStore } from '@/store'
 
 export interface XtermOptions {
   enabled?: boolean
@@ -128,6 +134,10 @@ export function useXterm({
   const onResizeRef = useRef(onResize)
   const onLinkRef = useRef(onLink)
   const [terminal, setTerminal] = useState<Terminal | null>(null)
+  // Zoom is one preference across every terminal, so it comes from the store
+  // rather than from each caller.
+  const fontSize = useStore((s) => s.terminalFontSize)
+  const fitRef = useRef<FitAddon | null>(null)
   onDataRef.current = onData
   onResizeRef.current = onResize
   onLinkRef.current = onLink
@@ -144,7 +154,9 @@ export function useXterm({
       window.open(uri, '_blank', 'noopener,noreferrer')
     }
     const created = new Terminal({
-      fontSize: 12,
+      // Read rather than watched: rebuilding the terminal on a zoom step
+      // would throw its scrollback away, so the size is applied below.
+      fontSize: useStore.getState().terminalFontSize,
       fontFamily: terminalFontFamily,
       scrollback: 50_000,
       cursorBlink: false,
@@ -159,7 +171,27 @@ export function useXterm({
       created.loadAddon(fit)
       created.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)))
       created.open(host)
-      attachClipboardKeys(created)
+      fitRef.current = fit
+
+      // xterm keeps a single custom key handler, so zoom and the clipboard
+      // shortcuts are one chain: the first to claim the event stops it
+      // reaching the shell.
+      const clipboard = clipboardKeys(created)
+      created.attachCustomKeyEventHandler((ev) => {
+        if (ev.type !== 'keydown') return clipboard(ev)
+        const zoom = terminalZoomKey(ev)
+        if (zoom) {
+          ev.preventDefault()
+          const { terminalFontSize, setTerminalFontSize } = useStore.getState()
+          setTerminalFontSize(
+            zoom === 'reset'
+              ? defaultTerminalFontSize
+              : terminalFontSize + (zoom === 'in' ? 1 : -1),
+          )
+          return false
+        }
+        return clipboard(ev)
+      })
 
       const repaint = () => paint(host, created)
       repaint()
@@ -179,6 +211,7 @@ export function useXterm({
         observer.disconnect()
         themeWatch.disconnect()
         input.dispose()
+        fitRef.current = null
       }
       setTerminal(created)
     })
@@ -191,6 +224,15 @@ export function useXterm({
       setTerminal(null)
     }
   }, [enabled, host])
+
+  // A zoom step changes the cell size, so the pane has to be re-fitted and
+  // the new geometry sent to the shell; nothing else observes the resize.
+  useEffect(() => {
+    if (!terminal) return
+    terminal.options.fontSize = fontSize
+    fitRef.current?.fit()
+    onResizeRef.current?.(terminal.cols, terminal.rows)
+  }, [fontSize, terminal])
 
   return { hostRef: setHost, terminal, ready: terminal !== null }
 }

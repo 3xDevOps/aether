@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { render, waitFor } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
 import { useXterm } from '@/components/xterm-host'
+import { defaultTerminalFontSize } from '@/lib/term-font'
 import { connectAttach } from '@/routes/terminal/attach'
+import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
 
 class NoResizeObserver {
@@ -122,5 +124,48 @@ describe('xterm host arrival', () => {
     // environment terminal permanently blank.
     await waitFor(() => expect(ready).not.toBeNull())
     view.unmount()
+  })
+})
+
+function KeyProbe() {
+  const { hostRef } = useXterm()
+  return <div ref={hostRef} />
+}
+
+/**
+ * xterm delivers browser keys to its own handler before the shell sees them,
+ * so the shortcuts are exercised through that handler rather than through a
+ * DOM event on the host element.
+ */
+async function mountKeys(): Promise<(ev: KeyboardEvent) => boolean> {
+  const attachHandler = vi.spyOn(Terminal.prototype, 'attachCustomKeyEventHandler')
+  render(<KeyProbe />)
+  await waitFor(() => expect(attachHandler).toHaveBeenCalled())
+  const handler = attachHandler.mock.calls[0][0]
+  attachHandler.mockRestore()
+  return handler
+}
+
+function key(init: KeyboardEventInit): KeyboardEvent {
+  return new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+}
+
+describe('terminal shortcuts', () => {
+  beforeEach(() => {
+    useStore.setState({ terminalFontSize: defaultTerminalFontSize })
+  })
+
+  it('zooms every terminal through the shared preference', async () => {
+    const handler = await mountKeys()
+
+    expect(handler(key({ code: 'Equal', ctrlKey: true }))).toBe(false)
+    expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize + 1)
+
+    handler(key({ code: 'Minus', ctrlKey: true }))
+    handler(key({ code: 'Minus', ctrlKey: true }))
+    expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize - 1)
+
+    handler(key({ code: 'Digit0', ctrlKey: true }))
+    expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize)
   })
 })

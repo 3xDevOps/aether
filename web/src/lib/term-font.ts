@@ -56,3 +56,41 @@ export function whenTerminalFontReady(open: () => void): () => void {
     clearTimeout(timer)
   }
 }
+
+/**
+ * The range terminal zoom stays inside. Below 8px the DOM renderer's cells
+ * collapse into an unreadable smear; above 32px a full agent TUI no longer
+ * fits an 80-column pane.
+ */
+export const minTerminalFontSize = 8
+export const maxTerminalFontSize = 32
+export const defaultTerminalFontSize = 12
+
+/** Snaps any candidate zoom level into the supported range. */
+export function clampTerminalFontSize(px: number): number {
+  if (!Number.isFinite(px)) return defaultTerminalFontSize
+  return Math.min(maxTerminalFontSize, Math.max(minTerminalFontSize, Math.round(px)))
+}
+
+/**
+ * The zoom a key event asks for, or null when it asks for none. Ctrl (or Cmd
+ * on macOS) with `=`/`+` grows, `-` shrinks and `0` returns to the default.
+ * Keyed off physical codes, like the clipboard shortcuts, so a remapped
+ * layout cannot move them.
+ */
+export function terminalZoomKey(ev: KeyboardEvent): 'in' | 'out' | 'reset' | null {
+  if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return null
+  switch (ev.code) {
+    case 'Equal':
+    case 'NumpadAdd':
+      return 'in'
+    case 'Minus':
+    case 'NumpadSubtract':
+      return 'out'
+    case 'Digit0':
+    case 'Numpad0':
+      return 'reset'
+    default:
+      return null
+  }
+}

@@ -116,3 +116,23 @@ describe('terminalFontFamily', () => {
     expect(families[families.length - 1]).toBe('monospace')
   })
 })
+import { describe, expect, it } from 'vitest'
+import { terminalZoomKey } from './term-font'
+
+function key(init: KeyboardEventInit): KeyboardEvent {
+  return new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+}
+
+describe('terminal zoom keys', () => {
+  it('reads the zoom a modified key asks for', () => {
+    expect(terminalZoomKey(key({ code: 'Equal', ctrlKey: true }))).toBe('in')
+    expect(terminalZoomKey(key({ code: 'Minus', metaKey: true }))).toBe('out')
+    expect(terminalZoomKey(key({ code: 'Digit0', ctrlKey: true }))).toBe('reset')
+  })
+
+  it('leaves unmodified and Alt-modified keys to the shell', () => {
+    expect(terminalZoomKey(key({ code: 'Equal' }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'Minus', ctrlKey: true, altKey: true }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'KeyF', ctrlKey: true }))).toBeNull()
+  })
+})

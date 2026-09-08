@@ -1,5 +1,35 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import {
+  defaultTerminalFontSize,
+  maxTerminalFontSize,
+  minTerminalFontSize,
+} from '@/lib/term-font'
 import { createRootStore, useStore } from '@/store'
+
+// Terminal zoom is one preference behind every terminal, and the shortcut
+// steps it without checking bounds first, so the store is where the range
+// has to hold.
+describe('terminal zoom', () => {
+  beforeEach(() => {
+    useStore.setState({ terminalFontSize: defaultTerminalFontSize })
+  })
+
+  it('keeps a requested size inside the supported range', () => {
+    const { setTerminalFontSize } = useStore.getState()
+
+    setTerminalFontSize(18)
+    expect(useStore.getState().terminalFontSize).toBe(18)
+
+    setTerminalFontSize(minTerminalFontSize - 5)
+    expect(useStore.getState().terminalFontSize).toBe(minTerminalFontSize)
+
+    setTerminalFontSize(maxTerminalFontSize + 5)
+    expect(useStore.getState().terminalFontSize).toBe(maxTerminalFontSize)
+
+    setTerminalFontSize(Number.NaN)
+    expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize)
+  })
+})
 
 // The active workspace and the workspace route are two views of one thing:
 // which workspace the app is acting on. If they drift, the sidebar names one
