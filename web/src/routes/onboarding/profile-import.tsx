@@ -310,7 +310,7 @@ export function ProfileImport({
         server so an agent there runs with your configuration. Credential
         files are excluded before anything is read, a file over 1 MiB or
         past the 20 MiB a snapshot holds is left behind, and a push carries
-        a harness's whole configuration minus what is listed as left out.
+        an agent's whole configuration minus what is listed as left out.
       </p>
 
       {served && looking === '' && !looked && (
@@ -534,7 +534,7 @@ function ProfileRow({
                 )}
               </ul>
               <p>
-                To send one anyway, push that harness from a terminal, where
+                To send one anyway, push that agent from a terminal, where
                 the override is attributable:
               </p>
               <pre className="overflow-x-auto rounded-md border bg-background px-2 py-1 font-mono">

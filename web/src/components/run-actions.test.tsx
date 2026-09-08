@@ -237,7 +237,7 @@ test('a viewer is offered nothing to change', () => {
     />,
   )
 
-  for (const name of ['Pause', 'Inject', 'Merged', 'Abandoned', 'Kill', 'Delete', 'Protect']) {
+  for (const name of ['Pause', 'Send', 'Merged', 'Abandoned', 'Kill', 'Delete', 'Protect']) {
     expect(screen.queryByRole('button', { name })).toBeNull()
   }
   expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()

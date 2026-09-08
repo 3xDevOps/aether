@@ -37,7 +37,7 @@ function AgentsView() {
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title="Agents" subtitle="harnesses this server can run" />
+      <ViewHeader title="Agents" subtitle="the agents this server can launch" />
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         {error && <p className="text-sm text-state-failed">{error}</p>}
         {loading && (

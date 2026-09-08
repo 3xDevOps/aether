@@ -291,8 +291,9 @@ export function WorkspaceStep({
             }}
           >
             <p className="text-sm text-muted-foreground">
-              No workspaces yet - create the first one. A workspace is a repo
-              plus a server-owned environment plan.
+              No workspaces yet - create the first one. A workspace is one
+              repository plus the container the server builds for it, and
+              every run in it starts from that same setup.
             </p>
             <label className="block space-y-1 text-sm">
               Name

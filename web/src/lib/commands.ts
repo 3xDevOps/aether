@@ -183,8 +183,8 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     }
     list.push({
       id: 'inject',
-      label: 'Inject a message...',
-      short: 'Inject',
+      label: 'Send a message to the agent...',
+      short: 'Send',
       Icon: MessageSquarePlus,
       perform: (d) => d.openDialog('inject', id),
     })
