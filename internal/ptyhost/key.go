@@ -30,17 +30,6 @@ func (k SessionKey) Run() (domain.RunID, bool) {
 	return domain.RunID(k), true
 }
 
-// OwningRun returns the run a session belongs to: an agent run session, or
-// a shell tab inside that run's container. A member terminal belongs to no
-// run.
-func (k SessionKey) OwningRun() (domain.RunID, bool) {
-	if rest, ok := strings.CutPrefix(string(k), "run-shell:"); ok {
-		id, _, found := strings.Cut(rest, ":")
-		return domain.RunID(id), found && id != ""
-	}
-	return k.Run()
-}
-
 // seedsReplay reports whether a restarted session should replay the prior
 // transcript tail: agent runs and member terminals survive restarts, while
 // a run-shell tab is always a fresh process whose old scrollback would

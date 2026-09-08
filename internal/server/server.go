@@ -153,8 +153,11 @@ type runSteerRecorder interface {
 	RecordSteer(ctx context.Context, run domain.RunID, member domain.MemberID)
 }
 
+// A shell tab inside the run container is not the agent's terminal, so
+// Run - which is false for one - is the right question here: opening a
+// shell in someone else's run is not steering their agent.
 func forwardRunSteer(rec runSteerRecorder, key ptyhost.SessionKey, member domain.MemberID) {
-	run, ok := key.OwningRun()
+	run, ok := key.Run()
 	if !ok || rec == nil {
 		return
 	}

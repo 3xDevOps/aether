@@ -42,9 +42,10 @@ type Config struct {
 	// OnTitle is declared for the title scanner and never called yet.
 	OnTitle func(key SessionKey, title string)
 	// OnInput reports that member typed into the session, at most once per
-	// write attach and only after the keystrokes reached the PTY. Who is
-	// typing is known here and nowhere below: neither the session nor its
-	// clients carry a member.
+	// write attach and only after the keystrokes reached the PTY. Bytes a
+	// terminal sends by itself do not count; see input.go. Who is typing is
+	// known here and nowhere below: neither the session nor its clients
+	// carry a member.
 	OnInput func(key SessionKey, member domain.MemberID)
 }
 
@@ -278,8 +279,8 @@ type ReplayWriter interface {
 }
 
 // reportInput hands the first keystroke of a write attach to OnInput. The
-// callback records a durable fact, so it runs off the read loop rather than
-// making the next keystroke wait for it.
+// callback records a durable fact, so it runs off the read loop rather
+// than making the next keystroke wait for it.
 func (h *Host) reportInput(key SessionKey, member domain.MemberID) {
 	if h.cfg.OnInput == nil {
 		return
@@ -319,6 +320,7 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, member domain.MemberI
 	go func() {
 		defer close(readDone)
 		buf := make([]byte, 4096)
+		var scan inputScanner
 		typed := false
 		for {
 			n, err := conn.Read(buf)
@@ -329,7 +331,7 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, member domain.MemberI
 				if !s.writeStdin(buf[:n]) {
 					return
 				}
-				if !typed {
+				if !typed && scan.typed(buf[:n]) {
 					typed = true
 					h.reportInput(key, member)
 				}

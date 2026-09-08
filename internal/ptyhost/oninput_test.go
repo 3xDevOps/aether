@@ -40,11 +40,21 @@ func TestOnInputReportsFirstKeystrokeOnce(t *testing.T) {
 	waitAttached(t, h, run, 1)
 	mirror.typeKeys(t, "ignored")
 
+	// A pane that only reported focus and answered a device-attributes
+	// query has typed nothing, and the bytes still reach the PTY.
 	a := startAttach(t, h, run, "bob", 80, 24, false)
+	a.typeKeys(t, "\x1b[I\x1b[?1;2c")
+	waitFor(t, "reports on stdin", func() bool { return stdin.String() == "\x1b[I\x1b[?1;2c" })
+	if got := report(); len(got) != 0 {
+		t.Fatalf("terminal reports were recorded as input by %v", got)
+	}
+
 	a.typeKeys(t, "ls\r")
-	waitFor(t, "keystrokes on stdin", func() bool { return stdin.String() == "ls\r" })
+	waitFor(t, "keystrokes on stdin", func() bool { return stdin.String() == "\x1b[I\x1b[?1;2cls\r" })
 	a.typeKeys(t, "pwd\r")
-	waitFor(t, "second keystrokes on stdin", func() bool { return stdin.String() == "ls\rpwd\r" })
+	waitFor(t, "second keystrokes on stdin", func() bool {
+		return stdin.String() == "\x1b[I\x1b[?1;2cls\rpwd\r"
+	})
 	waitFor(t, "input reported once", func() bool { return len(report()) == 1 })
 
 	a.detach()

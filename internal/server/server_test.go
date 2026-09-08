@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -56,6 +57,35 @@ func (s *runTitleSetterSpy) SetRunTitle(run domain.RunID, title string) {
 	s.run = run
 	s.title = title
 	s.calls++
+}
+
+type runSteerRecorderSpy struct {
+	runs []domain.RunID
+}
+
+func (s *runSteerRecorderSpy) RecordSteer(_ context.Context, run domain.RunID, _ domain.MemberID) {
+	s.runs = append(s.runs, run)
+}
+
+// Only the run's own agent terminal makes someone a co-author. A shell tab
+// inside the same container is a different session, and opening one in
+// another member's run is not steering their agent.
+func TestForwardRunSteerIgnoresShellAndTerminalSessions(t *testing.T) {
+	spy := &runSteerRecorderSpy{}
+	for _, key := range []ptyhost.SessionKey{
+		ptyhost.TerminalSession("member-1", "main"),
+		ptyhost.RunShellSession("run-1", "tab-1"),
+	} {
+		forwardRunSteer(spy, key, "member-1")
+		if len(spy.runs) != 0 {
+			t.Fatalf("%q recorded a steerer on %v", key, spy.runs)
+		}
+	}
+
+	forwardRunSteer(spy, ptyhost.RunSession("run-1"), "member-1")
+	if len(spy.runs) != 1 || spy.runs[0] != "run-1" {
+		t.Fatalf("run session recorded %v, want one call for run-1", spy.runs)
+	}
 }
 
 func TestForwardRunTitleIgnoresNonRunSession(t *testing.T) {
