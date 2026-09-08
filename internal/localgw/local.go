@@ -547,8 +547,8 @@ func (g *Gateway) localPull(r *http.Request, body []byte) (any, *protocol.Error)
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "decode pull coordinates: " + err.Error()}
 	}
 	pullResult, err := localops.Pull(cfg.Repo, cfg.User, cfg.Addr, coords)
-	if err != nil {
-		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	if perr := repoGitError(err); perr != nil {
+		return nil, perr
 	}
 	return struct {
 		Branch  string `json:"branch"`

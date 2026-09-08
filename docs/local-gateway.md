@@ -526,6 +526,10 @@ no SSH key is offered and the server requires one, it may create
   `current` reports whether the checkout is on that branch and `dirty` reports
   uncommitted changes after the operation. `pull.switch` refuses a dirty
   checkout and switches to the pulled branch when it is clean.
+- `pull` answers `-32002` (invalid state) for a branch move the member
+  fixes in their own repository, the run branch held by another worktree
+  above being the one such state, and `-32603` for anything else git ran
+  and lost. Both carry git's own words.
 - `pull`, `pull.switch`, `repo.push`, `repo.fast-forward`, `sync.start`, and
   `sync.stop` refuse with `-32002` when no repo is linked.
 - A sync session's states are `starting` (the overlay is dialing the run
