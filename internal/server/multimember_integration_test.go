@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -292,6 +293,19 @@ func TestIntegrationMultiMember(t *testing.T) {
 		return ok && string(e.RunID) == collab.ID && e.ActorID == domain.MemberID(bo.ID) &&
 			p.Kind == events.TimelineHandoff && p.Message == cam.ID
 	})
+	// Giving a run away is itself the credit: Bo has not steered since the
+	// handoff, so this is the transfer's line and not a steer's.
+	steerers, err := srv.Store().ListRunSteerers(ctx, domain.RunID(collab.ID))
+	if err != nil {
+		t.Fatalf("list run steerers after handoff: %v", err)
+	}
+	credited := make([]string, 0, len(steerers))
+	for _, m := range steerers {
+		credited = append(credited, string(m.ID))
+	}
+	if !slices.Contains(credited, bo.ID) {
+		t.Fatalf("steerers after handoff = %v, want the outgoing owner %s credited", credited, bo.ID)
+	}
 
 	// Approval inbox: an adapter-surfaced pause (the inbox's one source,
 	// published on the same bus seam adapters use) reaches every client's
