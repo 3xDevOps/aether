@@ -272,7 +272,9 @@ aether profile rollback --agent claude <snapshot-id>
 
 The local daemon (`aether daemon run`) does the push automatically on change;
 `--no-profile-sync` opts a machine out. It logs one line per file it left
-behind, so an unattended push never drops a file silently.
+behind, so an unattended push never drops a file silently. Where
+`aether profile push` refuses over a finding in a file you wrote, the daemon
+logs that file and syncs the rest, because nobody is there to answer.
 
 The dashboard does the same push without a terminal. Its onboarding wizard has
 an **Agents** step, and it runs on the same two guards: for each harness
@@ -288,7 +290,7 @@ stopped.
   Files over either limit are left behind rather than failing the push, and
   the preview, `aether profile push`, and the daemon's log name each one.
   They are decided from the file size alone, so an oversized file is never
-  read.
+  read. An empty file syncs as an empty file.
 - The snapshot budget is spent by category, in this order: memory, skills,
   commands, settings, MCP config, plugins, then everything else. Directory
   order would otherwise decide it, and a plugin cache that sorts early would
