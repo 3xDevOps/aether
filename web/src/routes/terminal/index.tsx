@@ -48,6 +48,10 @@ function TerminalView({ params }: RouteProps) {
   // reattach without re-running the terminal's own effect.
   const writeRef = useRef(state.write)
   writeRef.current = state.write
+  // An owner's run attaches with write already asked for, which the server
+  // grants without the member touching anything. Only a request they made
+  // counts as taking control.
+  const askedForControl = useRef(false)
   const controller = useXterm({
     enabled: known,
     onData: (data) => {
@@ -75,6 +79,7 @@ function TerminalView({ params }: RouteProps) {
     const ownerSteering = run?.status === 'running' && run.member_id === self.id
     setTerminal(runID, { ...initialTerminal, write: ownerSteering })
     writeRef.current = ownerSteering
+    askedForControl.current = false
 
     const attachment = connectAttach(() => api.attachSocket(runID), {
       onData: gate.current.write,
@@ -86,7 +91,7 @@ function TerminalView({ params }: RouteProps) {
         // refused request arrives as onWriteDenied instead. Marking control
         // here rather than on the click keeps a denied first attempt from
         // silencing the mirror hint for good.
-        if (write) markControlTaken()
+        if (write && askedForControl.current) markControlTaken()
         gate.current.unmute()
         terminal.reset()
         setTerminal(runID, { message: null, refused: false })
@@ -114,6 +119,7 @@ function TerminalView({ params }: RouteProps) {
 
   const toggleWrite = () => {
     writeRef.current = !state.write
+    if (writeRef.current) askedForControl.current = true
     setTerminal(runID, { write: writeRef.current })
     attachRef.current?.reopen()
   }

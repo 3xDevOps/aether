@@ -97,6 +97,18 @@ describe('terminal view', () => {
     view.unmount()
   })
 
+  it('does not count an owner run automatic steer as taking control', () => {
+    const view = mount()
+    attached()
+
+    // The owner's attach asks for write on its own and the server grants it.
+    // Nobody pressed anything, so the hint is still owed to them on the first
+    // run they only watch.
+    expect(screen.getByText('Steering')).toBeDefined()
+    expect(useStore.getState().terminalControlTaken).toBe(false)
+    view.unmount()
+  })
+
   it('keeps the mirror hint when the server refuses the request', () => {
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
