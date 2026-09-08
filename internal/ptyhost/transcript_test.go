@@ -300,3 +300,28 @@ func TestTranscriptWrittenIncrementally(t *testing.T) {
 	}
 	t.Fatal("transcript not flushed incrementally while session is live")
 }
+
+func TestLateMarkerAppendsAfterClose(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-late.cast")
+	w, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatalf("newCastWriter: %v", err)
+	}
+	w.output([]byte("before\n"))
+	w.marker("open marker")
+	if err := w.close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	w.lateMarker("inject by Ana: ship it")
+
+	_, events := parseCast(t, path)
+	var markers []string
+	for _, ev := range events {
+		if ev.code == "m" {
+			markers = append(markers, ev.data)
+		}
+	}
+	if len(markers) != 2 || markers[0] != "open marker" || markers[1] != "inject by Ana: ship it" {
+		t.Fatalf("markers = %v, want the open marker and the late append", markers)
+	}
+}

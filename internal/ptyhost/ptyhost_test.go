@@ -562,9 +562,10 @@ func (funcWriter) Close() error { return nil }
 
 // A session that ends while the injected line is still being written has
 // already accepted the full line: Inject must report success, not an
-// error that invites a double-submitting retry.
+// error that invites a double-submitting retry, and the transcript must
+// still carry the attribution the scheduler records.
 func TestInjectDeliveredReportsSuccessWhenSessionEndsDuringWrite(t *testing.T) {
-	h, _ := newTestHost(t)
+	h, dir := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-endwin")
 	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
@@ -584,10 +585,18 @@ func TestInjectDeliveredReportsSuccessWhenSessionEndsDuringWrite(t *testing.T) {
 	if string(written) != "ship it\r" {
 		t.Fatalf("stdin = %q, want the delivered line exactly once", written)
 	}
+	_, events := parseCast(t, dir+"/"+string(run)+".cast")
+	var markers []string
+	for _, ev := range events {
+		if ev.code == "m" {
+			markers = append(markers, ev.data)
+		}
+	}
+	if len(markers) != 1 || markers[0] != "inject by Ana: ship it" {
+		t.Fatalf("markers = %v, want the late attribution recorded", markers)
+	}
 }
 
-// echoStep is one delivered chunk of PTY output and whether it should count
-// as the agent talking.
 type echoStep struct {
 	out  string
 	want bool

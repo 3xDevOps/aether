@@ -342,7 +342,10 @@ func (s *session) inject(actorName, actorColor, message string) error {
 		// The write above already accepted the full line: a session that
 		// ended in this window must not turn delivered input into a
 		// reported failure, which would invite a double-submitting retry.
+		// The banner has no viewers on a wound-down session, but the
+		// transcript still takes the attribution marker.
 		if errors.Is(err, ErrSessionEnded) || errors.Is(err, ErrNoSession) {
+			s.tr.lateMarker("inject by " + bannerText(actorName) + ": " + bannerText(message))
 			return nil
 		}
 		return err

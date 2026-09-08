@@ -39,6 +39,9 @@ type castWriter struct {
 	pending []byte
 	closed  bool
 	stop    chan struct{}
+	// path is kept so a marker can still be appended after close, for a
+	// delivery that raced the session's end.
+	path string
 }
 
 func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
@@ -54,6 +57,7 @@ func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
 		bw:    bufio.NewWriterSize(f, 32*1024),
 		start: time.Now(),
 		stop:  make(chan struct{}),
+		path:  path,
 	}
 	hdr, err := json.Marshal(castHeader{
 		Version:   2,
@@ -203,16 +207,41 @@ func (w *castWriter) marker(text string) {
 	w.eventLocked("m", []byte(text))
 }
 
+// lateMarker records an attribution event after close, for a delivery that
+// raced the session's end: the cast file is reopened in append mode for the
+// single event so replay keeps the attribution the scheduler records. On an
+// open writer it behaves like marker.
+func (w *castWriter) lateMarker(text string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.closed {
+		w.eventLocked("m", []byte(text))
+		return
+	}
+	f, err := os.OpenFile(w.path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(castLine(w.start, "m", []byte(text)))
+	_ = f.Sync()
+	_ = f.Close()
+}
+
 func (w *castWriter) eventLocked(code string, data []byte) {
+	_, _ = w.bw.Write(castLine(w.start, code, data))
+}
+
+// castLine renders one asciicast event line relative to the recording's start.
+func castLine(start time.Time, code string, data []byte) []byte {
 	line := make([]byte, 0, len(data)+32)
 	line = append(line, '[')
-	line = strconv.AppendFloat(line, time.Since(w.start).Seconds(), 'f', 6, 64)
+	line = strconv.AppendFloat(line, time.Since(start).Seconds(), 'f', 6, 64)
 	line = append(line, ',', '"')
 	line = append(line, code...)
 	line = append(line, '"', ',')
 	line = appendCastString(line, data)
 	line = append(line, ']', '\n')
-	_, _ = w.bw.Write(line)
+	return line
 }
 
 func (w *castWriter) close() error {
