@@ -184,7 +184,13 @@ func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
 		werr = os.Rename(tmp.Name(), path)
 	}
 	if werr != nil {
-		_ = os.Remove(tmp.Name())
+		// A temp file left behind is visible to the agent in the mount
+		// beside the list it is told to read, so a cleanup that fails is
+		// worth saying out loud even though the write error is what the
+		// caller gets.
+		if rerr := os.Remove(tmp.Name()); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+			slog.Warn("coord: remove co-author temp file", "path", tmp.Name(), "error", rerr)
+		}
 		return fmt.Errorf("coord: write %s: %w", path, werr)
 	}
 	return nil
