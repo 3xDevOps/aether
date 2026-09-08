@@ -31,6 +31,7 @@ var localVerbs = []string{
 	"link.apply",
 	"link.repo",
 	"link.status",
+	"link.switch",
 	"profile.preview",
 	"profile.push",
 	"pull",
