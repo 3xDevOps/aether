@@ -941,7 +941,7 @@ describe('the harness the step set up', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Harness').value).toBe(
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe(
         'claude',
       )
     })
@@ -958,7 +958,7 @@ describe('the harness the step set up', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Harness').value).toBe('')
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe('')
     })
   })
 
@@ -1018,7 +1018,7 @@ describe('the harness the step set up', () => {
       await screen.findByRole('region', { name: 'First run' }),
     ).toBeDefined()
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Harness').value).toBe(
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe(
         'claude',
       )
     })

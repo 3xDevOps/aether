@@ -178,6 +178,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             back={back}
             defaultHarness={setUpHarness}
             onBackToWorkspace={() => setStep(onboardingStepIndex('Workspace'))}
+            onBackToAgents={() => setStep(onboardingStepIndex('Agents'))}
           />
         )}
       </div>

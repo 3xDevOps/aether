@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import type { Api } from '@/lib/api'
 import type {
   GatewayCapabilities,
@@ -10,6 +17,7 @@ import { OnboardingRoute } from '@/routes/onboarding'
 import { useStore, type RootState } from '@/store'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 import {
+  agentInfo,
   alice,
   fakeApi,
   otherWorkspace,
@@ -1141,7 +1149,7 @@ describe('onboarding wizard', () => {
     // scope again.
     expect(screen.queryByLabelText('Workspace')).toBeNull()
 
-    fireEvent.change(screen.getByLabelText('Harness'), {
+    fireEvent.change(screen.getByLabelText('Agent'), {
       target: { value: 'claude' },
     })
     fireEvent.change(screen.getByLabelText('Task'), {
@@ -1178,6 +1186,90 @@ describe('onboarding wizard', () => {
     })
   })
 
+  it('offers only the agents installed in this account', async () => {
+    // agent.list always carries every shipped name; only the installed ones
+    // can actually launch, so only they are offered.
+    const client = fakeApi({
+      agentList: vi.fn(async () => [
+        agentInfo(),
+        agentInfo({ name: 'codex', installed: false }),
+      ]),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    const picker = await screen.findByLabelText<HTMLSelectElement>('Agent')
+    const options = [...picker.options].map((o) => o.value)
+    expect(options).toEqual(['', 'claude'])
+  })
+
+  it('sends the reader back to Agents when nothing is installed', async () => {
+    const client = fakeApi({
+      agentList: vi.fn(async () => [agentInfo({ installed: false })]),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    expect(
+      await screen.findByText(/no agent is installed in your environment yet/i),
+    ).toBeDefined()
+    expect(screen.queryByLabelText('Agent')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Launch' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set up an agent' }))
+
+    expect(
+      await screen.findByRole('region', { name: 'Agents' }),
+    ).toBeDefined()
+    expect(
+      screen.getByRole('listitem', { current: 'step' }).textContent,
+    ).toContain('5. Agents')
+  })
+
+  it('keeps a failed agent.list on screen rather than calling it empty', async () => {
+    const client = fakeApi({
+      agentList: vi.fn(async () => {
+        throw new Error('agent.list: environment home unreadable')
+      }),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    expect(
+      await screen.findByText('agent.list: environment home unreadable'),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined()
+  })
+
+  it('jumps back to a finished step from the header', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toFirstRunStep()
+
+    // Steps already done are buttons; the current one and the ones ahead
+    // are not.
+    const steps = screen.getByLabelText('Steps')
+    fireEvent.click(
+      within(steps).getByRole('button', { name: '3. Workspace' }),
+    )
+
+    expect(
+      await screen.findByRole('region', { name: 'Workspace' }),
+    ).toBeDefined()
+    expect(useStore.getState().onboardingStep).toBe('Workspace')
+    // The step it landed on is current, so it is no longer clickable, and
+    // Repository is ahead again.
+    expect(
+      within(steps).queryByRole('button', { name: '3. Workspace' }),
+    ).toBeNull()
+    expect(
+      within(steps).queryByRole('button', { name: '4. Repository' }),
+    ).toBeNull()
+  })
+
   it('renders a launch refusal verbatim and lets the user retry', async () => {
     const runLaunch = vi
       .fn()
@@ -1188,7 +1280,7 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
-    fireEvent.change(await screen.findByLabelText('Harness'), {
+    fireEvent.change(await screen.findByLabelText('Agent'), {
       target: { value: 'claude' },
     })
     fireEvent.change(screen.getByLabelText('Task'), {

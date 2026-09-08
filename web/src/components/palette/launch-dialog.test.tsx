@@ -30,6 +30,8 @@ beforeEach(() => {
     route: { name: 'board', params: {} },
     runs: {},
     lastHarnessByAccount: {},
+    capabilities: null,
+    onboardingStep: 'Link',
   })
   vi.clearAllMocks()
 })
@@ -39,7 +41,7 @@ async function open() {
   render(<LaunchDialog />)
   await screen.findByRole('option', { name: 'claude' })
   await waitFor(() =>
-    expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).not.toBe(''),
+    expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).not.toBe(''),
   )
 }
 
@@ -56,10 +58,10 @@ describe('launch dialog', () => {
     vi.mocked(api.agentList).mockRejectedValue(new Error('agent.list: connection closed'))
     render(<LaunchDialog />)
     expect((await screen.findByRole('alert')).textContent).toBe('agent.list: connection closed')
-    expect(screen.queryByText(/No installed agents detected/)).toBeNull()
+    expect(screen.queryByText(/No agent is installed/)).toBeNull()
 
     vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh harnesses' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh agents' }))
     await screen.findByRole('option', { name: 'claude' })
     expect(screen.queryByRole('alert')).toBeNull()
   })
@@ -67,16 +69,66 @@ describe('launch dialog', () => {
   it('discovers a completed installation without restarting the app', async () => {
     vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
     render(<LaunchDialog />)
-    await screen.findByText(/No installed agents detected/)
+    await screen.findByText(/No agent is installed/)
     expect(screen.queryByRole('option', { name: 'claude' })).toBeNull()
     vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh harnesses' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh agents' }))
     await screen.findByRole('option', { name: 'claude' })
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
     await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({
       workspace_id: workspace.id, harness: 'claude',
     }))
   })
+  it('refuses to launch, and offers setup, when nothing is installed', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
+    render(<LaunchDialog />)
+
+    await screen.findByText('No agent is installed in this account.')
+    // No dangling field to pick the deployment escape hatch out of.
+    expect(screen.queryByLabelText('Agent')).toBeNull()
+    expect(screen.queryByRole('option', { name: 'custom' })).toBeNull()
+    expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+    expect(screen.getByRole('button', { name: 'Set up an agent' })).toBeDefined()
+  })
+
+  it('sends a local gateway to the onboarding wizard at its Agents step', async () => {
+    useStore.setState({
+      capabilities: { gateway: 'local', methods: ['*'], ws: [], local: ['link.status'] },
+    })
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
+    render(<LaunchDialog />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Set up an agent' }))
+
+    expect(useStore.getState().onboardingStep).toBe('Agents')
+    expect(useStore.getState().route.name).toBe('onboarding')
+    expect(useStore.getState().paletteDialog).toBeNull()
+  })
+
+  it('sends a remote gateway to the agents view', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
+    render(<LaunchDialog />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Set up an agent' }))
+
+    expect(useStore.getState().route.name).toBe('agents')
+    expect(useStore.getState().paletteDialog).toBeNull()
+  })
+
+  it('keeps launch disabled when the agent list fails', async () => {
+    vi.mocked(api.agentList).mockRejectedValue(new Error('agent.list: connection closed'))
+    render(<LaunchDialog />)
+
+    expect((await screen.findByRole('alert')).textContent).toBe('agent.list: connection closed')
+    expect(screen.queryByRole('option', { name: 'custom' })).toBeNull()
+    expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+  })
+
   it('seeds the agent with a task in the default interactive mode', async () => {
     await open()
 
@@ -106,7 +158,7 @@ describe('launch dialog', () => {
 
     expect(screen.queryByRole('option', { name: 'codex' })).toBeNull()
     await waitFor(() =>
-      expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('myagent'),
+      expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).toBe('myagent'),
     )
   })
 
@@ -121,7 +173,7 @@ describe('launch dialog', () => {
     await open()
 
     await waitFor(() =>
-      expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('myagent'),
+      expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).toBe('myagent'),
     )
   })
 

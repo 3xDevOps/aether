@@ -13,10 +13,13 @@ import {
 import { api } from '@/lib/api'
 import type { AgentInfo, Member } from '@/lib/types'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 
 // The harness roster comes from agent.list so member-registered agents are
-// launchable, not just the shipped names. "custom" remains the deployment
-// escape hatch; shipped and member entries are filtered to installed tools.
+// launchable, not just the shipped names; shipped and member entries are
+// filtered to installed tools. "custom" is the deployment escape hatch, and
+// it is offered only alongside an installed agent: with nothing installed a
+// launch has no executable to run, so the field is replaced by setup.
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
@@ -28,6 +31,8 @@ export function LaunchDialog() {
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
+  const setOnboardingStep = useStore((s) => s.setOnboardingStep)
+  const caps = useCapability()
   const upsertRun = useStore((s) => s.upsertRun)
   const rememberHarness = useStore((s) => s.rememberHarness)
   const lastHarnessByAccount = useStore((s) => s.lastHarnessByAccount)
@@ -59,6 +64,7 @@ export function LaunchDialog() {
   const needsTask = mode === 'headless' && task.trim() === ''
   const installedAgents = agents?.filter((agent) => agent.installed === true) ?? []
   const harnessLoading = agents === null
+  const noAgents = !harnessLoading && installedAgents.length === 0
 
   useEffect(() => {
     let live = true
@@ -93,19 +99,28 @@ export function LaunchDialog() {
           if (lastUsedHarness && installed.some((agent) => agent.name === lastUsedHarness)) {
             return lastUsedHarness
           }
-          return installed[0]?.name ?? 'custom'
+          return installed[0]?.name ?? ''
         })
       })
       .catch((err) => {
         if (!live) return
         setAgents([])
         setAgentError(message(err))
-        setHarness('custom')
       })
     return () => {
       live = false
     }
   }, [account, lastUsedHarness, ownAccountID, agentRefresh])
+
+  // Installing an agent needs this machine's filesystem, so a local gateway
+  // hands the member to the wizard's Agents step and a remote one to the
+  // agents view, which is as far as it can take them.
+  const setUpAgent = () => {
+    const local = caps.hasLocal('link.status')
+    if (local) setOnboardingStep('Agents')
+    close()
+    navigate(local ? 'onboarding' : 'agents')
+  }
 
   const launch = async () => {
     setLaunching(true)
@@ -194,22 +209,24 @@ export function LaunchDialog() {
                 ))}
               </select>
             </label>
-            <label className="flex-1 space-y-1 text-sm">
-              Harness
-              <select
-                className={field}
-                value={harness}
-                disabled={harnessLoading || launching}
-                onChange={(e) => setHarness(e.target.value)}
-              >
-                {installedAgents.map((agent) => (
-                  <option key={agent.name} value={agent.name}>
-                    {agent.name}
-                  </option>
-                ))}
-                <option value="custom">custom</option>
-              </select>
-            </label>
+            {!noAgents && (
+              <label className="flex-1 space-y-1 text-sm">
+                Agent
+                <select
+                  className={field}
+                  value={harness}
+                  disabled={harnessLoading || launching}
+                  onChange={(e) => setHarness(e.target.value)}
+                >
+                  {installedAgents.map((agent) => (
+                    <option key={agent.name} value={agent.name}>
+                      {agent.name}
+                    </option>
+                  ))}
+                  {installedAgents.length > 0 && <option value="custom">custom</option>}
+                </select>
+              </label>
+            )}
             <label className="flex-1 space-y-1 text-sm">
               Mode
               <select
@@ -225,11 +242,13 @@ export function LaunchDialog() {
           {agentError && (
             <p role="alert" className="text-xs text-state-failed">{agentError}</p>
           )}
-          {!harnessLoading && !agentError && installedAgents.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              No installed agents detected in this account. Install an agent in its
-              environment terminal, then refresh the harness list.
-            </p>
+          {noAgents && !agentError && (
+            <div className="space-y-2">
+              <p className="text-sm">No agent is installed in this account.</p>
+              <Button type="button" size="sm" onClick={setUpAgent}>
+                Set up an agent
+              </Button>
+            </div>
           )}
           <Button
             type="button"
@@ -238,7 +257,7 @@ export function LaunchDialog() {
             disabled={harnessLoading || launching}
             onClick={() => setAgentRefresh((current) => current + 1)}
           >
-            Refresh harnesses
+            Refresh agents
           </Button>
           {account && account !== ownAccountID && (
             <p className="text-xs text-muted-foreground">

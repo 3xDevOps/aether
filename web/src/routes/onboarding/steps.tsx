@@ -761,11 +761,10 @@ export function RepoStep({
 
 /**
  * The First run step: the first run, in the workspace the Workspace step
- * settled on. The harness comes from agent.list with a free-text fallback,
- * and launch lands the user on the run view. `defaultHarness` is the one the
- * Agents step set up; it is preselected only when agent.list carries that
- * name, because a name the server cannot launch would just move the refusal
- * later.
+ * settled on. Only agents agent.list reports as installed in this account
+ * are offered: a name the account has no executable for would fail in the
+ * container, so the step sends the reader back to Agents instead of letting
+ * them launch it. `defaultHarness` is the one the Agents step just set up.
  */
 export function FirstRunStep({
   client,
@@ -773,6 +772,7 @@ export function FirstRunStep({
   defaultHarness,
   back,
   onBackToWorkspace,
+  onBackToAgents,
 }: {
   client: Api
   workspace: Workspace | null
@@ -780,33 +780,43 @@ export function FirstRunStep({
   /** The wizard's Back button, rendered in this step's own action row. */
   back?: ReactNode
   onBackToWorkspace?: () => void
+  onBackToAgents?: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
   const setOnboarded = useStore((s) => s.setOnboarded)
 
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
+  const [agentsError, setAgentsError] = useState<string | null>(null)
   const [harness, setHarness] = useState('')
-  const [custom, setCustom] = useState('')
   const [task, setTask] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    // agent.list failing is not fatal: the harness field falls back to text.
+  const loadAgents = useCallback(() => {
+    setAgentsError(null)
     client
       .agentList()
       .then((list) => {
-        setAgents(list)
-        if (defaultHarness && list.some((a) => a.name === defaultHarness)) {
-          setHarness((prev) => prev || defaultHarness)
-        }
+        const installed = list.filter((a) => a.installed === true)
+        setAgents(installed)
+        setHarness(
+          (prev) =>
+            prev ||
+            (defaultHarness && installed.some((a) => a.name === defaultHarness)
+              ? defaultHarness
+              : ''),
+        )
       })
-      .catch(() => setAgents([]))
+      .catch((err) => {
+        setAgents([])
+        setAgentsError(message(err))
+      })
   }, [client, defaultHarness])
 
-  const freeText = agents !== null && agents.length === 0
-  const chosen = freeText || harness === '__custom' ? custom.trim() : harness
-  const ready = task.trim() !== '' && chosen !== '' && workspace !== null
+  useEffect(loadAgents, [loadAgents])
+
+  const loading = useDelayed(agents === null)
+  const ready = task.trim() !== '' && harness !== '' && workspace !== null
 
   const launch = async () => {
     setBusy(true)
@@ -816,7 +826,7 @@ export function FirstRunStep({
       const run = await client.runLaunch({
         workspace_id: workspace.id,
         task: task.trim(),
-        harness: chosen,
+        harness,
       })
       setOnboarded(true)
       navigate('run', { runId: run.id })
@@ -831,6 +841,24 @@ export function FirstRunStep({
     setOnboarded(true)
     navigate('board')
   }
+
+  // The escape hatch for a reader with no agent subscription. It is a CLI
+  // flow: `fake` is a scheduler registration, so it is never installed in an
+  // account and never appears in the picker above.
+  const withoutASubscription = (
+    <div className="space-y-1 rounded-md border bg-card p-3 text-xs text-muted-foreground">
+      <p className="font-medium text-foreground">No agent subscription yet?</p>
+      <p>
+        Aether ships a deterministic fake agent that runs a script from your
+        repo instead of a real one. Start the server with
+        AETHER_FAKE_AGENT="sh /workspace/agent.sh" in its environment, commit
+        an agent.sh that writes a file, and launch it from a terminal with{' '}
+        <span className="font-mono">aether run "..." --agent fake</span>: the
+        whole path - container, worktree, PTY, commit, fetch - runs with
+        nothing mocked but the agent.
+      </p>
+    </div>
+  )
 
   if (!workspace) {
     return (
@@ -849,6 +877,34 @@ export function FirstRunStep({
     )
   }
 
+  if (agents !== null && agents.length === 0) {
+    return (
+      <section aria-label="First run" className="space-y-3">
+        <h2 className="text-sm font-medium">Launch your first run</h2>
+        {agentsError ? (
+          <p className="text-xs text-state-failed">{agentsError}</p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            A run launches an agent in a container, and no agent is installed
+            in your environment yet.
+          </p>
+        )}
+        <div className="flex gap-2">
+          <Button size="sm" onClick={onBackToAgents}>
+            Set up an agent
+          </Button>
+          {agentsError && (
+            <Button size="sm" variant="outline" onClick={loadAgents}>
+              Retry
+            </Button>
+          )}
+          {back}
+        </div>
+        {withoutASubscription}
+      </section>
+    )
+  }
+
   return (
     <section aria-label="First run" className="space-y-3">
       <h2 className="text-sm font-medium">Launch your first run</h2>
@@ -856,45 +912,23 @@ export function FirstRunStep({
         The run forks from <span className="font-mono">{workspace.base_branch}</span>{' '}
         in {workspace.name}.
       </p>
-      {freeText ? (
+      {loading && <Skeleton className="h-16 w-full" />}
+      {agents && (
         <label className="block space-y-1 text-sm">
-          Harness
-          <input
+          Agent
+          <select
             className={field}
-            value={custom}
-            placeholder="claude"
-            onChange={(e) => setCustom(e.target.value)}
-          />
+            value={harness}
+            onChange={(e) => setHarness(e.target.value)}
+          >
+            <option value="">Choose an agent</option>
+            {agents.map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.name}
+              </option>
+            ))}
+          </select>
         </label>
-      ) : (
-        <>
-          <label className="block space-y-1 text-sm">
-            Harness
-            <select
-              className={field}
-              value={harness}
-              onChange={(e) => setHarness(e.target.value)}
-            >
-              <option value="">Choose a harness</option>
-              {(agents ?? []).map((a) => (
-                <option key={a.name} value={a.name}>
-                  {a.name}
-                </option>
-              ))}
-              <option value="__custom">Other...</option>
-            </select>
-          </label>
-          {harness === '__custom' && (
-            <label className="block space-y-1 text-sm">
-              Harness name
-              <input
-                className={field}
-                value={custom}
-                onChange={(e) => setCustom(e.target.value)}
-              />
-            </label>
-          )}
-        </>
       )}
       <label className="block space-y-1 text-sm">
         Task
@@ -915,18 +949,7 @@ export function FirstRunStep({
         </Button>
         {back}
       </div>
-      <div className="space-y-1 rounded-md border bg-card p-3 text-xs text-muted-foreground">
-        <p className="font-medium text-foreground">No agent subscription yet?</p>
-        <p>
-          Aether ships a deterministic fake harness that runs a script from
-          your repo instead of an agent. Start the server with
-          AETHER_FAKE_AGENT="sh /workspace/agent.sh" in its environment, commit
-          an agent.sh that writes a file, and launch with harness{' '}
-          <span className="font-mono">fake</span>: the whole path - container,
-          worktree, PTY, commit, fetch - runs with nothing mocked but the
-          agent.
-        </p>
-      </div>
+      {withoutASubscription}
     </section>
   )
 }
