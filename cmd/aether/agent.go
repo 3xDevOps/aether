@@ -195,7 +195,9 @@ func runShippedAgentInstall(agent protocol.AgentInfo) error {
 	if _, err := io.WriteString(stream, script+"\n"); err != nil {
 		return err
 	}
-	return describeTerminalEnd(copyRaw(stream))
+	// A member terminal is the member's own and records no steerer, so
+	// there is no replay window to mute.
+	return describeTerminalEnd(copyRaw(stream, 0))
 }
 
 func printAgentInstallGuidance(w io.Writer, agent protocol.AgentInfo) error {
