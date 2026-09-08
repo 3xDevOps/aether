@@ -8,6 +8,11 @@ import net from 'node:net'
  * A free loopback port, released before it is handed back. The server and
  * the gateway are both told which port to bind rather than being asked
  * afterwards, so a restart can claim the same address.
+ *
+ * Closing the probe before the caller binds leaves a window something else
+ * could take the port in. Nothing does today: `playwright.config.ts` runs
+ * one worker, and each CI job has the runner to itself. Raising the worker
+ * count reopens that window, so pass the listener on instead of the number.
  */
 export function reservePort(): Promise<number> {
   return new Promise((resolve, reject) => {
