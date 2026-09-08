@@ -725,14 +725,15 @@ when every harness answered without one. Checkboxes start unchecked: approving c
 `profile.push` once per checked harness, one at a time, and a refusal lands
 on its own row while the rest still run. No preview can refuse an import.
 A `secret` exclusion is a finding in a file the member wrote, so the row
-names each one above the checkbox with what the scanner matched - five
-paths, then a count deferring to the expander - and the harness still
-imports without those files. A `vendored-secret` exclusion reads as the
-member's own secret in a flat list, so the row instead says how many files
-inside installed plugins tripped the scanner and that they are
-third-party. Sending a flagged file anyway is deliberately not in the
-dashboard: the row prints the `aether profile push --allow-secret` command
-for it, which needs `--workspace` to be attributable.
+names each one on the harness's own line, above the **Left out of**
+expander, with what the scanner matched - five paths, then a count
+deferring to that expander - and the harness still imports without those
+files. A `vendored-secret` exclusion reads as the member's own secret in a
+flat list, so the row instead says how many files inside installed plugins
+tripped the scanner and that they are third-party. Sending a flagged file
+anyway is deliberately not in the dashboard: the row prints one
+`aether profile push` command that repeats `--allow-secret <path>` for
+every file it named, and it needs `--workspace` to be attributable.
 Where a setup-capable harness is installed locally,
 **Ask an agent** runs the `profile` scan over
 `/ws/envscan`, streams the agent's output, and pre-checks what it

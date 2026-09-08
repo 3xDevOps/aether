@@ -443,9 +443,10 @@ export interface ProfilePreview {
   excluded_total?: number
 }
 
-/** profile.push: the snapshot the push created, and the files the size
- * caps left behind - the only place the user learns they are not on the
- * server, since the push itself succeeded without them. */
+/** profile.push: the snapshot the push created, and the files a guard
+ * left behind - a size cap, the secret scanner, or a symlink out of the
+ * profile root. This is the only place the user learns they are not on
+ * the server, since the push itself succeeded without them. */
 export interface ProfilePushResult {
   harness: string
   skipped?: ProfileExclusion[]

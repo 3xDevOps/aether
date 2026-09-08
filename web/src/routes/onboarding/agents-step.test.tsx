@@ -381,6 +381,9 @@ describe('agents step', () => {
     const line = await screen.findByText(/1 file you wrote tripped/)
     const callout = line.parentElement as HTMLElement
     expect(callout.closest('details')).toBeNull()
+    // A file of theirs is being left off the server, so the sentence
+    // carries the failed state's colour rather than body text.
+    expect(line.className).toContain('text-state-failed')
     expect(
       within(callout).getByText('skills/cloudflare-deploy/README.md'),
     ).toBeDefined()
@@ -408,7 +411,10 @@ describe('agents step', () => {
     })
   })
 
-  it('hedges its own-file count when the gateway capped the list', async () => {
+  it('counts the member\'s own findings exactly when the cap cut other entries', async () => {
+    // The gateway sorts secret findings ahead of everything else before
+    // it caps the list, so a cap that fell on ignored files took none of
+    // them: the row states the count instead of hedging it.
     const client = fakeApi({
       localProfilePreview: vi.fn(async (harness: string) =>
         harness === 'claude'
@@ -418,6 +424,16 @@ describe('agents step', () => {
                   path: 'skills/cloudflare-deploy/README.md',
                   reason: 'secret',
                   detail: 'secret detected (curl-auth-header) at 12:2',
+                },
+                {
+                  path: 'notes/deploy.md',
+                  reason: 'secret',
+                  detail: 'secret detected (aws-access-key) at 4:9',
+                },
+                {
+                  path: 'projects/',
+                  reason: 'ignored',
+                  detail: 'skipped by default for claude (projects/)',
                 },
               ],
               excluded_total: 1403,
@@ -429,7 +445,84 @@ describe('agents step', () => {
     await look()
 
     expect(
-      await screen.findByText(/At least 1 file you wrote tripped/),
+      await screen.findByText(/^2 files you wrote tripped/),
+    ).toBeDefined()
+    expect(screen.queryByText(/At least/)).toBeNull()
+  })
+
+  it('hedges its own-file count when the findings themselves filled the cap', async () => {
+    // Every entry the gateway sent is a finding and there were more, so
+    // the cap did reach them and the count is only a floor.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: 'skills/cloudflare-deploy/README.md',
+                  reason: 'secret',
+                  detail: 'secret detected (curl-auth-header) at 12:2',
+                },
+                {
+                  path: 'notes/deploy.md',
+                  reason: 'secret',
+                  detail: 'secret detected (aws-access-key) at 4:9',
+                },
+              ],
+              excluded_total: 1403,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(
+      await screen.findByText(/At least 2 files you wrote tripped/),
+    ).toBeDefined()
+  })
+
+  it('prints one --allow-secret command carrying every path it named', async () => {
+    // --allow-secret repeats, and the row names five paths before it
+    // defers to the expander, so the command covers those same five.
+    const paths = [
+      'skills/a/README.md',
+      'skills/b/README.md',
+      'skills/c/README.md',
+      'skills/d/README.md',
+      'skills/e/README.md',
+      'skills/f/README.md',
+    ]
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: paths.map((path) => ({
+                path,
+                reason: 'secret',
+                detail: 'secret detected (curl-auth-header) at 12:2',
+              })),
+              excluded_total: paths.length,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(
+      await screen.findByText(/^6 files you wrote tripped/),
+    ).toBeDefined()
+    expect(
+      screen.getByText(/and 1 more, under Left out of/),
+    ).toBeDefined()
+    expect(
+      screen.getByText(
+        `aether profile push --agent claude ${paths
+          .slice(0, 5)
+          .map((p) => `--allow-secret ${p}`)
+          .join(' ')} --workspace ${workspace.id}`,
+      ),
     ).toBeDefined()
   })
 

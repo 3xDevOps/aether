@@ -68,18 +68,22 @@ export function previewSummary(preview: ProfilePreview): string {
 const maxNamed = 5
 
 /** Scanner findings in files the member wrote. These are theirs to fix,
- * so the row names each one rather than leaving it to the expander.
- *
- * `excluded` is capped by the gateway while `excluded_total` is exact,
- * so a capped list can only support a floor, never a count. */
+ * so the row names each one rather than leaving it to the expander. */
 function ownFindings(preview: ProfilePreview): {
   entries: ProfileExclusion[]
   atLeast: boolean
 } {
   const excluded = preview.excluded ?? []
+  const entries = excluded.filter((e) => e.reason === 'secret')
   return {
-    entries: excluded.filter((e) => e.reason === 'secret'),
-    atLeast: (preview.excluded_total ?? excluded.length) > excluded.length,
+    entries,
+    // The gateway sorts these findings ahead of every other exclusion
+    // before it caps the list, so the cap can only reach them once they
+    // fill the whole list themselves. Any other capped list still carries
+    // every one of them, and the count is exact.
+    atLeast:
+      entries.length === excluded.length &&
+      (preview.excluded_total ?? excluded.length) > excluded.length,
   }
 }
 
@@ -470,6 +474,13 @@ function ProfileRow({
   const own = ownFindings(preview)
   const vendored = vendoredFindings(preview)
   const snapshot = status?.snapshot
+  // --allow-secret repeats, so one command covers every path the callout
+  // named rather than only the first of them. Only the callout renders
+  // it, so there is always at least one.
+  const allowSecret = own.entries
+    .slice(0, maxNamed)
+    .map((e) => `--allow-secret ${e.path}`)
+    .join(' ')
 
   return (
     <li className="space-y-1 px-3 py-2 text-sm">
@@ -499,7 +510,7 @@ function ProfileRow({
           {reason && <p className="text-xs">{reason}</p>}
           {own.entries.length > 0 && (
             <div className="space-y-1 rounded-md border bg-card p-3 text-xs">
-              <p>
+              <p className="text-state-failed">
                 {own.atLeast ? 'At least ' : ''}
                 {own.entries.length}{' '}
                 {own.entries.length === 1 ? 'file' : 'files'} you wrote tripped
@@ -526,9 +537,7 @@ function ProfileRow({
                 the override is attributable:
               </p>
               <pre className="overflow-x-auto rounded-md border bg-background px-2 py-1 font-mono">
-                {`aether profile push --agent ${preview.harness} --allow-secret ${
-                  own.entries[0]?.path ?? '<file>'
-                } --workspace ${workspace?.id ?? '<workspace-id>'}`}
+                {`aether profile push --agent ${preview.harness} ${allowSecret} --workspace ${workspace?.id ?? '<workspace-id>'}`}
               </pre>
             </div>
           )}
