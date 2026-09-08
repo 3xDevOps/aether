@@ -37,6 +37,8 @@ function TerminalView({ params }: RouteProps) {
   const setTerminal = useStore((s) => s.setTerminal)
   const capability = useCapability()
   const self = useSelf()
+  const controlTaken = useStore((s) => s.terminalControlTaken)
+  const markControlTaken = useStore((s) => s.markTerminalControlTaken)
 
   const known = run !== undefined
   const attachRef = useRef<Attachment | null>(null)
@@ -107,6 +109,7 @@ function TerminalView({ params }: RouteProps) {
 
   const toggleWrite = () => {
     writeRef.current = !state.write
+    if (writeRef.current) markControlTaken()
     setTerminal(runID, { write: writeRef.current })
     attachRef.current?.reopen()
   }
@@ -137,6 +140,7 @@ function TerminalView({ params }: RouteProps) {
           size="sm"
           variant={state.write ? 'default' : 'outline'}
           disabled={state.steerDenied || run.status !== 'running'}
+          title={run.status !== 'running' ? 'This run is not running' : undefined}
           className="relative"
           onClick={toggleWrite}
         >
@@ -146,6 +150,13 @@ function TerminalView({ params }: RouteProps) {
         {state.steerDenied && (
           <span className="text-muted-foreground">
             You cannot steer this run.
+          </span>
+        )}
+        {/* Nothing else on screen separates watching from steering, so the
+            attach says what it is until the member has taken control once. */}
+        {!controlTaken && !state.write && !state.steerDenied && run.status === 'running' && (
+          <span className="text-muted-foreground">
+            Read-only mirror. Take control to type into the agent.
           </span>
         )}
         {state.message && (

@@ -27,6 +27,7 @@ function mount(seed: Partial<TerminalState> = {}) {
   useStore.setState({
     info: serverInfo,
     terminals: { run_1: { ...initialTerminal, ...seed } },
+    terminalControlTaken: false,
   })
   return render(<View params={{ runId: 'run_1' }} />)
 }
@@ -77,6 +78,20 @@ describe('terminal view', () => {
     view.unmount()
   })
 
+  it('says what a mirror is until the member has taken control once', () => {
+    const view = mount()
+    act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
+    attached()
+
+    const hint = 'Read-only mirror. Take control to type into the agent.'
+    expect(screen.getByText(hint)).toBeDefined()
+
+    fireEvent.click(screen.getByText('Take control'))
+    expect(useStore.getState().terminalControlTaken).toBe(true)
+    expect(screen.queryByText(hint)).toBeNull()
+    view.unmount()
+  })
+
   it('keeps replay-only finished runs out of steering mode', () => {
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
@@ -84,6 +99,10 @@ describe('terminal view', () => {
 
     const toggle = screen.getByText('Take control') as HTMLButtonElement
     expect(toggle.disabled).toBe(true)
+    // A finished run cannot be steered at all, so the button says why rather
+    // than offering the mirror hint that leads nowhere.
+    expect(toggle.title).toBe('This run is not running')
+    expect(screen.queryByText('Read-only mirror. Take control to type into the agent.')).toBeNull()
     expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
     view.unmount()
   })
