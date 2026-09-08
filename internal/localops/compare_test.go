@@ -290,6 +290,12 @@ func TestFastForwardStopsOnAnEditTheCatchUpWouldOverwrite(t *testing.T) {
 	if !strings.Contains(err.Error(), "would be overwritten by merge") {
 		t.Fatalf("error drops git's own words: %v", err)
 	}
+	// The member commits or stashes the edit; nothing about this is the
+	// server's doing, so it refuses rather than reading as an internal
+	// failure.
+	if !errors.Is(err, ErrPushPrecondition) {
+		t.Fatalf("err = %v, want a precondition refusal", err)
+	}
 	if after := git(t, clone, "rev-parse", "main"); after != before {
 		t.Fatalf("the refused fast-forward moved main to %s, want %s", after, before)
 	}

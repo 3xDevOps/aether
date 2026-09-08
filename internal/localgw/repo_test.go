@@ -116,18 +116,25 @@ func TestLocalRepoPush(t *testing.T) {
 		t.Fatalf("repo.push = %d: %s", rec.Code, rec.Body)
 	}
 	var got struct {
-		Branch string `json:"branch"`
-		Remote string `json:"remote"`
-		State  string `json:"state"`
-		Output string `json:"output"`
+		Branch          string `json:"branch"`
+		Remote          string `json:"remote"`
+		State           string `json:"state"`
+		WorkspaceCommit string `json:"workspace_commit"`
+		Ahead           int    `json:"ahead"`
+		Behind          int    `json:"behind"`
+		Output          string `json:"output"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	// A workspace whose repository has no such branch yet is the fresh
-	// case the comparison lets straight through to the push.
+	// case the comparison lets straight through to the push. There was
+	// nothing to count against, so both counts stay zero.
 	if got.Branch != "trunk" || got.Remote != "aether" || got.State != "pushed" {
 		t.Fatalf("repo.push = %+v", got)
+	}
+	if got.WorkspaceCommit != "" || got.Ahead != 0 || got.Behind != 0 {
+		t.Fatalf("repo.push = %+v, want no workspace tip and no counts", got)
 	}
 	if !strings.Contains(got.Output, "trunk") {
 		t.Fatalf("output does not mention the branch: %q", got.Output)
@@ -372,6 +379,10 @@ func TestLocalRepoPushReportsAnAlreadySeededWorkspace(t *testing.T) {
 	if got.State != "up-to-date" || got.LocalCommit != tip || got.WorkspaceCommit != tip {
 		t.Fatalf("repo.push = %+v, want up-to-date at %s", got, tip)
 	}
+	// The tips match, so the counts were never measured.
+	if got.Ahead != 0 || got.Behind != 0 {
+		t.Fatalf("repo.push = %+v, want no counts", got)
+	}
 }
 
 // Both sides moved on. Nothing is pushed and nothing is forced: the
@@ -451,5 +462,32 @@ func TestLocalRepoFastForwardRequiresLinkedRepo(t *testing.T) {
 	perr := decodeError(t, rec.Body.Bytes())
 	if perr.Code != protocol.CodeInvalidState || !strings.Contains(perr.Message, "no linked repo") {
 		t.Fatalf("error = %+v", perr)
+	}
+}
+
+// An uncommitted change the fast-forward would overwrite is the member's
+// to resolve in their own repository, so it answers the locally-fixable
+// refusal rather than an internal error - carrying git's own words.
+func TestLocalRepoFastForwardRefusesAnEditItWouldOverwrite(t *testing.T) {
+	g, _, wsID := behindGateway(t)
+	local := g.local.snapshot().Repo
+	if err := os.WriteFile(filepath.Join(local, "server.txt"), []byte("my edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := localGit(t, local, "rev-parse", "main")
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.fast-forward", pushBody(t, wsID), true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState {
+		t.Fatalf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(perr.Message, "would be overwritten by merge") {
+		t.Fatalf("message drops git's own words: %q", perr.Message)
+	}
+	if after := localGit(t, local, "rev-parse", "main"); after != before {
+		t.Fatalf("the refused fast-forward moved main to %s, want %s", after, before)
 	}
 }

@@ -137,7 +137,12 @@ func FastForward(repo, branch string) (FastForwardResult, error) {
 	current, output, err := advanceBranch(repo, branch, false)
 	result.Current, result.Output = current, result.Output+output
 	if err != nil {
-		return result, err
+		// git guards the working tree here, and an uncommitted change
+		// the fast-forward would overwrite is the common case. Every
+		// failure of this local step is fixed in this repository rather
+		// than on the server, so it reads as a refusal, not an internal
+		// error - git's own words carry through either way.
+		return result, pushRefusal{err.Error()}
 	}
 	if result.Commit, err = gitLine(repo, "rev-parse", "refs/heads/"+branch); err != nil {
 		return result, err
