@@ -445,6 +445,11 @@ Then run steps 3, 4, 6 and 8 above with the default standard image and
 `--agent fake` instead of `--agent claude`. Skip step 5: the fake harness has
 no agent login. Step 7 (`aether gui`) works too if you want to watch.
 
+Launching it is the CLI's job, though. `fake` is a server-side registration
+rather than an executable installed in your account, and every agent picker in
+the dashboard - the launch form and the wizard's **First run** step - offers
+only what is installed, so `fake` never appears in one.
+
 ```sh
 aether link <server-host>:2222
 aether workspace init demo

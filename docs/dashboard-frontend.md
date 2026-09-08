@@ -154,6 +154,17 @@ leave an offline user unable to move or close the app. In a browser
 `window.aetherDesktop` is absent, the component renders nothing, and the tab
 keeps the browser's own chrome.
 
+`App.tsx` mounts one more thing above everything:
+`src/components/launch-splash.tsx`, the night sky the desktop window opens on.
+It reads the same `window.aetherDesktop` bridge and a `sessionStorage` key, so
+it belongs to a shell window opening rather than to loading: a browser tab
+never sees it, and neither does a reload inside a window already open. It
+leaves as soon as the store reports hydrated - or reports that the hydrate
+failed, so `ConnectionError` is never behind a night sky that never ends -
+after a 600ms minimum that keeps a fast start from flickering. It is
+decoration, so it is `aria-hidden` and announces nothing, and
+`prefers-reduced-motion` skips it entirely.
+
 ## Data flow
 
 `connect()` in `src/store/sync.ts` owns the whole lifecycle. One round of HTTP
@@ -335,10 +346,11 @@ verb rather than offering the one the server would refuse.
 ## Commands: one list, two ways to reach it
 
 `src/lib/commands.ts` holds every verb the dashboard can perform - the run
-verbs (pause/resume, inject, close as merged or abandoned when a run needs
-attention, kill, delete, protect/unprotect, relaunch, pull branch, hand off)
-and the board verbs (open the board or the list, launch, launch from a
-template, mark all seen) - as data: an id, a label, an icon, the capability
+verbs (pause/resume, send a message to the agent, close as merged or
+abandoned when a run needs attention, kill, delete, protect/unprotect,
+relaunch, pull branch, hand off) and the board verbs (open the board or the
+list, launch, launch from a template, mark all seen) - as data: an id, a
+label, an icon, the capability
 gate, and the call itself. `useCommandRunner()` performs one and reports the
 outcome the same way everywhere: gateway verbs toast their past-tense name or
 the server's refusal verbatim. Deleting a run also removes it from the local
@@ -392,7 +404,9 @@ repository on this machine, so it answers to `hasLocal('pull')` alone.
 ### The forms
 
 The three verbs that need prose open a dialog rather than calling straight
-through: launch, inject, and launch from a template. The launch and inject
+through: launch, send a message to the agent, and launch from a template. The
+message form is `inject-dialog.tsx` over `run.inject` - the wire name stays
+`inject`, only the words the member reads changed. The launch and message
 forms are a store dialog (`openPaletteDialog` on the `palette` slice) hosted
 by `AppShell` through `components/palette/dialogs.tsx`, so a button on any
 surface opens one by asking the store, with no dependence on the palette or
@@ -403,7 +417,7 @@ workspace's templates over `template.list` and starts the run with
 `template.launch` (both on `lib/api.ts` like every other call), then reveals
 it.
 
-The launch form asks for an account, a task, a harness and a mode. `account.list`
+The launch form asks for an account, a task, an agent and a mode. `account.list`
 puts the caller first, followed by accounts explicitly shared with them. A
 shared selection makes `agent.list` return that account's custom definitions
 and sends its ID as `account_member_id` on `run.launch`. The task is optional in
@@ -412,15 +426,24 @@ with no seeded prompt - and required in headless, which has no interactive
 surface, so the form disables Launch and says why rather than sending a
 request the gateway will refuse (`runLaunch` in `internal/sshd/handlers.go` is
 the same rule). Only what was actually chosen goes on the wire: an empty task
-and the default `tui` mode are the server's own defaults. The harness list
-comes from the installed entries in `agent.list`, plus the always-offered
-`custom` escape hatch. `agent.list` reports installation from the selected
-account's persistent `~/.local/bin`; uninstalled shipped entries remain
-visible on the Agents page so setup can install them. The launch form also
-remembers the most recently used installed harness for each account and falls
-back to the first installed entry.
-A failed list request shows its error. **Refresh harnesses** retries discovery
-after a connection failure or an installation completed in another terminal.
+and the default `tui` mode are the server's own defaults. The **Agent** list
+comes from the installed entries in `agent.list`, plus the `custom` escape
+hatch, which is offered only beside at least one installed agent. `agent.list`
+reports installation from the selected account's persistent `~/.local/bin`;
+uninstalled shipped entries remain visible on the Agents page so setup can
+install them. The launch form also remembers the most recently used installed
+agent for each account and falls back to the first installed entry.
+With nothing installed there is no picker at all: the field is replaced by
+"No agent is installed in this account." and a **Set up an agent** button, and
+Launch stays disabled. The button goes to the wizard's Agents step on a local
+gateway and to the Agents view on a remote one, which is as far as a gateway
+without the client-machine verbs can take them. Falling back to `custom`
+instead - what the form used to do - launches a container with no executable
+to run, so the missing agent surfaces as the server's refusal afterwards.
+A failed list request shows its error and no setup button - nothing here can
+fix a gateway that did not answer - and Launch stays disabled there too.
+**Refresh agents** retries discovery after a connection failure or an
+installation completed in another terminal.
 
 Neither launch form asks which workspace to launch into: both take
 `activeWorkspace` and say where the run will land, naming the workspace and its
@@ -667,7 +690,11 @@ and steering policy.
 
 ## Settings
 
-`src/routes/settings/` shows the local link, sync daemon, and live overlay.
+`src/routes/settings/` shows the local link, the sync daemon, and **Mirror run
+files to your repository** - the card that drives a live run's sync overlay,
+named for what it does rather than for the mechanism, and saying in a sentence
+that the gateway mirrors the run's files into your linked clone as the agent
+works.
 When the local capability includes `repo.sync`, the Base branch card's **Sync
 from origin** button fast-forwards the server's workspace base branch from
 this machine's `origin` remote. It shows the returned branch and git's output
@@ -691,6 +718,17 @@ named `@github` - and the wizard holds the name, so **Back** closes an open
 sub-screen first and leaves the step only from the step's own screen. A step
 with sub-screens takes them as `setup` and `onSetup` rather than keeping them
 in its own state.
+
+The wizard owns that Back button but no step renders it in the same place
+twice: the wizard passes it down as a `back` node and each step puts it in its
+own action row, beside Create workspace, Skip for now or Launch. A step as
+tall as Agents with the terminal dock open would otherwise push a control
+sitting under the step content off the bottom of the window.
+
+The step header is the same navigation read back. A finished step carries a
+check and is a button that jumps to it; the current step and the ones ahead
+are inert text, because a step the member has not reached has nothing to show
+yet.
 
 The Git identity step collects the name and email the member's commits are
 authored as, saved on the server with `member.git`. Where the gateway serves
@@ -792,7 +830,7 @@ up** embeds the same `AgentWizard` the Agents page uses, driven with the
 harness and workspace already known so it opens the `agent-setup` shell
 without a form. Setup confirmation checks `agent.list` for an installed
 executable, then runs `env.save` - the call the dock's **Save environment**
-button makes - before handing the harness to the First run step, which
+button makes - before handing that agent to the First run step, which
 preselects it. The save is the point: an executable that exists only in the
 running container is not in the image runs start from. The done screen names
 the saved image. A missing executable, a failed check or a failed save keeps
@@ -857,6 +895,23 @@ recommended with each one-sentence reason next to its row; the scan is a
 proposal the user edits, and a failure leaves the manual path and both
 buttons live.
 
+The First run step is the last one, and launches a run in the workspace the
+Workspace step settled on. Its **Agent** select offers only the entries
+`agent.list` reports as `installed` in this account - the same rule the launch
+form follows - and the agent the Agents step just set up is preselected when
+it is one of them. With none installed the step drops the picker: it says a
+run launches an agent in a container and none is installed yet, and offers
+**Set up an agent**, which jumps back to the Agents step. Skipping setup and
+then picking a shipped name is how a member used to reach the server's
+refusal only after the run had launched. A failed `agent.list` shows the
+server's error and a **Retry** button instead, because a gateway that could
+not answer is not the same fact as an account with nothing installed.
+
+The step's "No agent subscription yet?" note points at the CLI, and stays on
+screen in both states: `fake` is a scheduler registration rather than an
+executable installed in an account, so it never appears in the picker and is
+launched with `aether run "..." --agent fake`. See
+[harnesses.md](harnesses.md) for what that agent runs.
 
 ## Update prompts
 
@@ -1022,8 +1077,11 @@ there are none, and gating pull and relaunch; the sidebar offering New run to
 a member who may start one and not to a viewer, and All runs opening the flat
 list; the board header opening the launch form and an empty workspace saying
 so once rather than three times; and the launch form refusing a headless run
-with no task while sending nothing the server already defaults. The sidebar
-also covers the switcher naming a sole workspace instead of offering a
+with no task while sending nothing the server already defaults, offering only
+installed agents, keeping Launch disabled both when none is installed and when
+`agent.list` fails, and sending setup to the wizard's Agents step on a local
+gateway and the Agents view on a remote one. The sidebar also covers
+the switcher naming a sole workspace instead of offering a
 picker, a switch rescoping the run list, and the attention badge counting.
 The permission mirror is exercised through the bar rather than on its own: a
 viewer is offered nothing that mutates a run, a collaborator may steer and
@@ -1051,8 +1109,12 @@ verbs - which the sidebar and the palette match by keeping Members reachable
 behind the narrow remote allowlist while every other admin entry stays
 hidden. The onboarding wizard walks all six steps against the stub API, and
 covers what navigation must not lose: Back leaving the Agents setup screen
-before it leaves the step, and the Repository step still showing its
-connected clone and push result after a walk away and back. The Repository
+before it leaves the step, the header jumping back to a finished step, and the
+Repository step still showing its connected clone and push result after a walk
+away and back. The First run step is covered on all three of its answers: only
+installed agents in the picker, **Set up an agent** returning to the Agents
+step when none is installed, and a failed `agent.list` kept on screen as the
+server's own error rather than read as an empty account. The Repository
 step also covers each comparison state: which command is the copyable one in
 each, and the fast-forward reporting a dirty tree it did not touch while
 keeping both git outputs. The Git identity step covers the prefill from this
