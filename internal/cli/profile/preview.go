@@ -162,7 +162,20 @@ func Inventory(ctx context.Context, harnessName string) (Preview, error) {
 			preview.Categories = append(preview.Categories, *group)
 		}
 	}
-	sort.Slice(preview.Excluded, func(i, j int) bool { return preview.Excluded[i].Path < preview.Excluded[j].Path })
+	// Scanner findings in the member's own files come first, then path
+	// order. The list below is capped, and a surface warns the member
+	// about those files from it, so ordering them last would let a
+	// profile with a few hundred ignored files push the one exclusion
+	// they have to act on off the end and leave the file behind with
+	// nothing said. It also means a capped list still carries an exact
+	// count of them, unless findings alone filled it.
+	sort.Slice(preview.Excluded, func(i, j int) bool {
+		a, b := preview.Excluded[i], preview.Excluded[j]
+		if (a.Reason == ExcludeSecret) != (b.Reason == ExcludeSecret) {
+			return a.Reason == ExcludeSecret
+		}
+		return a.Path < b.Path
+	})
 	preview.ExcludedTotal = len(preview.Excluded)
 	if len(preview.Excluded) > maxExclusions {
 		preview.Excluded = preview.Excluded[:maxExclusions]

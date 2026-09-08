@@ -387,10 +387,10 @@ no SSH key is offered and the server requires one, it may create
    "files":42,"bytes":183422,
    "categories":[{"category":"skills","files":12,"bytes":40201,
                   "paths":["skills/pdf/SKILL.md"],"truncated":false}],
-   "excluded":[{"path":".credentials.json","reason":"credential",
-                "detail":"credential file excluded for claude"},
-               {"path":"notes/key.txt","reason":"secret",
-                "detail":"secret detected (aws-access-key) at 3:9"}],
+   "excluded":[{"path":"notes/key.txt","reason":"secret",
+                "detail":"secret detected (aws-access-token) at 3:9"},
+               {"path":".credentials.json","reason":"credential",
+                "detail":"credential file excluded for claude"}],
    "excluded_total":2}
   ```
 
@@ -413,6 +413,12 @@ no SSH key is offered and the server requires one, it may create
 - An ignored directory is reported once, as the directory, rather than
   once per file inside it. `excluded` is capped at 200 entries;
   `excluded_total` is the exact count.
+- `excluded` lists every `secret` first, then the rest in path order.
+  Those are the entries a caller has to put in front of the user, and
+  ordering them by path would let a profile with a few hundred ignored
+  files push the one file the user has to act on past the cap. It also
+  means a capped list still carries all of them, and so an exact count,
+  unless every entry sent is a `secret`.
 - The snapshot budget is spent by category priority - memory, skills,
   commands, settings, mcp, plugins, other - not directory order, so the
   files this feature exists to carry are not crowded out by whatever
@@ -424,7 +430,7 @@ no SSH key is offered and the server requires one, it may create
   preview take minutes. The caps are the server's own
   (`internal/profile`), so the preview offers exactly the files a push
   can carry.
-- No exclusion refuses a push. Every one of them - both secret reasons,
+- No exclusion refuses a gateway push. Every one of them - both secret reasons,
   symlink escapes, and both size caps - lets the push succeed carrying
   what is left, so `excluded` and `excluded_total` are the whole preview
   and there is no field a caller has to check before offering the import.

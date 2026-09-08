@@ -140,7 +140,8 @@ func TestInventoryReportsExclusionsWithoutAborting(t *testing.T) {
 		byPath[e.Path] = e
 		paths = append(paths, e.Path)
 	}
-	if want := []string{".credentials.json", "memory/leak.md", "noise.log"}; !slices.Equal(paths, want) {
+	// The member's own finding leads, then path order.
+	if want := []string{"memory/leak.md", ".credentials.json", "noise.log"}; !slices.Equal(paths, want) {
 		t.Fatalf("excluded = %v, want %v", paths, want)
 	}
 	if got := byPath[".credentials.json"]; got.Reason != ExcludeCredential || !strings.Contains(got.Detail, "claude") {
@@ -733,4 +734,57 @@ func reasonsByPath(exclusions []Exclusion) map[string]string {
 		out[e.Path] = e.Reason
 	}
 	return out
+}
+
+// The exclusion list is capped, so a profile with hundreds of dropped
+// files could push a scanner finding in the member's own file off the
+// end of it. The dashboard reads that list to warn them, so a finding
+// that falls off is a file left behind with nothing said. Own findings
+// are ordered ahead of the cap for exactly that reason.
+func TestInventoryKeepsOwnFindingWithinTheExclusionCap(t *testing.T) {
+	root := setupClaudeRoot(t)
+	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"settings.json": `{"ok":true}`,
+		IgnoreFileName:  "*.log\n",
+		// Sorts after every noise-*.log path, so a path-ordered list
+		// would cut it.
+		"skills/deploy/README.md": string(secret),
+	}
+	for i := 0; i < maxExclusions+50; i++ {
+		files[fmt.Sprintf("noise-%03d.log", i)] = "log line\n"
+	}
+	writeAll(t, root, files)
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.ExcludedTotal != maxExclusions+51 {
+		t.Fatalf("excluded_total = %d, want every dropped file counted", preview.ExcludedTotal)
+	}
+	if len(preview.Excluded) != maxExclusions {
+		t.Fatalf("excluded = %d, want the list capped at %d", len(preview.Excluded), maxExclusions)
+	}
+	// The requirement: the member is told about their own file.
+	if !slices.ContainsFunc(preview.Excluded, func(e Exclusion) bool {
+		return e.Path == "skills/deploy/README.md" && e.Reason == ExcludeSecret
+	}) {
+		t.Fatalf("the member's own finding fell off the capped list of %d", len(preview.Excluded))
+	}
+	// It survives because findings are ordered ahead of the cap, which is
+	// also what lets a surface tell an exact count from a capped one.
+	if preview.Excluded[0].Reason != ExcludeSecret {
+		t.Fatalf("first exclusion = %+v, want the finding ordered first", preview.Excluded[0])
+	}
+	rest := preview.Excluded[1:]
+	if !slices.IsSortedFunc(rest, func(a, b Exclusion) int { return strings.Compare(a.Path, b.Path) }) {
+		t.Fatalf("exclusions behind the findings are not path-ordered: %+v", rest[:5])
+	}
+	if preview.Files != 1 {
+		t.Errorf("files = %d, want settings.json alone", preview.Files)
+	}
 }
