@@ -1,31 +1,56 @@
 name: Release
 
-# Tagging is the release trigger: push a `vX.Y.Z` tag and this builds the
-# cross-compile matrix, checksums it, and publishes a GitHub release whose
-# assets are exactly what scripts/install.sh downloads.
+# Publishing a non-draft GitHub release starts the trusted release workflow.
+# Release events use this workflow from the default branch, not the tag commit.
 on:
-  push:
-    tags: ['v*']
+  release:
+    types: [published]
 
 permissions:
   contents: write
   packages: write
 jobs:
+  runner-policy:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.select.outputs.allowed }}
+    steps:
+      - name: Select runner
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          permission=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_ACTOR}/permission" \
+            --jq '.permission' 2>/dev/null || true)
+          # A failed lookup deliberately disables the release.
+          if [ "$permission" = admin ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    needs: runner-policy
+    if: ${{ needs.runner-policy.outputs.allowed == 'true' }}
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0 # full history so git describe stamps the tag
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
 
-      # A tag push does not run the PR pipeline, so gate the release on the
-      # fast checks rather than publishing an untested binary.
+      # Publishing a release does not run the PR pipeline, so gate the release
+      # on the fast checks rather than publishing an untested binary.
       - name: Vet
         run: make vet
       - name: Unit tests

@@ -845,18 +845,23 @@ paused. Delete them once you have salvaged what you want.
 
 ## Releases
 
-Pushing a `vX.Y.Z` tag runs
+Push the `vX.Y.Z` tag, then publish a non-draft GitHub release for that tag:
+
+```sh
+git push origin vX.Y.Z
+gh release create vX.Y.Z --title vX.Y.Z --generate-notes
+```
+
+Publishing the release runs
 [`.github/workflows/release.yml`](../.github/workflows/release.yml): it vets,
 runs the unit tests, cross-compiles the full matrix with `make release`, writes
-`checksums.txt`, and publishes a GitHub release with generated notes. Those
-assets are exactly what the install script and `aether update` download, so
-the release workflow, the installer, and `internal/selfupdate` must stay in
-step: renaming an asset breaks every `curl | sh` and every deployed binary's
-self-update.
+`checksums.txt`, and uploads the binaries and standard image. Only an admin
+publisher runs this release job on the self-hosted runner; other publishers
+are skipped.
 
-If a tag workflow fails after building, rerun the workflow for that tag. The
-publisher uploads missing assets to the existing release and replaces
-same-named assets without changing its release notes.
+If the release workflow fails after building, rerun it for the published
+release. The publisher uploads missing assets to the existing release and
+replaces same-named assets without changing its release notes.
 
 The version the binaries report comes from `git describe`, so tags must be
 pushed to the repo the workflow checks out, and the checkout uses full history.
