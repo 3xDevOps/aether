@@ -175,6 +175,12 @@ func TestRunCoAuthorsFileTracksSteerers(t *testing.T) {
 // alone it would have the new owner instruct their own agent to credit
 // them as their own co-author, and would drop the outgoing owner, who did
 // the work, from the branch entirely.
+//
+// The container's own author does not move with the run: it was frozen
+// when the container was created. So after the handoff the agent is still
+// committing as the outgoing owner, and the file must not tell it to
+// credit that address - while Aether's own commit, authored as the new
+// owner, must.
 func TestHandoffRewritesTheCoAuthorList(t *testing.T) {
 	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
 	e := newTestEnv(t, withServerBinary(staged))
@@ -195,22 +201,28 @@ func TestHandoffRewritesTheCoAuthorList(t *testing.T) {
 	}
 	e.sched.RecordHandoff(t.Context(), run.ID, e.member.ID)
 
-	want := []string{"Co-authored-by: Ada Lovelace <ada@example.com>"}
-	if got := coord.trailers(run.ID); !slices.Equal(got, want) {
-		t.Errorf("co-authors after the handoff = %v, want %v", got, want)
+	// Bob owns the run and the agent still commits as Ada, so there is
+	// nobody left for the agent to credit.
+	if got := coord.trailers(run.ID); len(got) != 0 {
+		t.Errorf("co-authors after the handoff = %v, want none: the agent commits as Ada already", got)
 	}
-	// The same list reaches the branch through Aether's own commit.
+	// Aether's own commit is authored as Bob, so it does credit Ada.
 	if _, err := e.sched.commitAll(t.Context(), run.ID, "aether: add OAuth login"); err != nil {
 		t.Fatalf("commitAll: %v", err)
 	}
 	message := e.git.commitsFor(run.ID)[0]
-	if !strings.Contains(message, want[0]) || strings.Contains(message, "Bob Steer") {
-		t.Errorf("commit after the handoff = %q, want only the outgoing owner credited", message)
+	if !strings.Contains(message, "Co-authored-by: Ada Lovelace <ada@example.com>") {
+		t.Errorf("commit after the handoff = %q, want the outgoing owner credited", message)
+	}
+	if strings.Contains(message, "Bob Steer") {
+		t.Errorf("commit after the handoff = %q, credits its own author", message)
 	}
 }
 
-// Two members can stand behind one address. Git and GitHub credit the
-// address, so the second trailer would say nothing and read as a mistake.
+// Two members can stand behind one address - a shared account, or one
+// person joined twice. Git and GitHub credit the address, so a second
+// trailer says nothing, and one matching the address the commit is
+// already authored as credits the author twice.
 func TestCoAuthorTrailersDedupeByAddress(t *testing.T) {
 	e := newTestEnv(t, nil)
 	first := newSteerer(t, e, "Bot", "Release Bot", "bot@example.com")
@@ -219,12 +231,24 @@ func TestCoAuthorTrailersDedupeByAddress(t *testing.T) {
 	e.sched.RecordSteer(t.Context(), run.ID, first.ID)
 	e.sched.RecordSteer(t.Context(), run.ID, second.ID)
 
+	// Which of the two rows wins is the store's ordering to decide; that
+	// exactly one line comes out for the address is not.
 	trailers, err := e.sched.runCoAuthors(t.Context(), run)
 	if err != nil {
 		t.Fatalf("runCoAuthors: %v", err)
 	}
-	if !slices.Equal(trailers, []string{"Co-authored-by: Release Bot <bot@example.com>"}) {
+	if len(trailers) != 1 || !strings.EqualFold(trailers[0], "Co-authored-by: Release Bot <bot@example.com>") {
 		t.Errorf("trailers = %v, want one line for the shared address", trailers)
+	}
+
+	// Seeded with the address the commit is authored as, neither row is
+	// credited: skipping the owner by member id alone would miss this.
+	seeded, err := e.sched.runCoAuthors(t.Context(), run, "Bot@Example.com")
+	if err != nil {
+		t.Fatalf("runCoAuthors: %v", err)
+	}
+	if len(seeded) != 0 {
+		t.Errorf("trailers = %v, want none for the address that already authored the commit", seeded)
 	}
 }
 

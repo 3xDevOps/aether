@@ -165,22 +165,27 @@ type sidecar struct {
 	BridgeDigest string `json:"bridge_digest,omitempty"`
 	BridgePath   string `json:"bridge_path,omitempty"`
 	CoordDir     string `json:"coord_dir,omitempty"`
+	// GitAuthorEmail is the address baked into the container's
+	// GIT_AUTHOR_EMAIL when it was created, kept so a restart still knows
+	// who the agent's own commits are authored as.
+	GitAuthorEmail string `json:"git_author_email,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
 func (e *supervised) sidecar() sidecar {
 	return sidecar{
-		RunID:         string(e.runID),
-		ContainerID:   string(e.containerID),
-		WorkspaceID:   string(e.workspaceID),
-		Paused:        e.paused,
-		KillRequested: e.killRequested,
-		RunUser:       e.runUser,
-		ExitObserved:  e.exitObserved,
-		ExitCode:      e.exitCode,
-		BridgeDigest:  e.bridgeDigest,
-		BridgePath:    e.bridgePath,
-		CoordDir:      e.coordDir,
+		RunID:          string(e.runID),
+		ContainerID:    string(e.containerID),
+		WorkspaceID:    string(e.workspaceID),
+		Paused:         e.paused,
+		KillRequested:  e.killRequested,
+		RunUser:        e.runUser,
+		ExitObserved:   e.exitObserved,
+		ExitCode:       e.exitCode,
+		BridgeDigest:   e.bridgeDigest,
+		BridgePath:     e.bridgePath,
+		CoordDir:       e.coordDir,
+		GitAuthorEmail: e.gitAuthorEmail,
 	}
 }
 

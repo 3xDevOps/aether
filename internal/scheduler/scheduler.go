@@ -199,6 +199,16 @@ type supervised struct {
 	bridgeDigest string
 	bridgePath   string
 	coordDir     string
+	// gitAuthorEmail is the address the container's GIT_AUTHOR_EMAIL was
+	// created with. It does not move when the run is handed on or when
+	// its owner edits their git identity, so it is what tells the agent's
+	// own commits apart from Aether's.
+	gitAuthorEmail string
+	// coAuthorMu serializes the read-modify-write of this run's co-author
+	// list. Two members steering at once would otherwise interleave
+	// listing the steerers with writing the file, and the list left on
+	// disk would be whichever finished last, not the fuller one.
+	coAuthorMu sync.Mutex
 }
 
 type pendingRun struct {

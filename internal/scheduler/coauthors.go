@@ -38,13 +38,23 @@ func (s *Scheduler) withCoAuthorInstruction(task string) string {
 }
 
 // coAuthorTrailers renders one Co-authored-by line per member in steerers
-// who does not own the run now. The owner is the commit's author, and a
-// handoff can hand the run to someone already on the list. A member who
-// set no git identity is credited by the fallback domain.GitIdentity
-// gives them.
-func coAuthorTrailers(steerers []*domain.Member, owner domain.MemberID) []string {
+// who is not already credited by the commit itself. The owner is skipped
+// by member id, and a handoff can hand the run to someone already on the
+// list. A member who set no git identity is credited by the fallback
+// domain.GitIdentity gives them.
+//
+// credited holds the addresses the commit already carries - the address it
+// is authored as. Skipping the owner by id is not enough on its own: one
+// person with two member rows behind one address would otherwise be
+// credited as their own co-author.
+func coAuthorTrailers(steerers []*domain.Member, owner domain.MemberID, credited ...string) []string {
 	trailers := make([]string, 0, len(steerers))
-	seen := make(map[string]bool, len(steerers))
+	seen := make(map[string]bool, len(steerers)+len(credited))
+	for _, address := range credited {
+		if address != "" {
+			seen[strings.ToLower(address)] = true
+		}
+	}
 	for _, m := range steerers {
 		if m.ID == owner {
 			continue
@@ -63,13 +73,14 @@ func coAuthorTrailers(steerers []*domain.Member, owner domain.MemberID) []string
 	return trailers
 }
 
-// runCoAuthors is that list for one run, read from the store.
-func (s *Scheduler) runCoAuthors(ctx context.Context, run *domain.Run) ([]string, error) {
+// runCoAuthors is that list for one run, read from the store, less the
+// addresses the commit it will ride on already carries.
+func (s *Scheduler) runCoAuthors(ctx context.Context, run *domain.Run, credited ...string) ([]string, error) {
 	steerers, err := s.cfg.Store.ListRunSteerers(ctx, run.ID)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: list run steerers: %w", err)
 	}
-	return coAuthorTrailers(steerers, run.MemberID), nil
+	return coAuthorTrailers(steerers, run.MemberID, credited...), nil
 }
 
 // commitAll commits the run's outstanding work: authored as the run's
@@ -87,7 +98,7 @@ func (s *Scheduler) commitAll(ctx context.Context, run domain.RunID, message str
 		} else {
 			author = owner.GitIdentity()
 		}
-		trailers, terr := s.runCoAuthors(ctx, r)
+		trailers, terr := s.runCoAuthors(ctx, r, author.Email)
 		if terr != nil {
 			slog.Warn("scheduler: resolve commit co-authors", "run", run, "error", terr)
 		}
@@ -149,7 +160,7 @@ func (s *Scheduler) RefreshMemberCoAuthors(ctx context.Context, member domain.Me
 			continue
 		}
 		if slices.ContainsFunc(steerers, func(m *domain.Member) bool { return m.ID == member }) {
-			s.writeCoAuthors(r, coAuthorTrailers(steerers, r.MemberID))
+			s.refreshCoAuthors(ctx, r)
 		}
 	}
 }
@@ -173,26 +184,32 @@ func (s *Scheduler) addSteerer(ctx context.Context, run *domain.Run, member doma
 }
 
 // refreshCoAuthors rewrites the run container's co-author list from the
-// store.
+// store. Only a run holding a provisioned coordination directory has one to
+// rewrite; for any other run the trailers still reach the branch through
+// commitAll.
+//
+// The list leaves out the address the container's own commits are authored
+// as. That address is frozen when the container is created, so after a
+// handoff the agent is still committing as the outgoing owner while the
+// run belongs to someone else - and telling it to append a trailer for
+// itself would credit the author twice.
 func (s *Scheduler) refreshCoAuthors(ctx context.Context, run *domain.Run) {
-	trailers, err := s.runCoAuthors(ctx, run)
-	if err != nil {
-		slog.Warn("scheduler: resolve co-authors", "run", run.ID, "error", err)
-		return
-	}
-	s.writeCoAuthors(run, trailers)
-}
-
-// writeCoAuthors hands the list to the coordination service. Only a run
-// holding a provisioned coordination directory has one to rewrite; for any
-// other run the trailers still reach the branch through commitAll.
-func (s *Scheduler) writeCoAuthors(run *domain.Run, trailers []string) {
 	c := s.coordinationSeam()
 	s.mu.Lock()
 	entry := s.runs[run.ID]
-	provisioned := entry != nil && entry.coordDir != ""
+	var dir, author string
+	if entry != nil {
+		dir, author = entry.coordDir, entry.gitAuthorEmail
+	}
 	s.mu.Unlock()
-	if c == nil || !provisioned {
+	if c == nil || dir == "" {
+		return
+	}
+	entry.coAuthorMu.Lock()
+	defer entry.coAuthorMu.Unlock()
+	trailers, err := s.runCoAuthors(ctx, run, author)
+	if err != nil {
+		slog.Warn("scheduler: resolve co-authors", "run", run.ID, "error", err)
 		return
 	}
 	if err := c.svc.WriteCoAuthors(run.ID, trailers); err != nil {
