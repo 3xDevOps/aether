@@ -17,6 +17,7 @@ import type {
 } from '@/lib/types'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
+import type { OnboardingRepo } from '@/store/ui'
 
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
@@ -318,6 +319,20 @@ export function WorkspaceStep({
 }
 
 /**
+ * The record to merge an in-flight push or fast-forward answer into: the one
+ * as it stands now, so a request started from the same screen sees the
+ * other's answer, but only while it is still the connection the request was
+ * issued against. Re-pointing, or a change of workspace, leaves that answer
+ * - and its error - belonging to a connection the step has left. It compares
+ * the link id rather than the path, because reconnecting the same folder to
+ * the same workspace is a new connection whose remote was written again.
+ */
+const stillLinked = (origin: OnboardingRepo) => {
+  const current = useStore.getState().onboardingRepo
+  return current && current.link === origin.link ? current : null
+}
+
+/**
  * Step 3: point a local clone at the workspace. The gateway adds the
  * `aether` git remote and, where the repo.push verb is served, compares the
  * clone with the workspace and pushes only when the clone is ahead, keeping
@@ -397,6 +412,7 @@ export function RepoStep({
     setError(null)
     try {
       setConnected({
+        link: crypto.randomUUID(),
         workspace: workspace?.id ?? '',
         path,
         remote: await client.localLinkRepo(path, workspace?.id),
@@ -413,6 +429,7 @@ export function RepoStep({
 
   const push = async () => {
     if (!connected) return
+    const origin = connected
     setPushing(true)
     setPushError(null)
     try {
@@ -420,30 +437,28 @@ export function RepoStep({
       // "Everything up-to-date" and "[new branch]" mean different things,
       // and only git can tell them apart.
       const result = await client.localRepoPush(workspace?.id)
-      // The record as it is now, not as it was at render: a fast-forward
-      // started from the same screen may have written its own answer while
-      // this request was in flight.
-      const current = useStore.getState().onboardingRepo
+      const current = stillLinked(origin)
       if (current) setConnected({ ...current, push: result })
     } catch (err) {
-      setPushError(message(err))
+      if (stillLinked(origin)) setPushError(message(err))
     } finally {
-      setPushing(false)
+      if (stillLinked(origin)) setPushing(false)
     }
   }
 
   const fastForward = async () => {
     if (!connected) return
+    const origin = connected
     setForwarding(true)
     setForwardError(null)
     try {
       const result = await client.localRepoFastForward(workspace?.id)
-      const current = useStore.getState().onboardingRepo
+      const current = stillLinked(origin)
       if (current) setConnected({ ...current, fastForward: result })
     } catch (err) {
-      setForwardError(message(err))
+      if (stillLinked(origin)) setForwardError(message(err))
     } finally {
-      setForwarding(false)
+      if (stillLinked(origin)) setForwarding(false)
     }
   }
 
@@ -453,6 +468,10 @@ export function RepoStep({
     setError(null)
     setPushError(null)
     setForwardError(null)
+    // A push or fast-forward still in flight belongs to the clone being left
+    // behind, so its answer is dropped: nothing will clear these later.
+    setPushing(false)
+    setForwarding(false)
   }
 
   const copy = async (text: string) => {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 // PullResult describes the run branch after it has been fetched and either
@@ -76,9 +77,14 @@ func pull(repo, url, branch string) (PullResult, error) {
 // wants that; a member's own base branch does not, because its upstream
 // is their real remote and moving it would redirect their next git pull.
 func advanceBranch(repo, branch string, track bool) (bool, string, error) {
+	current := currentBranch(repo) == branch
+	if !current {
+		if held := branchWorktree(repo, branch); held != nil {
+			return false, "", pushRefusal{held.refusal(repo, branch)}
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
 	defer cancel()
-	current := currentBranch(repo) == branch
 	var out []byte
 	var err error
 	if current {
@@ -112,6 +118,79 @@ func advanceBranch(repo, branch string, track bool) (bool, string, error) {
 		return current, string(out), fmt.Errorf("git %s: %w: %s", action, err, strings.TrimSpace(string(out)))
 	}
 	return current, string(out), nil
+}
+
+// heldWorktree is the worktree that holds a branch this repository may
+// not move. Prunable means git has lost the directory but still counts
+// the branch as checked out there, which is what decides the fix.
+type heldWorktree struct {
+	path     string
+	prunable bool
+}
+
+// refusal is the whole user-facing sentence for a branch held elsewhere.
+// A live worktree is a place the member can catch the branch up; a
+// prunable one is a directory that no longer exists, so telling them to
+// run anything in it would be telling them to run nothing.
+//
+// The commands are written to be pasted, so every value in one is a shell
+// argument: a worktree path holding a space would otherwise split, and a
+// branch name may legally carry `$`, `;` and parentheses, which git's own
+// ref rules allow and a shell does not ignore. The path in the opening
+// sentence is prose rather than a command, so it stays bare.
+//
+// Both paths keep the spelling git gave them, which on Windows means
+// forward slashes (`C:/Users/...`) rather than the platform's backslashes.
+// That is the form to print: git accepts it back on every platform, and a
+// backslash is an escape character to the shell the member pastes into.
+func (h heldWorktree) refusal(repo, branch string) string {
+	msg := branch + " is checked out in the worktree at " + h.path +
+		"; git will not move a branch from outside the worktree that holds it. "
+	if h.prunable {
+		return msg + "Git can no longer find that directory, so run `git -C " + shellquote.Quote(repo) +
+			" worktree prune` to drop the record, then try again."
+	}
+	return msg + "Switch that worktree to another branch, or run `git -C " +
+		shellquote.Quote(h.path) + " merge --ff-only " + shellquote.Quote("aether/"+branch) + "` there."
+}
+
+// branchWorktree names a linked worktree of repo that has branch checked
+// out, or nil when none does. Git refuses `git branch --force` for a
+// branch checked out anywhere in the repository, so the move has to be
+// refused before it is attempted; this repository's own working tree is
+// not one of those, because there the branch is fast-forwarded in place.
+// A lookup git itself cannot answer returns nil deliberately: the move
+// then runs and git's own refusal is what the member reads.
+//
+// `-z` is what makes the answer parseable: git prints worktree paths
+// raw, so a path holding a newline splits across lines without it.
+func branchWorktree(repo, branch string) *heldWorktree {
+	out, err := exec.Command("git", "-C", repo, "worktree", "list", "--porcelain", "-z").Output()
+	if err != nil {
+		return nil
+	}
+	self, _ := gitLine(repo, "rev-parse", "--show-toplevel")
+	var held heldWorktree
+	var wanted bool
+	// Every record, the last one included, ends in the empty line git
+	// writes between them, and `prunable` follows `branch`, so a record
+	// is only answered once it is whole.
+	for _, line := range strings.Split(string(out), "\x00") {
+		switch {
+		case line == "":
+			if wanted {
+				return &held
+			}
+			held, wanted = heldWorktree{}, false
+		case strings.HasPrefix(line, "worktree "):
+			held.path = strings.TrimPrefix(line, "worktree ")
+		case line == "prunable" || strings.HasPrefix(line, "prunable "):
+			held.prunable = true
+		case line == "branch refs/heads/"+branch && held.path != self:
+			wanted = true
+		}
+	}
+	return nil
 }
 
 func remoteExists(repo, remote string) bool {

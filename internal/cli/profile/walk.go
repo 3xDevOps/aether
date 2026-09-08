@@ -302,11 +302,15 @@ func readCandidates(ctx context.Context, harnessName string, candidates []candid
 		if err != nil {
 			return err
 		}
-		total += c.size
 		file := visited{Rel: c.rel, Abs: c.abs, Mode: c.mode, Size: c.size, Content: content}
 		if findings := scanContent(c.rel, content); len(findings) > 0 && !allowed[c.rel] && !allowed[c.abs] {
 			file.Content = nil
 			file.Reason, file.Detail = findingVerdict(harnessName, c.rel, findings[0])
+		} else {
+			// Only bytes the snapshot carries spend its budget. Charging a
+			// flagged file for content it is dropping would push later
+			// files over a cap the snapshot has not reached.
+			total += c.size
 		}
 		if err := visit(file); err != nil {
 			return err

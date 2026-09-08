@@ -25,6 +25,22 @@ func (e pushRefusal) Error() string { return e.msg }
 
 func (e pushRefusal) Is(target error) bool { return target == ErrPushPrecondition }
 
+// ErrPushRejected marks a push git ran and the workspace refused as a
+// non-fast-forward. The compare that ran first found the push safe, so
+// this is the workspace branch moving in between: the caller compares
+// again rather than reporting a failure the compare exists to replace.
+var ErrPushRejected = errors.New("the workspace branch moved on since the compare")
+
+// pushRejection keeps git's own words as the message and matches
+// ErrPushRejected for the caller's re-compare.
+type pushRejection struct{ err error }
+
+func (e pushRejection) Error() string { return e.err.Error() }
+
+func (e pushRejection) Unwrap() error { return e.err }
+
+func (e pushRejection) Is(target error) bool { return target == ErrPushRejected }
+
 // pushTimeout bounds the seeding push. The first push of a real
 // repository uploads every object over SSH, so the bound is generous;
 // without one a stalled connection would hold the gateway request open
@@ -74,9 +90,24 @@ func Push(repo, branch string) (string, error) {
 		if ctx.Err() != nil {
 			return output, fmt.Errorf("git push: gave up after %s: %s", pushTimeout, strings.TrimSpace(output))
 		}
-		return output, fmt.Errorf("git push: %w: %s", err, strings.TrimSpace(output))
+		failure := fmt.Errorf("git push: %w: %s", err, strings.TrimSpace(output))
+		if nonFastForward(output) {
+			return output, pushRejection{failure}
+		}
+		return output, failure
 	}
 	return output, nil
+}
+
+// nonFastForward reports whether git refused the push because what the
+// workspace already carries is not an ancestor of what was pushed. The
+// reason is on the ref status line; the "Updates were rejected because"
+// hint under it is not read, because `advice.push*` switches those off.
+func nonFastForward(output string) bool {
+	if !strings.Contains(output, "[rejected]") {
+		return false
+	}
+	return strings.Contains(output, "(fetch first)") || strings.Contains(output, "(non-fast-forward)")
 }
 
 // usableBranch rejects the names that would change what the refspec

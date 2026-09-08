@@ -414,4 +414,11 @@ func TestUnacknowledgedSecrets(t *testing.T) {
 	if named := UnacknowledgedSecrets(root, skipped, []string{abs}); len(named) != 0 {
 		t.Fatalf("flagged = %+v after --skip-secret named %s", named, abs)
 	}
+	// The printed command writes a path starting with a dash relative to
+	// the current directory, so that spelling has to answer the finding
+	// as well - otherwise the command a member pastes does nothing.
+	dotted := "./skills/deploy/README.md"
+	if named := UnacknowledgedSecrets(root, skipped, []string{dotted}); len(named) != 0 {
+		t.Fatalf("flagged = %+v after --skip-secret named %s", named, dotted)
+	}
 }

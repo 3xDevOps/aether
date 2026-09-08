@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Api } from '@/lib/api'
 import type {
   GatewayCapabilities,
@@ -542,6 +542,118 @@ describe('onboarding wizard', () => {
     expect(
       screen.getByLabelText<HTMLInputElement>('Repository path').value,
     ).toBe('/home/alice/code/myproject')
+  })
+
+  /** Re-points the step at a second clone, leaving it connected. */
+  async function toOtherClone() {
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a different repository' }),
+    )
+    fireEvent.change(screen.getByLabelText('Repository path'), {
+      target: { value: '/home/alice/code/other' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+    await screen.findByText('/home/alice/code/other')
+  }
+
+  it('drops a push answer that lands after the clone was re-pointed', async () => {
+    let land: (result: RepoPushResult) => void = () => {}
+    const client = fakeApi({
+      localRepoPush: vi.fn(
+        async () =>
+          new Promise<RepoPushResult>((resolve) => {
+            land = resolve
+          }),
+      ),
+    })
+    await toPushChoice(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+    await toOtherClone()
+
+    // The new clone offers its own push rather than the old one's spinner.
+    expect(
+      screen.getByRole('button', { name: 'Push now' }),
+    ).toHaveProperty('disabled', false)
+
+    await act(async () => {
+      land(compared('pushed', { workspace_commit: localTip }))
+    })
+
+    // The answer belongs to the clone that was pushed, not the one on screen.
+    expect(screen.queryByText(/Pushed/)).toBeNull()
+    expect(useStore.getState().onboardingRepo?.path).toBe(
+      '/home/alice/code/other',
+    )
+    expect(useStore.getState().onboardingRepo?.push).toBeNull()
+    expect(screen.getByRole('button', { name: 'Push now' })).toBeDefined()
+  })
+
+  it('drops a push answer that lands after the same clone was reconnected', async () => {
+    // Re-pointing at the same folder and the same workspace makes a new
+    // connection, not the old one: the gateway wrote the remote again. An
+    // answer from the previous connection has to be dropped just the same,
+    // and path and workspace cannot tell the two apart.
+    let land: (result: RepoPushResult) => void = () => {}
+    const client = fakeApi({
+      localRepoPush: vi.fn(
+        async () =>
+          new Promise<RepoPushResult>((resolve) => {
+            land = resolve
+          }),
+      ),
+    })
+    await toPushChoice(client)
+    const first = useStore.getState().onboardingRepo?.link
+
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a different repository' }),
+    )
+    // The form comes back prefilled with the same path; the member changes
+    // their mind and reconnects it.
+    fireEvent.click(await screen.findByRole('button', { name: 'Add remote' }))
+    await screen.findByLabelText('Push command')
+
+    const second = useStore.getState().onboardingRepo
+    expect(second?.path).toBe('/home/alice/code/myproject')
+    expect(second?.link).not.toBe(first)
+
+    await act(async () => {
+      land(compared('pushed', { workspace_commit: localTip }))
+    })
+
+    expect(screen.queryByText(/Pushed/)).toBeNull()
+    expect(useStore.getState().onboardingRepo?.push).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Push now' }),
+    ).toHaveProperty('disabled', false)
+  })
+
+  it('drops a push failure that lands after the clone was re-pointed', async () => {
+    let refuse: (err: Error) => void = () => {}
+    const client = fakeApi({
+      localRepoPush: vi.fn(
+        async () =>
+          new Promise<RepoPushResult>((_, reject) => {
+            refuse = reject
+          }),
+      ),
+    })
+    await toPushChoice(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+    await toOtherClone()
+
+    await act(async () => {
+      refuse(new Error('! [remote rejected] main -> main'))
+    })
+
+    expect(screen.queryByText(/The push failed/)).toBeNull()
+    expect(screen.queryByText(/remote rejected/)).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Push now' }),
+    ).toHaveProperty('disabled', false)
   })
 
   it('forgets the connected repository when the workspace changes', async () => {

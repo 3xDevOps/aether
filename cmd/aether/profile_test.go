@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	cliprofile "github.com/3xDevOps/Aether/internal/cli/profile"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -113,4 +114,27 @@ func captureStdout(t *testing.T, run func() error) (string, error) {
 		t.Fatal(err)
 	}
 	return string(out), runErr
+}
+
+// A flagged path is pasted into a shell, so the refusal has to hold it as
+// one argument. A space or a quote in the path would otherwise split the
+// command the member copies.
+func TestSecretRefusalQuotesPathsForTheShell(t *testing.T) {
+	for _, tc := range []struct{ path, want string }{
+		{"skills/deploy notes/README.md", "'skills/deploy notes/README.md'"},
+		{"skills/o'brien/README.md", `'skills/o'\''brien/README.md'`},
+		// Quoting cannot keep a leading dash out of flag parsing, so the
+		// path is written relative to the current directory instead.
+		{"-x.md", "./-x.md"},
+	} {
+		err := secretRefusal("claude", []cliprofile.Exclusion{{Path: tc.path, Detail: "secret detected"}})
+		for _, want := range []string{
+			"aether profile push --agent claude --skip-secret " + tc.want,
+			"aether profile push --agent claude --allow-secret " + tc.want + " --workspace <workspace>",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("refusal %q does not carry %q", err.Error(), want)
+			}
+		}
+	}
 }

@@ -84,10 +84,11 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 1,
-        // Version 0 stored the Repository step's push answer before it
-        // carried the comparison state the step renders, so it comes back
-        // matching no state at all. Dropping it puts the step back on its
+        version: 2,
+        // Every older version stored a Repository step record this build
+        // cannot use: version 0's push answer predates the comparison state
+        // the step renders, and version 1 has no link id to tell one
+        // connection from the next. Dropping it puts the step back on its
         // push offer, which asks the gateway again.
         migrate: (persisted): PersistedState => {
           const { onboardingRepo, ...rest } = (persisted ??

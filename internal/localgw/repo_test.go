@@ -491,3 +491,118 @@ func TestLocalRepoFastForwardRefusesAnEditItWouldOverwrite(t *testing.T) {
 		t.Fatalf("the refused fast-forward moved main to %s, want %s", after, before)
 	}
 }
+
+// The base branch checked out in a second worktree is a local state the
+// member resolves in their own repository, so it answers the same
+// invalid-state refusal as a dirty checkout rather than an internal error.
+func TestLocalRepoFastForwardRefusesABranchHeldByAnotherWorktree(t *testing.T) {
+	g, _, wsID := behindGateway(t)
+	local := g.local.snapshot().Repo
+	before := localGit(t, local, "rev-parse", "main")
+	localGit(t, local, "switch", "-c", "feature")
+	held := filepath.Join(t.TempDir(), "held")
+	localGit(t, local, "worktree", "add", held, "main")
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.fast-forward", pushBody(t, wsID), true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState {
+		t.Fatalf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(perr.Message, held) || !strings.Contains(perr.Message, "merge --ff-only") {
+		t.Fatalf("message does not name the worktree and the fix: %q", perr.Message)
+	}
+	if after := localGit(t, local, "rev-parse", "main"); after != before {
+		t.Fatalf("the refused fast-forward moved main to %s, want %s", after, before)
+	}
+}
+
+// raceShim replaces the ssh shim with one that runs advance once, just
+// before the first git-receive-pack. The compare only ever runs
+// upload-pack, so the workspace branch moves in exactly the window
+// between the compare and the push.
+func raceShim(t *testing.T, advance string) {
+	t.Helper()
+	dir := t.TempDir()
+	armed := filepath.Join(dir, "armed")
+	if err := os.WriteFile(armed, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := filepath.Join(dir, "racing-ssh")
+	body := "#!/bin/sh\nfor last; do :; done\n" +
+		"case \"$last\" in git-receive-pack*)\n" +
+		"  if [ -f " + armed + " ]; then rm -f " + armed + "; " + advance + " >/dev/null 2>&1; fi ;;\n" +
+		"esac\neval \"$last\"\n"
+	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_SSH_COMMAND", shim)
+}
+
+// Another member advancing the workspace branch between the compare and
+// the push. Git rejects the push as a non-fast-forward, which is the very
+// failure the compare exists to replace, so the answer is the state the
+// second compare found and not an error.
+func TestLocalRepoPushComparesAgainWhenTheWorkspaceMovedFirst(t *testing.T) {
+	g, remote, wsID := pushGateway(t, "main")
+	local := g.local.snapshot().Repo
+	refspec := "refs/heads/main:refs/heads/main"
+	localGit(t, local, "push", "aether", refspec)
+	localGit(t, local, "commit", "--allow-empty", "-m", "my work")
+	mine := localGit(t, local, "rev-parse", "main")
+
+	work := filepath.Join(t.TempDir(), "work")
+	localGit(t, t.TempDir(), "clone", "--branch", "main", remote, work)
+	localGit(t, work, "commit", "--allow-empty", "-m", "workspace update")
+	theirs := localGit(t, work, "rev-parse", "main")
+	raceShim(t, "git -C "+work+" push origin "+refspec)
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, wsID), true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("repo.push = %d: %s", rec.Code, rec.Body)
+	}
+	got := decodePushState(t, rec.Body.Bytes())
+	if got.State != "diverged" || got.Ahead != 1 || got.Behind != 1 {
+		t.Fatalf("repo.push = %+v, want diverged one for one", got)
+	}
+	if got.LocalCommit != mine || got.WorkspaceCommit != theirs {
+		t.Fatalf("repo.push = %+v, want %s against %s", got, mine, theirs)
+	}
+	// Both attempts are on the record: git's rejection and the second
+	// compare's fetch.
+	if !strings.Contains(got.Output, "[rejected]") {
+		t.Fatalf("output drops the rejection git printed: %q", got.Output)
+	}
+	if after := localGit(t, remote, "rev-parse", "main"); after != theirs {
+		t.Fatalf("the workspace branch moved to %s, want %s", after, theirs)
+	}
+}
+
+// The same window on a workspace that had no branch at all: someone else
+// seeds it first, leaving this clone behind rather than diverged.
+func TestLocalRepoPushComparesAgainWhenTheWorkspaceWasSeededFirst(t *testing.T) {
+	g, remote, wsID := pushGateway(t, "main")
+	local := g.local.snapshot().Repo
+	mine := localGit(t, local, "rev-parse", "main")
+
+	work := filepath.Join(t.TempDir(), "work")
+	localGit(t, t.TempDir(), "clone", local, work)
+	localGit(t, work, "commit", "--allow-empty", "-m", "workspace update")
+	theirs := localGit(t, work, "rev-parse", "main")
+	localGit(t, work, "remote", "add", "workspace", remote)
+	raceShim(t, "git -C "+work+" push workspace refs/heads/main:refs/heads/main")
+
+	rec := do(g, http.MethodPost, "/local/v1/repo.push", pushBody(t, wsID), true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("repo.push = %d: %s", rec.Code, rec.Body)
+	}
+	got := decodePushState(t, rec.Body.Bytes())
+	if got.State != "behind" || got.Ahead != 0 || got.Behind != 1 {
+		t.Fatalf("repo.push = %+v, want behind by one", got)
+	}
+	if got.LocalCommit != mine || got.WorkspaceCommit != theirs {
+		t.Fatalf("repo.push = %+v, want %s against %s", got, mine, theirs)
+	}
+}

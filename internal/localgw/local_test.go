@@ -458,16 +458,18 @@ func TestLocalLinkSwitch(t *testing.T) {
 	}
 }
 
-func TestLocalPull(t *testing.T) {
+// pullGateway builds what `pull` needs: a "remote" repo carrying one
+// commit on the run branch, a local linked repo to pull into, and a
+// gateway wired to both. The remote directory carries a .git suffix so
+// the ssh URL's path resolves to it verbatim.
+func pullGateway(t *testing.T) (*Gateway, *verbStubBackend, string, string) {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
 	if runtime.GOOS == "windows" {
 		t.Skip("test ssh shim is a POSIX shell script")
 	}
-	// A "remote" repo with one commit on the run branch, and a local
-	// linked repo to pull into. The remote directory carries a .git
-	// suffix so the ssh URL's path resolves to it verbatim.
 	remote := filepath.Join(t.TempDir(), "ws_1.git")
 	if err := os.Mkdir(remote, 0o755); err != nil {
 		t.Fatal(err)
@@ -500,7 +502,11 @@ func TestLocalPull(t *testing.T) {
 	backend := &verbStubBackend{apiStubBackend: apiStubBackend{
 		results: map[string]json.RawMessage{protocol.MethodRunPull: coords},
 	}}
-	g := newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: local})
+	return newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice", Repo: local}), backend, local, remote
+}
+
+func TestLocalPull(t *testing.T) {
+	g, backend, local, remote := pullGateway(t)
 
 	rec := do(g, http.MethodPost, `/local/v1/pull`, `{"run_id":"run_1"}`, true)
 	if rec.Code != http.StatusOK {
@@ -530,6 +536,30 @@ func TestLocalPull(t *testing.T) {
 		t.Fatalf("backend calls = %+v", calls)
 	} else if want := `{"run_id":"run_1"}`; calls[0].params != want {
 		t.Fatalf("run.pull params = %s", calls[0].params)
+	}
+}
+
+// The run branch checked out in another worktree is a local state the
+// member resolves in their own repository, so `pull` answers the same
+// invalid-state refusal `repo.fast-forward` does rather than an internal
+// error. Both reach advanceBranch, so only the wire mapping differs.
+func TestLocalPullRefusesARunBranchHeldByAnotherWorktree(t *testing.T) {
+	g, _, local, _ := pullGateway(t)
+	localGit(t, local, "commit", "--allow-empty", "-m", "base")
+	held := filepath.Join(t.TempDir(), "held")
+	localGit(t, local, "branch", "aether/run_1", "main")
+	localGit(t, local, "worktree", "add", held, "aether/run_1")
+
+	rec := do(g, http.MethodPost, `/local/v1/pull`, `{"run_id":"run_1"}`, true)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("pull = %d, want 409: %s", rec.Code, rec.Body)
+	}
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState {
+		t.Fatalf("code = %d, want %d: %s", perr.Code, protocol.CodeInvalidState, perr.Message)
+	}
+	if !strings.Contains(perr.Message, held) {
+		t.Fatalf("message does not name the worktree holding the branch: %q", perr.Message)
 	}
 }
 

@@ -24,6 +24,17 @@ func git(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// worktreePath is the path git prints for a worktree, asked of git
+// itself. Rebuilding it from what Go was handed is not portable: on
+// Windows git prints forward slashes and the long name of a temp
+// directory Go names in its 8.3 short form (RUNNER~1), and on macOS it
+// prints the path behind the /var symlink. Both sides of the comparison
+// are then git's own spelling, whatever the platform.
+func worktreePath(t *testing.T, dir string) string {
+	t.Helper()
+	return git(t, dir, "rev-parse", "--show-toplevel")
+}
+
 // requireGit skips when git is not installed.
 func requireGit(t *testing.T) {
 	t.Helper()
@@ -214,5 +225,42 @@ func TestPullCommandShapesFetch(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("argv[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+// A run branch checked out in a second worktree. Git refuses to move it
+// from here, and the double failure that used to produce said nothing a
+// member could act on.
+func TestPullRefusesARunBranchHeldByAnotherWorktree(t *testing.T) {
+	requireGit(t)
+	local, remote := scratchRepos(t, "run-branch")
+	git(t, local, "switch", "-c", "main")
+	git(t, local, "remote", "add", "aether", remote)
+	if _, err := pull(local, remote, "run-branch"); err != nil {
+		t.Fatalf("first pull: %v", err)
+	}
+	before := git(t, local, "rev-parse", "run-branch")
+	other := filepath.Join(t.TempDir(), "held")
+	git(t, local, "worktree", "add", other, "run-branch")
+	if err := writeTestFile(filepath.Join(remote, "second.txt"), "second\n"); err != nil {
+		t.Fatal(err)
+	}
+	git(t, remote, "add", "second.txt")
+	git(t, remote, "commit", "-m", "second")
+
+	_, err := pull(local, remote, "run-branch")
+	if err == nil {
+		t.Fatal("pull moved a branch another worktree has checked out")
+	}
+	held := worktreePath(t, other)
+	if !strings.Contains(err.Error(), held) || !strings.Contains(err.Error(), "merge --ff-only") {
+		t.Fatalf("message does not name the worktree and the fix: %q", err)
+	}
+	// One refusal, not git's two failed attempts pasted together.
+	if strings.Count(err.Error(), "cannot force update") > 1 {
+		t.Fatalf("message repeats git's failure: %q", err)
+	}
+	if got := git(t, local, "rev-parse", "run-branch"); got != before {
+		t.Fatalf("run-branch moved to %s, want %s", got, before)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -321,5 +322,140 @@ func TestFastForwardKeepsTheBranchUpstream(t *testing.T) {
 	}
 	if got := git(t, clone, "config", "--get", "branch.main.merge"); got != "refs/heads/main" {
 		t.Fatalf("branch.main.merge = %q", got)
+	}
+}
+
+// A member whose base branch is checked out in a second worktree. Git
+// refuses to move a branch from outside the worktree that holds it, and
+// that is a local state the member resolves, not a server failure.
+func TestFastForwardRefusesABranchHeldByAnotherWorktree(t *testing.T) {
+	requireGit(t)
+	clone, remote, base := seededClone(t)
+	advance(t, remote)
+	git(t, clone, "switch", "-c", "feature")
+	other := filepath.Join(t.TempDir(), "held")
+	git(t, clone, "worktree", "add", other, "main")
+
+	_, err := FastForward(clone, "main")
+	if err == nil {
+		t.Fatal("FastForward moved a branch another worktree has checked out")
+	}
+	if !errors.Is(err, ErrPushPrecondition) {
+		t.Fatalf("err = %v, want a precondition refusal", err)
+	}
+	if held := worktreePath(t, other); !strings.Contains(err.Error(), held) ||
+		!strings.Contains(err.Error(), "main") {
+		t.Fatalf("message names neither the worktree nor the branch: %q", err)
+	}
+	// Nothing was created here, so the message must not blame branch
+	// creation, and it must say what the member does next.
+	if strings.Contains(err.Error(), "create local branch") {
+		t.Fatalf("message blames the wrong action: %q", err)
+	}
+	if !strings.Contains(err.Error(), "merge --ff-only") {
+		t.Fatalf("message does not say what to do next: %q", err)
+	}
+	if got := git(t, clone, "rev-parse", "main"); got != base {
+		t.Fatalf("main moved to %s, want %s", got, base)
+	}
+	if got := git(t, other, "rev-parse", "HEAD"); got != base {
+		t.Fatalf("the other worktree moved to %s, want %s", got, base)
+	}
+}
+
+// A worktree git can no longer find still holds the branch, so the
+// refusal stands - but the directory it names is gone, and telling the
+// member to run a merge in it would be telling them to run nothing.
+func TestFastForwardNamesPruneForAWorktreeGitLost(t *testing.T) {
+	requireGit(t)
+	clone, remote, base := seededClone(t)
+	advance(t, remote)
+	git(t, clone, "switch", "-c", "feature")
+	other := filepath.Join(t.TempDir(), "held")
+	git(t, clone, "worktree", "add", other, "main")
+	if err := os.RemoveAll(other); err != nil {
+		t.Fatalf("remove the held worktree: %v", err)
+	}
+
+	_, err := FastForward(clone, "main")
+	if !errors.Is(err, ErrPushPrecondition) {
+		t.Fatalf("err = %v, want a precondition refusal", err)
+	}
+	if !strings.Contains(err.Error(), "worktree prune") {
+		t.Fatalf("message does not name the prune that clears it: %q", err)
+	}
+	if strings.Contains(err.Error(), "merge --ff-only") {
+		t.Fatalf("message sends the member into a directory that is gone: %q", err)
+	}
+	if got := git(t, clone, "rev-parse", "main"); got != base {
+		t.Fatalf("main moved to %s, want %s", got, base)
+	}
+}
+
+// git prints worktree paths raw, so a newline in one splits the porcelain
+// listing across lines. The refusal has to name the whole path.
+func TestFastForwardNamesAWorktreePathWithANewline(t *testing.T) {
+	requireGit(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("a newline is not a legal character in a Windows path, so the fixture cannot be created")
+	}
+	clone, remote, _ := seededClone(t)
+	advance(t, remote)
+	git(t, clone, "switch", "-c", "feature")
+	other := filepath.Join(t.TempDir(), "held\nbranch refs/heads/main")
+	git(t, clone, "worktree", "add", other, "main")
+
+	_, err := FastForward(clone, "main")
+	if !errors.Is(err, ErrPushPrecondition) {
+		t.Fatalf("err = %v, want a precondition refusal", err)
+	}
+	if !strings.Contains(err.Error(), other) {
+		t.Fatalf("message does not name the whole worktree path: %q", err)
+	}
+}
+
+// The refusal's commands are written to be pasted, so every value in one
+// arrives as a single shell argument. A path holding a space is what a
+// bare interpolation splits in two.
+func TestWorktreeRefusalQuotesTheCommandsItPrints(t *testing.T) {
+	const repo = "/home/a b/clone"
+	const held = "/home/a b/held worktree"
+	for _, tc := range []struct {
+		name string
+		in   heldWorktree
+		want string
+	}{
+		{
+			name: "live worktree",
+			in:   heldWorktree{path: held},
+			want: "`git -C '/home/a b/held worktree' merge --ff-only aether/main`",
+		},
+		{
+			name: "prunable worktree",
+			in:   heldWorktree{path: held, prunable: true},
+			want: "`git -C '/home/a b/clone' worktree prune`",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.in.refusal(repo, "main")
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("refusal does not carry %s:\n%s", tc.want, got)
+			}
+			// The path in the opening sentence names where the branch is;
+			// it is prose, not a command, so it stays readable.
+			if !strings.HasPrefix(got, "main is checked out in the worktree at "+held+";") {
+				t.Fatalf("refusal does not open by naming the worktree: %s", got)
+			}
+		})
+	}
+}
+
+// A branch name may legally carry shell syntax - git's ref rules forbid
+// spaces but allow `$`, `;` and parentheses - so the ref is an argument
+// too, not just the paths.
+func TestWorktreeRefusalQuotesTheBranchRef(t *testing.T) {
+	got := heldWorktree{path: "/w"}.refusal("/repo", "fix/$(whoami)")
+	if !strings.Contains(got, "merge --ff-only 'aether/fix/$(whoami)'") {
+		t.Fatalf("refusal leaves the ref open to substitution: %s", got)
 	}
 }
