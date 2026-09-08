@@ -134,12 +134,43 @@ export class AgentsStep extends Step {
     return this.section.getByRole('status')
   }
 
+  /** Opens the Connect GitHub sub-screen. */
+  connectGitHub(): Locator {
+    return this.button('Connect GitHub')
+  }
+
   skip(): Locator {
     return this.button('Skip for now')
   }
 
   get configuration(): ConfigurationImport {
     return new ConfigurationImport(this.page)
+  }
+
+  get github(): GitHubConnect {
+    return new GitHubConnect(this.page)
+  }
+}
+
+/**
+ * The Agents step's GitHub part, closed and open: both states carry the
+ * same `<section aria-label>` and never render together, so one object
+ * covers them.
+ */
+export class GitHubConnect {
+  constructor(private readonly page: Page) {}
+
+  get section(): Locator {
+    return this.page.getByRole('region', { name: 'Connect GitHub', exact: true })
+  }
+
+  /** Runs the non-interactive half, once the device login is done. */
+  confirmLoggedIn(): Locator {
+    return this.section.getByRole('button', { name: "I've logged in", exact: true })
+  }
+
+  close(): Locator {
+    return this.section.getByRole('button', { name: 'Close', exact: true })
   }
 }
 

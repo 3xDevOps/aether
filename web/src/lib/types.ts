@@ -43,6 +43,9 @@ export interface Workspace {
   base_branch: string
   steer_others?: string
   created_at: string
+  /** The upstream git URL a run checkout's `origin` remote points at;
+   * absent until a clone with an origin is linked. */
+  origin?: string
 }
 
 export interface Member {
@@ -506,6 +509,17 @@ export interface LinkRepoResult {
   repo: string
   remote: string
   url: string
+  /** The workspace's upstream origin afterwards, whether it was already
+   * recorded or taken from this clone; absent when neither has one. */
+  origin?: string
+}
+
+/** github.connect: the account the environment terminal is logged in to,
+ * and the signing key now registered on it. */
+export interface GitHubConnectResult {
+  login: string
+  signing_key: string
+  fingerprint: string
 }
 
 /** pull: the run branch fetched into the linked repository. */

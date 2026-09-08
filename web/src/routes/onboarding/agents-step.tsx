@@ -1,11 +1,12 @@
-// The onboarding Agents step, between Repository and First run. Two
-// optional halves: setting a coding agent up on the server (the same
+// The onboarding Agents step, between Repository and First run. Three
+// optional parts: setting a coding agent up on the server (the same
 // environment-terminal instructions the Agents page shows, embedded
-// through AgentWizard), and bringing this machine's own agent
-// configuration across (ProfileImport). Neither is required - "Skip for
+// through AgentWizard), connecting GitHub, and bringing this machine's own
+// agent configuration across (ProfileImport). None is required - "Skip for
 // now" is reachable from every state, including a failed scan and open
 // setup instructions - and nothing here touches another member's setup:
-// an agent login and a profile snapshot are both per-member.
+// an agent login, a GitHub account and a profile snapshot are all
+// per-member.
 
 import { useCallback, useEffect, useState } from 'react'
 import { friendly, message } from '@/lib/format'
@@ -13,8 +14,18 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
-import type { AgentInfo, HarnessStatus, Workspace } from '@/lib/types'
+import type {
+  AgentInfo,
+  GitHubConnectResult,
+  HarnessStatus,
+  Workspace,
+} from '@/lib/types'
 import { AgentWizard } from '@/routes/agents/wizard'
+import {
+  GitHubConnect,
+  GitHubSection,
+  githubSubStep,
+} from '@/routes/onboarding/github-connect'
 import { ProfileImport } from '@/routes/onboarding/profile-import'
 import type { Capability } from '@/store/hooks'
 
@@ -51,11 +62,12 @@ export function AgentsStep({
   client: Api
   caps: Capability
   workspace: Workspace | null
-  /** The harness whose setup instructions are open; the step renders
-   * nothing else while they are, and empty is the harness list. The wizard
-   * owns it so Back closes this screen before it leaves the step. */
+  /** The open sub-screen: a harness's setup instructions, `githubSubStep`,
+   * or empty for the step's own screen. The step renders nothing else while
+   * one is open. The wizard owns it so Back closes this screen before it
+   * leaves the step. */
   setup: string
-  onSetup: (harness: string) => void
+  onSetup: (subStep: string) => void
   /** Advances the wizard; every state here can reach it. */
   onNext: () => void
   /** Names the harness whose setup was just confirmed, so the First run
@@ -68,6 +80,7 @@ export function AgentsStep({
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [agentsError, setAgentsError] = useState<string | null>(null)
   const [done, setDone] = useState<string[]>([])
+  const [github, setGithub] = useState<GitHubConnectResult | null>(null)
 
   const loadHarnesses = useCallback(() => {
     setListError(null)
@@ -96,13 +109,13 @@ export function AgentsStep({
   const loading = useDelayed(harnesses === null && listError === null)
   const canSetUp = caps.hasMethod('agent.register')
 
-  // Both halves are optional, so the way on is always here - including
+  // Every part is optional, so the way on is always here - including
   // while a setup shell is open and after a scan failed. Once something
   // has been set up, the primary Continue joins it rather than replacing
   // it, so "skip" never reads as "undo what I just did".
   const onward = (
     <div className="flex gap-2">
-      {done.length > 0 && (
+      {(done.length > 0 || github !== null) && (
         <Button size="sm" onClick={onNext}>
           Continue
         </Button>
@@ -119,19 +132,28 @@ export function AgentsStep({
         aria-label="Agents"
         className="flex min-h-0 flex-1 flex-col gap-3"
       >
-        <AgentWizard
-          agents={agents ?? []}
-          harness={setup}
-          client={client}
-          onRegistered={() => {
-            setDone((prev) =>
-              prev.includes(setup) ? prev : [...prev, setup],
-            )
-            onReady(setup)
-            loadAgents()
-          }}
-          onCancel={() => onSetup('')}
-        />
+        {setup === githubSubStep ? (
+          <GitHubConnect
+            client={client}
+            caps={caps}
+            onConnected={setGithub}
+            onClose={() => onSetup('')}
+          />
+        ) : (
+          <AgentWizard
+            agents={agents ?? []}
+            harness={setup}
+            client={client}
+            onRegistered={() => {
+              setDone((prev) =>
+                prev.includes(setup) ? prev : [...prev, setup],
+              )
+              onReady(setup)
+              loadAgents()
+            }}
+            onCancel={() => onSetup('')}
+          />
+        )}
         {onward}
       </section>
     )
@@ -212,6 +234,11 @@ export function AgentsStep({
           </p>
         )}
       </section>
+
+      <GitHubSection
+        connection={github}
+        onOpen={() => onSetup(githubSubStep)}
+      />
 
       <ProfileImport
         client={client}
