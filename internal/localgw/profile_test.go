@@ -57,7 +57,6 @@ type profilePreviewBody struct {
 	Present bool   `json:"present"`
 	Files   int    `json:"files"`
 	Bytes   int64  `json:"bytes"`
-	Blocked bool   `json:"blocked"`
 
 	Categories []struct {
 		Name  string   `json:"category"`
@@ -101,7 +100,7 @@ func TestLocalProfilePreview(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Harness != "claude" || got.Root != root || !got.Present || got.Blocked {
+	if got.Harness != "claude" || got.Root != root || !got.Present {
 		t.Fatalf("preview = %+v", got)
 	}
 	if got.Files != 2 || got.Bytes != int64(len("# standing instructions\n")+len("# pdf skill\n")) {
@@ -144,15 +143,16 @@ func TestLocalProfilePreviewMissingRoot(t *testing.T) {
 	}
 }
 
-// The dashboard has no --allow-secret: a finding refuses the push and
-// names the file plus the terminal command that can override it, where
-// --workspace makes the override attributable.
-func TestLocalProfilePushRefusesASecret(t *testing.T) {
+// The dashboard has no --allow-secret, but a finding in a file the member
+// wrote no longer costs them the rest of the profile: that file is left
+// out, the push carries everything else, and the answer names the file so
+// the row can say what did not go.
+func TestLocalProfilePushLeavesASecretBehind(t *testing.T) {
 	secret, err := os.ReadFile(filepath.Join("..", "cli", "profile", "testdata", "embedded_token.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := profileHome(t, map[string]string{
+	profileHome(t, map[string]string{
 		"CLAUDE.md":      "# standing instructions\n",
 		"memory/leak.md": string(secret),
 	})
@@ -162,26 +162,31 @@ func TestLocalProfilePushRefusesASecret(t *testing.T) {
 	g := newVerbGateway(t, backend, cli.Config{})
 
 	rec := do(g, http.MethodPost, "/local/v1/profile.push", `{"harness":"claude"}`, true)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("profile.push = %d: %s", rec.Code, rec.Body)
 	}
-	perr := decodeError(t, rec.Body.Bytes())
-	if perr.Code != protocol.CodeInvalidState {
-		t.Fatalf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	var got struct {
+		Files   int                 `json:"files"`
+		Skipped []profile.Exclusion `json:"skipped"`
 	}
-	for _, want := range []string{
-		"secret detected",
-		"memory/leak.md",
-		root,
-		"aether profile push --agent claude --allow-secret memory/leak.md --workspace <workspace>",
-	} {
-		if !strings.Contains(perr.Message, want) {
-			t.Errorf("message %q does not name %q", perr.Message, want)
-		}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
 	}
+	if got.Files != 1 {
+		t.Fatalf("files = %d, want CLAUDE.md alone", got.Files)
+	}
+	if len(got.Skipped) != 1 || got.Skipped[0].Path != "memory/leak.md" ||
+		got.Skipped[0].Reason != profile.ExcludeSecret {
+		t.Fatalf("skipped = %+v, want the flagged file", got.Skipped)
+	}
+	if !strings.Contains(got.Skipped[0].Detail, "secret detected") ||
+		!strings.Contains(got.Skipped[0].Detail, " at ") {
+		t.Errorf("detail = %q, want the rule and location", got.Skipped[0].Detail)
+	}
+	// The flagged bytes never reach the backend.
 	for _, call := range backend.recorded() {
-		if call.method == protocol.MethodProfilePush {
-			t.Fatalf("a blocked push still uploaded: %s", call.params)
+		if call.method == protocol.MethodProfilePush && strings.Contains(call.params, "leak.md") {
+			t.Fatalf("the flagged file was uploaded: %s", call.params)
 		}
 	}
 }
@@ -439,9 +444,6 @@ func TestLocalProfileVendoredPluginFixtureDoesNotBlock(t *testing.T) {
 	var preview profilePreviewBody
 	if err := json.Unmarshal(rec.Body.Bytes(), &preview); err != nil {
 		t.Fatal(err)
-	}
-	if preview.Blocked {
-		t.Fatalf("a plugin's own test fixture blocked the preview: %+v", preview)
 	}
 	if len(preview.Excluded) != len(fixtures) {
 		t.Fatalf("excluded = %+v, want both plugin trees", preview.Excluded)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -60,8 +61,8 @@ func TestInventoryGroupsFilesByCategory(t *testing.T) {
 	if preview.Files != len(files) || preview.Bytes != total {
 		t.Fatalf("files/bytes = %d/%d, want %d/%d", preview.Files, preview.Bytes, len(files), total)
 	}
-	if len(preview.Excluded) != 0 || preview.Blocked {
-		t.Fatalf("clean profile reports exclusions: %+v blocked=%v", preview.Excluded, preview.Blocked)
+	if len(preview.Excluded) != 0 {
+		t.Fatalf("clean profile reports exclusions: %+v", preview.Excluded)
 	}
 
 	wantOrder := []string{
@@ -105,9 +106,9 @@ func TestInventoryGroupsFilesByCategory(t *testing.T) {
 	}
 }
 
-// A preview never aborts: unlike Discover, a scanner finding is one more
-// reported exclusion, because the point is to show the user every file
-// they have to fix and everything else that would still go.
+// A preview never aborts: a scanner finding is one more reported
+// exclusion, because the point is to show the user every file they have
+// to fix and everything else that would still go.
 func TestInventoryReportsExclusionsWithoutAborting(t *testing.T) {
 	root := setupClaudeRoot(t)
 	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
@@ -126,9 +127,6 @@ func TestInventoryReportsExclusionsWithoutAborting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !preview.Blocked {
-		t.Error("a scanner finding must block the push")
-	}
 	if preview.Files != 1 || preview.Bytes != int64(len(`{"model":"opus"}`)) {
 		t.Fatalf("files/bytes = %d/%d, want the one clean file", preview.Files, preview.Bytes)
 	}
@@ -142,7 +140,8 @@ func TestInventoryReportsExclusionsWithoutAborting(t *testing.T) {
 		byPath[e.Path] = e
 		paths = append(paths, e.Path)
 	}
-	if want := []string{".credentials.json", "memory/leak.md", "noise.log"}; !slices.Equal(paths, want) {
+	// The member's own finding leads, then path order.
+	if want := []string{"memory/leak.md", ".credentials.json", "noise.log"}; !slices.Equal(paths, want) {
 		t.Fatalf("excluded = %v, want %v", paths, want)
 	}
 	if got := byPath[".credentials.json"]; got.Reason != ExcludeCredential || !strings.Contains(got.Detail, "claude") {
@@ -170,7 +169,7 @@ func TestInventoryMissingRootIsPresentFalse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing root must not be an error: %v", err)
 	}
-	if preview.Present || preview.Files != 0 || preview.Bytes != 0 || preview.Blocked {
+	if preview.Present || preview.Files != 0 || preview.Bytes != 0 {
 		t.Fatalf("preview = %+v", preview)
 	}
 	if len(preview.Categories) != 0 || len(preview.Excluded) != 0 {
@@ -230,9 +229,6 @@ func TestInventorySymlinkEscapeAgreesWithPush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.Blocked {
-		t.Fatalf("a symlink escape blocked the preview: %q at %q", preview.BlockedReason, preview.BlockedPath)
-	}
 	if preview.Files != 1 {
 		t.Errorf("files = %d, want the one real file carried", preview.Files)
 	}
@@ -270,10 +266,6 @@ func TestInventoryExcludesOversizedFileUnread(t *testing.T) {
 	preview, err := Inventory(t.Context(), "claude")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if preview.Blocked {
-		t.Fatalf("the oversized file was scanned: preview blocked by %q at %q",
-			preview.BlockedReason, preview.BlockedPath)
 	}
 	var found Exclusion
 	for _, e := range preview.Excluded {
@@ -521,10 +513,6 @@ func TestInventoryCodexScratchTreeIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.Blocked {
-		t.Fatalf("codex is blocked by its own scratch tree: %q at %q",
-			preview.BlockedReason, preview.BlockedPath)
-	}
 	if preview.Files != 2 {
 		t.Errorf("files = %d, want config.toml and the skill", preview.Files)
 	}
@@ -677,9 +665,6 @@ func TestInventoryVendoredPluginFindingDoesNotBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.Blocked {
-		t.Fatalf("blocked on vendored plugin content: %s %s", preview.BlockedPath, preview.BlockedDetail)
-	}
 	if preview.Files != 1 {
 		t.Fatalf("files = %d, want the one clean file", preview.Files)
 	}
@@ -705,9 +690,9 @@ func TestInventoryVendoredPluginFindingDoesNotBlock(t *testing.T) {
 	}
 }
 
-// A preview must never promise what a push then refuses, so both run the
-// same walk over the same tree: a vendored finding and a real one
-// together leave the preview blocked on the user's own file alone.
+// A preview must never promise what a push then carries, so both run the
+// same walk over the same tree: a vendored finding and one in the user's
+// own file are each reported under their own reason, by both.
 func TestInventoryVendoredAndOwnFindingAgreeWithPush(t *testing.T) {
 	root := setupClaudeRoot(t)
 	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
@@ -724,12 +709,82 @@ func TestInventoryVendoredAndOwnFindingAgreeWithPush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !preview.Blocked || preview.BlockedPath != "memory/notes.md" {
-		t.Fatalf("blocked = %v on %q, want the user's own file", preview.Blocked, preview.BlockedPath)
+	want := map[string]string{
+		"memory/notes.md":        ExcludeSecret,
+		vendoredFixture("6.3.0"): ExcludeVendoredSecret,
 	}
-	_, _, pushErr := DiscoverFiles(t.Context(), "claude", nil)
-	var de *DiscoverError
-	if !errors.As(pushErr, &de) || de.Path != "memory/notes.md" {
-		t.Fatalf("push refusal = %v, want memory/notes.md", pushErr)
+	if got := reasonsByPath(preview.Excluded); !maps.Equal(got, want) {
+		t.Fatalf("preview exclusions = %v, want %v", got, want)
+	}
+	files, skipped, err := DiscoverFiles(t.Context(), "claude", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reasonsByPath(skipped); !maps.Equal(got, want) {
+		t.Fatalf("push exclusions = %v, want %v", got, want)
+	}
+	if len(files) != 1 || files[0].Path != "settings.json" {
+		t.Fatalf("push carried %+v, want settings.json alone", files)
+	}
+}
+
+func reasonsByPath(exclusions []Exclusion) map[string]string {
+	out := map[string]string{}
+	for _, e := range exclusions {
+		out[e.Path] = e.Reason
+	}
+	return out
+}
+
+// The exclusion list is capped, so a profile with hundreds of dropped
+// files could push a scanner finding in the member's own file off the
+// end of it. The dashboard reads that list to warn them, so a finding
+// that falls off is a file left behind with nothing said. Own findings
+// are ordered ahead of the cap for exactly that reason.
+func TestInventoryKeepsOwnFindingWithinTheExclusionCap(t *testing.T) {
+	root := setupClaudeRoot(t)
+	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"settings.json": `{"ok":true}`,
+		IgnoreFileName:  "*.log\n",
+		// Sorts after every noise-*.log path, so a path-ordered list
+		// would cut it.
+		"skills/deploy/README.md": string(secret),
+	}
+	for i := 0; i < maxExclusions+50; i++ {
+		files[fmt.Sprintf("noise-%03d.log", i)] = "log line\n"
+	}
+	writeAll(t, root, files)
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.ExcludedTotal != maxExclusions+51 {
+		t.Fatalf("excluded_total = %d, want every dropped file counted", preview.ExcludedTotal)
+	}
+	if len(preview.Excluded) != maxExclusions {
+		t.Fatalf("excluded = %d, want the list capped at %d", len(preview.Excluded), maxExclusions)
+	}
+	// The requirement: the member is told about their own file.
+	if !slices.ContainsFunc(preview.Excluded, func(e Exclusion) bool {
+		return e.Path == "skills/deploy/README.md" && e.Reason == ExcludeSecret
+	}) {
+		t.Fatalf("the member's own finding fell off the capped list of %d", len(preview.Excluded))
+	}
+	// It survives because findings are ordered ahead of the cap, which is
+	// also what lets a surface tell an exact count from a capped one.
+	if preview.Excluded[0].Reason != ExcludeSecret {
+		t.Fatalf("first exclusion = %+v, want the finding ordered first", preview.Excluded[0])
+	}
+	rest := preview.Excluded[1:]
+	if !slices.IsSortedFunc(rest, func(a, b Exclusion) int { return strings.Compare(a.Path, b.Path) }) {
+		t.Fatalf("exclusions behind the findings are not path-ordered: %+v", rest[:5])
+	}
+	if preview.Files != 1 {
+		t.Errorf("files = %d, want settings.json alone", preview.Files)
 	}
 }

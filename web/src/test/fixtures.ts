@@ -170,7 +170,6 @@ export function profilePreview(
         detail: 'credential file excluded for claude',
       },
     ],
-    blocked: false,
     ...over,
   }
 }

@@ -17,23 +17,6 @@ type LocalFile struct {
 	Content []byte
 }
 
-// DiscoverError is a blocking discovery/scan failure (symlink escape or secret).
-type DiscoverError struct {
-	Path     string
-	Location string
-	Message  string
-}
-
-func (e *DiscoverError) Error() string {
-	if e.Location != "" {
-		return fmt.Sprintf("%s:%s: %s", e.Path, e.Location, e.Message)
-	}
-	if e.Path != "" {
-		return e.Path + ": " + e.Message
-	}
-	return e.Message
-}
-
 // userHome is os.UserHomeDir, overridden in tests.
 var userHome = os.UserHomeDir
 
@@ -58,23 +41,21 @@ func LocalDir(harnessName string) (string, harness.Profile, error) {
 // allowSecret names files (relative, basename, or absolute) that may pass
 // scanner findings. Negation in the ignore file cannot re-include denied
 // credential paths, extra credential names, symlink escapes, or findings
-// that were not explicitly allowed. A finding in a file the user wrote
-// refuses the whole walk; one in vendored third-party content drops that
-// file and is reported as an exclusion.
+// that were not explicitly allowed. A scanner finding drops the file it
+// names and is reported as an exclusion; it never refuses the walk.
 func Discover(ctx context.Context, harnessName string, allowSecret []string) ([]LocalFile, error) {
 	files, _, err := DiscoverFiles(ctx, harnessName, allowSecret)
 	return files, err
 }
 
-// DiscoverFiles is Discover plus the entries it skipped without
-// refusing: the ones the size caps dropped, symlinks pointing out of the
-// profile root, and scanner findings in vendored plugin content. Those
-// are the exclusions a caller has to be able to mention - a credential
-// or an ignored file is excluded by a rule the user wrote or asked for,
-// but a file dropped for its size, a link the walk would not follow, or
-// a plugin's own file is one they would otherwise expect to find on the
-// server. Callers with somewhere to print report them; the daemon, which
-// pushes unattended, logs them.
+// DiscoverFiles is Discover plus the entries it left out: the ones the
+// size caps dropped, symlinks pointing out of the profile root, and
+// scanner findings. Those are the exclusions a caller has to be able to
+// mention - a credential or an ignored file is excluded by a rule the
+// user wrote or asked for, but a file dropped for its size, a link the
+// walk would not follow, or one the scanner flagged is one they would
+// otherwise expect to find on the server. Callers with somewhere to
+// print report them; the daemon, which pushes unattended, logs them.
 func DiscoverFiles(ctx context.Context, harnessName string, allowSecret []string) ([]LocalFile, []Exclusion, error) {
 	root, prof, err := LocalDir(harnessName)
 	if err != nil {
@@ -91,22 +72,14 @@ func discoverRoot(ctx context.Context, root string, prof harness.Profile, allowS
 	var skipped []Exclusion
 	err := walkRoot(ctx, root, prof, allowSet(root, allowSecret), func(f visited) error {
 		switch f.Reason {
-		case ExcludeSecret:
-			return &DiscoverError{Path: f.Finding.Path, Location: f.Finding.Location, Message: f.Detail}
-		// A symlink out of the profile root is skipped, not fatal. The
-		// walk never reads a link's target and WalkDir never follows one,
-		// so the escaping bytes stay off the server either way; aborting
-		// only decided that the other files stayed off too. Symlinking
-		// skills into a shared directory is an ordinary setup, and it
-		// used to block the whole import with no override to offer.
-		// A finding in vendored third-party content is skipped for the
-		// same reason: the file is never read onto the server either
-		// way, and refusing the import only decided that the user's own
-		// skills and commands stayed off it too. A test fixture inside
-		// an installed plugin is not a secret the user can remove, and
-		// the --allow-secret path that used to unblock it carried the
-		// plugin version, so it had to be redone on every update.
-		case ExcludeSymlink, ExcludeVendoredSecret, ExcludeTooLarge, ExcludeOverBudget:
+		// Nothing here is fatal. The walk never reads a symlink's target
+		// and never carries a flagged file's bytes, so those stay off the
+		// server either way; refusing the walk only decided that every
+		// other file stayed off it too. A shared skills directory behind
+		// a symlink, a plugin's own test fixture, and a curl example in
+		// a README the member wrote are all ordinary, and each of them
+		// used to keep a whole profile off the server.
+		case ExcludeSecret, ExcludeSymlink, ExcludeVendoredSecret, ExcludeTooLarge, ExcludeOverBudget:
 			skipped = append(skipped, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: f.Detail})
 		case "":
 			out = append(out, LocalFile{Path: f.Rel, AbsPath: f.Abs, Mode: f.Mode, Content: f.Content})
@@ -132,4 +105,28 @@ func statRoot(root string) error {
 		return fmt.Errorf("profile root %s is not a directory", root)
 	}
 	return nil
+}
+
+// UnacknowledgedSecrets returns the scanner findings in files the member
+// wrote that skipSecret does not name. Discovery already leaves those
+// files out, so this exists only for a surface that has to hear the
+// member say so first. The dashboard shows each finding on the harness
+// row before the import button; the CLI has a single command and no
+// screen to show first, so it refuses until --skip-secret names the file
+// or --allow-secret carries it. Findings in vendored plugin content are
+// not included: nobody can remove a secret-shaped string from a package
+// the harness installed.
+//
+// root is the profile root the exclusions came from, so skipSecret takes
+// the same spellings --allow-secret does: relative to the root, or
+// absolute.
+func UnacknowledgedSecrets(root string, skipped []Exclusion, skipSecret []string) []Exclusion {
+	named := allowSet(root, skipSecret)
+	var out []Exclusion
+	for _, s := range skipped {
+		if s.Reason == ExcludeSecret && !named[s.Path] {
+			out = append(out, s)
+		}
+	}
+	return out
 }

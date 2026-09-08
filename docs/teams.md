@@ -299,5 +299,5 @@ stop existing runs; stop them first if access must end immediately.
 Agent *configuration* - skills, plugins, custom commands - syncs one way from
 each member's laptop with `aether profile push` (and automatically, if the
 local daemon is running). Secrets are excluded twice over: a per-harness
-credential denylist plus a client-side content scan that blocks pushes
-containing key material. Nothing ever syncs back down.
+credential denylist plus a client-side content scan that leaves any file
+carrying key material behind. Nothing ever syncs back down.

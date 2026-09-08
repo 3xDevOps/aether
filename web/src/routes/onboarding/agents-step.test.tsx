@@ -377,19 +377,22 @@ describe('agents step', () => {
     ).toBeDefined()
   })
 
-  it('refuses to push a blocked preview and names the flagged file', async () => {
+  it('leaves the member\'s own flagged file out and still imports the rest', async () => {
+    // A README with a curl -H "Authorization: ..." example is a finding in
+    // a file the member wrote. It costs that one file, never the harness,
+    // and the row has to say so without the expander being opened.
     const client = fakeApi({
       localProfilePreview: vi.fn(async (harness: string) =>
         harness === 'claude'
           ? profilePreview({
-              blocked: true,
               excluded: [
                 {
-                  path: 'notes/key.txt',
+                  path: 'skills/cloudflare-deploy/README.md',
                   reason: 'secret',
-                  detail: 'secret detected (aws-access-key) at line 3',
+                  detail: 'secret detected (curl-auth-header) at 12:2',
                 },
               ],
+              excluded_total: 1,
             })
           : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
       ),
@@ -397,28 +400,154 @@ describe('agents step', () => {
     renderStep(client)
     await look()
 
-    // No checkbox at all: the push is refused server-side, so offering it
-    // would be a lie.
+    // The callout is on the row itself, not inside the expander: the
+    // member has to see it without opening anything.
+    const line = await screen.findByText(/1 file you wrote tripped/)
+    const callout = line.parentElement as HTMLElement
+    expect(callout.closest('details')).toBeNull()
+    // A file of theirs is being left off the server, so the sentence
+    // carries the failed state's colour rather than body text.
+    expect(line.className).toContain('text-state-failed')
     expect(
-      await screen.findByText(
-        'notes/key.txt: secret detected (aws-access-key) at line 3',
-      ),
+      within(callout).getByText('skills/cloudflare-deploy/README.md'),
     ).toBeDefined()
     expect(
-      screen.queryByRole('checkbox', {
-        name: 'Bring Claude Code configuration',
-      }),
-    ).toBeNull()
-    // The fix is local, and the override lives on the CLI.
+      within(callout).getByText(/secret detected \(curl-auth-header\) at 12:2/),
+    ).toBeDefined()
+    // An uncapped list gives an exact count, so no hedge.
+    expect(screen.queryByText(/At least/)).toBeNull()
+
+    // Nothing is blocked: the harness is importable with that file left out.
+    const box = screen.getByRole('checkbox', {
+      name: 'Bring Claude Code configuration',
+    })
+    // Sending it anyway is still the CLI's override.
     expect(
       screen.getByText(
-        `aether profile push --agent claude --allow-secret notes/key.txt --workspace ${workspace.id}`,
+        `aether profile push --agent claude --allow-secret skills/cloudflare-deploy/README.md --workspace ${workspace.id}`,
       ),
     ).toBeDefined()
+
+    fireEvent.click(box)
+    fireEvent.click(screen.getByRole('button', { name: 'Import selected' }))
+    await waitFor(() => {
+      expect(client.localProfilePush).toHaveBeenCalledWith('claude')
+    })
+  })
+
+  it('counts the member\'s own findings exactly when the cap cut other entries', async () => {
+    // The gateway sorts secret findings ahead of everything else before
+    // it caps the list, so a cap that fell on ignored files took none of
+    // them: the row states the count instead of hedging it.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: 'skills/cloudflare-deploy/README.md',
+                  reason: 'secret',
+                  detail: 'secret detected (curl-auth-header) at 12:2',
+                },
+                {
+                  path: 'notes/deploy.md',
+                  reason: 'secret',
+                  detail: 'secret detected (aws-access-key) at 4:9',
+                },
+                {
+                  path: 'projects/',
+                  reason: 'ignored',
+                  detail: 'skipped by default for claude (projects/)',
+                },
+              ],
+              excluded_total: 1403,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
     expect(
-      screen.getByRole('button', { name: 'Import selected' }),
-    ).toHaveProperty('disabled', true)
-    expect(client.localProfilePush).not.toHaveBeenCalled()
+      await screen.findByText(/^2 files you wrote tripped/),
+    ).toBeDefined()
+    expect(screen.queryByText(/At least/)).toBeNull()
+  })
+
+  it('hedges its own-file count when the findings themselves filled the cap', async () => {
+    // Every entry the gateway sent is a finding and there were more, so
+    // the cap did reach them and the count is only a floor.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: 'skills/cloudflare-deploy/README.md',
+                  reason: 'secret',
+                  detail: 'secret detected (curl-auth-header) at 12:2',
+                },
+                {
+                  path: 'notes/deploy.md',
+                  reason: 'secret',
+                  detail: 'secret detected (aws-access-key) at 4:9',
+                },
+              ],
+              excluded_total: 1403,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(
+      await screen.findByText(/At least 2 files you wrote tripped/),
+    ).toBeDefined()
+  })
+
+  it('prints one --allow-secret command carrying every path it named', async () => {
+    // --allow-secret repeats, and the row names five paths before it
+    // defers to the expander, so the command covers those same five.
+    const paths = [
+      'skills/a/README.md',
+      'skills/b/README.md',
+      'skills/c/README.md',
+      'skills/d/README.md',
+      'skills/e/README.md',
+      'skills/f/README.md',
+    ]
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: paths.map((path) => ({
+                path,
+                reason: 'secret',
+                detail: 'secret detected (curl-auth-header) at 12:2',
+              })),
+              excluded_total: paths.length,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(
+      await screen.findByText(/^6 files you wrote tripped/),
+    ).toBeDefined()
+    expect(
+      screen.getByText(/and 1 more, under Left out of/),
+    ).toBeDefined()
+    expect(
+      screen.getByText(
+        `aether profile push --agent claude ${paths
+          .slice(0, 5)
+          .map((p) => `--allow-secret ${p}`)
+          .join(' ')} --workspace ${workspace.id}`,
+      ),
+    ).toBeDefined()
   })
 
   it('names a plugin-tree finding by where it lives and still imports', async () => {

@@ -196,12 +196,12 @@ from the client, not the server. If it fails with the agent rejecting its
 arguments, upgrade the client - the CLI, or the desktop app if you started it
 there. Upgrading the server alone does not change what the scan runs.
 
-Secrets never sync, and the dashboard has no override: a scanner finding in
-a file you wrote refuses the push and names the file so you can fix it
-locally. One inside an installed plugin drops that file and imports the
-rest, since there is nothing to fix in your own configuration.
-[harnesses.md](harnesses.md) has the full rules, including the CLI-only
-`--allow-secret`.
+Secrets never sync. A scanner finding drops the one file it named and lists
+it on that harness's row before the import button, so the rest still imports
+in one click. Sending a flagged file anyway is deliberately not in the
+dashboard: it stays on the CLI, where `--workspace` records who did it.
+[harnesses.md](harnesses.md) has the full rules, including `--skip-secret`
+and `--allow-secret`.
 
 ## 6. Launch a run
 
