@@ -15,7 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-func (h *harness) dial(t *testing.T, run domain.RunID) *protocol.Client {
+func (h *coordHarness) dial(t *testing.T, run domain.RunID) *protocol.Client {
 	t.Helper()
 	conn, err := net.Dial("unix", filepath.Join(h.dir, "coord", string(run), SocketName))
 	if err != nil {
@@ -279,7 +279,7 @@ func TestRestartRecovery(t *testing.T) {
 
 // restart builds a second service over the same data directory, the way a
 // server restart does, and starts it.
-func (h *harness) restart(t *testing.T, disabled bool) {
+func (h *coordHarness) restart(t *testing.T, disabled bool) {
 	t.Helper()
 	svc, err := New(Config{
 		Dir:      filepath.Join(h.dir, "coord"),

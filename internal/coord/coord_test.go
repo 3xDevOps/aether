@@ -88,7 +88,7 @@ type injection struct {
 	message string
 }
 
-func (f *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, _, _, message string) error {
+func (f *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, _, _, message, _ string) error {
 	run, _ := key.Run()
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -132,9 +132,9 @@ func (f *fakePTY) all() []injection {
 	return append([]injection(nil), f.injected...)
 }
 
-// harness is a coordination service over a real store and bus, with the
-// radar and the terminals faked and the clock under test control.
-type harness struct {
+// coordHarness is a coordination service over a real store and bus, with
+// the radar and the terminals faked and the clock under test control.
+type coordHarness struct {
 	t         *testing.T
 	dir       string
 	db        *store.DB
@@ -149,7 +149,7 @@ type harness struct {
 	clock   time.Time
 }
 
-func newHarness(t *testing.T, runs int, opts ...func(*Config)) *harness {
+func newHarness(t *testing.T, runs int, opts ...func(*Config)) *coordHarness {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -177,7 +177,7 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *harness {
 		t.Fatalf("create member: %v", merr)
 	}
 
-	h := &harness{
+	h := &coordHarness{
 		t:         t,
 		dir:       dir,
 		db:        db,
@@ -223,21 +223,21 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *harness {
 	return h
 }
 
-func (h *harness) now() time.Time {
+func (h *coordHarness) now() time.Time {
 	h.clockMu.Lock()
 	defer h.clockMu.Unlock()
 	return h.clock
 }
 
-func (h *harness) advance(d time.Duration) {
+func (h *coordHarness) advance(d time.Duration) {
 	h.clockMu.Lock()
 	defer h.clockMu.Unlock()
 	h.clock = h.clock.Add(d)
 }
 
-func (h *harness) run(i int) domain.RunID { return h.runs[i].ID }
+func (h *coordHarness) run(i int) domain.RunID { return h.runs[i].ID }
 
-func (h *harness) start() {
+func (h *coordHarness) start() {
 	h.t.Helper()
 	if err := h.svc.Start(context.Background()); err != nil {
 		h.t.Fatalf("Start: %v", err)

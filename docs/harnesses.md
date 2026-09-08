@@ -71,10 +71,15 @@ session of its own. See [failure-handling.md](failure-handling.md).
 
 ## Steering delivery
 
-`run.inject` writes a message and an Enter key to the run agent's PTY. It is
-terminal input, not a harness API: each native TUI decides when and how to
-submit it. Aether records the delivery only after the complete stdin write
-succeeds and renders the attribution without terminal control bytes.
+`run.inject` writes a message, then the harness's submit sequence, to the
+run agent's PTY. Most TUIs send the message on one Enter (`\r`); `opencode`
+accepts steered text into its editor on the first Enter and sends on the
+second, so its profile ends the write with `\r\r`. The sequence lives in the
+harness profile (`SteerSubmit` in `internal/harness`), not in the caller:
+the scheduler and the coordination radar both resolve it from the run's
+harness before writing. Aether records the delivery only after the complete
+stdin write succeeds and renders the attribution without terminal control
+bytes.
 
 Only `claude` has a **structured-output adapter** today, so its headless runs
 produce typed tool-call and token events. Everything else degrades to the PTY

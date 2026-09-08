@@ -61,9 +61,10 @@ type Peers interface {
 }
 
 // Injector writes an attributed banner into a run's terminal and its
-// transcript; satisfied by *ptyhost.Host.
+// transcript, ending the write with the run harness's submit sequence;
+// satisfied by *ptyhost.Host.
 type Injector interface {
-	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error
+	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error
 }
 
 // Config wires the service. Dir, Store, Mail, Bus, and Peers are

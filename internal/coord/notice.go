@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
@@ -42,7 +43,12 @@ func (s *Service) notify(ctx context.Context, run domain.RunID, with []events.Ov
 			slog.Warn("coord: overlap notice skipped", "run", run, "peer", peer.RunID, "error", err)
 			continue
 		}
-		err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), noticeActor, "", text)
+		submit, err := s.steerSubmit(ctx, run)
+		if err != nil {
+			slog.Warn("coord: overlap notice skipped", "run", run, "peer", peer.RunID, "error", err)
+			continue
+		}
+		err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), noticeActor, "", text, submit)
 		switch {
 		case err == nil:
 			s.markNotified(run, peer.RunID)
@@ -82,6 +88,20 @@ func (s *Service) stampNotice(ctx context.Context, run domain.RunID, peer events
 	if err != nil {
 		slog.Warn("coord: timeline stamp failed", "run", run, "peer", peer.RunID, "error", err)
 	}
+}
+
+// steerSubmit resolves the submit sequence the run harness ends its
+// terminal input with. A run whose row is gone cannot be noticed, and an
+// unknown harness steers with the default single Enter.
+func (s *Service) steerSubmit(ctx context.Context, run domain.RunID) (string, error) {
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return "", err
+	}
+	if p, ok := harness.Lookup(r.Harness); ok {
+		return p.SteerSuffix(), nil
+	}
+	return "\r", nil
 }
 
 // pendingNotices forgets the peers run no longer overlaps - which is what

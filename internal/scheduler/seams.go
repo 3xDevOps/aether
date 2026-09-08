@@ -29,5 +29,5 @@ type PTYHost interface {
 	StopSessionsWithPrefix(ctx context.Context, prefix string)
 	ActiveSessions(prefix string) []ptyhost.SessionKey
 	LastOutput(key ptyhost.SessionKey) (time.Time, bool)
-	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error
+	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error
 }
