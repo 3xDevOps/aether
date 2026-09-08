@@ -57,18 +57,25 @@ RUN case "$(dpkg --print-architecture)" in \
     done \
     && chmod -R a+rX "${FNM_DIR}"
 
-# The GitHub CLI from the pinned release tarball; the binary alone is
-# kept, on PATH for every uid via /usr/local/bin.
+# The GitHub CLI from the pinned release tarball, verified against the
+# checksum file published with it; the binary alone is kept, on PATH for
+# every uid via /usr/local/bin.
 RUN case "$(dpkg --print-architecture)" in \
         amd64) gh_arch=amd64 ;; \
         arm64) gh_arch=arm64 ;; \
         *) echo "unsupported architecture for gh" >&2; exit 1 ;; \
     esac \
-    && curl -fsSL -o /tmp/gh.tar.gz \
-        "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${gh_arch}.tar.gz" \
-    && tar -xzf /tmp/gh.tar.gz -C /tmp \
+    && gh_tarball="gh_${GH_VERSION}_linux_${gh_arch}.tar.gz" \
+    && gh_release="https://github.com/cli/cli/releases/download/v${GH_VERSION}" \
+    && cd /tmp \
+    && curl -fsSL -O "${gh_release}/${gh_tarball}" \
+    && curl -fsSL -O "${gh_release}/gh_${GH_VERSION}_checksums.txt" \
+    && grep " ${gh_tarball}$" "gh_${GH_VERSION}_checksums.txt" > /tmp/gh.sha256 \
+    && sha256sum -c /tmp/gh.sha256 \
+    && tar -xzf "${gh_tarball}" \
     && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${gh_arch}/bin/gh" /usr/local/bin/gh \
-    && rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${gh_arch}"
+    && rm -rf "/tmp/${gh_tarball}" "/tmp/gh_${GH_VERSION}_checksums.txt" /tmp/gh.sha256 \
+        "/tmp/gh_${GH_VERSION}_linux_${gh_arch}"
 
 # uv's standalone binary; its installer only fetches and unpacks the
 # pinned release.
