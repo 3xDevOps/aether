@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { render, waitFor } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
 import { useXterm } from '@/components/xterm-host'
@@ -17,6 +17,21 @@ function Probe({ onReady }: { onReady: (terminal: Terminal) => void }) {
     if (terminal) onReady(terminal)
   }, [onReady, terminal])
   return <div ref={hostRef} />
+}
+
+/**
+ * The environment dock's shape: the hook is enabled before the element it
+ * draws into exists, because the dock renders "Checking environment..." while
+ * `terminal.status` is in flight and only then swaps in the terminal's host.
+ */
+function LateHostProbe({ onReady }: { onReady: (terminal: Terminal) => void }) {
+  const { hostRef, terminal } = useXterm()
+  const [hostMounted, setHostMounted] = useState(false)
+  useEffect(() => setHostMounted(true), [])
+  useEffect(() => {
+    if (terminal) onReady(terminal)
+  }, [onReady, terminal])
+  return hostMounted ? <div ref={hostRef} /> : <p>Checking environment...</p>
 }
 
 beforeEach(() => {
@@ -94,5 +109,18 @@ describe('xterm replay scrollback', () => {
       ),
     )
     attachment.close()
+  })
+})
+
+describe('xterm host arrival', () => {
+  it('opens the terminal when its host mounts after the hook is enabled', async () => {
+    let ready: Terminal | null = null
+    const view = render(<LateHostProbe onReady={(terminal) => (ready = terminal)} />)
+
+    // A hook that watched only `enabled` would have run its one effect while
+    // the host was still the placeholder and never looked again, leaving the
+    // environment terminal permanently blank.
+    await waitFor(() => expect(ready).not.toBeNull())
+    view.unmount()
   })
 })
