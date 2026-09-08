@@ -24,13 +24,24 @@ test('setting an agent up saves the environment', async ({ page, aether }) => {
   await wizard.agents.setUp('Claude Code').click()
   await expect(wizard.agents.section).toContainText('Set up claude')
   await expect(wizard.agents.section).toContainText('curl -fsSL https://claude.ai/install.sh | bash')
-  // The environment terminal starts a real container on first open.
-  await expect(wizard.agents.containerStarting()).toHaveText(
-    'Starting your environment container',
-  )
-  await expect(wizard.agents.containerStarting()).toHaveCount(0, {
-    timeout: 3 * 60 * 1000,
-  })
+  // The environment terminal starts a real container on first open. The
+  // overlay that says so is a transient - the container is up in about a
+  // second - so one snapshot of it would be a race. Sampling it on the same
+  // poll that waits for the attach catches it wherever in that second a
+  // sample lands, and ends on the attach that clears it.
+  const overlay = wizard.agents.containerStarting()
+  const seen: string[] = []
+  await expect
+    .poll(
+      async () => {
+        const texts = await overlay.allTextContents()
+        seen.push(...texts)
+        return texts.length
+      },
+      { timeout: 3 * 60 * 1000 },
+    )
+    .toBe(0)
+  expect(seen).toContain('Starting your environment container')
 
   // Back closes the sub-screen before it leaves the step.
   await wizard.back().click()
