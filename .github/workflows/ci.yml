@@ -3,19 +3,59 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
-
+  pull_request_target:
+  # `pull_request_target` keeps this workflow definition on the base branch.
+  # Jobs below explicitly check out the PR head after policy selection.
 permissions:
   contents: read
-
 jobs:
+  # This job is intentionally hosted and does not check out repository code.
+  # PRs require both the event actor and PR author to be admins, so an admin
+  # action or rerun cannot elevate a contributor's PR onto self-hosted.
+  runner-policy:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.select.outputs.runner }}
+    steps:
+      - name: Select runner
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          is_admin() {
+            permission=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/collaborators/${1}/permission" \
+              --jq '.permission' 2>/dev/null || true)
+            [ "$permission" = admin ]
+          }
+
+          allowed=false
+          if is_admin "$GITHUB_ACTOR" &&
+            { [ "$GITHUB_EVENT_NAME" != pull_request_target ] ||
+              is_admin "$PR_AUTHOR"; }; then
+            allowed=true
+          fi
+          # A failed lookup deliberately stays on the GitHub-hosted runner.
+          if [ "$allowed" = true ]; then
+            echo "runner=self-hosted" >> "$GITHUB_OUTPUT"
+          else
+            echo "runner=ubuntu-latest" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-test:
-    runs-on: self-hosted
+    needs: runner-policy
+    runs-on: ${{ needs.runner-policy.outputs.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ github.event_name != 'pull_request_target' }}
       # `make build` builds the embedded dashboard SPA before Go compiles.
       - uses: actions/setup-node@v4
         with:
@@ -33,6 +73,7 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.4.0
+          skip-cache: ${{ github.event_name == 'pull_request_target' }}
       # Advisory only: the reachable Moby CVEs have no fixed release and
       # govulncheck cannot suppress individual findings, so a hard gate would
       # keep CI permanently red. Read the step output, do not ignore it.
@@ -47,13 +88,19 @@ jobs:
         run: make build
 
   integration:
+    needs: runner-policy
     # Docker is preinstalled on ubuntu-latest runners.
-    runs-on: self-hosted
+    runs-on: ${{ needs.runner-policy.outputs.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ github.event_name != 'pull_request_target' }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       # The standard image is what runs actually execute on, so the agent
@@ -67,8 +114,8 @@ jobs:
           file: images/standard/Dockerfile
           load: true
           tags: aether-standard:ci
-          cache-from: type=gha,scope=standard
-          cache-to: type=gha,mode=max,scope=standard
+          cache-from: type=gha,scope=standard-${{ github.event.pull_request.head.sha || github.ref_name }}
+          cache-to: type=gha,mode=max,scope=standard-${{ github.event.pull_request.head.sha || github.ref_name }}
       # The agent CLIs on top, at whatever version their vendors ship
       # today: that is the drift this image exists to catch. It carries no
       # credentials, which is exactly what TestSmokeHeadlessNoLogin needs.
@@ -92,9 +139,14 @@ jobs:
         run: make test-integration
 
   dashboard:
-    runs-on: self-hosted
+    needs: runner-policy
+    runs-on: ${{ needs.runner-policy.outputs.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -116,12 +168,18 @@ jobs:
   # real git. Separate from `dashboard` because that job is the fast jsdom
   # gate and this one starts containers.
   dashboard-e2e:
-    runs-on: self-hosted
+    needs: runner-policy
+    runs-on: ${{ needs.runner-policy.outputs.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ github.event_name != 'pull_request_target' }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -142,7 +200,7 @@ jobs:
         id: browser-cache
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ github.event.pull_request.head.sha || github.ref_name }}
       - name: Install the browser
         if: steps.browser-cache.outputs.cache-hit != 'true'
         run: bunx playwright install --with-deps chromium
@@ -164,12 +222,18 @@ jobs:
   # The desktop shell is built the way users build it: `aether gui build`
   # unpacks the sources embedded in the CLI and runs electron-builder.
   desktop:
-    runs-on: self-hosted
+    needs: runner-policy
+    runs-on: ${{ needs.runner-policy.outputs.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ github.event_name != 'pull_request_target' }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -227,12 +291,18 @@ jobs:
   # client's package closure is built and tested: the server is Linux-only by
   # design and internal/gitengine does not compile for Windows.
   windows:
+    needs: runner-policy
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ github.event_name != 'pull_request_target' }}
       # windows-latest defaults to PowerShell, where command substitution and
       # grep are unavailable. Git Bash is preinstalled.
       - name: Client packages build and vet
@@ -248,14 +318,19 @@ jobs:
           go test ./cmd/aether $pkgs
 
   release-build:
-    runs-on: self-hosted
+    needs: runner-policy
+    runs-on: ${{ needs.runner-policy.outputs.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
           fetch-depth: 0 # full history so git describe can version the build
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ github.event_name != 'pull_request_target' }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
