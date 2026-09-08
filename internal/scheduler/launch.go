@@ -337,7 +337,7 @@ func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cau
 	}
 	s.mu.Unlock()
 	if killed && run.Worktree != "" {
-		if _, cerr := s.cfg.Git.CommitAll(ctx, run.ID, "wip: "+taskLine(run.Task)); cerr != nil {
+		if _, cerr := s.commitAll(ctx, run.ID, "wip: "+taskLine(run.Task)); cerr != nil {
 			slog.Warn("scheduler: wip commit on kill", "run", run.ID, "error", cerr)
 		}
 		if _, perr := s.cfg.Git.PublishRunBranch(ctx, run.ID); perr != nil {

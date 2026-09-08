@@ -41,6 +41,11 @@ type Config struct {
 	Gate          WriteGate // nil = allow
 	// OnTitle is declared for the title scanner and never called yet.
 	OnTitle func(key SessionKey, title string)
+	// OnInput reports that member typed into the session, at most once per
+	// write attach and only after the keystrokes reached the PTY. Who is
+	// typing is known here and nowhere below: neither the session nor its
+	// clients carry a member.
+	OnInput func(key SessionKey, member domain.MemberID)
 }
 
 const (
@@ -272,6 +277,16 @@ type ReplayWriter interface {
 	WriteReplay(p []byte) (int, error)
 }
 
+// reportInput hands the first keystroke of a write attach to OnInput. The
+// callback records a durable fact, so it runs off the read loop rather than
+// making the next keystroke wait for it.
+func (h *Host) reportInput(key SessionKey, member domain.MemberID) {
+	if h.cfg.OnInput == nil {
+		return
+	}
+	go h.cfg.OnInput(key, member)
+}
+
 // Attach connects conn to the session's PTY and blocks until conn's read
 // side returns EOF or an error, ctx is done, the session ends (returns nil),
 // or the host closes. Reads from conn are keystrokes (discarded when
@@ -304,13 +319,20 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, member domain.MemberI
 	go func() {
 		defer close(readDone)
 		buf := make([]byte, 4096)
+		typed := false
 		for {
 			n, err := conn.Read(buf)
 			if c.isClosed() {
 				return
 			}
-			if n > 0 && !readOnly && !s.writeStdin(buf[:n]) {
-				return
+			if n > 0 && !readOnly {
+				if !s.writeStdin(buf[:n]) {
+					return
+				}
+				if !typed {
+					typed = true
+					h.reportInput(key, member)
+				}
 			}
 			if err != nil {
 				return

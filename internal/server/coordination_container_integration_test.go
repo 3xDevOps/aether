@@ -85,6 +85,7 @@ func TestIntegrationCoordinationInContainer(t *testing.T) {
 		att.waitOutput(t, "user:"+user)
 		att.waitOutput(t, "mode:"+mcpbridge.MountDir+"=0755")
 		att.waitOutput(t, coord.ConfigName+"=0444")
+		att.waitOutput(t, coord.CoAuthorsName+"=0444")
 		att.waitOutput(t, coord.SocketName+"=0666")
 		att.waitOutput(t, "mount:"+mcpbridge.MountDir+"=ro")
 		att.waitOutput(t, "readonly:"+mcpbridge.MountDir)

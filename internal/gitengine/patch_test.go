@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 // listTree lists every entry under dir, one line per path, each file's
@@ -68,7 +70,7 @@ func TestRunPatchRendersWorkingDiff(t *testing.T) {
 
 	// A committed change, so the patch has to reach past HEAD to the base.
 	write("keep.txt", "one\ntwo\n")
-	if _, err := e.CommitAll(ctx, "run1", "wip: edit"); err != nil {
+	if _, err := e.CommitAll(ctx, "run1", "wip: edit", domain.GitIdentity{}); err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
 	// Then uncommitted work: a further tracked edit, a brand new file, the

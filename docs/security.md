@@ -27,7 +27,8 @@ exception: `aether account share <member-id>` lets that member launch runs with
 the owner's home, saved image, profile, custom harness definitions, and vendor
 login. This is equivalent to handing them every credential and file in that
 home. The grant is directional, explicit, and never implied by the admin role.
-The authenticated launcher remains the run owner and Git author; usage and
+The authenticated launcher remains the run owner, and the run's commits are
+authored as that member's git identity, not the account owner's; usage and
 cost are attributed to the selected account.
 
 Revoking a grant blocks later launches and relaunches. It does not stop an

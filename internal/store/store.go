@@ -58,6 +58,9 @@ type Store interface {
 	ApproveMember(ctx context.Context, id domain.MemberID) error
 	// UpdateMemberImage sets only the member's saved environment image.
 	UpdateMemberImage(ctx context.Context, id domain.MemberID, image string) error
+	// UpdateMemberGitIdentity sets only the member's git author name and
+	// address. Either may be empty, restoring that half's fallback.
+	UpdateMemberGitIdentity(ctx context.Context, id domain.MemberID, name, email string) error
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	UpdateMember(ctx context.Context, m *domain.Member) error
 	DeleteMember(ctx context.Context, id domain.MemberID) error
@@ -97,6 +100,11 @@ type Store interface {
 	// other field untouched.
 	SetRunProtected(ctx context.Context, id domain.RunID, protected bool) error
 	DeleteRun(ctx context.Context, id domain.RunID) error
+	// AddRunSteerer records a member other than the run's owner steering
+	// it, and reports whether this call was the one that added them.
+	AddRunSteerer(ctx context.Context, run domain.RunID, member domain.MemberID) (bool, error)
+	// ListRunSteerers returns those members, ordered by member ID.
+	ListRunSteerers(ctx context.Context, run domain.RunID) ([]*domain.Member, error)
 
 	// Profile snapshots are content-addressed per member+harness.
 	// SaveProfileSnapshot assigns ID/CreatedAt when zero; if the digest

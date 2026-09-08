@@ -309,6 +309,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     memberApprove: vi.fn(async () => bob),
     memberRemove: vi.fn(async () => ({})),
     memberColor: vi.fn(async () => alice),
+    memberGit: vi.fn(async (name: string, email: string) => ({
+      ...alice,
+      git_name: name,
+      git_email: email,
+    })),
     memberRole: vi.fn(async () => bob),
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
@@ -369,6 +374,12 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       addr: 'host:2222',
       user: 'alice',
       repo: '/src/repo',
+    })),
+    // The machine's own git config, which the wizard offers as the
+    // default identity.
+    localGitIdentity: vi.fn(async () => ({
+      name: 'Alice Local',
+      email: 'alice@example.invalid',
     })),
     localLinkApply: vi.fn(async () => ({
       addr: 'host:2222',

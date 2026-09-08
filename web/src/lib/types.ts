@@ -51,6 +51,11 @@ export interface Member {
   color: string
   role: 'viewer' | 'collaborator' | 'admin'
   pending?: boolean
+  /** The name commits made in this member's runs are authored as; absent
+   * until the member sets one, when the server falls back. */
+  git_name?: string
+  /** The email address those commits carry; absent until set. */
+  git_email?: string
 }
 
 export interface AccountAccess {
@@ -510,6 +515,13 @@ export interface PullResult {
   output: string
   current: boolean
   dirty: boolean
+}
+
+/** git.identity: the `user.name` and `user.email` this machine's git
+ * resolves. Either is empty when the key is unset. */
+export interface GitIdentity {
+  name: string
+  email: string
 }
 
 /** pull.switch: the run branch now checked out locally. */

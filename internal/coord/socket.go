@@ -42,6 +42,11 @@ const (
 	// the agent at. Its content belongs to the harness registry; this
 	// package owns only where it lives and that it is read-only.
 	ConfigName = "mcp.json"
+	// CoAuthorsName holds the Co-authored-by trailers the agent appends to
+	// its commits, one per member other than the owner who has steered the
+	// run. It is rewritten whenever that set grows, so an agent reads it
+	// again before each commit rather than caching it.
+	CoAuthorsName = "co-authors"
 )
 
 // wireSocketNames are the socket names this server serves, one per
@@ -135,6 +140,36 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, config []byte
 		return "", err
 	}
 	return dir, nil
+}
+
+// WriteCoAuthors replaces the run's co-author list with one trailer per
+// line. The file is read-only to the container like the harness config:
+// the agent copies these lines into its commits, it does not decide who is
+// on them. Writing for a run that was never provisioned is an error, not a
+// silent no-op - the caller would otherwise believe the agent was told.
+func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
+	if s.cfg.Disabled {
+		return ErrDisabled
+	}
+	dir, err := s.runDir(run)
+	if err != nil {
+		return err
+	}
+	var body []byte
+	if len(trailers) > 0 {
+		body = []byte(strings.Join(trailers, "\n") + "\n")
+	}
+	path := filepath.Join(dir, CoAuthorsName)
+	if err := removeFile(path); err != nil {
+		return fmt.Errorf("coord: replace %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, body, configMode); err != nil {
+		return fmt.Errorf("coord: write %s: %w", path, err)
+	}
+	if err := os.Chmod(path, configMode); err != nil {
+		return fmt.Errorf("coord: set mode on %s: %w", path, err)
+	}
+	return nil
 }
 
 // Release stops the run's listeners, removes its coordination directory,

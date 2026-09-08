@@ -16,6 +16,7 @@ import type {
   EnvScanStatus,
   EnvSaveResult,
   GatewayCapabilities,
+  GitIdentity,
   LinkApplyResult,
   LinkRepoResult,
   LinkStatus,
@@ -369,6 +370,14 @@ export const api = {
   /** Sets the caller's own attribution color. */
   memberColor: (color: string) =>
     call<{ member: Member }>('member.color', { color }).then((r) => r.member),
+  /** Sets the git identity commits made in this member's runs are authored
+   * as. An empty name or email clears that half back to the fallback. */
+  memberGit: (name: string, email: string, memberID?: string) =>
+    call<{ member: Member }>('member.git', {
+      member_id: memberID,
+      name,
+      email,
+    }).then((r) => r.member),
   /** Sets another member's role; admin only, and never the last admin. */
   memberRole: (memberID: string, role: Member['role']) =>
     call<{ member: Member }>('member.role', { member_id: memberID, role }).then(
@@ -478,6 +487,9 @@ export const api = {
   // link.switch never succeeds: the gateway's SSH identity is fixed at
   // process start, so it answers the restart instruction as an error.
   localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
+  /** This machine's own git identity, for prefilling the one the server
+   * stores. */
+  localGitIdentity: () => local<GitIdentity>('git.identity'),
   localPull: (runID: string) => local<PullResult>('pull', { run_id: runID }),
   localPullSwitch: (runID: string) =>
     local<PullSwitchResult>('pull.switch', { run_id: runID }),

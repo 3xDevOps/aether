@@ -16,10 +16,23 @@ humans either way.
 <data>/coord/<run-id>/              0755  bind-mounted into the run container
 <data>/coord/<run-id>/coord2.sock   0666  the coordination socket (wire v2)
 <data>/coord/<run-id>/mcp.json      0444  harness config, written at provision
+<data>/coord/<run-id>/co-authors    0444  who to credit, rewritten as they join
 ```
 
 `mcp.json` is written only for a run whose harness profile registers MCP;
 its content belongs to the harness registry (`mcp-bridge.md`).
+
+`co-authors` holds one `Co-authored-by: Name <email>` line per member other
+than the run's owner who has steered the run - injected a message, or typed
+into one of its terminals. The agent is told in its task prompt to read
+`/run/aether/co-authors` before each commit and to end every commit message,
+and the description of any pull request it opens, with exactly those lines.
+The file is created empty at provision and rewritten each time someone new
+steers, so an agent re-reads it rather than caching it. Like `mcp.json` it is
+read-only in the container: who is credited is the server's answer, not the
+agent's. The same trailers go on the commits Aether makes itself at run end,
+so the branch is credited whether or not the agent cooperated - see
+[teams.md](teams.md).
 
 The per-run directory is what the container sees (at `/run/aether`), and
 the agent inside it is not root - hence the traversable directory and the
@@ -173,7 +186,9 @@ terminal to tell.
 turns the feature off: no notices, no listeners, no directories, no
 mailbox writes, no timeline entries, and every `coord.*` call fails
 `CodeUnavailable` before it touches anything. The radar and its chips are
-unaffected.
+unaffected. With no per-run directory there is no `co-authors` file either,
+so the agent is not asked for the trailers; Aether's own commits still
+carry them.
 
 ## Not in this component
 

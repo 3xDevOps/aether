@@ -675,12 +675,13 @@ verbatim; server refusals stay verbatim.
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the guided first-run path, five steps: Link,
-Workspace, Repository, Agents, First run. It renders only where the gateway
-serves the client-machine verbs (the capability descriptor lists
+`src/routes/onboarding/` is the guided first-run path, six steps: Link, Git
+identity, Workspace, Repository, Agents, First run. It renders only where the
+gateway serves the client-machine verbs (the capability descriptor lists
 `link.status`); a remote monitor gets an explanatory empty state instead of a
 broken wizard. Link, Workspace, Repository and First run live in `steps.tsx`;
-Agents is `agents-step.tsx` with its second half in `profile-import.tsx`.
+Git identity is `git-identity-step.tsx`, and Agents is `agents-step.tsx` with
+its second half in `profile-import.tsx`.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
 whichever step has sub-screens. The Agents step's setup screen is the only
@@ -688,6 +689,14 @@ one today, and the wizard holds it, so **Back** closes an open sub-screen
 first and leaves the step only from the step's own screen. A step with
 sub-screens takes them as `setup` and `onSetup` rather than keeping them in
 its own state.
+
+The Git identity step collects the name and email the member's commits are
+authored as, saved on the server with `member.git`. Where the gateway serves
+`git.identity` it prefills them from this machine's own `git config`, without
+overwriting a field the user has typed in; what the member already saved wins
+over both. **Skip** moves on and leaves the server's fallback in place, so the
+step never blocks the wizard. See [teams.md](teams.md) for what the identity
+does once it is set.
 
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
@@ -997,14 +1006,15 @@ denied, the confirmation an admin must clear before giving up their own admin
 role, and a non-admin getting the same roster as read-only text with no admin
 verbs - which the sidebar and the palette match by keeping Members reachable
 behind the narrow remote allowlist while every other admin entry stays
-hidden. The onboarding wizard walks all five steps against the stub API, and
+hidden. The onboarding wizard walks all six steps against the stub API, and
 covers what navigation must not lose: Back leaving the Agents setup screen
 before it leaves the step, and the Repository step still showing its
 connected clone and push result after a walk away and back. The Repository
 step also covers each comparison state: which command is the copyable one in
 each, the fast-forward reporting a dirty tree it did not touch and keeping
 both git outputs, and a version-0 persisted store dropping its stale push
-answer and nothing else. The
+answer and nothing else. The Git identity step covers the prefill, the save
+that advances, the failure that does not, and the skip. The
 Agents step tests setup-capable harness detection, the live terminal dock,
 the environment save that follows a confirmed install, profile previews and
 exclusions, profile recommendations, cancellation,

@@ -147,6 +147,20 @@ type runTitleSetter interface {
 	SetRunTitle(domain.RunID, string)
 }
 
+// runSteerRecorder records a member steering a run by typing into it. Who
+// typed is known only at the attach, so the PTY host hands it back here.
+type runSteerRecorder interface {
+	RecordSteer(ctx context.Context, run domain.RunID, member domain.MemberID)
+}
+
+func forwardRunSteer(rec runSteerRecorder, key ptyhost.SessionKey, member domain.MemberID) {
+	run, ok := key.OwningRun()
+	if !ok || rec == nil {
+		return
+	}
+	rec.RecordSteer(context.Background(), run, member)
+}
+
 func forwardRunTitle(setter runTitleSetter, key ptyhost.SessionKey, title string) {
 	run, ok := key.Run()
 	if !ok || setter == nil {
@@ -217,6 +231,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Gate:          sshd.NewWriteGate(s.db),
 		OnTitle: func(key ptyhost.SessionKey, title string) {
 			forwardRunTitle(s.sched, key, title)
+		},
+		OnInput: func(key ptyhost.SessionKey, member domain.MemberID) {
+			forwardRunSteer(s.sched, key, member)
 		},
 	}); err != nil {
 		return nil, err

@@ -122,6 +122,7 @@ function frame(data: object) {
 /** Walks the whole wizard from Link to the Agents step. */
 async function toAgentsStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
   fireEvent.click(
     await screen.findByRole('button', { name: `Use ${workspace.name}` }),
   )
@@ -977,19 +978,19 @@ describe('the harness the step set up', () => {
     // own to go back to.
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
-    // Back to the harness list, still on step four.
+    // Back to the harness list, still on the Agents step.
     expect(
       await screen.findByRole('button', { name: 'Set up Claude Code' }),
     ).toBeDefined()
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('4. Agents')
+    ).toContain('5. Agents')
 
     // Only now does Back leave the step.
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('3. Repository')
+    ).toContain('4. Repository')
   })
 
   it('reaches the First run step through the whole wizard', async () => {
@@ -999,9 +1000,9 @@ describe('the harness the step set up', () => {
 
     await toAgentsStep()
 
-    // Step four of five: the agents step.
+    // Step five of six: the agents step.
     const steps = screen.getByLabelText('Steps')
-    expect(steps.textContent).toContain('4. Agents')
+    expect(steps.textContent).toContain('5. Agents')
     fireEvent.click(
       await screen.findByRole('button', { name: 'Set up Claude Code' }),
     )

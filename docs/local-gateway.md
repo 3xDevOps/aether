@@ -160,10 +160,10 @@ audit history.
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
  "local":["daemon.install","daemon.status","env.harnesses","forward.start",
-          "forward.status","forward.stop","link.apply","link.repo","link.status",
-          "profile.preview","profile.push","pull","pull.switch",
-          "repo.fast-forward","repo.push","repo.sync","sync.start","sync.status",
-          "sync.stop","update.apply","update.check","update.status"],
+          "forward.status","forward.stop","git.identity","link.apply","link.repo",
+          "link.status","link.switch","profile.preview","profile.push","pull",
+          "pull.switch","repo.fast-forward","repo.push","repo.sync","sync.start",
+          "sync.status","sync.stop","update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -315,6 +315,7 @@ authority.
 | `link.status` | `{}` | `{"server_configured":bool,"linked":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"..."}],"active":"..."}` (`links`/`active` present only with named profiles; `server_configured` reports a configured server even when no repository is linked) |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"..."}` |
+| `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
 | `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
 | `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422,"skipped":[...]}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |

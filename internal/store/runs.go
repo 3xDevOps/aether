@@ -264,6 +264,7 @@ func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 		{`DELETE FROM approvals WHERE run_id = ?`, []any{id}},
 		{`DELETE FROM run_costs WHERE run_id = ?`, []any{id}},
 		{`DELETE FROM run_messages WHERE from_run = ? OR to_run = ?`, []any{id, id}},
+		{`DELETE FROM run_steerers WHERE run_id = ?`, []any{id}},
 	}
 	for _, deletion := range deletes {
 		if _, execErr := tx.ExecContext(ctx, deletion.query, deletion.args...); execErr != nil {
@@ -286,4 +287,39 @@ func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 		return fmt.Errorf("store: delete run: commit: %w", err)
 	}
 	return nil
+}
+
+// Run steerers
+
+// AddRunSteerer records that a member other than the run's owner steered
+// it - injected a message or typed into its terminal. The set is what the
+// run's commits credit as co-authors. Returns whether this call was the
+// one that added the member, so a caller can stamp the timeline and
+// refresh the container's list exactly once.
+func (d *DB) AddRunSteerer(ctx context.Context, run domain.RunID, member domain.MemberID) (bool, error) {
+	res, err := d.db.ExecContext(ctx,
+		`INSERT INTO run_steerers (run_id, member_id) VALUES (?, ?)
+		 ON CONFLICT (run_id, member_id) DO NOTHING`, run, member)
+	if err != nil {
+		return false, fmt.Errorf("store: add run steerer: %w", mapConstraint(err, ErrNotFound))
+	}
+	added, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: add run steerer: %w", err)
+	}
+	return added > 0, nil
+}
+
+// ListRunSteerers returns the members who steered the run. It is a set -
+// when they joined is on the timeline - so the order is by member ID,
+// which keeps the trailers it produces stable across calls.
+func (d *DB) ListRunSteerers(ctx context.Context, run domain.RunID) ([]*domain.Member, error) {
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT `+memberCols+` FROM members
+		 WHERE id IN (SELECT member_id FROM run_steerers WHERE run_id = ?)
+		 ORDER BY id`, run)
+	if err != nil {
+		return nil, fmt.Errorf("store: list run steerers: %w", err)
+	}
+	return collect(rows, scanMember)
 }

@@ -89,10 +89,17 @@ func (r *e2eRuntime) Create(_ context.Context, spec runtime.Spec) (runtime.ID, e
 	defer r.mu.Unlock()
 	r.seq++
 	id := runtime.ID(fmt.Sprintf("e2e-%d", r.seq))
+	// The task argument carries the server's own appendix (the co-author
+	// rule), so a script is keyed by the prefix its task starts with.
 	var script func(*e2eContainer)
 	for _, arg := range spec.Command {
-		if fn, ok := r.scripts[arg]; ok {
-			script = fn
+		for task, fn := range r.scripts {
+			if strings.HasPrefix(arg, task) {
+				script = fn
+				break
+			}
+		}
+		if script != nil {
 			break
 		}
 	}

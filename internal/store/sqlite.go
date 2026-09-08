@@ -389,9 +389,10 @@ func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {
 		return fmt.Errorf("store: create member: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at, image)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at, image, git_name, git_email)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, createdAt, m.Image,
+		m.GitName, m.GitEmail,
 	); err != nil {
 		return fmt.Errorf("store: create member: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -421,14 +422,15 @@ func scanMember(row interface{ Scan(...any) error }) (*domain.Member, error) {
 		createdAt int64
 	)
 	if err := row.Scan(&m.ID, &m.DisplayName, &m.PublicKey, &m.TailnetLogin, &m.Pending,
-		&m.Color, &m.Role, &createdAt, &m.Image); err != nil {
+		&m.Color, &m.Role, &createdAt, &m.Image, &m.GitName, &m.GitEmail); err != nil {
 		return nil, err
 	}
 	m.CreatedAt = decodeTime(createdAt)
 	return &m, nil
 }
 
-const memberCols = `id, display_name, public_key, tailnet_login, pending, color, role, created_at, image`
+const memberCols = `id, display_name, public_key, tailnet_login, pending, color, role, created_at, image,
+	git_name, git_email`
 
 func (d *DB) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
 	m, err := scanMember(d.db.QueryRowContext(ctx,
@@ -478,6 +480,17 @@ func (d *DB) ApproveMember(ctx context.Context, id domain.MemberID) error {
 		`UPDATE members SET pending = 0 WHERE id = ?`, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: approve member: %w", err)
+	}
+	return err
+}
+
+// UpdateMemberGitIdentity sets only the member's git author name and
+// address. Either may be empty, which restores that half's fallback.
+func (d *DB) UpdateMemberGitIdentity(ctx context.Context, id domain.MemberID, name, email string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE members SET git_name = ?, git_email = ? WHERE id = ?`, name, email, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: update member git identity: %w", err)
 	}
 	return err
 }

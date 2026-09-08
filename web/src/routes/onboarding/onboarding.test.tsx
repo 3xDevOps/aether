@@ -24,6 +24,7 @@ const localCaps: GatewayCapabilities = {
   local: [
     'link.status',
     'link.repo',
+    'git.identity',
     'pull',
     'repo.push',
     'repo.fast-forward',
@@ -77,8 +78,14 @@ function seed(extra: Partial<RootState> = {}) {
 }
 
 /** Walks the wizard from mount past the link step. */
-async function toWorkspaceStep() {
+async function toGitIdentityStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+}
+
+/** Walks on past the git identity step, which is optional. */
+async function toWorkspaceStep() {
+  await toGitIdentityStep()
+  fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
 }
 
 /** Walks on to the repo step by picking the fixture workspace. */
@@ -190,7 +197,7 @@ describe('onboarding wizard', () => {
     expect(useStore.getState().connectionEpoch).toBe(1)
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
-      '2. Workspace',
+      '2. Git identity',
     )
   })
   it('shows a configured server without a repository and opens the workspace picker', async () => {
@@ -209,16 +216,17 @@ describe('onboarding wizard', () => {
     expect(await screen.findByText('host:2222')).toBeDefined()
     expect(screen.getByText('alice')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
 
     expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
     expect(screen.queryByLabelText('Repository path')).toBeNull()
   })
   it('returns to the workspace step when a persisted repo step has no workspace', async () => {
-    seed({ onboardingStep: 2, onboardingWorkspace: '' })
+    seed({ onboardingStep: 3, onboardingWorkspace: '' })
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
     expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
-      '2. Workspace',
+      '3. Workspace',
     )
     expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
   })
@@ -248,6 +256,90 @@ describe('onboarding wizard', () => {
 
     expect(await screen.findByText('/src/repo')).toBeDefined()
     expect(client.localLinkStatus).toHaveBeenCalledTimes(2)
+  })
+
+  it('prefills the git identity from this machine and saves it', async () => {
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+
+    expect(await screen.findByRole('region', { name: 'Git identity' })).toBeDefined()
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
+        'Alice Local',
+      )
+    })
+    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe(
+      'alice@example.invalid',
+    )
+
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Ada Lovelace' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(client.memberGit).toHaveBeenCalledWith(
+        'Ada Lovelace',
+        'alice@example.invalid',
+      )
+    })
+    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+  })
+
+  it('keeps the identity the member already saved over the machine one', async () => {
+    const client = fakeApi()
+    seed({
+      info: {
+        ...serverInfo,
+        member: { ...alice, git_name: 'Ada Server', git_email: 'ada@server.invalid' },
+      },
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+
+    await screen.findByRole('region', { name: 'Git identity' })
+    await waitFor(() => {
+      expect(client.localGitIdentity).toHaveBeenCalled()
+    })
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Ada Server')
+    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe(
+      'ada@server.invalid',
+    )
+  })
+
+  it('shows the refusal verbatim and stays on the git identity step', async () => {
+    const client = fakeApi({
+      memberGit: vi.fn(async () => {
+        throw new Error('git email must contain @')
+      }),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
+        'Alice Local',
+      )
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('git email must contain @')).toBeDefined()
+    expect(screen.queryByRole('region', { name: 'Workspace' })).toBeNull()
+  })
+
+  it('skips the git identity step without saving one', async () => {
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
+
+    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+    expect(client.memberGit).not.toHaveBeenCalled()
   })
 
   it('creates the first workspace without an image selection', async () => {

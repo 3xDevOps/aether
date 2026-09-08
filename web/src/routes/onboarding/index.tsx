@@ -1,9 +1,9 @@
 // The onboarding wizard: the quickstart's most error-prone stretch - link,
-// workspace, repo remote, agents, first run - as five steps. It exists only
-// where the gateway has this machine's SSH identity and filesystem, so the
-// whole route gates on the link.status local verb; a remote gateway gets an
-// empty state, not a broken wizard. Step and workspace choices persist so a
-// reload resumes where the user left off.
+// git identity, workspace, repo remote, agents, first run - as six steps. It
+// exists only where the gateway has this machine's SSH identity and
+// filesystem, so the whole route gates on the link.status local verb; a
+// remote gateway gets an empty state, not a broken wizard. Step and
+// workspace choices persist so a reload resumes where the user left off.
 //
 // Navigation is two levels and nothing more: a step index, and a sub-screen
 // name owned by whichever step has one. Back closes the sub-screen first and
@@ -14,6 +14,7 @@ import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { AgentsStep } from '@/routes/onboarding/agents-step'
+import { GitIdentityStep } from '@/routes/onboarding/git-identity-step'
 import {
   FirstRunStep,
   LinkStep,
@@ -26,6 +27,7 @@ import { useCapability } from '@/store/hooks'
 
 const steps = [
   'Link',
+  'Git identity',
   'Workspace',
   'Repository',
   'Agents',
@@ -47,7 +49,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
       0,
       Math.min(
         steps.length - 1,
-        persistedStep >= 2 && !onboardingWorkspace ? 1 : persistedStep,
+        persistedStep >= 3 && !onboardingWorkspace ? 2 : persistedStep,
       ),
     ),
   )
@@ -105,6 +107,9 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           />
         )}
         {step === 1 && (
+          <GitIdentityStep client={client} caps={caps} onNext={() => setStep(2)} />
+        )}
+        {step === 2 && (
           <WorkspaceStep
             client={client}
             caps={caps}
@@ -112,19 +117,19 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
               upsertWorkspace(w)
               setOnboardingWorkspace(w.id)
               setActiveWorkspace(w.id)
-              setStep(2)
+              setStep(3)
             }}
           />
         )}
-        {step === 2 && (
+        {step === 3 && (
           <RepoStep
             client={client}
             caps={caps}
             workspace={workspace}
-            onNext={() => setStep(3)}
+            onNext={() => setStep(4)}
           />
         )}
-        {step === 3 && (
+        {step === 4 && (
           <AgentsStep
             client={client}
             caps={caps}
@@ -132,15 +137,15 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             setup={subStep}
             onSetup={setSubStep}
             onReady={setSetUpHarness}
-            onNext={() => setStep(4)}
+            onNext={() => setStep(5)}
           />
         )}
-        {step === 4 && (
+        {step === 5 && (
           <FirstRunStep
             client={client}
             workspace={workspace}
             defaultHarness={setUpHarness}
-            onBackToWorkspace={() => setStep(1)}
+            onBackToWorkspace={() => setStep(2)}
           />
         )}
 

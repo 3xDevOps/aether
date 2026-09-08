@@ -29,7 +29,7 @@ import (
 const profileAgentScript = `sleep 1
 echo agent-ready
 case "$1" in
-wait) read line ;;
+wait*) read line ;;
 esac
 ls "$HOME/.claude" > claude-ls.txt 2>/dev/null
 cat "$HOME/.claude/skill.md" > skill-seen.txt 2>/dev/null

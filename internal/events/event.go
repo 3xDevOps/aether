@@ -201,6 +201,11 @@ const (
 	TimelineKill    TimelineKind = "kill"
 	TimelineHandoff TimelineKind = "handoff"
 	TimelineNote    TimelineKind = "note"
+	// TimelineCoAuthor records a member other than the run's owner steering
+	// it for the first time. From that point the run's commits credit them
+	// with a Co-authored-by trailer, so the act is stamped once, not once
+	// per keystroke.
+	TimelineCoAuthor TimelineKind = "co-author"
 )
 
 // TimelinePayload is a workspace timeline / steering entry: a privileged or

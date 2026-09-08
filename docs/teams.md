@@ -219,6 +219,7 @@ with git's `! [rejected] main -> main (fetch first)`:
 | `aether budget` | The workspace's spend cap and what has been used. |
 | `aether sync --live <local-dir> <run>` | Live-overlay a local directory onto a run's worktree. Local edits that collide are preserved as `*.aether-conflict` files. |
 | `aether forward <run-id|terminal> <port> [--local <port>]` | Forward a run or environment terminal port to loopback for callbacks such as agent OAuth. The local port defaults to the forwarded port. |
+| `aether member git [--name <name>] [--email <email>] [member-id]` | Show or set the name and email every commit made for that member is authored as. Members set their own; an admin can set anyone's. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. |
 
@@ -257,6 +258,24 @@ Every privileged act - steer, kill, approve, handoff, settings change - is
 stamped into the workspace timeline with the actor. A server update is
 stamped into every workspace's timeline, since it affects all of them.
 Permissive by default, always attributed.
+
+That attribution reaches git too. Each member has a git identity - the real
+name and email their commits are authored as - collected by the dashboard's
+onboarding wizard and shown or changed with `aether member git`. The agent
+in a run container commits with the run owner's identity, and the commits
+Aether makes itself when a run finishes, is killed, or is recovered are
+authored as the run owner with Aether as the committer. A member who has set
+no identity keeps the fallback: their display name at
+`<member-id>@aether.local`, which maps to no upstream account.
+
+Whoever else steers a run is credited as a co-author of it. Injecting a
+message or typing into one of a run's terminals adds that member, once, to
+the run's steerers; every commit Aether makes for the run then ends with one
+`Co-authored-by:` trailer per steerer. The run's own agent gets the same list
+in `/run/aether/co-authors` and is told in its task prompt to end its commits
+and pull requests with those lines - see
+[coordination.md](coordination.md). The run owner is the author, never their
+own co-author, and a handoff moves that line with the ownership.
 
 ### Conflict radar
 

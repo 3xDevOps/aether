@@ -206,7 +206,7 @@ func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 		}
 	}
 	if r.Worktree != "" {
-		if _, cerr := s.cfg.Git.CommitAll(ctx, r.ID, "wip: "+taskLine(r.Task)); cerr != nil {
+		if _, cerr := s.commitAll(ctx, r.ID, "wip: "+taskLine(r.Task)); cerr != nil {
 			slog.Warn("scheduler: wip commit during recovery", "run", r.ID, "error", cerr)
 		}
 		if _, perr := s.cfg.Git.PublishRunBranch(ctx, r.ID); perr != nil {
@@ -305,7 +305,7 @@ func (s *Scheduler) cleanupLeftoverContainer(ctx context.Context, cid runtime.ID
 
 func (s *Scheduler) didNotSurvive(ctx context.Context, r *domain.Run, cid runtime.ID) {
 	if r.Worktree != "" {
-		if _, cerr := s.cfg.Git.CommitAll(ctx, r.ID, "wip: "+taskLine(r.Task)); cerr != nil {
+		if _, cerr := s.commitAll(ctx, r.ID, "wip: "+taskLine(r.Task)); cerr != nil {
 			slog.Warn("scheduler: wip commit during recovery", "run", r.ID, "error", cerr)
 		}
 		if _, perr := s.cfg.Git.PublishRunBranch(ctx, r.ID); perr != nil {

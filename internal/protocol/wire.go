@@ -55,7 +55,12 @@ type Member struct {
 	DisplayName string `json:"display_name"`
 	Color       string `json:"color"`
 	Role        string `json:"role"`
-	Pending     bool   `json:"pending,omitempty"`
+	// GitName and GitEmail are what commits made for this member are
+	// authored as; empty means the member has set neither and the
+	// fallback applies.
+	GitName  string `json:"git_name,omitempty"`
+	GitEmail string `json:"git_email,omitempty"`
+	Pending  bool   `json:"pending,omitempty"`
 }
 
 // Event is the wire envelope streamed on the events subsystem. Payload is
@@ -130,6 +135,8 @@ func MemberFromDomain(m *domain.Member) Member {
 		DisplayName: m.DisplayName,
 		Color:       m.Color,
 		Role:        string(m.Role),
+		GitName:     m.GitName,
+		GitEmail:    m.GitEmail,
 		Pending:     m.Pending,
 	}
 }
@@ -202,6 +209,20 @@ type MemberColorParams struct {
 
 // MemberColorResult is the result of member.color.
 type MemberColorResult struct {
+	Member Member `json:"member"`
+}
+
+// MemberGitParams sets a member's git identity - the name and address
+// commits made for them are authored as. An empty field clears that half
+// back to its fallback. MemberID defaults to the caller.
+type MemberGitParams struct {
+	MemberID string `json:"member_id,omitempty"`
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+}
+
+// MemberGitResult echoes the member after the change.
+type MemberGitResult struct {
 	Member Member `json:"member"`
 }
 

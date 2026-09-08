@@ -22,21 +22,22 @@ import (
 )
 
 // multiAgentScript is the multi-member fake agent, committed to the seed
-// repo and dispatched on the task the run was launched with: "collab"
-// echoes two injected lines before committing a result, "crash" leaves
-// partial work behind and dies. The e2eRuntime fallback registers the
+// repo and dispatched on the prefix of the task the run was launched with -
+// the server appends its co-author rule to the prompt: "collab" echoes two
+// injected lines before committing a result, "crash" leaves partial work
+// behind and dies. The e2eRuntime fallback registers the
 // same behaviours per task key.
 const multiAgentScript = `sleep 1
 echo agent-ready
 case "$1" in
-collab)
+collab*)
   read first
   echo "got:$first"
   read second
   echo "got:$second"
   printf 'collab done\n' > result.txt
   ;;
-crash)
+crash*)
   printf 'half-finished\n' > partial.txt
   exit 3
   ;;
@@ -206,6 +207,25 @@ func TestIntegrationMultiMember(t *testing.T) {
 	runGit(t, seedDir, gitEnv, "commit", "-q", "-m", "seed")
 	runGit(t, seedDir, gitEnv, "push", "-q", repoURL, "main")
 
+	// Each member records the identity their commits are authored as.
+	for _, who := range []struct {
+		ctrl        *protocol.Client
+		name, email string
+	}{
+		{boCtrl, "Bo Ito", "bo@example.com"},
+		{camCtrl, "Cam Diaz", "cam@example.com"},
+	} {
+		var set protocol.MemberGitResult
+		if err := who.ctrl.Call(protocol.MethodMemberGit, protocol.MemberGitParams{
+			Name: who.name, Email: who.email,
+		}, &set); err != nil {
+			t.Fatalf("member.git for %s: %v", who.name, err)
+		}
+		if set.Member.GitName != who.name || set.Member.GitEmail != who.email {
+			t.Fatalf("member.git result = %+v, want %s <%s>", set.Member, who.name, who.email)
+		}
+	}
+
 	// Bo launches; the run shows on Cam's board; Cam watches the terminal
 	// and steers Bo's run - collaborators steer each other by default.
 	var launched protocol.RunResult
@@ -365,6 +385,27 @@ func TestIntegrationMultiMember(t *testing.T) {
 		p, ok := e.Payload.(events.RunStatusPayload)
 		return ok && string(e.RunID) == collab.ID && p.To == domain.RunNeedsAttention
 	})
+
+	// The finished branch credits everyone: authored as Cam, who owns the
+	// run after the handoff, committed by Aether, and co-authored by Bo,
+	// who steered it. Cam steered it too, but authors are not their own
+	// co-authors.
+	var collabPull protocol.RunPullResult
+	if err := camCtrl.Call(protocol.MethodRunPull, protocol.RunIDParams{RunID: collab.ID}, &collabPull); err != nil {
+		t.Fatalf("run.pull collab run: %v", err)
+	}
+	runGit(t, seedDir, gitEnv, "fetch", "-q", repoURL, collabPull.Branch)
+	if got := strings.TrimSpace(runGit(t, seedDir, gitEnv, "log", "-1", "--format=%an <%ae>", "FETCH_HEAD")); got != "Cam Diaz <cam@example.com>" {
+		t.Errorf("collab tip author = %q, want the run owner", got)
+	}
+	if got := strings.TrimSpace(runGit(t, seedDir, gitEnv, "log", "-1", "--format=%cn <%ce>", "FETCH_HEAD")); got != "Aether <aether@localhost>" {
+		t.Errorf("collab tip committer = %q, want Aether", got)
+	}
+	trailers := strings.TrimSpace(runGit(t, seedDir, gitEnv, "log", "-1",
+		"--format=%(trailers:key=Co-authored-by,valueonly)", "FETCH_HEAD"))
+	if trailers != "Bo Ito <bo@example.com>" {
+		t.Errorf("collab tip co-authors = %q, want only Bo", trailers)
+	}
 
 	stopServer()
 	select {
