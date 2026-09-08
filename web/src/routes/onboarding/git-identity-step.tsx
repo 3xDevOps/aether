@@ -3,7 +3,7 @@
 // it; this step only collects it, offering the machine's own git config as
 // the default.
 
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
@@ -24,10 +24,13 @@ const field =
 export function GitIdentityStep({
   client,
   caps,
+  back,
   onNext,
 }: {
   client: Api
   caps: Capability
+  /** The wizard's Back button, rendered in this step's own action row. */
+  back?: ReactNode
   onNext: () => void
 }) {
   const info = useStore((s) => s.info)
@@ -136,6 +139,7 @@ export function GitIdentityStep({
           >
             Save
           </Button>
+          {back}
           <Button type="button" size="sm" variant="outline" onClick={onNext}>
             Skip
           </Button>

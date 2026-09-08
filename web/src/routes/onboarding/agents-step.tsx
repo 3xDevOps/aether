@@ -8,7 +8,7 @@
 // an agent login, a GitHub account and a profile snapshot are all
 // per-member.
 
-import { useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { friendly, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -54,6 +54,7 @@ export function AgentsStep({
   client,
   caps,
   workspace,
+  back,
   setup,
   onSetup,
   onNext,
@@ -62,6 +63,8 @@ export function AgentsStep({
   client: Api
   caps: Capability
   workspace: Workspace | null
+  /** The wizard's Back button, rendered in this step's own action row. */
+  back?: ReactNode
   /** The open sub-screen: a harness's setup instructions, `githubSubStep`,
    * or empty for the step's own screen. The step renders nothing else while
    * one is open. The wizard owns it so Back closes this screen before it
@@ -123,6 +126,7 @@ export function AgentsStep({
       <Button size="sm" variant="outline" onClick={onNext}>
         Skip for now
       </Button>
+      {back}
     </div>
   )
 

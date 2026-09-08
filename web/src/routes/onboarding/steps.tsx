@@ -3,7 +3,7 @@
 // are stored in the UI slice, while link status is checked against the local
 // gateway whenever this route is entered or refocused.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -216,10 +216,13 @@ export function LinkStep({
 export function WorkspaceStep({
   client,
   caps,
+  back,
   onNext,
 }: {
   client: Api
   caps: Capability
+  /** The wizard's Back button, rendered in this step's own action row. */
+  back?: ReactNode
   onNext: (workspace: Workspace) => void
 }) {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
@@ -312,13 +315,16 @@ export function WorkspaceStep({
                 onChange={(e) => setBaseBranch(e.target.value)}
               />
             </label>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={busy || !name.trim() || !baseBranch.trim()}
-            >
-              Create workspace
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                type="submit"
+                size="sm"
+                disabled={busy || !name.trim() || !baseBranch.trim()}
+              >
+                Create workspace
+              </Button>
+              {back}
+            </div>
           </form>
         ) : (
           <p className="text-sm text-muted-foreground">
@@ -327,6 +333,11 @@ export function WorkspaceStep({
             workspace init, then come back.
           </p>
         ))}
+      {/* Every other state - the list, the loading skeleton, the refusal -
+          has no action row of its own for Back to join. */}
+      {back && !(workspaces?.length === 0 && caps.hasMethod('workspace.add')) && (
+        <div className="flex gap-2">{back}</div>
+      )}
     </section>
   )
 }
@@ -358,11 +369,14 @@ export function RepoStep({
   client,
   caps,
   workspace,
+  back,
   onNext,
 }: {
   client: Api
   caps: Capability
   workspace: Workspace | null
+  /** The wizard's Back button, rendered in this step's own action row. */
+  back?: ReactNode
   onNext: () => void
 }) {
   // What the step settled lives in the UI slice, not here: walking back to
@@ -530,6 +544,7 @@ export function RepoStep({
             <Button type="submit" size="sm" disabled={busy || !absolute}>
               Add remote
             </Button>
+            {back}
           </form>
           {repo.trim() !== '' && !absolute && (
             <p className="text-xs text-muted-foreground">
@@ -736,6 +751,7 @@ export function RepoStep({
             <Button size="sm" variant="outline" onClick={repoint}>
               Use a different repository
             </Button>
+            {back}
           </div>
         </div>
       )}
@@ -755,11 +771,14 @@ export function FirstRunStep({
   client,
   workspace,
   defaultHarness,
+  back,
   onBackToWorkspace,
 }: {
   client: Api
   workspace: Workspace | null
   defaultHarness?: string
+  /** The wizard's Back button, rendered in this step's own action row. */
+  back?: ReactNode
   onBackToWorkspace?: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
@@ -820,9 +839,12 @@ export function FirstRunStep({
         <p className="text-sm text-muted-foreground">
           Choose a workspace before launching a run.
         </p>
-        <Button variant="outline" size="sm" onClick={onBackToWorkspace}>
-          Back to Workspace
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={onBackToWorkspace}>
+            Back to Workspace
+          </Button>
+          {back}
+        </div>
       </section>
     )
   }
@@ -891,6 +913,7 @@ export function FirstRunStep({
         <Button variant="outline" size="sm" onClick={goToBoard}>
           Go to board
         </Button>
+        {back}
       </div>
       <div className="space-y-1 rounded-md border bg-card p-3 text-xs text-muted-foreground">
         <p className="font-medium text-foreground">No agent subscription yet?</p>
