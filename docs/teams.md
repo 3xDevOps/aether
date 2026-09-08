@@ -279,12 +279,11 @@ one `Co-authored-by:` trailer per steerer, deduplicated by address, so two
 members sharing one address produce a single line. The run's own agent gets
 the same list in `/run/aether/co-authors` and is told in its task prompt to
 end its commits and pull requests with those lines - see
-[coordination.md](coordination.md). The run owner is the author, never their
-own co-author. A handoff swaps those two roles everywhere the server still
-decides them: the incoming owner becomes the author of Aether's own commits
-and leaves the trailers, the outgoing owner joins the steerers, and
-`/run/aether/co-authors` is rewritten so the agent credits the same people
-the branch does.
+[coordination.md](coordination.md). Aether's own commits credit everyone who
+steered the run; the file the agent reads credits everyone the run involves,
+its owner included, less the address that container already authors as. A
+handoff moves the roles the server still decides: the incoming owner becomes
+the author of Aether's own commits and the outgoing one joins the steerers.
 
 Two limits, both from one fact: a container's `GIT_AUTHOR_*` and
 `GIT_COMMITTER_*` are fixed when it is created, from the member who launched
@@ -293,9 +292,14 @@ live refreshes that run's `/run/aether/co-authors`, but the agent's own
 commits in that run keep the identity it started with; later runs use the
 new one. And after a handoff the agent's own commits are still authored as
 the outgoing owner, while Aether's end-of-run commits are authored as the
-current one. The server drops from `/run/aether/co-authors` any trailer
-whose address matches that frozen container author, so the agent is never
-told to credit itself.
+current one - which is why the incoming owner is on the co-author list at
+all, and the outgoing one is not.
+
+One consequence worth naming: a member who changes their git identity while
+they own a live run is credited on that run's remaining agent commits under
+the new address, because the container is still authoring under the old one.
+The commits carry both addresses rather than losing the change, which is the
+useful answer.
 
 ### Conflict radar
 

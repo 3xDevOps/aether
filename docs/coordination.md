@@ -29,19 +29,23 @@ host can reach another run's socket by walking the tree.
 `mcp.json` is written only for a run whose harness profile registers MCP;
 its content belongs to the harness registry (`mcp-bridge.md`).
 
-`co-authors` holds one `Co-authored-by: Name <email>` line per member other
-than the run's owner who has steered the run - injected a message, or typed
-into the run's own agent terminal. A trailer whose address matches the
-container's frozen `GIT_AUTHOR_EMAIL` is left out, so the agent is never
-told to credit itself. The agent is told in its task prompt to read
-`/run/aether/co-authors` before each commit and to end every commit message,
-and the description of any pull request it opens, with exactly those lines;
-a missing or empty file means it adds none, so a run whose provisioning
-failed asks the agent for nothing. Provisioning writes the list as it
-stands, so a relaunched or recovered run starts with the steerers it already
-had rather than empty. It is rewritten each time someone new steers, on
-every handoff - which adds the outgoing owner and drops the incoming one -
-and when a member already on it changes their git identity mid-run, so an
+`co-authors` holds one `Co-authored-by: Name <email>` line per member the
+run involves - its owner, and everyone who has steered it by injecting a
+message or typing into its own agent terminal - less the address the
+container already authors as. A trailer matching the container's frozen
+`GIT_AUTHOR_EMAIL` is left out, so the agent is never told to credit itself,
+and the owner is on the list only once that address stops being theirs. The
+agent is told in its task prompt to read `/run/aether/co-authors` before
+each commit and to end every commit message, and the description of any pull
+request it opens, with exactly those lines; a missing or empty file means it
+adds none, so a run whose provisioning failed asks the agent for nothing.
+Provisioning writes the list as it stands, so a recovered run starts with
+the steerers it already had rather than empty. A relaunch is a new run row
+and `run_steerers` is keyed by run, so a relaunched run starts with its
+owner alone. It is rewritten each time someone new steers, when a member
+already on it changes their git identity mid-run, and on every handoff,
+which adds the outgoing owner as a steerer and puts the incoming one on the
+list because the container still authors as whoever launched it. So an
 agent re-reads it rather than caching it. Each rewrite is a temp file and a
 rename, so a reader never catches the path missing. Like `mcp.json` it is
 read-only in the container: who is credited is the server's answer, not the

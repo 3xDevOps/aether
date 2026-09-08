@@ -37,28 +37,24 @@ func (s *Scheduler) withCoAuthorInstruction(task string) string {
 	return task + "\n\n" + coAuthorInstruction
 }
 
-// coAuthorTrailers renders one Co-authored-by line per member in steerers
-// who is not already credited by the commit itself. The owner is skipped
-// by member id, and a handoff can hand the run to someone already on the
-// list. A member who set no git identity is credited by the fallback
-// domain.GitIdentity gives them.
+// coAuthorTrailers renders one Co-authored-by line per member in members
+// who is not already credited by the commit itself. A member who set no
+// git identity is credited by the fallback domain.GitIdentity gives them.
 //
 // credited holds the addresses the commit already carries - the address it
-// is authored as. Skipping the owner by id is not enough on its own: one
-// person with two member rows behind one address would otherwise be
-// credited as their own co-author.
-func coAuthorTrailers(steerers []*domain.Member, owner domain.MemberID, credited ...string) []string {
-	trailers := make([]string, 0, len(steerers))
-	seen := make(map[string]bool, len(steerers)+len(credited))
+// is authored as. That is the whole rule: everyone involved, less whoever
+// the commit is already signed by. An owner filter on top of it would be
+// wrong for the container's own commits, which keep authoring as whoever
+// launched the run however often it changes hands.
+func coAuthorTrailers(members []*domain.Member, credited ...string) []string {
+	trailers := make([]string, 0, len(members))
+	seen := make(map[string]bool, len(members)+len(credited))
 	for _, address := range credited {
 		if address != "" {
 			seen[strings.ToLower(address)] = true
 		}
 	}
-	for _, m := range steerers {
-		if m.ID == owner {
-			continue
-		}
+	for _, m := range members {
 		id := m.GitIdentity()
 		// Two members can stand behind one address - a shared account, or
 		// the same person joined from two machines. Git and GitHub credit
@@ -80,7 +76,30 @@ func (s *Scheduler) runCoAuthors(ctx context.Context, run *domain.Run, credited 
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: list run steerers: %w", err)
 	}
-	return coAuthorTrailers(steerers, run.MemberID, credited...), nil
+	return coAuthorTrailers(steerers, credited...), nil
+}
+
+// containerCoAuthors is the list the run's own agent is told to append:
+// everyone the run involves - its owner and everyone who has steered it -
+// less the address the container already authors as.
+//
+// The owner belongs on it because the container's author is frozen when it
+// is created. After a handoff the agent still commits as whoever launched
+// the run, so the member now directing it is credited on none of those
+// commits unless a trailer says so. Before a handoff the owner is that
+// frozen address and drops right back out.
+func (s *Scheduler) containerCoAuthors(ctx context.Context, run *domain.Run, author string) ([]string, error) {
+	steerers, err := s.cfg.Store.ListRunSteerers(ctx, run.ID)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: list run steerers: %w", err)
+	}
+	members := steerers
+	if owner, oerr := s.cfg.Store.GetMember(ctx, run.MemberID); oerr != nil {
+		slog.Warn("scheduler: resolve run owner for co-authors", "run", run.ID, "error", oerr)
+	} else {
+		members = append([]*domain.Member{owner}, steerers...)
+	}
+	return coAuthorTrailers(members, author), nil
 }
 
 // commitAll commits the run's outstanding work: authored as the run's
@@ -188,11 +207,11 @@ func (s *Scheduler) addSteerer(ctx context.Context, run *domain.Run, member doma
 // rewrite; for any other run the trailers still reach the branch through
 // commitAll.
 //
-// The list leaves out the address the container's own commits are authored
-// as. That address is frozen when the container is created, so after a
-// handoff the agent is still committing as the outgoing owner while the
-// run belongs to someone else - and telling it to append a trailer for
-// itself would credit the author twice.
+// The list is everyone the run involves less the address the container's
+// own commits are authored as. That address is frozen when the container
+// is created, so telling the agent to append a trailer for itself would
+// credit the author twice, while the member who took the run over after a
+// handoff is credited nowhere else on those commits.
 func (s *Scheduler) refreshCoAuthors(ctx context.Context, run *domain.Run) {
 	c := s.coordinationSeam()
 	s.mu.Lock()
@@ -207,7 +226,7 @@ func (s *Scheduler) refreshCoAuthors(ctx context.Context, run *domain.Run) {
 	}
 	entry.coAuthorMu.Lock()
 	defer entry.coAuthorMu.Unlock()
-	trailers, err := s.runCoAuthors(ctx, run, author)
+	trailers, err := s.containerCoAuthors(ctx, run, author)
 	if err != nil {
 		slog.Warn("scheduler: resolve co-authors", "run", run.ID, "error", err)
 		return

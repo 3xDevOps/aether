@@ -196,7 +196,7 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	author := entry.gitAuthorEmail
 	s.mu.Unlock()
 	var trailers []string
-	if trailers, err = s.runCoAuthors(ctx, run, author); err != nil {
+	if trailers, err = s.containerCoAuthors(ctx, run, author); err != nil {
 		return nil, nil, err
 	}
 	if err = c.svc.WriteCoAuthors(run.ID, trailers); err != nil {
