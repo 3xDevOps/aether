@@ -31,7 +31,6 @@ beforeEach(() => {
     runs: {},
     lastHarnessByAccount: {},
     capabilities: null,
-    onboardingStep: 'Link',
   })
   vi.clearAllMocks()
 })
@@ -103,22 +102,10 @@ describe('launch dialog', () => {
     )
   })
 
-  it('sends a local gateway to the onboarding wizard at its Agents step', async () => {
+  it('sends setup to the agents view on every gateway', async () => {
     useStore.setState({
       capabilities: { gateway: 'local', methods: ['*'], ws: [], local: ['link.status'] },
     })
-    vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
-    render(<LaunchDialog />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Set up an agent' }))
-
-    expect(useStore.getState().onboardingStep).toBe('Agents')
-    expect(useStore.getState().route.name).toBe('onboarding')
-    expect(useStore.getState().paletteDialog).toBeNull()
-  })
-
-  it('sends a remote gateway to the agents view', async () => {
-    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
     vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
     render(<LaunchDialog />)
 

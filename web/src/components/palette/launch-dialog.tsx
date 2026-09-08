@@ -13,7 +13,6 @@ import {
 import { api } from '@/lib/api'
 import type { AgentInfo, Member } from '@/lib/types'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
 
 // The harness roster comes from agent.list so member-registered agents are
 // launchable, not just the shipped names; shipped and member entries are
@@ -31,8 +30,6 @@ export function LaunchDialog() {
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
-  const setOnboardingStep = useStore((s) => s.setOnboardingStep)
-  const caps = useCapability()
   const upsertRun = useStore((s) => s.upsertRun)
   const rememberHarness = useStore((s) => s.rememberHarness)
   const lastHarnessByAccount = useStore((s) => s.lastHarnessByAccount)
@@ -112,14 +109,11 @@ export function LaunchDialog() {
     }
   }, [account, lastUsedHarness, ownAccountID, agentRefresh])
 
-  // Installing an agent needs this machine's filesystem, so a local gateway
-  // hands the member to the wizard's Agents step and a remote one to the
-  // agents view, which is as far as it can take them.
+  // The agents view carries the install instructions and the terminal to run
+  // them in, and needs no workspace, so it is the destination on every gateway.
   const setUpAgent = () => {
-    const local = caps.hasLocal('link.status')
-    if (local) setOnboardingStep('Agents')
     close()
-    navigate(local ? 'onboarding' : 'agents')
+    navigate('agents')
   }
 
   const launch = async () => {
