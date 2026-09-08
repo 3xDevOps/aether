@@ -41,7 +41,9 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
     const resume = onboardingStepIndex(persistedStep)
     // Repository and everything past it need the workspace the wizard
     // settled on; without one there is nothing to resume into.
-    return resume >= 3 && !onboardingWorkspace ? 2 : resume
+    return resume >= onboardingStepIndex('Repository') && !onboardingWorkspace
+      ? onboardingStepIndex('Workspace')
+      : resume
   })
   // The harness the Agents step set up, so the first run starts on the one
   // that is actually logged in. Empty until a setup shell exits cleanly.

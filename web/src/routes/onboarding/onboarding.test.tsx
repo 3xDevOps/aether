@@ -8,6 +8,7 @@ import type {
 } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { useStore, type RootState } from '@/store'
+import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 import {
   alice,
   fakeApi,
@@ -248,6 +249,33 @@ describe('onboarding wizard', () => {
     )
     expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
   })
+  it('returns to the workspace step from every step past Repository', async () => {
+    // Repository is where the workspace first becomes load-bearing, so the
+    // guard covers it and everything after it, whatever their positions.
+    for (const step of onboardingSteps.slice(
+      onboardingStepIndex('Repository'),
+    )) {
+      seed({ onboardingStep: step, onboardingWorkspace: '' })
+      const view = render(<OnboardingRoute params={{}} client={fakeApi()} />)
+      expect(
+        await view.findByRole('region', { name: 'Workspace' }),
+      ).toBeDefined()
+      view.unmount()
+    }
+  })
+  it('resumes where it left off on the steps before Repository', async () => {
+    // Nothing before Repository needs a workspace, so a missing one must
+    // not drag the wizard forward or back.
+    seed({ onboardingStep: 'Git identity', onboardingWorkspace: '' })
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+
+    expect(
+      await screen.findByRole('region', { name: 'Git identity' }),
+    ).toBeDefined()
+    expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
+      '2. Git identity',
+    )
+  })
   it('rechecks link status when the window regains focus', async () => {
     let status = {
       server_configured: false,
@@ -356,6 +384,47 @@ describe('onboarding wizard', () => {
 
     expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
     expect(client.memberGit).not.toHaveBeenCalled()
+  })
+
+  it('keeps a concurrent info change made while the identity save is in flight', async () => {
+    let land = () => {}
+    const client = fakeApi({
+      memberGit: vi.fn(async (name: string, email: string) => {
+        await new Promise<void>((resolve) => {
+          land = resolve
+        })
+        return { ...alice, git_name: name, git_email: email }
+      }),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
+        'Alice Local',
+      )
+    })
+
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Ada Lovelace' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.memberGit).toHaveBeenCalled())
+
+    // What a disk-usage refresh does: write the whole info back with its
+    // own field changed, while the save is still on the wire.
+    act(() =>
+      useStore
+        .getState()
+        .setInfo({ ...serverInfo, tailnet_hostname: 'gateway.tailnet.ts.net' }),
+    )
+    land()
+
+    await screen.findByRole('region', { name: 'Workspace' })
+    expect(useStore.getState().info?.member.git_name).toBe('Ada Lovelace')
+    expect(useStore.getState().info?.tailnet_hostname).toBe(
+      'gateway.tailnet.ts.net',
+    )
   })
 
   it('shows the saved identity when the user walks back into the step', async () => {

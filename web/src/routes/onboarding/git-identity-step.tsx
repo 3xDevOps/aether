@@ -31,7 +31,6 @@ export function GitIdentityStep({
   onNext: () => void
 }) {
   const info = useStore((s) => s.info)
-  const setInfo = useStore((s) => s.setInfo)
   const saved = info?.member
   const [name, setName] = useState(saved?.git_name ?? '')
   const [email, setEmail] = useState(saved?.git_email ?? '')
@@ -71,8 +70,11 @@ export function GitIdentityStep({
       const member = await client.memberGit(name.trim(), email.trim())
       // Nothing on the wire announces a member's own change, so the store's
       // copy is what walking back into this step reads. Left stale, the
-      // machine probe would overwrite what was just saved.
-      if (info) setInfo({ ...info, member })
+      // machine probe would overwrite what was just saved. The info read
+      // here is the one at write time, not the render's: a disk-usage
+      // refresh can land while the call is in flight.
+      const s = useStore.getState()
+      if (s.info) s.setInfo({ ...s.info, member })
       onNext()
     } catch (err) {
       setError(message(err))
