@@ -893,18 +893,24 @@ export function FirstRunStep({
             in your environment yet.
           </p>
         )}
-        <div className="flex gap-2">
-          <Button size="sm" onClick={onBackToAgents}>
-            Set up an agent
-          </Button>
-          {agentsError && (
-            <Button size="sm" variant="outline" onClick={loadAgents}>
+        {withoutASubscription}
+        <div className={actionRow}>
+          {/* Setting an agent up cannot fix a gateway that did not answer,
+              so the failed list asks for the call again instead. */}
+          {agentsError ? (
+            <Button size="sm" onClick={loadAgents}>
               Retry
             </Button>
+          ) : (
+            <Button size="sm" onClick={onBackToAgents}>
+              Set up an agent
+            </Button>
           )}
+          <Button variant="outline" size="sm" onClick={goToBoard}>
+            Go to board
+          </Button>
           {back}
         </div>
-        {withoutASubscription}
       </section>
     )
   }
