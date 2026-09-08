@@ -552,6 +552,40 @@ func TestInjectAndTranscriptReplay(t *testing.T) {
 	}
 }
 
+type funcWriter struct {
+	write func([]byte) (int, error)
+}
+
+func (f funcWriter) Write(p []byte) (int, error) { return f.write(p) }
+
+func (funcWriter) Close() error { return nil }
+
+// A session that ends while the injected line is still being written has
+// already accepted the full line: Inject must report success, not an
+// error that invites a double-submitting retry.
+func TestInjectDeliveredReportsSuccessWhenSessionEndsDuringWrite(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-endwin")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	sess := h.lookup(RunSession(run))
+	var written []byte
+	sess.stdin = funcWriter{write: func(p []byte) (int, error) {
+		written = append(written, p...)
+		sess.end() // the attach loop observes the agent's exit mid-write
+		return len(p), nil
+	}}
+
+	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "ship it"); err != nil {
+		t.Fatalf("Inject after delivery = %v, want nil", err)
+	}
+	if string(written) != "ship it\r" {
+		t.Fatalf("stdin = %q, want the delivered line exactly once", written)
+	}
+}
+
 // echoStep is one delivered chunk of PTY output and whether it should count
 // as the agent talking.
 type echoStep struct {

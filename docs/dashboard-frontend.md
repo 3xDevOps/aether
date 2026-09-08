@@ -1268,46 +1268,36 @@ into the active workspace with either the caller's or a shared account, and
 offering only members who can own a run as
 handoff targets, never a viewer. The buttons that render the same list are
 covered where they live: the run action bar showing pause, resume or neither
-<<<<<<< HEAD
-as the pause state is known, asking before a kill and only then killing,
-offering the hand-off targets who may own a run and no button at all when
-there are none, and gating pull and relaunch; the sidebar offering New run to
-a member who may start one and not to a viewer; the board header opening the
-launch form, an empty workspace saying so once, each of the three bucket
-placeholders in its own state, and both transitions into and out of the notice;
-and the launch form refusing a headless run with no task while sending nothing
-the server already defaults, offering only installed agents beside the `custom`
-escape hatch, keeping Launch disabled both when none is installed and when
-`agent.list` fails, and sending setup to the Agents view. The sidebar also
-covers the switcher naming a sole workspace instead of offering a picker, a
-switch rescoping the run list, and the attention badge counting.
-
-The navigation's own claims are tested from both sides: every nav and palette
-entry appears only when its gate is served, `aria-current` marks the active
-entry, Approvals folds its count - or an unreadable queue - into its accessible
-name, and each view asserts the title its nav entry uses so the rename cannot
-come apart. `src/lib/events.test.tsx` renders one event of every named type and
-proves no row shows half of itself; `team.test.tsx` proves a failed
-`approval.list` reaches the reader instead of an empty queue, beside the
-workspaces that answered, and that a stale failure loses to a newer read.
-
-The permission mirror is exercised through the bar rather than on its own: a
-viewer is offered nothing that mutates a run, a collaborator may steer and kill
-another member's run but not give it away or protect it, and a protected run
-and an `admins_only` workspace both close steering to everyone but the owner.
-Two more cover the shared runner: a refused kill toasts the server's message
-verbatim, and a slow pull locks the whole bar, names the ref it fetched and
-leaves its git output on the store for the diff tab. The window size rules are
-covered as the classes that encode them, jsdom having no layout engine to
-measure: which verbs keep their place on a narrow run header and which move
-into the More menu, that menu closing itself when the row widens back, the
-header being the named container the split measures against, the order the
-status bar gives its readouts up in and every truncated readout keeping its
-whole text in a `title`, and the sidebar dropping to its rail on a narrow
-window without writing what the member stored. The shell test clicks New
-run in the sidebar and finds the real form, which is what proves the host is
-the shell's rather than the palette's.
-The team surfaces are driven through the same stub API: the status bar reading
+as the pause state is known, asking before a kill and delete and only then
+calling them, offering the hand-off targets who may own a run and no button at
+all when there are none, and gating pull and relaunch; the sidebar offering New
+run to a member who may start one and not to a viewer, and All runs opening the
+flat list; the board header opening the launch form, an empty workspace saying
+so once, each of the three bucket placeholders in its own state, and both
+transitions into and out of the notice; and the launch form refusing a
+headless run with no task while sending nothing the server already defaults,
+offering only installed agents beside the `custom` escape hatch, keeping
+Launch disabled both when none is installed and when `agent.list` fails, and
+sending setup to the Agents view.
+The palette covers the ending-action matrix: Delete for every status, Kill
+only while queued, provisioning, or running, and Close for every status that
+holds a record, where it chooses merged or abandoned.
+The permission mirror is exercised through the bar: a viewer is offered
+nothing that mutates a run, a collaborator may steer, kill, and delete another
+member's run but not give it away or protect it, and a protected run and an
+`admins_only` workspace both hide the Kill-policy verbs from everyone but the
+owner. A refused kill toasts the server's message verbatim, and a slow pull
+locks the whole bar, names the ref it fetched and leaves its git output on the
+store for the diff tab. The shell test clicks New run in the sidebar and finds
+the real form, which is what proves the host is the shell's rather than the
+palette's. The window size rules are covered as the classes that encode them,
+jsdom having no layout engine to measure: which verbs keep their place on a
+narrow run header and which move into the More menu, that menu closing itself
+when the row widens back, the header being the named container the split
+measures against, the order the status bar gives its readouts up in and every
+truncated readout keeping its whole text in a `title`, and the sidebar dropping
+to its rail on a narrow window without writing what the member stored. The
+team surfaces are driven through the same stub API: the status bar reading
 roster, queue and budget and rendering all three, the approval badge and
 watcher avatars reaching a real run card, a decision going out as
 `approval.decide` and coming back attributed, a steer refusal surfacing
@@ -1315,37 +1305,6 @@ instead of being guessed at, the refresh covering every workspace rather than
 only the ones with live runs, the heartbeat claiming only the workspace in
 view, an over-cap workspace staying in the readout after its last run
 finishes, and the feed opening its window at the log head, walking it back
-=======
-as the pause state is known, asking before a kill and delete and only then
-calling them, offering the hand-off targets who may own a run and no button at
-all when there are none, and gating pull and relaunch; the sidebar offering New
-run to a member who may start one and not to a viewer, and All runs opening the
-flat list; the board header opening the launch form and an empty workspace
-saying so once rather than three times; and the launch form refusing a
-headless run with no task while sending nothing the server already defaults.
-The palette covers the ending-action matrix: Delete for every status, Kill
-only while queued, provisioning, or running, and Close only for completed
-runs, where it chooses merged or abandoned. The sidebar also covers the
-switcher naming a sole workspace instead of offering a picker, a switch
-rescoping the run list, and the attention badge counting.
-The permission mirror is exercised through the bar rather than on its own: a
-viewer is offered nothing that mutates a run, a collaborator may steer, kill,
-and delete another member's run but not give it away or protect it, and a
-protected run and an `admins_only` workspace both hide those Kill-policy verbs
-from everyone but the owner. Two more cover the shared runner: a refused kill
-toasts the server's message verbatim, and a slow pull locks the whole bar,
-names the ref it fetched and leaves its git output on the store for the diff
-tab. The shell test clicks New run in the sidebar and finds the real form,
-which is what proves the host is the shell's rather than the palette's. The
-team surfaces are driven through the same stub
-API: the status bar reading roster, queue and budget and rendering all three,
-the approval badge and watcher avatars reaching a real run card, a decision
-going out as `approval.decide` and coming back attributed, a steer refusal
-surfacing instead of being guessed at, the refresh covering every workspace
-rather than only the ones with live runs, the heartbeat claiming only the
-workspace in view, an over-cap workspace staying in the readout after its last
-run finishes, and the feed opening its window at the log head, walking it back
->>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
 without re-reading, narrowing on a filter, and abandoning a page that belongs
 to filters the user has left. The Members roster is rendered both ways: an
 admin approving, inviting and changing another member's role with the roster

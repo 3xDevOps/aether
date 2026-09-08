@@ -33,6 +33,7 @@ type fakeRuntime struct {
 	startErr    error
 	waitErr     error
 	startHook   func(c *fakeContainer)
+	stopHook    func()
 	commitErr   error
 	commits     []fakeCommitCall
 	// heldImages are tags the fake daemon refuses to remove, as Docker does
@@ -220,8 +221,13 @@ func (r *fakeRuntime) Resume(_ context.Context, id runtime.ID) error {
 }
 
 func (r *fakeRuntime) Stop(_ context.Context, id runtime.ID, _ time.Duration) error {
+<<<<<<< HEAD
 	if r.stopErr != nil {
 		return r.stopErr
+=======
+	if r.stopHook != nil {
+		r.stopHook()
+>>>>>>> 6f8ed0a (fix: survive kill-finalize races in delete and injection)
 	}
 	c, err := r.get(id)
 	if err != nil {

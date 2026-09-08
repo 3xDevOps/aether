@@ -44,7 +44,9 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	}
 	s.mu.Unlock()
 	// No container yet (still provisioning): the provisioning checkpoints
-	// see killRequested and abort.
+	// see killRequested and abort. The container may also vanish mid-call
+	// - a finalize that raced this stop destroyed it after transitioning
+	// the status - and gone is the goal, so not-found is success.
 	if cid != "" {
 		if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 			return err

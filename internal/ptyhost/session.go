@@ -339,6 +339,12 @@ func (s *session) inject(actorName, actorColor, message string) error {
 		return fmt.Errorf("ptyhost: inject stdin write: %w", io.ErrShortWrite)
 	}
 	if err := s.annotateInjection(actorName, actorColor, message); err != nil {
+		// The write above already accepted the full line: a session that
+		// ended in this window must not turn delivered input into a
+		// reported failure, which would invite a double-submitting retry.
+		if errors.Is(err, ErrSessionEnded) || errors.Is(err, ErrNoSession) {
+			return nil
+		}
 		return err
 	}
 	return nil

@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func TestKill(t *testing.T) {
@@ -343,5 +344,47 @@ func TestInjectCleanExitedCompleted(t *testing.T) {
 	err := e.sched.Inject(ctx, run.ID, e.member.ID, "too late")
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Inject completed = %v, want ErrInvalidTransition", err)
+	}
+}
+
+// DeleteRun's redundant Kill must survive the kill that is already in
+// flight: the first kill's finalize can transition the status and destroy
+// the container while the delete's own Stop call is in the air, and the
+// delete must still remove the checkout, transcripts, and run record.
+func TestDeleteRunSurvivesKillFinalizingDuringStop(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "delete during kill")
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	e.rt.stopHook = func() {
+		close(entered)
+		<-release
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- e.sched.DeleteRun(t.Context(), run.ID, e.member.ID) }()
+	<-entered // DeleteRun's Kill sits inside Stop; its status check already passed.
+
+	e.sched.mu.Lock()
+	cid := e.sched.runs[run.ID].containerID
+	e.sched.mu.Unlock()
+	// The first kill's effect: the process ends and finalization destroys
+	// the container and releases the entry while the redundant stop is parked.
+	if err := e.rt.Destroy(t.Context(), cid); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	waitFor(t, "finalization released the entry", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.runs[run.ID] == nil
+	})
+
+	close(release)
+	if err := <-errCh; err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	if _, err := e.sched.cfg.Store.GetRun(t.Context(), run.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetRun after delete = %v, want not found", err)
 	}
 }
