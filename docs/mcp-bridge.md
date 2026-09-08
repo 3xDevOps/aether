@@ -14,15 +14,16 @@ framing anywhere.
 ```
 /opt/aether/aether-server   read-only  the staged bridge binary
 /run/aether/                read-only  the run's coordination directory
-/run/aether/coord2.sock                the socket the bridge dials (wire v2)
 /run/aether/co-authors      read-only  the trailers to end commits with
+/run/aether/coord2.sock                the socket the bridge dials (wire v2)
 ```
 
-Both are Aether-owned container paths. `runtime.ValidateMounts` refuses any
-caller-supplied mount that targets or nests under them, which is what
-guarantees a credential home or a synced profile can never shadow either
-one. The two mounts themselves are therefore built from server-constructed
-paths and appended after the caller's mounts have been validated.
+The binary and the directory are the two mounts, and both are Aether-owned
+container paths. `runtime.ValidateMounts` refuses any caller-supplied mount
+that targets or nests under them, which is what guarantees a credential home
+or a synced profile can never shadow either one. They are therefore built
+from server-constructed paths and appended after the caller's mounts have
+been validated.
 
 Nothing else crosses the boundary. No token enters the container: the
 socket is the run's identity, and the mount is the only thing that grants

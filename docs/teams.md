@@ -263,10 +263,11 @@ Permissive by default, always attributed.
 That attribution reaches git too. Each member has a git identity - the real
 name and email their commits are authored as - collected by the dashboard's
 onboarding wizard and shown or changed with `aether member git`. The agent
-in a run container commits with the run owner's identity, and the commits
-Aether makes itself when a run finishes, is killed, or is recovered are
-authored as the run owner with Aether as the committer. A member who has set
-no identity keeps the fallback: their display name, or their member id when
+in a run container commits with the identity of the member who launched it,
+baked into the container when it is created, and the commits Aether makes
+itself when a run finishes, is killed, or is recovered are authored as the
+run's current owner with Aether as the committer. A member who has set no
+identity keeps the fallback: their display name, or their member id when
 the display name cannot be a git author name, at `<member-id>@aether.local`,
 which maps to no upstream account.
 
@@ -279,16 +280,22 @@ members sharing one address produce a single line. The run's own agent gets
 the same list in `/run/aether/co-authors` and is told in its task prompt to
 end its commits and pull requests with those lines - see
 [coordination.md](coordination.md). The run owner is the author, never their
-own co-author. A handoff swaps those two roles: the incoming owner becomes
-the author and leaves the trailers, the outgoing owner joins the steerers,
-and `/run/aether/co-authors` is rewritten so the agent credits the same
-people the branch does.
+own co-author. A handoff swaps those two roles everywhere the server still
+decides them: the incoming owner becomes the author of Aether's own commits
+and leaves the trailers, the outgoing owner joins the steerers, and
+`/run/aether/co-authors` is rewritten so the agent credits the same people
+the branch does.
 
-One limitation. Changing a git identity while a run is live refreshes that
-run's `/run/aether/co-authors`, but the container's `GIT_AUTHOR_*` and
-`GIT_COMMITTER_*` are fixed when the container is created, so the agent's own
-commits in that run keep the identity it started with. Later runs use the new
-one.
+Two limits, both from one fact: a container's `GIT_AUTHOR_*` and
+`GIT_COMMITTER_*` are fixed when it is created, from the member who launched
+it, and never move while it lives. Changing a git identity while a run is
+live refreshes that run's `/run/aether/co-authors`, but the agent's own
+commits in that run keep the identity it started with; later runs use the
+new one. And after a handoff the agent's own commits are still authored as
+the outgoing owner, while Aether's end-of-run commits are authored as the
+current one. The server drops from `/run/aether/co-authors` any trailer
+whose address matches that frozen container author, so the agent is never
+told to credit itself.
 
 ### Conflict radar
 

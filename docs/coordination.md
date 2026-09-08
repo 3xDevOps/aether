@@ -19,31 +19,35 @@ humans either way.
 <data>/coord/<run-id>/co-authors    0444  who to credit, rewritten as they join
 ```
 
-`mcp.json` is written only for a run whose harness profile registers MCP;
-its content belongs to the harness registry (`mcp-bridge.md`).
-
-`co-authors` holds one `Co-authored-by: Name <email>` line per member other
-than the run's owner who has steered the run - injected a message, or typed
-into the run's own agent terminal. The agent is told in its task prompt to
-read `/run/aether/co-authors` before each commit and to end every commit
-message, and the description of any pull request it opens, with exactly those
-lines; a missing or empty file means it adds none, so a run whose
-provisioning failed asks the agent for nothing. The file is created empty at
-provision and rewritten each time someone new steers and on every handoff -
-which adds the outgoing owner and drops the incoming one - so an agent
-re-reads it rather than caching it. Each rewrite is a temp file and a rename,
-so a reader never catches the path missing. Like `mcp.json` it is read-only
-in the container: who is credited is the server's answer, not the agent's.
-The same trailers go on the commits Aether makes itself at run end, so the
-branch is credited whether or not the agent cooperated - see
-[teams.md](teams.md).
-
 The per-run directory is what the container sees (at `/run/aether`), and
 the agent inside it is not root - hence the traversable directory and the
 world-writable socket. The mount is the whole authentication: whoever
 connects on a run's socket *is* that run, so no token ever enters a
 container. The coordination root above it stays 0700 so nothing on the
 host can reach another run's socket by walking the tree.
+
+`mcp.json` is written only for a run whose harness profile registers MCP;
+its content belongs to the harness registry (`mcp-bridge.md`).
+
+`co-authors` holds one `Co-authored-by: Name <email>` line per member other
+than the run's owner who has steered the run - injected a message, or typed
+into the run's own agent terminal. A trailer whose address matches the
+container's frozen `GIT_AUTHOR_EMAIL` is left out, so the agent is never
+told to credit itself. The agent is told in its task prompt to read
+`/run/aether/co-authors` before each commit and to end every commit message,
+and the description of any pull request it opens, with exactly those lines;
+a missing or empty file means it adds none, so a run whose provisioning
+failed asks the agent for nothing. Provisioning writes the list as it
+stands, so a relaunched or recovered run starts with the steerers it already
+had rather than empty. It is rewritten each time someone new steers, on
+every handoff - which adds the outgoing owner and drops the incoming one -
+and when a member already on it changes their git identity mid-run, so an
+agent re-reads it rather than caching it. Each rewrite is a temp file and a
+rename, so a reader never catches the path missing. Like `mcp.json` it is
+read-only in the container: who is credited is the server's answer, not the
+agent's. The same trailers go on the commits Aether makes itself at run end,
+so the branch is credited whether or not the agent cooperated - see
+[teams.md](teams.md).
 
 The socket file deliberately survives process shutdown: its presence is
 the record that the run was provisioned, and its name is the wire version

@@ -36,15 +36,22 @@ already-running container or remove the home mounted into it. Stop those runs
 before revoking access when immediate removal matters.
 
 Real names and email addresses cross into the container with the run. The
-run owner's git identity is in the container's `GIT_AUTHOR_*` and
-`GIT_COMMITTER_*`, and `/run/aether/co-authors` holds one
-`Co-authored-by: Name <email>` line per member who steered the run, readable
-by the agent like any other file under the coordination mount. That is what
-makes the commits worth anything: a merged branch credits a real account only
-if it carries that account's address. An operator who does not want a
-member's address inside run containers leaves that member's git identity
-unset, which keeps the synthetic `<member-id>@aether.local` fallback and
-credits nobody upstream.
+git identity of the member who launched it is baked into the container's
+`GIT_AUTHOR_*` and `GIT_COMMITTER_*` at creation, and
+`/run/aether/co-authors` holds one `Co-authored-by: Name <email>` line per
+member who steered the run, readable by the agent like any other file under
+the coordination mount. A merged branch credits a real upstream account only
+if it carries that account's address.
+
+Each member controls their own address, not the operator. `aether member
+git` sets your own identity with no admin check - only setting someone
+else's needs the admin role (`internal/sshd/gitidentity.go`) - and the
+dashboard's onboarding wizard asks every new member for one. Setting none
+withholds the address alone: the synthetic `<member-id>@aether.local`
+fallback credits nobody upstream, but `domain.Member.GitIdentity` still
+falls back to the display name, or the member id when that cannot be a git
+author name, so a name reaches `GIT_AUTHOR_NAME` and the trailers either
+way.
 
 ### Hostile agents
 
