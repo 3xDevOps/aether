@@ -400,6 +400,51 @@ func TestInventorySpendsBudgetByPriority(t *testing.T) {
 	}
 }
 
+// TestInventoryChargesOnlyCarriedFilesToBudget pins that a file the
+// scanner flagged does not spend budget it was dropped from. A flagged
+// file read at a higher priority used to charge its bytes anyway, so a
+// clean file further down was reported over-budget while the snapshot
+// still had room for every byte of it.
+func TestInventoryChargesOnlyCarriedFilesToBudget(t *testing.T) {
+	root := setupClaudeRoot(t)
+	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Just under the per-file cap each, so the snapshot cap is what bites.
+	const size = profilesvc.MaxFileBytes - 1
+	// Sorts first inside skills/, so it is read before the clean files.
+	mustWrite(t, filepath.Join(root, "skills", "aaa-leak.md"),
+		string(secret)+strings.Repeat("x", size-len(secret)))
+	// Exactly as many clean files as the snapshot cap holds: charging the
+	// flagged file too costs the last one its place.
+	clean := profilesvc.MaxTotalBytes / size
+	body := strings.Repeat("x", size)
+	for i := range clean {
+		mustWrite(t, filepath.Join(root, "skills", fmt.Sprintf("s%02d.md", i)), body)
+	}
+
+	preview, err := Inventory(t.Context(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range preview.Excluded {
+		if e.Reason == ExcludeOverBudget {
+			t.Errorf("%s reported over-budget behind a dropped file: %s", e.Path, e.Detail)
+		}
+	}
+	if preview.Files != clean {
+		t.Errorf("carried %d files, want %d clean skills", preview.Files, clean)
+	}
+	if preview.Bytes != int64(clean)*size {
+		t.Errorf("preview promises %d bytes, want %d", preview.Bytes, int64(clean)*size)
+	}
+	if len(preview.Excluded) != 1 || preview.Excluded[0].Path != "skills/aaa-leak.md" ||
+		preview.Excluded[0].Reason != ExcludeSecret {
+		t.Fatalf("excluded = %+v, want only the flagged file", preview.Excluded)
+	}
+}
+
 // TestInventoryDefaultIgnoresTransientDirs pins the second half of the
 // same fix: claude's run-time directories are dropped by default, as one
 // entry each rather than one per file, and the user's own ignore file can
