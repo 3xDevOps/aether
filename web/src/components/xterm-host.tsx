@@ -16,7 +16,14 @@ export interface XtermOptions {
 }
 
 export interface XtermController {
-  hostRef: React.RefObject<HTMLDivElement | null>
+  /**
+   * Attach to the element the terminal renders into. It is a callback ref,
+   * not an object ref, because a caller may mount that element after the
+   * terminal is enabled - the environment dock does, while it is still
+   * waiting for `terminal.status` - and only a callback ref tells the hook
+   * the host has arrived.
+   */
+  hostRef: React.RefCallback<HTMLDivElement>
   terminal: Terminal | null
   ready: boolean
 }
@@ -116,7 +123,7 @@ export function useXterm({
   onResize,
   onLink,
 }: XtermOptions = {}): XtermController {
-  const hostRef = useRef<HTMLDivElement>(null)
+  const [host, setHost] = useState<HTMLDivElement | null>(null)
   const onDataRef = useRef(onData)
   const onResizeRef = useRef(onResize)
   const onLinkRef = useRef(onLink)
@@ -126,9 +133,7 @@ export function useXterm({
   onLinkRef.current = onLink
 
   useEffect(() => {
-    if (!enabled) return
-    const host = hostRef.current
-    if (!host) return
+    if (!enabled || !host) return
 
     // The DOM renderer, deliberately: @xterm/addon-webgl 0.19.0 reuses stale
     // glyph-atlas positions under heavy glyph churn, garbling scrolled rows
@@ -185,7 +190,7 @@ export function useXterm({
       created.dispose()
       setTerminal(null)
     }
-  }, [enabled])
+  }, [enabled, host])
 
-  return { hostRef, terminal, ready: terminal !== null }
+  return { hostRef: setHost, terminal, ready: terminal !== null }
 }

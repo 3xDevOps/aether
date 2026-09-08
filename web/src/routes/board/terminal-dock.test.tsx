@@ -7,7 +7,7 @@ import { useStore } from '@/store'
 import { initialEnvTerminal } from '@/store/env-terminal'
 
 const xterm = vi.hoisted(() => ({
-  hostRef: { current: null },
+  hostRef: () => {},
   terminal: { cols: 80, rows: 24, reset: vi.fn(), write: vi.fn() },
 }))
 
