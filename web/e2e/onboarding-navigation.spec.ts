@@ -16,11 +16,18 @@ test('back walks the steps without losing what they settled', async ({
   await wizard.link.link(aether.server.addr, { name: 'Alice' })
   await wizard.link.continue().click()
 
-  await wizard.expectStep('Workspace')
+  // The inserted step is between Link and Workspace in both directions.
+  await wizard.expectStep('Git identity')
   await wizard.back().click()
   await wizard.expectStep('Link')
 
   await wizard.link.continue().click()
+  await wizard.gitIdentity.skip().click()
+  await wizard.expectStep('Workspace')
+  await wizard.back().click()
+  await wizard.expectStep('Git identity')
+
+  await wizard.gitIdentity.skip().click()
   await wizard.workspace.create('project')
   await wizard.expectStep('Repository')
   await wizard.back().click()

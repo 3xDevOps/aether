@@ -16,6 +16,7 @@ import type {
   Workspace,
 } from '@/lib/types'
 import { useStore } from '@/store'
+import { onboardingStepIndex } from '@/store/ui'
 import type { Capability } from '@/store/hooks'
 import type { OnboardingRepo } from '@/store/ui'
 
@@ -30,8 +31,9 @@ const short = (commit: string) => commit.slice(0, 7)
 const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`
 
 /**
- * Step 1: link this machine to a server. The gateway's local link status
- * determines whether the in-app link form or the linked summary is shown.
+ * The Link step: link this machine to a server. The gateway's local link
+ * status determines whether the in-app link form or the linked summary is
+ * shown.
  */
 export function LinkStep({
   client,
@@ -112,7 +114,10 @@ export function LinkStep({
               Created SSH key <span className="font-mono">{success.key_generated}</span>.
             </p>
           )}
-          <Button size="sm" onClick={() => onNext(1)}>
+          <Button
+            size="sm"
+            onClick={() => onNext(onboardingStepIndex('Git identity'))}
+          >
             Continue
           </Button>
         </div>
@@ -174,7 +179,10 @@ export function LinkStep({
           <p className="text-muted-foreground">
             No repository is linked yet. Continue to connect one.
           </p>
-          <Button size="sm" onClick={() => onNext(1)}>
+          <Button
+            size="sm"
+            onClick={() => onNext(onboardingStepIndex('Git identity'))}
+          >
             Continue
           </Button>
         </div>
@@ -186,7 +194,10 @@ export function LinkStep({
             <span className="font-medium">{status.user}</span>, with{' '}
             <span className="font-mono">{status.repo}</span>.
           </p>
-          <Button size="sm" onClick={() => onNext(1)}>
+          <Button
+            size="sm"
+            onClick={() => onNext(onboardingStepIndex('Git identity'))}
+          >
             Continue
           </Button>
         </>
@@ -196,10 +207,10 @@ export function LinkStep({
 }
 
 /**
- * Step 2: pick the workspace runs will live in. With none on the server and
- * the add capability present, creation is inline. The base branch is the ref
- * every run in the workspace forks from, so it is settled here rather than
- * per run.
+ * The Workspace step: pick the workspace runs will live in. With none on the
+ * server and the add capability present, creation is inline. The base branch
+ * is the ref every run in the workspace forks from, so it is settled here
+ * rather than per run.
  */
 export function WorkspaceStep({
   client,
@@ -333,11 +344,11 @@ const stillLinked = (origin: OnboardingRepo) => {
 }
 
 /**
- * Step 3: point a local clone at the workspace. The gateway adds the
- * `aether` git remote and, where the repo.push verb is served, compares the
- * clone with the workspace and pushes only when the clone is ahead, keeping
- * git's own answer on the page; without the verb the push stays a
- * copy-paste command. A workspace that is ahead is answered by a
+ * The Repository step: point a local clone at the workspace. The gateway
+ * adds the `aether` git remote and, where the repo.push verb is served,
+ * compares the clone with the workspace and pushes only when the clone is
+ * ahead, keeping git's own answer on the page; without the verb the push
+ * stays a copy-paste command. A workspace that is ahead is answered by a
  * fast-forward of the clone. Either way the history is the user's: nothing
  * rewrites it, and a divergence is resolved by hand.
  */
@@ -725,11 +736,12 @@ export function RepoStep({
 }
 
 /**
- * The last step: the first run, in the workspace step 2 settled on. The
- * harness comes from agent.list with a free-text fallback, and launch lands
- * the user on the run view. `defaultHarness` is the one the Agents step set
- * up; it is preselected only when agent.list carries that name, because a
- * name the server cannot launch would just move the refusal later.
+ * The First run step: the first run, in the workspace the Workspace step
+ * settled on. The harness comes from agent.list with a free-text fallback,
+ * and launch lands the user on the run view. `defaultHarness` is the one the
+ * Agents step set up; it is preselected only when agent.list carries that
+ * name, because a name the server cannot launch would just move the refusal
+ * later.
  */
 export function FirstRunStep({
   client,

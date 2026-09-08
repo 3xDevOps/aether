@@ -258,6 +258,13 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if ownErr := s.applyRunOwnership(ws, run, plan.Mounts, plan.User); ownErr != nil {
 		return fmt.Errorf("apply run ownership: %w", ownErr)
 	}
+	// Recorded before coordination is provisioned, because the co-author
+	// list written there already leaves this address out: the agent's own
+	// commits carry it, so telling the agent to credit it would make it
+	// its own co-author.
+	s.mu.Lock()
+	entry.gitAuthorEmail = actor.GitIdentity().Email
+	s.mu.Unlock()
 	// Coordination assets are Aether-owned container surfaces and are appended
 	// after the environment plan's validated workspace mounts.
 	coordMounts, mcpArgs := s.coordinationMounts(ctx, entry, run, profile)
@@ -337,7 +344,7 @@ func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cau
 	}
 	s.mu.Unlock()
 	if killed && run.Worktree != "" {
-		if _, cerr := s.cfg.Git.CommitAll(ctx, run.ID, "wip: "+taskLine(run.Task)); cerr != nil {
+		if _, cerr := s.commitAll(ctx, run.ID, "wip: "+taskLine(run.Task)); cerr != nil {
 			slog.Warn("scheduler: wip commit on kill", "run", run.ID, "error", cerr)
 		}
 		if _, perr := s.cfg.Git.PublishRunBranch(ctx, run.ID); perr != nil {

@@ -27,12 +27,31 @@ exception: `aether account share <member-id>` lets that member launch runs with
 the owner's home, saved image, profile, custom harness definitions, and vendor
 login. This is equivalent to handing them every credential and file in that
 home. The grant is directional, explicit, and never implied by the admin role.
-The authenticated launcher remains the run owner and Git author; usage and
+The authenticated launcher remains the run owner, and the run's commits are
+authored as that member's git identity, not the account owner's; usage and
 cost are attributed to the selected account.
 
 Revoking a grant blocks later launches and relaunches. It does not stop an
 already-running container or remove the home mounted into it. Stop those runs
 before revoking access when immediate removal matters.
+
+Real names and email addresses cross into the container with the run. The
+git identity of the member who launched it is baked into the container's
+`GIT_AUTHOR_*` and `GIT_COMMITTER_*` at creation, and
+`/run/aether/co-authors` holds one `Co-authored-by: Name <email>` line per
+member who steered the run, readable by the agent like any other file under
+the coordination mount. A merged branch credits a real upstream account only
+if it carries that account's address.
+
+Each member controls their own address, not the operator. `aether member
+git` sets your own identity with no admin check - only setting someone
+else's needs the admin role (`internal/sshd/gitidentity.go`) - and the
+dashboard's onboarding wizard asks every new member for one. Setting none
+withholds the address alone: the synthetic `<member-id>@aether.local`
+fallback credits nobody upstream, but `domain.Member.GitIdentity` still
+falls back to the display name, or the member id when that cannot be a git
+author name, so a name reaches `GIT_AUTHOR_NAME` and the trailers either
+way.
 
 ### Hostile agents
 
@@ -110,9 +129,10 @@ stances are these.
   gets its own socket at `/run/aether/coord2.sock`; whoever connects on it *is*
   that run. There is nothing inside the container to steal, and nothing to
   rotate. The host-side modes (`0700` on the coordination root, `0755` on the
-  per-run directory, `0666` on the socket, `0444` on the config, `0555` on the
-  staged binary) are a contract with a semi-trusted container that may not run
-  as root - they are not the access control. Both container paths are reserved:
+  per-run directory, `0666` on the socket, `0444` on the config and the
+  co-author list, `0555` on the staged binary) are a contract with a
+  semi-trusted container that may not run as root - they are not the access
+  control. Both container paths are reserved:
   `runtime.ValidateMounts` refuses any caller-supplied mount that targets or
   nests under them, so a credential home cannot shadow either.
 - **The socket exposes three methods and no control verbs.** `coord.status`,

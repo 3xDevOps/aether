@@ -57,7 +57,7 @@ func (d *DB) AccountSharedWith(ctx context.Context, owner, grantee domain.Member
 func (d *DB) ListAccountOwners(ctx context.Context, grantee domain.MemberID) ([]*domain.Member, error) {
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT m.id, m.display_name, m.public_key, m.tailnet_login, m.pending,
-		       m.color, m.role, m.created_at, m.image FROM members m
+		       m.color, m.role, m.created_at, m.image, m.git_name, m.git_email FROM members m
 		JOIN account_shares s ON s.owner_member_id = m.id
 		WHERE s.grantee_member_id = ?
 		ORDER BY m.display_name, m.id`, grantee)
@@ -70,7 +70,7 @@ func (d *DB) ListAccountOwners(ctx context.Context, grantee domain.MemberID) ([]
 func (d *DB) ListAccountGrantees(ctx context.Context, owner domain.MemberID) ([]*domain.Member, error) {
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT m.id, m.display_name, m.public_key, m.tailnet_login, m.pending,
-		       m.color, m.role, m.created_at, m.image FROM members m
+		       m.color, m.role, m.created_at, m.image, m.git_name, m.git_email FROM members m
 		JOIN account_shares s ON s.grantee_member_id = m.id
 		WHERE s.owner_member_id = ?
 		ORDER BY m.display_name, m.id`, owner)

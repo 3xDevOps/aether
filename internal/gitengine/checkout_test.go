@@ -72,7 +72,7 @@ func TestCommitAllIgnoresCheckoutHooksAndFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	commit, err := e.CommitAll(t.Context(), domain.RunID("run-hostile"), "server commit")
+	commit, err := e.CommitAll(t.Context(), domain.RunID("run-hostile"), "server commit", domain.GitIdentity{})
 	if err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}

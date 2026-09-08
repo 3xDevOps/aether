@@ -24,14 +24,14 @@ import (
 const homeAgentScript = `sleep 1
 echo agent-ready
 case "$1" in
-write)
+write*)
   mkdir -p "$HOME/.local/bin"
   printf 'marker-v1\n' > "$HOME/.local/bin/marker.txt"
   # The container runs as root; loosen modes so the host test user can
   # remove the temp data dir during cleanup.
   chmod -R a+rwX "$HOME/.local"
   ;;
-read)
+read*)
   cat "$HOME/.local/bin/marker.txt" > marker-seen.txt 2>/dev/null || printf 'absent\n' > marker-seen.txt
   ;;
 esac

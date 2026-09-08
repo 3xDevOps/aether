@@ -19,6 +19,8 @@ test('a second member finds the workspace already seeded', async ({ page, aether
   await wizard.link.link(aether.server.addr, { invite: code, name: 'Bob' })
   await expect(wizard.link.section).toContainText('(collaborator)')
   await wizard.link.continue().click()
+  // The git identity is optional and this scenario is not about it.
+  await wizard.gitIdentity.skip().click()
 
   // The workspace is already there, so this step picks rather than creates.
   await wizard.expectStep('Workspace')

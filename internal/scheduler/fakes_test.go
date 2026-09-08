@@ -470,6 +470,7 @@ type fakeGit struct {
 	createErr         error
 	createHook        func(run domain.RunID)
 	commitHook        func(run domain.RunID, message string) // runs at the top of CommitAll
+	authors           map[domain.RunID][]domain.GitIdentity
 }
 
 func newFakeGit(root string) *fakeGit {
@@ -483,6 +484,7 @@ func newFakeGit(root string) *fakeGit {
 		workspaceByRun:    make(map[domain.RunID]domain.WorkspaceID),
 		branchByRun:       make(map[domain.RunID]string),
 		publishedBranches: make(map[domain.WorkspaceID]map[string]bool),
+		authors:           make(map[domain.RunID][]domain.GitIdentity),
 	}
 }
 
@@ -526,13 +528,14 @@ func (g *fakeGit) baseBranchFor(run domain.RunID) string {
 	return g.bases[run]
 }
 
-func (g *fakeGit) CommitAll(_ context.Context, run domain.RunID, message string) (string, error) {
+func (g *fakeGit) CommitAll(_ context.Context, run domain.RunID, message string, author domain.GitIdentity) (string, error) {
 	if g.commitHook != nil {
 		g.commitHook(run, message)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.commits[run] = append(g.commits[run], message)
+	g.authors[run] = append(g.authors[run], author)
 	return fmt.Sprintf("commit-%d", len(g.commits[run])), nil
 }
 
@@ -594,6 +597,12 @@ func (g *fakeGit) commitsFor(run domain.RunID) []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return slices.Clone(g.commits[run])
+}
+
+func (g *fakeGit) commitAuthors(run domain.RunID) []domain.GitIdentity {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.authors[run])
 }
 
 func (g *fakeGit) unpublishBranch(ws domain.WorkspaceID, branch string) {

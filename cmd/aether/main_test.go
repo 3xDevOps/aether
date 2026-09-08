@@ -129,7 +129,7 @@ func TestCopyRawStreamsWaitsForRemoteResultAfterInputEOF(t *testing.T) {
 	}
 	var output bytes.Buffer
 
-	err := copyRawStreams(stream, strings.NewReader(""), &output)
+	err := copyRawStreams(stream, strings.NewReader(""), &output, 0)
 
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("copy error = %v, want %v", err, wantErr)
@@ -155,7 +155,7 @@ func TestCopyRawStreamsReturnsAfterSuccessfulRemoteClose(t *testing.T) {
 	}
 	var output bytes.Buffer
 
-	if err := copyRawStreams(stream, input, &output); err != nil {
+	if err := copyRawStreams(stream, input, &output, 0); err != nil {
 		t.Fatalf("copy error = %v, want nil", err)
 	}
 	if got := output.String(); got != "remote complete\n" {

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -113,5 +114,54 @@ func TestWorkspaceEnvironmentValidation(t *testing.T) {
 				t.Fatalf("Valid() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// A display name is whatever a member typed into the SSH username an
+// invite was redeemed with. One holding angle brackets or a line break
+// would forge the author address on every commit a run of theirs makes,
+// so it never reaches the identity: the member id does instead.
+func TestGitIdentityRejectsAnUnusableDisplayName(t *testing.T) {
+	tests := []struct {
+		name        string
+		displayName string
+		wantName    string
+	}{
+		{"plain", "Ada Lovelace", "Ada Lovelace"},
+		{"angle brackets", "Eve <attacker@evil.com>", "m_01"},
+		{"newline", "Eve\nCo-authored-by: Eve <attacker@evil.com>", "m_01"},
+		{"carriage return", "Eve\rmore", "m_01"},
+		{"empty", "", "m_01"},
+		{"padded", "  Ada  ", "m_01"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Member{ID: "m_01", DisplayName: tt.displayName}
+			got := m.GitIdentity()
+			if got.Name != tt.wantName {
+				t.Errorf("GitIdentity().Name = %q, want %q", got.Name, tt.wantName)
+			}
+			if got.Email != "m_01@aether.local" {
+				t.Errorf("GitIdentity().Email = %q, want the fallback address", got.Email)
+			}
+			if strings.Count(got.Trailer(), "<") != 1 {
+				t.Errorf("trailer %q carries more than one address", got.Trailer())
+			}
+		})
+	}
+}
+
+// A stored git identity is validated on the way in, and again here: the
+// row is not the only way a value can land in those columns.
+func TestGitIdentityIgnoresAnUnusableStoredValue(t *testing.T) {
+	m := &Member{
+		ID:          "m_01",
+		DisplayName: "Ada Lovelace",
+		GitName:     "Eve <attacker@evil.com>",
+		GitEmail:    "not an address",
+	}
+	got := m.GitIdentity()
+	if got.Name != "Ada Lovelace" || got.Email != "m_01@aether.local" {
+		t.Fatalf("GitIdentity() = %v, want the display name at the fallback address", got)
 	}
 }

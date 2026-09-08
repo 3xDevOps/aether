@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -18,33 +20,37 @@ import (
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
-// localVerbs is the /local/v1 surface, sorted, advertised by the
-// capabilities endpoint. These verbs need the user's repository and SSH
-// key, so only the local gateway offers them.
-var localVerbs = []string{
-	"daemon.install",
-	"daemon.status",
-	"env.harnesses",
-	"forward.start",
-	"forward.status",
-	"forward.stop",
-	"link.apply",
-	"link.repo",
-	"link.status",
-	"profile.preview",
-	"profile.push",
-	"pull",
-	"pull.switch",
-	"repo.fast-forward",
-	"repo.push",
-	"repo.sync",
-	"sync.start",
-	"sync.status",
-	"sync.stop",
-	"update.apply",
-	"update.check",
-	"update.status",
+// localHandlers is the /local/v1 surface: verbs that need the user's
+// repository and SSH key, so only the local gateway offers them. The
+// capabilities endpoint advertises exactly the verbs dispatched here.
+var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *protocol.Error){
+	"daemon.install":    (*Gateway).localDaemonInstall,
+	"daemon.status":     (*Gateway).localDaemonStatus,
+	"env.harnesses":     (*Gateway).localEnvHarnesses,
+	"forward.start":     (*Gateway).localForwardStart,
+	"forward.status":    (*Gateway).localForwardStatus,
+	"forward.stop":      (*Gateway).localForwardStop,
+	"git.identity":      (*Gateway).localGitIdentity,
+	"link.apply":        (*Gateway).localLinkApply,
+	"link.repo":         (*Gateway).localLinkRepo,
+	"link.status":       (*Gateway).localLinkStatus,
+	"link.switch":       (*Gateway).localLinkSwitch,
+	"profile.preview":   (*Gateway).localProfilePreview,
+	"profile.push":      (*Gateway).localProfilePush,
+	"pull":              (*Gateway).localPull,
+	"pull.switch":       (*Gateway).localPullSwitch,
+	"repo.fast-forward": (*Gateway).localRepoFastForward,
+	"repo.push":         (*Gateway).localRepoPush,
+	"repo.sync":         (*Gateway).localRepoSync,
+	"sync.start":        (*Gateway).localSyncStart,
+	"sync.status":       (*Gateway).localSyncStatus,
+	"sync.stop":         (*Gateway).localSyncStop,
+	"update.apply":      (*Gateway).localUpdateApply,
+	"update.check":      (*Gateway).localUpdateCheck,
+	"update.status":     (*Gateway).localUpdateStatus,
 }
+
+var localVerbs = slices.Sorted(maps.Keys(localHandlers))
 
 // localState is the mutable client-machine state behind /local/v1 and
 // /ws/envscan: the saved link config (link.repo updates it), the
@@ -129,31 +135,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verb := r.PathValue("verb")
-	handler, ok := map[string]func(*Gateway, *http.Request, []byte) (any, *protocol.Error){
-		"daemon.install":    (*Gateway).localDaemonInstall,
-		"daemon.status":     (*Gateway).localDaemonStatus,
-		"env.harnesses":     (*Gateway).localEnvHarnesses,
-		"link.apply":        (*Gateway).localLinkApply,
-		"link.repo":         (*Gateway).localLinkRepo,
-		"link.switch":       (*Gateway).localLinkSwitch,
-		"link.status":       (*Gateway).localLinkStatus,
-		"profile.preview":   (*Gateway).localProfilePreview,
-		"profile.push":      (*Gateway).localProfilePush,
-		"pull":              (*Gateway).localPull,
-		"pull.switch":       (*Gateway).localPullSwitch,
-		"repo.fast-forward": (*Gateway).localRepoFastForward,
-		"repo.push":         (*Gateway).localRepoPush,
-		"repo.sync":         (*Gateway).localRepoSync,
-		"forward.start":     (*Gateway).localForwardStart,
-		"forward.status":    (*Gateway).localForwardStatus,
-		"forward.stop":      (*Gateway).localForwardStop,
-		"sync.start":        (*Gateway).localSyncStart,
-		"sync.status":       (*Gateway).localSyncStatus,
-		"sync.stop":         (*Gateway).localSyncStop,
-		"update.apply":      (*Gateway).localUpdateApply,
-		"update.check":      (*Gateway).localUpdateCheck,
-		"update.status":     (*Gateway).localUpdateStatus,
-	}[verb]
+	handler, ok := localHandlers[verb]
 	if !ok {
 		webgate.WriteError(w, http.StatusNotFound, &protocol.Error{
 			Code:    protocol.CodeMethodNotFound,

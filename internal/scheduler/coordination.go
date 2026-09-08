@@ -72,6 +72,7 @@ var mcpConfigPath = path.Join(mcpbridge.MountDir, coord.ConfigName)
 // is gone.
 type Coordinator interface {
 	Provision(ctx context.Context, run domain.RunID, config []byte) (string, error)
+	WriteCoAuthors(run domain.RunID, trailers []string) error
 	Release(run domain.RunID) error
 }
 
@@ -188,6 +189,19 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 			}
 		}
 	}()
+	// The co-author list has to be in the directory before the container
+	// exists: the agent is told to read it before its first commit, and a
+	// path that is missing on first look reads as "nobody to credit".
+	s.mu.Lock()
+	author := entry.gitAuthorEmail
+	s.mu.Unlock()
+	var trailers []string
+	if trailers, err = s.containerCoAuthors(ctx, run, author); err != nil {
+		return nil, nil, err
+	}
+	if err = c.svc.WriteCoAuthors(run.ID, trailers); err != nil {
+		return nil, nil, fmt.Errorf("write run co-authors: %w", err)
+	}
 	mounts = []runtime.Mount{
 		{HostPath: bin, ContainerPath: mcpbridge.BinaryPath, ReadOnly: true},
 		{HostPath: dir, ContainerPath: mcpbridge.MountDir, ReadOnly: true},

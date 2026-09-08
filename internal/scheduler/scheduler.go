@@ -199,6 +199,16 @@ type supervised struct {
 	bridgeDigest string
 	bridgePath   string
 	coordDir     string
+	// gitAuthorEmail is the address the container's GIT_AUTHOR_EMAIL was
+	// created with. It does not move when the run is handed on or when
+	// its owner edits their git identity, so it is what tells the agent's
+	// own commits apart from Aether's.
+	gitAuthorEmail string
+	// coAuthorMu serializes the read-modify-write of this run's co-author
+	// list. Two members steering at once would otherwise interleave
+	// listing the steerers with writing the file, and the list left on
+	// disk would be whichever finished last, not the fuller one.
+	coAuthorMu sync.Mutex
 }
 
 type pendingRun struct {
@@ -407,6 +417,7 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 // the shipped registry. Member definitions only shape argv inside that
 // member's own container, so they never leak across members.
 func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
+	task = s.withCoAuthorInstruction(task)
 	profile, inRegistry := harness.Lookup(harnessName)
 	var tui, headless []string
 	spec, ok := s.harnesses[harnessName]
@@ -553,10 +564,11 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env["AETHER_RUN_ID"] = string(run.ID)
 	env["AETHER_WORKSPACE_ID"] = string(run.WorkspaceID)
 	env["AETHER_ACCOUNT_MEMBER_ID"] = string(run.AccountMember())
-	env["GIT_AUTHOR_NAME"] = member.DisplayName
-	env["GIT_COMMITTER_NAME"] = member.DisplayName
-	env["GIT_AUTHOR_EMAIL"] = string(member.ID) + "@aether.local"
-	env["GIT_COMMITTER_EMAIL"] = string(member.ID) + "@aether.local"
+	identity := member.GitIdentity()
+	env["GIT_AUTHOR_NAME"] = identity.Name
+	env["GIT_COMMITTER_NAME"] = identity.Name
+	env["GIT_AUTHOR_EMAIL"] = identity.Email
+	env["GIT_COMMITTER_EMAIL"] = identity.Email
 	command := argv
 	// The fake harness is a deterministic lifecycle fixture: its exit codes
 	// are assertions in the integration suite, not an installed agent a user

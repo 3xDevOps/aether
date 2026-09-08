@@ -61,7 +61,9 @@ func runTerminal(args []string) error {
 		return err
 	}
 	defer func() { _ = stream.Close() }()
-	return describeTerminalEnd(copyRaw(stream))
+	// No steerer is recorded for a member terminal, so nothing needs
+	// muting over its replay.
+	return describeTerminalEnd(copyRaw(stream, 0))
 }
 
 func terminalUsage() error {

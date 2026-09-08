@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -64,7 +65,9 @@ func TestHandoffAndWorkspaceTimeline(t *testing.T) {
 	}
 
 	// Ownership moved and the agent was never interrupted: the run is
-	// still running and the scheduler was not asked to do anything.
+	// still running, and the only thing the scheduler was asked for is the
+	// attribution bookkeeping - the outgoing owner joins the run's
+	// steerers, and its container's co-author list is rewritten.
 	moved, err := e.store.GetRun(ctx, e.run.ID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
@@ -75,8 +78,9 @@ func TestHandoffAndWorkspaceTimeline(t *testing.T) {
 	if moved.Status != domain.RunRunning {
 		t.Fatalf("status = %q, want running", moved.Status)
 	}
-	if calls := e.runs.Calls(); len(calls) != 0 {
-		t.Fatalf("handoff touched the agent: %v", calls)
+	want := fmt.Sprintf("handoff:%s:%s", e.run.ID, e.member.ID)
+	if calls := e.runs.Calls(); len(calls) != 1 || calls[0] != want {
+		t.Fatalf("handoff asked the scheduler for %v, want only %q", calls, want)
 	}
 
 	// Attribution follows the owner: the run now lists under Grace only.

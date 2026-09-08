@@ -206,7 +206,7 @@ func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 		}
 	}
 	if r.Worktree != "" {
-		if _, cerr := s.cfg.Git.CommitAll(ctx, r.ID, "wip: "+taskLine(r.Task)); cerr != nil {
+		if _, cerr := s.commitAll(ctx, r.ID, "wip: "+taskLine(r.Task)); cerr != nil {
 			slog.Warn("scheduler: wip commit during recovery", "run", r.ID, "error", cerr)
 		}
 		if _, perr := s.cfg.Git.PublishRunBranch(ctx, r.ID); perr != nil {
@@ -305,7 +305,7 @@ func (s *Scheduler) cleanupLeftoverContainer(ctx context.Context, cid runtime.ID
 
 func (s *Scheduler) didNotSurvive(ctx context.Context, r *domain.Run, cid runtime.ID) {
 	if r.Worktree != "" {
-		if _, cerr := s.cfg.Git.CommitAll(ctx, r.ID, "wip: "+taskLine(r.Task)); cerr != nil {
+		if _, cerr := s.commitAll(ctx, r.ID, "wip: "+taskLine(r.Task)); cerr != nil {
 			slog.Warn("scheduler: wip commit during recovery", "run", r.ID, "error", cerr)
 		}
 		if _, perr := s.cfg.Git.PublishRunBranch(ctx, r.ID); perr != nil {
@@ -359,21 +359,22 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		// The workspace comes off the run row, not the sidecar: a sidecar
 		// written by an older build has no workspace scope at all, and the
 		// row is the source of truth either way.
-		workspaceID:   r.WorkspaceID,
-		containerID:   runtime.ID(sc.ContainerID),
-		task:          r.Task,
-		memberID:      r.AccountMember(),
-		harness:       r.Harness,
-		status:        r.Status,
-		startedAt:     started,
-		paused:        sc.Paused,
-		killRequested: sc.KillRequested,
-		runUser:       sc.RunUser,
-		exitObserved:  sc.ExitObserved,
-		exitCode:      sc.ExitCode,
-		bridgeDigest:  sc.BridgeDigest,
-		bridgePath:    sc.BridgePath,
-		coordDir:      sc.CoordDir,
-		done:          make(chan struct{}),
+		workspaceID:    r.WorkspaceID,
+		containerID:    runtime.ID(sc.ContainerID),
+		task:           r.Task,
+		memberID:       r.AccountMember(),
+		harness:        r.Harness,
+		status:         r.Status,
+		startedAt:      started,
+		paused:         sc.Paused,
+		killRequested:  sc.KillRequested,
+		runUser:        sc.RunUser,
+		exitObserved:   sc.ExitObserved,
+		exitCode:       sc.ExitCode,
+		bridgeDigest:   sc.BridgeDigest,
+		bridgePath:     sc.BridgePath,
+		coordDir:       sc.CoordDir,
+		gitAuthorEmail: sc.GitAuthorEmail,
+		done:           make(chan struct{}),
 	}
 }

@@ -73,7 +73,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if code == 0 && !killed {
 		msg = "aether: "
 	}
-	if _, err := s.cfg.Git.CommitAll(ctx, entry.runID, msg+taskLine(entry.task)); err != nil {
+	if _, err := s.commitAll(ctx, entry.runID, msg+taskLine(entry.task)); err != nil {
 		slog.Warn("scheduler: commit results", "run", entry.runID, "error", err)
 	}
 	if _, err := s.cfg.Git.PublishRunBranch(ctx, entry.runID); err != nil {

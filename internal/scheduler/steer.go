@@ -67,7 +67,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		return nil
 	}
 	if r.Worktree != "" {
-		if _, cerr := s.cfg.Git.CommitAll(ctx, id, "wip: "+taskLine(r.Task)); cerr != nil {
+		if _, cerr := s.commitAll(ctx, id, "wip: "+taskLine(r.Task)); cerr != nil {
 			slog.Warn("scheduler: wip commit on kill", "run", id, "error", cerr)
 		}
 		if _, perr := s.cfg.Git.PublishRunBranch(ctx, id); perr != nil {
@@ -274,6 +274,7 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 		return err
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, message)
+	s.RecordSteer(ctx, run, actor)
 	return nil
 }
 

@@ -14,14 +14,14 @@ import (
 func init() {
 	register(command{
 		name:  "member",
-		short: "list, approve, color, change the role of, or remove members",
+		short: "list, approve, color, set the git identity of, change the role of, or remove members",
 		run:   runMember,
 	})
 }
 
 func runMember(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether member <list|approve|color|role|remove>")
+		return fmt.Errorf("usage: aether member <list|approve|color|git|role|remove>")
 	}
 	switch args[0] {
 	case "list":
@@ -38,6 +38,8 @@ func runMember(args []string) error {
 		return memberRemove(args[1])
 	case "color":
 		return memberColor(args[1:])
+	case "git":
+		return memberGit(args[1:])
 	case "role":
 		return memberRole(args[1:])
 	default:

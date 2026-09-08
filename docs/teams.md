@@ -93,16 +93,17 @@ aether member role 01m04mqes1z7wsdk4s90tx0pgg viewer
 set 01m04mqes1z7wsdk4s90tx0pgg dana to viewer
 ```
 
-`member list`, `member approve`, `member color`, `member role` and `member
-remove` are the member surface. Two rules hold no matter what you type. **The
-last admin can neither be removed nor demoted** - `refusing to delete the last
-admin` and `refusing to demote the last admin` - because a server with no admin
-has no way back. **A role change lands on connections that are already open**,
-not at next login: the role is re-read from the store on every request, so a
-demotion takes effect mid-session. A live write attach is re-checked every few
-seconds and dropped when steer goes away - `detached: you can no longer steer
-this run` - and `aether attach --read-only` still shows the terminal
-afterwards. Removing a member ends every attach and live sync of theirs.
+`member list`, `member approve`, `member color`, `member git`, `member role`
+and `member remove` are the member surface. Two rules hold no matter what you
+type. **The last admin can neither be removed nor demoted** - `refusing to
+delete the last admin` and `refusing to demote the last admin` - because a
+server with no admin has no way back. **A role change lands on connections
+that are already open**, not at next login: the role is re-read from the
+store on every request, so a demotion takes effect mid-session. A live write
+attach is re-checked every few seconds and dropped when steer goes away -
+`detached: you can no longer steer this run` - and `aether attach
+--read-only` still shows the terminal afterwards. Removing a member ends
+every attach and live sync of theirs.
 
 Setting someone to the role they already hold is a harmless no-op, and a
 pending member's role can be changed before they are approved - approval and
@@ -219,6 +220,7 @@ with git's `! [rejected] main -> main (fetch first)`:
 | `aether budget` | The workspace's spend cap and what has been used. |
 | `aether sync --live <local-dir> <run>` | Live-overlay a local directory onto a run's worktree. Local edits that collide are preserved as `*.aether-conflict` files. |
 | `aether forward <run-id|terminal> <port> [--local <port>]` | Forward a run or environment terminal port to loopback for callbacks such as agent OAuth. The local port defaults to the forwarded port. |
+| `aether member git [--name <name>] [--email <email>] [member-id]` | Show or set the name and email every commit made for that member is authored as. Members set their own; an admin can set anyone's. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. |
 
@@ -257,6 +259,47 @@ Every privileged act - steer, kill, approve, handoff, settings change - is
 stamped into the workspace timeline with the actor. A server update is
 stamped into every workspace's timeline, since it affects all of them.
 Permissive by default, always attributed.
+
+That attribution reaches git too. Each member has a git identity - the real
+name and email their commits are authored as - collected by the dashboard's
+onboarding wizard and shown or changed with `aether member git`. The agent
+in a run container commits with the identity of the member who launched it,
+baked into the container when it is created, and the commits Aether makes
+itself when a run finishes, is killed, or is recovered are authored as the
+run's current owner with Aether as the committer. A member who has set no
+identity keeps the fallback: their display name, or their member id when
+the display name cannot be a git author name, at `<member-id>@aether.local`,
+which maps to no upstream account.
+
+Whoever else steers a run is credited as a co-author of it. Steering is
+injecting a message or typing into the run's own agent terminal - a shell
+tab in the run's container is not steering - and it adds that member, once,
+to the run's steerers. Every commit Aether makes for the run then ends with
+one `Co-authored-by:` trailer per steerer, deduplicated by address, so two
+members sharing one address produce a single line. The run's own agent gets
+the same list in `/run/aether/co-authors` and is told in its task prompt to
+end its commits and pull requests with those lines - see
+[coordination.md](coordination.md). Aether's own commits credit everyone who
+steered the run; the file the agent reads credits everyone the run involves,
+its owner included, less the address that container already authors as. A
+handoff moves the roles the server still decides: the incoming owner becomes
+the author of Aether's own commits and the outgoing one joins the steerers.
+
+Two limits, both from one fact: a container's `GIT_AUTHOR_*` and
+`GIT_COMMITTER_*` are fixed when it is created, from the member who launched
+it, and never move while it lives. Changing a git identity while a run is
+live refreshes that run's `/run/aether/co-authors`, but the agent's own
+commits in that run keep the identity it started with; later runs use the
+new one. And after a handoff the agent's own commits are still authored as
+the outgoing owner, while Aether's end-of-run commits are authored as the
+current one - which is why the incoming owner is on the co-author list at
+all, and the outgoing one is not.
+
+One consequence worth naming: a member who changes their git identity while
+they own a live run is credited on that run's remaining agent commits under
+the new address, because the container is still authoring under the old one.
+The commits carry both addresses rather than losing the change, which is the
+useful answer.
 
 ### Conflict radar
 

@@ -17,6 +17,8 @@ test('a flagged file is left out and the rest of the profile imports', async ({
   const wizard = await OnboardingWizard.open(page, alice.url)
   await wizard.link.link(aether.server.addr, { name: 'Alice' })
   await wizard.link.continue().click()
+  // The git identity is optional and this scenario is not about it.
+  await wizard.gitIdentity.skip().click()
   await wizard.workspace.create('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()

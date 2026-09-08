@@ -370,6 +370,33 @@ func TestClosingTheGatewayStopsTheRebuild(t *testing.T) {
 	}
 }
 
+// Close has to outlast the rebuild it cancels, on a gateway that never
+// served as much as on one that did. The record of why a build stopped is
+// read back from a path that belongs to whoever is running when it lands,
+// so a Close that returns while the build goroutine is still reaping its
+// child leaves that answer to be written into the next gateway's directory
+// - or, in this binary, the next test's.
+func TestClosingAGatewayWithNoListenerWaitsForTheRebuild(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	stubRebuild(t, scriptBuild(t,
+		`printf '{"phase":"packaging"}\n'`+"\nexec sleep 120\n"), true)
+
+	if got := applyForRebuild(t, g); !got.Rebuilding {
+		t.Fatalf("apply = %+v, want a rebuild", got)
+	}
+	awaitPhase(t, g, localops.PhasePackaging)
+
+	if err := g.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Nothing waits here on purpose: the record has to be on disk by the
+	// time Close returns.
+	if got := localops.LastDesktopBuildError(); got != stoppedByQuit {
+		t.Fatalf("recorded error the moment Close returned = %q, want %q", got, stoppedByQuit)
+	}
+}
+
 // A second apply - another tab, or the app beside a browser tab - must not
 // exit a supervised gateway while the first build is still swapping the
 // app directory. It says a rebuild is running and leaves it alone.

@@ -1,9 +1,10 @@
 // The onboarding wizard: the quickstart's most error-prone stretch - link,
-// workspace, repo remote, agents, first run - as five steps. It exists only
-// where the gateway has this machine's SSH identity and filesystem, so the
-// whole route gates on the link.status local verb; a remote gateway gets an
-// empty state, not a broken wizard. Step and workspace choices persist so a
-// reload resumes where the user left off.
+// git identity, workspace, repo remote, agents, first run - as six steps. It
+// exists only where the gateway has this machine's SSH identity and
+// filesystem, so the whole route gates on the link.status local verb; a
+// remote gateway gets an empty state, not a broken wizard. Step and
+// workspace choices persist so a reload resumes where the user left off; the
+// step persists by name, so adding one does not move anyone mid-wizard.
 //
 // Navigation is two levels and nothing more: a step index, and a sub-screen
 // name owned by whichever step has one. Back closes the sub-screen first and
@@ -14,6 +15,7 @@ import { useState } from 'react'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { AgentsStep } from '@/routes/onboarding/agents-step'
+import { GitIdentityStep } from '@/routes/onboarding/git-identity-step'
 import {
   FirstRunStep,
   LinkStep,
@@ -23,14 +25,7 @@ import {
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
-
-const steps = [
-  'Link',
-  'Workspace',
-  'Repository',
-  'Agents',
-  'First run',
-] as const
+import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
@@ -42,15 +37,15 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const onboardingWorkspace = useStore((s) => s.onboardingWorkspace)
   const workspaces = useStore((s) => s.workspaces)
   const workspace = onboardingWorkspace ? workspaces[onboardingWorkspace] ?? null : null
-  const [step, setStepState] = useState(() =>
-    Math.max(
-      0,
-      Math.min(
-        steps.length - 1,
-        persistedStep >= 2 && !onboardingWorkspace ? 1 : persistedStep,
-      ),
-    ),
-  )
+  const [step, setStepState] = useState(() => {
+    const resume = onboardingStepIndex(persistedStep)
+    // Repository and everything past it need the workspace the wizard
+    // settled on; without one there is nothing to resume into.
+    return resume >= onboardingStepIndex('Repository') && !onboardingWorkspace
+      ? onboardingStepIndex('Workspace')
+      : resume
+  })
+  const current = onboardingSteps[step]
   // The harness the Agents step set up, so the first run starts on the one
   // that is actually logged in. Empty until a setup shell exits cleanly.
   const [setUpHarness, setSetUpHarness] = useState('')
@@ -60,7 +55,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const setStep = (next: number) => {
     setStepState(next)
     setSubStep('')
-    setOnboardingStep(next)
+    setOnboardingStep(onboardingSteps[next])
   }
 
   if (!caps.hasLocal('link.status')) {
@@ -80,10 +75,10 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title="Onboarding" subtitle={steps[step]} />
+      <ViewHeader title="Onboarding" subtitle={current} />
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         <ol aria-label="Steps" className="flex gap-2 text-xs">
-          {steps.map((label, i) => (
+          {onboardingSteps.map((label, i) => (
             <li
               key={label}
               aria-current={i === step ? 'step' : undefined}
@@ -98,13 +93,20 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           ))}
         </ol>
 
-        {step === 0 && (
+        {current === 'Link' && (
           <LinkStep
             client={client}
             onNext={(nextStep) => setStep(nextStep)}
           />
         )}
-        {step === 1 && (
+        {current === 'Git identity' && (
+          <GitIdentityStep
+            client={client}
+            caps={caps}
+            onNext={() => setStep(onboardingStepIndex('Workspace'))}
+          />
+        )}
+        {current === 'Workspace' && (
           <WorkspaceStep
             client={client}
             caps={caps}
@@ -112,19 +114,19 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
               upsertWorkspace(w)
               setOnboardingWorkspace(w.id)
               setActiveWorkspace(w.id)
-              setStep(2)
+              setStep(onboardingStepIndex('Repository'))
             }}
           />
         )}
-        {step === 2 && (
+        {current === 'Repository' && (
           <RepoStep
             client={client}
             caps={caps}
             workspace={workspace}
-            onNext={() => setStep(3)}
+            onNext={() => setStep(onboardingStepIndex('Agents'))}
           />
         )}
-        {step === 3 && (
+        {current === 'Agents' && (
           <AgentsStep
             client={client}
             caps={caps}
@@ -132,15 +134,15 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             setup={subStep}
             onSetup={setSubStep}
             onReady={setSetUpHarness}
-            onNext={() => setStep(4)}
+            onNext={() => setStep(onboardingStepIndex('First run'))}
           />
         )}
-        {step === 4 && (
+        {current === 'First run' && (
           <FirstRunStep
             client={client}
             workspace={workspace}
             defaultHarness={setUpHarness}
-            onBackToWorkspace={() => setStep(1)}
+            onBackToWorkspace={() => setStep(onboardingStepIndex('Workspace'))}
           />
         )}
 

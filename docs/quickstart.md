@@ -105,6 +105,20 @@ On first contact `aether` records the server's host key in `~/.ssh/known_hosts`
 (`%USERPROFILE%\.ssh\known_hosts` on Windows) and prints its fingerprint.
 Compare that against what the server printed if you care to.
 
+Then tell Aether who to put on your commits:
+
+```sh
+aether member git --name "Ada Lovelace" --email ada@example.com
+```
+
+Every commit an agent makes in your runs, and every commit Aether makes for
+them, is authored as that name and address, so branches you merge upstream
+credit your account. Without it the fallback is your display name at
+`<member-id>@aether.local`, which maps nowhere. The dashboard's onboarding
+wizard asks for the same two fields in its **Git identity** step, right after
+Link, prefilled from this machine's `git config user.name` and `user.email`.
+`aether member git` with no flags shows what is set.
+
 ## 4. Create a workspace and push your repo
 
 A **workspace** is the repo plus a server-owned scope for runs and shells.

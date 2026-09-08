@@ -231,8 +231,9 @@ func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceI
 	return e.branchExists(ctx, repo, branch)
 }
 
-// CommitAll stages and commits everything in the run's checkout with the
-// fixed Aether identity. Returns "", nil when the tree is clean.
+// CommitAll stages and commits everything in the run's checkout, authored
+// as author and committed as Aether. Returns "", nil when the tree is
+// clean; a zero author leaves Aether as both.
 //
 // The checkout - .git included - is agent-writable, so anything in it
 // that names a command to run is hostile input that must never execute
@@ -241,7 +242,7 @@ func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceI
 // worktree so a planted .gitattributes cannot select a clean filter, and
 // .git/info/attributes (which GIT_ATTR_SOURCE does not override) is
 // removed outright - it is plumbing no agent legitimately writes.
-func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string) (commit string, err error) {
+func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity) (commit string, err error) {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return "", err
@@ -272,9 +273,14 @@ func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string
 	if status == "" {
 		return "", nil
 	}
-	if _, err := git(
-		"-c", "user.name=Aether", "-c", "user.email=aether@localhost",
-		"commit", "-m", message); err != nil {
+	// The committer is Aether - this commit is the server's act - while the
+	// author is the member the run belongs to, so the branch credits a
+	// person. A run whose owner cannot be resolved keeps Aether as both.
+	args := []string{"-c", "user.name=Aether", "-c", "user.email=aether@localhost", "commit", "-m", message}
+	if author.Name != "" && author.Email != "" {
+		args = append(args, "--author="+author.String())
+	}
+	if _, err := git(args...); err != nil {
 		return "", err
 	}
 	return git("rev-parse", "HEAD")

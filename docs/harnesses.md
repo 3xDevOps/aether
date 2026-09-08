@@ -94,6 +94,13 @@ prompt is then dropped, so `opencode --prompt={task}` leaves whole rather than
 dangling an empty flag. Headless mode has no interactive surface, so it still
 requires a task.
 
+Where conflict coordination is on, the server appends the co-author rule to
+the task before substituting `{task}`, so the agent is told to read
+`/run/aether/co-authors` before each commit. Only the prompt the harness
+receives changes: the stored task, the branch slug, and every CLI and
+dashboard surface keep what the member typed. See
+[coordination.md](coordination.md).
+
 | Harness | tui | headless |
 | --- | --- | --- |
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions {task}` |

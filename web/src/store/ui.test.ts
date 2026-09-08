@@ -39,7 +39,7 @@ describe('workspace scope and route stay in sync', () => {
     useStore.setState({
       route: { name: 'onboarding', params: {} },
       onboarded: false,
-      onboardingStep: 4,
+      onboardingStep: 'Agents',
       onboardingWorkspace: 'wsp_1',
       onboardingRepo: {
         link: 'lnk_1',
@@ -56,7 +56,7 @@ describe('workspace scope and route stay in sync', () => {
     expect(useStore.getState()).toMatchObject({
       route: { name: 'board', params: {} },
       onboarded: true,
-      onboardingStep: 0,
+      onboardingStep: 'Link',
       onboardingWorkspace: '',
       onboardingRepo: null,
     })
@@ -65,7 +65,7 @@ describe('workspace scope and route stay in sync', () => {
     useStore.setState({
       route: { name: 'onboarding', params: {} },
       onboarded: false,
-      onboardingStep: 3,
+      onboardingStep: 'Repository',
       onboardingWorkspace: 'wsp_1',
     })
 
@@ -74,7 +74,7 @@ describe('workspace scope and route stay in sync', () => {
     expect(useStore.getState()).toMatchObject({
       route: { name: 'onboarding', params: {} },
       onboarded: false,
-      onboardingStep: 3,
+      onboardingStep: 'Repository',
       onboardingWorkspace: 'wsp_1',
     })
   })
@@ -150,7 +150,21 @@ describe('terminal dock heights', () => {
   })
 })
 
-describe('a persisted store from before the repository comparison', () => {
+// The resume point is persisted by name because a wizard grows steps.
+// Versions 0 and 1 wrote an index into a step list without "Git identity" in
+// it, so every one of those numbers has to keep meaning the step it named
+// then. Version 0 also wrote a Repository answer from before the comparison
+// states, which matches none of them and is dropped.
+describe('a persisted store from an older release', () => {
+  /** Rehydrates a fresh store from a payload written at version. */
+  function resumeFrom(version: number, onboardingStep: unknown): string {
+    window.localStorage.setItem(
+      'aether.ui',
+      JSON.stringify({ state: { onboardingStep }, version }),
+    )
+    return createRootStore().getState().onboardingStep
+  }
+
   it('drops the stale repository answer and keeps the other preferences', () => {
     // Version 0 stored a push result with no `state`: the Repository step
     // matches it against none of its states and renders a blank panel.
@@ -178,8 +192,95 @@ describe('a persisted store from before the repository comparison', () => {
     expect(migrated.onboardingRepo).toBeNull()
     expect(migrated.theme).toBe('dark')
     expect(migrated.activeWorkspace).toBe('wsp_2')
-    expect(migrated.onboardingStep).toBe(2)
+    expect(migrated.onboardingStep).toBe('Repository')
     expect(migrated.onboardingWorkspace).toBe('wsp_2')
+    window.localStorage.removeItem('aether.ui')
+  })
+
+  it('drops a version 1 repository answer, which carries no link id', () => {
+    // Version 1 already carried the comparison states but nothing to tell
+    // one connection from the next, so the step has to ask again.
+    window.localStorage.setItem(
+      'aether.ui',
+      JSON.stringify({
+        version: 1,
+        state: {
+          onboardingStep: 3,
+          onboardingRepo: {
+            workspace: 'wsp_2',
+            path: '/home/alice/code/myproject',
+            remote: { remote: 'aether', url: 'ssh://alice@host:2222/wsp_2' },
+            push: null,
+            fastForward: null,
+          },
+        },
+      }),
+    )
+
+    const migrated = createRootStore().getState()
+
+    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingRepo).toBeNull()
+    window.localStorage.removeItem('aether.ui')
+  })
+
+  it('keeps a version 2 repository answer while renaming its step', () => {
+    // Version 2 is the first shape this build can use as it stands, so only
+    // the step needs reading back.
+    const repo = {
+      link: 'lnk_1',
+      workspace: 'wsp_2',
+      path: '/home/alice/code/myproject',
+      remote: { remote: 'aether', url: 'ssh://alice@host:2222/wsp_2' },
+      push: null,
+      fastForward: null,
+    }
+    window.localStorage.setItem(
+      'aether.ui',
+      JSON.stringify({ version: 2, state: { onboardingStep: 3, onboardingRepo: repo } }),
+    )
+
+    const migrated = createRootStore().getState()
+
+    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingRepo).toEqual(repo)
+    window.localStorage.removeItem('aether.ui')
+  })
+
+  it('maps every old index to the step it named', () => {
+    for (const version of [0, 1, 2]) {
+      expect(resumeFrom(version, 0)).toBe('Link')
+      expect(resumeFrom(version, 1)).toBe('Workspace')
+      expect(resumeFrom(version, 2)).toBe('Repository')
+      expect(resumeFrom(version, 3)).toBe('Agents')
+      expect(resumeFrom(version, 4)).toBe('First run')
+    }
+  })
+
+  it('starts over on a value the wizard cannot place', () => {
+    expect(resumeFrom(0, 9)).toBe('Link')
+    expect(resumeFrom(0, -1)).toBe('Link')
+    expect(resumeFrom(0, 'Repository')).toBe('Link')
+    expect(resumeFrom(0, undefined)).toBe('Link')
+  })
+
+  it('runs the migrate on every version behind this one', () => {
+    // Zustand calls migrate only when the stored version is older than the
+    // configured one, so a payload seeded at the current version proves
+    // nothing about it. All three older versions stored an index, and each
+    // has to come back as the step it named.
+    expect(resumeFrom(0, 3)).toBe('Agents')
+    expect(resumeFrom(1, 3)).toBe('Agents')
+    expect(resumeFrom(2, 3)).toBe('Agents')
+    window.localStorage.removeItem('aether.ui')
+  })
+
+  it('leaves a payload at this version untouched', () => {
+    window.localStorage.setItem(
+      'aether.ui',
+      JSON.stringify({ state: { onboardingStep: 'Agents' }, version: 3 }),
+    )
+    expect(createRootStore().getState().onboardingStep).toBe('Agents')
     window.localStorage.removeItem('aether.ui')
   })
 })

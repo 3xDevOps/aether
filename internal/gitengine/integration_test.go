@@ -250,20 +250,30 @@ func TestCheckoutLifecycle(t *testing.T) {
 	}
 
 	// Clean tree: CommitAll is a no-op.
-	if noop, noopErr := e.CommitAll(ctx, "run1", "aether: noop"); noopErr != nil || noop != "" {
+	if noop, noopErr := e.CommitAll(ctx, "run1", "aether: noop", domain.GitIdentity{}); noopErr != nil || noop != "" {
 		t.Fatalf("clean CommitAll = (%q, %v), want (\"\", nil)", noop, noopErr)
 	}
 
-	// Dirty tree: wip commit with the fixed identity.
+	// Dirty tree: wip commit authored as the run owner, committed by Aether.
 	if writeErr := os.WriteFile(filepath.Join(checkout, "new.txt"), []byte("hi\n"), 0o644); writeErr != nil {
 		t.Fatal(writeErr)
 	}
-	commit, err := e.CommitAll(ctx, "run1", "wip: fix the auth bug")
+	owner := domain.GitIdentity{Name: "Ada Lovelace", Email: "ada@example.com"}
+	commit, err := e.CommitAll(ctx, "run1",
+		"wip: fix the auth bug\n\nCo-authored-by: Bob <bob@example.com>", owner)
 	if err != nil || len(commit) != 40 {
 		t.Fatalf("CommitAll = (%q, %v)", commit, err)
 	}
-	if author, _ := e.git(ctx, checkout, "log", "-1", "--format=%an <%ae>"); author != "Aether <aether@localhost>" {
-		t.Errorf("commit author = %q", author)
+	// The run owner is the author; Aether stays the committer, and the
+	// trailer rides in the message the scheduler assembled.
+	if author, _ := e.git(ctx, checkout, "log", "-1", "--format=%an <%ae>"); author != owner.String() {
+		t.Errorf("commit author = %q, want %q", author, owner)
+	}
+	if committer, _ := e.git(ctx, checkout, "log", "-1", "--format=%cn <%ce>"); committer != "Aether <aether@localhost>" {
+		t.Errorf("commit committer = %q", committer)
+	}
+	if body, _ := e.git(ctx, checkout, "log", "-1", "--format=%(trailers:key=Co-authored-by,valueonly)"); body != "Bob <bob@example.com>" {
+		t.Errorf("commit co-author trailer = %q", body)
 	}
 
 	// Publish makes the branch fetchable from the bare repo.
@@ -418,7 +428,7 @@ func TestAgentCannotRedirectPublish(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "hostile.txt"), []byte("pwned\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	hostile, err := e.CommitAll(ctx, "run1", "hostile")
+	hostile, err := e.CommitAll(ctx, "run1", "hostile", domain.GitIdentity{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +483,7 @@ func TestConcurrentRunsOneWorkspace(t *testing.T) {
 				errs <- err
 				return
 			}
-			if _, err := e.CommitAll(ctx, run, "aether: work"); err != nil {
+			if _, err := e.CommitAll(ctx, run, "aether: work", domain.GitIdentity{}); err != nil {
 				errs <- fmt.Errorf("%s commit: %w", run, err)
 				return
 			}
@@ -902,7 +912,7 @@ func publishRun(t *testing.T, e *Engine, ws domain.WorkspaceID, run domain.RunID
 	if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("wip\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.CommitAll(ctx, run, "wip"); err != nil {
+	if _, err := e.CommitAll(ctx, run, "wip", domain.GitIdentity{}); err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
 	tip, err = e.PublishRunBranch(ctx, run)
@@ -1000,7 +1010,7 @@ func TestServerRewriteKeepsOldTipInReflog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "rewritten.txt"), []byte("v2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	newTip, err := e.CommitAll(ctx, "run1", "rewritten")
+	newTip, err := e.CommitAll(ctx, "run1", "rewritten", domain.GitIdentity{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1109,5 +1119,46 @@ func TestDiffWatchPublishesCommitWithoutTreeEvent(t *testing.T) {
 	}
 	if payload.Commit != head {
 		t.Fatalf("published commit = %s, want %s", payload.Commit, head)
+	}
+}
+
+// A display name is member-supplied and never validated, and git reads the
+// first <...> in an author as the address. A name like
+// "Eve <attacker@evil.com>" would therefore author every commit of that
+// member's runs as an address they do not hold, and GitHub would link it to
+// whoever does. The identity falls back to the member id instead, which
+// credits nobody - the honest answer.
+func TestCommitAllRefusesAForgedDisplayName(t *testing.T) {
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	for i, displayName := range []string{
+		"Eve <attacker@evil.com>",
+		"Eve\nCo-authored-by: Eve <attacker@evil.com>",
+	} {
+		run := domain.RunID(fmt.Sprintf("forge%d", i))
+		checkout, _, err := e.CreateRunCheckout(ctx, "ws1", run, "main", "forged")
+		if err != nil {
+			t.Fatalf("CreateRunCheckout: %v", err)
+		}
+		if werr := os.WriteFile(filepath.Join(checkout, "new.txt"), []byte("hi\n"), 0o644); werr != nil {
+			t.Fatal(werr)
+		}
+		id := (&domain.Member{ID: "m_eve", DisplayName: displayName}).GitIdentity()
+		if _, cerr := e.CommitAll(ctx, run, "wip: forged\n\n"+id.Trailer(), id); cerr != nil {
+			t.Fatalf("CommitAll with display name %q: %v", displayName, cerr)
+		}
+		if got, _ := e.git(ctx, checkout, "log", "-1", "--format=%ae"); got != "m_eve@aether.local" {
+			t.Errorf("display name %q authored the commit as %q", displayName, got)
+		}
+		if got, _ := e.git(ctx, checkout, "log", "-1", "--format=%an"); got != "m_eve" {
+			t.Errorf("display name %q named the author %q", displayName, got)
+		}
+		trailer, _ := e.git(ctx, checkout, "log", "-1", "--format=%(trailers:key=Co-authored-by,valueonly)")
+		if trailer != "m_eve <m_eve@aether.local>" {
+			t.Errorf("display name %q produced the trailer %q", displayName, trailer)
+		}
 	}
 }

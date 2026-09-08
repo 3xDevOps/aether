@@ -22,8 +22,15 @@ type fakeCoordinator struct {
 	root string
 	err  error
 
-	mu       sync.Mutex
-	released []domain.RunID
+	// beforeWrite runs inside WriteCoAuthors, after the caller has read the
+	// steerers and before the list lands, which is the window a test can
+	// hold a writer in.
+	beforeWrite func()
+
+	mu             sync.Mutex
+	released       []domain.RunID
+	coAuthors      map[domain.RunID][]string
+	coAuthorWrites map[domain.RunID]int
 }
 
 func (f *fakeCoordinator) Provision(_ context.Context, run domain.RunID, _ []byte) (string, error) {
@@ -35,6 +42,36 @@ func (f *fakeCoordinator) Provision(_ context.Context, run domain.RunID, _ []byt
 		return "", err
 	}
 	return dir, nil
+}
+
+func (f *fakeCoordinator) WriteCoAuthors(run domain.RunID, trailers []string) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.beforeWrite != nil {
+		f.beforeWrite()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.coAuthors == nil {
+		f.coAuthors = make(map[domain.RunID][]string)
+		f.coAuthorWrites = make(map[domain.RunID]int)
+	}
+	f.coAuthors[run] = trailers
+	f.coAuthorWrites[run]++
+	return nil
+}
+
+func (f *fakeCoordinator) trailers(run domain.RunID) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.coAuthors[run]
+}
+
+func (f *fakeCoordinator) writes(run domain.RunID) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.coAuthorWrites[run]
 }
 
 func (f *fakeCoordinator) Release(run domain.RunID) error {

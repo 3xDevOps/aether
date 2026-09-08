@@ -311,15 +311,19 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	if derr := permissions.Check(permissions.Launch, actor, permissions.Target{}); derr != nil {
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own runs", recipient.DisplayName))
 	}
+	from := run.MemberID
 	if err := s.cfg.Store.TransferRun(ctx, run.ID, to); err != nil {
 		return nil, rpcError(err)
 	}
+	// The transfer is stamped before the credit it causes, so the feed
+	// reads in the order the two happened.
 	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
 		WorkspaceID: run.WorkspaceID,
 		RunID:       run.ID,
 		ActorID:     member,
 		Payload:     events.TimelinePayload{Kind: events.TimelineHandoff, Message: p.ToMemberID},
 	})
+	s.cfg.Runs.RecordHandoff(ctx, run.ID, from)
 	return struct{}{}, nil
 }
 

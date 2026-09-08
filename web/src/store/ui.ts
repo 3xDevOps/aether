@@ -42,6 +42,27 @@ export interface OnboardingRepo {
   fastForward: RepoFastForwardResult | null
 }
 
+/**
+ * The onboarding wizard's steps, in order. The resume point is persisted as
+ * one of these names rather than as a position, so inserting a step never
+ * relocates someone who is mid-wizard.
+ */
+export const onboardingSteps = [
+  'Link',
+  'Git identity',
+  'Workspace',
+  'Repository',
+  'Agents',
+  'First run',
+] as const
+
+export type OnboardingStep = (typeof onboardingSteps)[number]
+
+/** Where to resume; anything the wizard no longer knows starts over. */
+export function onboardingStepIndex(step: OnboardingStep): number {
+  return Math.max(0, onboardingSteps.indexOf(step))
+}
+
 export const minSidebarWidth = 200
 export const maxSidebarWidth = 520
 
@@ -52,7 +73,7 @@ export interface UiSlice {
   terminalDockHeight: number
   runDockHeight: number
   onboarded: boolean
-  onboardingStep: number
+  onboardingStep: OnboardingStep
   onboardingWorkspace: string
   onboardingRepo: OnboardingRepo | null
   /**
@@ -81,7 +102,7 @@ export interface UiSlice {
   setRunDockHeight: (height: number) => void
   toggleSidebar: () => void
   setOnboarded: (onboarded: boolean) => void
-  setOnboardingStep: (step: number) => void
+  setOnboardingStep: (step: OnboardingStep) => void
   setOnboardingWorkspace: (workspaceID: string) => void
   setOnboardingRepo: (repo: OnboardingRepo | null) => void
   setActiveWorkspace: (workspaceID: string) => void
@@ -100,7 +121,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   terminalDockHeight: 280,
   runDockHeight: 240,
   onboarded: false,
-  onboardingStep: 0,
+  onboardingStep: 'Link',
   onboardingWorkspace: '',
   onboardingRepo: null,
   activeWorkspace: '',
@@ -121,7 +142,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
       onboarded
         ? {
             onboarded: true,
-            onboardingStep: 0,
+            onboardingStep: 'Link',
             onboardingWorkspace: '',
             onboardingRepo: null,
           }
@@ -158,7 +179,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
       ...(s.route.name === 'onboarding' && name !== 'onboarding'
         ? {
             onboarded: true,
-            onboardingStep: 0,
+            onboardingStep: 'Link',
             onboardingWorkspace: '',
             onboardingRepo: null,
           }

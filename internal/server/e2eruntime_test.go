@@ -89,10 +89,20 @@ func (r *e2eRuntime) Create(_ context.Context, spec runtime.Spec) (runtime.ID, e
 	defer r.mu.Unlock()
 	r.seq++
 	id := runtime.ID(fmt.Sprintf("e2e-%d", r.seq))
+	// The task argument carries the server's own appendix behind a blank
+	// line, so a script matches the argument that is its task or starts
+	// with its task and a line break. Matching a bare prefix instead would
+	// let one key shadow another, and which one won would depend on map
+	// order.
 	var script func(*e2eContainer)
 	for _, arg := range spec.Command {
-		if fn, ok := r.scripts[arg]; ok {
-			script = fn
+		for task, fn := range r.scripts {
+			if arg == task || strings.HasPrefix(arg, task+"\n") {
+				script = fn
+				break
+			}
+		}
+		if script != nil {
 			break
 		}
 	}

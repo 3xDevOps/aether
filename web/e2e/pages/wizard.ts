@@ -10,6 +10,7 @@ import { expect, type Locator, type Page } from '@playwright/test'
 /** The step labels the wizard's header lists, in order. */
 export const stepNames = [
   'Link',
+  'Git identity',
   'Workspace',
   'Repository',
   'Agents',
@@ -51,6 +52,24 @@ export class LinkStep extends Step {
 
   continue(): Locator {
     return this.button('Continue')
+  }
+}
+
+export class GitIdentityStep extends Step {
+  constructor(page: Page) {
+    super(page, 'Git identity')
+  }
+
+  /** Fills the identity in and saves it, which also moves the wizard on. */
+  async save(name: string, email: string): Promise<void> {
+    await this.section.getByLabel('Name', { exact: true }).fill(name)
+    await this.section.getByLabel('Email', { exact: true }).fill(email)
+    await this.button('Save').click()
+  }
+
+  /** Moves on without one, leaving the server's fallback in place. */
+  skip(): Locator {
+    return this.button('Skip')
   }
 }
 
@@ -191,6 +210,7 @@ export class FirstRunStep extends Step {
 
 export class OnboardingWizard {
   readonly link: LinkStep
+  readonly gitIdentity: GitIdentityStep
   readonly workspace: WorkspaceStep
   readonly repository: RepositoryStep
   readonly agents: AgentsStep
@@ -198,6 +218,7 @@ export class OnboardingWizard {
 
   constructor(readonly page: Page) {
     this.link = new LinkStep(page)
+    this.gitIdentity = new GitIdentityStep(page)
     this.workspace = new WorkspaceStep(page)
     this.repository = new RepositoryStep(page)
     this.agents = new AgentsStep(page)

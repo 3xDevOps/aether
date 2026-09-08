@@ -675,12 +675,13 @@ verbatim; server refusals stay verbatim.
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the guided first-run path, five steps: Link,
-Workspace, Repository, Agents, First run. It renders only where the gateway
-serves the client-machine verbs (the capability descriptor lists
+`src/routes/onboarding/` is the guided first-run path, six steps: Link, Git
+identity, Workspace, Repository, Agents, First run. It renders only where the
+gateway serves the client-machine verbs (the capability descriptor lists
 `link.status`); a remote monitor gets an explanatory empty state instead of a
 broken wizard. Link, Workspace, Repository and First run live in `steps.tsx`;
-Agents is `agents-step.tsx` with its second half in `profile-import.tsx`.
+Git identity is `git-identity-step.tsx`, and Agents is `agents-step.tsx` with
+its second half in `profile-import.tsx`.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
 whichever step has sub-screens. The Agents step's setup screen is the only
@@ -688,6 +689,14 @@ one today, and the wizard holds it, so **Back** closes an open sub-screen
 first and leaves the step only from the step's own screen. A step with
 sub-screens takes them as `setup` and `onSetup` rather than keeping them in
 its own state.
+
+The Git identity step collects the name and email the member's commits are
+authored as, saved on the server with `member.git`. Where the gateway serves
+`git.identity` it prefills them from this machine's own `git config`, without
+overwriting a field the user has typed in; what the member already saved wins
+over both. **Skip** moves on and leaves the server's fallback in place, so the
+step never blocks the wizard. See [teams.md](teams.md) for what the identity
+does once it is set.
 
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
@@ -741,16 +750,24 @@ repo with **Use a different repository** to go back to the form, prefilled
 with the old path; a blank form there would ask again for a remote that
 already exists.
 
-The UI slice persists the current step, the selected workspace and the
-connected repository. The persisted state is versioned: version 0 stored a
-push answer from before the comparison, which matches none of the four
-states, so the migration drops `onboardingRepo` and leaves the other
-preferences alone rather than rehydrating a blank panel. Hydration reads
-`link.status` first: a linked local gateway is marked onboarded before the
-redirect decision, so a linked machine never re-enters onboarding after a fresh
-GUI launch. An unlinked local gateway still routes here when `onboarded` is
-false. Completing the final step or navigating elsewhere marks the UI onboarded
-and clears that wizard state.
+The UI slice persists the resume point, the selected workspace and the
+connected repository. The step is stored by name rather than by position, so
+inserting a step - as "Git identity" was - never relocates someone who is
+mid-wizard. The persisted state is versioned, and one migration in
+`web/src/store/index.ts` covers every older shape: versions 0 through 2 stored
+the resume point as an index, so those numbers are read back as the steps they
+named, and versions 0 and 1 stored a Repository answer this build cannot use -
+version 0's predates the comparison states and version 1's carries no link id -
+so it is dropped rather than rehydrating a blank panel. Anything it cannot
+place starts over. Repository is where the workspace first becomes
+load-bearing, so resuming onto it or any later step without one falls back to
+the workspace picker; the steps before it resume where they were.
+
+Hydration reads `link.status` first: a linked local gateway is marked
+onboarded before the redirect decision, so a linked machine never re-enters
+onboarding after a fresh GUI launch. An unlinked local gateway still routes
+here when `onboarded` is false. Completing the final step or navigating
+elsewhere marks the UI onboarded and clears that wizard state.
 
 The Link step distinguishes no configured server, a server with no repository,
 and a fully linked server. It refreshes on Retry and when the window regains
@@ -997,14 +1014,29 @@ denied, the confirmation an admin must clear before giving up their own admin
 role, and a non-admin getting the same roster as read-only text with no admin
 verbs - which the sidebar and the palette match by keeping Members reachable
 behind the narrow remote allowlist while every other admin entry stays
-hidden. The onboarding wizard walks all five steps against the stub API, and
+hidden. The onboarding wizard walks all six steps against the stub API, and
 covers what navigation must not lose: Back leaving the Agents setup screen
 before it leaves the step, and the Repository step still showing its
 connected clone and push result after a walk away and back. The Repository
 step also covers each comparison state: which command is the copyable one in
-each, the fast-forward reporting a dirty tree it did not touch and keeping
-both git outputs, and a version-0 persisted store dropping its stale push
-answer and nothing else. The
+each, and the fast-forward reporting a dirty tree it did not touch while
+keeping both git outputs. The Git identity step covers the prefill from this
+machine and the save that advances, the member's own saved identity winning
+over the machine's, a refusal rendered verbatim with the wizard staying put,
+the skip, the identity still shown when the user walks back in, a machine
+with no identity to read, a gateway that does not speak `git.identity`,
+typing that survives a late prefill, a field cleared on purpose staying
+empty, the refusal to save half an identity, and a server-info refresh
+landing mid-save without losing either change. The persisted resume point is
+covered from both sides: in the store, a version 0 payload losing its stale
+push answer and nothing else, a version 1 payload losing an answer with no
+link id, a version 2 payload keeping its answer while its step is renamed,
+every old index mapping to the step it named at every version behind this
+one, an unplaceable value starting over, and a payload at this version left
+untouched; in the wizard, every step from Repository on falling back to the
+workspace picker when no workspace survived, the steps before it resuming
+where they were, and a resumed Repository step holding its connected clone
+through a walk back to Workspace and a walk forward past Git identity. The
 Agents step tests setup-capable harness detection, the live terminal dock,
 the environment save that follows a confirmed install, profile previews and
 exclusions, profile recommendations, cancellation,

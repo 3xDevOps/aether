@@ -42,6 +42,11 @@ const (
 	// the agent at. Its content belongs to the harness registry; this
 	// package owns only where it lives and that it is read-only.
 	ConfigName = "mcp.json"
+	// CoAuthorsName holds the Co-authored-by trailers the agent appends to
+	// its commits, one per member other than the owner who has steered the
+	// run. It is rewritten whenever that set grows, so an agent reads it
+	// again before each commit rather than caching it.
+	CoAuthorsName = "co-authors"
 )
 
 // wireSocketNames are the socket names this server serves, one per
@@ -135,6 +140,60 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, config []byte
 		return "", err
 	}
 	return dir, nil
+}
+
+// WriteCoAuthors replaces the run's co-author list with one trailer per
+// line. The file is read-only to the container like the harness config:
+// the agent copies these lines into its commits, it does not decide who is
+// on them. Writing for a run that was never provisioned is an error, not a
+// silent no-op - the caller would otherwise believe the agent was told.
+//
+// Unlike the harness config this is rewritten while the container is live,
+// and the agent is told to read it before every commit, so the replacement
+// is a rename over the old name: a reader either gets the whole previous
+// list or the whole new one, never a missing path.
+func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
+	if s.cfg.Disabled {
+		return ErrDisabled
+	}
+	dir, err := s.runDir(run)
+	if err != nil {
+		return err
+	}
+	var body []byte
+	if len(trailers) > 0 {
+		body = []byte(strings.Join(trailers, "\n") + "\n")
+	}
+	path := filepath.Join(dir, CoAuthorsName)
+	tmp, err := os.CreateTemp(dir, "."+CoAuthorsName+"-*")
+	if err != nil {
+		return fmt.Errorf("coord: write %s: %w", path, err)
+	}
+	werr := os.WriteFile(tmp.Name(), body, configMode)
+	if werr == nil {
+		werr = tmp.Close()
+	} else {
+		_ = tmp.Close()
+	}
+	// CreateTemp opens at 0600 and WriteFile keeps an existing file's mode,
+	// so the container-readable mode is set explicitly before the rename.
+	if werr == nil {
+		werr = os.Chmod(tmp.Name(), configMode)
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), path)
+	}
+	if werr != nil {
+		// A temp file left behind is visible to the agent in the mount
+		// beside the list it is told to read, so a cleanup that fails is
+		// worth saying out loud even though the write error is what the
+		// caller gets.
+		if rerr := os.Remove(tmp.Name()); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+			slog.Warn("coord: remove co-author temp file", "path", tmp.Name(), "error", rerr)
+		}
+		return fmt.Errorf("coord: write %s: %w", path, werr)
+	}
+	return nil
 }
 
 // Release stops the run's listeners, removes its coordination directory,

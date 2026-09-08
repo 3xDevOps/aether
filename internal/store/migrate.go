@@ -664,6 +664,17 @@ CREATE TABLE account_shares (
 );
 CREATE INDEX idx_account_shares_grantee ON account_shares(grantee_member_id);
 `,
+	// v22: per-member git identity, and the set of members other than the
+	// owner who steered a run - the co-authors its commits credit.
+	`
+ALTER TABLE members ADD COLUMN git_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE members ADD COLUMN git_email TEXT NOT NULL DEFAULT '';
+CREATE TABLE run_steerers (
+	run_id    TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	PRIMARY KEY (run_id, member_id)
+);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

@@ -29,14 +29,17 @@ import (
 // would finalize the run instead of coming back to running. "finish" is the
 // disk scenario's way of ending a run cleanly.
 //
-// The run's task arrives as $1, and deafTask selects the hung agent the
-// stall scenario's second half needs: it never reads stdin and never
-// writes, so a steer lands on a process that cannot answer.
+// The run's task arrives as $1 with the server's co-author rule appended to
+// it, so the dispatch matches on the task prefix. deafTask selects the hung
+// agent the stall scenario's second half needs: it never reads stdin and
+// never writes, so a steer lands on a process that cannot answer.
 const pressureAgent = `sleep 1
 echo agent-ready
-if [ "$1" = "hang on me" ]; then
+case "$1" in
+"hang on me"*)
   while :; do sleep 60; done
-fi
+  ;;
+esac
 while read line; do
   echo "got:$line"
   if [ "$line" = "finish" ]; then
