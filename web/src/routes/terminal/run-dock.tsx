@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Dock } from '@/components/dock'
+import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
@@ -35,7 +36,7 @@ export function RunDock({ runID }: { runID: string }) {
   activeTabRef.current = activeTab
   const terminalRef = useRef<XtermController['terminal']>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
-  const { hostRef, terminal } = useXterm({
+  const controller = useXterm({
     enabled: activeTab !== null && !dock.collapsed && dock.refusedMessage === null,
     onData: (data) => {
       if (gate.current.muted()) return
@@ -47,6 +48,7 @@ export function RunDock({ runID }: { runID: string }) {
       if (tab) getShellSocket(runID, tab)?.resize(cols, rows)
     },
   })
+  const terminal = controller.terminal
   terminalRef.current = terminal
 
   useEffect(() => {
@@ -130,7 +132,7 @@ export function RunDock({ runID }: { runID: string }) {
           </Button>
         </div>
       ) : (
-        <div ref={hostRef} className="h-full min-h-0 bg-background p-2 text-foreground" />
+        <TerminalPane controller={controller} />
       )}
     </Dock>
   )

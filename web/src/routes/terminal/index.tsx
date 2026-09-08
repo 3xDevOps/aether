@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { RunActions } from '@/components/run-actions'
+import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
@@ -45,7 +46,7 @@ function TerminalView({ params }: RouteProps) {
   // reattach without re-running the terminal's own effect.
   const writeRef = useRef(state.write)
   writeRef.current = state.write
-  const { hostRef, terminal } = useXterm({
+  const controller = useXterm({
     enabled: known,
     onData: (data) => {
       if (!gate.current.muted()) attachRef.current?.send(data)
@@ -62,6 +63,7 @@ function TerminalView({ params }: RouteProps) {
       )
     },
   })
+  const terminal = controller.terminal
   terminalRef.current = terminal
   useEffect(() => {
     if (!terminal) return
@@ -160,7 +162,7 @@ function TerminalView({ params }: RouteProps) {
         )}
       </div>
       <div className="min-h-0 flex-1">
-        <div ref={hostRef} className="h-full min-h-0 bg-background p-2 text-foreground" />
+        <TerminalPane controller={controller} />
       </div>
       <RunDock runID={runID} />
     </div>

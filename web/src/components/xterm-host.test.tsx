@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { render, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { SearchAddon } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
+import { TerminalPane } from '@/components/terminal-pane'
 import { useXterm } from '@/components/xterm-host'
 import { defaultTerminalFontSize } from '@/lib/term-font'
 import { connectAttach } from '@/routes/terminal/attach'
@@ -127,9 +129,10 @@ describe('xterm host arrival', () => {
   })
 })
 
-function KeyProbe() {
-  const { hostRef } = useXterm()
-  return <div ref={hostRef} />
+/** The pane as the three terminal surfaces render it. */
+function PaneProbe() {
+  const controller = useXterm()
+  return <TerminalPane controller={controller} />
 }
 
 /**
@@ -137,9 +140,9 @@ function KeyProbe() {
  * so the shortcuts are exercised through that handler rather than through a
  * DOM event on the host element.
  */
-async function mountKeys(): Promise<(ev: KeyboardEvent) => boolean> {
+async function mountPane(): Promise<(ev: KeyboardEvent) => boolean> {
   const attachHandler = vi.spyOn(Terminal.prototype, 'attachCustomKeyEventHandler')
-  render(<KeyProbe />)
+  render(<PaneProbe />)
   await waitFor(() => expect(attachHandler).toHaveBeenCalled())
   const handler = attachHandler.mock.calls[0][0]
   attachHandler.mockRestore()
@@ -156,7 +159,7 @@ describe('terminal shortcuts', () => {
   })
 
   it('zooms every terminal through the shared preference', async () => {
-    const handler = await mountKeys()
+    const handler = await mountPane()
 
     expect(handler(key({ code: 'Equal', ctrlKey: true }))).toBe(false)
     expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize + 1)
@@ -167,5 +170,39 @@ describe('terminal shortcuts', () => {
 
     handler(key({ code: 'Digit0', ctrlKey: true }))
     expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize)
+  })
+
+  it('finds through the search addon and closes on Escape', async () => {
+    const findNext = vi.spyOn(SearchAddon.prototype, 'findNext').mockReturnValue(true)
+    const findPrevious = vi.spyOn(SearchAddon.prototype, 'findPrevious').mockReturnValue(true)
+    const handler = await mountPane()
+
+    expect(handler(key({ code: 'KeyF', ctrlKey: true, shiftKey: true }))).toBe(false)
+    const input = await screen.findByLabelText('Find in terminal')
+
+    fireEvent.change(input, { target: { value: 'panic' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(findNext).toHaveBeenCalledWith('panic', { incremental: true })
+
+    fireEvent.click(screen.getByLabelText('Find previous'))
+    expect(findPrevious).toHaveBeenCalledWith('panic')
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByLabelText('Find in terminal')).toBeNull())
+    findNext.mockRestore()
+    findPrevious.mockRestore()
+  })
+
+  it('says so when the term is nowhere in the scrollback', async () => {
+    const findNext = vi.spyOn(SearchAddon.prototype, 'findNext').mockReturnValue(false)
+    const handler = await mountPane()
+    handler(key({ code: 'KeyF', ctrlKey: true, shiftKey: true }))
+
+    const input = await screen.findByLabelText('Find in terminal')
+    fireEvent.change(input, { target: { value: 'nothing here' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(await screen.findByText('No matches')).toBeDefined()
+    findNext.mockRestore()
   })
 })

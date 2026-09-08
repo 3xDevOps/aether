@@ -1,8 +1,9 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import {
   defaultTerminalFontSize,
@@ -32,6 +33,10 @@ export interface XtermController {
   hostRef: React.RefCallback<HTMLDivElement>
   terminal: Terminal | null
   ready: boolean
+  /** Backs the find bar `TerminalPane` draws over this terminal. */
+  search: SearchAddon | null
+  findOpen: boolean
+  setFindOpen: (open: boolean) => void
 }
 
 function rgba(color: string, alpha: number): string | undefined {
@@ -134,6 +139,8 @@ export function useXterm({
   const onResizeRef = useRef(onResize)
   const onLinkRef = useRef(onLink)
   const [terminal, setTerminal] = useState<Terminal | null>(null)
+  const [search, setSearch] = useState<SearchAddon | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
   // Zoom is one preference across every terminal, so it comes from the store
   // rather than from each caller.
   const fontSize = useStore((s) => s.terminalFontSize)
@@ -170,12 +177,14 @@ export function useXterm({
       const fit = new FitAddon()
       created.loadAddon(fit)
       created.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)))
+      const searchAddon = new SearchAddon()
+      created.loadAddon(searchAddon)
       created.open(host)
       fitRef.current = fit
 
-      // xterm keeps a single custom key handler, so zoom and the clipboard
-      // shortcuts are one chain: the first to claim the event stops it
-      // reaching the shell.
+      // xterm keeps a single custom key handler, so zoom, find and the
+      // clipboard shortcuts are one chain: the first to claim the event stops
+      // it reaching the shell.
       const clipboard = clipboardKeys(created)
       created.attachCustomKeyEventHandler((ev) => {
         if (ev.type !== 'keydown') return clipboard(ev)
@@ -188,6 +197,11 @@ export function useXterm({
               ? defaultTerminalFontSize
               : terminalFontSize + (zoom === 'in' ? 1 : -1),
           )
+          return false
+        }
+        if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyF') {
+          ev.preventDefault()
+          setFindOpen(true)
           return false
         }
         return clipboard(ev)
@@ -214,6 +228,7 @@ export function useXterm({
         fitRef.current = null
       }
       setTerminal(created)
+      setSearch(searchAddon)
     })
 
     return () => {
@@ -222,6 +237,8 @@ export function useXterm({
       teardown?.()
       created.dispose()
       setTerminal(null)
+      setSearch(null)
+      setFindOpen(false)
     }
   }, [enabled, host])
 
@@ -234,5 +251,22 @@ export function useXterm({
     onResizeRef.current?.(terminal.cols, terminal.rows)
   }, [fontSize, terminal])
 
-  return { hostRef: setHost, terminal, ready: terminal !== null }
+  // Closing the find bar hands the keyboard back to the shell; the match it
+  // selected stays selected, so it can still be copied.
+  const changeFind = useCallback(
+    (open: boolean) => {
+      setFindOpen(open)
+      if (!open) terminal?.focus()
+    },
+    [terminal],
+  )
+
+  return {
+    hostRef: setHost,
+    terminal,
+    ready: terminal !== null,
+    search,
+    findOpen,
+    setFindOpen: changeFind,
+  }
 }
