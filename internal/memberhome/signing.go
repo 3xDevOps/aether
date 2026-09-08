@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"golang.org/x/crypto/ssh"
 
@@ -119,18 +120,11 @@ func installPublicKey(root *os.Root, line string) error {
 // through the open descriptor so a symlink swapped in mid-call cannot
 // take the chmod somewhere else.
 func restrictKey(root *os.Root) error {
-	f, err := root.OpenFile(signingKeyName, os.O_RDONLY, 0)
+	f, info, err := openRegular(root, signingKeyName)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a regular file", signingKeyName)
-	}
 	if info.Mode().Perm() == 0o600 {
 		return nil
 	}
@@ -271,9 +265,10 @@ func (m *Manager) openHome(member domain.MemberID) (*os.Root, error) {
 
 // readRegularFile returns the contents of name, nil when it is absent,
 // and an error when it exists as anything but a regular file or holds
-// more than limit bytes. The type check and the size check are both made
+// more than limit bytes. The Lstat refuses a symlink, which openRegular
+// would follow inside the home; the type and size checks are then made
 // on the open descriptor so the file that was read is the file that was
-// checked; the LimitReader then bounds a file that grows between the
+// checked, and the LimitReader bounds a file that grows between the
 // fstat and the read.
 func readRegularFile(root *os.Root, name string, limit int64) ([]byte, error) {
 	link, err := root.Lstat(name)
@@ -286,22 +281,37 @@ func readRegularFile(root *os.Root, name string, limit int64) ([]byte, error) {
 	if !link.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s is not a regular file", name)
 	}
-	f, err := root.OpenFile(name, os.O_RDONLY, 0)
+	f, info, err := openRegular(root, name)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", name)
-	}
 	if info.Size() > limit {
 		return nil, fmt.Errorf("%s is %d bytes, over the %d byte limit", name, info.Size(), limit)
 	}
 	return io.ReadAll(io.LimitReader(f, limit))
+}
+
+// openRegular opens name for reading and refuses anything but a regular
+// file, judged on the descriptor. The open is non-blocking because a
+// container can swap the file for a FIFO between any path check and the
+// open, and a blocking open of a FIFO with no writer never returns; the
+// flag is harmless for the regular file this is meant to find.
+func openRegular(root *os.Root, name string) (*os.File, fs.FileInfo, error) {
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("%s is not a regular file", name)
+	}
+	return f, info, nil
 }
 
 // ensureDir creates name unless it already exists as a directory;
