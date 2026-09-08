@@ -24,6 +24,17 @@ func git(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// worktreePath is the path git prints for a worktree, asked of git
+// itself. Rebuilding it from what Go was handed is not portable: on
+// Windows git prints forward slashes and the long name of a temp
+// directory Go names in its 8.3 short form (RUNNER~1), and on macOS it
+// prints the path behind the /var symlink. Both sides of the comparison
+// are then git's own spelling, whatever the platform.
+func worktreePath(t *testing.T, dir string) string {
+	t.Helper()
+	return git(t, dir, "rev-parse", "--show-toplevel")
+}
+
 // requireGit skips when git is not installed.
 func requireGit(t *testing.T) {
 	t.Helper()
@@ -241,7 +252,8 @@ func TestPullRefusesARunBranchHeldByAnotherWorktree(t *testing.T) {
 	if err == nil {
 		t.Fatal("pull moved a branch another worktree has checked out")
 	}
-	if !strings.Contains(err.Error(), other) || !strings.Contains(err.Error(), "merge --ff-only") {
+	held := worktreePath(t, other)
+	if !strings.Contains(err.Error(), held) || !strings.Contains(err.Error(), "merge --ff-only") {
 		t.Fatalf("message does not name the worktree and the fix: %q", err)
 	}
 	// One refusal, not git's two failed attempts pasted together.

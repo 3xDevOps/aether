@@ -138,6 +138,11 @@ type heldWorktree struct {
 // branch name may legally carry `$`, `;` and parentheses, which git's own
 // ref rules allow and a shell does not ignore. The path in the opening
 // sentence is prose rather than a command, so it stays bare.
+//
+// Both paths keep the spelling git gave them, which on Windows means
+// forward slashes (`C:/Users/...`) rather than the platform's backslashes.
+// That is the form to print: git accepts it back on every platform, and a
+// backslash is an escape character to the shell the member pastes into.
 func (h heldWorktree) refusal(repo, branch string) string {
 	msg := branch + " is checked out in the worktree at " + h.path +
 		"; git will not move a branch from outside the worktree that holds it. "

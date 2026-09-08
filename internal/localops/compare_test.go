@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -342,7 +343,8 @@ func TestFastForwardRefusesABranchHeldByAnotherWorktree(t *testing.T) {
 	if !errors.Is(err, ErrPushPrecondition) {
 		t.Fatalf("err = %v, want a precondition refusal", err)
 	}
-	if !strings.Contains(err.Error(), other) || !strings.Contains(err.Error(), "main") {
+	if held := worktreePath(t, other); !strings.Contains(err.Error(), held) ||
+		!strings.Contains(err.Error(), "main") {
 		t.Fatalf("message names neither the worktree nor the branch: %q", err)
 	}
 	// Nothing was created here, so the message must not blame branch
@@ -394,6 +396,9 @@ func TestFastForwardNamesPruneForAWorktreeGitLost(t *testing.T) {
 // listing across lines. The refusal has to name the whole path.
 func TestFastForwardNamesAWorktreePathWithANewline(t *testing.T) {
 	requireGit(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("a newline is not a legal character in a Windows path, so the fixture cannot be created")
+	}
 	clone, remote, _ := seededClone(t)
 	advance(t, remote)
 	git(t, clone, "switch", "-c", "feature")
