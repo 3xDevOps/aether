@@ -9,6 +9,7 @@ import (
 
 	cliprofile "github.com/3xDevOps/Aether/internal/cli/profile"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 func init() {
@@ -80,7 +81,7 @@ func profilePush(args []string) error {
 		// retyped.
 		if s.Reason == cliprofile.ExcludeVendoredSecret {
 			fmt.Printf("  to send it anyway: aether profile push --agent %s --allow-secret %s --workspace <workspace>\n",
-				*agent, s.Path)
+				*agent, shellquote.Quote(s.Path))
 		}
 	}
 	if flagged := cliprofile.UnacknowledgedSecrets(root, skipped, skip); len(flagged) > 0 {
@@ -151,9 +152,9 @@ func secretRefusal(harnessName string, flagged []cliprofile.Exclusion) error {
 	b.WriteString(head)
 	for _, f := range flagged {
 		fmt.Fprintf(&b, "\n  %s: %s", f.Path, f.Detail)
-		fmt.Fprintf(&b, "\n    leave it out:   aether profile push --agent %s --skip-secret %s", harnessName, f.Path)
+		fmt.Fprintf(&b, "\n    leave it out:   aether profile push --agent %s --skip-secret %s", harnessName, shellquote.Quote(f.Path))
 		fmt.Fprintf(&b, "\n    send it anyway: aether profile push --agent %s --allow-secret %s --workspace <workspace>",
-			harnessName, f.Path)
+			harnessName, shellquote.Quote(f.Path))
 	}
 	return errors.New(b.String())
 }

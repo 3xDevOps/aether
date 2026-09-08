@@ -550,6 +550,35 @@ describe('agents step', () => {
     ).toBeDefined()
   })
 
+  it('quotes a flagged path so the printed command stays one argument', async () => {
+    // The member pastes this command into a shell. A space in the path
+    // would split it into two arguments and push the wrong file.
+    const client = fakeApi({
+      localProfilePreview: vi.fn(async (harness: string) =>
+        harness === 'claude'
+          ? profilePreview({
+              excluded: [
+                {
+                  path: 'skills/deploy notes/README.md',
+                  reason: 'secret',
+                  detail: 'secret detected (curl-auth-header) at 12:2',
+                },
+              ],
+              excluded_total: 1,
+            })
+          : profilePreview({ harness, present: false, files: 0, bytes: 0 }),
+      ),
+    })
+    renderStep(client)
+    await look()
+
+    expect(
+      await screen.findByText(
+        `aether profile push --agent claude --allow-secret 'skills/deploy notes/README.md' --workspace ${workspace.id}`,
+      ),
+    ).toBeDefined()
+  })
+
   it('names a plugin-tree finding by where it lives and still imports', async () => {
     // A plugin ships its own test fixtures, and one of them holding a
     // secret-shaped string is nothing the user can fix in their own

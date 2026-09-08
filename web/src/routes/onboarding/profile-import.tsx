@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { friendly, formatBytes, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { ApiError, type Api, type EnvScanSession } from '@/lib/api'
+import { shellQuote } from '@/lib/shell'
 import type {
   EnvScanStatus,
   HarnessStatus,
@@ -479,7 +480,7 @@ function ProfileRow({
   // it, so there is always at least one.
   const allowSecret = own.entries
     .slice(0, maxNamed)
-    .map((e) => `--allow-secret ${e.path}`)
+    .map((e) => `--allow-secret ${shellQuote(e.path)}`)
     .join(' ')
 
   return (
