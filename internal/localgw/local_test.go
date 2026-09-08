@@ -20,6 +20,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/overlay"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 // verbStubBackend fakes the linked server for /local/v1 handler tests:
@@ -180,13 +181,9 @@ func newVerbGateway(t *testing.T, backend Backend, cfg cli.Config) *Gateway {
 }
 
 // useTempConfigDir points cli.Save/cli.Load at a scratch config directory.
-// Both variables are needed because os.UserConfigDir reads different
-// environment variables on Unix and Windows.
 func useTempConfigDir(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("AppData", dir)
+	testhome.Isolate(t)
 }
 
 func saveConfigAt(t *testing.T, cfg cli.Config, mtime time.Time) {

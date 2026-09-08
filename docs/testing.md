@@ -25,6 +25,18 @@ Layers, per the design spec's testing strategy:
   person walks in the dashboard, which no Go test and no jsdom test
   reaches. CI runs them in the `dashboard-e2e` job.
 
+## Local configuration in tests
+
+Tests that read or write the linked-server config through `cli.Load`,
+`cli.Save`, or gateway handlers must call `internal/testhome.Isolate(t)`.
+It sets `AETHER_CONFIG_DIR`, the platform home/config variables, and clears
+`SSH_AUTH_SOCK`. Setting only `XDG_CONFIG_HOME` and `AppData` leaves the real
+macOS config at `~/Library/Application Support/aether/config.json` exposed.
+The gateway regression in `internal/localgw/config_isolation_test.go` runs
+config refresh and repository linking against a temporary user config and
+checks that its contents and modification time stay unchanged, including
+when the test process inherits `AETHER_CONFIG_DIR`.
+
 ## The E2E scenario suite
 
 `internal/server`'s `*_integration_test.go` files are the owned
