@@ -49,6 +49,10 @@ type Config struct {
 	OnInput func(key SessionKey, member domain.MemberID)
 }
 
+// readBufferBytes is one read from an attach. It also bounds what the
+// input scanner carries between reads (input.go).
+const readBufferBytes = 4096
+
 const (
 	defaultReplayBytes = 1 << 20
 	defaultCols        = 120
@@ -319,7 +323,7 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, member domain.MemberI
 	readDone := make(chan struct{})
 	go func() {
 		defer close(readDone)
-		buf := make([]byte, 4096)
+		buf := make([]byte, readBufferBytes)
 		var scan inputScanner
 		typed := false
 		for {

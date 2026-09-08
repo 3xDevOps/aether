@@ -17,6 +17,11 @@ package ptyhost
 // XTVERSION, XTGETTCAP, the kitty keyboard query, the colour reads and
 // SGR mouse reports alike.
 //
+// Only the 7-bit introducers are recognised. The 8-bit C1 forms - 0x9b for
+// CSI, 0x9d for OSC - are left as typing on purpose: both are UTF-8
+// continuation bytes, so reading them as introducers would swallow the
+// middle of typed text.
+//
 // One key is lost to this: CSI 1;2R is Shift-F3 on some terminals and a
 // cursor position report everywhere, and nothing in the byte stream tells
 // them apart. It stays uncounted, which is the safe direction - failing
@@ -29,10 +34,11 @@ package ptyhost
 const (
 	esc = 0x1b
 	bel = 0x07
-	// maxPartialReport bounds the tail carried between reads. A report
-	// this does not finish within that many bytes is not one of these, and
-	// counts as typing.
-	maxPartialReport = 256
+	// maxPartialReport bounds the tail carried between reads. One read is
+	// the natural ceiling: a report that arrives whole in a single read is
+	// never carried at all, so anything still unfinished after a buffer's
+	// worth is not one of these and counts as typing.
+	maxPartialReport = readBufferBytes
 )
 
 // inputScanner decides whether the writes of one attach include anything
@@ -126,9 +132,10 @@ func csiReport(p []byte) (int, bool) {
 		return i + 1, false
 	}
 	switch p[i] {
-	case 'I', 'O', 'c', 'R', 't', 'n':
+	case 'I', 'O', 'c', 'R', 't', 'n', 'M', 'm':
 		// Focus in and out, device attributes, cursor position, window
-		// size, and device status.
+		// size, device status, and the mouse reports that carry no private
+		// marker (mode 1015). None of the eight is a keyboard encoding.
 		return i + 1, false
 	case '~':
 		if s := string(p[params:end]); s == "200" || s == "201" {

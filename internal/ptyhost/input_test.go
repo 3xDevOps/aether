@@ -32,6 +32,8 @@ func TestTerminalReportsAreNotTyping(t *testing.T) {
 		"SGR mouse wheel down":  "\x1b[<65;10;5M",
 		"SGR mouse motion":      "\x1b[<35;11;6M",
 		"legacy mouse":          "\x1b[M\x20\x30\x30",
+		"urxvt mouse":           "\x1b[32;10;5M",
+		"urxvt mouse release":   "\x1b[35;10;5m",
 		"legacy mouse high bit": "\x1b[M\x60\xc8\xc8",
 		"foreground colour":     "\x1b]10;rgb:ffff/ffff/ffff\x07",
 		"background colour":     "\x1b]11;rgb:0000/0000/0000\x1b\\",
@@ -117,6 +119,22 @@ func TestReportSplitAcrossWrites(t *testing.T) {
 	}
 	if !sc.typed([]byte("Ia")) {
 		t.Error("a key behind a rejoined focus report did not count as typing")
+	}
+}
+
+// A long report still reads as one when it arrives in pieces: a clipboard
+// reply is the only one that runs to hundreds of bytes, and it is still a
+// report.
+func TestLongReportSplitAcrossWrites(t *testing.T) {
+	seq := "\x1b]52;c;" + strings.Repeat("aGk=", 60) + "\x07"
+	for _, read := range []int{64, 100, 512} {
+		var sc inputScanner
+		for i := 0; i < len(seq); i += read {
+			end := min(i+read, len(seq))
+			if sc.typed([]byte(seq[i:end])) {
+				t.Fatalf("in %d-byte reads, bytes %d..%d of a clipboard reply counted as typing", read, i, end)
+			}
+		}
 	}
 }
 
