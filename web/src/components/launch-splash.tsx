@@ -1,7 +1,28 @@
 import { useEffect, useState } from 'react'
+import { desktopBridge } from '@/components/shell/title-bar'
+import { useStore } from '@/store'
 
-const EXIT_START_MS = 2000
-const REMOVE_MS = 2250
+/** Held this long so a fast hydrate reads as a beat rather than a flicker. */
+const MIN_VISIBLE_MS = 600
+/** The fade in index.css runs 260ms; unmount just as it finishes. */
+const FADE_MS = 250
+
+const SHOWN_KEY = 'aether.launchSplashShown'
+
+/**
+ * The splash belongs to the desktop shell opening, not to loading: a browser
+ * tab and every reload inside the same shell session skip it. Reading storage
+ * throws in some embedded contexts, and a decoration is never worth a crash.
+ */
+function firstLaunch(): boolean {
+  if (!desktopBridge()) return false
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return false
+  try {
+    return window.sessionStorage.getItem(SHOWN_KEY) === null
+  } catch {
+    return false
+  }
+}
 
 const stars = [
   ['14%', '16%', 'mint'],
@@ -16,31 +37,39 @@ const stars = [
 ] as const
 
 export function LaunchSplash() {
+  // Read at first render, marked in an effect: StrictMode runs both twice, and
+  // a claim made while rendering would hide the splash from its own remount.
+  const [show] = useState(firstLaunch)
+  const hydrated = useStore((s) => s.hydrated)
+  // A hydrate that failed is also over: the connection error page below is
+  // what the member needs to read, not a night sky that never ends.
+  const failed = useStore((s) => s.hydrationError !== null)
+  const [held, setHeld] = useState(true)
   const [leaving, setLeaving] = useState(false)
-  const [visible, setVisible] = useState(true)
+  const [removed, setRemoved] = useState(false)
 
   useEffect(() => {
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      setVisible(false)
-      return
+    if (!show) return
+    try {
+      window.sessionStorage.setItem(SHOWN_KEY, '1')
+    } catch {
+      // Storage is blocked; the splash repeats rather than the app breaking.
     }
+    const hold = window.setTimeout(() => setHeld(false), MIN_VISIBLE_MS)
+    return () => window.clearTimeout(hold)
+  }, [show])
 
-    const exit = window.setTimeout(() => setLeaving(true), EXIT_START_MS)
-    const remove = window.setTimeout(() => setVisible(false), REMOVE_MS)
-    return () => {
-      window.clearTimeout(exit)
-      window.clearTimeout(remove)
-    }
-  }, [])
+  useEffect(() => {
+    if (!show || held || !(hydrated || failed)) return
+    setLeaving(true)
+    const remove = window.setTimeout(() => setRemoved(true), FADE_MS)
+    return () => window.clearTimeout(remove)
+  }, [show, held, hydrated, failed])
 
-  if (!visible) return null
+  if (!show || removed) return null
 
   return (
-    <div
-      className={`launch-splash${leaving ? ' launch-splash--leaving' : ''}`}
-      role="status"
-      aria-label="Launching Aether"
-    >
+    <div className={`launch-splash${leaving ? ' launch-splash--leaving' : ''}`} aria-hidden="true">
       <div className="launch-splash__sky" aria-hidden="true">
         <img className="launch-splash__grain" src="/grain.png" alt="" />
         <div className="launch-splash__cloud launch-splash__cloud--one">
