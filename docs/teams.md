@@ -179,6 +179,28 @@ which adds the `aether` git remote. Run branches (`aether/run-*`) are
 server-owned - clients cannot force-push or delete them, because the branch is
 the artifact. Every other branch behaves like a normal git remote.
 
+The workspace's base branch is usually already there by the time the second
+member links: whoever created the workspace pushed it. Nothing guarantees
+that, so the dashboard wizard's **Push now** button (step 4 of
+[quickstart.md](quickstart.md)) compares your clone with the workspace's copy
+of the branch before it pushes, and reports what it found instead of failing
+with git's `! [rejected] main -> main (fetch first)`:
+
+- **Not there yet** - nobody has pushed the branch. Your clone seeds it,
+  exactly as the first member's would.
+- **Level** - both sides are the same commit. Nothing to push; carry on.
+- **Your clone is ahead** - you cloned, then committed. The push runs as
+  usual.
+- **The workspace is ahead** - your clone is missing commits a teammate
+  pushed. **Fast-forward my clone** moves your branch up to the workspace's
+  commit, fast-forward only: no merge commit, and the commits you made are
+  never rewritten. With another branch checked out, only the branch ref
+  moves and your working tree is left alone; an uncommitted change the
+  fast-forward would overwrite stops it, in git's own words.
+- **Diverged** - you both committed since. Aether does not force-push and
+  does not merge for you; the wizard prints the `git fetch`, `git log`,
+  `git rebase` and `git push` commands and you decide.
+
 ## Working together
 
 | Command | What it does |

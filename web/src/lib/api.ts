@@ -28,6 +28,7 @@ import type {
   ProfileStatus,
   PullResult,
   PullSwitchResult,
+  RepoFastForwardResult,
   RepoPushResult,
   RepoSyncResult,
   FileDiff,
@@ -480,6 +481,12 @@ export const api = {
   localPull: (runID: string) => local<PullResult>('pull', { run_id: runID }),
   localPullSwitch: (runID: string) =>
     local<PullSwitchResult>('pull.switch', { run_id: runID }),
+  /** Fast-forwards the clone's base branch to the workspace's copy, the way
+   * out for a member joining a workspace that already has history. */
+  localRepoFastForward: (workspaceID?: string) =>
+    local<RepoFastForwardResult>('repo.fast-forward', {
+      workspace_id: workspaceID,
+    }),
   /** Pushes the workspace's base branch to the `aether` remote, seeding a
    * fresh workspace without leaving the app. */
   localRepoPush: (workspaceID?: string) =>

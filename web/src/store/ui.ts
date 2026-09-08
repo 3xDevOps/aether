@@ -1,5 +1,9 @@
 import { clampDockHeight } from '@/components/dock'
-import type { LinkRepoResult, RepoPushResult } from '@/lib/types'
+import type {
+  LinkRepoResult,
+  RepoFastForwardResult,
+  RepoPushResult,
+} from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
@@ -15,17 +19,20 @@ export interface Route {
 
 /**
  * What the onboarding Repository step settled: the clone it pointed at, the
- * remote the gateway wrote, and git's answer to the seeding push once one
- * has run. It outlives the step so walking back into Repository shows the
- * connected repo rather than an empty form. The workspace it was settled
- * for is part of it, because a remote points at one workspace: picking a
- * different one leaves this stale, and the step must ask again.
+ * remote the gateway wrote, git's answer to the seeding push once one has
+ * run, and the fast-forward that answered a workspace ahead of the clone.
+ * It outlives the step so walking back into Repository shows the settled
+ * answer rather than an empty form or a button that was already pressed.
+ * The workspace it was settled for is part of it, because a remote points at
+ * one workspace: picking a different one leaves this stale, and the step
+ * must ask again.
  */
 export interface OnboardingRepo {
   workspace: string
   path: string
   remote: LinkRepoResult
   push: RepoPushResult | null
+  fastForward: RepoFastForwardResult | null
 }
 
 export const minSidebarWidth = 200

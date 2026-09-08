@@ -691,23 +691,53 @@ its own state.
 
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
-button that runs the push in the clone. Success names the branch that
-landed and keeps git's output in a "What git did" panel, open on arrival
-because `Everything up-to-date` and `[new branch]` are both success and
-mean different things; Continue then moves on. A refusal keeps the user on
-the step with git's own output in a monospace block, both retry and the
-copyable command still there. The branch is the workspace's base branch,
-so a workspace created with `--base` seeds the branch its runs fork from.
-An older gateway without the verb shows only the copyable command.
+button. The gateway compares the clone's base branch with the workspace's
+copy before pushing and answers with one of four states, so the second
+member to join a workspace reads what happened instead of git's
+`! [rejected] main -> main (fetch first)`.
 
-What the step settled - the clone path, the remote the gateway wrote, and
-git's push answer - lives on the UI slice as `onboardingRepo`, not in the
-component. Returning to the step shows that connected repo with **Use a
-different repository** to go back to the form, prefilled with the old path;
-a blank form there would ask again for a remote that already exists.
+`pushed` names the branch that landed; `up-to-date` names the commit the
+workspace already has. Both keep git's output in a "What git did" panel,
+open on arrival because `Everything up-to-date` and `[new branch]` are both
+success and mean different things, and Continue moves on.
+
+`behind` means the workspace is ahead. The step names both tips and offers
+**Fast-forward my clone**, which runs `repo.fast-forward` and then reports
+the new tip, whether that branch was the checked-out one, and whether the
+working tree is dirty. The panel then shows both outputs in the order git
+produced them: the comparison's fetch, then the fast-forward. `diverged`
+means both sides moved on: the step names both tips and offers the fetch,
+log, rebase and push commands to resolve it by hand, copyable as one block,
+with no fast-forward button, because Aether never force-pushes.
+
+Both states keep **Push now**, which re-compares - the thing to do after
+resolving by hand - and both take away the copyable `git push -u aether
+<branch>`: it is the command that produced the rejection this comparison
+exists to replace. That command stays only where it is the right one, which
+is a clone the workspace has not moved past: before any push, after one that
+failed, and after one that landed. A refusal keeps the user on the step with
+git's own output in a monospace block. The three outcome panels - behind,
+diverged and the fast-forward result - are `aria-live="polite"`, because they
+appear without a page change.
+
+The branch is the workspace's base branch, so a workspace created with
+`--base` seeds the branch its runs fork from. A gateway that does not serve
+`repo.push` - the server-served dashboard - shows only the copyable command.
+
+What the step settled - the clone path, the remote the gateway wrote,
+git's push answer, and the fast-forward once one has run - lives on the UI
+slice as `onboardingRepo`, not in the component. Each answer is written onto
+the record as it stands in the store rather than the one captured at render,
+so a push and a fast-forward started from the same screen cannot lose each
+other's result. Returning to the step shows that connected repo with **Use a
+different repository** to go back to the form, prefilled with the old path; a
+blank form there would ask again for a remote that already exists.
 
 The UI slice persists the current step, the selected workspace and the
-connected repository. Hydration reads
+connected repository. The persisted state is versioned: version 0 stored a
+push answer from before the comparison, which matches none of the four
+states, so the migration drops `onboardingRepo` and leaves the other
+preferences alone rather than rehydrating a blank panel. Hydration reads
 `link.status` first: a linked local gateway is marked onboarded before the
 redirect decision, so a linked machine never re-enters onboarding after a fresh
 GUI launch. An unlinked local gateway still routes here when `onboarded` is
@@ -962,7 +992,11 @@ behind the narrow remote allowlist while every other admin entry stays
 hidden. The onboarding wizard walks all five steps against the stub API, and
 covers what navigation must not lose: Back leaving the Agents setup screen
 before it leaves the step, and the Repository step still showing its
-connected clone and push result after a walk away and back. The
+connected clone and push result after a walk away and back. The Repository
+step also covers each comparison state: which command is the copyable one in
+each, the fast-forward reporting a dirty tree it did not touch and keeping
+both git outputs, and a version-0 persisted store dropping its stale push
+answer and nothing else. The
 Agents step tests setup-capable harness detection, the live terminal dock,
 the environment save that follows a confirmed install, profile previews and
 exclusions, profile recommendations, cancellation,

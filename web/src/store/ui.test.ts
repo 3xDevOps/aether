@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useStore } from '@/store'
+import { createRootStore, useStore } from '@/store'
 
 // The active workspace and the workspace route are two views of one thing:
 // which workspace the app is acting on. If they drift, the sidebar names one
@@ -46,6 +46,7 @@ describe('workspace scope and route stay in sync', () => {
         path: '/home/alice/code/myproject',
         remote: { repo: '/home/alice/code/myproject', remote: 'aether', url: 'ssh://host/wsp_1' },
         push: null,
+        fastForward: null,
       },
     })
 
@@ -145,5 +146,39 @@ describe('terminal dock heights', () => {
       runDockHeight: Math.max(120, window.innerHeight - 200),
     })
     useStore.setState({ terminalDockHeight: 280, runDockHeight: 240 })
+  })
+})
+
+describe('a persisted store from before the repository comparison', () => {
+  it('drops the stale repository answer and keeps the other preferences', () => {
+    // Version 0 stored a push result with no `state`: the Repository step
+    // matches it against none of its states and renders a blank panel.
+    window.localStorage.setItem(
+      'aether.ui',
+      JSON.stringify({
+        version: 0,
+        state: {
+          theme: 'dark',
+          activeWorkspace: 'wsp_2',
+          onboardingStep: 2,
+          onboardingWorkspace: 'wsp_2',
+          onboardingRepo: {
+            workspace: 'wsp_2',
+            path: '/home/alice/code/myproject',
+            remote: { remote: 'aether', url: 'ssh://alice@host:2222/wsp_2' },
+            push: { branch: 'main', remote: 'aether', output: '' },
+          },
+        },
+      }),
+    )
+
+    const migrated = createRootStore().getState()
+
+    expect(migrated.onboardingRepo).toBeNull()
+    expect(migrated.theme).toBe('dark')
+    expect(migrated.activeWorkspace).toBe('wsp_2')
+    expect(migrated.onboardingStep).toBe(2)
+    expect(migrated.onboardingWorkspace).toBe('wsp_2')
+    window.localStorage.removeItem('aether.ui')
   })
 })
