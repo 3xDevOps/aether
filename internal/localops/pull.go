@@ -1,6 +1,7 @@
 package localops
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -53,7 +54,7 @@ func pull(repo, url, branch string) (PullResult, error) {
 		return result, err
 	}
 
-	current, opOutput, err := advanceBranch(repo, branch)
+	current, opOutput, err := advanceBranch(repo, branch, true)
 	result.Current, result.Output = current, result.Output+opOutput
 	if err != nil {
 		return result, err
@@ -70,22 +71,34 @@ func pull(repo, url, branch string) (PullResult, error) {
 // checked out, and otherwise a ref update that leaves the working tree
 // alone. It reports whether the branch was the checked-out one and
 // everything git printed.
-func advanceBranch(repo, branch string) (bool, string, error) {
+//
+// track points the branch's upstream at the aether remote. A run branch
+// wants that; a member's own base branch does not, because its upstream
+// is their real remote and moving it would redirect their next git pull.
+func advanceBranch(repo, branch string, track bool) (bool, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
+	defer cancel()
 	current := currentBranch(repo) == branch
 	var out []byte
 	var err error
 	if current {
-		out, err = exec.Command("git", "-C", repo, "merge", "--ff-only", "aether/"+branch).CombinedOutput()
+		out, err = exec.CommandContext(ctx, "git", "-C", repo, "merge", "--ff-only", "aether/"+branch).CombinedOutput()
 	} else {
 		args := []string{"-C", repo, "branch", "--force"}
-		tracked := remoteExists(repo, "aether")
+		tracked := track && remoteExists(repo, "aether")
 		if tracked {
 			args = append(args, "--track")
+		} else {
+			// git's own branch.autoSetupMerge defaults to setting an
+			// upstream whenever the start point is a remote-tracking
+			// branch, so leaving --track off is not enough to leave the
+			// member's upstream alone.
+			args = append(args, "--no-track")
 		}
 		args = append(args, branch, "aether/"+branch)
-		out, err = exec.Command("git", args...).CombinedOutput()
+		out, err = exec.CommandContext(ctx, "git", args...).CombinedOutput()
 		if err != nil && tracked {
-			fallback := exec.Command("git", "-C", repo, "branch", "--force", branch, "aether/"+branch)
+			fallback := exec.CommandContext(ctx, "git", "-C", repo, "branch", "--force", branch, "aether/"+branch)
 			var fallbackOutput []byte
 			fallbackOutput, err = fallback.CombinedOutput()
 			out = append(out, fallbackOutput...)

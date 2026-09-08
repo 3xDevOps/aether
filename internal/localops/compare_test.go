@@ -68,6 +68,10 @@ func TestCompareBranchReportsAWorkspaceWithoutTheBranch(t *testing.T) {
 	if cmp.Workspace != "" {
 		t.Fatalf("workspace = %q, want empty", cmp.Workspace)
 	}
+	// There was nothing to count against, so the counts stay zero.
+	if cmp.Ahead != 0 || cmp.Behind != 0 {
+		t.Fatalf("ahead/behind = %d/%d, want 0/0", cmp.Ahead, cmp.Behind)
+	}
 }
 
 func TestCompareBranchReportsTheSameCommit(t *testing.T) {
@@ -288,5 +292,28 @@ func TestFastForwardStopsOnAnEditTheCatchUpWouldOverwrite(t *testing.T) {
 	}
 	if after := git(t, clone, "rev-parse", "main"); after != before {
 		t.Fatalf("the refused fast-forward moved main to %s, want %s", after, before)
+	}
+}
+
+// The member's base branch tracks their own remote. Catching it up with
+// the workspace moves the ref and nothing else: retargeting the upstream
+// would silently redirect their next git pull to the workspace.
+func TestFastForwardKeepsTheBranchUpstream(t *testing.T) {
+	requireGit(t)
+	clone, remote, _ := seededClone(t)
+	git(t, clone, "remote", "add", "origin", remote)
+	git(t, clone, "config", "branch.main.remote", "origin")
+	git(t, clone, "config", "branch.main.merge", "refs/heads/main")
+	advance(t, remote)
+	git(t, clone, "switch", "-c", "feature")
+
+	if _, err := FastForward(clone, "main"); err != nil {
+		t.Fatalf("FastForward: %v", err)
+	}
+	if got := git(t, clone, "config", "--get", "branch.main.remote"); got != "origin" {
+		t.Fatalf("branch.main.remote = %q, want origin", got)
+	}
+	if got := git(t, clone, "config", "--get", "branch.main.merge"); got != "refs/heads/main" {
+		t.Fatalf("branch.main.merge = %q", got)
 	}
 }

@@ -131,7 +131,10 @@ func FastForward(repo, branch string) (FastForwardResult, error) {
 		return result, pushRefusal{notBehindMessage(cmp.State, branch)}
 	}
 
-	current, output, err := advanceBranch(repo, branch)
+	// The member's base branch keeps whatever upstream it already had:
+	// theirs points at their own remote, and moving it would redirect
+	// their next git pull to the workspace.
+	current, output, err := advanceBranch(repo, branch, false)
 	result.Current, result.Output = current, result.Output+output
 	if err != nil {
 		return result, err
