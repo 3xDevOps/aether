@@ -52,6 +52,15 @@ The integration suite uses real Docker and git:
 make test-integration
 ```
 
+The dashboard end-to-end suite drives a real browser against a real
+`aether gui` gateway and a real server. It needs Docker, real git, and
+Playwright's browser:
+
+```sh
+cd web && bunx playwright install chromium   # once
+make test-e2e
+```
+
 The dashboard checks run from `web/`:
 
 ```sh

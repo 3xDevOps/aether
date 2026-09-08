@@ -40,6 +40,11 @@ web/node_modules/
 web/dist/*
 !web/dist/.gitkeep
 
+# Dashboard end-to-end suite: browser downloads, traces, screenshots, reports.
+web/test-results/
+web/playwright-report/
+web/blob-report/
+
 # Desktop shell. Dependencies and installers stay out of git; the Electron
 # build is reproducible from desktop/package.json. No npm lockfile is
 # committed either - the repo toolchain is Bun, which cannot write one.

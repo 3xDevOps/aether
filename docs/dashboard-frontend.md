@@ -1007,5 +1007,9 @@ the truncation notice, a snapshot rendering its own interval and only that
 change, deselecting returning to the cumulative patch without a refetch, a
 snapshot carrying no tree staying unselectable, and a conflict chip naming its
 member and opening their run.
-Full end-to-end coverage of the dashboard belongs to the E2E harness driving
-the real gateway.
+Full end-to-end coverage is `web/e2e/`: a Playwright suite that drives this
+dashboard in a real browser against a real `aether gui` gateway and a real
+server, with real git and real containers. It walks the onboarding wizard the
+way a person does - link, workspace, clone and push, the environment terminal,
+a first run - and it is `make test-e2e`. docs/testing.md describes what each
+scenario covers and how to add a step to it.
