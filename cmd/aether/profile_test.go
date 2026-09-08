@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 // A push refuses while a scanner finding in a file the member wrote is
@@ -18,8 +20,11 @@ func TestProfilePushRefusesUntilAFindingIsAnswered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	// The profile root resolves through os.UserHomeDir, which reads HOME
+	// on unix and USERPROFILE on Windows. Isolate sets both, so this does
+	// not silently walk the developer's real ~/.claude on one platform and
+	// an empty root on another.
+	home := testhome.Isolate(t)
 	readme := filepath.Join(home, ".claude", "skills", "deploy", "README.md")
 	if err = os.MkdirAll(filepath.Dir(readme), 0o755); err != nil {
 		t.Fatal(err)
@@ -61,8 +66,7 @@ func TestProfilePushPrintsSkippedFilesBeforeRefusing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := testhome.Isolate(t)
 	vendored := filepath.Join("plugins", "cache", "official", "notes", "6.3.0", "tests", "ws.test.js")
 	for _, rel := range []string{filepath.Join("skills", "deploy", "README.md"), vendored} {
 		path := filepath.Join(home, ".claude", rel)
