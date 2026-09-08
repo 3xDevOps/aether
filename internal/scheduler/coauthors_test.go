@@ -281,11 +281,56 @@ func TestGitIdentityChangeRefreshesLiveRuns(t *testing.T) {
 		t.Errorf("co-authors after the change = %v, want %v", got, want)
 	}
 
-	// A member the run does not credit leaves it alone.
+	// A member the run neither belongs to nor credits leaves it alone. The
+	// owner is not that member: the list carries them too.
+	stranger := newSteerer(t, e, "Carol", "Carol Steer", "carol@example.com")
 	before := coord.writes(run.ID)
-	e.sched.RefreshMemberCoAuthors(t.Context(), e.member.ID)
+	e.sched.RefreshMemberCoAuthors(t.Context(), stranger.ID)
 	if got := coord.writes(run.ID); got != before {
 		t.Errorf("an unrelated identity change rewrote the list %d times", got-before)
+	}
+}
+
+// A member who takes a run over in a handoff is on its co-author list -
+// the container goes on authoring as whoever launched it - without ever
+// being one of its steerers. Their identity change has to reach that list
+// too, or the container keeps telling the agent to credit the address they
+// have just stopped using.
+func TestGitIdentityChangeReachesARunTakenOverInAHandoff(t *testing.T) {
+	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
+	e := newTestEnv(t, withServerBinary(staged))
+	coord, _ := withCoordination(t, e)
+	if err := e.db.UpdateMemberGitIdentity(t.Context(), e.member.ID, "Ada Lovelace", "ada@example.com"); err != nil {
+		t.Fatalf("UpdateMemberGitIdentity: %v", err)
+	}
+	bob := newSteerer(t, e, "Bob", "Bob Steer", "bob@example.com")
+
+	run, _ := e.launchFake(t, "add OAuth login")
+	if err := e.db.TransferRun(t.Context(), run.ID, bob.ID); err != nil {
+		t.Fatalf("TransferRun: %v", err)
+	}
+	e.sched.RecordHandoff(t.Context(), run.ID, e.member.ID)
+	want := []string{"Co-authored-by: Bob Steer <bob@example.com>"}
+	if got := coord.trailers(run.ID); !slices.Equal(got, want) {
+		t.Fatalf("co-authors after the handoff = %v, want %v", got, want)
+	}
+	// Bob owns the run now and never steered it, so nothing has recorded
+	// him as a steerer.
+	steerers, err := e.db.ListRunSteerers(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("ListRunSteerers: %v", err)
+	}
+	if slices.ContainsFunc(steerers, func(m *domain.Member) bool { return m.ID == bob.ID }) {
+		t.Fatalf("steerers = %+v, want the incoming owner absent", steerers)
+	}
+
+	if err := e.db.UpdateMemberGitIdentity(t.Context(), bob.ID, "Bob Steer", "bob@work.example"); err != nil {
+		t.Fatalf("UpdateMemberGitIdentity: %v", err)
+	}
+	e.sched.RefreshMemberCoAuthors(t.Context(), bob.ID)
+	want = []string{"Co-authored-by: Bob Steer <bob@work.example>"}
+	if got := coord.trailers(run.ID); !slices.Equal(got, want) {
+		t.Errorf("co-authors after the owner's identity change = %v, want %v", got, want)
 	}
 }
 

@@ -163,6 +163,12 @@ func (s *Scheduler) RecordHandoff(ctx context.Context, run domain.RunID, from do
 // trailers only: a container's own GIT_AUTHOR_* is fixed when it is
 // created, so the agent's author line keeps the identity the run started
 // with (docs/teams.md).
+//
+// A run credits its current owner as well as its steerers, because the
+// container goes on authoring as whoever launched it. The owner of a run
+// they took over in a handoff is on its list without being one of its
+// steerers, so matching on the steerers alone would leave their old
+// address in the container.
 func (s *Scheduler) RefreshMemberCoAuthors(ctx context.Context, member domain.MemberID) {
 	if s.coordinationSeam() == nil {
 		return
@@ -173,6 +179,10 @@ func (s *Scheduler) RefreshMemberCoAuthors(ctx context.Context, member domain.Me
 		return
 	}
 	for _, r := range runs {
+		if r.MemberID == member {
+			s.refreshCoAuthors(ctx, r)
+			continue
+		}
 		steerers, lerr := s.cfg.Store.ListRunSteerers(ctx, r.ID)
 		if lerr != nil {
 			slog.Warn("scheduler: list run steerers", "run", r.ID, "error", lerr)
