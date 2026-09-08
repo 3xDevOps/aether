@@ -290,14 +290,14 @@ elif [ "$ROLE" = client ]; then
 	BIN_DIR="$USER_BIN_DIR"
 else
 	BIN_DIR="$SYSTEM_BIN_DIR"
-	if [ ! -w "$BIN_DIR" ]; then
+	if [ "$(id -u)" -ne 0 ]; then
 		if command -v sudo >/dev/null 2>&1; then
 			sudo="sudo"
 		else
 			[ -n "${HOME:-}" ] ||
-				die "no write access to ${SYSTEM_BIN_DIR}, no sudo, and HOME is not set; pass --bin-dir <dir>"
+				die "server installation needs root or sudo, and HOME is not set; pass --bin-dir <dir>"
 			BIN_DIR="$USER_BIN_DIR"
-			say "no write access to ${SYSTEM_BIN_DIR} and no sudo; using ${BIN_DIR}"
+			say "server installation needs root or sudo; using ${BIN_DIR}"
 		fi
 	fi
 fi
