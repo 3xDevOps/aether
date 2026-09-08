@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -301,8 +302,20 @@ func TestCapabilities(t *testing.T) {
 	if !reflect.DeepEqual(caps.WS, []string{"events", "attach", "terminal", "envscan"}) {
 		t.Errorf("ws = %v, want [events attach terminal envscan]", caps.WS)
 	}
-	if !reflect.DeepEqual(caps.Local, localVerbs) {
-		t.Errorf("local = %v, want %v", caps.Local, localVerbs)
+	// The advertised verbs are what a client will call, so they must be
+	// exactly the verbs handleLocal can dispatch, in sorted order.
+	if !slices.IsSorted(caps.Local) {
+		t.Errorf("local = %v, want sorted", caps.Local)
+	}
+	for _, verb := range caps.Local {
+		if _, ok := localHandlers[verb]; !ok {
+			t.Errorf("local advertises %q with no handler", verb)
+		}
+	}
+	for verb := range localHandlers {
+		if !slices.Contains(caps.Local, verb) {
+			t.Errorf("handler %q is not advertised in local = %v", verb, caps.Local)
+		}
 	}
 
 	if rec := do(g, http.MethodGet, "/api/v1/capabilities", "", false); rec.Code != http.StatusUnauthorized {
