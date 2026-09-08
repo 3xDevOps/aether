@@ -14,6 +14,10 @@ The home is the member's durable environment:
 - Executables installed in `~/.local/bin`
 - Vendor login state and other files written by the agent
 - Profile files synced with `aether profile push`
+- The GitHub login written by `gh auth login`, in `~/.config/gh/hosts.yml`
+- The commit signing key, `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`
+- `~/.gitconfig`, which carries the git identity, gh's credential helper, and
+  the signing settings
 
 Files outside the home live in the container layer. **Save environment** in the
 terminal turns that layer into your member image so later runs get it; see
@@ -49,6 +53,80 @@ aether terminal
 After setup, every run using that account sees the same executable and login
 state. A member-defined agent also records its launch arguments for later runs.
 The terminal command ships in this release series.
+
+## Connect GitHub
+
+Connect GitHub once and every later run of yours can push branches to the
+workspace's upstream repository, open pull requests, and sign its commits.
+Both halves happen in the member home, so no run needs its own credentials.
+
+Open the [environment terminal](terminal.md) and log in there:
+
+```sh
+aether terminal
+```
+
+```sh
+gh auth login --hostname github.com --git-protocol https --web \
+  --scopes admin:ssh_signing_key
+```
+
+`--web` is GitHub's device flow: gh prints a one-time code and a URL, and
+you finish in a browser on your own machine. Nothing is forwarded and no
+password reaches the server. `--scopes admin:ssh_signing_key` is on top of
+gh's own defaults, and it is what lets the next command register your
+signing key on your account without you pasting it into GitHub by hand.
+
+Then, from your machine:
+
+```sh
+aether github connect
+```
+
+```
+logged in to github.com as octocat
+signing key SHA256:2E3v9x... registered on GitHub
+```
+
+That one command does five things, all on the server:
+
+1. Checks `gh auth status` for `github.com` inside your terminal container
+   to confirm the login took.
+2. Runs `gh auth setup-git --hostname github.com` there, which writes gh's
+   credential helper into `~/.gitconfig` so `git push` over HTTPS
+   authenticates as you.
+3. Generates an ed25519 key pair at `~/.ssh/aether_signing` and
+   `~/.ssh/aether_signing.pub` if there is not one already.
+4. Writes five keys into `~/.gitconfig`: `user.name`, `user.email`,
+   `gpg.format=ssh`, `user.signingkey=~/.ssh/aether_signing`, and
+   `commit.gpgsign=true`.
+5. Registers the public key on your account with `gh ssh-key add --type
+   signing`.
+
+Re-running it is safe. An existing key is reused rather than replaced, and
+GitHub accepts a key it already holds without an error.
+
+Three failures have their own messages. Without a terminal login:
+
+```
+github: not logged in to github.com in the environment terminal; run gh auth login there first
+```
+
+The line carries gh's own output after it. A saved environment built
+before `gh` shipped in the standard image answers that `gh is not on PATH
+in the environment terminal`; install it there and save again, or `aether
+env reset`. And when the **server host** has no `ssh-keygen`, the command
+refuses before generating anything, because that binary is what signs
+Aether's own commits; install the OpenSSH client package on the server
+([install.md](install.md#server-prerequisites)).
+
+`aether member git` keeps `~/.gitconfig` in step: once a signing key
+exists, changing your name or address rewrites the identity in the home's
+`.gitconfig` too, so the signature and the author stay the same person.
+
+The credentials and the key are readable by container root in every run
+using this account. Read [security.md](security.md#github-credentials-and-signing-keys)
+before connecting an account whose reach is wider than this workspace.
 
 ## Profile sync
 

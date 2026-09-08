@@ -148,6 +148,14 @@ SSH port, no separate credentials. With multiple workspaces, add
 sends the workspace's base branch; replace `main` if you created the
 workspace with `--base`.
 
+The first `link --repo` also reads your clone's own `origin` URL and records
+it on the workspace, printing `workspace origin -> <url>`. Every run
+checkout created afterwards gets an `origin` remote pointing there, so an
+agent in a run can `git push origin <branch>` and open a pull request once
+you have connected GitHub ([step 5](#5-set-up-your-agent)). The dashboard
+wizard's Repository step does the same. `aether workspace origin` shows what
+was recorded and takes a URL or `--clear` to change it.
+
 In the dashboard, the onboarding wizard's Repository step does both for
 you: it adds the remote, then its **Push now** button compares your clone
 with the workspace and pushes when there is something to push, keeping git's
@@ -226,6 +234,33 @@ in one click. Sending a flagged file anyway is deliberately not in the
 dashboard: it stays on the CLI, where `--workspace` records who did it.
 [harnesses.md](harnesses.md) has the full rules, including `--skip-secret`
 and `--allow-secret`.
+
+### Connect GitHub
+
+Optional, and worth doing before the first run: connect GitHub once and your
+runs can push their branch to the `origin` recorded in step 4, open a pull
+request, and sign their commits as you.
+
+In the dashboard, the Agents step has a **Connect GitHub** button. It opens
+the same terminal dock, types the login command, and its **I've logged in**
+button runs the rest, reporting the account and the registered key.
+
+From the CLI it is two commands. In the environment terminal:
+
+```sh
+gh auth login --hostname github.com --git-protocol https --web \
+  --scopes admin:ssh_signing_key
+```
+
+Then, back on your machine:
+
+```sh
+aether github connect
+```
+
+What each step writes, how to re-run it, and how to revoke are in
+[environment-home.md](environment-home.md#connect-github) and
+[security.md](security.md#github-credentials-and-signing-keys).
 
 ## 6. Launch a run
 

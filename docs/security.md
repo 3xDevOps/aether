@@ -53,6 +53,67 @@ falls back to the display name, or the member id when that cannot be a git
 author name, so a name reaches `GIT_AUTHOR_NAME` and the trailers either
 way.
 
+### GitHub credentials and signing keys
+
+Connecting GitHub (`aether github connect`, see
+[environment-home.md](environment-home.md#connect-github)) puts two secrets
+in the member home on the server:
+
+- **The gh token**, at `homes/<member>/.config/gh/hosts.yml`. `gh auth
+  login` runs inside the environment terminal container, which has no
+  keyring, so gh falls back to writing the token to that file in plain
+  text.
+- **The signing key pair**, at `homes/<member>/.ssh/aether_signing` (mode
+  `0600`) and `.pub`. Aether generates the ed25519 key itself and registers
+  only the public half on GitHub with `gh ssh-key add --type signing`.
+- **The settings that use them**, in `homes/<member>/.gitconfig`: gh's
+  credential helper for `https://github.com`, plus `gpg.format=ssh`,
+  `user.signingkey=~/.ssh/aether_signing`, and `commit.gpgsign=true`.
+
+None of it is in `aether.db`, and none of it is in a saved environment
+image. The member home is a bind mount, and Docker's commit records only
+the container's own layer, never a bind mount, so `aether env save` cannot
+capture the token, the key, or the `.gitconfig`. An integration test starts
+a container from a saved image with no home mounted and asserts all three
+are absent (`TestIntegrationMemberEnvironmentImage`).
+
+What that grants an agent is the point of the feature, so it is worth
+stating plainly. **Container root in any of that member's runs can read the
+token and the private key.** With them it can act as the member on GitHub
+within the token's scopes - `gh auth login` as documented in
+[environment-home.md](environment-home.md#connect-github) requests gh's
+defaults (`repo`, `read:org`, `gist`) plus `admin:ssh_signing_key` - so it
+can push to the workspace's recorded `origin`, open pull requests, and
+register or remove signing keys on the account. Account sharing hands the
+recipient's runs the same reach, exactly as it does every other credential
+in the home.
+
+Aether signs its own end-of-run commits with that key while still treating
+the home as hostile. It opens the key through a root-confined open on the
+home directory, so a symlink planted inside the container cannot lead the
+server to a file outside it, and copies the bytes into a private temp file
+of the server's own for the length of the commit. `gpg.format`,
+`gpg.ssh.program` and `commit.gpgsign` are all passed with `git -c` on the
+command line, because the run checkout's `.git/config` is agent-writable:
+without pinning them, a planted `gpg.ssh.program` would name a program the
+server then runs.
+
+GitHub marks a signature **Verified** only when the commit's committer
+address belongs to the account that registered the key. So the agent's own
+commits, which the container makes as the member, show as verified on
+GitHub; Aether's end-of-run commits, which are committed as Aether, do not.
+Those still verify locally against the member's public key with `git
+verify-commit`, given a `gpg.ssh.allowedSignersFile` that lists the address
+and the key. Signing does not change who the commit is authored as; see
+[teams.md](teams.md#attribution).
+
+To revoke: run `gh auth logout --hostname github.com` in the environment
+terminal, remove the signing key from
+[github.com/settings/keys](https://github.com/settings/keys), and delete
+`.config/gh/hosts.yml`, `.ssh/aether_signing` and `.ssh/aether_signing.pub`
+from the member home. `aether env reset` does none of this - it forgets the
+saved image and never touches the home.
+
 ### Hostile agents
 
 If you run agents you do not trust, put the `--data-dir` on a filesystem
