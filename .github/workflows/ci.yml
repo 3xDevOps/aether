@@ -17,6 +17,9 @@ jobs:
         with:
           go-version-file: go.mod
       # `make build` builds the embedded dashboard SPA before Go compiles.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
@@ -92,6 +95,9 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
@@ -116,6 +122,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
@@ -247,6 +256,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
