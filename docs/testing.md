@@ -209,12 +209,12 @@ attaches the server's output to the report.
 
 | Spec | Scenario |
 | --- | --- |
-| `onboarding-first-member` | A fresh server: link (first identity becomes admin, SSH key generated), create the workspace, point the step at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
+| `onboarding-first-member` | A fresh server: link (first identity becomes admin, SSH key generated), set the git identity from what this machine's `git config` offers, create the workspace, point the step at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
 | `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
 | `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |
 | `onboarding-configuration` | Bringing a member's own agent configuration across, from a fixture home holding an empty file and a file the secret scanner flags: the flagged file is named on the row and left out, everything else imports |
 | `onboarding-first-run` | Launching the first run on the fake harness and watching it reach needs-attention with its work committed |
-| `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through |
+| `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through, and the Git identity step reached in both directions between Link and Workspace |
 
 `onboarding-agents` and `onboarding-first-run` need a reachable Docker
 daemon and skip without one, the way the Go suite skips its container

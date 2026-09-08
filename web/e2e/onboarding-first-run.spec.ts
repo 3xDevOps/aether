@@ -15,6 +15,8 @@ test('the first run reaches needs-attention', async ({ page, aether }) => {
   const wizard = await OnboardingWizard.open(page, alice.url)
   await wizard.link.link(aether.server.addr, { name: 'Alice' })
   await wizard.link.continue().click()
+  // The git identity is optional and this scenario is not about it.
+  await wizard.gitIdentity.skip().click()
   await wizard.workspace.create('project')
   await wizard.repository.addRemote(repo)
   // Every run forks from the workspace's base branch, so the push is what

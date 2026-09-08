@@ -54,6 +54,11 @@ export interface Aether {
    * where agent.list looks to decide whether an agent is installed.
    */
   installAgent: (memberID: string, executable: string) => void
+  /**
+   * Writes a git identity into a member's own machine, which is what the
+   * Git identity step offers as the default.
+   */
+  giveGitIdentity: (member: Member, name: string, email: string) => void
 }
 
 /**
@@ -110,6 +115,12 @@ export const test = base.extend<{ aether: Aether }>({
         cpSync(path.join(testdata, 'claude-profile'), path.join(m.home, '.claude'), {
           recursive: true,
         })
+      },
+      giveGitIdentity: (member, name, email) => {
+        writeFileSync(
+          path.join(member.home, '.gitconfig'),
+          `[user]\n\tname = ${name}\n\temail = ${email}\n`,
+        )
       },
       installAgent: (memberID, executable) => {
         const bin = path.join(server.memberHome(memberID), '.local', 'bin')

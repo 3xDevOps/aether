@@ -10,6 +10,7 @@ test('the first member links, creates a workspace and seeds it', async ({
 }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
+  aether.giveGitIdentity(alice, 'Alice Local', 'alice@local.invalid')
   const wizard = await OnboardingWizard.open(page, alice.url)
 
   await wizard.expectStep('Link')
@@ -22,6 +23,17 @@ test('the first member links, creates a workspace and seeds it', async ({
     `Created SSH key ${alice.home}/.ssh/id_ed25519`,
   )
   await wizard.link.continue().click()
+
+  // What every commit made in this member's runs is authored as. The step
+  // offers this machine's own git config, and saving moves the wizard on.
+  await wizard.expectStep('Git identity')
+  await expect(
+    wizard.gitIdentity.section.getByLabel('Name', { exact: true }),
+  ).toHaveValue('Alice Local')
+  await expect(
+    wizard.gitIdentity.section.getByLabel('Email', { exact: true }),
+  ).toHaveValue('alice@local.invalid')
+  await wizard.gitIdentity.save('Alice Lovelace', 'alice@example.com')
 
   await wizard.expectStep('Workspace')
   await wizard.workspace.create('project')
