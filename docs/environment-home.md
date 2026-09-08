@@ -25,12 +25,12 @@ terminal turns that layer into your member image so later runs get it; see
 
 ## Setting up an agent
 
-The dashboard and CLI list the shipped harnesses and member-defined agents.
-The launch form and the onboarding wizard's First run step only offer agents
-whose executable is installed in the selected account's `~/.local/bin`, and
-with none installed they offer **Set up an agent** in place of the picker
-rather than a launch the server would refuse; the Agents page still lists
-uninstalled shipped harnesses so you can set them up.
+The dashboard and CLI list both the agents Aether ships and the ones members
+define. The launch form and the onboarding wizard's First run step only offer
+agents whose executable is installed in the selected account's `~/.local/bin`,
+and with none installed they say so and offer **Set up an agent** rather than
+a launch the server would refuse; the Agents page still lists uninstalled
+shipped agents so you can set them up.
 
 Discovery follows relative symlinks and absolute links under `/root` or
 `/home/aether` within that account's home. Claude's native installer uses an

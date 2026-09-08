@@ -412,9 +412,9 @@ The dashboard Settings page can run the same sync once, on demand.
 
 ## Prove the plumbing without an agent subscription
 
-No vendor login yet? Aether ships a deterministic `fake` harness for exactly
-this: it runs a script from your repo instead of an agent, so you can drive the
-whole lifecycle end to end and see a real branch come back.
+No vendor login yet? Aether ships a deterministic agent named `fake` for
+exactly this: it runs a script from your repo instead of an agent, so you can
+drive the whole lifecycle end to end and see a real branch come back.
 
 Start the server with the fake agent's command in its environment. If the
 systemd unit from step 2 is already running, stop it first
@@ -442,13 +442,13 @@ git add -A && git commit -m seed
 ```
 
 Then run steps 3, 4, 6 and 8 above with the default standard image and
-`--agent fake` instead of `--agent claude`. Skip step 5: the fake harness has
-no agent login. Step 7 (`aether gui`) works too if you want to watch.
+`--agent fake` instead of `--agent claude`. Skip step 5: `fake` has no agent
+login. Step 7 (`aether gui`) works too if you want to watch.
 
 Launching it is the CLI's job, though. `fake` is a server-side registration
-rather than an executable installed in your account, and every agent picker in
-the dashboard - the launch form and the wizard's **First run** step - offers
-only what is installed, so `fake` never appears in one.
+rather than an executable installed in your account, and the dashboard's two
+launch surfaces - the launch form and the wizard's **First run** step - offer
+only what is installed, so `fake` never appears in either.
 
 ```sh
 aether link <server-host>:2222

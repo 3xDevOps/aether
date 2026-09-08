@@ -346,16 +346,15 @@ verb rather than offering the one the server would refuse.
 ## Commands: one list, two ways to reach it
 
 `src/lib/commands.ts` holds every verb the dashboard can perform - the run
-verbs (pause/resume, send a message to the agent, close as merged or
-abandoned when a run needs attention, kill, delete, protect/unprotect,
-relaunch, pull branch, hand off) and the board verbs (open the board or the
-list, launch, launch from a template, mark all seen) - as data: an id, a
-label, an icon, the capability
-gate, and the call itself. `useCommandRunner()` performs one and reports the
-outcome the same way everywhere: gateway verbs toast their past-tense name or
-the server's refusal verbatim. Deleting a run also removes it from the local
-run map after the server confirms deletion; other run state is still reported
-by the event stream.
+verbs (pause/resume, send a message to the agent, close as merged or abandoned
+when a run needs attention, kill, delete, protect/unprotect, relaunch, pull
+branch, hand off) and the board verbs (open the board or the list, launch,
+launch from a template, mark all seen) - as data: an id, a label, an icon, the
+capability gate, and the call itself. `useCommandRunner()` performs one and
+reports the outcome the same way everywhere: gateway verbs toast their
+past-tense name or the server's refusal verbatim. Deleting a run also removes
+it from the local run map after the server confirms deletion; other run state
+is still reported by the event stream.
 
 Kill and Delete stay available to members with the `Kill` capability for
 every run status. Killing a terminal run is a safe no-op; deleting removes
@@ -426,24 +425,22 @@ with no seeded prompt - and required in headless, which has no interactive
 surface, so the form disables Launch and says why rather than sending a
 request the gateway will refuse (`runLaunch` in `internal/sshd/handlers.go` is
 the same rule). Only what was actually chosen goes on the wire: an empty task
-and the default `tui` mode are the server's own defaults. The **Agent** list
-comes from the installed entries in `agent.list`, plus the `custom` escape
-hatch, which is offered only beside at least one installed agent. `agent.list`
-reports installation from the selected account's persistent `~/.local/bin`;
-uninstalled shipped entries remain visible on the Agents page so setup can
-install them. The launch form also remembers the most recently used installed
-agent for each account and falls back to the first installed entry.
-With nothing installed there is no picker at all: the field is replaced by
-"No agent is installed in this account." and a **Set up an agent** button, and
-Launch stays disabled. The button goes to the wizard's Agents step on a local
-gateway and to the Agents view on a remote one, which is as far as a gateway
-without the client-machine verbs can take them. Falling back to `custom`
-instead - what the form used to do - launches a container with no executable
-to run, so the missing agent surfaces as the server's refusal afterwards.
-A failed list request shows its error and no setup button - nothing here can
-fix a gateway that did not answer - and Launch stays disabled there too.
-**Refresh agents** retries discovery after a connection failure or an
-installation completed in another terminal.
+and the default `tui` mode are the server's own defaults. The **Agent** field
+is always there: a leading "Choose an agent" option, then the installed
+entries from `agent.list`, then `custom`, the escape hatch that `agent.list`
+never returns and that only launches where the deployment pinned a harness
+with `--harness-definitions`. `agent.list` reports installation from the
+selected account's persistent `~/.local/bin`; uninstalled shipped entries
+remain visible on the Agents page so setup can install them. The launch form
+also remembers the most recently used installed agent for each account and
+falls back to the first installed entry. With nothing installed nothing is
+preselected, so Launch stays disabled until the member picks one: "No agent is
+installed in this account." and a **Set up an agent** button sit beside the
+field rather than replacing it, and the button opens the Agents view. A failed
+list request shows its error and no setup button - nothing here can fix a
+gateway that did not answer - and Launch stays disabled there too. **Refresh
+agents** retries discovery after a connection failure or an installation
+completed in another terminal.
 
 Neither launch form asks which workspace to launch into: both take
 `activeWorkspace` and say where the run will land, naming the workspace and its
@@ -691,14 +688,11 @@ and steering policy.
 ## Settings
 
 `src/routes/settings/` shows the local link, the sync daemon, and **Mirror run
-files to your repository** - the card that drives a live run's sync overlay,
-named for what it does rather than for the mechanism, and saying in a sentence
-that the gateway mirrors the run's files into your linked clone as the agent
-works.
-When the local capability includes `repo.sync`, the Base branch card's **Sync
-from origin** button fast-forwards the server's workspace base branch from
-this machine's `origin` remote. It shows the returned branch and git's output
-verbatim; server refusals stay verbatim.
+files to your repository**, the card that starts and stops a live run's sync
+overlay. When the local capability includes `repo.sync`, the Base branch
+card's **Sync from origin** button fast-forwards the server's workspace base
+branch from this machine's `origin` remote. It shows the returned branch and
+git's output verbatim; server refusals stay verbatim.
 
 ## Onboarding wizard
 
@@ -719,16 +713,16 @@ sub-screen first and leaves the step only from the step's own screen. A step
 with sub-screens takes them as `setup` and `onSetup` rather than keeping them
 in its own state.
 
-The wizard owns that Back button but no step renders it in the same place
-twice: the wizard passes it down as a `back` node and each step puts it in its
-own action row, beside Create workspace, Skip for now or Launch. A step as
-tall as Agents with the terminal dock open would otherwise push a control
-sitting under the step content off the bottom of the window.
+The wizard owns that Back button, but every step renders it in the same place:
+the wizard passes it down as a `back` node and each step puts it in its own
+action row, beside Create workspace, Skip for now or Launch. A step as tall as
+Agents with the terminal dock open would otherwise push a control sitting
+under the step content off the bottom of the window.
 
-The step header is the same navigation read back. A finished step carries a
-check and is a button that jumps to it; the current step and the ones ahead
-are inert text, because a step the member has not reached has nothing to show
-yet.
+In the step header, every step the member has already reached carries a check
+and is a button that jumps back to it, so walking backwards does not strand
+them on a step they cannot leave. The current step and the ones never reached
+are inert text.
 
 The Git identity step collects the name and email the member's commits are
 authored as, saved on the server with `member.git`. Where the gateway serves
@@ -897,21 +891,20 @@ buttons live.
 
 The First run step is the last one, and launches a run in the workspace the
 Workspace step settled on. Its **Agent** select offers only the entries
-`agent.list` reports as `installed` in this account - the same rule the launch
-form follows - and the agent the Agents step just set up is preselected when
-it is one of them. With none installed the step drops the picker: it says a
-run launches an agent in a container and none is installed yet, and offers
-**Set up an agent**, which jumps back to the Agents step. Skipping setup and
-then picking a shipped name is how a member used to reach the server's
-refusal only after the run had launched. A failed `agent.list` shows the
-server's error and a **Retry** button instead, because a gateway that could
-not answer is not the same fact as an account with nothing installed.
+`agent.list` reports as `installed` in this account - the launch form's rule
+without its `custom` escape hatch - and the agent the Agents step just set up
+is preselected when it is one of them. With none installed the step drops the
+picker: it says a run launches an agent in a container and none is installed
+yet, and offers **Set up an agent**, which jumps back to the Agents step.
+Skipping setup and then picking a shipped name is how a member used to reach
+the server's refusal only after the run had launched. A failed `agent.list`
+shows the server's error with **Retry** as the primary action and no setup
+button, because a gateway that could not answer is not the same fact as an
+account with nothing installed.
 
-The step's "No agent subscription yet?" note points at the CLI, and stays on
-screen in both states: `fake` is a scheduler registration rather than an
-executable installed in an account, so it never appears in the picker and is
-launched with `aether run "..." --agent fake`. See
-[harnesses.md](harnesses.md) for what that agent runs.
+The step's "No agent subscription yet?" note points at the CLI and stays on
+screen in every state; "Prove the plumbing without an agent subscription" in
+[quickstart.md](quickstart.md) covers what `fake` is and how to launch it.
 
 ## Update prompts
 
@@ -1078,27 +1071,27 @@ a member who may start one and not to a viewer, and All runs opening the flat
 list; the board header opening the launch form and an empty workspace saying
 so once rather than three times; and the launch form refusing a headless run
 with no task while sending nothing the server already defaults, offering only
-installed agents, keeping Launch disabled both when none is installed and when
-`agent.list` fails, and sending setup to the wizard's Agents step on a local
-gateway and the Agents view on a remote one. The sidebar also covers
-the switcher naming a sole workspace instead of offering a
-picker, a switch rescoping the run list, and the attention badge counting.
-The permission mirror is exercised through the bar rather than on its own: a
-viewer is offered nothing that mutates a run, a collaborator may steer and
-kill another member's run but not give it away or protect it, and a protected
-run and an `admins_only` workspace both close steering to everyone but the
-owner. Two more cover the shared runner: a refused kill toasts the server's
-message verbatim, and a slow pull locks the whole bar, names the ref it
-fetched and leaves its git output on the store for the diff tab. The shell
-test clicks New run in the sidebar and finds the real form, which is what
-proves the host is the shell's rather than the palette's. The team surfaces are driven through the same stub
-API: the status bar reading roster, queue and budget and rendering all three,
-the approval badge and watcher avatars reaching a real run card, a decision
-going out as `approval.decide` and coming back attributed, a steer refusal
-surfacing instead of being guessed at, the refresh covering every workspace
-rather than only the ones with live runs, the heartbeat claiming only the
-workspace in view, an over-cap workspace staying in the readout after its last
-run finishes, and the feed opening its window at the log head, walking it back
+installed agents beside the `custom` escape hatch, keeping Launch disabled
+both when none is installed and when `agent.list` fails, and sending setup to
+the Agents view. The sidebar also covers the switcher naming a sole workspace
+instead of offering a picker, a switch rescoping the run list, and the
+attention badge counting. The permission mirror is exercised through the bar
+rather than on its own: a viewer is offered nothing that mutates a run, a
+collaborator may steer and kill another member's run but not give it away or
+protect it, and a protected run and an `admins_only` workspace both close
+steering to everyone but the owner. Two more cover the shared runner: a
+refused kill toasts the server's message verbatim, and a slow pull locks the
+whole bar, names the ref it fetched and leaves its git output on the store for
+the diff tab. The shell test clicks New run in the sidebar and finds the real
+form, which is what proves the host is the shell's rather than the palette's.
+The team surfaces are driven through the same stub API: the status bar reading
+roster, queue and budget and rendering all three, the approval badge and
+watcher avatars reaching a real run card, a decision going out as
+`approval.decide` and coming back attributed, a steer refusal surfacing
+instead of being guessed at, the refresh covering every workspace rather than
+only the ones with live runs, the heartbeat claiming only the workspace in
+view, an over-cap workspace staying in the readout after its last run
+finishes, and the feed opening its window at the log head, walking it back
 without re-reading, narrowing on a filter, and abandoning a page that belongs
 to filters the user has left. The Members roster is rendered both ways: an
 admin approving, inviting and changing another member's role with the roster
@@ -1106,47 +1099,48 @@ refetching after, the server's refusal rendered verbatim when a role change is
 denied, the confirmation an admin must clear before giving up their own admin
 role, and a non-admin getting the same roster as read-only text with no admin
 verbs - which the sidebar and the palette match by keeping Members reachable
-behind the narrow remote allowlist while every other admin entry stays
-hidden. The onboarding wizard walks all six steps against the stub API, and
-covers what navigation must not lose: Back leaving the Agents setup screen
-before it leaves the step, the header jumping back to a finished step, and the
-Repository step still showing its connected clone and push result after a walk
-away and back. The First run step is covered on all three of its answers: only
+behind the narrow remote allowlist while every other admin entry stays hidden.
+The onboarding wizard walks all six steps against the stub API, and covers
+what navigation must not lose: Back leaving the Agents setup screen before it
+leaves the step and rendering inside the step it belongs to, the header
+jumping between steps already reached while leaving a step never reached
+inert, the First run draft surviving a jump away and back, and the Repository
+step still showing its connected clone and push result after a walk away and
+back. The First run step is covered on all three of its answers: only
 installed agents in the picker, **Set up an agent** returning to the Agents
 step when none is installed, and a failed `agent.list` kept on screen as the
-server's own error rather than read as an empty account. The Repository
-step also covers each comparison state: which command is the copyable one in
-each, and the fast-forward reporting a dirty tree it did not touch while
-keeping both git outputs. The Git identity step covers the prefill from this
-machine and the save that advances, the member's own saved identity winning
-over the machine's, a refusal rendered verbatim with the wizard staying put,
-the skip, the identity still shown when the user walks back in, a machine
-with no identity to read, a gateway that does not speak `git.identity`,
-typing that survives a late prefill, a field cleared on purpose staying
-empty, the refusal to save half an identity, and a server-info refresh
-landing mid-save without losing either change. The persisted resume point is
-covered from both sides: in the store, a version 0 payload losing its stale
-push answer and nothing else, a version 1 payload losing an answer with no
-link id, a version 2 payload keeping its answer while its step is renamed,
-every old index mapping to the step it named at every version behind this
-one, an unplaceable value starting over, and a payload at this version left
-untouched; in the wizard, every step from Repository on falling back to the
-workspace picker when no workspace survived, the steps before it resuming
-where they were, and a resumed Repository step holding its connected clone
-through a walk back to Workspace and a walk forward past Git identity. The
-Agents step tests setup-capable harness detection, the live terminal dock,
-the environment save that follows a confirmed install, the GitHub connect
-screen - the login command reaching the dock, the account and fingerprint it
-reports, a refusal rendered verbatim, the CLI path without a terminal socket,
-and Back closing it without leaving the step - profile previews and
-exclusions, profile recommendations, cancellation,
-secret and plugin guards, push refusals, and the optional skip paths. The diff
-tab covers the parser on the shapes that would break it - a deletion, a new
-file, a removed line that reads exactly like a file marker - then the fetch,
-the truncation notice, a snapshot rendering its own interval and only that
-change, deselecting returning to the cumulative patch without a refetch, a
-snapshot carrying no tree staying unselectable, and a conflict chip naming its
-member and opening their run.
+server's own error rather than read as an empty account. The Repository step
+also covers each comparison state: which command is the copyable one in each,
+and the fast-forward reporting a dirty tree it did not touch while keeping
+both git outputs. The Git identity step covers the prefill from this machine
+and the save that advances, the member's own saved identity winning over the
+machine's, a refusal rendered verbatim with the wizard staying put, the skip,
+the identity still shown when the user walks back in, a machine with no
+identity to read, a gateway that does not speak `git.identity`, typing that
+survives a late prefill, a field cleared on purpose staying empty, the refusal
+to save half an identity, and a server-info refresh landing mid-save without
+losing either change. The persisted resume point is covered from both sides:
+in the store, a version 0 payload losing its stale push answer and nothing
+else, a version 1 payload losing an answer with no link id, a version 2
+payload keeping its answer while its step is renamed, every old index mapping
+to the step it named at every version behind this one, an unplaceable value
+starting over, and a payload at this version left untouched; in the wizard,
+every step from Repository on falling back to the workspace picker when no
+workspace survived, the steps before it resuming where they were, and a
+resumed Repository step holding its connected clone through a walk back to
+Workspace and a walk forward past Git identity. The Agents step tests
+setup-capable harness detection, the live terminal dock, the environment save
+that follows a confirmed install, the GitHub connect screen - the login
+command reaching the dock, the account and fingerprint it reports, a refusal
+rendered verbatim, the CLI path without a terminal socket, and Back closing it
+without leaving the step - profile previews and exclusions, profile
+recommendations, cancellation, secret and plugin guards, push refusals, and
+the optional skip paths. The diff tab covers the parser on the shapes that
+would break it - a deletion, a new file, a removed line that reads exactly
+like a file marker - then the fetch, the truncation notice, a snapshot
+rendering its own interval and only that change, deselecting returning to the
+cumulative patch without a refetch, a snapshot carrying no tree staying
+unselectable, and a conflict chip naming its member and opening their run.
 Full end-to-end coverage is `web/e2e/`: a Playwright suite that drives this
 dashboard in a real browser against a real `aether gui` gateway and a real
 server, with real git and real containers. It walks the onboarding wizard the
