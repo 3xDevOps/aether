@@ -69,15 +69,18 @@ jobs:
       # The agent CLIs on top, at whatever version their vendors ship
       # today: that is the drift this image exists to catch. It carries no
       # credentials, which is exactly what TestSmokeHeadlessNoLogin needs.
+      #
+      # It has to build on the "default" builder, the one backed by the
+      # Docker daemon, because that is the only builder that can see the
+      # image the step above loaded. The container builder buildx sets up
+      # keeps its own store, so it would resolve BASE as a registry
+      # reference and go looking for it on Docker Hub.
       - name: Build the agent smoke image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/smoke/Dockerfile
-          load: true
-          build-args: BASE=aether-standard:ci
-          tags: aether-smoke:ci
-          no-cache: true
+        run: |
+          docker buildx build --builder default --load --no-cache \
+            --build-arg BASE=aether-standard:ci \
+            --tag aether-smoke:ci \
+            --file images/smoke/Dockerfile .
       - name: Integration tests (real Docker, real git)
         env:
           AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN: aether-smoke:ci
