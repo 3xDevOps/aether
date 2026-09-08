@@ -35,6 +35,29 @@ export type RootState = ServerSlice &
   UiSlice
 
 /**
+ * What survives a reload. Reading it back yields a partial: an older release
+ * stored fewer keys, and a migration may drop one.
+ */
+type PersistedState = Partial<
+  Pick<
+    RootState,
+    | 'theme'
+    | 'sidebarWidth'
+    | 'sidebarCollapsed'
+    | 'terminalDockHeight'
+    | 'runDockHeight'
+    | 'activeWorkspace'
+    | 'groupBy'
+    | 'lastHarnessByAccount'
+    | 'dismissedUpdates'
+    | 'onboarded'
+    | 'onboardingStep'
+    | 'onboardingWorkspace'
+    | 'onboardingRepo'
+  >
+>
+
+/**
  * The root store: one Zustand store composed of independent slices. A new
  * feature adds a slice file and one line here.
  */
@@ -61,8 +84,18 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
+        version: 1,
+        // Version 0 stored the Repository step's push answer before it
+        // carried the comparison state the step renders, so it comes back
+        // matching no state at all. Dropping it puts the step back on its
+        // push offer, which asks the gateway again.
+        migrate: (persisted): PersistedState => {
+          const { onboardingRepo, ...rest } = (persisted ??
+            {}) as PersistedState
+          return rest
+        },
         // Only view preferences survive a reload; server data is re-hydrated.
-        partialize: (s) => ({
+        partialize: (s): PersistedState => ({
           theme: s.theme,
           sidebarWidth: s.sidebarWidth,
           sidebarCollapsed: s.sidebarCollapsed,

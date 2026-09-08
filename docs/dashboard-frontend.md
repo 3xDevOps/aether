@@ -723,7 +723,10 @@ the form, prefilled with the old path; a blank form there would ask again
 for a remote that already exists.
 
 The UI slice persists the current step, the selected workspace and the
-connected repository. Hydration reads
+connected repository. The persisted state is versioned: version 0 stored a
+push answer from before the comparison, which matches none of the four
+states, so the migration drops `onboardingRepo` and leaves the other
+preferences alone rather than rehydrating a blank panel. Hydration reads
 `link.status` first: a linked local gateway is marked onboarded before the
 redirect decision, so a linked machine never re-enters onboarding after a fresh
 GUI launch. An unlinked local gateway still routes here when `onboarded` is
