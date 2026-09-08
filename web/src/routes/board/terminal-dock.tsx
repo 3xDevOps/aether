@@ -130,17 +130,25 @@ export function TerminalDock({
     }
   }, [rpc, setStatus, statusAttempt])
 
+  // The dock is collapsed by default, but a caller that opens it on mount
+  // means to show the terminal - the Agents and GitHub steps type into it.
+  // Once only: re-running this whenever `collapsed` changed would undo the
+  // member's own press of the collapse chevron on the same tick.
+  const expandedOnMount = useRef(false)
+  useEffect(() => {
+    if (!openOnMount || expandedOnMount.current) return
+    expandedOnMount.current = true
+    setCollapsed(false)
+  }, [openOnMount, setCollapsed])
+
   useEffect(() => {
     if (!openOnMount) return
-    // The dock is collapsed by default, but a caller that opens it on mount
-    // means to show the terminal - the Agents and GitHub steps type into it.
-    if (dock.collapsed) setCollapsed(false)
     if (!dock.tabs.includes('main')) {
       openTab()
     } else if (dock.activeTab !== 'main') {
       selectTab('main')
     }
-  }, [dock.activeTab, dock.collapsed, dock.tabs, openOnMount, openTab, selectTab, setCollapsed])
+  }, [dock.activeTab, dock.tabs, openOnMount, openTab, selectTab])
 
   useEffect(() => {
     if (!openOnMount || !initialLine || hasEnvTerminalLineSent('main', initialLine)) return

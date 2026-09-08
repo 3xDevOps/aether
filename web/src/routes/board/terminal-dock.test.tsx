@@ -110,6 +110,9 @@ describe('environment terminal dock', () => {
 
     await waitFor(() => expect(api.terminalStop).toHaveBeenCalled())
     expect(useStore.getState().envTerminal.tabs).toEqual([])
+    // Whether the dock is open is the member's choice, not part of the
+    // environment's state, so stopping must not close it under them.
+    expect(useStore.getState().envTerminal.collapsed).toBe(false)
   })
   it('saves the running environment and hides the unsaved hint', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
@@ -149,6 +152,7 @@ describe('environment terminal dock', () => {
 
     await waitFor(() => expect(api.envReset).toHaveBeenCalledTimes(1))
     expect(useStore.getState().envTerminal.tabs).toEqual([])
+    expect(useStore.getState().envTerminal.collapsed).toBe(false)
     expect(useStore.getState().envTerminal.status).toEqual({
       running: false,
       tabs: [],
@@ -242,6 +246,20 @@ describe('environment terminal dock', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand terminal dock' }))
 
     expect(await screen.findByText('Your environment starts on first open')).toBeDefined()
+  })
+
+  it('opens itself for a caller that mounts it open, and still closes', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock openOnMount />)
+
+    await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse terminal dock' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Expand terminal dock' })).toBeDefined(),
+    )
+    expect(useStore.getState().envTerminal.collapsed).toBe(true)
   })
 
   it('names the real tab ceiling when every environment tab is open', async () => {

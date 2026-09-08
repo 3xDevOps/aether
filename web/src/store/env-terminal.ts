@@ -177,7 +177,12 @@ export const createEnvTerminalSlice: SliceCreator<EnvTerminalSlice> = (set) => (
     for (const tab of sockets.keys()) unregisterEnvTerminalSocket(tab)
     pendingLines.clear()
     sentLines.clear()
-    set({ envTerminal: initialEnvTerminal })
+    // The shell exiting, a stop and a reset all land here, and none of them
+    // is the member asking for the dock to close: whether it is open is
+    // their choice, not part of the environment's state.
+    set((s) => ({
+      envTerminal: { ...initialEnvTerminal, collapsed: s.envTerminal.collapsed },
+    }))
   },
   sendLine: (tab, text) => {
     const line = `${text}\n`
