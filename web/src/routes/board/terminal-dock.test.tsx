@@ -262,6 +262,19 @@ describe('environment terminal dock', () => {
     expect(useStore.getState().envTerminal.collapsed).toBe(true)
   })
 
+  it('opens the dock when a collapsed strip is asked for a tab', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock />)
+
+    // The strip's controls stay live while the dock is shut, and a tab with
+    // no mounted terminal never attaches, so + has to open the dock too.
+    fireEvent.click(await screen.findByRole('button', { name: 'Add terminal tab' }))
+
+    await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
+    expect(useStore.getState().envTerminal.tabs).toContain('main')
+  })
+
   it('names the real tab ceiling when every environment tab is open', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     render(<TerminalDock />)

@@ -133,6 +133,21 @@ describe('run-shell dock', () => {
     view.unmount()
   })
 
+  it('opens the dock when a collapsed strip is asked for a shell', async () => {
+    useStore.getState().upsertRun(run())
+    useStore.setState({ terminals: {}, shellDocks: {} })
+    const View = lookupRoute('terminal')
+    if (!View) throw new Error('terminal route not registered')
+    const view = render(<View params={{ runId: 'run_1' }} />)
+
+    // A tab in a shut dock mounts no terminal, so nothing would ever attach.
+    fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
+
+    await waitFor(() => expect(useStore.getState().shellDocks.run_1.collapsed).toBe(false))
+    expect(useStore.getState().shellDocks.run_1.tabs).toEqual(['t1'])
+    view.unmount()
+  })
+
   it('names the real tab ceiling when every shell tab is open', async () => {
     const view = mount()
     for (let n = 0; n < 4; n++) {

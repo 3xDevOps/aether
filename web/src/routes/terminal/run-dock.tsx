@@ -102,13 +102,22 @@ export function RunDock({ runID }: { runID: string }) {
   }, [activeTab, dock.refusedMessage, removeShellTab, runID, setShellRefused, terminal])
 
   const tabs = canOpenShell ? dock.tabs.map((tab) => ({ id: tab, label: tab })) : []
-  const open = () => openShellTab(runID)
+  // The header strip stays live while the dock is collapsed, so a tab control
+  // has to open the dock it belongs to; otherwise it would add a tab with no
+  // terminal mounted to attach it.
+  const open = () => {
+    setDockCollapsed(runID, false)
+    openShellTab(runID)
+  }
 
   return (
     <Dock
       tabs={tabs}
       activeTab={canOpenShell ? activeTab ?? '' : ''}
-      onSelectTab={(tab) => selectShellTab(runID, tab)}
+      onSelectTab={(tab) => {
+        setDockCollapsed(runID, false)
+        selectShellTab(runID, tab)
+      }}
       onAddTab={canOpenShell ? open : undefined}
       maxTabs={maxShellTabs}
       onCloseTab={(tab) => closeShellTab(runID, tab)}

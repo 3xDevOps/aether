@@ -268,8 +268,14 @@ export function TerminalDock({
       <Dock
         tabs={tabs}
         activeTab={activeTab ?? ''}
-        onSelectTab={selectTab}
-        onAddTab={openTab}
+        onSelectTab={(tab) => {
+          setCollapsed(false)
+          selectTab(tab)
+        }}
+        onAddTab={() => {
+          setCollapsed(false)
+          openTab()
+        }}
         maxTabs={maxTabs}
         onCloseTab={closeTab}
         height={terminalDockHeight}
