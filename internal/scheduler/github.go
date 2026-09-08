@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -18,13 +20,36 @@ import (
 // terminal is not logged in to github.com yet.
 var ErrGitHubNotLoggedIn = errors.New("github: not logged in to github.com in the environment terminal; run gh auth login there first")
 
+// ErrGitHubScopeMissing reports that the login is good but was granted
+// without the scope the last step of the connect needs.
+var ErrGitHubScopeMissing = errors.New("github: the gh login on github.com lacks the admin:ssh_signing_key scope; run gh auth refresh -h github.com -s admin:ssh_signing_key in the environment terminal")
+
+// signingKeyScope is the gh scope that lets ssh-key add register a signing
+// key on the member's account.
+const signingKeyScope = "admin:ssh_signing_key"
+
+// githubConnectTimeout bounds the whole connect, which holds the member's
+// terminal lock while it runs commands that reach github.com. A gh the
+// member's container has shadowed could otherwise block every other call
+// for that member for as long as the SSH channel stays open. Tests shorten
+// it.
+var githubConnectTimeout = 2 * time.Minute
+
 // ghAuthStatus is the shape of gh auth status --json hosts.
 type ghAuthStatus struct {
-	Hosts map[string][]struct {
-		State  string `json:"state"`
-		Active bool   `json:"active"`
-		Login  string `json:"login"`
-	} `json:"hosts"`
+	Hosts map[string][]ghAuthEntry `json:"hosts"`
+}
+
+// ghAuthEntry is one account gh knows for a host.
+type ghAuthEntry struct {
+	State  string `json:"state"`
+	Active bool   `json:"active"`
+	Login  string `json:"login"`
+	// Scopes is gh's own comma-separated rendering, "gist, read:org, repo".
+	Scopes string `json:"scopes"`
+	// Error is what gh could not do with this account - an expired or
+	// revoked token reads as "HTTP 401: Bad credentials".
+	Error string `json:"error"`
 }
 
 // ConnectGitHub finishes the GitHub connection the member started with
@@ -39,10 +64,13 @@ type ghAuthStatus struct {
 // the home.
 func (s *Scheduler) ConnectGitHub(ctx context.Context, member domain.MemberID) (domain.GitHubConnection, error) {
 	// Held for the whole call so a concurrent stop cannot pull the
-	// container out from under the three execs.
+	// container out from under the four execs.
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+
+	ctx, cancel := context.WithTimeout(ctx, githubConnectTimeout)
+	defer cancel()
 
 	sup := s.lookupTerminal(member)
 	if sup == nil {
@@ -71,9 +99,23 @@ func (s *Scheduler) ConnectGitHub(ctx context.Context, member domain.MemberID) (
 	if code == 126 || code == 127 {
 		return domain.GitHubConnection{}, fmt.Errorf("scheduler: gh is not on PATH in the environment terminal (the standard image ships it; a saved environment may need it installed): %s", said)
 	}
-	login, ok := activeGitHubLogin(code, stdout)
+	entry, ok := activeGitHubLogin(stdout)
 	if !ok {
-		return domain.GitHubConnection{}, fmt.Errorf("%w: %s", ErrGitHubNotLoggedIn, said)
+		// gh's own account error says why far better than its JSON does;
+		// without an entry there is nothing to quote but what gh printed.
+		detail := entry.Error
+		if detail == "" {
+			detail = said
+		}
+		return domain.GitHubConnection{}, fmt.Errorf("%w: %s", ErrGitHubNotLoggedIn, detail)
+	}
+	// Refused before anything in the home is touched: a member who has to
+	// go back to gh auth refresh should not first collect a signing key,
+	// a rewritten .gitconfig and a git credential helper.
+	if !slices.ContainsFunc(strings.Split(entry.Scopes, ","), func(scope string) bool {
+		return strings.TrimSpace(scope) == signingKeyScope
+	}) {
+		return domain.GitHubConnection{}, ErrGitHubScopeMissing
 	}
 	// Signing happens on the server, so the server host is what needs the
 	// signing program; failing here beats writing a key nothing can use.
@@ -101,6 +143,8 @@ func (s *Scheduler) ConnectGitHub(ctx context.Context, member domain.MemberID) (
 	}
 
 	title := "aether " + string(member)
+	// gh ssh-key add takes no --hostname: the key goes to gh's default
+	// host, which is github.com unless the home sets GH_HOST.
 	code, _, said, err = gh("gh", "ssh-key", "add", ".ssh/aether_signing.pub", "--type", "signing", "--title", title)
 	if err != nil {
 		return domain.GitHubConnection{}, fmt.Errorf("scheduler: register signing key on github: %w", err)
@@ -113,26 +157,48 @@ func (s *Scheduler) ConnectGitHub(ctx context.Context, member domain.MemberID) (
 	if err != nil {
 		return domain.GitHubConnection{}, err
 	}
-	return domain.GitHubConnection{Login: login, SigningKey: pub, Fingerprint: fingerprint}, nil
+	// The upload names a path in the home, which the container writes; the
+	// fingerprint reported here comes from the private key. Reading the
+	// account back is what makes those the same key.
+	code, listed, said, err := gh("gh", "ssh-key", "list")
+	if err != nil {
+		return domain.GitHubConnection{}, fmt.Errorf("scheduler: list github signing keys: %w", err)
+	}
+	if code != 0 {
+		return domain.GitHubConnection{}, fmt.Errorf("scheduler: gh ssh-key list exited %d: %s", code, said)
+	}
+	if !listsFingerprint(listed, fingerprint) {
+		return domain.GitHubConnection{}, fmt.Errorf(
+			"github: the signing key registered on the account does not match this member's key (fingerprint %s not listed)", fingerprint)
+	}
+	return domain.GitHubConnection{Login: entry.Login, SigningKey: pub, Fingerprint: fingerprint}, nil
 }
 
-// activeGitHubLogin reads the account gh reports as the active, logged-in
-// one for github.com. Anything else - a nonzero exit, unparsable output,
-// no successful active entry - is "not logged in".
-func activeGitHubLogin(code int, stdout string) (string, bool) {
-	if code != 0 {
-		return "", false
-	}
+// activeGitHubLogin returns the account gh reports as the active one for
+// github.com and whether it is logged in. A failed entry comes back too,
+// for the error it carries; unparsable output comes back as no entry.
+func activeGitHubLogin(stdout string) (ghAuthEntry, bool) {
 	var status ghAuthStatus
 	if err := json.Unmarshal([]byte(stdout), &status); err != nil {
-		return "", false
+		return ghAuthEntry{}, false
 	}
 	for _, host := range status.Hosts["github.com"] {
-		if host.Active && host.State == "success" && host.Login != "" {
-			return host.Login, true
+		if host.Active {
+			return host, host.State == "success" && host.Login != ""
 		}
 	}
-	return "", false
+	return ghAuthEntry{}, false
+}
+
+// listsFingerprint reports whether gh ssh-key list names fingerprint. Each
+// line is tab separated: title, fingerprint, added, id, type.
+func listsFingerprint(out, fingerprint string) bool {
+	for line := range strings.Lines(out) {
+		if slices.Contains(strings.Split(strings.TrimSpace(line), "\t"), fingerprint) {
+			return true
+		}
+	}
+	return false
 }
 
 func signingFingerprint(publicKeyLine string) (string, error) {

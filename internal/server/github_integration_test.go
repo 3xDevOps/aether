@@ -41,8 +41,9 @@ git -c gpg.ssh.allowedSignersFile=/tmp/allowed-signers log -1 --format='%G?' HEA
 // ghStub is the fake gh this scenario puts first on the environment
 // terminal's PATH. It records every call, reports one logged-in account,
 // writes the credential helper block real gh writes, and files the public
-// key it is handed - so the run afterwards is driven by exactly what a
-// real connect would have left in the home.
+// key it is handed, and lists that key's fingerprint back the way gh does
+// - so the run afterwards is driven by exactly what a real connect would
+// have left in the home.
 const ghStub = `#!/bin/sh
 echo "$*" >> "$HOME/gh-calls.log"
 case "$1 $2" in
@@ -54,6 +55,10 @@ case "$1 $2" in
 	;;
 "ssh-key add")
 	cp "$3" "$HOME/gh-registered-key"
+	;;
+"ssh-key list")
+	set -- $(ssh-keygen -lf "$HOME/gh-registered-key")
+	printf 'aether\t%s\t2026-01-01T00:00:00Z\t1\tsigning\n' "$2"
 	;;
 *)
 	echo "stub gh: unsupported command: $*" >&2
@@ -233,6 +238,7 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 		"auth status --hostname github.com --active --json hosts",
 		"auth setup-git --hostname github.com",
 		"ssh-key add .ssh/aether_signing.pub --type signing --title aether " + string(member.ID),
+		"ssh-key list",
 	}
 	if calls := strings.Split(strings.TrimSpace(readHomeFile(t, home, "gh-calls.log")), "\n"); !equalStrings(calls, wantCalls) {
 		t.Errorf("gh calls = %q, want %q", calls, wantCalls)

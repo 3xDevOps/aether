@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -8,11 +9,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-const ghStatusLoggedIn = `{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat"}]}}`
+const ghStatusLoggedIn = `{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"gist, read:org, repo, admin:ssh_signing_key"}]}}`
 
 func requireSSHKeygen(t *testing.T) {
 	t.Helper()
@@ -82,8 +84,11 @@ func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 		t.Fatalf("UpdateMemberGitIdentity: %v", err)
 	}
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
-		if slices.Contains(argv, "status") {
+		switch {
+		case slices.Contains(argv, "status"):
 			return 0, ghStatusLoggedIn, nil
+		case slices.Contains(argv, "list"):
+			return 0, "aether\t" + homeKeyFingerprint(t, e) + "\t2026-01-01\t1\tsigning\n", nil
 		}
 		return 0, "", nil
 	}
@@ -114,6 +119,7 @@ func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 		{"gh", "auth", "status", "--hostname", "github.com", "--active", "--json", "hosts"},
 		{"gh", "auth", "setup-git", "--hostname", "github.com"},
 		{"gh", "ssh-key", "add", ".ssh/aether_signing.pub", "--type", "signing", "--title", "aether " + string(e.member.ID)},
+		{"gh", "ssh-key", "list"},
 	}
 	calls := e.rt.execRuns()
 	if len(calls) != len(wantArgv) {
@@ -152,6 +158,149 @@ func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 	}
 }
 
+// homeKeyFingerprint is what gh would report for the key the connect just
+// wrote into the member's home. The exec handler that calls it runs on its
+// own goroutine, so a failure is reported rather than fatal.
+func homeKeyFingerprint(t *testing.T, e *testEnv) string {
+	t.Helper()
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Errorf("home path: %v", err)
+		return ""
+	}
+	pub, err := os.ReadFile(filepath.Join(home, ".ssh", "aether_signing.pub"))
+	if err != nil {
+		t.Errorf("read public key: %v", err)
+		return ""
+	}
+	fingerprint, err := signingFingerprint(strings.TrimSpace(string(pub)))
+	if err != nil {
+		t.Errorf("fingerprint: %v", err)
+		return ""
+	}
+	return fingerprint
+}
+
+// A token the account no longer honors leaves gh exiting 0 with its
+// complaint in the entry. That sentence is what the member needs, not the
+// JSON it arrived in.
+func TestConnectGitHubReportsTheAccountsOwnError(t *testing.T) {
+	e := newTestEnv(t, nil)
+	const output = `{"hosts":{"github.com":[{"state":"error","active":true,"login":"octocat","error":"HTTP 401: Bad credentials"}]}}`
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		if slices.Contains(argv, "status") {
+			return 0, output, nil
+		}
+		t.Errorf("unexpected exec %v after a rejected token", argv)
+		return 0, "", nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if !errors.Is(err, ErrGitHubNotLoggedIn) {
+		t.Fatalf("ConnectGitHub error = %v, want %v", err, ErrGitHubNotLoggedIn)
+	}
+	if !strings.Contains(err.Error(), "HTTP 401: Bad credentials") {
+		t.Errorf("error %q does not carry gh's account error", err)
+	}
+	if strings.Contains(err.Error(), `"hosts"`) {
+		t.Errorf("error %q shows the JSON blob", err)
+	}
+}
+
+// A login granted without admin:ssh_signing_key would fail at the last
+// step, after the home had been rewritten. It is refused first, with the
+// command that fixes it.
+func TestConnectGitHubRefusesALoginWithoutTheSigningScope(t *testing.T) {
+	e := newTestEnv(t, nil)
+	const output = `{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"gist, read:org, repo"}]}}`
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		if slices.Contains(argv, "status") {
+			return 0, output, nil
+		}
+		t.Errorf("unexpected exec %v with the scope missing", argv)
+		return 0, "", nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if !errors.Is(err, ErrGitHubScopeMissing) {
+		t.Fatalf("ConnectGitHub error = %v, want %v", err, ErrGitHubScopeMissing)
+	}
+	if errors.Is(err, ErrGitHubNotLoggedIn) {
+		t.Errorf("error %q reads as a missing login", err)
+	}
+	if !strings.Contains(err.Error(), "gh auth refresh -h github.com -s admin:ssh_signing_key") {
+		t.Errorf("error %q does not carry the refresh command", err)
+	}
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{".ssh", ".gitconfig"} {
+		if _, statErr := os.Stat(filepath.Join(home, name)); !os.IsNotExist(statErr) {
+			t.Errorf("%s stat = %v, want the home untouched", name, statErr)
+		}
+	}
+}
+
+// The upload names a path the container can rewrite between the two
+// steps, so the connection is only reported once the account lists the
+// fingerprint the member's own private key produces.
+func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
+	requireSSHKeygen(t)
+	e := newTestEnv(t, nil)
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		switch {
+		case slices.Contains(argv, "status"):
+			return 0, ghStatusLoggedIn, nil
+		case slices.Contains(argv, "list"):
+			return 0, "someone else\tSHA256:Ry9aBd4mNJmZQMxTS0KaCiKtGCEccCWQyPq9WLm0000\t2026-01-01\t9\tsigning\n", nil
+		}
+		return 0, "", nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if err == nil || !strings.Contains(err.Error(), "does not match this member's key") {
+		t.Fatalf("ConnectGitHub error = %v, want the fingerprint mismatch", err)
+	}
+	if !strings.Contains(err.Error(), homeKeyFingerprint(t, e)) {
+		t.Errorf("error %q does not name the member's own fingerprint", err)
+	}
+}
+
+// gh comes from the member's container, which can shadow it with a
+// command that never returns. The connect holds that member's terminal
+// lock, so it has to give up on its own.
+func TestConnectGitHubStopsAtItsDeadline(t *testing.T) {
+	e := newTestEnv(t, nil)
+	released := make(chan struct{})
+	t.Cleanup(func() { close(released) })
+	e.rt.execHandler = func(_ runtime.ID, _ []string) (int, string, error) {
+		<-released
+		return 0, ghStatusLoggedIn, nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	restore := githubConnectTimeout
+	githubConnectTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { githubConnectTimeout = restore })
+
+	start := time.Now()
+	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ConnectGitHub error = %v, want the deadline", err)
+	}
+	if elapsed := time.Since(start); elapsed > 30*time.Second {
+		t.Errorf("ConnectGitHub returned after %v, want it to give up at its deadline", elapsed)
+	}
+}
+
 // The end-of-run commit is signed with the run owner's key once they have
 // one, and stays unsigned before that.
 func TestCommitAllSignsWithTheRunOwnersKey(t *testing.T) {
@@ -173,5 +322,30 @@ func TestCommitAllSignsWithTheRunOwnersKey(t *testing.T) {
 	}
 	if got := e.git.commitSignings(run.ID); len(got) != 2 || !got[1] {
 		t.Fatalf("signings after a key = %v, want a signed second commit", got)
+	}
+}
+
+// A key the agent has corrupted from inside its own run costs the
+// signature, not the commit.
+func TestCommitAllCommitsWithAnUnusableKey(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "add OAuth login")
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if derr := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); derr != nil {
+		t.Fatal(derr)
+	}
+	if werr := os.WriteFile(filepath.Join(home, ".ssh", "aether_signing"), []byte("not a key\n"), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+
+	commit, err := e.sched.commitAll(t.Context(), run.ID, "wip: with a corrupt key")
+	if err != nil || commit == "" {
+		t.Fatalf("commitAll = (%q, %v), want the work committed", commit, err)
+	}
+	if got := e.git.commitSignings(run.ID); len(got) != 1 || got[0] {
+		t.Fatalf("signings = %v, want [false]", got)
 	}
 }

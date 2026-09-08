@@ -295,7 +295,7 @@ func (r *fakeRuntime) attachForExec(ctx context.Context, id runtime.ID, _ []stri
 	return att, nil
 }
 
-func (r *fakeRuntime) Exec(_ context.Context, id runtime.ID, argv []string, workDir string) (int, string, string, error) {
+func (r *fakeRuntime) Exec(ctx context.Context, id runtime.ID, argv []string, workDir string) (int, string, string, error) {
 	r.mu.Lock()
 	r.execRunCalls = append(r.execRunCalls, fakeExecCall{id: id, argv: slices.Clone(argv), workDir: workDir})
 	handler := r.execHandler
@@ -303,8 +303,25 @@ func (r *fakeRuntime) Exec(_ context.Context, id runtime.ID, argv []string, work
 	if handler == nil {
 		return 0, "", "", nil
 	}
-	code, stdout, err := handler(id, argv)
-	return code, stdout, "", err
+	// Docker's Exec answers ctx.Err() when the deadline passes under a
+	// running command, so a handler that never returns must not outlive
+	// its context here either.
+	type answer struct {
+		code   int
+		stdout string
+		err    error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		code, stdout, err := handler(id, argv)
+		done <- answer{code, stdout, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return 0, "", "", ctx.Err()
+	case got := <-done:
+		return got.code, got.stdout, "", got.err
+	}
 }
 
 func (r *fakeRuntime) execRuns() []fakeExecCall {

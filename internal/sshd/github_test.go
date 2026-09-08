@@ -29,15 +29,25 @@ func TestGitHubConnectIsMemberScoped(t *testing.T) {
 	}
 }
 
-func TestGitHubNotLoggedInMapsToInvalidState(t *testing.T) {
-	e := newTestEnv(t, nil)
-	e.runs.setErr(scheduler.ErrGitHubNotLoggedIn)
-	c := controlClient(t, e)
+// Both ways a connect can be refused for the state of the member's gh
+// login reach the client as CodeInvalidState, with gh's own remedy in the
+// message.
+func TestGitHubLoginProblemsMapToInvalidState(t *testing.T) {
+	for _, seam := range []error{scheduler.ErrGitHubNotLoggedIn, scheduler.ErrGitHubScopeMissing} {
+		t.Run(seam.Error(), func(t *testing.T) {
+			e := newTestEnv(t, nil)
+			e.runs.setErr(seam)
+			c := controlClient(t, e)
 
-	var pe *protocol.Error
-	err := c.Call(protocol.MethodGitHubConnect, struct{}{}, nil)
-	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState {
-		t.Fatalf("github.connect error = %v, want CodeInvalidState", err)
+			var pe *protocol.Error
+			err := c.Call(protocol.MethodGitHubConnect, struct{}{}, nil)
+			if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState {
+				t.Fatalf("github.connect error = %v, want CodeInvalidState", err)
+			}
+			if pe.Message != seam.Error() {
+				t.Errorf("message = %q, want %q", pe.Message, seam.Error())
+			}
+		})
 	}
 }
 
