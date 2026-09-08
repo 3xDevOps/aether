@@ -357,7 +357,9 @@ export function RepoStep({
   const [pushError, setPushError] = useState<string | null>(null)
   const [forwarding, setForwarding] = useState(false)
   const [forwardError, setForwardError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  // The command last copied, so the two Copy buttons cannot report each
+  // other's success.
+  const [copied, setCopied] = useState('')
   const cmdRef = useRef<HTMLInputElement>(null)
 
   // Every run forks from the workspace's base branch, so that is the branch
@@ -374,6 +376,20 @@ export function RepoStep({
     forwarded !== null ||
     pushed?.state === 'pushed' ||
     pushed?.state === 'up-to-date'
+  // `git push` is the command to run only while the two tips have not
+  // parted: offering it to a clone the workspace has moved past is offering
+  // the `! [rejected] main -> main` this comparison exists to prevent.
+  const manual = !pushed?.state || pushed.state === 'pushed'
+  // The commands that resolve a divergence by hand, in the order they run.
+  const resolveCmds =
+    pushed?.state === 'diverged'
+      ? [
+          `git fetch ${pushed.remote} ${pushed.branch}`,
+          `git log --oneline --left-right ${pushed.branch}...${pushed.remote}/${pushed.branch}`,
+          `git rebase ${pushed.remote}/${pushed.branch}`,
+          `git push ${pushed.remote} ${pushed.branch}`,
+        ].join('\n')
+      : ''
 
   const link = async () => {
     const path = repo.trim()
@@ -404,7 +420,11 @@ export function RepoStep({
       // "Everything up-to-date" and "[new branch]" mean different things,
       // and only git can tell them apart.
       const result = await client.localRepoPush(workspace?.id)
-      setConnected({ ...connected, push: result })
+      // The record as it is now, not as it was at render: a fast-forward
+      // started from the same screen may have written its own answer while
+      // this request was in flight.
+      const current = useStore.getState().onboardingRepo
+      if (current) setConnected({ ...current, push: result })
     } catch (err) {
       setPushError(message(err))
     } finally {
@@ -418,7 +438,8 @@ export function RepoStep({
     setForwardError(null)
     try {
       const result = await client.localRepoFastForward(workspace?.id)
-      setConnected({ ...connected, fastForward: result })
+      const current = useStore.getState().onboardingRepo
+      if (current) setConnected({ ...current, fastForward: result })
     } catch (err) {
       setForwardError(message(err))
     } finally {
@@ -434,11 +455,12 @@ export function RepoStep({
     setForwardError(null)
   }
 
-  const copy = async () => {
+  const copy = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(pushCmd)
-      setCopied(true)
+      await navigator.clipboard.writeText(text)
+      setCopied(text)
     } catch {
+      // Nothing to select when the command is the diverged block's <pre>.
       cmdRef.current?.focus()
       cmdRef.current?.select()
     }
@@ -516,7 +538,7 @@ export function RepoStep({
             )}
           </p>
           {pushed?.state === 'behind' && !forwarded && (
-            <div className="space-y-2">
+            <div className="space-y-2" aria-live="polite">
               <p className="text-sm">
                 The workspace is {commits(pushed.behind)} ahead of your clone.
               </p>
@@ -552,7 +574,7 @@ export function RepoStep({
             </div>
           )}
           {pushed?.state === 'diverged' && (
-            <div className="space-y-2">
+            <div className="space-y-2" aria-live="polite">
               <p className="text-sm">
                 Your clone and the workspace have both moved on:{' '}
                 {commits(pushed.ahead)} here, {pushed.behind} there. Aether
@@ -568,18 +590,23 @@ export function RepoStep({
                 .
               </p>
               <p className="text-sm">Resolve it by hand, then push again:</p>
-              <pre className={`rounded-md border bg-card ${pane}`}>
-                {[
-                  `git fetch ${pushed.remote} ${pushed.branch}`,
-                  `git log --oneline --left-right ${pushed.branch}...${pushed.remote}/${pushed.branch}`,
-                  `git rebase ${pushed.remote}/${pushed.branch}`,
-                  `git push ${pushed.remote} ${pushed.branch}`,
-                ].join('\n')}
-              </pre>
+              <div className="flex items-start gap-2">
+                <pre className={`flex-1 rounded-md border bg-card ${pane}`}>
+                  {resolveCmds}
+                </pre>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Copy resolve commands"
+                  onClick={() => void copy(resolveCmds)}
+                >
+                  {copied === resolveCmds ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
             </div>
           )}
           {forwarded && (
-            <p className="text-sm">
+            <p className="text-sm" aria-live="polite">
               {forwarded.current ? (
                 <>
                   Fast-forwarded{' '}
@@ -591,12 +618,12 @@ export function RepoStep({
                   Updated <span className="font-mono">{forwarded.branch}</span>{' '}
                   to{' '}
                   <span className="font-mono">{short(forwarded.commit)}</span>.
-                  Another branch is checked out, so your working tree is
-                  untouched.
+                  Another branch is checked out, so the fast-forward left your
+                  working tree alone.
                 </>
               )}
               {forwarded.dirty &&
-                ' Your working tree still has uncommitted changes.'}
+                ' The uncommitted changes you already had are still there.'}
             </p>
           )}
           {settled ? (
@@ -609,34 +636,37 @@ export function RepoStep({
                 What git did
               </summary>
               <pre className={pane}>
-                {(forwarded ?? pushed)?.output.trim() || 'git printed nothing.'}
+                {[pushed?.output, forwarded?.output]
+                  .map((out) => out?.trim())
+                  .filter(Boolean)
+                  .join('\n\n') || 'git printed nothing.'}
               </pre>
             </details>
           ) : (
+            canPush && (
+              <>
+                <Button size="sm" disabled={pushing} onClick={() => void push()}>
+                  {pushing ? 'Pushing...' : 'Push now'}
+                </Button>
+                {pushError && (
+                  <div className="space-y-1">
+                    <p className="text-xs text-state-failed">
+                      The push failed. Git said:
+                    </p>
+                    <pre className={`rounded-md border bg-card ${pane}`}>
+                      {pushError}
+                    </pre>
+                  </div>
+                )}
+              </>
+            )
+          )}
+          {manual && (
             <>
               {canPush && (
-                <>
-                  <Button
-                    size="sm"
-                    disabled={pushing}
-                    onClick={() => void push()}
-                  >
-                    {pushing ? 'Pushing...' : 'Push now'}
-                  </Button>
-                  {pushError && (
-                    <div className="space-y-1">
-                      <p className="text-xs text-state-failed">
-                        The push failed. Git said:
-                      </p>
-                      <pre className={`rounded-md border bg-card ${pane}`}>
-                        {pushError}
-                      </pre>
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    or run it yourself:
-                  </p>
-                </>
+                <p className="text-xs text-muted-foreground">
+                  {settled ? 'The same push, by hand:' : 'or run it yourself:'}
+                </p>
               )}
               <div className="flex gap-2">
                 <input
@@ -647,8 +677,12 @@ export function RepoStep({
                   value={pushCmd}
                   onFocus={(e) => e.target.select()}
                 />
-                <Button variant="outline" size="sm" onClick={() => void copy()}>
-                  {copied ? 'Copied' : 'Copy'}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void copy(pushCmd)}
+                >
+                  {copied === pushCmd ? 'Copied' : 'Copy'}
                 </Button>
               </div>
             </>

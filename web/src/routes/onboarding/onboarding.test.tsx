@@ -332,6 +332,11 @@ describe('onboarding wizard', () => {
     expect(output.closest('details')?.open).toBe(true)
     // Nothing invites a second push, and Continue moves on.
     expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
+    // The command stays copyable: the two tips agree, so it is still the
+    // command that would seed the workspace.
+    expect(
+      screen.getByLabelText<HTMLInputElement>('Push command').value,
+    ).toBe('git push -u aether main')
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     // The optional Agents step sits between Repository and First run.
     fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
@@ -390,6 +395,13 @@ describe('onboarding wizard', () => {
   it('fast-forwards the clone when the workspace is ahead', async () => {
     const client = fakeApi({
       localRepoPush: vi.fn(async () => compared('behind', { behind: 2 })),
+      localRepoFastForward: vi.fn(async () => ({
+        branch: 'main',
+        commit: workspaceTip,
+        current: true,
+        dirty: false,
+        output: 'Updating 9f1c2ab..1a2b3c4\nFast-forward',
+      })),
     })
     await toPushChoice(client)
 
@@ -400,8 +412,11 @@ describe('onboarding wizard', () => {
     ).toBeDefined()
     expect(screen.getByText('9f1c2ab')).toBeDefined()
     expect(screen.getByText('1a2b3c4')).toBeDefined()
-    // The push offer stays: resolving by hand and retrying must still work.
+    // The push offer stays - a member who resolves by hand retries with it -
+    // but `git push` is the wrong command here, so it is not the one on
+    // offer to copy.
     expect(screen.getByRole('button', { name: 'Push now' })).toBeDefined()
+    expect(screen.queryByLabelText('Push command')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Fast-forward my clone' }))
 
@@ -410,6 +425,12 @@ describe('onboarding wizard', () => {
     })
     const settled = await screen.findByText(/Fast-forwarded/)
     expect(settled.textContent).toBe('Fast-forwarded main to 1a2b3c4.')
+    // Both commands git ran, in the order they ran: the compare's fetch,
+    // then the fast-forward.
+    expect(screen.getByText(/FETCH_HEAD/).textContent).toBe(
+      'From ssh://alice@host:2222/wsp_1\n * branch main -> FETCH_HEAD\n\n' +
+        'Updating 9f1c2ab..1a2b3c4\nFast-forward',
+    )
     expect(
       screen.queryByRole('button', { name: 'Fast-forward my clone' }),
     ).toBeNull()
@@ -447,9 +468,9 @@ describe('onboarding wizard', () => {
     // all three are things the user has to know before the next step.
     const settled = await screen.findByText(/Updated/)
     expect(settled.textContent).toBe(
-      'Updated main to 1a2b3c4. Another branch is checked out, so your ' +
-        'working tree is untouched. Your working tree still has uncommitted ' +
-        'changes.',
+      'Updated main to 1a2b3c4. Another branch is checked out, so the ' +
+        'fast-forward left your working tree alone. The uncommitted changes ' +
+        'you already had are still there.',
     )
   })
 
@@ -474,12 +495,25 @@ describe('onboarding wizard', () => {
     expect(
       screen.queryByRole('button', { name: 'Fast-forward my clone' }),
     ).toBeNull()
-    expect(screen.getByText(/git rebase/).textContent).toBe(
+    const commands =
       'git fetch aether main\n' +
-        'git log --oneline --left-right main...aether/main\n' +
-        'git rebase aether/main\n' +
-        'git push aether main',
+      'git log --oneline --left-right main...aether/main\n' +
+      'git rebase aether/main\n' +
+      'git push aether main'
+    expect(screen.getByText(/git rebase/).textContent).toBe(commands)
+    // The commands that resolve this are the copyable ones. A bare
+    // `git push` is what the workspace just rejected, so it is not offered.
+    expect(screen.queryByLabelText('Push command')).toBeNull()
+    const writeText = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy resolve commands' }),
     )
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(commands))
+    vi.unstubAllGlobals()
+
+    // Push now stays: it re-compares, which is what a member does after
+    // resolving by hand.
     expect(screen.getByRole('button', { name: 'Push now' })).toBeDefined()
   })
 
