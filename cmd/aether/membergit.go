@@ -75,8 +75,9 @@ func memberGitTarget(c *protocol.Client, idOrName string) (protocol.Member, erro
 	return info.Member, nil
 }
 
-// memberGitLines renders the identity, naming the fallback wherever the
-// member has set nothing so the value is not mistaken for a choice.
+// memberGitLines renders the identity, naming the fallback that actually
+// applied wherever the shown value is not the member's own, so it is
+// neither mistaken for a choice nor labelled as a fallback it is not.
 func memberGitLines(m protocol.Member) []string {
 	id := (&domain.Member{
 		ID:          domain.MemberID(m.ID),
@@ -85,10 +86,14 @@ func memberGitLines(m protocol.Member) []string {
 		GitEmail:    m.GitEmail,
 	}).GitIdentity()
 	name, email := id.Name, id.Email
-	if m.GitName == "" {
+	switch name {
+	case m.GitName:
+	case m.DisplayName:
 		name += " (fallback: display name)"
+	default:
+		name += " (fallback: member id; the display name is not a valid git author name)"
 	}
-	if m.GitEmail == "" {
+	if email != m.GitEmail {
 		email += " (fallback)"
 	}
 	return []string{"git name   " + name, "git email  " + email}

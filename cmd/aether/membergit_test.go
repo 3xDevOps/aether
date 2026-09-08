@@ -33,6 +33,17 @@ func TestMemberGitLines(t *testing.T) {
 				"git email  bob@example.com",
 			},
 		},
+		{
+			// Angle brackets would forge a second address in git's
+			// "Name <email>" form, so the display name is refused and
+			// the member id is what the commit carries.
+			name:   "display name rejected",
+			member: protocol.Member{ID: "mem_01abc", DisplayName: "Bob <bob@evil.example>"},
+			want: []string{
+				"git name   mem_01abc (fallback: member id; the display name is not a valid git author name)",
+				"git email  mem_01abc@aether.local (fallback)",
+			},
+		},
 	} {
 		got := memberGitLines(tc.member)
 		if len(got) != len(tc.want) || got[0] != tc.want[0] || got[1] != tc.want[1] {
