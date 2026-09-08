@@ -589,6 +589,47 @@ describe('onboarding wizard', () => {
     expect(screen.getByRole('button', { name: 'Push now' })).toBeDefined()
   })
 
+  it('drops a push answer that lands after the same clone was reconnected', async () => {
+    // Re-pointing at the same folder and the same workspace makes a new
+    // connection, not the old one: the gateway wrote the remote again. An
+    // answer from the previous connection has to be dropped just the same,
+    // and path and workspace cannot tell the two apart.
+    let land: (result: RepoPushResult) => void = () => {}
+    const client = fakeApi({
+      localRepoPush: vi.fn(
+        async () =>
+          new Promise<RepoPushResult>((resolve) => {
+            land = resolve
+          }),
+      ),
+    })
+    await toPushChoice(client)
+    const first = useStore.getState().onboardingRepo?.link
+
+    fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a different repository' }),
+    )
+    // The form comes back prefilled with the same path; the member changes
+    // their mind and reconnects it.
+    fireEvent.click(await screen.findByRole('button', { name: 'Add remote' }))
+    await screen.findByLabelText('Push command')
+
+    const second = useStore.getState().onboardingRepo
+    expect(second?.path).toBe('/home/alice/code/myproject')
+    expect(second?.link).not.toBe(first)
+
+    await act(async () => {
+      land(compared('pushed', { workspace_commit: localTip }))
+    })
+
+    expect(screen.queryByText(/Pushed/)).toBeNull()
+    expect(useStore.getState().onboardingRepo?.push).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Push now' }),
+    ).toHaveProperty('disabled', false)
+  })
+
   it('drops a push failure that lands after the clone was re-pointed', async () => {
     let refuse: (err: Error) => void = () => {}
     const client = fakeApi({

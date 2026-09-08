@@ -28,6 +28,13 @@ export interface Route {
  * must ask again.
  */
 export interface OnboardingRepo {
+  /**
+   * Identifies this connection, not the clone it points at. Re-pointing
+   * and reconnecting the same path to the same workspace is a different
+   * connection, and a push still in flight from the previous one has to be
+   * told apart from it; path and workspace alone cannot do that.
+   */
+  link: string
   workspace: string
   path: string
   remote: LinkRepoResult

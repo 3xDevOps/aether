@@ -321,17 +321,15 @@ export function WorkspaceStep({
 /**
  * The record to merge an in-flight push or fast-forward answer into: the one
  * as it stands now, so a request started from the same screen sees the
- * other's answer, but only while it is still the clone the request was
+ * other's answer, but only while it is still the connection the request was
  * issued against. Re-pointing, or a change of workspace, leaves that answer
- * - and its error - belonging to a repository the step has left.
+ * - and its error - belonging to a connection the step has left. It compares
+ * the link id rather than the path, because reconnecting the same folder to
+ * the same workspace is a new connection whose remote was written again.
  */
 const stillLinked = (origin: OnboardingRepo) => {
   const current = useStore.getState().onboardingRepo
-  return current &&
-    current.workspace === origin.workspace &&
-    current.path === origin.path
-    ? current
-    : null
+  return current && current.link === origin.link ? current : null
 }
 
 /**
@@ -414,6 +412,7 @@ export function RepoStep({
     setError(null)
     try {
       setConnected({
+        link: crypto.randomUUID(),
         workspace: workspace?.id ?? '',
         path,
         remote: await client.localLinkRepo(path, workspace?.id),
