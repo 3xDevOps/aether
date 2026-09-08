@@ -41,5 +41,9 @@ func (s *Server) memberGit(ctx context.Context, member domain.MemberID, params j
 		return nil, rpcError(uerr)
 	}
 	m.GitName, m.GitEmail = p.Name, p.Email
+	// A live run's co-author list is a file the agent re-reads, so it can
+	// pick this up; its GIT_AUTHOR_* cannot - that is baked into the
+	// container at creation.
+	s.cfg.Runs.RefreshMemberCoAuthors(ctx, target)
 	return protocol.MemberGitResult{Member: protocol.MemberFromDomain(m)}, nil
 }

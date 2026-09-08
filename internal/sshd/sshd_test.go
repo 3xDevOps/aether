@@ -310,6 +310,14 @@ func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.Memb
 	return f.record(fmt.Sprintf("inject:%s:%s:%s", run, actor, message))
 }
 
+func (f *fakeRuns) RecordHandoff(_ context.Context, run domain.RunID, from domain.MemberID) {
+	_ = f.record(fmt.Sprintf("handoff:%s:%s", run, from))
+}
+
+func (f *fakeRuns) RefreshMemberCoAuthors(_ context.Context, member domain.MemberID) {
+	_ = f.record(fmt.Sprintf("refresh-coauthors:%s", member))
+}
+
 func (f *fakeRuns) CloseRun(_ context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error {
 	return f.record(fmt.Sprintf("close:%s:%s:%s", run, actor, outcome))
 }

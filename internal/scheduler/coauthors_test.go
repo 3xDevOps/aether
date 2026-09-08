@@ -169,3 +169,94 @@ func TestRunCoAuthorsFileTracksSteerers(t *testing.T) {
 		t.Errorf("co-authors after steering = %v, want %v", got, want)
 	}
 }
+
+// A handoff swaps the author and one of the co-authors. The commit path
+// recomputes per commit, but the file the agent reads does not - left
+// alone it would have the new owner instruct their own agent to credit
+// them as their own co-author, and would drop the outgoing owner, who did
+// the work, from the branch entirely.
+func TestHandoffRewritesTheCoAuthorList(t *testing.T) {
+	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
+	e := newTestEnv(t, withServerBinary(staged))
+	coord, _ := withCoordination(t, e)
+	if err := e.db.UpdateMemberGitIdentity(t.Context(), e.member.ID, "Ada Lovelace", "ada@example.com"); err != nil {
+		t.Fatalf("UpdateMemberGitIdentity: %v", err)
+	}
+	bob := newSteerer(t, e, "Bob", "Bob Steer", "bob@example.com")
+
+	run, _ := e.launchFake(t, "add OAuth login")
+	e.sched.RecordSteer(t.Context(), run.ID, bob.ID)
+	if got := coord.trailers(run.ID); !slices.Equal(got, []string{"Co-authored-by: Bob Steer <bob@example.com>"}) {
+		t.Fatalf("co-authors before the handoff = %v", got)
+	}
+
+	if err := e.db.TransferRun(t.Context(), run.ID, bob.ID); err != nil {
+		t.Fatalf("TransferRun: %v", err)
+	}
+	e.sched.RecordHandoff(t.Context(), run.ID, e.member.ID)
+
+	want := []string{"Co-authored-by: Ada Lovelace <ada@example.com>"}
+	if got := coord.trailers(run.ID); !slices.Equal(got, want) {
+		t.Errorf("co-authors after the handoff = %v, want %v", got, want)
+	}
+	// The same list reaches the branch through Aether's own commit.
+	if _, err := e.sched.commitAll(t.Context(), run.ID, "aether: add OAuth login"); err != nil {
+		t.Fatalf("commitAll: %v", err)
+	}
+	message := e.git.commitsFor(run.ID)[0]
+	if !strings.Contains(message, want[0]) || strings.Contains(message, "Bob Steer") {
+		t.Errorf("commit after the handoff = %q, want only the outgoing owner credited", message)
+	}
+}
+
+// Two members can stand behind one address. Git and GitHub credit the
+// address, so the second trailer would say nothing and read as a mistake.
+func TestCoAuthorTrailersDedupeByAddress(t *testing.T) {
+	e := newTestEnv(t, nil)
+	first := newSteerer(t, e, "Bot", "Release Bot", "bot@example.com")
+	second := newSteerer(t, e, "Bot on the laptop", "Release Bot", "BOT@example.com")
+	run, _ := e.launchFake(t, "add OAuth login")
+	e.sched.RecordSteer(t.Context(), run.ID, first.ID)
+	e.sched.RecordSteer(t.Context(), run.ID, second.ID)
+
+	trailers, err := e.sched.runCoAuthors(t.Context(), run)
+	if err != nil {
+		t.Fatalf("runCoAuthors: %v", err)
+	}
+	if !slices.Equal(trailers, []string{"Co-authored-by: Release Bot <bot@example.com>"}) {
+		t.Errorf("trailers = %v, want one line for the shared address", trailers)
+	}
+}
+
+// A member who sets their git identity while a run is live has that run's
+// list rewritten, so the agent's next commit credits the address they just
+// gave rather than the aether.local fallback.
+func TestGitIdentityChangeRefreshesLiveRuns(t *testing.T) {
+	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
+	e := newTestEnv(t, withServerBinary(staged))
+	coord, _ := withCoordination(t, e)
+	bob := newSteerer(t, e, "Bob", "", "")
+
+	run, _ := e.launchFake(t, "add OAuth login")
+	e.sched.RecordSteer(t.Context(), run.ID, bob.ID)
+	fallback := "Co-authored-by: Bob <" + string(bob.ID) + "@aether.local>"
+	if got := coord.trailers(run.ID); !slices.Equal(got, []string{fallback}) {
+		t.Fatalf("co-authors before the change = %v, want %q", got, fallback)
+	}
+
+	if err := e.db.UpdateMemberGitIdentity(t.Context(), bob.ID, "Bob Steer", "bob@example.com"); err != nil {
+		t.Fatalf("UpdateMemberGitIdentity: %v", err)
+	}
+	e.sched.RefreshMemberCoAuthors(t.Context(), bob.ID)
+	want := []string{"Co-authored-by: Bob Steer <bob@example.com>"}
+	if got := coord.trailers(run.ID); !slices.Equal(got, want) {
+		t.Errorf("co-authors after the change = %v, want %v", got, want)
+	}
+
+	// A member the run does not credit leaves it alone.
+	before := coord.writes(run.ID)
+	e.sched.RefreshMemberCoAuthors(t.Context(), e.member.ID)
+	if got := coord.writes(run.ID); got != before {
+		t.Errorf("an unrelated identity change rewrote the list %d times", got-before)
+	}
+}

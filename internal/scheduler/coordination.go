@@ -193,7 +193,7 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	// exists: the agent is told to read it before its first commit, and a
 	// path that is missing on first look reads as "nobody to credit".
 	var trailers []string
-	if trailers, err = s.coAuthorTrailers(ctx, run); err != nil {
+	if trailers, err = s.runCoAuthors(ctx, run); err != nil {
 		return nil, nil, err
 	}
 	if err = c.svc.WriteCoAuthors(run.ID, trailers); err != nil {
