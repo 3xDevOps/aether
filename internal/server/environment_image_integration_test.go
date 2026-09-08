@@ -110,7 +110,7 @@ func TestIntegrationMemberEnvironmentImage(t *testing.T) {
 	ctrlA := openControl(t, clientA)
 	ctrlB := openControl(t, dialSSH(t, addr, signerB))
 	markerSeen := func(ctrl *protocol.Client, run protocol.Run) string {
-		waitRunStatus(t, sub, &seen, run.ID, domain.RunNeedsAttention)
+		waitRunStatus(t, sub, &seen, run.ID, domain.RunCompleted)
 		return fetchRunFile(t, ctrl, seedDir, gitEnv, repoURL, run.ID, "marker-seen.txt")
 	}
 
