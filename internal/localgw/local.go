@@ -437,7 +437,8 @@ func (g *Gateway) localRepoPush(r *http.Request, body []byte) (any, *protocol.Er
 			again, cmpErr := localops.CompareBranch(cfg.Repo, ws.BaseBranch)
 			if cmpErr == nil && (again.State == localops.BranchBehind || again.State == localops.BranchDiverged) {
 				result.Output += again.Output
-				result.WorkspaceCommit, result.Ahead, result.Behind = again.Workspace, again.Ahead, again.Behind
+				result.LocalCommit, result.WorkspaceCommit = again.Local, again.Workspace
+				result.Ahead, result.Behind = again.Ahead, again.Behind
 				result.State = string(again.State)
 				return result, nil
 			}
