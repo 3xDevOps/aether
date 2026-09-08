@@ -58,7 +58,7 @@ function seed(caps: GatewayCapabilities = localCaps) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
-    onboardingStep: 0,
+    onboardingStep: 'Link',
     onboardingWorkspace: '',
     onboardingRepo: null,
   })

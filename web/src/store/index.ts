@@ -15,7 +15,27 @@ import { createServerSlice, type ServerSlice } from '@/store/server'
 import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
-import { createUiSlice, type UiSlice } from '@/store/ui'
+import {
+  createUiSlice,
+  onboardingSteps,
+  type OnboardingStep,
+  type UiSlice,
+} from '@/store/ui'
+
+/**
+ * Every version up to 2 persisted the onboarding resume point as an index
+ * into the step list as it stood before "Git identity" was inserted at
+ * position two. The names are what those stored numbers meant; typing them
+ * as OnboardingStep keeps this list from drifting away from the wizard's
+ * own.
+ */
+const v0OnboardingSteps: OnboardingStep[] = [
+  'Link',
+  'Workspace',
+  'Repository',
+  'Agents',
+  'First run',
+]
 
 export type RootState = ServerSlice &
   WorkspacesSlice &
@@ -34,28 +54,28 @@ export type RootState = ServerSlice &
   LocalSlice &
   UiSlice
 
+/** Only view preferences survive a reload; server data is re-hydrated. */
+const persistedUi = (s: RootState) => ({
+  theme: s.theme,
+  sidebarWidth: s.sidebarWidth,
+  sidebarCollapsed: s.sidebarCollapsed,
+  terminalDockHeight: s.terminalDockHeight,
+  runDockHeight: s.runDockHeight,
+  activeWorkspace: s.activeWorkspace,
+  groupBy: s.groupBy,
+  lastHarnessByAccount: s.lastHarnessByAccount,
+  dismissedUpdates: s.dismissedUpdates,
+  onboarded: s.onboarded,
+  onboardingStep: s.onboardingStep,
+  onboardingWorkspace: s.onboardingWorkspace,
+  onboardingRepo: s.onboardingRepo,
+})
+
 /**
  * What survives a reload. Reading it back yields a partial: an older release
  * stored fewer keys, and a migration may drop one.
  */
-type PersistedState = Partial<
-  Pick<
-    RootState,
-    | 'theme'
-    | 'sidebarWidth'
-    | 'sidebarCollapsed'
-    | 'terminalDockHeight'
-    | 'runDockHeight'
-    | 'activeWorkspace'
-    | 'groupBy'
-    | 'lastHarnessByAccount'
-    | 'dismissedUpdates'
-    | 'onboarded'
-    | 'onboardingStep'
-    | 'onboardingWorkspace'
-    | 'onboardingRepo'
-  >
->
+type PersistedState = Partial<ReturnType<typeof persistedUi>>
 
 /**
  * The root store: one Zustand store composed of independent slices. A new
@@ -84,33 +104,33 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 2,
-        // Every older version stored a Repository step record this build
+        version: 3,
+        // Every version before 2 stored a Repository step record this build
         // cannot use: version 0's push answer predates the comparison state
         // the step renders, and version 1 has no link id to tell one
         // connection from the next. Dropping it puts the step back on its
-        // push offer, which asks the gateway again.
-        migrate: (persisted): PersistedState => {
-          const { onboardingRepo, ...rest } = (persisted ??
-            {}) as PersistedState
-          return rest
+        // push offer, which asks the gateway again. Every version before 3
+        // stored the resume point as an index, so the number is read back
+        // as the step it meant.
+        migrate: (persisted, version): PersistedState => {
+          const stored = (persisted ?? {}) as PersistedState & {
+            onboardingStep?: unknown
+          }
+          const state: PersistedState = { ...stored }
+          if (version < 2) {
+            delete state.onboardingRepo
+          }
+          if (version < 3) {
+            const index = stored.onboardingStep
+            state.onboardingStep =
+              typeof index === 'number' && v0OnboardingSteps[index]
+                ? v0OnboardingSteps[index]
+                : onboardingSteps[0]
+          }
+          return state
         },
         // Only view preferences survive a reload; server data is re-hydrated.
-        partialize: (s): PersistedState => ({
-          theme: s.theme,
-          sidebarWidth: s.sidebarWidth,
-          sidebarCollapsed: s.sidebarCollapsed,
-          terminalDockHeight: s.terminalDockHeight,
-          runDockHeight: s.runDockHeight,
-          activeWorkspace: s.activeWorkspace,
-          groupBy: s.groupBy,
-          lastHarnessByAccount: s.lastHarnessByAccount,
-          dismissedUpdates: s.dismissedUpdates,
-          onboarded: s.onboarded,
-          onboardingStep: s.onboardingStep,
-          onboardingWorkspace: s.onboardingWorkspace,
-          onboardingRepo: s.onboardingRepo,
-        }),
+        partialize: persistedUi,
       },
     ),
   )

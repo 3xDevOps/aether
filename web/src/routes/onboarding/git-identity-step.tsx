@@ -16,9 +16,10 @@ const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 /**
- * Step 2: the git identity commits made in this member's runs carry. What
- * the member already saved wins; the machine's `git config` fills whatever
- * is still empty, and skipping leaves the server's fallback in place.
+ * The Git identity step: the identity commits made in this member's runs
+ * carry. What the member already saved wins; the machine's `git config`
+ * fills whatever is still empty, and skipping leaves the server's fallback
+ * in place.
  */
 export function GitIdentityStep({
   client,
@@ -29,7 +30,9 @@ export function GitIdentityStep({
   caps: Capability
   onNext: () => void
 }) {
-  const saved = useStore((s) => s.info?.member)
+  const info = useStore((s) => s.info)
+  const setInfo = useStore((s) => s.setInfo)
+  const saved = info?.member
   const [name, setName] = useState(saved?.git_name ?? '')
   const [email, setEmail] = useState(saved?.git_email ?? '')
   const [error, setError] = useState<string | null>(null)
@@ -65,7 +68,11 @@ export function GitIdentityStep({
     setBusy(true)
     setError(null)
     try {
-      await client.memberGit(name.trim(), email.trim())
+      const member = await client.memberGit(name.trim(), email.trim())
+      // Nothing on the wire announces a member's own change, so the store's
+      // copy is what walking back into this step reads. Left stale, the
+      // machine probe would overwrite what was just saved.
+      if (info) setInfo({ ...info, member })
       onNext()
     } catch (err) {
       setError(message(err))

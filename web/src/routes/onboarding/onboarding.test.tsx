@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Api } from '@/lib/api'
 import type {
   GatewayCapabilities,
+  GitIdentity,
   RepoPushResult,
   RepoPushState,
 } from '@/lib/types'
@@ -32,8 +33,11 @@ const localCaps: GatewayCapabilities = {
   ],
 }
 
-/** The same gateway one release older: it cannot push for the user. */
-const noPushCaps: GatewayCapabilities = {
+/**
+ * The same gateway one release older: it can neither read this machine's git
+ * config nor push for the user.
+ */
+const olderCaps: GatewayCapabilities = {
   ...localCaps,
   local: ['link.status', 'link.repo', 'pull', 'daemon.status'],
 }
@@ -59,6 +63,20 @@ function compared(
   }
 }
 
+/** A Repository step that has already connected the fixture workspace. */
+const connectedRepo = {
+  link: 'lnk_connected',
+  workspace: workspace.id,
+  path: '/home/alice/code/myproject',
+  remote: {
+    repo: '/home/alice/code/myproject',
+    remote: 'aether',
+    url: `ssh://alice@host:2222/${workspace.id}`,
+  },
+  push: null,
+  fastForward: null,
+}
+
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
@@ -70,7 +88,7 @@ function seed(extra: Partial<RootState> = {}) {
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
     onboarded: false,
-    onboardingStep: 0,
+    onboardingStep: 'Link',
     onboardingWorkspace: '',
     onboardingRepo: null,
     ...extra,
@@ -222,7 +240,7 @@ describe('onboarding wizard', () => {
     expect(screen.queryByLabelText('Repository path')).toBeNull()
   })
   it('returns to the workspace step when a persisted repo step has no workspace', async () => {
-    seed({ onboardingStep: 3, onboardingWorkspace: '' })
+    seed({ onboardingStep: 'Repository', onboardingWorkspace: '' })
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
     expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
@@ -291,22 +309,20 @@ describe('onboarding wizard', () => {
   it('keeps the identity the member already saved over the machine one', async () => {
     const client = fakeApi()
     seed({
-      info: {
-        ...serverInfo,
-        member: { ...alice, git_name: 'Ada Server', git_email: 'ada@server.invalid' },
-      },
+      info: { ...serverInfo, member: { ...alice, git_name: 'Ada Server' } },
     })
     render(<OnboardingRoute params={{}} client={client} />)
     await toGitIdentityStep()
 
     await screen.findByRole('region', { name: 'Git identity' })
+    // The machine's address landing in the empty email is what says the
+    // probe finished; the saved name is asserted after that, not before.
     await waitFor(() => {
-      expect(client.localGitIdentity).toHaveBeenCalled()
+      expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe(
+        'alice@example.invalid',
+      )
     })
     expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Ada Server')
-    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe(
-      'ada@server.invalid',
-    )
   })
 
   it('shows the refusal verbatim and stays on the git identity step', async () => {
@@ -340,6 +356,172 @@ describe('onboarding wizard', () => {
 
     expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
     expect(client.memberGit).not.toHaveBeenCalled()
+  })
+
+  it('shows the saved identity when the user walks back into the step', async () => {
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
+        'Alice Local',
+      )
+    })
+
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Ada Lovelace' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByRole('region', { name: 'Workspace' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+
+    // What the server answered, not the machine's git config: the save
+    // refreshed the stored member, so the re-run probe has nothing to fill.
+    await screen.findByRole('region', { name: 'Git identity' })
+    await waitFor(() => {
+      expect(client.localGitIdentity).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
+      'Ada Lovelace',
+    )
+    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe(
+      'alice@example.invalid',
+    )
+  })
+
+  it('stays usable when this machine has no git identity to read', async () => {
+    const client = fakeApi({
+      localGitIdentity: vi.fn(async () => {
+        throw new Error('git config: no user.name set')
+      }),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+
+    expect(await screen.findByText('git config: no user.name set')).toBeDefined()
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Ada Lovelace' },
+    })
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'ada@example.invalid' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(client.memberGit).toHaveBeenCalledWith(
+        'Ada Lovelace',
+        'ada@example.invalid',
+      )
+    })
+    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+  })
+
+  it('asks a gateway without the git.identity verb for nothing', async () => {
+    const client = fakeApi()
+    seed({ capabilities: olderCaps })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+
+    expect(await screen.findByRole('region', { name: 'Git identity' })).toBeDefined()
+    expect(client.localGitIdentity).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Ada Lovelace' },
+    })
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'ada@example.invalid' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(client.memberGit).toHaveBeenCalledWith(
+        'Ada Lovelace',
+        'ada@example.invalid',
+      )
+    })
+  })
+
+  /** A probe that stays in flight until the test resolves it. */
+  function deferredIdentity() {
+    let resolve: (identity: GitIdentity) => void = () => {}
+    const client = fakeApi({
+      localGitIdentity: vi.fn(
+        () =>
+          new Promise<GitIdentity>((r) => {
+            resolve = r
+          }),
+      ),
+    })
+    return { client, settle: () => resolve({ name: 'Alice Local', email: 'alice@example.invalid' }) }
+  }
+
+  it('keeps what the user typed while the machine identity was still coming', async () => {
+    const { client, settle } = deferredIdentity()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+    await screen.findByRole('region', { name: 'Git identity' })
+
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Ada Lovelace' },
+    })
+    settle()
+
+    // The untouched email takes the machine's answer, which is what says the
+    // probe landed; the typed name is untouched by it.
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe(
+        'alice@example.invalid',
+      )
+    })
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
+      'Ada Lovelace',
+    )
+  })
+
+  it('leaves a field the user cleared on purpose empty', async () => {
+    const { client, settle } = deferredIdentity()
+    seed({
+      info: {
+        ...serverInfo,
+        member: { ...alice, git_email: 'ada@server.invalid' },
+      },
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toGitIdentityStep()
+    await screen.findByRole('region', { name: 'Git identity' })
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: '' } })
+    settle()
+
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
+        'Alice Local',
+      )
+    })
+    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe('')
+  })
+
+  it('will not save half an identity', async () => {
+    seed({ capabilities: olderCaps })
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toGitIdentityStep()
+
+    const save = await screen.findByRole('button', { name: 'Save' })
+    expect(save).toHaveProperty('disabled', true)
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Ada Lovelace' },
+    })
+    expect(save).toHaveProperty('disabled', true)
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'ada@example.invalid' },
+    })
+    expect(save).toHaveProperty('disabled', false)
+    // Whitespace is not a name; the server would refuse it anyway.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '  ' } })
+    expect(save).toHaveProperty('disabled', true)
   })
 
   it('creates the first workspace without an image selection', async () => {
@@ -748,6 +930,56 @@ describe('onboarding wizard', () => {
     ).toHaveProperty('disabled', false)
   })
 
+  it('resumes on Repository with its clone connected and walks back to Workspace', async () => {
+    // What an older release left behind: its resume point was an index and
+    // its repository answer already carried the comparison states. Migrated,
+    // the two have to fit together - the wizard opens on Repository with the
+    // clone still connected, and Back reaches Workspace rather than the step
+    // inserted in front of it.
+    const client = fakeApi()
+    seed({
+      onboardingStep: 'Repository',
+      onboardingWorkspace: workspace.id,
+      onboardingRepo: connectedRepo,
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    expect(
+      await screen.findByRole('region', { name: 'Repository' }),
+    ).toBeDefined()
+    expect(screen.getByText('/home/alice/code/myproject')).toBeDefined()
+    expect(screen.queryByLabelText('Repository path')).toBeNull()
+    expect(client.localLinkRepo).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: `Use ${workspace.name}` }),
+    )
+    expect(
+      await screen.findByRole('region', { name: 'Repository' }),
+    ).toBeDefined()
+    expect(screen.getByText('/home/alice/code/myproject')).toBeDefined()
+  })
+
+  it('keeps the connected clone while the identity step is walked through', async () => {
+    // Forward from the start: the Git identity step sits between Link and
+    // Workspace, and passing it must not disturb the answer Repository
+    // already holds.
+    const client = fakeApi()
+    seed({ onboardingWorkspace: workspace.id, onboardingRepo: connectedRepo })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    await toRepoStep()
+
+    expect(
+      await screen.findByRole('region', { name: 'Repository' }),
+    ).toBeDefined()
+    expect(screen.getByText('/home/alice/code/myproject')).toBeDefined()
+    expect(client.memberGit).not.toHaveBeenCalled()
+  })
+
   it('forgets the connected repository when the workspace changes', async () => {
     // A remote points at one workspace. Changing the workspace after
     // connecting leaves that answer stale, and the new one is unseeded.
@@ -770,7 +1002,7 @@ describe('onboarding wizard', () => {
 
   it('falls back to the copy-paste push when the gateway cannot push', async () => {
     const client = fakeApi()
-    seed({ capabilities: noPushCaps })
+    seed({ capabilities: olderCaps })
     render(<OnboardingRoute params={{}} client={client} />)
     await toRepoStep()
     fireEvent.change(await screen.findByLabelText('Repository path'), {
@@ -847,7 +1079,7 @@ describe('onboarding wizard', () => {
 
     expect(useStore.getState()).toMatchObject({
       onboarded: true,
-      onboardingStep: 0,
+      onboardingStep: 'Link',
       onboardingWorkspace: '',
       route: { name: 'board', params: {} },
     })

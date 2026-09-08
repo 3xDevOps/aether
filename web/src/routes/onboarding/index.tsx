@@ -3,7 +3,8 @@
 // exists only where the gateway has this machine's SSH identity and
 // filesystem, so the whole route gates on the link.status local verb; a
 // remote gateway gets an empty state, not a broken wizard. Step and
-// workspace choices persist so a reload resumes where the user left off.
+// workspace choices persist so a reload resumes where the user left off; the
+// step persists by name, so adding one does not move anyone mid-wizard.
 //
 // Navigation is two levels and nothing more: a step index, and a sub-screen
 // name owned by whichever step has one. Back closes the sub-screen first and
@@ -24,15 +25,7 @@ import {
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
-
-const steps = [
-  'Link',
-  'Git identity',
-  'Workspace',
-  'Repository',
-  'Agents',
-  'First run',
-] as const
+import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
@@ -44,15 +37,12 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const onboardingWorkspace = useStore((s) => s.onboardingWorkspace)
   const workspaces = useStore((s) => s.workspaces)
   const workspace = onboardingWorkspace ? workspaces[onboardingWorkspace] ?? null : null
-  const [step, setStepState] = useState(() =>
-    Math.max(
-      0,
-      Math.min(
-        steps.length - 1,
-        persistedStep >= 3 && !onboardingWorkspace ? 2 : persistedStep,
-      ),
-    ),
-  )
+  const [step, setStepState] = useState(() => {
+    const resume = onboardingStepIndex(persistedStep)
+    // Repository and everything past it need the workspace the wizard
+    // settled on; without one there is nothing to resume into.
+    return resume >= 3 && !onboardingWorkspace ? 2 : resume
+  })
   // The harness the Agents step set up, so the first run starts on the one
   // that is actually logged in. Empty until a setup shell exits cleanly.
   const [setUpHarness, setSetUpHarness] = useState('')
@@ -62,7 +52,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const setStep = (next: number) => {
     setStepState(next)
     setSubStep('')
-    setOnboardingStep(next)
+    setOnboardingStep(onboardingSteps[next])
   }
 
   if (!caps.hasLocal('link.status')) {
@@ -82,10 +72,10 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title="Onboarding" subtitle={steps[step]} />
+      <ViewHeader title="Onboarding" subtitle={onboardingSteps[step]} />
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         <ol aria-label="Steps" className="flex gap-2 text-xs">
-          {steps.map((label, i) => (
+          {onboardingSteps.map((label, i) => (
             <li
               key={label}
               aria-current={i === step ? 'step' : undefined}
