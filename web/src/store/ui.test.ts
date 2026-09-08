@@ -14,6 +14,14 @@ describe('terminal zoom', () => {
     useStore.setState({ terminalFontSize: defaultTerminalFontSize })
   })
 
+  /** Rehydrates a fresh store from a payload this build's own version wrote. */
+  function rehydrate(state: Record<string, unknown>) {
+    window.localStorage.setItem('aether.ui', JSON.stringify({ state, version: 3 }))
+    const hydrated = createRootStore().getState()
+    window.localStorage.removeItem('aether.ui')
+    return hydrated
+  }
+
   it('keeps a requested size inside the supported range', () => {
     const { setTerminalFontSize } = useStore.getState()
 
@@ -28,6 +36,32 @@ describe('terminal zoom', () => {
 
     setTerminalFontSize(Number.NaN)
     expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize)
+  })
+
+  // Stored state is a file on disk, and a same-version reload never reaches
+  // migrate. xterm does not validate fontSize either, so anything that got
+  // in there would render a terminal nobody can read.
+  it('clamps a stored size on the way back in', () => {
+    expect(rehydrate({ terminalFontSize: 900 }).terminalFontSize).toBe(maxTerminalFontSize)
+    expect(rehydrate({ terminalFontSize: -5 }).terminalFontSize).toBe(minTerminalFontSize)
+    expect(rehydrate({ terminalFontSize: null }).terminalFontSize).toBe(defaultTerminalFontSize)
+    expect(rehydrate({ terminalFontSize: 'huge' }).terminalFontSize).toBe(defaultTerminalFontSize)
+    expect(rehydrate({ terminalFontSize: 18 }).terminalFontSize).toBe(18)
+    expect(rehydrate({}).terminalFontSize).toBe(defaultTerminalFontSize)
+  })
+
+  it('takes only a stored true as control having been taken', () => {
+    expect(rehydrate({ terminalControlTaken: true }).terminalControlTaken).toBe(true)
+    expect(rehydrate({ terminalControlTaken: 'yes' }).terminalControlTaken).toBe(false)
+    expect(rehydrate({}).terminalControlTaken).toBe(false)
+  })
+
+  it('leaves the other stored preferences alone', () => {
+    const hydrated = rehydrate({ theme: 'dark', sidebarWidth: 320, terminalFontSize: 20 })
+
+    expect(hydrated.theme).toBe('dark')
+    expect(hydrated.sidebarWidth).toBe(320)
+    expect(hydrated.terminalFontSize).toBe(20)
   })
 })
 

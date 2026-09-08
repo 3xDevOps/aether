@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { clampTerminalFontSize } from '@/lib/term-font'
 import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
 import { createCostSlice, type CostSlice } from '@/store/cost'
@@ -138,6 +139,21 @@ export function createRootStore() {
             state.onboardingFurthest = state.onboardingStep
           }
           return state
+        },
+        // Stored state is a file on the member's disk, not a value this
+        // build wrote: `migrate` only runs when the version differs, and
+        // xterm does not validate `fontSize`, so a hand-edited or corrupted
+        // entry would reach the terminal as-is and render nothing readable.
+        merge: (persisted, current) => {
+          const stored = (persisted ?? {}) as PersistedState
+          return {
+            ...current,
+            ...stored,
+            terminalFontSize: clampTerminalFontSize(
+              Number(stored.terminalFontSize ?? current.terminalFontSize),
+            ),
+            terminalControlTaken: stored.terminalControlTaken === true,
+          }
         },
         // Only view preferences survive a reload; server data is re-hydrated.
         partialize: persistedUi,
