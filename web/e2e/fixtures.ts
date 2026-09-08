@@ -51,9 +51,11 @@ export interface Aether {
   /**
    * Puts an executable in a member's environment home on the server. That
    * directory is bind-mounted into their environment container, and it is
-   * where agent.list looks to decide whether an agent is installed.
+   * where agent.list looks to decide whether an agent is installed. `script`
+   * is the shell body it runs, for a scenario that launches it; the default
+   * does nothing, which is all a detection test needs.
    */
-  installAgent: (memberID: string, executable: string) => void
+  installAgent: (memberID: string, executable: string, script?: string) => void
   /**
    * Writes a git identity into a member's own machine, which is what the
    * Git identity step offers as the default.
@@ -166,10 +168,12 @@ export const test = base.extend<{ aether: Aether }>({
           `[user]\n\tname = ${name}\n\temail = ${email}\n`,
         )
       },
-      installAgent: (memberID, executable) => {
+      installAgent: (memberID, executable, script = '') => {
         const bin = path.join(server.memberHome(memberID), '.local', 'bin')
         mkdirSync(bin, { recursive: true })
-        writeFileSync(path.join(bin, executable), '#!/bin/sh\n', { mode: 0o755 })
+        writeFileSync(path.join(bin, executable), `#!/bin/sh\n${script}\n`, {
+          mode: 0o755,
+        })
       },
       installStubGh: (memberID) => {
         // The environment terminal's PATH puts ~/.local/bin first, and
