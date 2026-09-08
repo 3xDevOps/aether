@@ -82,13 +82,21 @@ case "$1 $2" in
 	echo "! First copy your one-time code: ABCD-1234"
 	;;
 "auth status")
-	echo '{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat"}]}}'
+	echo '{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"admin:ssh_signing_key, gist, read:org, repo"}]}}'
 	;;
 "auth setup-git")
 	printf '[credential "https://github.com"]\\n\\thelper = !gh auth git-credential\\n' >> "$HOME/.gitconfig"
 	;;
 "ssh-key add")
 	cp "$3" "$HOME/gh-registered-key"
+	;;
+"ssh-key list")
+	# The SHA256 fingerprint of the registered key, the way ssh-keygen -l
+	# prints it: base64 of the digest of the decoded key blob, unpadded.
+	# busybox has no ssh-keygen, so the digest is spelled out.
+	hex=$(awk '{print $2}' "$HOME/gh-registered-key" | base64 -d | sha256sum | cut -d' ' -f1)
+	fp=$(printf "$(printf %s "$hex" | sed 's/../\\\\x&/g')" | base64 | tr -d '=\n')
+	printf 'aether\tSHA256:%s\t2026-01-01T00:00:00Z\t1\tsigning\n' "$fp"
 	;;
 *)
 	echo "gh: unsupported invocation: $*" >&2

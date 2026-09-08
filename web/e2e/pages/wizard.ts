@@ -168,10 +168,6 @@ export class GitHubConnect {
   confirmLoggedIn(): Locator {
     return this.section.getByRole('button', { name: "I've logged in", exact: true })
   }
-
-  close(): Locator {
-    return this.section.getByRole('button', { name: 'Close', exact: true })
-  }
 }
 
 /**

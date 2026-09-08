@@ -2,10 +2,10 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { ApiError } from '@/lib/api'
 import type { Api } from '@/lib/api'
+import { githubLoginCommand } from '@/lib/github'
 import type { GatewayCapabilities } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { AgentsStep } from '@/routes/onboarding/agents-step'
-import { githubLoginCommand } from '@/routes/onboarding/github-connect'
 import { useStore } from '@/store'
 import {
   registerEnvTerminalSocket,
@@ -161,7 +161,9 @@ describe('connect GitHub', () => {
     // Closing returns to the step, which now says who it connected as, and
     // a connection counts the way a set-up agent does for Continue.
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-    expect(await screen.findByText('Connected as octocat')).toBeDefined()
+    expect(
+      await screen.findByText('Connected in this session as octocat'),
+    ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDefined()
   })
 
@@ -198,6 +200,11 @@ describe('connect GitHub', () => {
     expect(screen.getByText('aether terminal')).toBeDefined()
     expect(screen.getByText(githubLoginCommand)).toBeDefined()
     expect(screen.getByText('aether github connect')).toBeDefined()
+    // The whole flow is the CLI's here: there is no terminal to log in
+    // through, so the screen never offers to finish it from the browser.
+    expect(
+      screen.queryByRole('button', { name: "I've logged in" }),
+    ).toBeNull()
   })
 
   it('walks Back out of the connect screen before it leaves the Agents step', async () => {

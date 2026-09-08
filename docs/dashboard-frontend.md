@@ -707,6 +707,10 @@ copy before pushing and answers with one of four states, so the second
 member to join a workspace reads what happened instead of git's
 `! [rejected] main -> main (fetch first)`.
 
+When `link.repo` answers an `origin`, the connected line adds `Runs push to
+<origin>`: the upstream a run pushes to, the same one `aether link --repo`
+prints. A link that recorded none says nothing about one.
+
 `pushed` names the branch that landed; `up-to-date` names the commit the
 workspace already has. Both keep git's output in a "What git did" panel,
 open on arrival because `Everything up-to-date` and `[new branch]` are both
@@ -802,16 +806,27 @@ are signed with a key kept in their environment home - and **Connect GitHub**
 opens the sub-screen. The sub-screen mounts the same `TerminalDock` the setup
 screen uses, with `initialLine` set to `gh auth login --hostname github.com
 --git-protocol https --web --scopes admin:ssh_signing_key`, echoes that
-command in a code block for anyone who would rather type it, and waits.
-**I've logged in** calls `github.connect`, which does the non-interactive
-rest on the server; success names the account and the signing key's
-fingerprint, and **Close** returns to the step, which then reads "Connected
-as `<login>`". A connection counts the way a set-up agent does for the
-step's primary **Continue**. Server refusals - most often "not logged in to
-github.com in the environment terminal" - render verbatim and leave the
-screen open to retry. Where the gateway serves no terminal socket the screen
-gives the CLI path instead: `aether terminal`, the same `gh auth login`, then
-`aether github connect`.
+command in a code block for anyone who would rather type it, and says what
+that login looks like from inside a container: gh asks the member to press
+Enter to open a browser and then reports that it could not open one, so the
+member presses Enter, ignores the failure and opens the printed URL with the
+one-time code. **I've logged in** calls `github.connect`, which does the
+non-interactive rest on the server; success names the account and the
+signing key's fingerprint, and **Close** returns to the step, which then
+reads "Connected in this session as `<login>`" - the connection is React
+state that a reload loses, said the way the agent rows say "Set up in this
+session". A connection counts the way a set-up agent does for the step's
+primary **Continue**. Server refusals - most often "not logged in to
+github.com in the environment terminal" - render verbatim in the same
+monospace pane the Repository step gives git's output, because gh's answer
+runs to several lines, and leave the screen open to retry.
+
+Where the gateway serves no terminal socket the screen gives the CLI path
+and nothing else: `aether terminal`, the same `gh auth login`, then `aether
+github connect`. There is no **I've logged in** button there - with no
+terminal to log in through, the whole flow is the CLI's. The login command
+itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
+assert one string.
 
 Part B (`ProfileImport`) previews each harness configuration on this machine
 with `profile.preview`, showing the category counts and, behind an expander,

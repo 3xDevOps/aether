@@ -7,15 +7,14 @@
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
+import { githubLoginCommand } from '@/lib/github'
+
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID } from './harness/setup'
 import { OnboardingWizard } from './pages/wizard'
 
 test.skip(!dockerReachable(), 'connecting GitHub needs a reachable Docker daemon')
-
-const loginCommand =
-  'gh auth login --hostname github.com --git-protocol https --web --scopes admin:ssh_signing_key'
 
 test('connecting GitHub registers a signing key and keeps gh credentials', async ({
   page,
@@ -41,7 +40,7 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
 
   const github = wizard.agents.github
   await wizard.agents.connectGitHub().click()
-  await expect(github.section).toContainText(loginCommand)
+  await expect(github.section).toContainText(githubLoginCommand)
 
   // Opening the dock starts a real environment container, and the connect
   // runs inside it. The server's own view of it is what to wait on: the
@@ -73,9 +72,11 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   expect(gitconfig).toContain('format = ssh')
   expect(gitconfig).toContain('signingkey = ~/.ssh/aether_signing')
   expect(gitconfig).toContain('gpgsign = true')
-  expect(readFileSync(path.join(home, 'gh-calls.log'), 'utf8')).toContain(
-    'auth setup-git --hostname github.com',
-  )
+  const calls = readFileSync(path.join(home, 'gh-calls.log'), 'utf8')
+  expect(calls).toContain('auth setup-git --hostname github.com')
+  // The server reads the account's keys back after registering, so the
+  // fingerprint it shows is the one GitHub holds.
+  expect(calls).toContain('ssh-key list')
 
   // Back closes the sub-screen without leaving the step, and the step now
   // says who it connected as.
