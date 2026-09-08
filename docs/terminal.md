@@ -17,13 +17,22 @@ aether terminal stop
 ```
 
 In the dashboard, open the terminal dock on the run board. The first open starts
-the environment; the dock says **Starting your environment container** until
-the shell attaches, and shows the server's own error if the start fails. Later
-tabs and tab switches reach a container that is already up, so those say
-**Connecting to your environment**. The dock reconnects and replays terminal
-output when the page or network reconnects. The stream ack identifies the replay byte count, so the
-dashboard mutes terminal-generated replies until that scrollback is parsed.
+the environment; the dock says **Starting your environment container** until the
+shell attaches, and shows the server's own error if the start fails. Later tabs
+and tab switches reach a container that is already up, so those say **Connecting
+to your environment**. The dock reconnects and replays terminal output when the
+page or network reconnects. The stream ack identifies the replay byte count, so
+the dashboard mutes terminal-generated replies until that scrollback is parsed.
 Closing a tab only detaches it; opening that tab again reattaches to its shell.
+
+`aether attach` mutes the same window, and does it by discarding: keystrokes
+that arrive before the announced replay has been written to your terminal are
+dropped, not deferred. A terminal answers the device-attribute and colour
+queries the replayed scrollback still carries, and those answers reach the
+server on the channel keystrokes use, where they would count as steering the
+run. Anything typed - or piped on stdin - in that window goes with them, without
+a message. The client has no other lever: the server decides what counts as
+typing.
 
 The Agents setup step uses the same dock and types the install command for you.
 Complete the vendor login there, then return to the wizard. Its **I've
