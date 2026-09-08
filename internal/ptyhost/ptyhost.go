@@ -262,17 +262,18 @@ func (h *Host) Replay(run domain.RunID) (io.ReadCloser, error) {
 	return &replayReader{f: f, br: bufio.NewReader(f)}, nil
 }
 
-// Inject writes message plus a carriage return to the session's stdin, then
-// records an attributed banner after the complete write succeeds. The banner
-// never reaches the agent's input, and neither it nor the terminal's echo
-// advances LastOutput. Authorization is the caller's.
-func (h *Host) Inject(ctx context.Context, key SessionKey, actorName, actorColor, message string) error {
+// Inject writes message plus submit (the harness's submit sequence, e.g. a
+// carriage return) to the session's stdin, then records an attributed
+// banner after the complete write succeeds. The banner never reaches the
+// agent's input, and neither it nor the terminal's echo advances
+// LastOutput. Authorization is the caller's.
+func (h *Host) Inject(ctx context.Context, key SessionKey, actorName, actorColor, message, submit string) error {
 	_ = ctx
 	s := h.lookup(key)
 	if s == nil {
 		return ErrNoSession
 	}
-	return s.inject(actorName, actorColor, message)
+	return s.inject(actorName, actorColor, message, submit)
 }
 
 // ReplayWriter is implemented by an attach conn that wants to be told where

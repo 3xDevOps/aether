@@ -724,6 +724,7 @@ type fakeInject struct {
 	name    string
 	color   string
 	message string
+	submit  string
 }
 
 var errFakeNoSession = errors.New("fake ptyhost: no session for run")
@@ -823,12 +824,12 @@ func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {
 	return sess.last, true
 }
 
-func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error {
+func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error {
 	run, _ := key.Run()
 	p.mu.Lock()
 	sess, ok := p.sessions[key]
 	if ok {
-		p.injects = append(p.injects, fakeInject{run: run, name: actorName, color: actorColor, message: message})
+		p.injects = append(p.injects, fakeInject{run: run, name: actorName, color: actorColor, message: message, submit: submit})
 	}
 	p.mu.Unlock()
 	if !ok {
@@ -838,7 +839,7 @@ func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, a
 	// arrives on the attachment does. This fake has no terminal, so it
 	// models none of ptyhost.Host's echo handling - that lives in the
 	// ptyhost tests.
-	_, err := sess.att.Stdin().Write([]byte(message + "\r"))
+	_, err := sess.att.Stdin().Write([]byte(message + submit))
 	return err
 }
 

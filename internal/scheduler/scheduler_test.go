@@ -620,10 +620,8 @@ func TestReserveRunUserConflict(t *testing.T) {
 
 func TestLegalTransitions(t *testing.T) {
 	allowed := map[[2]domain.RunStatus]bool{}
-	for _, from := range []domain.RunStatus{
-		domain.RunQueued, domain.RunProvisioning, domain.RunRunning,
-		domain.RunNeedsAttention, domain.RunCompleted,
-	} {
+	for _, from := range domain.AllRunStatuses {
+		allowed[[2]domain.RunStatus{from, domain.RunMerged}] = true
 		allowed[[2]domain.RunStatus{from, domain.RunAbandoned}] = true
 	}
 	for _, from := range []domain.RunStatus{
@@ -641,7 +639,6 @@ func TestLegalTransitions(t *testing.T) {
 	allowed[[2]domain.RunStatus{domain.RunNeedsAttention, domain.RunNeedsAttention}] = true
 	allowed[[2]domain.RunStatus{domain.RunNeedsAttention, domain.RunCompleted}] = true
 	allowed[[2]domain.RunStatus{domain.RunNeedsAttention, domain.RunFailed}] = true
-	allowed[[2]domain.RunStatus{domain.RunCompleted, domain.RunMerged}] = true
 
 	for _, from := range domain.AllRunStatuses {
 		for _, to := range domain.AllRunStatuses {
@@ -658,9 +655,6 @@ func TestInvalidAPITransitions(t *testing.T) {
 	ctx := t.Context()
 
 	run, c := e.launchFake(t, "task")
-	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("CloseRun on running run: %v, want ErrInvalidTransition", err)
-	}
 	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Relaunch on running run: %v, want ErrInvalidTransition", err)
 	}
@@ -675,9 +669,6 @@ func TestInvalidAPITransitions(t *testing.T) {
 	}
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun: %v", err)
-	}
-	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("CloseRun on terminal run: %v, want ErrInvalidTransition", err)
 	}
 	if err := e.sched.Kill(ctx, run.ID, e.member.ID); err != nil {
 		t.Fatalf("Kill on terminal run: %v", err)

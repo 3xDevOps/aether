@@ -24,7 +24,7 @@ type (
 		StartSession(ctx context.Context, key SessionKey, att runtime.Attachment) error
 		StopSession(ctx context.Context, key SessionKey) error
 		LastOutput(key SessionKey) (time.Time, bool)
-		Inject(ctx context.Context, key SessionKey, actorName, actorColor, message string) error
+		Inject(ctx context.Context, key SessionKey, actorName, actorColor, message, submit string) error
 	}
 	sshdPTYAttacher interface {
 		Attach(ctx context.Context, key SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error
@@ -500,7 +500,7 @@ func TestInjectAndTranscriptReplay(t *testing.T) {
 	waitFor(t, "output before inject", func() bool {
 		return strings.HasSuffix(a.out.String(), "llo ")
 	})
-	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "fix the tests"); err != nil {
+	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "fix the tests", "\r"); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
 	att.writeOutput(t, "after")
@@ -579,7 +579,7 @@ func TestInjectDeliveredReportsSuccessWhenSessionEndsDuringWrite(t *testing.T) {
 		return len(p), nil
 	}}
 
-	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "ship it"); err != nil {
+	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "ship it", "\r"); err != nil {
 		t.Fatalf("Inject after delivery = %v, want nil", err)
 	}
 	if string(written) != "ship it\r" {
@@ -718,6 +718,9 @@ func TestInjectIsNotAgentOutput(t *testing.T) {
 	att := newFakeAtt()
 	stdin := att.captureStdin()
 	run := domain.RunID("run-liveness")
+	origQuiet := paintQuiet
+	paintQuiet = time.Millisecond
+	t.Cleanup(func() { paintQuiet = origQuiet })
 	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
@@ -739,7 +742,7 @@ func TestInjectIsNotAgentOutput(t *testing.T) {
 
 	// A single-line steer, its echo split across reads as a real PTY
 	// delivers it.
-	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "wake"); err != nil {
+	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "wake", "\r"); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
 	att.writeOutput(t, "wa")
@@ -749,7 +752,7 @@ func TestInjectIsNotAgentOutput(t *testing.T) {
 
 	// The dashboard's steer box is a textarea, so a message can carry
 	// interior newlines; every one of them echoes back as CRLF.
-	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "wake\nup"); err != nil {
+	if err := h.Inject(context.Background(), RunSession(run), "Ana", "#ff8800", "wake\nup", "\r"); err != nil {
 		t.Fatalf("Inject multi-line: %v", err)
 	}
 	att.writeOutput(t, "wake\r\nup\r\n")
@@ -778,6 +781,45 @@ func TestInjectIsNotAgentOutput(t *testing.T) {
 	if err := a.wait(t); err != nil {
 		t.Fatalf("attach returned %v", err)
 	}
+}
+
+// TestAttachNudgeDoesNotClockLiveness pins the paint-quiet window: the
+// redraw nudge every write-capable attach fires makes TUI agents repaint,
+// and that repaint must not read as the agent answering. Without it,
+// opening a stale run's terminal flips it back to working.
+func TestAttachNudgeDoesNotClockLiveness(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-nudge")
+	origQuiet := paintQuiet
+	paintQuiet = 50 * time.Millisecond
+	t.Cleanup(func() { paintQuiet = origQuiet })
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	a := startAttach(t, h, run, "m1", 120, 30, false)
+	waitAttached(t, h, run, 1)
+	sess := h.lookup(RunSession(run))
+	waitFor(t, "nudge armed the paint-quiet window", func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return !sess.paintQuietUntil.IsZero()
+	})
+
+	// The agent's repaint answer, well inside the quiet window.
+	att.writeOutput(t, "repaint\r\n")
+	if ts, _ := h.LastOutput(RunSession(run)); !ts.IsZero() {
+		t.Fatalf("LastOutput = %v during the paint-quiet window, want zero", ts)
+	}
+	waitFor(t, "quiet window elapsed", func() bool {
+		return time.Now().After(sess.paintQuietUntil)
+	})
+	att.writeOutput(t, "real answer\r\n")
+	waitFor(t, "post-window output clocks liveness", func() bool {
+		ts, _ := h.LastOutput(RunSession(run))
+		return !ts.IsZero()
+	})
+	_ = a
 }
 
 func TestWriteGate(t *testing.T) {
@@ -822,7 +864,7 @@ func TestLifecycleErrorsAndLastOutput(t *testing.T) {
 	if err := h.Attach(ctx, SessionKey("nope"), "m", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("Attach unknown run = %v", err)
 	}
-	if err := h.Inject(ctx, SessionKey("nope"), "a", "", "hi"); !errors.Is(err, ErrNoSession) {
+	if err := h.Inject(ctx, SessionKey("nope"), "a", "", "hi", "\r"); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("Inject unknown run = %v", err)
 	}
 	if err := h.StopSession(ctx, SessionKey("nope")); !errors.Is(err, ErrNoSession) {
@@ -863,7 +905,7 @@ func TestLifecycleErrorsAndLastOutput(t *testing.T) {
 		t.Fatalf("client output = %q", got)
 	}
 	waitFor(t, "session end", func() bool {
-		err := h.Inject(ctx, RunSession(run), "a", "", "x")
+		err := h.Inject(ctx, RunSession(run), "a", "", "x", "\r")
 		return errors.Is(err, ErrSessionEnded)
 	})
 	if err := h.Attach(ctx, RunSession(run), "m2", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrSessionEnded) {
@@ -882,7 +924,7 @@ func TestLifecycleErrorsAndLastOutput(t *testing.T) {
 	if _, ok := h.LastOutput(RunSession(run)); ok {
 		t.Fatal("LastOutput true after StopSession")
 	}
-	if err := h.Inject(ctx, RunSession(run), "a", "", "x"); !errors.Is(err, ErrNoSession) {
+	if err := h.Inject(ctx, RunSession(run), "a", "", "x", "\r"); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("Inject after stop = %v, want ErrNoSession", err)
 	}
 }
@@ -966,7 +1008,7 @@ func TestBlockingResizeDoesNotStallSession(t *testing.T) {
 			t.Error("LastOutput lost the session")
 		}
 		att.writeOutput(t, "still-flowing")
-		if err := h.Inject(context.Background(), RunSession(run), "Ana", "", "hi"); err != nil {
+		if err := h.Inject(context.Background(), RunSession(run), "Ana", "", "hi", "\r"); err != nil {
 			t.Errorf("Inject: %v", err)
 		}
 	}()

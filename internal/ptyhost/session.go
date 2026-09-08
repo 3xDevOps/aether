@@ -29,6 +29,13 @@ const resizeTimeout = 5 * time.Second
 // standing against whatever the agent printed next.
 const echoWindow = time.Second
 
+// paintQuiet is how long agent output stays liveness-silent after the
+// session pokes the PTY with a redraw nudge. A TUI answers the nudge with
+// a full repaint; those bytes prove nothing about the agent's progress,
+// so they must not clear a stall the way a real answer would. Tests
+// shorten it to keep assertions off the real window.
+var paintQuiet = 3 * time.Second
+
 // maxPendingEcho caps the echo the session tracks at once. An expectation
 // past it is dropped whole: the bytes then count as the agent's, which only
 // costs a stall one more threshold, where an unbounded queue would grow for
@@ -47,19 +54,20 @@ type session struct {
 	stdinMu sync.Mutex
 	stdin   io.WriteCloser
 
-	mu         sync.Mutex
-	clients    map[*client]struct{}
-	ring       *ring
-	cols       uint
-	rows       uint
-	geoGen     uint64 // bumped whenever the PTY must be (re)sized
-	geoApplied uint64 // last geoGen an applier has picked up
-	ended      bool
-	stopped    bool
-	lastOut    time.Time
-	done       chan struct{}
-	title      titleScanner
-	onTitle    func(string)
+	mu              sync.Mutex
+	clients         map[*client]struct{}
+	ring            *ring
+	cols            uint
+	rows            uint
+	geoGen          uint64 // bumped whenever the PTY must be (re)sized
+	geoApplied      uint64 // last geoGen an applier has picked up
+	ended           bool
+	stopped         bool
+	lastOut         time.Time
+	paintQuietUntil time.Time
+	done            chan struct{}
+	title           titleScanner
+	onTitle         func(string)
 
 	// pendingEcho is the echo the terminal still owes for input the server
 	// wrote to the agent - an injected line, or a member's keystrokes. The
@@ -98,8 +106,8 @@ func (s *session) deliver(p []byte) {
 	}
 	// Viewers, the transcript and the title scanner get every byte; only
 	// the liveness clock discounts the terminal's echo of what the server
-	// wrote.
-	if s.consumeEcho(p, now) {
+	// wrote, and a repaint provoked by our own resize nudge.
+	if s.consumeEcho(p, now) && now.After(s.paintQuietUntil) {
 		s.lastOut = now
 	}
 	s.title.scan(p, s.onTitle)
@@ -267,6 +275,9 @@ func (s *session) applyResize() {
 		_ = s.att.Resize(ctx, cols, rows-1)
 	}
 	_ = s.att.Resize(ctx, cols, rows)
+	s.mu.Lock()
+	s.paintQuietUntil = time.Now().Add(paintQuiet)
+	s.mu.Unlock()
 }
 
 // writeStdin forwards keystrokes to the agent; false once the session is
@@ -311,8 +322,8 @@ func (s *session) annotateInjection(actorName, actorColor, message string) error
 	return nil
 }
 
-func (s *session) inject(actorName, actorColor, message string) error {
-	line := []byte(message + "\r")
+func (s *session) inject(actorName, actorColor, message, submit string) error {
+	line := []byte(message + submit)
 	s.stdinMu.Lock()
 	defer s.stdinMu.Unlock()
 	s.mu.Lock()
