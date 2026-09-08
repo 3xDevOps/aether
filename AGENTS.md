@@ -59,7 +59,7 @@ The dashboard end-to-end suite drives a real browser against a real
 Playwright's browser:
 
 ```sh
-cd web && bunx playwright install chromium   # once
+(cd web && bunx playwright install chromium)   # once, from the repo root
 make test-e2e
 ```
 

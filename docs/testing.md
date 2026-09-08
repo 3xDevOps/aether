@@ -163,7 +163,7 @@ every call over a real SSH connection to a real `aether-server`. Playwright
 is the runner, pinned to an exact version in `web/package.json`.
 
 ```sh
-cd web && bunx playwright install chromium   # once
+(cd web && bunx playwright install chromium)   # once, from the repo root
 make test-e2e
 ```
 
