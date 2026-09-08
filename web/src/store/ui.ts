@@ -17,9 +17,12 @@ export interface Route {
  * What the onboarding Repository step settled: the clone it pointed at, the
  * remote the gateway wrote, and git's answer to the seeding push once one
  * has run. It outlives the step so walking back into Repository shows the
- * connected repo rather than an empty form.
+ * connected repo rather than an empty form. The workspace it was settled
+ * for is part of it, because a remote points at one workspace: picking a
+ * different one leaves this stale, and the step must ask again.
  */
 export interface OnboardingRepo {
+  workspace: string
   path: string
   remote: LinkRepoResult
   push: RepoPushResult | null

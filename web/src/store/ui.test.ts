@@ -42,6 +42,7 @@ describe('workspace scope and route stay in sync', () => {
       onboardingStep: 4,
       onboardingWorkspace: 'wsp_1',
       onboardingRepo: {
+        workspace: 'wsp_1',
         path: '/home/alice/code/myproject',
         remote: { repo: '/home/alice/code/myproject', remote: 'aether', url: 'ssh://host/wsp_1' },
         push: null,

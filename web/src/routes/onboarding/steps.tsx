@@ -333,9 +333,15 @@ export function RepoStep({
   onNext: () => void
 }) {
   // What the step settled lives in the UI slice, not here: walking back to
-  // this step must not ask for a path that is already connected.
-  const connected = useStore((s) => s.onboardingRepo)
+  // this step must not ask for a path that is already connected. A remote
+  // written for another workspace is not this step's answer, so a workspace
+  // the user changed their mind about leaves the form empty again.
+  const remembered = useStore((s) => s.onboardingRepo)
   const setConnected = useStore((s) => s.setOnboardingRepo)
+  const connected =
+    remembered && remembered.workspace === (workspace?.id ?? '')
+      ? remembered
+      : null
   const [repo, setRepo] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -361,6 +367,7 @@ export function RepoStep({
     setError(null)
     try {
       setConnected({
+        workspace: workspace?.id ?? '',
         path,
         remote: await client.localLinkRepo(path, workspace?.id),
         push: null,
