@@ -278,26 +278,32 @@ func (g *Gateway) Close() error {
 	g.cancel()
 	g.local.forward.Close()
 	backendErr := g.cfg.Backend.Close()
-	if g.ln == nil {
-		return backendErr
+	var serveErr error
+	if g.ln != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+		defer cancel()
+		serveErr = g.srv.Shutdown(ctx)
+		if errors.Is(serveErr, context.DeadlineExceeded) {
+			serveErr = g.srv.Close()
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-	defer cancel()
-	err := g.srv.Shutdown(ctx)
-	if errors.Is(err, context.DeadlineExceeded) {
-		err = g.srv.Close()
-	}
-	// The cancelled context has killed any rebuild; its goroutine still
-	// has to reap the child and record why it stopped. Waiting here keeps
-	// that record with this gateway rather than whatever comes after it.
+	// The cancelled context has killed any rebuild; its goroutine still has
+	// to reap the child and record why it stopped. Waiting here keeps that
+	// record with this gateway rather than whatever comes after it, which
+	// is why it cannot sit behind the listener check: a gateway that never
+	// served still runs rebuilds, and the record is read from a path that
+	// belongs to whoever is running when it lands. The drain gets its own
+	// deadline so a slow shutdown cannot spend it.
 	built := make(chan struct{})
 	go func() {
 		g.builds.Wait()
 		close(built)
 	}()
+	drain, stop := context.WithTimeout(context.Background(), closeTimeout)
+	defer stop()
 	select {
 	case <-built:
-	case <-ctx.Done():
+	case <-drain.Done():
 	}
-	return errors.Join(backendErr, err)
+	return errors.Join(backendErr, serveErr)
 }
