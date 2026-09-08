@@ -14,6 +14,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 func TestNewDockerDefaults(t *testing.T) {
@@ -485,5 +486,37 @@ func TestContainerConfigAdditionalMounts(t *testing.T) {
 	}
 	if prof.Target != "/opt/profile" || !prof.ReadOnly {
 		t.Errorf("profile mount = %+v", prof)
+	}
+}
+
+// What a container prints is the container's choice, so Exec keeps the
+// two streams apart but stops reading at its cap.
+func TestReadExecOutput(t *testing.T) {
+	var framed bytes.Buffer
+	if _, err := stdcopy.NewStdWriter(&framed, stdcopy.Stdout).Write([]byte("out\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdcopy.NewStdWriter(&framed, stdcopy.Stderr).Write([]byte("err\n")); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err := readExecOutput(bytes.NewReader(framed.Bytes()))
+	if err != nil || stdout != "out\n" || stderr != "err\n" {
+		t.Fatalf("readExecOutput = (%q, %q, %v), want the two streams apart", stdout, stderr, err)
+	}
+
+	var flood bytes.Buffer
+	writer := stdcopy.NewStdWriter(&flood, stdcopy.Stdout)
+	chunk := bytes.Repeat([]byte("y"), 64<<10)
+	for flood.Len() <= execOutputLimit+1 {
+		if _, werr := writer.Write(chunk); werr != nil {
+			t.Fatal(werr)
+		}
+	}
+	stdout, _, err = readExecOutput(bytes.NewReader(flood.Bytes()))
+	if err == nil || !strings.Contains(err.Error(), "1048576 byte limit") {
+		t.Fatalf("readExecOutput on a flood = %v, want the cap named", err)
+	}
+	if len(stdout) > execOutputLimit {
+		t.Errorf("buffered %d bytes, want no more than %d", len(stdout), execOutputLimit)
 	}
 }

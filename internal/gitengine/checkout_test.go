@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -67,7 +68,9 @@ func newHostileCheckout(t *testing.T, e *Engine, run domain.RunID) hostileChecko
 		t.Fatal(err)
 	}
 	// A signing program the agent chose: git would run it as the server
-	// unless CommitAll pins gpg.ssh.program itself.
+	// unless CommitAll pins gpg.format, gpg.ssh.program and commit.gpgsign
+	// itself. Each planted value is the opposite of the pin, so dropping
+	// any one of the three shows up here.
 	signer := filepath.Join(markerDir, "signer")
 	if err := os.WriteFile(signer, []byte("#!/bin/sh\nprintf gpg > "+markers["gpg"]+"\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -75,8 +78,9 @@ func newHostileCheckout(t *testing.T, e *Engine, run domain.RunID) hostileChecko
 	runCheckoutGit(t, checkout, "config", "core.hooksPath", hooks)
 	runCheckoutGit(t, checkout, "config", "filter.hostile.clean", clean)
 	runCheckoutGit(t, checkout, "config", "filter.hostile.required", "true")
-	runCheckoutGit(t, checkout, "config", "commit.gpgsign", "true")
-	runCheckoutGit(t, checkout, "config", "gpg.format", "ssh")
+	runCheckoutGit(t, checkout, "config", "commit.gpgsign", "false")
+	runCheckoutGit(t, checkout, "config", "gpg.format", "openpgp")
+	runCheckoutGit(t, checkout, "config", "gpg.program", signer)
 	runCheckoutGit(t, checkout, "config", "gpg.ssh.program", signer)
 	if err := os.WriteFile(filepath.Join(checkout, ".gitattributes"), []byte("payload filter=hostile\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -107,6 +111,9 @@ func (h hostileCheckout) assertNothingRan(t *testing.T) {
 func TestCommitAllIgnoresCheckoutHooksAndFilters(t *testing.T) {
 	e := newUnitEngine(t)
 	hostile := newHostileCheckout(t, e, "run-hostile")
+	// The keyless path pins commit.gpgsign=false, so this checkout asks
+	// for the opposite: dropping the pin makes the commit fail here.
+	runCheckoutGit(t, hostile.path, "config", "commit.gpgsign", "true")
 
 	commit, err := e.CommitAll(t.Context(), domain.RunID("run-hostile"), "server commit", domain.GitIdentity{}, nil)
 	if err != nil {
@@ -171,6 +178,52 @@ func TestCommitAllSignsWithTheMemberKey(t *testing.T) {
 	runCheckoutGit(t, hostile.path, "-c", "gpg.format=ssh", "-c", "gpg.ssh.program=ssh-keygen",
 		"-c", "gpg.ssh.allowedSignersFile="+allowed, "verify-commit", commit)
 
+	if after := tempSigningKeyFiles(t); len(after) != len(before) {
+		t.Errorf("staged signing keys left behind: %v, want %v", after, before)
+	}
+}
+
+// A member home is agent-writable, so the key CommitAll is handed can be
+// one that needs a passphrase. ssh-keygen then asks for it, and with a
+// controlling terminal on the server it asks on /dev/tty and waits there
+// forever; gitEnv's askpass pair is what turns that into an error. The
+// commit fails either way, and leaves no copy of the key behind.
+func TestCommitAllFailsFastOnAPassphraseProtectedKey(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("ssh-keygen is not on PATH")
+	}
+	e := newUnitEngine(t)
+	hostile := newHostileCheckout(t, e, "run-locked")
+	keyPath := filepath.Join(t.TempDir(), "signing")
+	gen := exec.CommandContext(t.Context(), "ssh-keygen", "-q", "-t", "ed25519",
+		"-N", "secret", "-C", "aether member-1", "-f", keyPath)
+	if out, err := gen.CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen: %v: %s", err, out)
+	}
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := tempSigningKeyFiles(t)
+
+	type outcome struct {
+		commit string
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		commit, commitErr := e.CommitAll(t.Context(), domain.RunID("run-locked"), "server commit", domain.GitIdentity{}, key)
+		done <- outcome{commit, commitErr}
+	}()
+	select {
+	case got := <-done:
+		if got.err == nil {
+			t.Fatalf("CommitAll with a passphrase-protected key = %q, want git's error", got.commit)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("CommitAll blocked on a passphrase prompt")
+	}
+	hostile.assertNothingRan(t)
 	if after := tempSigningKeyFiles(t); len(after) != len(before) {
 		t.Errorf("staged signing keys left behind: %v, want %v", after, before)
 	}

@@ -43,6 +43,10 @@ const (
 	setupSentinelPrefix = "/tmp/.aether-setup-"
 )
 
+// execOutputLimit is the most Exec keeps from one command's stdout and
+// stderr together.
+const execOutputLimit = 1 << 20
+
 type dockerWaitClient interface {
 	ContainerInspect(context.Context, string) (container.InspectResponse, error)
 	ContainerWait(context.Context, string, container.WaitCondition) (<-chan container.WaitResponse, <-chan error)
@@ -341,28 +345,57 @@ func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) 
 		case <-watchDone:
 		}
 	}()
-	var stdout, stderr bytes.Buffer
-	_, copyErr := stdcopy.StdCopy(&stdout, &stderr, att.Reader)
+	stdout, stderr, copyErr := readExecOutput(att.Reader)
 	if err := ctx.Err(); err != nil {
-		return 0, stdout.String(), stderr.String(), err
+		return 0, stdout, stderr, err
 	}
 	if copyErr != nil {
-		return 0, stdout.String(), stderr.String(), fmt.Errorf("exec output: %w", copyErr)
+		return 0, stdout, stderr, fmt.Errorf("exec output: %w", copyErr)
 	}
 	for {
 		ins, err := d.cli.ContainerExecInspect(ctx, created.ID)
 		if err != nil {
-			return 0, stdout.String(), stderr.String(), fmt.Errorf("exec inspect: %w", err)
+			return 0, stdout, stderr, fmt.Errorf("exec inspect: %w", err)
 		}
 		if !ins.Running {
-			return ins.ExitCode, stdout.String(), stderr.String(), nil
+			return ins.ExitCode, stdout, stderr, nil
 		}
 		select {
 		case <-ctx.Done():
-			return 0, stdout.String(), stderr.String(), ctx.Err()
+			return 0, stdout, stderr, ctx.Err()
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+// readExecOutput splits a hijacked exec stream into stdout and stderr,
+// refusing a command that writes more than execOutputLimit bytes in all.
+// What a command inside a container prints is the container's to choose,
+// and a caller buffers the whole answer, so an endless stream has to end
+// as an error rather than as the server's memory.
+func readExecOutput(r io.Reader) (stdout, stderr string, err error) {
+	// One byte past the cap, so an output of exactly that size is not
+	// mistaken for a truncated one.
+	counted := &countingReader{r: io.LimitReader(r, execOutputLimit+1)}
+	var out, errOut bytes.Buffer
+	_, copyErr := stdcopy.StdCopy(&out, &errOut, counted)
+	if counted.read > execOutputLimit {
+		return out.String(), errOut.String(), fmt.Errorf("output passed the %d byte limit", execOutputLimit)
+	}
+	return out.String(), errOut.String(), copyErr
+}
+
+// countingReader reports how much has been read through it, so the caller
+// can tell a stream that ended from one that was cut off at the cap.
+type countingReader struct {
+	r    io.Reader
+	read int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.read += int64(n)
+	return n, err
 }
 
 // Pause implements Runtime via the cgroup freezer (SIGSTOP semantics).
