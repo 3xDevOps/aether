@@ -1,8 +1,8 @@
 // The last step: a real run, in a real container, launched from the wizard.
 // The picker offers only the agents this account has installed, so the run
 // here is launched by an agent this scenario installs: a shim that runs the
-// `agent.sh` the seed repository carries, exits cleanly, and leaves the run
-// parked at needs-attention with its work committed.
+// `agent.sh` the seed repository carries, exits cleanly, and completes the
+// run with its work committed.
 
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
