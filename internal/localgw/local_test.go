@@ -805,6 +805,35 @@ func TestLocalLinkRepoLeavesAnExistingOriginAlone(t *testing.T) {
 	}
 }
 
+// Recording the origin is a bonus the link never fails over: a viewer is
+// denied it, and a URL the server will not take is refused. Either way the
+// remote is written, the link answers 200, and the response omits origin.
+func TestLocalLinkRepoToleratesARefusedOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		perr *protocol.Error
+	}{
+		{"viewer", &protocol.Error{Code: protocol.CodeDenied, Message: "pushing to a workspace requires the collaborator role"}},
+		{"rejected origin", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "origin must be empty or a git URL"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := workspaceListBackend(`{"id":"ws_1","name":"app","base_branch":"main","created_at":""}`)
+			backend.errs = map[string]*protocol.Error{protocol.MethodWorkspaceOrigin: tc.perr}
+			got := linkRepoWithOrigin(t, backend, "https://github.com/acme/app.git")
+
+			if got["remote"] != "aether" {
+				t.Fatalf("response remote = %v, want the remote still written", got["remote"])
+			}
+			if _, ok := got["origin"]; ok {
+				t.Fatalf("response carries origin %v, want the key omitted", got["origin"])
+			}
+			if originCall(backend) == "" {
+				t.Fatal("workspace.origin was never attempted")
+			}
+		})
+	}
+}
+
 // A clone with no origin of its own records nothing.
 func TestLocalLinkRepoWithoutAnOriginRecordsNothing(t *testing.T) {
 	backend := workspaceListBackend(`{"id":"ws_1","name":"app","base_branch":"main","created_at":""}`)

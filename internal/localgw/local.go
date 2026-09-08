@@ -300,7 +300,9 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 // pushes, so runs reach the same upstream. It only ever fills a blank: a
 // workspace that already names an origin keeps it, because the server's
 // answer is shared by everyone and this clone is one developer's.
-// Returns the workspace's origin afterwards.
+// Returns the workspace's origin afterwards, or "" when the server would
+// not take it: a viewer may not set one, and an origin the server rejects
+// is not one this link should fail over.
 func (g *Gateway) recordWorkspaceOrigin(r *http.Request, wsID, repo string) (string, *protocol.Error) {
 	ws, perr := g.pickWorkspace(r, wsID)
 	if perr != nil {
@@ -321,6 +323,9 @@ func (g *Gateway) recordWorkspaceOrigin(r *http.Request, wsID, repo string) (str
 		return "", &protocol.Error{Code: protocol.CodeInternal, Message: "encode workspace.origin params: " + err.Error()}
 	}
 	if _, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodWorkspaceOrigin, params); perr != nil {
+		if perr.Code == protocol.CodeDenied || perr.Code == protocol.CodeInvalidParams {
+			return "", nil
+		}
 		return "", perr
 	}
 	return origin, nil

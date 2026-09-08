@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -154,11 +155,19 @@ func runLink(args []string) error {
 	return recordWorkspaceOrigin(c, wl.Workspaces, wsID, cfg.Repo)
 }
 
+// originCaller is the one control call recordWorkspaceOrigin makes,
+// narrowed so a test can answer it without a server.
+type originCaller interface {
+	Call(method string, params, result any) error
+}
+
 // recordWorkspaceOrigin teaches the workspace where the linked clone
 // pushes, so runs reach the same upstream. It only ever fills a blank: an
 // origin the workspace already names is shared by everyone on the server,
-// and this clone is one developer's.
-func recordWorkspaceOrigin(c *protocol.Client, list []protocol.Workspace, wsID, repo string) error {
+// and this clone is one developer's. Recording is a bonus, not the link:
+// a viewer is denied it (-32001) and a URL the server will not take is
+// refused (-32602), and neither is a reason to fail a link already made.
+func recordWorkspaceOrigin(c originCaller, list []protocol.Workspace, wsID, repo string) error {
 	ws, ok := workspaceByID(list, wsID)
 	if !ok || ws.Origin != "" {
 		return nil
@@ -174,6 +183,11 @@ func recordWorkspaceOrigin(c *protocol.Client, list []protocol.Workspace, wsID, 
 	if err := c.Call(protocol.MethodWorkspaceOrigin, protocol.WorkspaceOriginParams{
 		WorkspaceID: wsID, Origin: origin,
 	}, &res); err != nil {
+		var perr *protocol.Error
+		if errors.As(err, &perr) &&
+			(perr.Code == protocol.CodeDenied || perr.Code == protocol.CodeInvalidParams) {
+			return nil
+		}
 		return err
 	}
 	fmt.Printf("workspace origin -> %s\n", res.Workspace.Origin)
