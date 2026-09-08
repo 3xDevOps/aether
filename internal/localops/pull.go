@@ -78,10 +78,8 @@ func pull(repo, url, branch string) (PullResult, error) {
 func advanceBranch(repo, branch string, track bool) (bool, string, error) {
 	current := currentBranch(repo) == branch
 	if !current {
-		if held := branchWorktree(repo, branch); held != "" {
-			return false, "", pushRefusal{branch + " is checked out in the worktree at " + held +
-				"; git will not move a branch from outside the worktree that holds it. Switch that worktree to another branch, or run `git -C " +
-				held + " merge --ff-only aether/" + branch + "` there."}
+		if held := branchWorktree(repo, branch); held != nil {
+			return false, "", pushRefusal{held.refusal(repo, branch)}
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
@@ -121,29 +119,66 @@ func advanceBranch(repo, branch string, track bool) (bool, string, error) {
 	return current, string(out), nil
 }
 
+// heldWorktree is the worktree that holds a branch this repository may
+// not move. Prunable means git has lost the directory but still counts
+// the branch as checked out there, which is what decides the fix.
+type heldWorktree struct {
+	path     string
+	prunable bool
+}
+
+// refusal is the whole user-facing sentence for a branch held elsewhere.
+// A live worktree is a place the member can catch the branch up; a
+// prunable one is a directory that no longer exists, so telling them to
+// run anything in it would be telling them to run nothing.
+func (h heldWorktree) refusal(repo, branch string) string {
+	msg := branch + " is checked out in the worktree at " + h.path +
+		"; git will not move a branch from outside the worktree that holds it. "
+	if h.prunable {
+		return msg + "Git can no longer find that directory, so run `git -C " + repo +
+			" worktree prune` to drop the record, then try again."
+	}
+	return msg + "Switch that worktree to another branch, or run `git -C " +
+		h.path + " merge --ff-only aether/" + branch + "` there."
+}
+
 // branchWorktree names a linked worktree of repo that has branch checked
-// out, or "" when none does. Git refuses `git branch --force` for a
+// out, or nil when none does. Git refuses `git branch --force` for a
 // branch checked out anywhere in the repository, so the move has to be
 // refused before it is attempted; this repository's own working tree is
 // not one of those, because there the branch is fast-forwarded in place.
-func branchWorktree(repo, branch string) string {
-	out, err := exec.Command("git", "-C", repo, "worktree", "list", "--porcelain").Output()
+// A lookup git itself cannot answer returns nil deliberately: the move
+// then runs and git's own refusal is what the member reads.
+//
+// `-z` is what makes the answer parseable: git prints worktree paths
+// raw, so a path holding a newline splits across lines without it.
+func branchWorktree(repo, branch string) *heldWorktree {
+	out, err := exec.Command("git", "-C", repo, "worktree", "list", "--porcelain", "-z").Output()
 	if err != nil {
-		return ""
+		return nil
 	}
 	self, _ := gitLine(repo, "rev-parse", "--show-toplevel")
-	path := ""
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if rest, ok := strings.CutPrefix(line, "worktree "); ok {
-			path = rest
-			continue
-		}
-		if line == "branch refs/heads/"+branch && path != self {
-			return path
+	var held heldWorktree
+	var wanted bool
+	// Every record, the last one included, ends in the empty line git
+	// writes between them, and `prunable` follows `branch`, so a record
+	// is only answered once it is whole.
+	for _, line := range strings.Split(string(out), "\x00") {
+		switch {
+		case line == "":
+			if wanted {
+				return &held
+			}
+			held, wanted = heldWorktree{}, false
+		case strings.HasPrefix(line, "worktree "):
+			held.path = strings.TrimPrefix(line, "worktree ")
+		case line == "prunable" || strings.HasPrefix(line, "prunable "):
+			held.prunable = true
+		case line == "branch refs/heads/"+branch && held.path != self:
+			wanted = true
 		}
 	}
-	return ""
+	return nil
 }
 
 func remoteExists(repo, remote string) bool {

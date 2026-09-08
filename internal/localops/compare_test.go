@@ -360,3 +360,51 @@ func TestFastForwardRefusesABranchHeldByAnotherWorktree(t *testing.T) {
 		t.Fatalf("the other worktree moved to %s, want %s", got, base)
 	}
 }
+
+// A worktree git can no longer find still holds the branch, so the
+// refusal stands - but the directory it names is gone, and telling the
+// member to run a merge in it would be telling them to run nothing.
+func TestFastForwardNamesPruneForAWorktreeGitLost(t *testing.T) {
+	requireGit(t)
+	clone, remote, base := seededClone(t)
+	advance(t, remote)
+	git(t, clone, "switch", "-c", "feature")
+	other := filepath.Join(t.TempDir(), "held")
+	git(t, clone, "worktree", "add", other, "main")
+	if err := os.RemoveAll(other); err != nil {
+		t.Fatalf("remove the held worktree: %v", err)
+	}
+
+	_, err := FastForward(clone, "main")
+	if !errors.Is(err, ErrPushPrecondition) {
+		t.Fatalf("err = %v, want a precondition refusal", err)
+	}
+	if !strings.Contains(err.Error(), "worktree prune") {
+		t.Fatalf("message does not name the prune that clears it: %q", err)
+	}
+	if strings.Contains(err.Error(), "merge --ff-only") {
+		t.Fatalf("message sends the member into a directory that is gone: %q", err)
+	}
+	if got := git(t, clone, "rev-parse", "main"); got != base {
+		t.Fatalf("main moved to %s, want %s", got, base)
+	}
+}
+
+// git prints worktree paths raw, so a newline in one splits the porcelain
+// listing across lines. The refusal has to name the whole path.
+func TestFastForwardNamesAWorktreePathWithANewline(t *testing.T) {
+	requireGit(t)
+	clone, remote, _ := seededClone(t)
+	advance(t, remote)
+	git(t, clone, "switch", "-c", "feature")
+	other := filepath.Join(t.TempDir(), "held\nbranch refs/heads/main")
+	git(t, clone, "worktree", "add", other, "main")
+
+	_, err := FastForward(clone, "main")
+	if !errors.Is(err, ErrPushPrecondition) {
+		t.Fatalf("err = %v, want a precondition refusal", err)
+	}
+	if !strings.Contains(err.Error(), other) {
+		t.Fatalf("message does not name the whole worktree path: %q", err)
+	}
+}
