@@ -147,6 +147,11 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, config []byte
 // the agent copies these lines into its commits, it does not decide who is
 // on them. Writing for a run that was never provisioned is an error, not a
 // silent no-op - the caller would otherwise believe the agent was told.
+//
+// Unlike the harness config this is rewritten while the container is live,
+// and the agent is told to read it before every commit, so the replacement
+// is a rename over the old name: a reader either gets the whole previous
+// list or the whole new one, never a missing path.
 func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
 	if s.cfg.Disabled {
 		return ErrDisabled
@@ -160,14 +165,27 @@ func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
 		body = []byte(strings.Join(trailers, "\n") + "\n")
 	}
 	path := filepath.Join(dir, CoAuthorsName)
-	if err := removeFile(path); err != nil {
-		return fmt.Errorf("coord: replace %s: %w", path, err)
-	}
-	if err := os.WriteFile(path, body, configMode); err != nil {
+	tmp, err := os.CreateTemp(dir, "."+CoAuthorsName+"-*")
+	if err != nil {
 		return fmt.Errorf("coord: write %s: %w", path, err)
 	}
-	if err := os.Chmod(path, configMode); err != nil {
-		return fmt.Errorf("coord: set mode on %s: %w", path, err)
+	werr := os.WriteFile(tmp.Name(), body, configMode)
+	if werr == nil {
+		werr = tmp.Close()
+	} else {
+		_ = tmp.Close()
+	}
+	// CreateTemp opens at 0600 and WriteFile keeps an existing file's mode,
+	// so the container-readable mode is set explicitly before the rename.
+	if werr == nil {
+		werr = os.Chmod(tmp.Name(), configMode)
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), path)
+	}
+	if werr != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("coord: write %s: %w", path, werr)
 	}
 	return nil
 }
