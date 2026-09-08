@@ -98,8 +98,10 @@ function seed(extra: Partial<RootState> = {}) {
     route: { name: 'onboarding', params: {} },
     onboarded: false,
     onboardingStep: 'Link',
+    onboardingFurthest: 'Link',
     onboardingWorkspace: '',
     onboardingRepo: null,
+    onboardingFirstRun: { harness: '', task: '' },
     ...extra,
   })
 }
@@ -1244,30 +1246,69 @@ describe('onboarding wizard', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined()
   })
 
-  it('jumps back to a finished step from the header', async () => {
+  it('jumps between the steps it has reached from the header', async () => {
     seed()
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
     await toFirstRunStep()
 
-    // Steps already done are buttons; the current one and the ones ahead
-    // are not.
+    const steps = screen.getByLabelText('Steps')
+    const chip = (name: string) =>
+      within(steps).queryByRole('button', { name: `${name}, done - go to this step` })
+
+    fireEvent.click(chip('3. Workspace')!)
+
+    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+    expect(useStore.getState().onboardingStep).toBe('Workspace')
+    // The step it landed on is the current one, so it is not a jump target.
+    expect(chip('3. Workspace')).toBeNull()
+    // Everything already reached stays reachable, or a jump backwards would
+    // strand the member on a step whose own Back is gone.
+    expect(useStore.getState().onboardingFurthest).toBe('First run')
+    fireEvent.click(chip('6. First run')!)
+    expect(await screen.findByRole('region', { name: 'First run' })).toBeDefined()
+  })
+
+  it('leaves a step it has never reached inert in the header', () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+
+    const steps = screen.getByLabelText('Steps')
+    expect(within(steps).queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('keeps the first run draft when the header jumps away and back', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toFirstRunStep()
+
+    fireEvent.change(await screen.findByLabelText('Task'), {
+      target: { value: 'add a health check endpoint' },
+    })
     const steps = screen.getByLabelText('Steps')
     fireEvent.click(
-      within(steps).getByRole('button', { name: '3. Workspace' }),
+      within(steps).getByRole('button', {
+        name: '3. Workspace, done - go to this step',
+      }),
+    )
+    await screen.findByRole('region', { name: 'Workspace' })
+    fireEvent.click(
+      within(steps).getByRole('button', {
+        name: '6. First run, done - go to this step',
+      }),
     )
 
     expect(
-      await screen.findByRole('region', { name: 'Workspace' }),
-    ).toBeDefined()
-    expect(useStore.getState().onboardingStep).toBe('Workspace')
-    // The step it landed on is current, so it is no longer clickable, and
-    // Repository is ahead again.
-    expect(
-      within(steps).queryByRole('button', { name: '3. Workspace' }),
-    ).toBeNull()
-    expect(
-      within(steps).queryByRole('button', { name: '4. Repository' }),
-    ).toBeNull()
+      (await screen.findByLabelText<HTMLTextAreaElement>('Task')).value,
+    ).toBe('add a health check endpoint')
+  })
+
+  it('renders Back inside the step it belongs to', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toAgentsStep()
+
+    const agents = await screen.findByRole('region', { name: 'Agents' })
+    expect(within(agents).getByRole('button', { name: 'Back' })).toBeDefined()
   })
 
   it('renders a launch refusal verbatim and lets the user retry', async () => {

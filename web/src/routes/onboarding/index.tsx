@@ -9,9 +9,8 @@
 // Navigation is two levels and nothing more: a step index, and a sub-screen
 // name owned by whichever step has one. Back closes the sub-screen first and
 // only then leaves the step, so a step's own screens never fall through to
-// the previous step. The wizard owns the Back button but every step renders
-// it beside its own actions: a step as tall as Agents with the terminal dock
-// open would otherwise push it off screen.
+// the previous step. The wizard owns the Back button; every step renders it
+// in its own action row.
 
 import { Check } from 'lucide-react'
 import { useState } from 'react'
@@ -31,8 +30,9 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
-/** One step's marker in the header: done, current, or still ahead. */
-const chip = 'rounded-sm border px-1.5 py-0.5'
+/** One step's marker in the header: reached, current, or still ahead. */
+const chip =
+  'rounded-sm border px-1.5 py-0.5 outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
@@ -44,14 +44,18 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const onboardingWorkspace = useStore((s) => s.onboardingWorkspace)
   const workspaces = useStore((s) => s.workspaces)
   const workspace = onboardingWorkspace ? workspaces[onboardingWorkspace] ?? null : null
-  const [step, setStepState] = useState(() => {
-    const resume = onboardingStepIndex(persistedStep)
-    // Repository and everything past it need the workspace the wizard
-    // settled on; without one there is nothing to resume into.
-    return resume >= onboardingStepIndex('Repository') && !onboardingWorkspace
+  const persistedFurthest = useStore((s) => s.onboardingFurthest)
+  // Repository and everything past it need the workspace the wizard settled
+  // on; without one there is nothing to resume into, and nothing further
+  // back to jump forward to either.
+  const reachable = (index: number) =>
+    index >= onboardingStepIndex('Repository') && !onboardingWorkspace
       ? onboardingStepIndex('Workspace')
-      : resume
-  })
+      : index
+  const [step, setStepState] = useState(() => reachable(onboardingStepIndex(persistedStep)))
+  // Every step already reached stays reachable: a jump backwards must not
+  // strand the member on a step whose own Back is gone.
+  const furthest = Math.max(step, reachable(onboardingStepIndex(persistedFurthest)))
   const current = onboardingSteps[step]
   // The harness the Agents step set up, so the first run starts on the one
   // that is actually logged in. Empty until a setup shell exits cleanly.
@@ -65,8 +69,6 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
     setOnboardingStep(onboardingSteps[next])
   }
 
-  // Handed to every step past the first, which renders it in its own action
-  // row. Back closes an open sub-screen before it leaves the step.
   const back =
     step > 0 ? (
       <Button
@@ -98,12 +100,16 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
     <div className="flex h-full flex-col">
       <ViewHeader title="Onboarding" subtitle={current} />
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        <ol aria-label="Steps" className="flex flex-wrap gap-2 text-xs">
+        <ol
+          aria-label="Steps"
+          className="sticky top-0 z-10 -mx-4 -mt-4 flex flex-wrap gap-2 bg-background px-4 pb-2 pt-4 text-xs"
+        >
           {onboardingSteps.map((label, i) => (
             <li key={label} aria-current={i === step ? 'step' : undefined}>
-              {i < step ? (
+              {i !== step && i <= furthest ? (
                 <button
                   type="button"
+                  aria-label={`${i + 1}. ${label}, done - go to this step`}
                   className={`${chip} flex items-center gap-1 hover:bg-accent`}
                   onClick={() => setStep(i)}
                 >

@@ -67,8 +67,10 @@ const persistedUi = (s: RootState) => ({
   dismissedUpdates: s.dismissedUpdates,
   onboarded: s.onboarded,
   onboardingStep: s.onboardingStep,
+  onboardingFurthest: s.onboardingFurthest,
   onboardingWorkspace: s.onboardingWorkspace,
   onboardingRepo: s.onboardingRepo,
+  onboardingFirstRun: s.onboardingFirstRun,
 })
 
 /**

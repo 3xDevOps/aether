@@ -59,8 +59,10 @@ function seed(caps: GatewayCapabilities = localCaps) {
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
     onboardingStep: 'Link',
+    onboardingFurthest: 'Link',
     onboardingWorkspace: '',
     onboardingRepo: null,
+    onboardingFirstRun: { harness: '', task: '' },
   })
 }
 
@@ -937,6 +939,7 @@ describe('the harness the step set up', () => {
         client={fakeApi()}
         workspace={workspace}
         defaultHarness="claude"
+        onBackToAgents={() => {}}
       />,
     )
 
@@ -954,6 +957,7 @@ describe('the harness the step set up', () => {
         client={fakeApi({ agentList: vi.fn(async () => [agentInfo()]) })}
         workspace={workspace}
         defaultHarness="codex"
+        onBackToAgents={() => {}}
       />,
     )
 

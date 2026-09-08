@@ -782,41 +782,45 @@ export function FirstRunStep({
   client: Api
   workspace: Workspace | null
   defaultHarness?: string
-  /** The wizard's Back button, rendered in this step's own action row. */
   back?: ReactNode
   onBackToWorkspace?: () => void
-  onBackToAgents?: () => void
+  onBackToAgents: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
   const setOnboarded = useStore((s) => s.setOnboarded)
+  // The draft outlives this component: the header can jump to another step
+  // and back, which unmounts it.
+  const draft = useStore((s) => s.onboardingFirstRun)
+  const setDraft = useStore((s) => s.setOnboardingFirstRun)
 
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [agentsError, setAgentsError] = useState<string | null>(null)
-  const [harness, setHarness] = useState('')
-  const [task, setTask] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const { harness, task } = draft
 
   const loadAgents = useCallback(() => {
+    let live = true
     setAgentsError(null)
     client
       .agentList()
       .then((list) => {
+        if (!live) return
         const installed = list.filter((a) => a.installed === true)
         setAgents(installed)
-        setHarness(
-          (prev) =>
-            prev ||
-            (defaultHarness && installed.some((a) => a.name === defaultHarness)
-              ? defaultHarness
-              : ''),
-        )
+        if (defaultHarness && installed.some((a) => a.name === defaultHarness)) {
+          setDraft({ ...useStore.getState().onboardingFirstRun, harness: defaultHarness })
+        }
       })
       .catch((err) => {
+        if (!live) return
         setAgents([])
         setAgentsError(message(err))
       })
-  }, [client, defaultHarness])
+    return () => {
+      live = false
+    }
+  }, [client, defaultHarness, setDraft])
 
   useEffect(loadAgents, [loadAgents])
 
@@ -929,7 +933,7 @@ export function FirstRunStep({
           <select
             className={field}
             value={harness}
-            onChange={(e) => setHarness(e.target.value)}
+            onChange={(e) => setDraft({ ...draft, harness: e.target.value })}
           >
             <option value="">Choose an agent</option>
             {agents.map((a) => (
@@ -946,11 +950,12 @@ export function FirstRunStep({
           className={`${field} min-h-20`}
           value={task}
           placeholder="add a health check endpoint"
-          onChange={(e) => setTask(e.target.value)}
+          onChange={(e) => setDraft({ ...draft, task: e.target.value })}
         />
       </label>
       {error && <p className="text-xs text-state-failed">{error}</p>}
-      <div className="flex gap-2">
+      {withoutASubscription}
+      <div className={actionRow}>
         <Button size="sm" disabled={busy || !ready} onClick={() => void launch()}>
           Launch
         </Button>
@@ -959,7 +964,6 @@ export function FirstRunStep({
         </Button>
         {back}
       </div>
-      {withoutASubscription}
     </section>
   )
 }
