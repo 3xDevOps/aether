@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
+import { useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { Api } from '@/lib/api'
 import type { GatewayCapabilities } from '@/lib/types'
@@ -57,23 +58,33 @@ function seed(caps: GatewayCapabilities = localCaps) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
+    onboardingStep: 0,
+    onboardingWorkspace: '',
+    onboardingRepo: null,
   })
 }
 
-/** The step on its own, with the wizard's callbacks as spies. */
+/** The step on its own, with the wizard's callbacks as spies. The wizard
+ * owns the open sub-screen, so this stands in for that much of it. */
 function renderStep(client: Api, caps: GatewayCapabilities = localCaps) {
   seed(caps)
   const onNext = vi.fn()
   const onReady = vi.fn()
-  const view = render(
-    <AgentsStep
-      client={client}
-      caps={capability(caps)}
-      workspace={workspace}
-      onNext={onNext}
-      onReady={onReady}
-    />,
-  )
+  function Host() {
+    const [setup, onSetup] = useState('')
+    return (
+      <AgentsStep
+        client={client}
+        caps={capability(caps)}
+        workspace={workspace}
+        setup={setup}
+        onSetup={onSetup}
+        onNext={onNext}
+        onReady={onReady}
+      />
+    )
+  }
+  const view = render(<Host />)
   return { onNext, onReady, view }
 }
 
@@ -106,6 +117,19 @@ async function look() {
 
 function frame(data: object) {
   StubSocket.last().onmessage?.({ data: JSON.stringify(data) })
+}
+
+/** Walks the whole wizard from Link to the Agents step. */
+async function toAgentsStep() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+  fireEvent.click(
+    await screen.findByRole('button', { name: `Use ${workspace.name}` }),
+  )
+  fireEvent.change(await screen.findByLabelText('Repository path'), {
+    target: { value: '/home/alice/code/myproject' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 }
 
 beforeEach(() => {
@@ -879,20 +903,43 @@ describe('the harness the step set up', () => {
     })
   })
 
+  it('walks Back out of the setup screen before it leaves the Agents step', async () => {
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toAgentsStep()
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Set up Claude Code' }),
+    )
+    await act(async () => {})
+    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
+
+    // One Back, the wizard's: an embedded setup screen has no form of its
+    // own to go back to.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+
+    // Back to the harness list, still on step four.
+    expect(
+      await screen.findByRole('button', { name: 'Set up Claude Code' }),
+    ).toBeDefined()
+    expect(
+      screen.getByRole('listitem', { current: 'step' }).textContent,
+    ).toContain('4. Agents')
+
+    // Only now does Back leave the step.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(
+      screen.getByRole('listitem', { current: 'step' }).textContent,
+    ).toContain('3. Repository')
+  })
+
   it('reaches the First run step through the whole wizard', async () => {
     const client = fakeApi()
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-    fireEvent.click(
-      await screen.findByRole('button', { name: `Use ${workspace.name}` }),
-    )
-    fireEvent.change(await screen.findByLabelText('Repository path'), {
-      target: { value: '/home/alice/code/myproject' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    await toAgentsStep()
 
     // Step four of five: the agents step.
     const steps = screen.getByLabelText('Steps')

@@ -138,7 +138,9 @@ In the dashboard, the onboarding wizard's Repository step does both for
 you: it adds the remote, then its **Push now** button runs that push in
 your clone and keeps git's own output on the page. It runs the same push
 with `--no-follow-tags`, so the command above also sends your tags if you
-have `push.followTags` set.
+have `push.followTags` set. The step remembers the repository it connected,
+so walking back to it shows the connected clone and its push result with
+**Use a different repository** to re-point, not an empty form.
 
 ## 5. Set up your agent
 
@@ -149,9 +151,13 @@ aether agent add claude
 ```
 
 For a shipped agent, the dashboard's Agents step opens the live environment
-terminal dock and types its vendor install script. From the CLI, open the
-terminal, run the script, install into `~/.local/bin`, and complete the vendor
-login there:
+terminal dock and types its vendor install script. The dock says
+**Starting your environment container** while Docker starts it, then the
+shell appears. When you press **I've installed and logged in**, the wizard
+checks the executable is on the server and runs `env save` for you, naming
+the saved image. It cannot check the vendor login; the agent does that when
+it starts. From the CLI, open the terminal, run the script, install into
+`~/.local/bin`, and complete the vendor login there:
 
 ```sh
 aether terminal
@@ -184,6 +190,11 @@ installed on your machine you can also let one read the inventory and
 recommend what is worth bringing, with a sentence of reasoning per agent;
 the recommendation is a checklist you edit, never something that acts on
 its own. Both parts are optional - **Skip for now** moves on.
+
+That scan runs the agent on your own machine, and it takes the launch command
+from the client, not the server. If it fails with the agent rejecting its
+arguments, upgrade the client - the CLI, or the desktop app if you started it
+there. Upgrading the server alone does not change what the scan runs.
 
 Secrets never sync. A scanner finding drops the one file it named and lists
 it on that harness's row before the import button, so the rest still imports

@@ -18,14 +18,14 @@ Two rules shape everything below:
 
 ## Shipped harnesses
 
-| `--agent` | CLI | Login state | Profile sync root | API key env | MCP | Resume | Env setup |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | yes (`--mcp-config`) | by session ID (`--session-id`, `--resume`) | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | no | no | yes |
-| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | best effort (`--continue`) | yes |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | no | no | no |
-| `fake` | a script you name | - | - | - | no | no | no |
-| `custom` | deployment-supplied | - | - | - | no | no | no |
+| `--agent` | CLI | Login state | Profile sync root | API key env | Launch env | MCP | Resume | Env setup |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | by session ID (`--session-id`, `--resume`) | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | no | yes |
+| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | best effort (`--continue`) | yes |
+| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | no | no |
+| `fake` | a script you name | - | - | - | - | no | no | no |
+| `custom` | deployment-supplied | - | - | - | - | no | no | no |
 
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user).
@@ -39,6 +39,11 @@ Only harnesses with an **MCP** column of `yes` can be pointed at the in-containe
 coordination bridge, so conflict coordination between overlapping runs works for
 Claude Code and degrades to the advisory overlap notice for the rest. See
 [coordination.md](coordination.md).
+
+The **Launch env** column is what the server sets in the run container
+because the CLI will not start without it. It is applied after the
+workspace's own variables, so a workspace cannot leave the agent unable to
+run. See the launch table below for why `claude` needs one.
 
 The **Resume** column is what a relaunch uses when a server reboot
 interrupted the run. The flags ride directly behind the executable.
@@ -91,15 +96,30 @@ requires a task.
 
 | Harness | tui | headless |
 | --- | --- | --- |
-| `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --dangerously-skip-permissions {task}` |
+| `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |
 | `pi` | `pi {task}` | `pi -p {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
 
-These are the vendors' own flags, and vendors rename them. If a launch fails
-with an unknown-flag error, the installed CLI has drifted from the registry.
+Every `claude` **run** also gets `IS_SANDBOX=1`. Runs execute as root on the
+standard image, and Claude Code refuses `--dangerously-skip-permissions` as
+root; that variable is a vendor internal, not a supported interface, and the
+vendor's own answer is to run the container as a non-root user. It is a
+stopgap until the standard image ships one. Environment terminals carry no
+harness, so they get none of this - the member's own shell is not launching
+an agent.
+
+These are the vendors' own flags, and vendors rename them and tighten how
+they combine - `claude` now refuses `--output-format stream-json` unless
+`--verbose` comes with it. If a launch fails with the CLI rejecting its own
+arguments, the installed CLI has drifted from the registry.
 Update the registry or install a compatible CLI in the member's environment
 terminal. The installed executable lives in that member's environment home.
+An argv override replaces the shipped template wholesale, so a registry fix
+never reaches it: a deployment's `--harness-definitions` entry that redefines
+a shipped harness has to be updated on its own. It keeps the registry's key
+passthrough and launch env for that name, since neither is part of the
+command line.
 
 ## Setting up an agent
 

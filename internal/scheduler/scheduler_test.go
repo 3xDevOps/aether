@@ -431,7 +431,7 @@ func TestCommandTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
-	want := []string{"claude", "-p", "--output-format", "stream-json", "--dangerously-skip-permissions", "do it"}
+	want := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "do it"}
 	if fmt.Sprint(argv) != fmt.Sprint(want) {
 		t.Fatalf("claude headless argv = %v, want %v", argv, want)
 	}

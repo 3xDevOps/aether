@@ -1,5 +1,8 @@
 // `agent add` as a wizard: collect the name and launch templates, then give
 // concise instructions for setup in the member's persistent environment home.
+// Confirming the install also saves the environment, because an executable
+// that only exists in the running container is not in the image runs start
+// from.
 
 import { useState } from 'react'
 import { message } from '@/lib/format'
@@ -7,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import { TerminalDock } from '@/routes/board/terminal-dock'
 import type { AgentInfo } from '@/lib/types'
+import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
 const field =
@@ -22,6 +26,9 @@ export function splitArgv(template: string): string[] {
 }
 
 type Step = 'form' | 'instructions' | 'done'
+
+/** What the confirm button is doing, and what it says while it does it. */
+type Phase = 'idle' | 'checking' | 'saving'
 
 export function AgentWizard({
   agents,
@@ -46,9 +53,12 @@ export function AgentWizard({
   // Argv templates follow the name until the user edits them.
   const [tui, setTui] = useState<string | null>(null)
   const [headless, setHeadless] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [phase, setPhase] = useState<Phase>('idle')
+  const [saved, setSaved] = useState('')
   const [error, setError] = useState<string | null>(null)
   const caps = useCapability()
+  const setEnvStatus = useStore((s) => s.setEnvTerminalStatus)
+  const busy = phase !== 'idle'
 
   const trimmed = name.trim()
   const selected = agents.find((a) => a.name === trimmed)
@@ -70,7 +80,7 @@ export function AgentWizard({
 
   const finish = async () => {
     if (!trimmed || busy) return
-    setBusy(true)
+    setPhase('checking')
     setError(null)
     try {
       if (!shipped) {
@@ -87,12 +97,19 @@ export function AgentWizard({
           `agent.list: ${trimmed} is not detected as installed in your account's ~/.local/bin. Finish the installation in the environment terminal, then try again.`,
         )
       }
+      setPhase('saving')
+      const image = (await client.envSave()).image
+      // The dock shares this status, so its unsaved hint and its saved image
+      // follow the save whoever ran it.
+      const status = useStore.getState().envTerminal.status
+      setEnvStatus({ ...(status ?? { running: true, tabs: [] }), saved_image: image })
+      setSaved(image)
       onRegistered()
       setStep('done')
     } catch (err) {
       setError(message(err))
     } finally {
-      setBusy(false)
+      setPhase('idle')
     }
   }
 
@@ -104,7 +121,9 @@ export function AgentWizard({
         </p>
         <p className="text-sm text-muted-foreground">
           {trimmed} is available in the run launcher. Its executable and user-local files
-          persist in your member home. Vendor login is checked by the agent when it starts.
+          persist in your member home, and your environment is saved as{' '}
+          <span className="font-mono">{saved}</span>, so new runs start from it.
+          Vendor login is checked by the agent when it starts, not here.
         </p>
         <Button size="sm" onClick={onCancel}>
           Close
@@ -155,17 +174,25 @@ export function AgentWizard({
         {error && <p className="text-xs text-state-failed">{error}</p>}
         <div className="flex gap-2">
           <Button type="button" size="sm" onClick={() => void finish()} disabled={busy}>
-            {busy ? 'Checking installation...' : "I've installed and logged in"}
+            {phase === 'checking'
+              ? 'Checking installation...'
+              : phase === 'saving'
+                ? 'Saving environment...'
+                : "I've installed and logged in"}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => (harness ? onCancel() : setStep('form'))}
-            disabled={busy}
-          >
-            Back
-          </Button>
+          {/* Embedded with a harness there is no form to go back to, and
+              the host wizard carries the only Back. */}
+          {!harness && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setStep('form')}
+              disabled={busy}
+            >
+              Back
+            </Button>
+          )}
         </div>
       </div>
     )

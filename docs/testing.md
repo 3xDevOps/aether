@@ -111,6 +111,45 @@ the scheduler chowns the run checkout and the member home to the container
 user before creating the container, and an unprivileged test process can
 only chown to itself.
 
+### The real-harness smoke tests
+
+`internal/harness/smoke_integration_test.go` launches the vendors' actual
+CLIs and checks that the argv Aether ships is still the argv they accept.
+Nothing else catches a vendor renaming a flag or refusing a combination it
+used to allow: a change like that breaks every run of that harness and no
+amount of internal testing sees it coming.
+
+`TestSmokeHeadlessNoLogin` is the one that runs in CI. It launches each
+headless template with no credentials at all and requires the run to fail
+for want of a login, never for want of a parseable command line - reaching
+the provider is proof the CLI accepted the flags. The `integration` job
+builds `images/standard/Dockerfile`, then `images/smoke/Dockerfile` on top
+of it to add the agent CLIs at whatever version their vendors ship that
+day, and points the gate variables at the result.
+
+To run it locally, build the same image and name it:
+
+```sh
+docker build -f images/standard/Dockerfile -t aether-standard:local .
+docker build -f images/smoke/Dockerfile --build-arg BASE=aether-standard:local \
+  -t aether-smoke:local .
+AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN=aether-smoke:local \
+AETHER_SMOKE_IMAGE_CODEX_NOLOGIN=aether-smoke:local \
+AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN=aether-smoke:local \
+  go test -tags integration -run TestSmokeHeadlessNoLogin ./internal/harness/
+```
+
+The `_NOLOGIN` images must carry no credentials. The other smoke tests -
+`TestSmokeClaude`, `TestSmokeOpencode`, `TestSmokeCodexFlags` - drive the
+agent far enough to produce output, so they need an image that *does* carry
+that harness's login state, named by `AETHER_SMOKE_IMAGE_<NAME>`. CI has no
+such credentials, so those stay a manual check. Every one of them skips when
+its variable is unset, and the no-login test skips as a whole rather than
+reporting a pass with nothing run.
+
+`pi` has no smoke test: it is not in the smoke image, so nothing pins its
+template. Adding it is one more install line and one more map entry.
+
 ## Failure-table coverage
 
 Every row of the design spec's failure table has at least one covering

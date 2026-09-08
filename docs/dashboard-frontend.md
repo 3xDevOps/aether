@@ -450,7 +450,14 @@ host and relies on transcript replay to restore its content.
 The board's `TerminalDock` exposes **Save environment** while the member's
 terminal is running, and its Stop dialog includes the destructive **Reset to
 standard** action. When the terminal is running and `saved_image` is empty, it
-shows the hint **Installs here reach agents after you save.**
+shows the hint **Installs here reach agents after you save.** From the moment
+a tab opens until its attach is acked, a spinner covers the terminal, because
+the xterm host is blank until then. The words follow what the dock knows: a
+terminal it has not seen running is **Starting your environment container**,
+which is the wait Docker's container start accounts for; a second tab, a tab
+switch or an expanded dock is **Connecting to your environment**, with no
+container to start. A refused or failed start replaces the terminal with the
+gateway's own error instead.
 
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
@@ -675,6 +682,13 @@ serves the client-machine verbs (the capability descriptor lists
 broken wizard. Link, Workspace, Repository and First run live in `steps.tsx`;
 Agents is `agents-step.tsx` with its second half in `profile-import.tsx`.
 
+Navigation is two levels: the step index, and one sub-screen name owned by
+whichever step has sub-screens. The Agents step's setup screen is the only
+one today, and the wizard holds it, so **Back** closes an open sub-screen
+first and leaves the step only from the step's own screen. A step with
+sub-screens takes them as `setup` and `onSetup` rather than keeping them in
+its own state.
+
 The Repository step adds the `aether` remote (`link.repo`) and then seeds
 the workspace: where the gateway serves `repo.push` it shows a **Push now**
 button that runs the push in the clone. Success names the branch that
@@ -686,7 +700,14 @@ copyable command still there. The branch is the workspace's base branch,
 so a workspace created with `--base` seeds the branch its runs fork from.
 An older gateway without the verb shows only the copyable command.
 
-The UI slice persists the current step and selected workspace. Hydration reads
+What the step settled - the clone path, the remote the gateway wrote, and
+git's push answer - lives on the UI slice as `onboardingRepo`, not in the
+component. Returning to the step shows that connected repo with **Use a
+different repository** to go back to the form, prefilled with the old path;
+a blank form there would ask again for a remote that already exists.
+
+The UI slice persists the current step, the selected workspace and the
+connected repository. Hydration reads
 `link.status` first: a linked local gateway is marked onboarded before the
 redirect decision, so a linked machine never re-enters onboarding after a fresh
 GUI launch. An unlinked local gateway still routes here when `onboarded` is
@@ -709,8 +730,13 @@ account has not installed them, so the list is not a "set up" badge - and **Set
 up** embeds the same `AgentWizard` the Agents page uses, driven with the
 harness and workspace already known so it opens the `agent-setup` shell
 without a form. Setup confirmation checks `agent.list` for an installed
-executable before handing the harness to the First run step, which preselects
-it. A missing executable or failed request keeps setup open for retry.
+executable, then runs `env.save` - the call the dock's **Save environment**
+button makes - before handing the harness to the First run step, which
+preselects it. The save is the point: an executable that exists only in the
+running container is not in the image runs start from. The done screen names
+the saved image. A missing executable, a failed check or a failed save keeps
+setup open for retry with the real error. The vendor login is not checkable
+from here, and the copy says so.
 
 Part B (`ProfileImport`) previews each harness configuration on this machine
 with `profile.preview`, showing the category counts and, behind an expander,
@@ -933,9 +959,13 @@ denied, the confirmation an admin must clear before giving up their own admin
 role, and a non-admin getting the same roster as read-only text with no admin
 verbs - which the sidebar and the palette match by keeping Members reachable
 behind the narrow remote allowlist while every other admin entry stays
-hidden. The onboarding wizard walks all five steps against the stub API. The
+hidden. The onboarding wizard walks all five steps against the stub API, and
+covers what navigation must not lose: Back leaving the Agents setup screen
+before it leaves the step, and the Repository step still showing its
+connected clone and push result after a walk away and back. The
 Agents step tests setup-capable harness detection, the live terminal dock,
-profile previews and exclusions, profile recommendations, cancellation,
+the environment save that follows a confirmed install, profile previews and
+exclusions, profile recommendations, cancellation,
 secret and plugin guards, push refusals, and the optional skip paths. The diff
 tab covers the parser on the shapes that would break it - a deletion, a new
 file, a removed line that reads exactly like a file marker - then the fetch,

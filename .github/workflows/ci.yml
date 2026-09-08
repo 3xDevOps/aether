@@ -51,7 +51,41 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      # The standard image is what runs actually execute on, so the agent
+      # CLIs are smoke-tested on it and not on some thinner stand-in. It is
+      # built here rather than pulled so the test matches this checkout,
+      # and cached so only a Dockerfile change pays for it.
+      - name: Build the standard environment image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/standard/Dockerfile
+          load: true
+          tags: aether-standard:ci
+          cache-from: type=gha,scope=standard
+          cache-to: type=gha,mode=max,scope=standard
+      # The agent CLIs on top, at whatever version their vendors ship
+      # today: that is the drift this image exists to catch. It carries no
+      # credentials, which is exactly what TestSmokeHeadlessNoLogin needs.
+      #
+      # It has to build on the "default" builder, the one backed by the
+      # Docker daemon, because that is the only builder that can see the
+      # image the step above loaded. The container builder buildx sets up
+      # keeps its own store, so it would resolve BASE as a registry
+      # reference and go looking for it on Docker Hub.
+      - name: Build the agent smoke image
+        run: |
+          docker buildx build --builder default --load --no-cache \
+            --build-arg BASE=aether-standard:ci \
+            --tag aether-smoke:ci \
+            --file images/smoke/Dockerfile .
       - name: Integration tests (real Docker, real git)
+        env:
+          AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN: aether-smoke:ci
+          AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
+          AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
         run: make test-integration
 
   dashboard:

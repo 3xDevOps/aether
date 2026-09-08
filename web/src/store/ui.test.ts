@@ -41,6 +41,12 @@ describe('workspace scope and route stay in sync', () => {
       onboarded: false,
       onboardingStep: 4,
       onboardingWorkspace: 'wsp_1',
+      onboardingRepo: {
+        workspace: 'wsp_1',
+        path: '/home/alice/code/myproject',
+        remote: { repo: '/home/alice/code/myproject', remote: 'aether', url: 'ssh://host/wsp_1' },
+        push: null,
+      },
     })
 
     useStore.getState().navigate('board')
@@ -50,6 +56,7 @@ describe('workspace scope and route stay in sync', () => {
       onboarded: true,
       onboardingStep: 0,
       onboardingWorkspace: '',
+      onboardingRepo: null,
     })
   })
   it('keeps onboarding state when navigating to onboarding again', () => {

@@ -12,9 +12,7 @@ import { useDelayed } from '@/lib/hooks'
 import type {
   AgentInfo,
   LinkApplyResult,
-  LinkRepoResult,
   LinkStatus,
-  RepoPushResult,
   Workspace,
 } from '@/lib/types'
 import { useStore } from '@/store'
@@ -334,15 +332,23 @@ export function RepoStep({
   workspace: Workspace | null
   onNext: () => void
 }) {
+  // What the step settled lives in the UI slice, not here: walking back to
+  // this step must not ask for a path that is already connected. A remote
+  // written for another workspace is not this step's answer, so a workspace
+  // the user changed their mind about leaves the form empty again.
+  const remembered = useStore((s) => s.onboardingRepo)
+  const setConnected = useStore((s) => s.setOnboardingRepo)
+  const connected =
+    remembered && remembered.workspace === (workspace?.id ?? '')
+      ? remembered
+      : null
   const [repo, setRepo] = useState('')
-  const [result, setResult] = useState<LinkRepoResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   // The push runs on its own flag: a failed push must not disable the link
   // form the user may want to correct, and the reverse.
   const [pushing, setPushing] = useState(false)
-  const [pushed, setPushed] = useState<RepoPushResult | null>(null)
   const [pushError, setPushError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const cmdRef = useRef<HTMLInputElement>(null)
@@ -353,12 +359,19 @@ export function RepoStep({
   const pushCmd = `git push -u aether ${branch}`
   const canPush = caps.hasLocal('repo.push')
   const absolute = repo.trim().startsWith('/')
+  const pushed = connected?.push ?? null
 
   const link = async () => {
+    const path = repo.trim()
     setBusy(true)
     setError(null)
     try {
-      setResult(await client.localLinkRepo(repo.trim(), workspace?.id))
+      setConnected({
+        workspace: workspace?.id ?? '',
+        path,
+        remote: await client.localLinkRepo(path, workspace?.id),
+        push: null,
+      })
       void client.localLinkStatus().then(setLinkStatus).catch(() => undefined)
     } catch (err) {
       setError(message(err))
@@ -368,18 +381,27 @@ export function RepoStep({
   }
 
   const push = async () => {
+    if (!connected) return
     setPushing(true)
     setPushError(null)
     try {
       // The step stays put on success so git's own answer is readable:
       // "Everything up-to-date" and "[new branch]" mean different things,
       // and only git can tell them apart.
-      setPushed(await client.localRepoPush(workspace?.id))
+      const result = await client.localRepoPush(workspace?.id)
+      setConnected({ ...connected, push: result })
     } catch (err) {
       setPushError(message(err))
     } finally {
       setPushing(false)
     }
+  }
+
+  const repoint = () => {
+    setRepo(connected?.path ?? '')
+    setConnected(null)
+    setError(null)
+    setPushError(null)
   }
 
   const copy = async () => {
@@ -402,38 +424,44 @@ export function RepoStep({
           ? 'Aether can then push your base branch for you - the history stays yours.'
           : 'Pushing stays manual - the history is yours.'}
       </p>
-      <form
-        className="flex items-end gap-3"
-        aria-label="Link repository"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void link()
-        }}
-      >
-        <label className="flex-1 space-y-1 text-sm">
-          Repository path
-          <input
-            className={field}
-            value={repo}
-            placeholder="/home/you/code/myproject"
-            onChange={(e) => setRepo(e.target.value)}
-          />
-        </label>
-        <Button type="submit" size="sm" disabled={busy || !absolute}>
-          Add remote
-        </Button>
-      </form>
-      {repo.trim() !== '' && !absolute && (
-        <p className="text-xs text-muted-foreground">
-          The path must be absolute.
-        </p>
+      {!connected && (
+        <>
+          <form
+            className="flex items-end gap-3"
+            aria-label="Link repository"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void link()
+            }}
+          >
+            <label className="flex-1 space-y-1 text-sm">
+              Repository path
+              <input
+                className={field}
+                value={repo}
+                placeholder="/home/you/code/myproject"
+                onChange={(e) => setRepo(e.target.value)}
+              />
+            </label>
+            <Button type="submit" size="sm" disabled={busy || !absolute}>
+              Add remote
+            </Button>
+          </form>
+          {repo.trim() !== '' && !absolute && (
+            <p className="text-xs text-muted-foreground">
+              The path must be absolute.
+            </p>
+          )}
+          {error && <p className="text-xs text-state-failed">{error}</p>}
+        </>
       )}
-      {error && <p className="text-xs text-state-failed">{error}</p>}
-      {result && (
+      {connected && (
         <div className="space-y-2">
           <p className="text-sm">
-            Remote <span className="font-mono">{result.remote}</span> added,
-            pointing at <span className="font-mono">{result.url}</span>.{' '}
+            Connected <span className="font-mono">{connected.path}</span>.
+            Remote <span className="font-mono">{connected.remote.remote}</span>{' '}
+            points at{' '}
+            <span className="font-mono">{connected.remote.url}</span>.{' '}
             {pushed ? (
               <>
                 Pushed <span className="font-mono">{pushed.branch}</span> to{' '}
@@ -500,13 +528,18 @@ export function RepoStep({
               </div>
             </>
           )}
-          <Button
-            size="sm"
-            variant={canPush && !pushed ? 'outline' : 'default'}
-            onClick={onNext}
-          >
-            Continue
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant={canPush && !pushed ? 'outline' : 'default'}
+              onClick={onNext}
+            >
+              Continue
+            </Button>
+            <Button size="sm" variant="outline" onClick={repoint}>
+              Use a different repository
+            </Button>
+          </div>
         </div>
       )}
     </section>

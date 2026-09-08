@@ -1,3 +1,4 @@
+import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Dock } from '@/components/dock'
@@ -64,6 +65,7 @@ export function TerminalDock({
   const [resetting, setResetting] = useState(false)
   const [savedConfirmation, setSavedConfirmation] = useState(false)
   const [statusAttempt, setStatusAttempt] = useState(0)
+  const [attachedTab, setAttachedTab] = useState<string | null>(null)
   const activeTab = dock.activeTab
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
@@ -155,6 +157,7 @@ export function TerminalDock({
           emitEnvTerminalSocketData(socketKey, chunk, kind),
         onAttached: () => {
           setEnvTerminalSocketReady(socketKey, true)
+          setAttachedTab(socketKey)
           if (activeTabRef.current === socketKey) {
             gate.current.unmute()
             terminalRef.current?.reset()
@@ -189,6 +192,7 @@ export function TerminalDock({
     }
 
     setEnvTerminalSocketReady(socketKey, false)
+    setAttachedTab(null)
     const unsubscribe = subscribeEnvTerminalSocket(socketKey, gate.current.write)
     if (existing) attachment.reopen()
     return () => {
@@ -343,7 +347,23 @@ export function TerminalDock({
                 </Button>
               </div>
             ) : (
-              <div ref={hostRef} className="h-full min-h-0 bg-background p-2 text-foreground" />
+              <div className="relative h-full min-h-0">
+                <div ref={hostRef} className="h-full min-h-0 bg-background p-2 text-foreground" />
+                {attachedTab !== activeTab && (
+                  <div
+                    role="status"
+                    className="absolute inset-0 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
+                  >
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                    {/* Only a terminal the dock has not seen running is
+                        starting a container. A second tab, a tab switch or an
+                        expanded dock is reattaching to one that is up. */}
+                    {dock.status?.running
+                      ? 'Connecting to your environment'
+                      : 'Starting your environment container'}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 
@@ -90,6 +91,9 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			env[key] = value
 		}
 	}
+	// The harness's own launch requirements come after workspace
+	// variables: a run whose agent refuses to start is not a preference.
+	maps.Copy(env, profile.Env)
 	env["HOME"] = home
 	env["TERM"] = "xterm-256color"
 	localBin := filepath.Join(home, ".local", "bin")

@@ -203,6 +203,50 @@ describe('agents view', () => {
     view.unmount()
   })
 
+  it('saves the environment after the install check and names the image', async () => {
+    // An executable that lives only in the running container is not in the
+    // image runs start from, so confirming setup has to save it.
+    const onRegistered = vi.fn()
+    useStore.getState().resetEnvTerminal()
+    vi.mocked(api.envSave).mockClear()
+    const view = render(<AgentWizard agents={[agentInfo()]} harness="claude"
+      onRegistered={onRegistered} onCancel={vi.fn()} client={api} />)
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
+    fireEvent.click(screen.getByText("I've installed and logged in"))
+    await flush()
+
+    expect(vi.mocked(api.envSave)).toHaveBeenCalledOnce()
+    expect(screen.getByText('Agent installed')).toBeDefined()
+    expect(screen.getByText('aether/member-1:123')).toBeDefined()
+    expect(useStore.getState().envTerminal.status?.saved_image).toBe(
+      'aether/member-1:123',
+    )
+    expect(onRegistered).toHaveBeenCalledOnce()
+    view.unmount()
+  })
+
+  it('shows the real save failure and keeps the confirm button for a retry', async () => {
+    const onRegistered = vi.fn()
+    const view = render(<AgentWizard agents={[agentInfo()]} harness="claude"
+      onRegistered={onRegistered} onCancel={vi.fn()} client={api} />)
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
+    vi.mocked(api.envSave).mockRejectedValueOnce(
+      new Error('env.save: no space left on device'),
+    )
+    fireEvent.click(screen.getByText("I've installed and logged in"))
+    await flush()
+
+    expect(screen.getByText('env.save: no space left on device')).toBeDefined()
+    expect(screen.queryByText('Agent installed')).toBeNull()
+    expect(onRegistered).not.toHaveBeenCalled()
+
+    vi.mocked(api.envSave).mockResolvedValueOnce({ image: 'aether/member-1:124' })
+    fireEvent.click(screen.getByText("I've installed and logged in"))
+    await flush()
+    expect(screen.getByText('Agent installed')).toBeDefined()
+    view.unmount()
+  })
+
   it('verifies shipped installation before reporting success and allows retry', async () => {
     const onRegistered = vi.fn()
     const view = render(<AgentWizard agents={[agentInfo()]} harness="claude"
