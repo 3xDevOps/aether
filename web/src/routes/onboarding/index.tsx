@@ -45,6 +45,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
       ? onboardingStepIndex('Workspace')
       : resume
   })
+  const current = onboardingSteps[step]
   // The harness the Agents step set up, so the first run starts on the one
   // that is actually logged in. Empty until a setup shell exits cleanly.
   const [setUpHarness, setSetUpHarness] = useState('')
@@ -74,7 +75,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title="Onboarding" subtitle={onboardingSteps[step]} />
+      <ViewHeader title="Onboarding" subtitle={current} />
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         <ol aria-label="Steps" className="flex gap-2 text-xs">
           {onboardingSteps.map((label, i) => (
@@ -92,16 +93,20 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           ))}
         </ol>
 
-        {step === 0 && (
+        {current === 'Link' && (
           <LinkStep
             client={client}
             onNext={(nextStep) => setStep(nextStep)}
           />
         )}
-        {step === 1 && (
-          <GitIdentityStep client={client} caps={caps} onNext={() => setStep(2)} />
+        {current === 'Git identity' && (
+          <GitIdentityStep
+            client={client}
+            caps={caps}
+            onNext={() => setStep(onboardingStepIndex('Workspace'))}
+          />
         )}
-        {step === 2 && (
+        {current === 'Workspace' && (
           <WorkspaceStep
             client={client}
             caps={caps}
@@ -109,19 +114,19 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
               upsertWorkspace(w)
               setOnboardingWorkspace(w.id)
               setActiveWorkspace(w.id)
-              setStep(3)
+              setStep(onboardingStepIndex('Repository'))
             }}
           />
         )}
-        {step === 3 && (
+        {current === 'Repository' && (
           <RepoStep
             client={client}
             caps={caps}
             workspace={workspace}
-            onNext={() => setStep(4)}
+            onNext={() => setStep(onboardingStepIndex('Agents'))}
           />
         )}
-        {step === 4 && (
+        {current === 'Agents' && (
           <AgentsStep
             client={client}
             caps={caps}
@@ -129,15 +134,15 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             setup={subStep}
             onSetup={setSubStep}
             onReady={setSetUpHarness}
-            onNext={() => setStep(5)}
+            onNext={() => setStep(onboardingStepIndex('First run'))}
           />
         )}
-        {step === 5 && (
+        {current === 'First run' && (
           <FirstRunStep
             client={client}
             workspace={workspace}
             defaultHarness={setUpHarness}
-            onBackToWorkspace={() => setStep(2)}
+            onBackToWorkspace={() => setStep(onboardingStepIndex('Workspace'))}
           />
         )}
 

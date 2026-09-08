@@ -16,6 +16,7 @@ import type {
   Workspace,
 } from '@/lib/types'
 import { useStore } from '@/store'
+import { onboardingStepIndex } from '@/store/ui'
 import type { Capability } from '@/store/hooks'
 import type { OnboardingRepo } from '@/store/ui'
 
@@ -113,7 +114,10 @@ export function LinkStep({
               Created SSH key <span className="font-mono">{success.key_generated}</span>.
             </p>
           )}
-          <Button size="sm" onClick={() => onNext(1)}>
+          <Button
+            size="sm"
+            onClick={() => onNext(onboardingStepIndex('Git identity'))}
+          >
             Continue
           </Button>
         </div>
@@ -175,7 +179,10 @@ export function LinkStep({
           <p className="text-muted-foreground">
             No repository is linked yet. Continue to connect one.
           </p>
-          <Button size="sm" onClick={() => onNext(1)}>
+          <Button
+            size="sm"
+            onClick={() => onNext(onboardingStepIndex('Git identity'))}
+          >
             Continue
           </Button>
         </div>
@@ -187,7 +194,10 @@ export function LinkStep({
             <span className="font-medium">{status.user}</span>, with{' '}
             <span className="font-mono">{status.repo}</span>.
           </p>
-          <Button size="sm" onClick={() => onNext(1)}>
+          <Button
+            size="sm"
+            onClick={() => onNext(onboardingStepIndex('Git identity'))}
+          >
             Continue
           </Button>
         </>
