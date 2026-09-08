@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
+import { actionRow } from '@/routes/onboarding/steps'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
@@ -29,7 +30,6 @@ export function GitIdentityStep({
 }: {
   client: Api
   caps: Capability
-  /** The wizard's Back button, rendered in this step's own action row. */
   back?: ReactNode
   onNext: () => void
 }) {
@@ -131,7 +131,8 @@ export function GitIdentityStep({
             }}
           />
         </label>
-        <div className="flex gap-2">
+        {error && <p className="text-xs text-state-failed">{error}</p>}
+        <div className={actionRow}>
           <Button
             type="submit"
             size="sm"
@@ -139,12 +140,11 @@ export function GitIdentityStep({
           >
             Save
           </Button>
-          {back}
           <Button type="button" size="sm" variant="outline" onClick={onNext}>
             Skip
           </Button>
+          {back}
         </div>
-        {error && <p className="text-xs text-state-failed">{error}</p>}
       </form>
     </section>
   )

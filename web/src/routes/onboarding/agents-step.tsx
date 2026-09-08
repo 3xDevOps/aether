@@ -27,6 +27,7 @@ import {
   githubSubStep,
 } from '@/routes/onboarding/github-connect'
 import { ProfileImport } from '@/routes/onboarding/profile-import'
+import { actionRow } from '@/routes/onboarding/steps'
 import type { Capability } from '@/store/hooks'
 
 /**
@@ -63,7 +64,6 @@ export function AgentsStep({
   client: Api
   caps: Capability
   workspace: Workspace | null
-  /** The wizard's Back button, rendered in this step's own action row. */
   back?: ReactNode
   /** The open sub-screen: a harness's setup instructions, `githubSubStep`,
    * or empty for the step's own screen. The step renders nothing else while
@@ -117,7 +117,7 @@ export function AgentsStep({
   // has been set up, the primary Continue joins it rather than replacing
   // it, so "skip" never reads as "undo what I just did".
   const onward = (
-    <div className="flex gap-2">
+    <div className={actionRow}>
       {(done.length > 0 || github !== null) && (
         <Button size="sm" onClick={onNext}>
           Continue
@@ -132,10 +132,7 @@ export function AgentsStep({
 
   if (setup) {
     return (
-      <section
-        aria-label="Agents"
-        className="flex min-h-0 flex-1 flex-col gap-3"
-      >
+      <section aria-label="Agents" className="space-y-3">
         {setup === githubSubStep ? (
           <GitHubConnect
             client={client}

@@ -23,6 +23,15 @@ import type { OnboardingRepo } from '@/store/ui'
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
+/**
+ * The row a step ends with, Back included. It sticks to the bottom of the
+ * wizard's scroller because the step above it can be taller than the window
+ * - Agents with the terminal dock open is - and a control that scrolls out
+ * of reach is the reason Back moved here.
+ */
+export const actionRow =
+  'sticky bottom-0 z-10 -mx-4 flex gap-2 border-t bg-background px-4 py-3'
+
 // Raw command output - git's, and gh's on the Connect GitHub screen:
 // scrollable, wrapped, never truncated.
 export const pane =
@@ -221,7 +230,6 @@ export function WorkspaceStep({
 }: {
   client: Api
   caps: Capability
-  /** The wizard's Back button, rendered in this step's own action row. */
   back?: ReactNode
   onNext: (workspace: Workspace) => void
 }) {
@@ -239,6 +247,8 @@ export function WorkspaceStep({
   }, [client])
 
   const loading = useDelayed(workspaces === null && error === null)
+  // The one state with an action row of its own for Back to join.
+  const creating = workspaces?.length === 0 && caps.hasMethod('workspace.add')
 
   const create = async () => {
     setBusy(true)
@@ -284,7 +294,7 @@ export function WorkspaceStep({
         </ul>
       )}
       {workspaces?.length === 0 &&
-        (caps.hasMethod('workspace.add') ? (
+        (creating ? (
           <form
             className="space-y-3"
             aria-label="Create workspace"
@@ -315,7 +325,7 @@ export function WorkspaceStep({
                 onChange={(e) => setBaseBranch(e.target.value)}
               />
             </label>
-            <div className="flex gap-2">
+            <div className={actionRow}>
               <Button
                 type="submit"
                 size="sm"
@@ -333,11 +343,7 @@ export function WorkspaceStep({
             workspace init, then come back.
           </p>
         ))}
-      {/* Every other state - the list, the loading skeleton, the refusal -
-          has no action row of its own for Back to join. */}
-      {back && !(workspaces?.length === 0 && caps.hasMethod('workspace.add')) && (
-        <div className="flex gap-2">{back}</div>
-      )}
+      {back && !creating && <div className={actionRow}>{back}</div>}
     </section>
   )
 }
@@ -375,7 +381,6 @@ export function RepoStep({
   client: Api
   caps: Capability
   workspace: Workspace | null
-  /** The wizard's Back button, rendered in this step's own action row. */
   back?: ReactNode
   onNext: () => void
 }) {
@@ -740,7 +745,7 @@ export function RepoStep({
               </div>
             </>
           )}
-          <div className="flex gap-2">
+          <div className={actionRow}>
             <Button
               size="sm"
               variant={canPush && !settled ? 'outline' : 'default'}
@@ -867,11 +872,10 @@ export function FirstRunStep({
         <p className="text-sm text-muted-foreground">
           Choose a workspace before launching a run.
         </p>
-        <div className="flex gap-2">
+        <div className={actionRow}>
           <Button variant="outline" size="sm" onClick={onBackToWorkspace}>
             Back to Workspace
           </Button>
-          {back}
         </div>
       </section>
     )
