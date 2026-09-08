@@ -355,7 +355,12 @@ export function TerminalDock({
                     className="absolute inset-0 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
                   >
                     <Loader2 className="size-4 animate-spin" aria-hidden />
-                    Starting your environment container
+                    {/* Only a terminal the dock has not seen running is
+                        starting a container. A second tab, a tab switch or an
+                        expanded dock is reattaching to one that is up. */}
+                    {dock.status?.running
+                      ? 'Connecting to your environment'
+                      : 'Starting your environment container'}
                   </div>
                 )}
               </div>

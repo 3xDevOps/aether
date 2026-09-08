@@ -18,9 +18,10 @@ aether terminal stop
 
 In the dashboard, open the terminal dock on the run board. The first open starts
 the environment; the dock says **Starting your environment container** until
-the shell attaches, and shows the server's own error if the start fails. The
-dock reconnects and replays terminal output when the page
-or network reconnects. The stream ack identifies the replay byte count, so the
+the shell attaches, and shows the server's own error if the start fails. Later
+tabs and tab switches reach a container that is already up, so those say
+**Connecting to your environment**. The dock reconnects and replays terminal
+output when the page or network reconnects. The stream ack identifies the replay byte count, so the
 dashboard mutes terminal-generated replies until that scrollback is parsed.
 Closing a tab only detaches it; opening that tab again reattaches to its shell.
 

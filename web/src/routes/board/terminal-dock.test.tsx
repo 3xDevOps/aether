@@ -168,8 +168,9 @@ describe('environment terminal dock', () => {
   })
 
   it('shows the starting indicator until the terminal attaches', async () => {
-    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
     render(<TerminalDock />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
 
     expect(await screen.findByRole('status')).toBeDefined()
     expect(screen.getByText('Starting your environment container')).toBeDefined()
@@ -181,17 +182,42 @@ describe('environment terminal dock', () => {
     expect(screen.queryByText('Starting your environment container')).toBeNull()
   })
 
-  it('shows the real start failure instead of the starting indicator', async () => {
-    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+  it('does not claim a container start when reattaching to a running one', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
     render(<TerminalDock />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    act(() => attach.handlers?.onAttached(true))
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
 
+    // A second tab runs another shell in the container that is already up.
+    fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
+    expect(await screen.findByText('Connecting to your environment')).toBeDefined()
+    expect(screen.queryByText('Starting your environment container')).toBeNull()
+    act(() => attach.handlers?.onAttached(true))
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+
+    // And neither does switching back to the first tab.
+    fireEvent.click(screen.getByRole('tab', { name: 'main' }))
+    expect(await screen.findByText('Connecting to your environment')).toBeDefined()
+    expect(screen.queryByText('Starting your environment container')).toBeNull()
+  })
+
+  it('replaces the starting indicator with the real start failure', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    render(<TerminalDock />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+
+    expect(
+      await screen.findByText('Starting your environment container'),
+    ).toBeDefined()
     await waitFor(() => expect(attach.handlers).not.toBeNull())
     act(() => attach.handlers?.onRefused('start environment: no space left on device'))
 
     expect(
       await screen.findByText('start environment: no space left on device'),
     ).toBeDefined()
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByText('Starting your environment container')).toBeNull()
   })
 
   it('shows an attach refusal with open tabs and clears it after attaching', async () => {

@@ -451,10 +451,13 @@ The board's `TerminalDock` exposes **Save environment** while the member's
 terminal is running, and its Stop dialog includes the destructive **Reset to
 standard** action. When the terminal is running and `saved_image` is empty, it
 shows the hint **Installs here reach agents after you save.** From the moment
-a tab opens until its attach is acked, a spinner and **Starting your
-environment container** cover the terminal, because Docker can take seconds to
-start the container and the xterm host is blank until then. A refused or
-failed start replaces the terminal with the gateway's own error instead.
+a tab opens until its attach is acked, a spinner covers the terminal, because
+the xterm host is blank until then. The words follow what the dock knows: a
+terminal it has not seen running is **Starting your environment container**,
+which is the wait Docker's container start accounts for; a second tab, a tab
+switch or an expanded dock is **Connecting to your environment**, with no
+container to start. A refused or failed start replaces the terminal with the
+gateway's own error instead.
 
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
