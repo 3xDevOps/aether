@@ -21,6 +21,7 @@ one entry to the `profiles` map:
 | `TUIArgs` | Argv for the interactive TUI. Use `TaskPlaceholder` (`{task}`) where the prompt goes. |
 | `HeadlessArgs` | Argv for the machine-readable mode. Same placeholder. |
 | `EnvPassthrough` | Environment variables copied from the server process into run containers when set. API keys only. |
+| `Env` | Fixed environment variables the CLI needs to start at all, applied after the workspace's own so a workspace cannot break the launch. Not for configuration - a variable belongs here only when the agent refuses to run without it. |
 | `CredentialPaths` | Home-relative directories holding native login state. Persisted with the member account and mounted read-write into every run using that account. Directories, not files. |
 | `LocalRoot` | Home-relative directory captured by profile sync. Empty means the harness has no profile sync. |
 | `DenyNames` | Basenames profile sync always excludes - credential files, token caches, keychains. |
