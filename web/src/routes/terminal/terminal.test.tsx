@@ -86,9 +86,31 @@ describe('terminal view', () => {
     const hint = 'Read-only mirror. Take control to type into the agent.'
     expect(screen.getByText(hint)).toBeDefined()
 
+    // Asking is not being granted: the flag waits for the reattach's ack, so
+    // a member the server refuses keeps the hint.
     fireEvent.click(screen.getByText('Take control'))
+    expect(useStore.getState().terminalControlTaken).toBe(false)
+    attached()
+
     expect(useStore.getState().terminalControlTaken).toBe(true)
     expect(screen.queryByText(hint)).toBeNull()
+    view.unmount()
+  })
+
+  it('keeps the mirror hint when the server refuses the request', () => {
+    const view = mount()
+    act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
+    attached()
+
+    fireEvent.click(screen.getByText('Take control'))
+    act(() => {
+      StubSocket.last().onopen?.()
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ ok: false, code: codeDenied, error: 'permission denied' }),
+      })
+    })
+
+    expect(useStore.getState().terminalControlTaken).toBe(false)
     view.unmount()
   })
 
@@ -99,9 +121,10 @@ describe('terminal view', () => {
 
     const toggle = screen.getByText('Take control') as HTMLButtonElement
     expect(toggle.disabled).toBe(true)
-    // A finished run cannot be steered at all, so the button says why rather
-    // than offering the mirror hint that leads nowhere.
-    expect(toggle.title).toBe('This run is not running')
+    // A finished run cannot be steered at all, so the reason is on screen
+    // rather than in a title the disabled button would never show, and the
+    // mirror hint that leads nowhere stays away.
+    expect(screen.getByText('This run is not running')).toBeDefined()
     expect(screen.queryByText('Read-only mirror. Take control to type into the agent.')).toBeNull()
     expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
     view.unmount()

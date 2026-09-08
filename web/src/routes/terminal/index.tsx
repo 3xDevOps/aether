@@ -81,7 +81,12 @@ function TerminalView({ params }: RouteProps) {
       // Every attach starts with the server's transcript replay, so the pane
       // is never blank - and clearing first keeps a reconnect from stacking a
       // second copy of the scrollback under the first.
-      onAttached: () => {
+      onAttached: (write) => {
+        // The ack carries what the server granted, not what was asked: a
+        // refused request arrives as onWriteDenied instead. Marking control
+        // here rather than on the click keeps a denied first attempt from
+        // silencing the mirror hint for good.
+        if (write) markControlTaken()
         gate.current.unmute()
         terminal.reset()
         setTerminal(runID, { message: null, refused: false })
@@ -101,7 +106,7 @@ function TerminalView({ params }: RouteProps) {
       attachment.close()
       attachRef.current = null
     }
-  }, [run?.member_id, run?.status, runID, self.id, setTerminal, terminal])
+  }, [markControlTaken, run?.member_id, run?.status, runID, self.id, setTerminal, terminal])
 
   if (!run) {
     return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
@@ -109,7 +114,6 @@ function TerminalView({ params }: RouteProps) {
 
   const toggleWrite = () => {
     writeRef.current = !state.write
-    if (writeRef.current) markControlTaken()
     setTerminal(runID, { write: writeRef.current })
     attachRef.current?.reopen()
   }
@@ -140,7 +144,6 @@ function TerminalView({ params }: RouteProps) {
           size="sm"
           variant={state.write ? 'default' : 'outline'}
           disabled={state.steerDenied || run.status !== 'running'}
-          title={run.status !== 'running' ? 'This run is not running' : undefined}
           className="relative"
           onClick={toggleWrite}
         >
@@ -151,6 +154,11 @@ function TerminalView({ params }: RouteProps) {
           <span className="text-muted-foreground">
             You cannot steer this run.
           </span>
+        )}
+        {/* A disabled control shows no tooltip, so the reason is written out
+            beside it rather than hidden in a title attribute. */}
+        {run.status !== 'running' && !state.steerDenied && (
+          <span className="text-muted-foreground">This run is not running</span>
         )}
         {/* Nothing else on screen separates watching from steering, so the
             attach says what it is until the member has taken control once. */}
