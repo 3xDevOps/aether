@@ -18,6 +18,16 @@ func Quote(s string) string {
 	if s != "" && !strings.ContainsFunc(s, func(r rune) bool { return !strings.ContainsRune(literal, r) }) {
 		return s
 	}
+	return QuoteAlways(s)
+}
+
+// QuoteAlways single quotes s whether or not it needs it: everything
+// inside single quotes is literal, and an embedded quote is closed,
+// escaped and reopened. A generated script is easier to audit when every
+// value in it is a quoted literal by construction rather than by a rule
+// the reader applies per value; a command printed for a human to read is
+// not, which is what Quote is for.
+func QuoteAlways(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
