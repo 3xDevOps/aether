@@ -269,11 +269,12 @@ server was not told where the data directory is, or the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
 zero anywhere else).
 
-### `run.patch`, `server.disk`, and files on the control channel
+### Control-channel methods this gateway calls
 
-The two `GET` endpoints above and the files methods below are backed by SSH
-control-channel methods, because this gateway proxies the whole API shape over
-SSH and needs these reads without a listener on the server.
+The two `GET` endpoints above are backed by SSH control-channel methods, as
+are the file reads and the member and workspace writes below. This gateway
+proxies the whole API shape over SSH, so it needs all of them without a
+listener on the server.
 
 | Method | Params | Result |
 | --- | --- | --- |
@@ -306,10 +307,11 @@ SSH and needs these reads without a listener on the server.
   calling member's own environment terminal. It runs `gh` inside that
   container, so it answers `-32002` (invalid state) when the terminal is not
   running, and again when gh is not logged in to `github.com` there - that
-  second message carries gh's own output, so the dashboard and the CLI can
-  show what gh said rather than a summary. `signing_key` is the public key
-  line and `fingerprint` its `SHA256:` fingerprint; the private key never
-  leaves the server. The dashboard's Agents step calls this after the member
+  second message ends with gh's own reason for the account, such as `HTTP
+  401: Bad credentials`, so the dashboard and the CLI can show what gh said
+  rather than a summary. `signing_key` is the public key line and
+  `fingerprint` its `SHA256:` fingerprint; the private key never leaves the
+  server. The dashboard's Agents step calls this after the member
   finishes `gh auth login` in the terminal dock; see
   [environment-home.md](environment-home.md#connect-github).
 

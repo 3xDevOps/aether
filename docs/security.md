@@ -56,8 +56,8 @@ way.
 ### GitHub credentials and signing keys
 
 Connecting GitHub (`aether github connect`, see
-[environment-home.md](environment-home.md#connect-github)) puts two secrets
-in the member home on the server:
+[environment-home.md](environment-home.md#connect-github)) puts two secrets,
+and the settings that use them, in the member home on the server:
 
 - **The gh token**, at `homes/<member>/.config/gh/hosts.yml`. `gh auth
   login` runs inside the environment terminal container, which has no
@@ -77,16 +77,33 @@ capture the token, the key, or the `.gitconfig`. An integration test starts
 a container from a saved image with no home mounted and asserts all three
 are absent (`TestIntegrationMemberEnvironmentImage`).
 
+The token is in the home because the run itself has to hold the credential:
+the agent pushes its own branch and opens its own pull request. Keeping it
+out of the container behind a host-side proxy was considered and rejected -
+the agent asks that proxy for the same pushes and pull requests, so it has
+the same reach by a longer path.
+
 What that grants an agent is the point of the feature, so it is worth
-stating plainly. **Container root in any of that member's runs can read the
-token and the private key.** With them it can act as the member on GitHub
-within the token's scopes - `gh auth login` as documented in
-[environment-home.md](environment-home.md#connect-github) requests gh's
-defaults (`repo`, `read:org`, `gist`) plus `admin:ssh_signing_key` - so it
-can push to the workspace's recorded `origin`, open pull requests, and
-register or remove signing keys on the account. Account sharing hands the
-recipient's runs the same reach, exactly as it does every other credential
-in the home.
+stating plainly. **Container root in any of that member's runs can read and
+replace the token, the private key, and `.gitconfig`.** With the token it
+can act as the member on GitHub within the token's scopes - `gh auth login`
+as documented in [environment-home.md](environment-home.md#connect-github)
+requests gh's defaults (`repo`, `read:org`, `gist`) plus
+`admin:ssh_signing_key` - so it can push to the workspace's recorded
+`origin`, open pull requests, and register or remove signing keys on the
+account. That push is HTTPS: gh's
+credential helper authenticates `https://github.com` and nothing in the home
+authenticates SSH, which is why a `github.com` origin is recorded in its
+https form ([teams.md](teams.md#workspaces)).
+
+Replacing reaches further than reading. The home is mounted read-write and
+its files are owned by the container user, so an agent can swap the signing
+key for one of its own, and Aether then signs its own end-of-run commits
+with the replacement; rewrite `.gitconfig`, which decides the credential
+helper and the identity commits are made under; and plant `~/.local/bin/gh`,
+first on the container's `PATH`, so the next `aether github connect` runs
+the agent's program instead of gh. Account sharing hands the recipient's
+runs the same reach, exactly as it does every other credential in the home.
 
 Aether signs its own end-of-run commits with that key while still treating
 the home as hostile. It opens the key through a root-confined open on the
@@ -99,20 +116,33 @@ without pinning them, a planted `gpg.ssh.program` would name a program the
 server then runs.
 
 GitHub marks a signature **Verified** only when the commit's committer
-address belongs to the account that registered the key. So the agent's own
-commits, which the container makes as the member, show as verified on
-GitHub; Aether's end-of-run commits, which are committed as Aether, do not.
-Those still verify locally against the member's public key with `git
-verify-commit`, given a `gpg.ssh.allowedSignersFile` that lists the address
-and the key. Signing does not change who the commit is authored as; see
+address is a verified address on the account that registered the key. So
+the agent's own commits, which the container makes as the member, show as
+verified only when that member's git email is on their GitHub account: the
+synthetic `<member-id>@aether.local` fallback, and any address they have
+not added there, read Unverified. Aether's end-of-run commits, which are
+committed as Aether, never verify on GitHub. Those still verify locally
+against the member's public key with `git verify-commit`, given a
+`gpg.ssh.allowedSignersFile` that lists the address and the key. Signing
+does not change who the commit is authored as; see
 [teams.md](teams.md#attribution).
 
 To revoke: run `gh auth logout --hostname github.com` in the environment
 terminal, remove the signing key from
 [github.com/settings/keys](https://github.com/settings/keys), and delete
 `.config/gh/hosts.yml`, `.ssh/aether_signing` and `.ssh/aether_signing.pub`
-from the member home. `aether env reset` does none of this - it forgets the
-saved image and never touches the home.
+from the member home. Then clear the signing settings in the environment
+terminal, or every `git commit` inside a run starts failing with `Load key
+...: No such file or directory`:
+
+```sh
+git config --global --unset commit.gpgsign
+git config --global --unset user.signingkey
+git config --global --unset gpg.format
+```
+
+`aether env reset` does none of this - it forgets the saved image and never
+touches the home.
 
 ### Hostile agents
 

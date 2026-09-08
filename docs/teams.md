@@ -145,15 +145,28 @@ Three settings belong to the workspace rather than to any run in it:
   `origin` remote - normally the GitHub repository your clones came from.
   Nobody types it in the usual case: the first `aether link --repo` (or the
   dashboard wizard's Repository step) reads that clone's own `origin` and
-  records it. **First one wins.** A later link from a teammate whose clone
-  points somewhere else does not overwrite it, so one member's fork cannot
-  silently redirect everyone's runs. Change it deliberately:
+  records it. Recording happens only when the caller may push - a viewer may
+  not - and the clone's origin is one the server accepts. When either does
+  not hold, the link still succeeds and nothing is recorded; set it later
+  with `aether workspace origin`. **First one wins.** A later link from a
+  teammate whose clone points somewhere else does not overwrite it, so one
+  member's fork cannot silently redirect everyone's runs. Change it
+  deliberately:
 
   ```sh
   aether workspace origin                          # show
   aether workspace origin https://github.com/acme/myproject.git
   aether workspace origin --clear
   ```
+
+  A `github.com` origin in scp-like or ssh form - `git@github.com:acme/app.git`
+  or `ssh://git@github.com/acme/app.git` - is recorded as
+  `https://github.com/acme/app.git`, whether it came from a clone or from the
+  command above. gh's credential helper authenticates HTTPS only and nothing
+  in the member home authenticates SSH, so the https form is the one a run
+  can push to. Every other host is recorded verbatim, and an SSH origin on
+  another host cannot be pushed to from a run: give the workspace an https
+  URL with `aether workspace origin` if runs need to push there.
 
   The remote is set when a run's checkout is created, so a change reaches
   new runs only; runs already going keep the URL they were given. With no
@@ -246,7 +259,7 @@ with git's `! [rejected] main -> main (fetch first)`:
 | `aether forward <run-id|terminal> <port> [--local <port>]` | Forward a run or environment terminal port to loopback for callbacks such as agent OAuth. The local port defaults to the forwarded port. |
 | `aether member git [--name <name>] [--email <email>] [member-id]` | Show or set the name and email every commit made for that member is authored as. Members set their own; an admin can set anyone's. |
 | `aether github connect` | Finish connecting GitHub after `gh auth login` in your environment terminal: sets up git credentials there, generates and registers a commit signing key. See [environment-home.md](environment-home.md#connect-github). |
-| `aether workspace origin [<url>\|--clear]` | Show or set the upstream git URL run checkouts get as their `origin` remote. Needs the push capability. |
+| `aether workspace origin [--workspace <name-or-id>] [<url>\|--clear]` | Show or set the upstream git URL run checkouts get as their `origin` remote. Needs the push capability. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. |
 
@@ -300,8 +313,12 @@ which maps to no upstream account.
 Once that member has connected GitHub, those commits are signed with the
 key in their environment home - the agent's own, from the home's
 `.gitconfig`, and Aether's, with the same key read on the server. GitHub
-shows the agent's as **Verified** and Aether's as unverified, because it
-checks the committer address and Aether is the committer on its own commits;
+shows a signature as **Verified** only when the committer address is a
+verified address on the account that registered the key. So the agent's own
+commits show as verified when the member's git email is on their GitHub
+account, and Unverified when it is not - the `<member-id>@aether.local`
+fallback above never is. Aether's commits are committed as Aether, so they
+stay unverified either way;
 [security.md](security.md#github-credentials-and-signing-keys) has the
 detail.
 

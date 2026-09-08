@@ -153,8 +153,14 @@ it on the workspace, printing `workspace origin -> <url>`. Every run
 checkout created afterwards gets an `origin` remote pointing there, so an
 agent in a run can `git push origin <branch>` and open a pull request once
 you have connected GitHub ([step 5](#5-set-up-your-agent)). The dashboard
-wizard's Repository step does the same. `aether workspace origin` shows what
-was recorded and takes a URL or `--clear` to change it.
+wizard's Repository step does the same. Recording happens only when you may
+push - a viewer may not - and your clone's origin is one the server accepts;
+otherwise the link still succeeds, prints no `workspace origin ->` line, and
+records nothing. `aether workspace origin` shows what was recorded and takes
+a URL or `--clear` to change it. A `github.com` origin you cloned over SSH
+is recorded in its `https://github.com/...` form, because that is the form a
+run can push to; [teams.md](teams.md#workspaces) has the rule for other
+hosts.
 
 In the dashboard, the onboarding wizard's Repository step does both for
 you: it adds the remote, then its **Push now** button compares your clone
