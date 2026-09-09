@@ -109,7 +109,8 @@ that workspace's runs, with the nav for every other view under it. There is no
 run tree: one workspace is in view at a time, so the outer level had nothing
 left to hold, and the runs group instead by state or by owning member (the
 `groupBy` preference, persisted). The only collapse state left is the whole
-sidebar's.
+sidebar's, which a narrow window sets for itself (see [Window size and
+overflow](#window-size-and-overflow)).
 
 - **The switcher sits above everything it scopes**, and appears only when there
   is a choice: a single workspace renders as a plain label with its base branch
@@ -185,6 +186,67 @@ covers the frameless window's title bar, so nothing else would bring the
 window controls and `ConnectionError` back. It is decoration, so it is
 `aria-hidden` and announces nothing, and `prefers-reduced-motion` skips it
 entirely.
+
+## Window size and overflow
+
+The shell is a fixed column - title bar, update prompts, sidebar and view,
+status bar - and nothing in its own chrome scrolls sideways. A control pushed
+past an edge is unreachable, not merely off screen, so every row states what
+gives way first.
+
+`desktop/main.js` sets `minWidth: 960` and `minHeight: 600`. That is the size
+the rules below are designed against; a browser tab has no such floor, so they
+degrade below it rather than break.
+
+- **The update prompts** each keep their prose in one shrinking column and
+  their controls on the first row beside it, so the button is where the
+  prompt starts at every width. A prompt that prints verbatim output - a
+  failed rebuild's error - bounds it at 6rem with its own scroll, because
+  prompts stack and one prompt's output must not push the next one's controls
+  out of the strip. The strip itself scrolls, and the row below it holds a
+  10rem floor, so prompts taller than the window give way rather than taking
+  the app off the bottom of it.
+- **The status bar** shrinks its left group and never its right one, whose
+  only concession is the palette trigger dropping the word "Commands" below
+  `lg` and keeping its shortcut badge. The left group sheds its lowest
+  priority readouts first: the disk gauge below `xl`, the member name below
+  `lg`, the local link below `md`. Connection state, the unreachable and
+  server-update notices and the version label stay at every width. What
+  truncates rather than hiding keeps its whole text in a `title`, because the
+  half of an outage notice that says what to do about it is the half that
+  goes off the edge.
+- **The run header** truncates the title and the subtitle, each carrying its
+  full text in a `title` attribute. The run views pass the whole task as the
+  subtitle, so the subtitle is the half that gives way first: a run's own name
+  is what identifies the view. The action bar never shrinks. The split is a
+  container query on the header itself, not on the window, because the sidebar
+  beside it is resizable between 200px and 520px and one window width
+  therefore leaves this row 320px more or less room. Below a 928px row -
+  `@4xl` measured against the header's content box, chosen over the 768px step
+  so the title keeps some room - it holds the verbs that steer the run now
+  (pause/resume, send, close, kill, relaunch) and moves the rest into a
+  **More** menu, which closes itself if the row widens back past the
+  threshold while it is open and hands the keyboard to the row that replaced
+  it.
+- **The board columns** are `flex-1` over a 15rem floor, so they share a wide
+  window and fall back to the row's horizontal scroll only when even that
+  floor does not fit.
+- **The sidebar** drops to its rail on its own at 1000px and narrower. That
+  answers the viewport, not the stored preference: expanding it there lasts
+  until the window widens again, and widening restores exactly what the
+  member had stored.
+
+Two end-to-end specs hold these rules. `web/e2e/window-sizing.spec.ts` drives
+the update prompts at the shell's own minimum - it reads `minWidth` and
+`minHeight` out of `desktop/main.js`, so the test and the shell cannot drift
+apart - through the states that carry a button: offered, applying, rebuilding,
+failed and cancelled. It holds every prompt's controls to that prompt's first
+row and the app to the window, and repeats both at a size the shell now
+refuses but a browser tab can still reach.
+`web/e2e/status-bar-sizing.spec.ts` fills the bar from a real server and then
+stops that server, which is how its longest notice comes up without seeding
+the store behind the app's back, and holds the palette, shortcuts and theme
+controls inside the window at both sizes.
 
 ## Data flow
 
@@ -412,8 +474,8 @@ delete and both close actions - opens a dialog naming the run before it runs;
 the palette does not ask, because a palette item is already several
 deliberate steps (open, type, select) away from an accident, where a button
 is one click. And the bar locks while a verb is in flight, showing a spinner
-on the one running: a pull shells out to `git fetch` over SSH and takes
-seconds, and a second click would race the first for the same ref. Buttons
+on the one running, or on the **More** trigger while any verb is in flight: a pull shells out to `git fetch` over SSH and takes seconds, and a
+second click would race the first for the same ref. Buttons
 also take the command's `short` label and keep the full sentence as their
 tooltip, because the action bar is intentionally compact.
 
@@ -1207,7 +1269,14 @@ another member's run but not give it away or protect it, and a protected run
 and an `admins_only` workspace both close steering to everyone but the owner.
 Two more cover the shared runner: a refused kill toasts the server's message
 verbatim, and a slow pull locks the whole bar, names the ref it fetched and
-leaves its git output on the store for the diff tab. The shell test clicks New
+leaves its git output on the store for the diff tab. The window size rules are
+covered as the classes that encode them, jsdom having no layout engine to
+measure: which verbs keep their place on a narrow run header and which move
+into the More menu, that menu closing itself when the row widens back, the
+header being the named container the split measures against, the order the
+status bar gives its readouts up in and every truncated readout keeping its
+whole text in a `title`, and the sidebar dropping to its rail on a narrow
+window without writing what the member stored. The shell test clicks New
 run in the sidebar and finds the real form, which is what proves the host is
 the shell's rather than the palette's.
 The team surfaces are driven through the same stub API: the status bar reading
