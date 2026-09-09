@@ -464,6 +464,10 @@ routes on the same `runId`.
 The Terminal view is a vertical split. The agent terminal keeps the flexible
 space above a `RunDock` below it. The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and a resizer.
+Both docks start collapsed (`initialRunShellDock`, `initialEnvTerminal`), so
+the terminal a member came for owns the window until they ask for a shell;
+expanding holds for the session. `TerminalDock` mounted with `openOnMount`
+expands itself, because the Agents and GitHub steps type into it.
 Its tab state and socket registry live in `src/store/terminal.ts`, so opening
 Overview, Diff, or Events does not discard run-shell tabs or their attachments.
 Only the selected shell tab mounts an xterm host; switching tabs remounts that
@@ -488,7 +492,11 @@ terminal and event stream reconnect on the same jittered schedule, and it
   64 KiB frame cap, never splitting a surrogate pair.
 - **Steer on entry.** The agent header requests `write` on the first attach and
   the active button carries a short pulse animation; the toggle reattaches
-  rather than upgrading in place. Whether the member may steer is the server's
+  rather than upgrading in place. Until the member has taken control once
+  (`UiSlice.terminalControlTaken`, persisted) a live run they are only
+  watching says **Read-only mirror. Take control to type into the agent.**,
+  and the button carries the title `This run is not running` when the run
+  cannot be steered at all. Whether the member may steer is the server's
   answer, never the client's guess: a `-32001` refusal drops the request back
   to a mirror and disables the toggle. A finished run attaches as a read-only replay of its
   recorded transcript, which ends with a 1000 close, reason `session ended` -
@@ -496,8 +504,9 @@ terminal and event stream reconnect on the same jittered schedule, and it
   Every other refusal (unknown run, transiently missing terminal) stops the
   reconnect loop and offers a retry.
 - **Run-shell tabs always write.** The `+` control opens names `t1`, `t2`,
-  `t3`, and `t4`; four is the per-run limit and the disabled control says
-  `At most 4 tabs`. Each shell attach uses
+  `t3`, and `t4`; four is the per-run limit, six is the environment dock's,
+  and `Dock` writes whichever `maxTabs` it was given beside the disabled
+  control - a disabled button shows no tooltip. Each shell attach uses
   `/ws/attach/<run>?shell=<tab>`, requires write/steer permission, and closes
   its socket when the tab is closed. A `-32001` response does not reconnect;
   the dock replaces the terminal with the sentence **You can view this run
@@ -522,6 +531,17 @@ terminal and event stream reconnect on the same jittered schedule, and it
   the first. The shared xterm host uses `scrollback: 50000`; the server replay
   ring is 1 MiB and is seeded from the cast tail when a session is restarted,
   so re-attach retains the full recent history rather than only 64 KiB.
+- **Find and zoom ride one key handler.** xterm keeps a single custom key
+  handler, so `src/components/xterm-host.tsx` chains zoom, find and the
+  clipboard shortcuts (`src/lib/term-clipboard.ts`) in that order; the first
+  to claim a key stops it reaching the shell. `Ctrl+Shift+F` opens the find
+  bar `TerminalPane` (`src/components/terminal-pane.tsx`) draws over the
+  terminal, backed by `@xterm/addon-search`; it reports **No matches** from
+  the addon's own answer rather than tracking a count. `Ctrl+=`, `Ctrl+-` and
+  `Ctrl+0` move `UiSlice.terminalFontSize`, clamped to 8-32px by
+  `clampTerminalFontSize`. The size is one persisted preference behind every
+  terminal, applied to the live instance and re-fitted rather than by
+  rebuilding it, which would throw the scrollback away.
 - **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
   glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038), garbling
   scrolled rows until a forced refresh; the DOM renderer never desyncs. The

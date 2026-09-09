@@ -16,7 +16,9 @@ aether terminal status
 aether terminal stop
 ```
 
-In the dashboard, open the terminal dock on the run board. The first open starts
+In the dashboard, open the terminal dock on the run board. The dock starts
+collapsed, so the board keeps the window; the chevron in its header strip
+opens it, and it stays open for the rest of the session. The first open starts
 the environment; the dock says **Starting your environment container** until the
 shell attaches, and shows the server's own error if the start fails. Later tabs
 and tab switches reach a container that is already up, so those say **Connecting
@@ -70,6 +72,23 @@ Saving pauses the terminal for the few seconds Docker needs to commit it.
 New runs and workspace shells use the saved image; reset stops the terminal,
 removes the saved image, and makes the next open use the standard image. See
 [environments.md](environments.md) for image selection and persistence.
+
+## Keys
+
+These work in every terminal Aether draws - the environment dock, a run's
+terminal, and a run shell.
+
+| Key | What it does |
+| --- | --- |
+| `Ctrl+Shift+C` | Copy the selection. A plain `Ctrl+C` copies too when text is selected, and interrupts when none is. |
+| `Ctrl+Shift+V` | Paste. Plain `Ctrl+V` works as well. |
+| `Ctrl+Shift+F` | Open the find bar. `Enter` goes to the next match, `Shift+Enter` back, `Esc` closes it. |
+| `Ctrl+=` / `Ctrl+-` | Grow or shrink the terminal font, 8px to 32px. |
+| `Ctrl+0` | Back to the default 12px. |
+
+On macOS use `Cmd` in place of `Ctrl` for the zoom keys. The font size is one
+preference across every terminal and survives a reload; find searches the
+scrollback of the terminal it was opened in.
 
 ## Tabs and lifecycle
 
