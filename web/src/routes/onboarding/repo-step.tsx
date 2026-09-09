@@ -87,9 +87,13 @@ export function RepoStep({
   // The desktop shell browses this machine's filesystem for the user; a
   // browser tab has no such dialog and keeps the typed field alone.
   const chooseFolder = desktopBridge()?.chooseFolder
-  // A second dialog is reachable where the chooser is not modal to the
-  // window - an out-of-process xdg-desktop-portal one is not - and its
-  // answer would land on top of the first.
+  // Where the chooser is not modal to the window - an out-of-process
+  // xdg-desktop-portal one is not - the whole form stays live while a dialog
+  // is open, so a second dialog is reachable and a late answer would land on
+  // top of whatever was typed or submitted meanwhile. The form waits on the
+  // dialog instead. It is deliberately component state: leaving the step and
+  // coming back is then the way out of a chooser that died without
+  // answering, rather than a button disabled for good.
   const [picking, setPicking] = useState(false)
   const suggestions = knownRepos(useStore((s) => s.linkStatus))
   const fieldId = useId()
@@ -262,6 +266,7 @@ export function RepoStep({
                   className={field}
                   value={repo}
                   list={listId}
+                  disabled={picking}
                   placeholder="/home/you/code/myproject"
                   onChange={(e) => setRepo(e.target.value)}
                 />
@@ -283,7 +288,11 @@ export function RepoStep({
                 )}
               </div>
             </div>
-            <Button type="submit" size="sm" disabled={busy || !absolute}>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={busy || picking || !absolute}
+            >
               Add remote
             </Button>
             {back}

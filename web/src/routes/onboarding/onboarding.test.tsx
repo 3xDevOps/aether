@@ -809,6 +809,42 @@ describe('onboarding wizard', () => {
     })
   })
 
+  it('freezes the path form while a folder dialog is open', async () => {
+    let answer!: (path: string) => void
+    const chooseFolder = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          answer = resolve
+        }),
+    )
+    shellWindow.aetherDesktop = { platform: 'linux', chooseFolder }
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toRepoStep()
+
+    fireEvent.change(await screen.findByLabelText('Repository path'), {
+      target: { value: '/home/alice/code/first' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }))
+
+    // Where the chooser is not modal to the window the rest of the form is
+    // still clickable, and a dialog answering late would land on top of
+    // whatever was done in the meantime.
+    const path = screen.getByLabelText<HTMLInputElement>('Repository path')
+    await waitFor(() => expect(path.disabled).toBe(true))
+    expect(
+      screen.getByRole('button', { name: 'Add remote' }).hasAttribute('disabled'),
+    ).toBe(true)
+
+    answer('/home/alice/code/picked')
+
+    await waitFor(() => expect(path.value).toBe('/home/alice/code/picked'))
+    expect(path.disabled).toBe(false)
+    expect(
+      screen.getByRole('button', { name: 'Add remote' }).hasAttribute('disabled'),
+    ).toBe(false)
+  })
+
   it('has no folder picker in a browser tab', async () => {
     // Last of the bridge tests on purpose: it is also the guard that the
     // cleanup above really removes the bridge the two before it installed.

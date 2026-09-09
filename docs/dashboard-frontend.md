@@ -1113,11 +1113,13 @@ profile's - as a `datalist`. In the desktop shell it also gets a **Choose
 folder** button, which opens the native directory dialog through
 `window.aetherDesktop.chooseFolder`, writes the answer into the field and
 clears any error the last attempt left; cancelling leaves both alone, a
-dialog that fails puts the shell's own error under the form, and the button
-is disabled while one is open, because a chooser that is not modal to the
-window would otherwise answer twice. Typing stays the fallback, because a
-browser tab has no dialog and a shell built by an older `aether gui build`
-has no method.
+dialog that fails puts the shell's own error under the form, and the whole
+path form waits while a dialog is open, because a chooser that is not modal
+to the window leaves it live and a late answer would land on top of whatever
+was typed or submitted meanwhile. That wait is the step's own state, so
+leaving the step and coming back is the way out of a chooser that died
+without answering. Typing stays the fallback, because a browser tab has no
+dialog and a shell built by an older `aether gui build` has no method.
 
 The step adds the `aether` remote (`link.repo`) and then seeds the workspace:
 where the gateway serves `repo.push` it shows a **Push now** button. The
@@ -1638,7 +1640,8 @@ and the fast-forward reporting a dirty tree it did not touch while keeping
 both git outputs. It covers the folder picker too: the deduplicated
 suggestion list, the dialog filling the field, cancelling keeping both the
 path and the error that sent the user there, the shell's own dialog error, a
-Windows path accepted as absolute, and a browser tab with no button at all.
+Windows path accepted as absolute, the form waiting while a dialog is open,
+and a browser tab with no button at all.
 The Git identity step covers the prefill from this machine and the save that
 advances, the member's own saved identity winning over the
 machine's, a refusal rendered verbatim with the wizard staying put, the skip,
