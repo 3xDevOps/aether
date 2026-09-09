@@ -3,12 +3,13 @@
 // it; this step only collects it, offering the machine's own git config as
 // the default.
 
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
+import { actionRow } from '@/routes/onboarding/steps'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
@@ -24,10 +25,12 @@ const field =
 export function GitIdentityStep({
   client,
   caps,
+  back,
   onNext,
 }: {
   client: Api
   caps: Capability
+  back?: ReactNode
   onNext: () => void
 }) {
   const info = useStore((s) => s.info)
@@ -128,7 +131,8 @@ export function GitIdentityStep({
             }}
           />
         </label>
-        <div className="flex gap-2">
+        {error && <p className="text-xs text-state-failed">{error}</p>}
+        <div className={actionRow}>
           <Button
             type="submit"
             size="sm"
@@ -139,8 +143,8 @@ export function GitIdentityStep({
           <Button type="button" size="sm" variant="outline" onClick={onNext}>
             Skip
           </Button>
+          {back}
         </div>
-        {error && <p className="text-xs text-state-failed">{error}</p>}
       </form>
     </section>
   )

@@ -237,7 +237,7 @@ test('a viewer is offered nothing to change', () => {
     />,
   )
 
-  for (const name of ['Pause', 'Inject', 'Merged', 'Abandoned', 'Kill', 'Delete', 'Protect']) {
+  for (const name of ['Pause', 'Send', 'Merged', 'Abandoned', 'Kill', 'Delete', 'Protect']) {
     expect(screen.queryByRole('button', { name })).toBeNull()
   }
   expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()
@@ -256,6 +256,8 @@ test('a collaborator on another member run may steer it but not give it away', (
 
   expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
+  // Steering a run includes typing into it, which the bar calls Send.
+  expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy()
   // Delete is reserved for runs that already ended.
   expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Protect' })).toBeNull()

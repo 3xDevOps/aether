@@ -581,12 +581,4 @@
       transform: rotate(var(--shoot-angle)) translate3d(var(--shoot-distance), 0, 0);
     }
   }
-
-  @media (prefers-reduced-motion: reduce) {
-    .launch-splash,
-    .launch-splash * {
-      animation: none !important;
-      transition: none !important;
-    }
-  }
 }

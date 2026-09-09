@@ -52,7 +52,7 @@ export function RunView({ params }: RouteProps) {
             <span className="text-muted-foreground">- {run.reason}</span>
           )}
         </dd>
-        <dt className="text-muted-foreground">Harness</dt>
+        <dt className="text-muted-foreground">Agent</dt>
         <dd>
           {run.harness} ({run.mode})
         </dd>

@@ -3,7 +3,7 @@
 // are stored in the UI slice, while link status is checked against the local
 // gateway whenever this route is entered or refocused.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -22,6 +22,15 @@ import type { OnboardingRepo } from '@/store/ui'
 
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
+
+/**
+ * The row a step ends with, Back included. It sticks to the bottom of the
+ * wizard's scroller because the step above it can be taller than the window
+ * - Agents with the terminal dock open is - and a control that scrolls out
+ * of reach is the reason Back moved here.
+ */
+export const actionRow =
+  'sticky bottom-0 z-10 -mx-4 -mb-4 flex gap-2 border-t bg-background px-4 pb-7 pt-3'
 
 // Raw command output - git's, and gh's on the Connect GitHub screen:
 // scrollable, wrapped, never truncated.
@@ -216,10 +225,12 @@ export function LinkStep({
 export function WorkspaceStep({
   client,
   caps,
+  back,
   onNext,
 }: {
   client: Api
   caps: Capability
+  back?: ReactNode
   onNext: (workspace: Workspace) => void
 }) {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
@@ -236,6 +247,8 @@ export function WorkspaceStep({
   }, [client])
 
   const loading = useDelayed(workspaces === null && error === null)
+  // The one state with an action row of its own for Back to join.
+  const creating = workspaces?.length === 0 && caps.hasMethod('workspace.add')
 
   const create = async () => {
     setBusy(true)
@@ -281,7 +294,7 @@ export function WorkspaceStep({
         </ul>
       )}
       {workspaces?.length === 0 &&
-        (caps.hasMethod('workspace.add') ? (
+        (creating ? (
           <form
             className="space-y-3"
             aria-label="Create workspace"
@@ -291,8 +304,9 @@ export function WorkspaceStep({
             }}
           >
             <p className="text-sm text-muted-foreground">
-              No workspaces yet - create the first one. A workspace is a repo
-              plus a server-owned environment plan.
+              No workspaces yet - create the first one. A workspace is one
+              repository plus the container the server builds for it, and
+              every run in it starts from that same setup.
             </p>
             <label className="block space-y-1 text-sm">
               Name
@@ -311,13 +325,16 @@ export function WorkspaceStep({
                 onChange={(e) => setBaseBranch(e.target.value)}
               />
             </label>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={busy || !name.trim() || !baseBranch.trim()}
-            >
-              Create workspace
-            </Button>
+            <div className={actionRow}>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={busy || !name.trim() || !baseBranch.trim()}
+              >
+                Create workspace
+              </Button>
+              {back}
+            </div>
           </form>
         ) : (
           <p className="text-sm text-muted-foreground">
@@ -326,6 +343,7 @@ export function WorkspaceStep({
             workspace init, then come back.
           </p>
         ))}
+      {back && !creating && <div className={actionRow}>{back}</div>}
     </section>
   )
 }
@@ -357,11 +375,13 @@ export function RepoStep({
   client,
   caps,
   workspace,
+  back,
   onNext,
 }: {
   client: Api
   caps: Capability
   workspace: Workspace | null
+  back?: ReactNode
   onNext: () => void
 }) {
   // What the step settled lives in the UI slice, not here: walking back to
@@ -529,6 +549,7 @@ export function RepoStep({
             <Button type="submit" size="sm" disabled={busy || !absolute}>
               Add remote
             </Button>
+            {back}
           </form>
           {repo.trim() !== '' && !absolute && (
             <p className="text-xs text-muted-foreground">
@@ -724,7 +745,7 @@ export function RepoStep({
               </div>
             </>
           )}
-          <div className="flex gap-2">
+          <div className={actionRow}>
             <Button
               size="sm"
               variant={canPush && !settled ? 'outline' : 'default'}
@@ -735,6 +756,7 @@ export function RepoStep({
             <Button size="sm" variant="outline" onClick={repoint}>
               Use a different repository
             </Button>
+            {back}
           </div>
         </div>
       )}
@@ -744,49 +766,87 @@ export function RepoStep({
 
 /**
  * The First run step: the first run, in the workspace the Workspace step
- * settled on. The harness comes from agent.list with a free-text fallback,
- * and launch lands the user on the run view. `defaultHarness` is the one the
- * Agents step set up; it is preselected only when agent.list carries that
- * name, because a name the server cannot launch would just move the refusal
- * later.
+ * settled on. Only agents agent.list reports as installed in this account
+ * are offered: a name the account has no executable for would fail in the
+ * container, so the step sends the reader back to Agents instead of letting
+ * them launch it. `defaultHarness` is the one the Agents step just set up.
  */
 export function FirstRunStep({
   client,
   workspace,
   defaultHarness,
+  back,
   onBackToWorkspace,
+  onBackToAgents,
 }: {
   client: Api
   workspace: Workspace | null
   defaultHarness?: string
+  back?: ReactNode
   onBackToWorkspace?: () => void
+  onBackToAgents: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
   const setOnboarded = useStore((s) => s.setOnboarded)
+  // The draft outlives this component: the header can jump to another step
+  // and back, which unmounts it.
+  const draft = useStore((s) => s.onboardingFirstRun)
+  const setDraft = useStore((s) => s.setOnboardingFirstRun)
 
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
-  const [harness, setHarness] = useState('')
-  const [custom, setCustom] = useState('')
-  const [task, setTask] = useState('')
+  const [agentsError, setAgentsError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const { harness, task } = draft
 
-  useEffect(() => {
-    // agent.list failing is not fatal: the harness field falls back to text.
+  const loadAgents = useCallback(() => {
+    let live = true
+    // Back to loading, not to an empty account: a retry that left the list at
+    // [] would tell the member nothing is installed while the call it is
+    // waiting on is the only thing that knows.
+    setAgents(null)
+    setAgentsError(null)
     client
       .agentList()
       .then((list) => {
-        setAgents(list)
-        if (defaultHarness && list.some((a) => a.name === defaultHarness)) {
-          setHarness((prev) => prev || defaultHarness)
-        }
+        if (!live) return
+        const installed = list.filter((a) => a.installed === true)
+        setAgents(installed)
+        // The draft is persisted, so it can name an agent this account no
+        // longer has: an offer the picker cannot show and the server would
+        // refuse. What the member chose wins over the one the Agents step
+        // just set up.
+        const current = useStore.getState().onboardingFirstRun
+        const kept = installed.some((a) => a.name === current.harness)
+          ? current.harness
+          : ''
+        const harness =
+          kept ||
+          (defaultHarness && installed.some((a) => a.name === defaultHarness)
+            ? defaultHarness
+            : '')
+        if (harness !== current.harness) setDraft({ ...current, harness })
       })
-      .catch(() => setAgents([]))
-  }, [client, defaultHarness])
+      .catch((err) => {
+        if (!live) return
+        setAgents([])
+        setAgentsError(message(err))
+      })
+    return () => {
+      live = false
+    }
+  }, [client, defaultHarness, setDraft])
 
-  const freeText = agents !== null && agents.length === 0
-  const chosen = freeText || harness === '__custom' ? custom.trim() : harness
-  const ready = task.trim() !== '' && chosen !== '' && workspace !== null
+  useEffect(loadAgents, [loadAgents])
+
+  const loading = useDelayed(agents === null)
+  // Launchable only against an agent this account was reported to have. A
+  // persisted draft is on screen before agent.list answers, so a name it is
+  // about to reject must not be launchable in the meantime.
+  const ready =
+    task.trim() !== '' &&
+    workspace !== null &&
+    (agents ?? []).some((a) => a.name === harness)
 
   const launch = async () => {
     setBusy(true)
@@ -796,7 +856,7 @@ export function FirstRunStep({
       const run = await client.runLaunch({
         workspace_id: workspace.id,
         task: task.trim(),
-        harness: chosen,
+        harness,
       })
       setOnboarded(true)
       navigate('run', { runId: run.id })
@@ -812,6 +872,24 @@ export function FirstRunStep({
     navigate('board')
   }
 
+  // The escape hatch for a reader with no agent subscription. It is a CLI
+  // flow: `fake` is a scheduler registration, so it is never installed in an
+  // account and never appears in the picker above.
+  const withoutASubscription = (
+    <div className="space-y-1 rounded-md border bg-card p-3 text-xs text-muted-foreground">
+      <p className="font-medium text-foreground">No agent subscription yet?</p>
+      <p>
+        Aether ships a deterministic fake agent that runs a script from your
+        repo instead of a real one. Start the server with
+        AETHER_FAKE_AGENT="sh /workspace/agent.sh" in its environment, commit
+        an agent.sh that writes a file, and launch it from a terminal with{' '}
+        <span className="font-mono">aether run "..." --agent fake</span>: the
+        whole path - container, worktree, PTY, commit, fetch - runs with
+        nothing mocked but the agent.
+      </p>
+    </div>
+  )
+
   if (!workspace) {
     return (
       <section aria-label="First run" className="space-y-3">
@@ -819,9 +897,45 @@ export function FirstRunStep({
         <p className="text-sm text-muted-foreground">
           Choose a workspace before launching a run.
         </p>
-        <Button variant="outline" size="sm" onClick={onBackToWorkspace}>
-          Back to Workspace
-        </Button>
+        <div className={actionRow}>
+          <Button variant="outline" size="sm" onClick={onBackToWorkspace}>
+            Back to Workspace
+          </Button>
+        </div>
+      </section>
+    )
+  }
+
+  if (agents !== null && agents.length === 0) {
+    return (
+      <section aria-label="First run" className="space-y-3">
+        <h2 className="text-sm font-medium">Launch your first run</h2>
+        {agentsError ? (
+          <p className="text-xs text-state-failed">{agentsError}</p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            A run launches an agent in a container, and no agent is installed
+            in your environment yet.
+          </p>
+        )}
+        {withoutASubscription}
+        <div className={actionRow}>
+          {/* Setting an agent up cannot fix a gateway that did not answer,
+              so the failed list asks for the call again instead. */}
+          {agentsError ? (
+            <Button size="sm" onClick={loadAgents}>
+              Retry
+            </Button>
+          ) : (
+            <Button size="sm" onClick={onBackToAgents}>
+              Set up an agent
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={goToBoard}>
+            Go to board
+          </Button>
+          {back}
+        </div>
       </section>
     )
   }
@@ -833,45 +947,23 @@ export function FirstRunStep({
         The run forks from <span className="font-mono">{workspace.base_branch}</span>{' '}
         in {workspace.name}.
       </p>
-      {freeText ? (
+      {loading && <Skeleton className="h-16 w-full" />}
+      {agents && (
         <label className="block space-y-1 text-sm">
-          Harness
-          <input
+          Agent
+          <select
             className={field}
-            value={custom}
-            placeholder="claude"
-            onChange={(e) => setCustom(e.target.value)}
-          />
+            value={harness}
+            onChange={(e) => setDraft({ ...draft, harness: e.target.value })}
+          >
+            <option value="">Choose an agent</option>
+            {agents.map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.name}
+              </option>
+            ))}
+          </select>
         </label>
-      ) : (
-        <>
-          <label className="block space-y-1 text-sm">
-            Harness
-            <select
-              className={field}
-              value={harness}
-              onChange={(e) => setHarness(e.target.value)}
-            >
-              <option value="">Choose a harness</option>
-              {(agents ?? []).map((a) => (
-                <option key={a.name} value={a.name}>
-                  {a.name}
-                </option>
-              ))}
-              <option value="__custom">Other...</option>
-            </select>
-          </label>
-          {harness === '__custom' && (
-            <label className="block space-y-1 text-sm">
-              Harness name
-              <input
-                className={field}
-                value={custom}
-                onChange={(e) => setCustom(e.target.value)}
-              />
-            </label>
-          )}
-        </>
       )}
       <label className="block space-y-1 text-sm">
         Task
@@ -879,29 +971,19 @@ export function FirstRunStep({
           className={`${field} min-h-20`}
           value={task}
           placeholder="add a health check endpoint"
-          onChange={(e) => setTask(e.target.value)}
+          onChange={(e) => setDraft({ ...draft, task: e.target.value })}
         />
       </label>
       {error && <p className="text-xs text-state-failed">{error}</p>}
-      <div className="flex gap-2">
+      {withoutASubscription}
+      <div className={actionRow}>
         <Button size="sm" disabled={busy || !ready} onClick={() => void launch()}>
           Launch
         </Button>
         <Button variant="outline" size="sm" onClick={goToBoard}>
           Go to board
         </Button>
-      </div>
-      <div className="space-y-1 rounded-md border bg-card p-3 text-xs text-muted-foreground">
-        <p className="font-medium text-foreground">No agent subscription yet?</p>
-        <p>
-          Aether ships a deterministic fake harness that runs a script from
-          your repo instead of an agent. Start the server with
-          AETHER_FAKE_AGENT="sh /workspace/agent.sh" in its environment, commit
-          an agent.sh that writes a file, and launch with harness{' '}
-          <span className="font-mono">fake</span>: the whole path - container,
-          worktree, PTY, commit, fetch - runs with nothing mocked but the
-          agent.
-        </p>
+        {back}
       </div>
     </section>
   )

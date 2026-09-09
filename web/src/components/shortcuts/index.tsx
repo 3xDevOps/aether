@@ -23,7 +23,10 @@ const groups: { name: string; entries: [string, string][] }[] = [
     name: 'Steer the focused run',
     entries: [
       ['Pause / Resume', 'Suspend or continue the run the centre view shows'],
-      ['Inject a message', 'Send guidance to the running agent'],
+      [
+        'Send a message to the agent',
+        'Send text into the run without attaching to it',
+      ],
       ['Close as merged / abandoned', 'Finish the run and record how it ended'],
       ['Kill run', 'Stop the run immediately'],
       ['Delete run', 'Remove the run, checkout and transcript'],

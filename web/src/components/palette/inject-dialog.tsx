@@ -27,10 +27,10 @@ export function InjectDialog() {
     try {
       await api.runInject(runID, text.trim())
       close()
-      toast.success('Message injected')
+      toast.success('Message sent')
     } catch (err) {
       setSending(false)
-      toast.error(`Inject failed: ${message(err)}`)
+      toast.error(`Send failed: ${message(err)}`)
     }
   }
 
@@ -38,7 +38,7 @@ export function InjectDialog() {
     <Dialog open onOpenChange={close}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Inject a message</DialogTitle>
+          <DialogTitle>Send a message to the agent</DialogTitle>
           <DialogDescription>
             {run ? runLabel(run) : 'The message lands in the run transcript, attributed to you.'}
           </DialogDescription>
@@ -64,7 +64,7 @@ export function InjectDialog() {
             Cancel
           </Button>
           <Button type="submit" form="inject-message" disabled={sending || !text.trim()}>
-            Inject
+            Send
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -251,7 +251,7 @@ function TemplateForm({
           </label>
           <div className="flex gap-3">
             <label className="flex-1 space-y-1 text-sm">
-              Harness
+              Agent
               <select
                 className={field}
                 value={harness}

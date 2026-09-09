@@ -14,9 +14,6 @@ import { api } from '@/lib/api'
 import type { AgentInfo, Member } from '@/lib/types'
 import { useStore } from '@/store'
 
-// The harness roster comes from agent.list so member-registered agents are
-// launchable, not just the shipped names. "custom" remains the deployment
-// escape hatch; shipped and member entries are filtered to installed tools.
 const field =
   'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
@@ -57,8 +54,14 @@ export function LaunchDialog() {
   // task to have anything to do. Say so here rather than sending a request
   // the gateway will refuse.
   const needsTask = mode === 'headless' && task.trim() === ''
+  // The roster comes from agent.list so member-registered agents are
+  // launchable, not just the shipped names, and both are filtered to what is
+  // installed. agent.list never reports "custom": it is the harness a
+  // deployment pins with --harness-definitions rather than a tool in the
+  // member's account, so the field offers it unconditionally.
   const installedAgents = agents?.filter((agent) => agent.installed === true) ?? []
   const harnessLoading = agents === null
+  const noAgents = !harnessLoading && installedAgents.length === 0
 
   useEffect(() => {
     let live = true
@@ -93,19 +96,25 @@ export function LaunchDialog() {
           if (lastUsedHarness && installed.some((agent) => agent.name === lastUsedHarness)) {
             return lastUsedHarness
           }
-          return installed[0]?.name ?? 'custom'
+          return installed[0]?.name ?? ''
         })
       })
       .catch((err) => {
         if (!live) return
         setAgents([])
         setAgentError(message(err))
-        setHarness('custom')
       })
     return () => {
       live = false
     }
   }, [account, lastUsedHarness, ownAccountID, agentRefresh])
+
+  // The agents view is where an agent is added, and needs no workspace, so it
+  // is the destination on every gateway.
+  const setUpAgent = () => {
+    close()
+    navigate('agents')
+  }
 
   const launch = async () => {
     setLaunching(true)
@@ -195,13 +204,14 @@ export function LaunchDialog() {
               </select>
             </label>
             <label className="flex-1 space-y-1 text-sm">
-              Harness
+              Agent
               <select
                 className={field}
                 value={harness}
                 disabled={harnessLoading || launching}
                 onChange={(e) => setHarness(e.target.value)}
               >
+                <option value="">Choose an agent</option>
                 {installedAgents.map((agent) => (
                   <option key={agent.name} value={agent.name}>
                     {agent.name}
@@ -225,11 +235,13 @@ export function LaunchDialog() {
           {agentError && (
             <p role="alert" className="text-xs text-state-failed">{agentError}</p>
           )}
-          {!harnessLoading && !agentError && installedAgents.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              No installed agents detected in this account. Install an agent in its
-              environment terminal, then refresh the harness list.
-            </p>
+          {noAgents && !agentError && (
+            <div className="space-y-2">
+              <p className="text-sm">No agent is installed in this account.</p>
+              <Button type="button" size="sm" onClick={setUpAgent}>
+                Set up an agent
+              </Button>
+            </div>
           )}
           <Button
             type="button"
@@ -238,7 +250,7 @@ export function LaunchDialog() {
             disabled={harnessLoading || launching}
             onClick={() => setAgentRefresh((current) => current + 1)}
           >
-            Refresh harnesses
+            Refresh agents
           </Button>
           {account && account !== ownAccountID && (
             <p className="text-xs text-muted-foreground">

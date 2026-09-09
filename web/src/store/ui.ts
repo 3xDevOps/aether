@@ -58,6 +58,23 @@ export const onboardingSteps = [
 
 export type OnboardingStep = (typeof onboardingSteps)[number]
 
+/** The First run step's unlaunched draft. */
+export interface OnboardingFirstRun {
+  harness: string
+  task: string
+}
+
+const emptyFirstRun: OnboardingFirstRun = { harness: '', task: '' }
+
+/** What leaving the wizard clears: the walk, not the member's preferences. */
+const wizardReset = {
+  onboardingStep: 'Link',
+  onboardingFurthest: 'Link',
+  onboardingWorkspace: '',
+  onboardingRepo: null,
+  onboardingFirstRun: emptyFirstRun,
+} as const
+
 /** Where to resume; anything the wizard no longer knows starts over. */
 export function onboardingStepIndex(step: OnboardingStep): number {
   return Math.max(0, onboardingSteps.indexOf(step))
@@ -74,8 +91,18 @@ export interface UiSlice {
   runDockHeight: number
   onboarded: boolean
   onboardingStep: OnboardingStep
+  /**
+   * The furthest step reached, which never falls back on its own. The header
+   * marks these done and lets the member jump between them: without it a
+   * jump backwards would make every later step unreachable, and Link has no
+   * Back of its own to escape with.
+   */
+  onboardingFurthest: OnboardingStep
   onboardingWorkspace: string
   onboardingRepo: OnboardingRepo | null
+  /** What the First run step has typed but not launched. It lives here so a
+   * jump to another step and back does not throw the draft away. */
+  onboardingFirstRun: OnboardingFirstRun
   /**
    * The workspace every scoped surface acts on: the sidebar's run list, the
    * board, launches, templates, budgets and the activity feed. Empty until
@@ -105,6 +132,7 @@ export interface UiSlice {
   setOnboardingStep: (step: OnboardingStep) => void
   setOnboardingWorkspace: (workspaceID: string) => void
   setOnboardingRepo: (repo: OnboardingRepo | null) => void
+  setOnboardingFirstRun: (draft: OnboardingFirstRun) => void
   setActiveWorkspace: (workspaceID: string) => void
   setGroupBy: (groupBy: GroupBy) => void
   rememberHarness: (accountID: string, harness: string) => void
@@ -122,8 +150,10 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   runDockHeight: 240,
   onboarded: false,
   onboardingStep: 'Link',
+  onboardingFurthest: 'Link',
   onboardingWorkspace: '',
   onboardingRepo: null,
+  onboardingFirstRun: emptyFirstRun,
   activeWorkspace: '',
   groupBy: 'status',
   lastHarnessByAccount: {},
@@ -139,18 +169,19 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setOnboarded: (onboarded) =>
     set(
-      onboarded
-        ? {
-            onboarded: true,
-            onboardingStep: 'Link',
-            onboardingWorkspace: '',
-            onboardingRepo: null,
-          }
-        : { onboarded: false },
+      onboarded ? { onboarded: true, ...wizardReset } : { onboarded: false },
     ),
-  setOnboardingStep: (onboardingStep) => set({ onboardingStep }),
+  setOnboardingStep: (onboardingStep) =>
+    set((s) => ({
+      onboardingStep,
+      onboardingFurthest:
+        onboardingStepIndex(onboardingStep) > onboardingStepIndex(s.onboardingFurthest)
+          ? onboardingStep
+          : s.onboardingFurthest,
+    })),
   setOnboardingWorkspace: (onboardingWorkspace) => set({ onboardingWorkspace }),
   setOnboardingRepo: (onboardingRepo) => set({ onboardingRepo }),
+  setOnboardingFirstRun: (onboardingFirstRun) => set({ onboardingFirstRun }),
   // Switching scope carries the workspace route with it. Otherwise the
   // switcher would say one workspace while the open view, its budget dialog
   // and its settings dialog still acted on another.
@@ -177,12 +208,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
     set((s) => ({
       route: { name, params },
       ...(s.route.name === 'onboarding' && name !== 'onboarding'
-        ? {
-            onboarded: true,
-            onboardingStep: 'Link',
-            onboardingWorkspace: '',
-            onboardingRepo: null,
-          }
+        ? { onboarded: true, ...wizardReset }
         : {}),
     }))
     if (params.runId) get().ackRun(params.runId)

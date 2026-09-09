@@ -215,23 +215,18 @@ export class FirstRunStep extends Step {
   }
 
   /**
-   * Launches the run. A harness the server does not list - `fake` is a
-   * scheduler registration, not a registry entry - goes in through the
-   * select's own "Other..." option.
+   * Launches the run. The picker offers only the agents this account has
+   * installed, so a scenario installs one before it gets here.
    */
-  async launch(harness: string, task: string): Promise<void> {
-    const select = this.section.getByRole('combobox', { name: 'Harness' })
-    const listed = await select.locator(`option[value="${harness}"]`).count()
-    if (listed > 0) {
-      await select.selectOption(harness)
-    } else {
-      await select.selectOption('__custom')
-      await this.section
-        .getByRole('textbox', { name: 'Harness name' })
-        .fill(harness)
-    }
+  async launch(agent: string, task: string): Promise<void> {
+    await this.section.getByRole('combobox', { name: 'Agent' }).selectOption(agent)
     await this.section.getByRole('textbox', { name: 'Task' }).fill(task)
     await this.button('Launch').click()
+  }
+
+  /** The way out when no agent is installed: back to the Agents step. */
+  setUpAgent(): Locator {
+    return this.button('Set up an agent')
   }
 }
 

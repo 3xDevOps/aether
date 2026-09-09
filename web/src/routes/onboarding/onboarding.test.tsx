@@ -1,15 +1,25 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import type { Api } from '@/lib/api'
 import type {
+  AgentInfo,
   GatewayCapabilities,
   GitIdentity,
   RepoPushResult,
   RepoPushState,
 } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
+import { FirstRunStep } from '@/routes/onboarding/steps'
 import { useStore, type RootState } from '@/store'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 import {
+  agentInfo,
   alice,
   fakeApi,
   otherWorkspace,
@@ -90,8 +100,10 @@ function seed(extra: Partial<RootState> = {}) {
     route: { name: 'onboarding', params: {} },
     onboarded: false,
     onboardingStep: 'Link',
+    onboardingFurthest: 'Link',
     onboardingWorkspace: '',
     onboardingRepo: null,
+    onboardingFirstRun: { harness: '', task: '' },
     ...extra,
   })
 }
@@ -1141,7 +1153,7 @@ describe('onboarding wizard', () => {
     // scope again.
     expect(screen.queryByLabelText('Workspace')).toBeNull()
 
-    fireEvent.change(screen.getByLabelText('Harness'), {
+    fireEvent.change(screen.getByLabelText('Agent'), {
       target: { value: 'claude' },
     })
     fireEvent.change(screen.getByLabelText('Task'), {
@@ -1178,6 +1190,219 @@ describe('onboarding wizard', () => {
     })
   })
 
+  it('offers only the agents installed in this account', async () => {
+    // agent.list always carries every shipped name; only the installed ones
+    // can actually launch, so only they are offered.
+    const client = fakeApi({
+      agentList: vi.fn(async () => [
+        agentInfo(),
+        agentInfo({ name: 'codex', installed: false }),
+      ]),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    const picker = await screen.findByLabelText<HTMLSelectElement>('Agent')
+    const options = [...picker.options].map((o) => o.value)
+    expect(options).toEqual(['', 'claude'])
+  })
+
+  it('sends the reader back to Agents when nothing is installed', async () => {
+    const client = fakeApi({
+      agentList: vi.fn(async () => [agentInfo({ installed: false })]),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    expect(
+      await screen.findByText(/no agent is installed in your environment yet/i),
+    ).toBeDefined()
+    expect(screen.queryByLabelText('Agent')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Launch' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set up an agent' }))
+
+    expect(
+      await screen.findByRole('region', { name: 'Agents' }),
+    ).toBeDefined()
+    expect(
+      screen.getByRole('listitem', { current: 'step' }).textContent,
+    ).toContain('5. Agents')
+  })
+
+  it('keeps a failed agent.list on screen rather than calling it empty', async () => {
+    const client = fakeApi({
+      agentList: vi.fn(async () => {
+        throw new Error('agent.list: environment home unreadable')
+      }),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    expect(
+      await screen.findByText('agent.list: environment home unreadable'),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined()
+  })
+
+  it('waits rather than claiming an empty account while a retry is in flight', async () => {
+    let answer: (agents: AgentInfo[]) => void = () => {}
+    // The Agents step asks first, so the failure is the standing answer until
+    // the retry, which is left hanging.
+    let hang = false
+    const client = fakeApi({
+      agentList: vi.fn(() =>
+        hang
+          ? new Promise<AgentInfo[]>((resolve) => {
+              answer = resolve
+            })
+          : Promise.reject(new Error('agent.list: environment home unreadable')),
+      ),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    hang = true
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+
+    // The gateway has said nothing yet, so neither does the step.
+    expect(screen.queryByText(/no agent is installed/i)).toBeNull()
+    expect(
+      screen.queryByText('agent.list: environment home unreadable'),
+    ).toBeNull()
+
+    await act(async () => answer([agentInfo()]))
+    expect(screen.getByLabelText('Agent')).toBeDefined()
+  })
+
+  it('jumps between the steps it has reached from the header', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toFirstRunStep()
+
+    const steps = screen.getByLabelText('Steps')
+    const chip = (name: string) =>
+      within(steps).queryByRole('button', { name: `${name}, done - go to this step` })
+
+    fireEvent.click(chip('3. Workspace')!)
+
+    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+    expect(useStore.getState().onboardingStep).toBe('Workspace')
+    // The step it landed on is the current one, so it is not a jump target.
+    expect(chip('3. Workspace')).toBeNull()
+    // Everything already reached stays reachable, or a jump backwards would
+    // strand the member on a step whose own Back is gone.
+    expect(useStore.getState().onboardingFurthest).toBe('First run')
+    fireEvent.click(chip('6. First run')!)
+    expect(await screen.findByRole('region', { name: 'First run' })).toBeDefined()
+  })
+
+  it('leaves a step it has never reached inert in the header', () => {
+    seed({ onboardingStep: 'Git identity', onboardingFurthest: 'Workspace' })
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+
+    const steps = screen.getByLabelText('Steps')
+    const names = within(steps)
+      .getAllByRole('button')
+      .map((chip) => chip.getAttribute('aria-label'))
+
+    expect(names).toEqual([
+      '1. Link, done - go to this step',
+      '3. Workspace, done - go to this step',
+    ])
+  })
+
+  it('drops a draft agent this account no longer has installed', async () => {
+    // The draft is persisted, so it outlives the account that could run it.
+    seed({ onboardingFirstRun: { harness: 'claude', task: 'write a result file' } })
+    const client = fakeApi({
+      agentList: vi.fn(async () => [
+        agentInfo({ installed: false }),
+        agentInfo({ name: 'codex', installed: true }),
+      ]),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe('')
+    })
+    expect(useStore.getState().onboardingFirstRun.harness).toBe('')
+    expect(
+      screen.getByRole('button', { name: 'Launch' }),
+    ).toHaveProperty('disabled', true)
+  })
+
+  it('keeps launch blocked until the agent list has answered', async () => {
+    // The draft is on screen at once; the list that decides whether its agent
+    // can run is a round trip behind it.
+    seed({ onboardingFirstRun: { harness: 'claude', task: 'write a result file' } })
+    const client = fakeApi({
+      agentList: vi.fn(() => new Promise<AgentInfo[]>(() => {})),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    expect(
+      await screen.findByRole('button', { name: 'Launch' }),
+    ).toHaveProperty('disabled', true)
+  })
+
+  it('keeps the agent the member picked over the one Agents set up', async () => {
+    seed({ onboardingFirstRun: { harness: 'myagent', task: 'write a file' } })
+    render(
+      <FirstRunStep
+        client={fakeApi()}
+        workspace={workspace}
+        defaultHarness="claude"
+        onBackToAgents={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe('myagent')
+    })
+  })
+
+  it('keeps the first run draft when the header jumps away and back', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toFirstRunStep()
+
+    fireEvent.change(await screen.findByLabelText('Task'), {
+      target: { value: 'add a health check endpoint' },
+    })
+    const steps = screen.getByLabelText('Steps')
+    fireEvent.click(
+      within(steps).getByRole('button', {
+        name: '3. Workspace, done - go to this step',
+      }),
+    )
+    await screen.findByRole('region', { name: 'Workspace' })
+    fireEvent.click(
+      within(steps).getByRole('button', {
+        name: '6. First run, done - go to this step',
+      }),
+    )
+
+    expect(
+      (await screen.findByLabelText<HTMLTextAreaElement>('Task')).value,
+    ).toBe('add a health check endpoint')
+  })
+
+  it('renders Back inside the step it belongs to', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toAgentsStep()
+
+    const agents = await screen.findByRole('region', { name: 'Agents' })
+    expect(within(agents).getByRole('button', { name: 'Back' })).toBeDefined()
+  })
+
   it('renders a launch refusal verbatim and lets the user retry', async () => {
     const runLaunch = vi
       .fn()
@@ -1188,7 +1413,7 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
-    fireEvent.change(await screen.findByLabelText('Harness'), {
+    fireEvent.change(await screen.findByLabelText('Agent'), {
       target: { value: 'claude' },
     })
     fireEvent.change(screen.getByLabelText('Task'), {

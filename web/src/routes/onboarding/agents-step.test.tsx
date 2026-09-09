@@ -59,8 +59,10 @@ function seed(caps: GatewayCapabilities = localCaps) {
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
     onboardingStep: 'Link',
+    onboardingFurthest: 'Link',
     onboardingWorkspace: '',
     onboardingRepo: null,
+    onboardingFirstRun: { harness: '', task: '' },
   })
 }
 
@@ -937,11 +939,12 @@ describe('the harness the step set up', () => {
         client={fakeApi()}
         workspace={workspace}
         defaultHarness="claude"
+        onBackToAgents={() => {}}
       />,
     )
 
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Harness').value).toBe(
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe(
         'claude',
       )
     })
@@ -954,11 +957,12 @@ describe('the harness the step set up', () => {
         client={fakeApi({ agentList: vi.fn(async () => [agentInfo()]) })}
         workspace={workspace}
         defaultHarness="codex"
+        onBackToAgents={() => {}}
       />,
     )
 
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Harness').value).toBe('')
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe('')
     })
   })
 
@@ -1018,7 +1022,7 @@ describe('the harness the step set up', () => {
       await screen.findByRole('region', { name: 'First run' }),
     ).toBeDefined()
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Harness').value).toBe(
+      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe(
         'claude',
       )
     })

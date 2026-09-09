@@ -8,7 +8,7 @@
 // an agent login, a GitHub account and a profile snapshot are all
 // per-member.
 
-import { useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { friendly, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -27,6 +27,7 @@ import {
   githubSubStep,
 } from '@/routes/onboarding/github-connect'
 import { ProfileImport } from '@/routes/onboarding/profile-import'
+import { actionRow } from '@/routes/onboarding/steps'
 import type { Capability } from '@/store/hooks'
 
 /**
@@ -54,6 +55,7 @@ export function AgentsStep({
   client,
   caps,
   workspace,
+  back,
   setup,
   onSetup,
   onNext,
@@ -62,6 +64,7 @@ export function AgentsStep({
   client: Api
   caps: Capability
   workspace: Workspace | null
+  back?: ReactNode
   /** The open sub-screen: a harness's setup instructions, `githubSubStep`,
    * or empty for the step's own screen. The step renders nothing else while
    * one is open. The wizard owns it so Back closes this screen before it
@@ -114,7 +117,7 @@ export function AgentsStep({
   // has been set up, the primary Continue joins it rather than replacing
   // it, so "skip" never reads as "undo what I just did".
   const onward = (
-    <div className="flex gap-2">
+    <div className={actionRow}>
       {(done.length > 0 || github !== null) && (
         <Button size="sm" onClick={onNext}>
           Continue
@@ -123,15 +126,13 @@ export function AgentsStep({
       <Button size="sm" variant="outline" onClick={onNext}>
         Skip for now
       </Button>
+      {back}
     </div>
   )
 
   if (setup) {
     return (
-      <section
-        aria-label="Agents"
-        className="flex min-h-0 flex-1 flex-col gap-3"
-      >
+      <section aria-label="Agents" className="space-y-3">
         {setup === githubSubStep ? (
           <GitHubConnect
             client={client}
@@ -164,12 +165,12 @@ export function AgentsStep({
       <section aria-label="Set up an agent" className="space-y-3">
         <h2 className="text-sm font-medium">Set up an agent on the server</h2>
         <p className="text-sm text-muted-foreground">
-          Runs launch a coding agent on the server. The server lists the
-          harness names it can launch - every shipped harness is on that
-          list whether or not you have installed and logged one in. Setup
-          installs the agent into your environment home, once for every
-          workspace, and it is safe to re-run. Confirming the install saves
-          your environment, so runs start with the agent already there.
+          Runs launch a coding agent on the server. Every agent the server
+          knows how to launch is listed below, installed or not, and a run
+          can only use one you have installed and logged in. Setup installs
+          the agent into your environment home, once for every workspace,
+          and it is safe to re-run. Confirming the install saves your
+          environment, so runs start with the agent already there.
         </p>
         {loading && <Skeleton className="h-16 w-full" />}
         {listError && (

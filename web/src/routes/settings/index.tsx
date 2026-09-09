@@ -352,10 +352,16 @@ function OverlayCard({ client }: { client: Api }) {
 
   return (
     <section
-      aria-label="Live overlay"
+      aria-labelledby="overlay-card-heading"
       className="space-y-2 rounded-md border bg-card p-3"
     >
-      <h2 className="text-sm font-medium">Live overlay</h2>
+      <h2 id="overlay-card-heading" className="text-sm font-medium">
+        Mirror run files to your repository
+      </h2>
+      <p className="text-sm text-muted-foreground">
+        Pick a run and the local gateway mirrors its files into your linked
+        repository as the agent works, so you can open them in your editor.
+      </p>
       {live.length === 0 && (
         <p className="text-sm text-muted-foreground">No active runs.</p>
       )}
