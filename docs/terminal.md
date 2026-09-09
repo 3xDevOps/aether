@@ -76,7 +76,9 @@ removes the saved image, and makes the next open use the standard image. See
 ## Keys
 
 These work in every terminal Aether draws - the environment dock, a run's
-terminal, and a run shell.
+terminal, and a run shell - and only in the terminal that has focus, because
+the terminal itself claims them before the shell sees them. Click into a
+terminal first.
 
 | Key | What it does |
 | --- | --- |
@@ -86,9 +88,18 @@ terminal, and a run shell.
 | `Ctrl+=` / `Ctrl+-` | Grow or shrink the terminal font, 8px to 32px. |
 | `Ctrl+0` | Back to the default 12px. |
 
-On macOS use `Cmd` in place of `Ctrl` for the zoom keys. The font size is one
-preference across every terminal and survives a reload; find searches the
+On macOS, `Cmd` works as well as `Ctrl` for the zoom keys. The font size is
+one preference across every terminal and survives a reload; find searches the
 scrollback of the terminal it was opened in.
+
+`Ctrl+Shift+-` and `Ctrl+Shift+0` are left alone, because `Ctrl+_` is
+readline's undo and vim's keymap switch.
+
+The zoom keys are also a browser's own page-zoom accelerators. The desktop app
+binds no competing zoom, and a browser that lets a page cancel the accelerator
+zooms only the terminal; the end-to-end suite checks that Chromium does. Where
+a browser reserves them, the page zooms as well; use the desktop app if that
+gets in the way.
 
 ## Tabs and lifecycle
 

@@ -493,10 +493,12 @@ terminal and event stream reconnect on the same jittered schedule, and it
 - **Steer on entry.** The agent header requests `write` on the first attach and
   the active button carries a short pulse animation; the toggle reattaches
   rather than upgrading in place. Until the member has taken control once
-  (`UiSlice.terminalControlTaken`, persisted) a live run they are only
-  watching says **Read-only mirror. Take control to type into the agent.**,
-  and the button carries the title `This run is not running` when the run
-  cannot be steered at all. Whether the member may steer is the server's
+  (`UiSlice.terminalControlTaken`, persisted, and set from the attach ack that
+  granted write rather than from the click that asked for it) a live run they
+  are only watching says **Read-only mirror. Take control to type into the
+  agent.** A run that is not running says **This run is not running** beside
+  the disabled control, as visible text for the same reason the dock's tab
+  ceiling is. Whether the member may steer is the server's
   answer, never the client's guess: a `-32001` refusal drops the request back
   to a mirror and disables the toggle. A finished run attaches as a read-only replay of its
   recorded transcript, which ends with a 1000 close, reason `session ended` -
@@ -539,9 +541,11 @@ terminal and event stream reconnect on the same jittered schedule, and it
   terminal, backed by `@xterm/addon-search`; it reports **No matches** from
   the addon's own answer rather than tracking a count. `Ctrl+=`, `Ctrl+-` and
   `Ctrl+0` move `UiSlice.terminalFontSize`, clamped to 8-32px by
-  `clampTerminalFontSize`. The size is one persisted preference behind every
-  terminal, applied to the live instance and re-fitted rather than by
-  rebuilding it, which would throw the scrollback away.
+  `clampTerminalFontSize` - on the way in from a keystroke and again in the
+  store's `merge`, because a same-version reload never reaches `migrate` and
+  xterm does not validate `fontSize`. The size is one persisted preference
+  behind every terminal, applied to the live instance and re-fitted rather
+  than by rebuilding it, which would throw the scrollback away.
 - **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
   glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038), garbling
   scrolled rows until a forced refresh; the DOM renderer never desyncs. The
