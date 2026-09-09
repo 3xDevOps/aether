@@ -67,14 +67,20 @@ export async function refreshTeam(store: RootStore, client: Api = api): Promise<
  */
 export async function refreshInbox(store: RootStore, client: Api = api): Promise<void> {
   const s = store.getState()
-  await Promise.all(
-    Object.keys(s.workspaces).map((id) =>
+  const id = s.startInboxRead()
+  const results = await Promise.all(
+    Object.keys(s.workspaces).map((wsp) =>
       client
-        .approvalList(id, s.showDecided)
-        .then((list) => store.getState().setInbox(id, list))
-        .catch(ignore),
+        .approvalList(wsp, s.showDecided)
+        .then((list) => {
+          if (store.getState().inboxRequest === id) store.getState().setInbox(wsp, list)
+          return null
+        })
+        .catch(message),
     ),
   )
+  if (store.getState().inboxRequest !== id) return
+  store.getState().setInboxError(results.find((r) => r !== null) ?? null)
 }
 
 /** Tells the server we are here, in the workspace we are actually in. */

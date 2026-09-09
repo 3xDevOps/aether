@@ -16,19 +16,20 @@ import { approvalsForRun, pendingApprovals, sortByCreated } from '@/store/approv
 /** The queue's size, in the status bar. Absent while nothing is waiting. */
 export function ApprovalStatus() {
   const inbox = useStore((s) => s.inbox)
+  const error = useStore((s) => s.inboxError)
   const navigate = useStore((s) => s.navigate)
   const waiting = pendingApprovals(inbox).length
-  if (waiting === 0) return null
+  if (waiting === 0 && !error) return null
 
   return (
     <button
       type="button"
       onClick={() => navigate('approvals')}
-      title="Open the approval inbox"
+      title={error ?? 'Open Approvals'}
       className="flex items-center gap-1 rounded px-1 text-state-needs-attention hover:underline"
     >
       <ShieldQuestion className="size-3.5" aria-hidden />
-      {waiting} waiting
+      {error ? 'queue unreadable' : `${waiting} waiting`}
     </button>
   )
 }
@@ -61,6 +62,7 @@ export function ApprovalBadge({ run }: CardSlotProps) {
  */
 export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
   const inbox = useStore((s) => s.inbox)
+  const error = useStore((s) => s.inboxError)
   const showDecided = useStore((s) => s.showDecided)
   const setShowDecided = useStore((s) => s.setShowDecided)
   const [decisions, setDecisions] = useState<Record<string, Approval>>({})
@@ -84,7 +86,7 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
   return (
     <div className="flex h-full flex-col">
       <ViewHeader
-        title="Approval inbox"
+        title="Approvals"
         subtitle={waiting === 1 ? '1 request waiting' : `${waiting} requests waiting`}
       />
       <div className="flex items-center border-b px-4 py-1">
@@ -98,6 +100,7 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
         </Button>
       </div>
       <div className="flex-1 overflow-y-auto p-3">
+        {error && <p className="mb-2 text-xs text-state-failed">{error}</p>}
         <ul className="space-y-2">
           {rows.map((approval) => (
             <Row
@@ -110,7 +113,7 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
             />
           ))}
         </ul>
-        {rows.length === 0 && (
+        {rows.length === 0 && !error && (
           <p className="text-sm text-muted-foreground">
             Nothing is waiting on a decision.
           </p>
