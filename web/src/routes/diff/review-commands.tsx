@@ -1,4 +1,5 @@
 import { CopyableCommand } from '@/components/copyable-command'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 
@@ -18,7 +19,7 @@ export function ReviewCommands({ run }: { run: RunRecord }) {
     <>
       {pulled && (
         <details className="basis-full">
-          <summary className="cursor-pointer select-none">
+          <summary className={cn(focusRing, 'cursor-pointer select-none')}>
             fetched {pulled.ref}
           </summary>
           <pre className="mt-1 max-h-48 overflow-auto rounded-md border bg-muted/50 p-2 font-mono text-[11px] whitespace-pre-wrap">

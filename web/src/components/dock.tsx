@@ -1,8 +1,10 @@
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react'
-import { useCallback } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { useDrag, useWindowHeight } from '@/lib/hooks'
+import { onTabListKeyDown, splitterTarget } from '@/lib/keys'
+import { cn, focusRing } from '@/lib/utils'
 
 export interface DockTab {
   id: string
@@ -26,10 +28,15 @@ export interface DockProps {
   children: React.ReactNode
 }
 
-export function clampDockHeight(px: number): number {
-  const min = 120
-  const max = Math.max(min, (typeof window === 'undefined' ? 320 : window.innerHeight) - 200)
-  return Math.min(max, Math.max(min, px))
+const minDockHeight = 120
+
+/** What is left of the window once the shell's own chrome has its share. */
+function maxDockHeight(viewport: number): number {
+  return Math.max(minDockHeight, viewport - 200)
+}
+
+export function clampDockHeight(px: number, viewport = window.innerHeight): number {
+  return Math.min(maxDockHeight(viewport), Math.max(minDockHeight, px))
 }
 
 export function Dock({
@@ -47,29 +54,68 @@ export function Dock({
   children,
 }: DockProps) {
   const atLimit = tabs.length >= maxTabs
+  const id = useId()
+  const tabID = (tab: string) => `${id}-tab-${tab}`
+  const panelID = `${id}-panel`
+  const dockID = `${id}-dock`
+  const viewport = useWindowHeight()
+  const beginDrag = useDrag()
+  const max = maxDockHeight(viewport)
+  const index = Math.max(
+    0,
+    tabs.findIndex((tab) => tab.id === activeTab),
+  )
+  const [focused, setFocused] = useState(index)
+  useEffect(() => setFocused(index), [index, tabs.length])
+  const stop = Math.min(focused, tabs.length - 1)
+  // Enter collapses, which unmounts this handle, so focus moves to the toggle
+  // before the pane goes: that button is in the header either way.
+  const collapse = useRef<HTMLButtonElement>(null)
 
   const startResize = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       event.preventDefault()
       const startY = event.clientY
       const startHeight = height
+      const drag = beginDrag()
       const move = (ev: PointerEvent) => {
-        onHeightChange(clampDockHeight(startHeight + startY - ev.clientY))
+        onHeightChange(clampDockHeight(startHeight + startY - ev.clientY, viewport))
       }
-      const stop = () => {
-        window.removeEventListener('pointermove', move)
-        window.removeEventListener('pointerup', stop)
+      window.addEventListener('pointermove', move, { signal: drag.signal })
+      for (const end of ['pointerup', 'pointercancel']) {
+        window.addEventListener(end, () => drag.abort(), { signal: drag.signal })
       }
-      window.addEventListener('pointermove', move)
-      window.addEventListener('pointerup', stop)
     },
-    [height, onHeightChange],
+    [beginDrag, height, onHeightChange, viewport],
+  )
+
+  const resizeKey = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        collapse.current?.focus()
+        onToggleCollapse()
+        return
+      }
+      const next = splitterTarget(event.key, {
+        value: height,
+        min: minDockHeight,
+        max,
+        grow: 'ArrowUp',
+        shrink: 'ArrowDown',
+      })
+      if (next === null) return
+      event.preventDefault()
+      onHeightChange(clampDockHeight(next, viewport))
+    },
+    [height, max, onHeightChange, onToggleCollapse, viewport],
   )
 
   return (
     <section
+      id={dockID}
       className="relative flex shrink-0 flex-col border-t bg-background"
-      style={collapsed ? undefined : { height: clampDockHeight(height) }}
+      style={collapsed ? undefined : { height: clampDockHeight(height, viewport) }}
       aria-label="Terminal dock"
     >
       {!collapsed && (
@@ -77,47 +123,70 @@ export function Dock({
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize terminal dock"
+          aria-controls={dockID}
+          aria-valuenow={Math.round(clampDockHeight(height, viewport))}
+          aria-valuemin={minDockHeight}
+          aria-valuemax={Math.round(max)}
+          tabIndex={0}
           onPointerDown={startResize}
-          className="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize hover:bg-accent"
+          onKeyDown={resizeKey}
+          className={cn(
+            focusRing,
+            'absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize hover:bg-accent',
+          )}
         />
       )}
       <div className="flex h-9 min-h-9 items-center gap-1 border-b px-2">
-        <div className="flex min-w-0 flex-1 items-center gap-1" role="tablist">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={cn(
-                'flex min-w-0 items-center rounded-md',
-                activeTab === tab.id && 'bg-accent',
-              )}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === tab.id}
-                tabIndex={activeTab === tab.id ? 0 : -1}
-                className="truncate px-2 py-1 text-xs font-medium outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50"
-                onClick={() => onSelectTab(tab.id)}
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <div
+            className="flex min-w-0 items-center gap-1"
+            role={tabs.length > 0 ? 'tablist' : undefined}
+            aria-label={tabs.length > 0 ? 'Terminal tabs' : undefined}
+          >
+            {tabs.map((tab, i) => (
+              <div
+                key={tab.id}
+                className={cn(
+                  'flex min-w-0 items-center rounded-md',
+                  activeTab === tab.id && 'bg-accent',
+                )}
               >
-                {tab.label}
-              </button>
-              {onCloseTab && !tab.permanent && (
-                <Button
+                <button
                   type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="mr-0.5 size-5"
-                  aria-label={`Close ${tab.label}`}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onCloseTab(tab.id)
-                  }}
+                  role="tab"
+                  id={tabID(tab.id)}
+                  aria-selected={activeTab === tab.id}
+                  aria-controls={
+                    !collapsed && activeTab === tab.id ? panelID : undefined
+                  }
+                  tabIndex={i === stop ? 0 : -1}
+                  className={cn(focusRing, 'truncate px-2 py-1 text-xs font-medium')}
+                  onFocus={() => setFocused(i)}
+                  onClick={() => onSelectTab(tab.id)}
+                  onKeyDown={(event) =>
+                    onTabListKeyDown(event, tabs.length, stop, setFocused)
+                  }
                 >
-                  <X />
-                </Button>
-              )}
-            </div>
-          ))}
+                  {tab.label}
+                </button>
+                {onCloseTab && !tab.permanent && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="mr-0.5 size-5"
+                    aria-label={`Close ${tab.label}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onCloseTab(tab.id)
+                    }}
+                  >
+                    <X />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
           {onAddTab && (
             <Button
               type="button"
@@ -140,6 +209,7 @@ export function Dock({
         </div>
         {actions}
         <Button
+          ref={collapse}
           type="button"
           variant="ghost"
           size="icon"
@@ -150,7 +220,17 @@ export function Dock({
           {collapsed ? <ChevronUp /> : <ChevronDown />}
         </Button>
       </div>
-      {!collapsed && <div className="min-h-0 flex-1">{children}</div>}
+      {!collapsed && (
+        <div
+          role={tabs.length > 0 ? 'tabpanel' : undefined}
+          id={panelID}
+          aria-labelledby={tabs[index] ? tabID(tabs[index].id) : undefined}
+          tabIndex={tabs.length > 0 ? 0 : undefined}
+          className={cn(focusRing, 'min-h-0 flex-1')}
+        >
+          {children}
+        </div>
+      )}
     </section>
   )
 }

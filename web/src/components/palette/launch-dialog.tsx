@@ -12,10 +12,8 @@ import {
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
 import type { AgentInfo, Member } from '@/lib/types'
+import { field } from '@/lib/utils'
 import { useStore } from '@/store'
-
-const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 /** The two launch modes the server accepts; `tui` is its default. */
 type LaunchMode = 'tui' | 'headless'

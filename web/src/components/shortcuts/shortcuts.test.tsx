@@ -1,14 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import '@/components/shortcuts'
 import { Slot } from '@/components/slots'
-import { useStore } from '@/store'
-
-beforeEach(() => {
-  useStore.setState({
-    paletteOpen: false,
-    paletteDialog: null,
-  })
-})
 
 describe('shortcut reference', () => {
   it('rides the status bar slot', () => {
@@ -47,11 +39,16 @@ describe('shortcut reference', () => {
     ).toBeNull()
   })
 
-  it('yields to a dialog already on screen', () => {
-    useStore.setState({ paletteOpen: true })
+  // A key pressed inside an overlay belongs to that overlay, whatever the
+  // store thinks is open: this asks the event, not the store.
+  it.each(['dialog', 'menu'])('yields to an open %s', (role) => {
     render(<Slot name="statusbar" />)
+    const overlay = document.createElement('div')
+    overlay.setAttribute('role', role)
+    document.body.append(overlay)
+    onTestFinished(() => overlay.remove())
 
-    fireEvent.keyDown(window, { key: '?', shiftKey: true })
+    fireEvent.keyDown(overlay, { key: '?', shiftKey: true })
 
     expect(
       screen.queryByRole('heading', { name: 'Keyboard shortcuts' }),

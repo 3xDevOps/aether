@@ -11,7 +11,7 @@ import { banner, Dismiss, verbatim } from '@/components/update-banner-shared'
 import { ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { UpdateApplyResult, UpdateBuildStatus, UpdateStatus } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
 type ApplyState =
@@ -343,7 +343,10 @@ export function CliBanner({
             href={update.cli.release_url}
             target="_blank"
             rel="noreferrer"
-            className="text-xs underline underline-offset-2 hover:text-foreground"
+            className={cn(
+              focusRing,
+              'text-xs underline underline-offset-2 hover:text-foreground',
+            )}
           >
             Release notes
           </a>

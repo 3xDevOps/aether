@@ -14,9 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
-
-const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
+import { field } from '@/lib/utils'
 
 export function BudgetDialog({
   workspaceID,

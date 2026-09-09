@@ -14,10 +14,8 @@ import {
   type LocalForwardStatusResult,
 } from '@/lib/api'
 import { message } from '@/lib/format'
+import { field } from '@/lib/utils'
 import { useStore } from '@/store'
-
-const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 export function ForwardDialog() {
   const target = useStore((s) => s.paletteForwardTarget)

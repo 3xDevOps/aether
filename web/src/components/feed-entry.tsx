@@ -7,6 +7,7 @@ import { typeLabel, type EventType } from '@/lib/events'
 import { budgetStateLabel, money, timeAgo } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import type { BudgetState, Event } from '@/lib/types'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
 export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: boolean }) {
@@ -33,7 +34,10 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
         <button
           type="button"
           onClick={() => navigate('terminal', { runId: run.id })}
-          className="max-w-40 shrink-0 truncate text-muted-foreground hover:text-foreground hover:underline"
+          className={cn(
+            focusRing,
+            'max-w-40 shrink-0 truncate text-muted-foreground hover:text-foreground hover:underline',
+          )}
         >
           {runLabel(run)}
         </button>

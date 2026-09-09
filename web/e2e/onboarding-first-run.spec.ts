@@ -45,10 +45,10 @@ test('the first run completes', async ({ page, aether }) => {
   await expect(
     page.getByRole('heading', { name: 'write the result file', exact: true }),
   ).toBeVisible()
-  const tabs = page.getByRole('navigation', { name: 'Run tabs' })
-  await expect(tabs.getByRole('button', { name: 'Terminal' })).toHaveAttribute(
-    'aria-current',
-    'page',
+  const tabs = page.getByRole('tablist', { name: 'Run tabs' })
+  await expect(tabs.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
+    'aria-selected',
+    'true',
   )
 
   // The header carries the state on the terminal tab, so nobody has to leave
@@ -58,7 +58,7 @@ test('the first run completes', async ({ page, aether }) => {
   await expect(header).toContainText('Done', { timeout: 3 * 60 * 1000 })
 
   // The Overview tab keeps what the header cannot say: why the run stopped.
-  await tabs.getByRole('button', { name: 'Overview' }).click()
+  await tabs.getByRole('tab', { name: 'Overview' }).click()
   await expect(
     page.getByRole('definition').filter({ hasText: 'agent exited; results committed' }),
   ).toBeVisible()

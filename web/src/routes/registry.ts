@@ -18,3 +18,9 @@ export function registerRoute(name: string, view: ComponentType<RouteProps>): vo
 export function lookupRoute(name: string): ComponentType<RouteProps> | undefined {
   return registry[name]
 }
+
+/** Every registered view, so a sweep over "all surfaces" cannot go stale as
+ * routes are added. */
+export function registeredRoutes(): string[] {
+  return Object.keys(registry)
+}

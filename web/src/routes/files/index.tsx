@@ -6,6 +6,7 @@ import { api, type Api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
 import { terminalFontFamily } from '@/lib/term-font'
 import type { Run, Workspace } from '@/lib/types'
+import { cn, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { FilePatch } from '@/routes/diff/patch-view'
 import { parsePatch } from '@/routes/diff/parse'
@@ -91,7 +92,10 @@ function WorkspaceTree({
     <section>
       <button
         type="button"
-        className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-sm font-medium hover:bg-accent"
+        className={cn(
+          focusRing,
+          'flex w-full items-center gap-1 rounded px-1 py-1 text-left text-sm font-medium hover:bg-accent',
+        )}
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
       >
@@ -169,7 +173,10 @@ function TreeDirectory({
     <div>
       <button
         type="button"
-        className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-sm hover:bg-accent"
+        className={cn(
+          focusRing,
+          'flex w-full items-center gap-1 rounded px-1 py-1 text-left text-sm hover:bg-accent',
+        )}
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
       >
@@ -200,7 +207,10 @@ function TreeDirectory({
               <button
                 key={childPath}
                 type="button"
-                className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-sm hover:bg-accent"
+                className={cn(
+                  focusRing,
+                  'flex w-full items-center gap-1 rounded px-1 py-1 text-left text-sm hover:bg-accent',
+                )}
                 onClick={() => onSelect(source, childPath)}
               >
                 <File className="size-3.5 text-muted-foreground" />
@@ -282,8 +292,30 @@ function FileViewer({
         <span className="min-w-0 flex-1 truncate" title={selection.path}>{selection.path}</span>
         {selection.runID && (
           <>
-            <button type="button" className={mode === 'file' ? 'rounded bg-accent px-2 py-1' : 'rounded px-2 py-1 text-muted-foreground hover:bg-accent'} onClick={() => onMode('file')}>File</button>
-            <button type="button" className={mode === 'diff' ? 'rounded bg-accent px-2 py-1' : 'rounded px-2 py-1 text-muted-foreground hover:bg-accent'} onClick={() => onMode('diff')}>Diff vs base</button>
+            <button
+              type="button"
+              className={cn(
+                focusRing,
+                mode === 'file'
+                  ? 'rounded bg-accent px-2 py-1'
+                  : 'rounded px-2 py-1 text-muted-foreground hover:bg-accent',
+              )}
+              onClick={() => onMode('file')}
+            >
+              File
+            </button>
+            <button
+              type="button"
+              className={cn(
+                focusRing,
+                mode === 'diff'
+                  ? 'rounded bg-accent px-2 py-1'
+                  : 'rounded px-2 py-1 text-muted-foreground hover:bg-accent',
+              )}
+              onClick={() => onMode('diff')}
+            >
+              Diff vs base
+            </button>
           </>
         )}
       </header>

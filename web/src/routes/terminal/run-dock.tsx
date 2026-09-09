@@ -4,6 +4,7 @@ import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import { cn, focusRing } from '@/lib/utils'
 import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import {
@@ -41,6 +42,25 @@ export function RunDock({ runID }: { runID: string }) {
   activeTabRef.current = activeTab
   const terminalRef = useRef<XtermController['terminal']>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
+  // Which of the dock's four bodies is on screen. The three that are not the
+  // terminal replace one that may have been holding the keyboard: the server
+  // refuses a shell, the agent exits the last one, the run stops running.
+  // Disposing it leaves focus on <body>, where the next keystroke reaches the
+  // shell's shortcuts, so whatever took its place takes the keyboard too.
+  const showing = !canOpenShell
+    ? 'unavailable'
+    : dock.refusedMessage !== null
+      ? 'refused'
+      : activeTab === null
+        ? 'closed'
+        : 'terminal'
+  const placeholder = useRef<HTMLDivElement>(null)
+  const takesFocus = { ref: placeholder, tabIndex: -1 }
+  useEffect(() => {
+    if (showing === 'terminal') return
+    if (document.activeElement === document.body) placeholder.current?.focus()
+  }, [showing])
+
   const controller = useXterm({
     enabled:
       canOpenShell &&
@@ -147,16 +167,18 @@ export function RunDock({ runID }: { runID: string }) {
       collapsed={dock.collapsed}
       onToggleCollapse={() => setDockCollapsed(runID, !dock.collapsed)}
     >
-      {!canOpenShell ? (
-        <div className="p-3 text-sm text-muted-foreground">
+      {showing === 'unavailable' ? (
+        <div {...takesFocus} className={cn(focusRing, 'p-3 text-sm text-muted-foreground')}>
           {pauseKnown
             ? 'Run shell unavailable: this run has no live container. The Terminal tab replays its recorded output.'
             : 'Run shell unavailable: waiting for the run pause state.'}
         </div>
-      ) : dock.refusedMessage !== null ? (
-        <div className="p-3 text-sm text-muted-foreground">{dock.refusedMessage}</div>
-      ) : activeTab === null ? (
-        <div className="p-3">
+      ) : showing === 'refused' ? (
+        <div {...takesFocus} className={cn(focusRing, 'p-3 text-sm text-muted-foreground')}>
+          {dock.refusedMessage}
+        </div>
+      ) : showing === 'closed' ? (
+        <div {...takesFocus} className={cn(focusRing, 'p-3')}>
           <Button type="button" size="sm" onClick={open}>
             Open shell
           </Button>

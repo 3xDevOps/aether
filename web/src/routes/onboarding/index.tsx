@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
+import { cn, focusRing } from '@/lib/utils'
 import { AgentsStep } from '@/routes/onboarding/agents-step'
 import { GitIdentityStep } from '@/routes/onboarding/git-identity-step'
 import {
@@ -31,8 +32,7 @@ import { useCapability } from '@/store/hooks'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
 /** One step's marker in the header: reached, current, or still ahead. */
-const chip =
-  'rounded-sm border px-1.5 py-0.5 outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
+const chip = 'rounded-sm border px-1.5 py-0.5'
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
@@ -110,7 +110,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
                 <button
                   type="button"
                   aria-label={`${i + 1}. ${label}, done - go to this step`}
-                  className={`${chip} flex items-center gap-1 hover:bg-accent`}
+                  className={cn(focusRing, chip, 'flex items-center gap-1 hover:bg-accent')}
                   onClick={() => setStep(i)}
                 >
                   <Check className="size-3" aria-hidden />

@@ -3,6 +3,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { SidebarRun } from '@/store/selectors'
 
@@ -43,7 +44,11 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
             type="button"
             onClick={() => navigate('terminal', { runId: run.id })}
             style={{ borderLeftColor: owner?.color }}
-            className="flex w-full items-center gap-3 border-l-2 border-l-transparent px-4 py-2 text-left hover:bg-accent/60"
+            className={cn(
+              focusRing,
+              'focus-visible:-outline-offset-2',
+              'flex w-full items-center gap-3 border-l-2 border-l-transparent px-4 py-2 text-left hover:bg-accent/60',
+            )}
           >
             <StateIndicator state={state} />
             <span className="min-w-0 flex-1">

@@ -5,14 +5,14 @@ import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
-import { cn } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { Land } from '@/routes/diff/land'
 import { parsePatch } from '@/routes/diff/parse'
 import { FilePatch } from '@/routes/diff/patch-view'
 import { ReviewCommands } from '@/routes/diff/review-commands'
 import { registerRoute, type RouteProps } from '@/routes/registry'
-import { RunTabs } from '@/routes/terminal/tabs'
+import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import {
   initialDiff,
@@ -61,62 +61,64 @@ function DiffView({ params }: RouteProps) {
     <div className="flex h-full flex-col">
       <RunHeader run={run} subtitle={run.branch} />
       <RunTabs runID={runID} active="diff" />
-      <div className="px-4 pt-3">
-        <Land run={run} />
-      </div>
+      <div {...runTabPanel('diff', 'flex min-h-0 flex-1 flex-col')}>
+        <div className="px-4 pt-3">
+          <Land run={run} />
+        </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground">
-        {snapshot ? (
-          <span>What changed {timeAgo(snapshot.time)}</span>
-        ) : (
-          <span>
-            Current diff against{' '}
-            <code title={state.base}>{state.base.slice(0, 8) || 'the fork point'}</code>
-          </span>
-        )}
-        <span>
-          {shown.length} file{shown.length === 1 ? '' : 's'}
-        </span>
-        <span className="text-state-done">+{total(shown, 'additions')}</span>
-        <span className="text-destructive">-{total(shown, 'deletions')}</span>
-        <ConflictChips run={run} />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto h-6 px-2"
-          onClick={() => useStore.getState().refreshDiff(runID)}
-        >
-          <RefreshCw className={cn('size-3', state.status === 'loading' && 'animate-spin')} />
-          Refresh
-        </Button>
-        <ReviewCommands run={run} />
-      </div>
-
-      {failed && (
-        <p className="border-b bg-destructive/10 px-4 py-1.5 text-xs">
-          {error ?? 'The diff could not be loaded.'}
-        </p>
-      )}
-      {truncated && (
-        <p className="border-b bg-state-waiting/10 px-4 py-1.5 text-xs">
-          This diff is too large to render in full; everything below the cut is
-          missing. Fetch the run branch to read it whole.
-        </p>
-      )}
-
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
-        <Timeline
-          snapshots={state.snapshots}
-          selected={selected}
-          onSelect={(time) => setSelected(time === selected ? null : time)}
-        />
-        <div className="min-w-0 space-y-3 overflow-auto p-3">
-          {shown.map((file) => (
-            <FilePatch key={file.path} file={file} />
-          ))}
-          {shown.length === 0 && note && (
-            <p className="text-sm text-muted-foreground">{note}</p>
+        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground">
+          {snapshot ? (
+            <span>What changed {timeAgo(snapshot.time)}</span>
+          ) : (
+            <span>
+              Current diff against{' '}
+              <code title={state.base}>{state.base.slice(0, 8) || 'the fork point'}</code>
+            </span>
           )}
+          <span>
+            {shown.length} file{shown.length === 1 ? '' : 's'}
+          </span>
+          <span className="text-state-done">+{total(shown, 'additions')}</span>
+          <span className="text-destructive">-{total(shown, 'deletions')}</span>
+          <ConflictChips run={run} />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-6 px-2"
+            onClick={() => useStore.getState().refreshDiff(runID)}
+          >
+            <RefreshCw className={cn('size-3', state.status === 'loading' && 'animate-spin')} />
+            Refresh
+          </Button>
+          <ReviewCommands run={run} />
+        </div>
+
+        {failed && (
+          <p className="border-b bg-destructive/10 px-4 py-1.5 text-xs">
+            {error ?? 'The diff could not be loaded.'}
+          </p>
+        )}
+        {truncated && (
+          <p className="border-b bg-state-waiting/10 px-4 py-1.5 text-xs">
+            This diff is too large to render in full; everything below the cut is
+            missing. Fetch the run branch to read it whole.
+          </p>
+        )}
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
+          <Timeline
+            snapshots={state.snapshots}
+            selected={selected}
+            onSelect={(time) => setSelected(time === selected ? null : time)}
+          />
+          <div className="min-w-0 space-y-3 overflow-auto p-3">
+            {shown.map((file) => (
+              <FilePatch key={file.path} file={file} />
+            ))}
+            {shown.length === 0 && note && (
+              <p className="text-sm text-muted-foreground">{note}</p>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -186,6 +188,8 @@ function Timeline({
                 onClick={() => onSelect(snap.time)}
                 aria-pressed={selected === snap.time}
                 className={cn(
+                  focusRing,
+                  'focus-visible:-outline-offset-2',
                   'w-full px-3 py-1.5 text-left text-xs hover:bg-accent/50',
                   selected === snap.time && 'bg-accent',
                   !shownable && 'cursor-not-allowed opacity-60 hover:bg-transparent',

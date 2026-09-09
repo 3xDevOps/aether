@@ -13,81 +13,107 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useStore } from '@/store'
+import { canLaunch } from '@/lib/commands'
+import { keyboardBusy } from '@/lib/keys'
+import { shortcutLabel } from '@/lib/platform'
+import { cn, focusRing } from '@/lib/utils'
+import { useCapability, useSelfRole } from '@/store/hooks'
+
+/**
+ * The keys the shell itself listens for, as the reader has to press them.
+ * `nav-shortcuts.ts` implements every row below the first two; a key added
+ * there earns a row here.
+ */
+function shellKeys(launchable: boolean): [string, string][] {
+  return [
+    [shortcutLabel('K'), 'Open the command palette'],
+    ['Shift+/', 'Open this reference'],
+    ...(launchable ? ([['n', 'Launch a run']] as [string, string][]) : []),
+    ['g then b', 'Go to the board'],
+    ['g then l', 'Go to all runs'],
+    ['Esc', 'Leave a run for the board'],
+  ]
+}
 
 // The verb table below is static prose, not a registry crawl: the verbs live
 // in lib/commands.ts and this table is maintained alongside it. A new group
 // of commands earns a row here.
-const groups: { name: string; entries: [string, string][] }[] = [
-  {
-    name: 'Steer the focused run',
-    entries: [
-      ['Pause / Resume', 'Suspend or continue the run the centre view shows'],
-      [
-        'Send a message to the agent',
-        'Send text into the run without attaching to it',
+function commandGroups(): { name: string; entries: [string, string][] }[] {
+  return [
+    {
+      name: 'Steer the focused run',
+      entries: [
+        ['Pause / Resume', 'Suspend or continue the run the centre view shows'],
+        [
+          'Send a message to the agent',
+          'Send text into the run without attaching to it',
+        ],
+        ['Close as merged / abandoned', 'Finish the run and record how it ended'],
+        ['Kill run', 'Stop the run immediately'],
+        ['Delete run', 'Remove the run, checkout and transcript'],
+        ['Protect / Unprotect', 'Shield the run from the idle reaper'],
+        ['Relaunch run', 'Start a finished run over from its task'],
+        ['Pull branch', 'Fetch the run branch into the local workspace'],
+        ['Hand off', 'Reassign the run to another member'],
       ],
-      ['Close as merged / abandoned', 'Finish the run and record how it ended'],
-      ['Kill run', 'Stop the run immediately'],
-      ['Delete run', 'Remove the run, checkout and transcript'],
-      ['Protect / Unprotect', 'Shield the run from the idle reaper'],
-      ['Relaunch run', 'Start a finished run over from its task'],
-      ['Pull branch', 'Fetch the run branch into the local workspace'],
-      ['Hand off', 'Reassign the run to another member'],
-    ],
-  },
-  {
-    name: 'Go to',
-    entries: [
-      [
-        'Approvals, Activity, Members, Manage workspaces, Templates, Agents, Files',
-        'Surfaces, when the gateway serves their methods',
+    },
+    {
+      name: 'Go to',
+      entries: [
+        [
+          'Approvals, Activity, Members, Manage workspaces, Templates, Agents, Files',
+          'Surfaces, when the gateway serves their methods',
+        ],
+        ['Onboarding, Settings', 'Local gateway surfaces, when a link is configured'],
       ],
-      ['Onboarding, Settings', 'Local gateway surfaces, when a link is configured'],
-    ],
-  },
-  {
-    name: 'Board',
-    entries: [
-      ['Open the board / all runs', 'Jump between the board and the flat list'],
-      ['Launch a run / from a template', 'Start new work'],
-      ['Mark all runs seen', 'Clear the attention markers'],
-    ],
-  },
-  {
-    name: 'Terminal (in the terminal that has focus)',
-    entries: [
-      ['Copy', 'Ctrl+Shift+C - a plain Ctrl+C copies too when text is selected'],
-      ['Paste', 'Ctrl+Shift+V - plain Ctrl+V works as well'],
-      ['Find', 'Ctrl+Shift+F - Enter for the next match, Shift+Enter back, Esc closes'],
-      [
-        'Zoom',
-        '⌘= / Ctrl+= and ⌘- / Ctrl+- resize every terminal; ⌘0 / Ctrl+0 restores the default',
+    },
+    {
+      name: 'Board',
+      entries: [
+        ['Open the board / all runs', 'Jump between the board and the flat list'],
+        ['Launch a run / from a template', 'Start new work'],
+        ['Mark all runs seen', 'Clear the attention markers'],
       ],
-    ],
-  },
-]
-
-/** True when the key event happened inside a text field of any flavour. */
-function inField(e: KeyboardEvent): boolean {
-  const t = e.target
-  return (
-    t instanceof HTMLElement &&
-    (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
-  )
+    },
+    {
+      name: 'When a tab strip or a resize handle has focus',
+      entries: [
+        [
+          'Left / Right, Home / End',
+          'Move along a run or dock tab strip; Enter or Space opens the focused tab',
+        ],
+        [
+          'Arrow keys',
+          'Resize the sidebar or a dock 16px a press; Home and End are its limits, Enter collapses it',
+        ],
+      ],
+    },
+    {
+      name: 'Terminal (in the terminal that has focus)',
+      entries: [
+        ['Copy', 'Ctrl+Shift+C - a plain Ctrl+C copies too when text is selected'],
+        ['Paste', 'Ctrl+Shift+V - plain Ctrl+V works as well'],
+        ['Find', 'Ctrl+Shift+F - Enter for the next match, Shift+Enter back, Esc closes'],
+        [
+          'Zoom',
+          `${shortcutLabel('=')} and ${shortcutLabel('-')} resize every terminal; ` +
+            `${shortcutLabel('0')} restores the default`,
+        ],
+      ],
+    },
+  ]
 }
 
 export function ShortcutsButton() {
   const [open, setOpen] = useState(false)
+  // The same gate the handler answers to, so the reference never offers a key
+  // that would do nothing.
+  const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== '?' || e.metaKey || e.ctrlKey || e.altKey) return
-      // Typing "?" into a field is text, not a command; and a dialog already
-      // on screen keeps the keyboard - same guard as the palette's.
-      if (inField(e)) return
-      const s = useStore.getState()
-      if (s.paletteOpen || s.paletteDialog) return
+      if (e.defaultPrevented || keyboardBusy(e)) return
       e.preventDefault()
       setOpen(true)
     }
@@ -102,7 +128,7 @@ export function ShortcutsButton() {
         onClick={() => setOpen(true)}
         aria-label="Keyboard shortcuts"
         title="Keyboard shortcuts"
-        className="flex items-center gap-1 rounded px-1 hover:text-foreground"
+        className={cn(focusRing, 'flex items-center gap-1 rounded px-1 hover:text-foreground')}
       >
         <CircleHelp className="size-3.5" />
       </button>
@@ -117,22 +143,20 @@ export function ShortcutsButton() {
           </DialogHeader>
           <table className="w-full text-sm">
             <tbody>
-              <tr>
-                <td className="py-1 pr-4">
-                  <kbd className="rounded border px-1 font-sans text-[10px]">⌘K / Ctrl+K</kbd>
-                </td>
-                <td className="py-1 text-muted-foreground">Open the command palette</td>
-              </tr>
-              <tr>
-                <td className="py-1 pr-4">
-                  <kbd className="rounded border px-1 font-sans text-[10px]">Shift+/</kbd>
-                </td>
-                <td className="py-1 text-muted-foreground">Open this reference</td>
-              </tr>
+              {shellKeys(launchable).map(([key, what]) => (
+                <tr key={key}>
+                  <td className="py-1 pr-4">
+                    <kbd className="rounded border px-1 font-sans text-[10px] whitespace-nowrap">
+                      {key}
+                    </kbd>
+                  </td>
+                  <td className="py-1 text-muted-foreground">{what}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
           <div className="max-h-80 space-y-3 overflow-y-auto">
-            {groups.map((g) => (
+            {commandGroups().map((g) => (
               <div key={g.name}>
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
                   {g.name}

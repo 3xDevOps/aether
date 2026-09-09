@@ -6,6 +6,7 @@ import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { eventLabel, type EventType } from '@/lib/events'
 import { runLabel } from '@/lib/status'
+import { cn, focusRing } from '@/lib/utils'
 import type { RouteProps } from '@/routes/registry'
 import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
 import { useStore } from '@/store'
@@ -43,7 +44,7 @@ export function TimelineStatus() {
       type="button"
       onClick={() => navigate('timeline')}
       title="Open Activity"
-      className="flex items-center gap-1 rounded px-1 hover:text-foreground"
+      className={cn(focusRing, 'flex items-center gap-1 rounded px-1 hover:text-foreground')}
     >
       <History className="size-3.5" aria-hidden />
       Activity
@@ -191,7 +192,10 @@ function Select({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="max-w-44 truncate rounded-md border bg-background px-2 py-1 text-foreground"
+        className={cn(
+          focusRing,
+          'max-w-44 truncate rounded-md border bg-background px-2 py-1 text-foreground',
+        )}
       >
         {options.map(([id, name]) => (
           <option key={id} value={id}>

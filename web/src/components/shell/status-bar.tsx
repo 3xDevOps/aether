@@ -3,7 +3,7 @@ import { ThemeToggle } from '@/components/theme'
 import { formatBytes } from '@/lib/format'
 import type { ConnectionState } from '@/lib/stream'
 import type { DiskUsage } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { UnreachableKind } from '@/store/server'
@@ -105,7 +105,10 @@ function LocalStatus() {
       type="button"
       onClick={() => navigate(linked ? 'settings' : 'onboarding')}
       title={linked ? `Linked to ${link?.repo}` : 'Link a repository'}
-      className="hidden shrink-0 items-center gap-1.5 rounded px-1 hover:text-foreground md:flex"
+      className={cn(
+        focusRing,
+        'hidden shrink-0 items-center gap-1.5 rounded px-1 hover:text-foreground md:flex',
+      )}
     >
       <span
         className={cn(
@@ -149,7 +152,10 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
       onClick={clearDismissedUpdates}
       aria-label={`Update available: ${latest}`}
       title={`${latest} is available - show the update banner`}
-      className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1 hover:text-foreground"
+      className={cn(
+        focusRing,
+        'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1 hover:text-foreground',
+      )}
     >
       {label}
       <span className="size-2 rounded-full bg-state-waiting" aria-hidden />

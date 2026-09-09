@@ -17,6 +17,7 @@ import { friendly, formatBytes, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { ApiError, type Api, type EnvScanSession } from '@/lib/api'
 import { shellPath } from '@/lib/shell'
+import { cn, focusRing } from '@/lib/utils'
 import type {
   EnvScanStatus,
   HarnessStatus,
@@ -363,7 +364,7 @@ export function ProfileImport({
             {statusLine[phase.status]}
           </p>
           <details className="rounded-md border bg-card">
-            <summary className="cursor-pointer px-3 py-2 text-sm">
+            <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-sm')}>
               View process
             </summary>
             <pre className={pane}>{lines.join('\n')}</pre>
@@ -379,7 +380,7 @@ export function ProfileImport({
           <p className="text-xs text-state-failed">{phase.detail}</p>
           {phase.outputTail && (
             <details className="rounded-md border bg-card">
-              <summary className="cursor-pointer px-3 py-2 text-sm">
+              <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-sm')}>
                 Last output
               </summary>
               <pre className={pane}>{phase.outputTail}</pre>
@@ -488,7 +489,7 @@ function ProfileRow({
       <div className="flex items-start gap-3">
         <input
           type="checkbox"
-          className="mt-1"
+          className={cn(focusRing, 'mt-1')}
           aria-label={`Bring ${label} configuration`}
           checked={checked}
           onChange={(e) => onToggle(e.target.checked)}
@@ -563,7 +564,7 @@ function ProfileRow({
       </div>
       {excludedTotal > 0 && (
         <details className="rounded-md border bg-card">
-          <summary className="cursor-pointer px-3 py-2 text-xs">
+          <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-xs')}>
             {`Left out of ${label}: ${excludedTotal} ${
               excludedTotal === 1 ? 'entry' : 'entries'
             }`}

@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { Copy, Minus, Square, X } from 'lucide-react'
 import { type CSSProperties, useEffect, useState } from 'react'
-import { cn } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 
 /** The window buttons, present only when the shell draws none of its own. */
 export type DesktopControls = {
@@ -63,6 +63,7 @@ function ControlButton({
       onClick={onClick}
       style={NO_DRAG}
       className={cn(
+        focusRing,
         'grid h-full w-[46px] place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
         className,
       )}

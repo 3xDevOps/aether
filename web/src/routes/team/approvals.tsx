@@ -6,7 +6,7 @@ import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
 import { runLabel } from '@/lib/status'
-import { cn } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 import type { Approval } from '@/lib/types'
 import type { RouteProps } from '@/routes/registry'
 import { refreshInbox } from '@/routes/team/sync'
@@ -26,7 +26,10 @@ export function ApprovalStatus() {
       type="button"
       onClick={() => navigate('approvals')}
       title={error ?? 'Open Approvals'}
-      className="flex items-center gap-1 rounded px-1 text-state-needs-attention hover:underline"
+      className={cn(
+        focusRing,
+        'flex items-center gap-1 rounded px-1 text-state-needs-attention hover:underline',
+      )}
     >
       <ShieldQuestion className="size-3.5" aria-hidden />
       {error ? 'queue unreadable' : `${waiting} waiting`}
@@ -46,7 +49,10 @@ export function ApprovalBadge({ run }: CardSlotProps) {
       type="button"
       onClick={() => navigate('approvals')}
       title={`${waiting} waiting on a decision`}
-      className="flex shrink-0 items-center gap-1 rounded-sm bg-state-needs-attention/15 px-1 text-[11px] text-state-needs-attention"
+      className={cn(
+        focusRing,
+        'flex shrink-0 items-center gap-1 rounded-sm bg-state-needs-attention/15 px-1 text-[11px] text-state-needs-attention',
+      )}
     >
       <ShieldQuestion className="size-3.5" aria-hidden />
       {waiting}
@@ -190,7 +196,7 @@ function Row({
           <button
             type="button"
             onClick={() => navigate('terminal', { runId: run.id })}
-            className="max-w-60 truncate hover:text-foreground hover:underline"
+            className={cn(focusRing, 'max-w-60 truncate hover:text-foreground hover:underline')}
           >
             {runLabel(run)}
           </button>

@@ -20,6 +20,7 @@ import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
 import type { Member } from '@/lib/types'
+import { cn, field, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
@@ -35,11 +36,6 @@ const presetColors = [
   '#46f0f0',
   '#4363d8',
 ]
-
-// The house field style, duplicated per file rather than shared; see the
-// admin dialogs for the other copies.
-const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
 
@@ -331,7 +327,10 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                   type="button"
                   aria-label={`Set color ${color}`}
                   aria-pressed={self.color === color}
-                  className="size-6 rounded-full border ring-ring/50 hover:ring-[3px] aria-pressed:ring-[3px]"
+                  className={cn(
+                    focusRing,
+                    'size-6 rounded-full border ring-ring/50 hover:ring-[3px] aria-pressed:ring-[3px]',
+                  )}
                   style={{ backgroundColor: color }}
                   onClick={() => void recolor(color)}
                 />
@@ -416,7 +415,7 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
                 ref={codeRef}
                 readOnly
                 aria-label="Invite code"
-                className="w-full rounded-md border bg-background px-2 py-1 font-mono text-sm"
+                className={cn(field, 'font-mono')}
                 value={result.code}
                 onFocus={(e) => e.target.select()}
               />
