@@ -66,13 +66,17 @@ func cacheHome(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", dir)
 }
 
-// applyForRebuild runs update.apply against a gateway whose binary swap is
-// stubbed, and returns the decoded answer.
-func applyForRebuild(t *testing.T, g *Gateway) struct {
+// applyAnswer is the part of the update.apply response these tests read.
+type applyAnswer struct {
+	Version    string `json:"version"`
 	Restarting bool   `json:"restarting"`
 	Rebuilding bool   `json:"rebuilding"`
 	Note       string `json:"note"`
-} {
+}
+
+// applyForRebuild runs update.apply against a gateway whose binary swap is
+// stubbed, and returns the decoded answer.
+func applyForRebuild(t *testing.T, g *Gateway) applyAnswer {
 	t.Helper()
 	stubApply(t, func(context.Context, string, string) ([]string, error) {
 		return []string{"/usr/local/bin/aether"}, nil
@@ -81,11 +85,7 @@ func applyForRebuild(t *testing.T, g *Gateway) struct {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
-	var got struct {
-		Restarting bool   `json:"restarting"`
-		Rebuilding bool   `json:"rebuilding"`
-		Note       string `json:"note"`
-	}
+	var got applyAnswer
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}

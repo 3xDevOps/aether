@@ -39,6 +39,9 @@ type rebuildState struct {
 	phase string
 	err   string
 	tail  []string
+	// tag is the release the build was made from, so a later apply can tell
+	// a build of this release from a build of the one before it.
+	tag string
 	// running guards against a second update.apply starting a second build
 	// over the first one's build directory.
 	running bool
@@ -87,19 +90,29 @@ func (s *rebuildState) addLine(line string) {
 	}
 }
 
-// claim takes the one-build-at-a-time slot, false when a build is already
-// running.
-func (s *rebuildState) claim() bool {
+// claim takes the one-build-at-a-time slot for tag. A claim that loses
+// names the release the running build is for, which is not always this one.
+func (s *rebuildState) claim(tag string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.running {
-		return false
+		return s.tag, false
 	}
 	s.running = true
 	s.phase = localops.PhaseUnpacking
 	s.err = ""
 	s.tail = nil
-	return true
+	s.tag = tag
+	return tag, true
+}
+
+func (s *rebuildState) builtRelease() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.phase != localops.PhaseDone {
+		return ""
+	}
+	return s.tag
 }
 
 func (s *rebuildState) release() {
@@ -120,8 +133,12 @@ const (
 	rebuildNone rebuildOutcome = iota
 	// rebuildStarted: a build is running because of this call.
 	rebuildStarted
-	// rebuildBusy: a build this gateway started earlier is still running.
+	// rebuildBusy: a build this gateway started earlier for this same
+	// release is still running.
 	rebuildBusy
+	// rebuildStale: a build for an earlier release is still running, so
+	// this release has no build of its own and none can start yet.
+	rebuildStale
 )
 
 // startAppRebuild rebuilds an installed desktop app with the CLI that
@@ -130,7 +147,7 @@ const (
 // The build runs as a child of `<bin> gui build --json` rather than in
 // this process, because that binary carries the shell sources the new app
 // has to be built from - this one is the version being replaced.
-func (g *Gateway) startAppRebuild(bin string) rebuildOutcome {
+func (g *Gateway) startAppRebuild(bin, tag string) rebuildOutcome {
 	who, err := lookupRealUser()
 	if err != nil {
 		msg := "find the account to build for: " + err.Error()
@@ -146,7 +163,10 @@ func (g *Gateway) startAppRebuild(bin string) rebuildOutcome {
 	if _, ok := installedDesktopApp(runtime.GOOS, who); !ok {
 		return rebuildNone
 	}
-	if !g.rebuild.claim() {
+	if running, ok := g.rebuild.claim(tag); !ok {
+		if running != tag {
+			return rebuildStale
+		}
 		return rebuildBusy
 	}
 	argv := rebuildArgv(bin, who, true)

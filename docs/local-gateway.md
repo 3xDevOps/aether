@@ -346,7 +346,7 @@ authority.
 | `forward.start` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"state":"active"}`; idempotent for the same target and port |
 | `forward.stop` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"state":"stopped"}` |
 | `forward.status` | `{}` | `{"forwards":[{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"conns":1}]}` sorted by target, then port |
-| `update.check` | `{}` | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `cli_path` and `install_method` absent when the binary could not be probed) |
+| `update.check` | `{"refresh":bool}` (optional; `true` skips the cached release lookup) | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"shell_build_error":"...","cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `shell_build_error` only when the last in-app desktop rebuild failed; `cli_path` and `install_method` absent when the binary could not be probed) |
 | `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
 | `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
 
@@ -557,14 +557,26 @@ no SSH key is offered and the server requires one, it may create
   `version`, `commit`, `latest`, `update_available`, `asset`, `release_url`,
   `dev`, `disabled`, `can_self_update` and `checked_at`
   ([install.md](install.md#upgrading)). The gateway resolves the latest
-  release at most once every six hours and serves the cached answer in
-  between, so a page load never costs a request to GitHub.
-  `server_behind` compares the linked server's version with that same latest
-  release; `supervised` reports whether this gateway was started by the
-  desktop shell (`aether gui --json`), which is what decides whether
-  `update.apply` may restart it. `shell_build_error` is present only when
-  the last in-app desktop rebuild failed, and carries that build's own
-  error.
+  release at most once an hour and serves the cached answer in between, so
+  a page load never costs a request to GitHub. `refresh: true` skips the
+  cache and dials, and the answer it resolves replaces the cached one; the
+  dashboard sets it on the read behind the Update button, which names the
+  release about to be installed. A refresh that cannot reach GitHub is that
+  caller's error - `-32004`, `check for releases: <the lookup's own
+  message>` - rather than the cached answer, and it leaves any cached
+  success in place. A failed lookup is cached for five minutes, so an
+  offline machine is not re-dialed every time a page loads or a window
+  comes back. Lookups are numbered, so one that started earlier never
+  replaces the cached answer of one that started later: two straddling a
+  release would otherwise leave the superseded tag cached for the hour.
+  Those two are the verb's only errors, plus `-32602` for a `refresh` that
+  is not a boolean. `server_behind` compares the linked server's version
+  with that same latest release; `supervised` reports
+  whether this gateway was started by the desktop shell
+  (`aether gui --json`), which is what decides whether `update.apply` may
+  restart it. `shell_build_error`
+  is present only when the last in-app desktop rebuild failed, and carries
+  that build's own error.
 - `cli_path` is the binary `update.apply` would replace, symlinks resolved,
   and `install_method` how: `direct` when its directory is writable by this
   user, so the swap just happens; `admin-prompt` when it is not and the
@@ -597,22 +609,32 @@ no SSH key is offered and the server requires one, it may create
   false, and the backend's own message in `server_error`. The CLI half is
   about a binary on this machine and has nothing to do with the SSH hop, so
   a server outage must not take the CLI update prompt down with it.
-- `update.apply` runs the swap `aether update` runs, on the `aether`
-  binary this gateway is served from - and `aether-server` beside it on a
-  Linux server host, in which case `restart_command` carries the
-  `sudo systemctl restart aether-server` the command prints, because the
-  running server keeps the old code until its unit restarts. On a
-  supervised gateway it answers `restarting: true`; started from a terminal
-  it answers `restarting: false` and a note telling the user to rerun
-  `aether gui`. It never updates a *remote* server: the dashboard has no
-  authority there, and the server banner names the commands to run on that
-  host instead. A second `update.apply` for a release this gateway process
-  already installed does not download or prompt again: the binary is
-  already on disk, so the answer picks up after the swap. When that
-  release's desktop-app rebuild already finished in this process, no second
+- `update.apply` takes the one-install-at-a-time slot before anything else,
+  so a second click pays for no lookup, then resolves the latest release
+  fresh - never from the cached answer, so a click installs what is newest
+  at that moment rather than what was newest when the banner was drawn. A
+  lookup that fails is the call's error; no cached tag stands in for it. It
+  then runs the swap `aether update` runs, on the `aether` binary this gateway
+  is served from - and `aether-server` beside it on a Linux server host, in
+  which case `restart_command` carries the `sudo systemctl restart
+  aether-server` the command prints, because the running server keeps the
+  old code until its unit restarts. On a supervised gateway it answers
+  `restarting: true`; started from a terminal it answers
+  `restarting: false` and a note telling the user to rerun `aether gui`. It
+  never updates a *remote* server: the dashboard has no authority there,
+  and the server banner names the commands to run on that host instead. A
+  second `update.apply` for a release this gateway process already
+  installed does not download or prompt again: the binary is already on
+  disk, so the answer picks up after the swap. Both that guard and the
+  desktop-app rebuild key on the tag this call resolved, so a newer release
+  that shipped in between is installed and rebuilt rather than skipped.
+  When this release's rebuild already finished in this process, no second
   rebuild starts: it answers `rebuilding: false` with the note `the desktop
   app was rebuilt; restart it to use the new version`, and a supervised
-  gateway does not exit again.
+  gateway does not exit again. One build runs at a time, so a newer release
+  arriving while an older one is still building has no build of its own
+  yet: that answers `rebuilding: false` with the note `a rebuild of an
+  earlier release is still running; rerun the update once it finishes`.
 - This process never gains privileges. Where the binary's directory is
   writable (`install_method: "direct"`) the release is downloaded, verified
   against `checksums.txt`, staged beside the binary and renamed over it,

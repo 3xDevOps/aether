@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,14 +24,25 @@ const (
 )
 
 // releaseChecker points the update verbs at a stub that answers the
-// GitHub latest-release redirect, so no test dials the network.
-func releaseChecker(t *testing.T) *selfupdate.Checker {
+// GitHub latest-release redirect, so no test dials the network. The
+// returned setter publishes a different tag mid-test, which is how a
+// release shipping while the app is open is reproduced.
+func releaseChecker(t *testing.T) (*selfupdate.Checker, func(string)) {
 	t.Helper()
+	var mu sync.Mutex
+	tag := releaseTag
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/releases/tag/"+releaseTag, http.StatusFound)
+		mu.Lock()
+		latest := tag
+		mu.Unlock()
+		http.Redirect(w, r, "/releases/tag/"+latest, http.StatusFound)
 	}))
 	t.Cleanup(srv.Close)
-	return selfupdate.NewChecker(srv.URL, time.Hour)
+	return selfupdate.NewChecker(srv.URL, time.Hour), func(next string) {
+		mu.Lock()
+		defer mu.Unlock()
+		tag = next
+	}
 }
 
 // pinVersion makes this a release build for one test; the check reads the
@@ -53,16 +65,25 @@ func stubApply(t *testing.T, fn func(context.Context, string, string) ([]string,
 // updateGateway builds a gateway whose release check is stubbed.
 func updateGateway(t *testing.T, backend Backend, supervised bool) *Gateway {
 	t.Helper()
+	g, _ := releasingGateway(t, backend, supervised)
+	return g
+}
+
+// releasingGateway is updateGateway plus the setter that publishes a new
+// tag from its stub, for the tests where a release ships mid-run.
+func releasingGateway(t *testing.T, backend Backend, supervised bool) (*Gateway, func(string)) {
+	t.Helper()
+	checker, setTag := releaseChecker(t)
 	g, err := New(Config{
 		Backend:    backend,
 		CLI:        cli.Config{},
-		Update:     releaseChecker(t),
+		Update:     checker,
 		Supervised: supervised,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return g
+	return g, setTag
 }
 
 func TestUpdateCheckReportsBehindServer(t *testing.T) {
@@ -169,5 +190,39 @@ func TestUpdateApplyRefusesDevBuild(t *testing.T) {
 	}
 	if !strings.Contains(perr.Message, "dev build") {
 		t.Fatalf("message = %q, want it to name the dev build", perr.Message)
+	}
+}
+
+// TestUpdateCheckRefreshBypassesTheCache covers the read behind the Update
+// button: it names the tag that is about to be installed, so it may not be
+// served from an answer that is up to an hour old.
+func TestUpdateCheckRefreshBypassesTheCache(t *testing.T) {
+	pinVersion(t)
+	g, setTag := releasingGateway(t, &verbStubBackend{}, false)
+
+	latest := func(params string) string {
+		t.Helper()
+		rec := do(g, http.MethodPost, "/local/v1/update.check", params, true)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+		}
+		var got struct {
+			CLI selfupdate.Check `json:"cli"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got.CLI.Latest
+	}
+
+	if tag := latest("{}"); tag != releaseTag {
+		t.Fatalf("latest = %q, want %q", tag, releaseTag)
+	}
+	setTag("v1.4.0")
+	if tag := latest("{}"); tag != releaseTag {
+		t.Fatalf("cached latest = %q, want the cached %q", tag, releaseTag)
+	}
+	if tag := latest(`{"refresh":true}`); tag != "v1.4.0" {
+		t.Fatalf("refreshed latest = %q, want v1.4.0", tag)
 	}
 }

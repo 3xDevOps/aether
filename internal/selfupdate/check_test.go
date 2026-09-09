@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -14,15 +15,29 @@ import (
 
 // tagServer answers /releases/latest with the redirect GitHub sends,
 // counting how many times it was dialed.
-func tagServer(t *testing.T, tag string) (*httptest.Server, *atomic.Int64) {
+// The returned setter publishes a different tag mid-test; the empty string
+// breaks the endpoint, which is how a failed lookup is driven.
+func tagServer(t *testing.T, tag string) (*httptest.Server, *atomic.Int64, func(string)) {
 	t.Helper()
 	var hits atomic.Int64
+	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		http.Redirect(w, r, "/releases/tag/"+tag, http.StatusFound)
+		mu.Lock()
+		latest := tag
+		mu.Unlock()
+		if latest == "" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(w, r, "/releases/tag/"+latest, http.StatusFound)
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &hits
+	return srv, &hits, func(next string) {
+		mu.Lock()
+		defer mu.Unlock()
+		tag = next
+	}
 }
 
 // fakeClock is a hand-wound clock, so a test can expire a cache without
@@ -123,7 +138,7 @@ func TestAssetName(t *testing.T) {
 
 func TestCheckReportsUpdate(t *testing.T) {
 	setVersion(t, "v1.2.3", "abc1234")
-	srv, hits := tagServer(t, "v1.3.0")
+	srv, hits, _ := tagServer(t, "v1.3.0")
 
 	c := NewChecker(srv.URL, time.Hour)
 	got, err := c.Check(t.Context())
@@ -160,7 +175,7 @@ func TestCheckReportsUpdate(t *testing.T) {
 
 func TestCheckReportsUpToDate(t *testing.T) {
 	setVersion(t, "v1.2.3", "abc1234")
-	srv, _ := tagServer(t, "v1.2.3")
+	srv, _, _ := tagServer(t, "v1.2.3")
 
 	got, err := NewChecker(srv.URL, time.Hour).Check(t.Context())
 	if err != nil {
@@ -176,7 +191,7 @@ func TestCheckReportsUpToDate(t *testing.T) {
 
 func TestCheckCacheExpires(t *testing.T) {
 	setVersion(t, "v1.2.3", "abc1234")
-	srv, hits := tagServer(t, "v1.3.0")
+	srv, hits, _ := tagServer(t, "v1.3.0")
 
 	clock := newClock()
 	c := withClock(NewChecker(srv.URL, time.Hour), clock)
@@ -235,7 +250,7 @@ func TestCheckCachesFailures(t *testing.T) {
 
 func TestCheckDevBuildNeverDials(t *testing.T) {
 	setVersion(t, "dev", "unknown")
-	srv, hits := tagServer(t, "v1.3.0")
+	srv, hits, _ := tagServer(t, "v1.3.0")
 
 	got, err := NewChecker(srv.URL, time.Hour).Check(t.Context())
 	if err != nil {
@@ -252,7 +267,7 @@ func TestCheckDevBuildNeverDials(t *testing.T) {
 func TestCheckOptOutNeverDials(t *testing.T) {
 	setVersion(t, "v1.2.3", "abc1234")
 	t.Setenv(OptOutEnv, "1")
-	srv, hits := tagServer(t, "v1.3.0")
+	srv, hits, _ := tagServer(t, "v1.3.0")
 
 	got, err := NewChecker(srv.URL, time.Hour).Check(t.Context())
 	if err != nil {
@@ -263,5 +278,193 @@ func TestCheckOptOutNeverDials(t *testing.T) {
 	}
 	if n := hits.Load(); n != 0 {
 		t.Fatalf("dialed %d times with %s set", n, OptOutEnv)
+	}
+}
+
+func TestCheckFreshBypassesAndReplacesTheCache(t *testing.T) {
+	setVersion(t, "v1.2.3", "abc1234")
+	srv, _, setTag := tagServer(t, "v1.3.0")
+
+	c := NewChecker(srv.URL, time.Hour)
+	latest := func(get func(context.Context) (Check, error)) string {
+		t.Helper()
+		got, err := get(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Latest
+	}
+
+	if tag := latest(c.Check); tag != "v1.3.0" {
+		t.Fatalf("latest = %q, want v1.3.0", tag)
+	}
+	setTag("v1.4.0")
+	if tag := latest(c.Check); tag != "v1.3.0" {
+		t.Fatalf("cached latest = %q, want the cached v1.3.0", tag)
+	}
+	if tag := latest(c.CheckFresh); tag != "v1.4.0" {
+		t.Fatalf("fresh latest = %q, want v1.4.0", tag)
+	}
+	// The fresh answer replaced the cached one, so the checks that follow
+	// do not hand back the tag it superseded.
+	setTag("v1.5.0")
+	if tag := latest(c.Check); tag != "v1.4.0" {
+		t.Fatalf("cached latest = %q, want the freshly cached v1.4.0", tag)
+	}
+}
+
+// The install path asks through CheckFresh, so a dial that fails has to
+// reach it as an error. Handing back a cached tag instead would install a
+// release the check never resolved.
+func TestCheckFreshFailureDoesNotBorrowTheCachedAnswer(t *testing.T) {
+	setVersion(t, "v1.2.3", "abc1234")
+	srv, _, setTag := tagServer(t, "v1.3.0")
+
+	c := NewChecker(srv.URL, time.Hour)
+	if _, err := c.Check(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	setTag("")
+	got, err := c.CheckFresh(t.Context())
+	if err == nil {
+		t.Fatalf("CheckFresh = %+v, want the dial failure", got)
+	}
+	if got.Latest != "" {
+		t.Fatalf("latest = %q, want no tag from a failed lookup", got.Latest)
+	}
+	// The cached success outlives the failure: the periodic checks behind it
+	// keep the banner they already had rather than losing it to a blip.
+	cached, err := c.Check(t.Context())
+	if err != nil || cached.Latest != "v1.3.0" {
+		t.Fatalf("Check = %+v, %v, want the cached v1.3.0", cached, err)
+	}
+}
+
+// Two callers arrive on an expired cache; the slow one's dial fails after
+// the other has stored a success. The success is the better information of
+// the two, so it is what the loser is handed.
+func TestCheckPrefersASuccessResolvedWhileItDialed(t *testing.T) {
+	setVersion(t, "v1.2.3", "abc1234")
+	arrived, release := make(chan struct{}), make(chan struct{})
+	var slow atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if slow.CompareAndSwap(false, true) {
+			close(arrived)
+			<-release
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(w, r, "/releases/tag/v1.3.0", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := NewChecker(srv.URL, time.Hour)
+	loser := make(chan Check, 1)
+	go func() {
+		got, err := c.Check(context.Background())
+		if err != nil {
+			t.Errorf("the loser got its own error: %v", err)
+		}
+		loser <- got
+	}()
+
+	<-arrived
+	if _, err := c.Check(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if got := <-loser; got.Latest != "v1.3.0" {
+		t.Fatalf("loser latest = %q, want the answer the winner resolved", got.Latest)
+	}
+}
+
+// A retry inside a cached failure's window must not push that window out,
+// or a member clicking Update while offline keeps every other check on the
+// stale error indefinitely.
+func TestCheckFailureWindowSurvivesRetries(t *testing.T) {
+	setVersion(t, "v1.2.3", "abc1234")
+	srv, hits, _ := tagServer(t, "")
+	clock := newClock()
+	c := withClock(NewChecker(srv.URL, time.Hour), clock)
+
+	if _, err := c.Check(t.Context()); err == nil {
+		t.Fatal("expected the endpoint to fail")
+	}
+	clock.advance(4 * time.Minute)
+	if _, err := c.CheckFresh(t.Context()); err == nil {
+		t.Fatal("expected the retry to fail too")
+	}
+	clock.advance(2 * time.Minute)
+	if _, err := c.Check(t.Context()); err == nil {
+		t.Fatal("expected another failure")
+	}
+	if n := hits.Load(); n != 3 {
+		t.Fatalf("dialed %d times, want the window to have expired 5 minutes after the first failure", n)
+	}
+}
+
+// The dashboard re-checks on half this period, so the hour is what bounds
+// how long a published release waits before a banner names it.
+func TestDefaultTTLHoldsASuccessForAnHour(t *testing.T) {
+	setVersion(t, "v1.2.3", "abc1234")
+	srv, _, setTag := tagServer(t, "v1.3.0")
+	clock := newClock()
+	c := withClock(NewChecker(srv.URL, defaultTTL), clock)
+
+	if _, err := c.Check(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	setTag("v1.4.0")
+	clock.advance(59 * time.Minute)
+	got, err := c.Check(t.Context())
+	if err != nil || got.Latest != "v1.3.0" {
+		t.Fatalf("check = %+v, %v, want the cached v1.3.0 inside the hour", got, err)
+	}
+	clock.advance(2 * time.Minute)
+	if got, err = c.Check(t.Context()); err != nil || got.Latest != "v1.4.0" {
+		t.Fatalf("check = %+v, %v, want v1.4.0 once the hour passed", got, err)
+	}
+}
+
+// Two fresh lookups straddle a release and the one that started first
+// answers last, carrying the tag that has since been superseded. The cache
+// has to keep the newer answer, or every check behind it advertises the
+// older release for a whole period.
+func TestCheckFreshDoesNotRegressTheCacheToAnOlderLookup(t *testing.T) {
+	setVersion(t, "v1.2.3", "abc1234")
+	arrived, release := make(chan struct{}), make(chan struct{})
+	var slow atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if slow.CompareAndSwap(false, true) {
+			close(arrived)
+			<-release
+			http.Redirect(w, r, "/releases/tag/v1.3.0", http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, "/releases/tag/v1.4.0", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := NewChecker(srv.URL, time.Hour)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// The caller still gets what it resolved; only the cache is ordered.
+		got, err := c.CheckFresh(context.Background())
+		if err != nil || got.Latest != "v1.3.0" {
+			t.Errorf("first lookup = %+v, %v, want its own v1.3.0", got, err)
+		}
+	}()
+
+	<-arrived
+	if got, err := c.CheckFresh(t.Context()); err != nil || got.Latest != "v1.4.0" {
+		t.Fatalf("second lookup = %+v, %v, want v1.4.0", got, err)
+	}
+	close(release)
+	<-done
+
+	cached, err := c.Check(t.Context())
+	if err != nil || cached.Latest != "v1.4.0" {
+		t.Fatalf("cached = %+v, %v, want the later lookup's answer", cached, err)
 	}
 }

@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -247,5 +249,135 @@ func TestUpdateApplySupervisedResponseSurvivesShutdown(t *testing.T) {
 		}
 	case <-time.After(closeTimeout + time.Second):
 		t.Fatal("gateway never shut down")
+	}
+}
+
+// The dashboard checks, a release ships while the app is open, and the
+// member clicks Update. The click must install what is newest now, not the
+// tag the cached check answered with.
+func TestUpdateApplyInstallsTheReleaseThatIsNewestAtTheClick(t *testing.T) {
+	pinVersion(t)
+	stubRebuild(t, "/bin/true", false)
+	g, setTag := releasingGateway(t, &verbStubBackend{}, false)
+
+	rec := do(g, http.MethodPost, "/local/v1/update.check", "{}", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("check status = %d: %s", rec.Code, rec.Body)
+	}
+
+	setTag("v1.4.0")
+	var installed string
+	stubApply(t, func(_ context.Context, _, tag string) ([]string, error) {
+		installed = tag
+		return []string{"/usr/local/bin/aether"}, nil
+	})
+
+	rec = do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply status = %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if installed != "v1.4.0" {
+		t.Errorf("installed %q, want the release that is newest at the click", installed)
+	}
+	if got.Version != "v1.4.0" {
+		t.Errorf("version = %q, want the tag that was installed", got.Version)
+	}
+}
+
+// A release this process already installed is on disk, but a newer one is
+// not: the guard that skips the second download keys on the release, not on
+// "something was installed here".
+func TestUpdateApplyInstallsAReleaseNewerThanTheOneOnDisk(t *testing.T) {
+	pinVersion(t)
+	stubRebuild(t, "/bin/true", false)
+	g, setTag := releasingGateway(t, &verbStubBackend{}, false)
+
+	var installed []string
+	stubApply(t, func(_ context.Context, _, tag string) ([]string, error) {
+		installed = append(installed, tag)
+		return []string{"/usr/local/bin/aether"}, nil
+	})
+	for range 2 {
+		if rec := do(g, http.MethodPost, "/local/v1/update.apply", "{}", true); rec.Code != http.StatusOK {
+			t.Fatalf("apply status = %d: %s", rec.Code, rec.Body)
+		}
+	}
+	setTag("v1.4.0")
+	if rec := do(g, http.MethodPost, "/local/v1/update.apply", "{}", true); rec.Code != http.StatusOK {
+		t.Fatalf("apply status = %d: %s", rec.Code, rec.Body)
+	}
+	if want := []string{releaseTag, "v1.4.0"}; !slices.Equal(installed, want) {
+		t.Fatalf("installed %v, want %v: one download per release", installed, want)
+	}
+}
+
+// A release shipping mid-build: the running build is for the release
+// before this one, so it covers nothing here and must not be reported as
+// this release's rebuild.
+func TestUpdateApplyDoesNotClaimAnEarlierReleasesRebuild(t *testing.T) {
+	pinVersion(t)
+	stubRebuild(t, scriptBuild(t, `printf '{"phase":"packaging"}\n'`+"\nexec sleep 120\n"), true)
+	g, setTag := releasingGateway(t, &verbStubBackend{}, false)
+	stubApply(t, func(context.Context, string, string) ([]string, error) {
+		return []string{"/usr/local/bin/aether"}, nil
+	})
+
+	rec := do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first apply status = %d: %s", rec.Code, rec.Body)
+	}
+	awaitPhase(t, g, localops.PhasePackaging)
+	t.Cleanup(func() { _ = g.Close() })
+
+	setTag("v1.4.0")
+	rec = do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second apply status = %d: %s", rec.Code, rec.Body)
+	}
+	var got applyAnswer
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != "v1.4.0" {
+		t.Fatalf("version = %q, want the newer release", got.Version)
+	}
+	if got.Rebuilding {
+		t.Fatalf("apply = %+v, want no claim on a build made from %s", got, releaseTag)
+	}
+	if !strings.Contains(got.Note, "earlier release") {
+		t.Fatalf("note = %q, want it to name the build that is running", got.Note)
+	}
+}
+
+// The banner offered an update from a cached check and the fresh resolve
+// disagrees - the release was yanked, or `aether update` ran in a terminal
+// while the app was open. Nothing may be downloaded over a current build.
+func TestUpdateApplyRefusesWhenTheFreshResolveSaysItIsCurrent(t *testing.T) {
+	pinVersion(t)
+	stubRebuild(t, "/bin/true", false)
+	g, setTag := releasingGateway(t, &verbStubBackend{}, false)
+
+	if rec := do(g, http.MethodPost, "/local/v1/update.check", "{}", true); rec.Code != http.StatusOK {
+		t.Fatalf("check status = %d: %s", rec.Code, rec.Body)
+	}
+	setTag(runningTag)
+	stubApply(t, func(context.Context, string, string) ([]string, error) {
+		t.Fatal("this build is already on the newest release; nothing may be downloaded")
+		return nil, nil
+	})
+
+	rec := do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeInvalidState {
+		t.Fatalf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(perr.Message, "already on "+runningTag) {
+		t.Fatalf("message = %q, want the newest-release refusal", perr.Message)
 	}
 }
