@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
+import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
 import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
@@ -113,7 +114,7 @@ function TerminalView({ params }: RouteProps) {
   }, [markControlTaken, run?.member_id, run?.status, runID, self.id, setTerminal, terminal])
 
   if (!run) {
-    return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
+    return <MissingRun />
   }
 
   const toggleWrite = () => {

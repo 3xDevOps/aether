@@ -69,3 +69,14 @@ it('shows the last commit row only when its timestamp is set', () => {
   render(<RunView params={{ runId: 'run_1' }} />)
   expect(screen.queryByText('Last commit')).toBeNull()
 })
+
+// The Overview tab hands an unknown run to the shared component rather than
+// rendering a dead end of its own.
+it('sends an unknown run to the shared missing-run view', () => {
+  seed()
+  useStore.setState({ hydrated: true, hydrationError: null, streamDead: false })
+
+  render(<RunView params={{ runId: 'run_missing' }} />)
+
+  expect(screen.getByRole('button', { name: 'Back to board' })).toBeDefined()
+})

@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
@@ -53,7 +54,7 @@ function DiffView({ params }: RouteProps) {
   const note = emptyNote(snapshot, interval, state)
 
   if (!run) {
-    return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
+    return <MissingRun />
   }
 
   return (

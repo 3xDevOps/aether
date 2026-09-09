@@ -552,6 +552,19 @@ the last commit. All four tabs render one `RunHeader`
 reader, and `isRunRoute` in `tabs.tsx` is what keeps a sidebar row lit while
 they move between the tabs.
 
+A run id none of the four tabs can find renders one shared `MissingRun`
+(`src/components/missing-run.tsx`) instead of that header, its tab strip and
+four copies of a sentence with nothing to press. What it says is what the
+store actually knows. While the server is unreachable it reports that, in
+the same words `run-list.tsx` uses and with the same split - a dead token is
+not a server that is retrying, so that one says what the error recorded -
+rather than a claim about the run. While the store is still hydrating it is
+a skeleton, held behind `useDelayed` so a fast load never flashes one. Only
+once the store has hydrated does it say the run is not on the server, and
+offer **Back to board**. The launch paths seed the run they just started -
+both template launches and the onboarding first-run form, the way
+`launch-dialog.tsx` does - so a launch never lands on the deleted claim.
+
 The center view renders the run-detail route without a key, so one
 `TerminalView` is reused across a run switch. The Terminal tab therefore
 clears the pane when the run id changes rather than waiting for the attach
