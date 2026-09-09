@@ -61,7 +61,105 @@ function open() {
   fireEvent.keyDown(window, { key: 'k', metaKey: true })
 }
 
+/** Appends markup the guard has to notice, removed however the test ends. */
+function overlay(markup: string): void {
+  const host = document.createElement('div')
+  host.setAttribute('data-probe', '')
+  host.innerHTML = markup
+  document.body.append(host)
+  onTestFinished(() => host.remove())
+}
+
 describe('command palette', () => {
+  // Every way into a run lands on the Terminal tab, the terminal takes the
+  // focus when it mounts, and xterm swallows Tab. This shortcut is the way
+  // out, so a terminal has no claim on it; a modal does.
+  it.each([
+    ['a terminal', '<div class="xterm"><span></span></div>', true],
+    ['a dialog', '<div role="dialog"><button type="button">ok</button></div>', false],
+    ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>', false],
+  ])('opens from inside %s: %s', (_, markup, opens) => {
+    render(<CommandPalette />)
+    overlay(markup)
+
+    fireEvent.keyDown(document.querySelector('[data-probe] *') as HTMLElement, {
+      key: 'k',
+      ctrlKey: true,
+    })
+
+    expect(useStore.getState().paletteOpen).toBe(opens)
+  })
+
+  // A control that disables itself mid-flight - the Send button on the form
+  // this key would stack over - drops the keyboard on the body without a
+  // focusout, and Radix's focus scope watches children rather than attributes,
+  // so it does not take it back.
+  it.each([
+    ['a dialog', '<div role="dialog"><button type="button" disabled>ok</button></div>'],
+    ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>'],
+  ])('stays shut under an open %s when focus has fallen to the body', (_, markup) => {
+    render(<CommandPalette />)
+    overlay(markup)
+
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+
+    expect(useStore.getState().paletteOpen).toBe(false)
+  })
+
+  it('keeps the chord away from the browser whether or not it acts on it', () => {
+    render(<CommandPalette />)
+    overlay('<div role="dialog"><button type="button">ok</button></div>')
+
+    const standDown = fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+    // fireEvent returns false once a listener has called preventDefault.
+    expect(standDown).toBe(false)
+  })
+
+  // The forms this component hosts are store state, so they are asked of the
+  // store: they may be mid-render, or have dropped the keyboard entirely.
+  it('stays shut while it is hosting a form of its own', () => {
+    useStore.setState({ paletteDialog: 'launch' })
+    render(<CommandPalette />)
+
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+
+    expect(useStore.getState().paletteOpen).toBe(false)
+  })
+
+  it('leaves a dismissed dialog no claim on the chord', () => {
+    render(<CommandPalette />)
+    overlay('<div role="dialog" data-state="closed"></div>')
+
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+
+    expect(useStore.getState().paletteOpen).toBe(true)
+  })
+
+  it('names the modifier the reader actually has', () => {
+    // shortcutLabel prefers userAgentData; jsdom defines neither, so both
+    // have to be stubbed or the test stops testing what it claims.
+    const platform = (value: string) => {
+      Object.defineProperty(navigator, 'platform', { value, configurable: true })
+      Object.defineProperty(navigator, 'userAgentData', {
+        value: { platform: value },
+        configurable: true,
+      })
+    }
+    const original = navigator.platform
+    onTestFinished(() => {
+      platform(original)
+    })
+
+    platform('Linux x86_64')
+    const { unmount } = render(<CommandPalette />)
+    expect(screen.getByRole('button', { name: 'Commands' }).textContent).toContain('Ctrl+K')
+    unmount()
+
+    platform('MacIntel')
+    render(<CommandPalette />)
+    expect(screen.getByRole('button', { name: 'Commands' }).textContent).toContain('⌘K')
+  })
+
   it('opens on the shortcut and jumps to a run', async () => {
     open()
 

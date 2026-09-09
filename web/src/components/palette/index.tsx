@@ -9,6 +9,9 @@ import { PaletteBody } from '@/components/palette/palette'
 import { TemplateDialog } from '@/components/palette/template-dialog'
 import { registerSlot } from '@/components/slots'
 import { CommandDialog } from '@/components/ui/command'
+import { inModal } from '@/lib/keys'
+import { shortcutLabel } from '@/lib/platform'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
 const shortcut = 'k'
@@ -23,16 +26,18 @@ export function CommandPalette() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== shortcut || !(e.metaKey || e.ctrlKey)) return
+      // The app owns this chord whether or not it acts on it: left to the
+      // browser, it opens the address bar over whatever is on screen.
       e.preventDefault()
       // A form is a modal step out of the palette; do not stack one on top.
-      // The run action bar's confirm and hand-off dialogs are local state
-      // rather than store state, so ask the document instead of listing them:
-      // any open modal that is not the palette itself keeps the keyboard.
+      // The forms this one hosts are store state, and every other modal is
+      // asked of the event. The palette itself is the exception, because this
+      // is also what closes it. Deliberately not `keyboardBusy`: a terminal
+      // is not a modal, and on a run screen its hidden textarea holds the
+      // focus, so this is the way out of one.
       const s = useStore.getState()
       if (s.paletteDialog || templates) return
-      if (!s.paletteOpen && document.querySelector('[role="dialog"][data-state="open"]')) {
-        return
-      }
+      if (!s.paletteOpen && inModal(e.target)) return
       toggle()
     }
     window.addEventListener('keydown', onKey)
@@ -49,9 +54,11 @@ export function CommandPalette() {
         onClick={() => toggle(true)}
         aria-label="Commands"
         title="Command palette"
-        className="flex items-center gap-1 rounded px-1 hover:text-foreground"
+        className={cn(focusRing, 'flex items-center gap-1 rounded px-1 hover:text-foreground')}
       >
-        <kbd className="rounded border px-1 font-sans text-[10px]">⌘K</kbd>
+        <kbd className="rounded border px-1 font-sans text-[10px]">
+          {shortcutLabel('K')}
+        </kbd>
         <span className="hidden lg:inline">Commands</span>
       </button>
       <CommandDialog

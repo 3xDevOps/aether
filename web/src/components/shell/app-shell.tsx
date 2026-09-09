@@ -1,10 +1,12 @@
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { CenterView } from '@/components/shell/center-view'
+import { useNavShortcuts } from '@/components/shell/nav-shortcuts'
 import { Sidebar } from '@/components/shell/sidebar'
 import { StatusBar } from '@/components/shell/status-bar'
 import { UpdateBanners } from '@/components/update-banner'
 
 export function AppShell() {
+  useNavShortcuts()
   return (
     <div className="flex h-full flex-col">
       {/* Above everything: an out-of-date binary is about the whole app, not
