@@ -15,13 +15,11 @@ import type {
   LinkStatus,
   Workspace,
 } from '@/lib/types'
+import { cn, field, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { onboardingStepIndex } from '@/store/ui'
 import type { Capability } from '@/store/hooks'
 import type { OnboardingRepo } from '@/store/ui'
-
-const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 /**
  * The row a step ends with, Back included. It sticks to the bottom of the
@@ -690,7 +688,7 @@ export function RepoStep({
             // reader who needs that distinction is the one who would not
             // know to go looking for it.
             <details open className="rounded-md border bg-card">
-              <summary className="cursor-pointer px-3 py-2 text-sm">
+              <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-sm')}>
                 What git did
               </summary>
               <pre className={pane}>
@@ -731,7 +729,7 @@ export function RepoStep({
                   ref={cmdRef}
                   readOnly
                   aria-label="Push command"
-                  className="w-full rounded-md border bg-background px-2 py-1 font-mono text-sm"
+                  className={cn(field, 'font-mono')}
                   value={pushCmd}
                   onFocus={(e) => e.target.select()}
                 />

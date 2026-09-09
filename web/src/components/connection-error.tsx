@@ -1,6 +1,7 @@
 import { CircleAlert, KeyRound, RefreshCw, ServerOff, Unplug, WifiOff } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { cn, focusRing } from '@/lib/utils'
 import type { UnreachableKind } from '@/store/server'
 
 type ConnectionErrorProps = {
@@ -137,7 +138,9 @@ export function ConnectionError({ kind, dead, error, onRetry }: ConnectionErrorP
             never competes with the instruction above. */}
         {error && (
           <details className="mt-6 text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none hover:text-foreground">
+            <summary
+              className={cn(focusRing, 'cursor-pointer select-none hover:text-foreground')}
+            >
               Technical details
             </summary>
             <p className="mt-2 break-words font-mono leading-5">{error}</p>

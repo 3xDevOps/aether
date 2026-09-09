@@ -1,5 +1,6 @@
 import { TriangleAlert } from 'lucide-react'
 import { registerSlot, type CardSlotProps } from '@/components/slots'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
 /**
@@ -25,7 +26,10 @@ export function ConflictChips({ run }: CardSlotProps) {
         onClick={() => navigate('terminal', { runId: peer.run_id })}
         title={`${peer.files.join('\n')}\n\nalso being changed by ${who}`}
         aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their run`}
-        className="flex min-w-0 items-center gap-1 rounded-full border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 py-0.5 text-[11px] hover:bg-state-needs-attention/20"
+        className={cn(
+          focusRing,
+          'flex min-w-0 items-center gap-1 rounded-full border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 py-0.5 text-[11px] hover:bg-state-needs-attention/20',
+        )}
       >
         <TriangleAlert className="size-3 shrink-0" aria-hidden />
         <span className="max-w-32 truncate">{basename(first)}</span>

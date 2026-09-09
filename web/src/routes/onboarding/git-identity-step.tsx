@@ -9,12 +9,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
+import { field } from '@/lib/utils'
 import { actionRow } from '@/routes/onboarding/steps'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
-
-const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 /**
  * The Git identity step: the identity commits made in this member's runs

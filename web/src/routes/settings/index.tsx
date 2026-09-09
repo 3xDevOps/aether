@@ -15,13 +15,11 @@ import type {
   DaemonStatusResult,
   RepoSyncResult,
 } from '@/lib/types'
+import { cn, field } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { SyncPanel } from '@/routes/run-sync'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
-
-const field =
-  'w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50'
 
 export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
@@ -239,7 +237,7 @@ function DaemonCard({ client }: { client: Api }) {
               ref={noteRef}
               readOnly
               aria-label="Enable command"
-              className="w-full rounded-md border bg-background px-2 py-1 font-mono text-sm"
+              className={cn(field, 'font-mono')}
               value={installed.note}
               onFocus={(e) => e.target.select()}
             />

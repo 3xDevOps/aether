@@ -9,6 +9,7 @@ import { message } from '@/lib/format'
 import type { CardSlotProps } from '@/components/slots'
 import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
@@ -24,7 +25,10 @@ export function SyncBadge({ run }: CardSlotProps) {
       aria-label="Sync overlay running"
       title="Sync overlay running"
       onClick={() => navigate('settings', {})}
-      className="flex shrink-0 items-center rounded-sm bg-state-working/15 px-1 text-[11px] text-state-working"
+      className={cn(
+        focusRing,
+        'flex shrink-0 items-center rounded-sm bg-state-working/15 px-1 text-[11px] text-state-working',
+      )}
     >
       <RefreshCw className="size-3.5" aria-hidden />
     </button>

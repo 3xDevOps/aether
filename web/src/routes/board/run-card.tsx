@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { copyText } from '@/lib/clipboard'
 import { timeAgo } from '@/lib/format'
 import { runLabel, stateLabel } from '@/lib/status'
-import { cn } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
 import { MemberAvatar } from '@/routes/board/member-avatar'
 import type { BoardCard } from '@/routes/board/selectors'
@@ -47,7 +47,11 @@ export function RunCard({ card }: { card: BoardCard }) {
         type="button"
         aria-label={runLabel(run)}
         onClick={() => navigate('terminal', { runId: run.id })}
-        className="absolute inset-0 z-10 rounded-md focus-visible:ring-[2px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        className={cn(
+          focusRing,
+          'focus-visible:-outline-offset-2',
+          'absolute inset-0 z-10 rounded-md',
+        )}
       />
 
       <div className="space-y-3 p-3">
