@@ -6,6 +6,7 @@
 
 import { useEffect } from 'react'
 import { FeedEntry } from '@/components/feed-entry'
+import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
@@ -53,7 +54,7 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
   }, [pinned, lastSeq, client])
 
   if (!run) {
-    return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
+    return <MissingRun />
   }
 
   return (

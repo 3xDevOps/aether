@@ -96,20 +96,22 @@ describe('templates view', () => {
 
   it('launches a template and navigates to the run', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []) })
-    seed()
+    seed({ runs: {} })
     render(<TemplatesRoute params={{}} client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Launch' }))
 
     expect(client.templateLaunch).toHaveBeenCalledWith(workspace.id, template.name)
     expect(await screen.findByText('nightly triage')).toBeDefined()
-    // fakeApi's templateLaunch returns run_tpl; navigation lands on it.
+    // fakeApi's templateLaunch returns run_tpl; navigation lands on it, and
+    // the run is seeded with it so the tab does not call it deleted.
     await waitFor(() => {
       expect(useStore.getState().route).toEqual({
         name: 'terminal',
         params: { runId: 'run_tpl' },
       })
     })
+    expect(useStore.getState().runs.run_tpl).toBeDefined()
   })
 
   // The route follows the sidebar switcher rather than carrying a picker of

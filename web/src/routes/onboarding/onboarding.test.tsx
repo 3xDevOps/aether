@@ -1144,7 +1144,7 @@ describe('onboarding wizard', () => {
 
   it('launches the first run in the chosen workspace and navigates to it', async () => {
     const client = fakeApi()
-    seed()
+    seed({ runs: {} })
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
@@ -1167,12 +1167,14 @@ describe('onboarding wizard', () => {
       harness: 'claude',
     })
     // runLaunch resolves to the fixture run; the wizard hands off to the
-    // run view rather than holding a done screen.
+    // run view rather than holding a done screen, with the run already in
+    // the store so the terminal tab does not call it deleted.
     await waitFor(() => {
       expect(useStore.getState().route).toEqual({
         name: 'terminal',
         params: { runId: 'run_1' },
       })
+      expect(useStore.getState().runs.run_1).toBeDefined()
     })
   })
   it('finishes onboarding by going to the board', async () => {

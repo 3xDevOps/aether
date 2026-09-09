@@ -70,9 +70,17 @@ aether env reset
 ```
 
 Saving pauses the terminal for the few seconds Docker needs to commit it.
-New runs and workspace shells use the saved image; reset stops the terminal,
-removes the saved image, and makes the next open use the standard image. See
-[environments.md](environments.md) for image selection and persistence.
+New runs and workspace shells use the saved image; `aether env reset` stops
+the terminal, removes that image, and makes the next open use the standard
+image. See [environments.md](environments.md) for image selection and
+persistence.
+
+The dock splits stopping from resetting, each behind its own confirmation.
+**Stop environment** does what `aether terminal stop` does: the container
+stops and both your home files and your saved image remain, so a later open
+starts it again. **Reset to standard** does what `aether env reset` does,
+and is offered only once you have a saved image to discard. A failure is
+reported in the dialog that caused it.
 
 ## Keys
 

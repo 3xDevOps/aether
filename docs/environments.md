@@ -82,7 +82,7 @@ first and then save.
 
 ## Reset to standard
 
-Reset from **Reset to standard** in the terminal dock's Stop dialog, or run:
+Reset from **Reset to standard** in the terminal dock, or run:
 
 ```sh
 aether env reset

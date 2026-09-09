@@ -417,3 +417,14 @@ test('a conflict chip names the file and the member and opens their run', () => 
     params: { runId: peerRun.id },
   })
 })
+
+// The Diff tab hands an unknown run to the shared component rather than
+// rendering a dead end of its own.
+it('sends an unknown run to the shared missing-run view', () => {
+  seed()
+  useStore.setState({ hydrationError: null, streamDead: false })
+
+  render(<DiffView params={{ runId: 'run_missing' }} />)
+
+  expect(screen.getByRole('button', { name: 'Back to board' })).toBeDefined()
+})

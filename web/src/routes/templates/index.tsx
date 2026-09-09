@@ -33,6 +33,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
   const workspaces = useStore((s) => s.workspaces)
   const active = useStore((s) => s.activeWorkspace)
   const navigate = useStore((s) => s.navigate)
+  const upsertRun = useStore((s) => s.upsertRun)
   const caps = useCapability()
   const [templates, setTemplates] = useState<Template[]>([])
   const [schedules, setSchedules] = useState<Schedule[]>([])
@@ -81,6 +82,8 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
   const launch = async (template: Template) => {
     try {
       const result = await client.templateLaunch(workspaceID, template.name)
+      // Seed the store so the terminal view attaches without a refetch.
+      upsertRun(result.run)
       navigate('terminal', { runId: result.run.id })
       toast.success('Run launched')
     } catch (err) {

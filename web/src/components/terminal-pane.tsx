@@ -3,7 +3,7 @@
 // terminal, the run-shell dock and the environment dock - renders this, so
 // find behaves the same in all three.
 
-import { ChevronDown, ChevronUp, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Loader2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import type { SearchAddon } from '@xterm/addon-search'
@@ -97,7 +97,7 @@ export function TerminalPane({
   controller: XtermController
   /** Extra classes for the terminal element itself. */
   className?: string
-  /** Overlays the dock draws on top of the terminal, such as its spinner. */
+  /** Overlays drawn on top of the terminal, such as `TerminalSpinner`. */
   children?: React.ReactNode
 }) {
   return (
@@ -110,6 +110,23 @@ export function TerminalPane({
         <FindBar search={controller.search} onClose={() => controller.setFindOpen(false)} />
       )}
       {children}
+    </div>
+  )
+}
+
+/**
+ * What covers a terminal that has nothing to draw yet, because the xterm host
+ * is blank until an attach acks. Shared so the run terminal and the
+ * environment dock wait the same way and only the words differ.
+ */
+export function TerminalSpinner({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
+    >
+      <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+      {label}
     </div>
   )
 }

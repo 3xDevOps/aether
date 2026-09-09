@@ -207,6 +207,8 @@ describe('connect GitHub', () => {
     ).toBeNull()
   })
 
+  // A whole wizard walk, several seconds of real awaits even idle, so it
+  // carries its own budget rather than sitting just under the default.
   it('walks Back out of the connect screen before it leaves the Agents step', async () => {
     attachMainTab()
     seed()
@@ -232,5 +234,5 @@ describe('connect GitHub', () => {
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
     ).toContain('4. Repository')
-  })
+  }, 20_000)
 })

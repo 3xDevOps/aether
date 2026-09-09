@@ -1,7 +1,9 @@
-import { GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
+import { useRef, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { StateIndicator } from '@/components/state-dot'
+import { Button } from '@/components/ui/button'
+import { copyText } from '@/lib/clipboard'
 import { timeAgo } from '@/lib/format'
 import { runLabel, stateLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
@@ -13,14 +15,16 @@ import { approvalsForRun } from '@/store/approvals'
 import type { RunRecord } from '@/store/runs'
 
 /**
- * One run, as it appears on the board. Everything a later ticket adds goes
- * through the slots (`card:badges`, `card:chips`, `card:footer`) rather than
- * into this file. The whole card is one click target: an overlay button sits
- * above the text and below the slots, so slot content stays interactive.
+ * One run, as it appears on the board. Another feature contributes to the
+ * card through the slots (`card:badges`, `card:chips`, `card:footer`); the
+ * card's own content is written here. The whole card is one click target: an
+ * overlay button sits above the text and below the slots and the branch chip,
+ * so those stay readable and interactive.
  */
 export function RunCard({ card }: { card: BoardCard }) {
   const { run, state, owner, unseen, paused } = card
   const navigate = useStore((s) => s.navigate)
+  const branchRef = useRef<HTMLSpanElement>(null)
   // An approval pause fires no run.status event, so the run's reason stays
   // empty; the pending question itself is the summary the card needs then.
   const summary = useStore((s) =>
@@ -37,6 +41,15 @@ export function RunCard({ card }: { card: BoardCard }) {
         unseen ? 'border-foreground/25' : 'opacity-90',
       )}
     >
+      {/* First in the DOM so a keyboard reaches the run before the card's
+          secondary controls; z-index, not order, keeps it under them. */}
+      <button
+        type="button"
+        aria-label={runLabel(run)}
+        onClick={() => navigate('terminal', { runId: run.id })}
+        className="absolute inset-0 z-10 rounded-md focus-visible:ring-[2px] focus-visible:ring-ring/50 focus-visible:outline-none"
+      />
+
       <div className="space-y-3 p-3">
         <div className="flex items-start gap-2">
           <StateIndicator state={state} className="mt-1" />
@@ -88,10 +101,30 @@ export function RunCard({ card }: { card: BoardCard }) {
 
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <HarnessGlyph harness={run.harness} mode={run.mode} />
-          <span className="flex min-w-0 items-center gap-1">
-            <GitBranch className="size-3 shrink-0" aria-hidden />
-            <span className="truncate">{run.branch}</span>
-          </span>
+          {/* A run whose checkout failed carries no branch, so the chip and
+              its copy button would name and copy nothing. Raised above the
+              card's click overlay: without that the title never resolves,
+              the truncated name cannot be selected, and the copy button is
+              unreachable. The trade is that a click landing on the chip
+              itself no longer opens the run. */}
+          {run.branch && (
+            <span className="relative z-20 flex min-w-0 items-center gap-1">
+              <GitBranch className="size-3 shrink-0" aria-hidden />
+              <span ref={branchRef} className="truncate" title={run.branch}>
+                {run.branch}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Copy branch ${run.branch}`}
+                className="size-5 shrink-0"
+                onClick={() => void copyText(run.branch, branchRef.current)}
+              >
+                <Copy className="size-3" aria-hidden />
+              </Button>
+            </span>
+          )}
           {run.last_commit && (
             <span
               className="flex items-center gap-1"
@@ -113,13 +146,6 @@ export function RunCard({ card }: { card: BoardCard }) {
           <CardSlot name="card:footer" run={run} />
         </div>
       </div>
-
-      <button
-        type="button"
-        aria-label={runLabel(run)}
-        onClick={() => navigate('terminal', { runId: run.id })}
-        className="absolute inset-0 z-10 rounded-md focus-visible:ring-[2px] focus-visible:ring-ring/50 focus-visible:outline-none"
-      />
     </article>
   )
 }

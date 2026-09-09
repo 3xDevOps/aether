@@ -207,6 +207,8 @@ describe('command palette', () => {
         params: { runId: 'run_tpl' },
       }),
     )
+    // Seeded, so the terminal tab it lands on does not call the run deleted.
+    expect(useStore.getState().runs.run_tpl).toBeDefined()
   })
 
   it('offers the admin surfaces when the gateway serves their methods', async () => {

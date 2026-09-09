@@ -22,6 +22,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
   const workspaceID = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const navigate = useStore((s) => s.navigate)
+  const upsertRun = useStore((s) => s.upsertRun)
   const [templates, setTemplates] = useState<Template[] | null>(null)
   const [name, setName] = useState('')
   const [launching, setLaunching] = useState(false)
@@ -54,6 +55,8 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
     setLaunching(true)
     try {
       const { run } = await api.templateLaunch(workspaceID, name)
+      // Seed the store so the terminal view attaches without a refetch.
+      upsertRun(run)
       onClose()
       navigate('terminal', { runId: run.id })
       toast.success('Run launched')

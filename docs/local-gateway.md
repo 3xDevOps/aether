@@ -801,9 +801,12 @@ needs.
    `"write"` always works for a member who can see the run. An unknown run is
    refused with `-32000`.
    A finished run attaches as a read-only replay of its recorded
-   transcript, ending with the session-end close below; only a run whose
-   session is transiently missing (server recovery in progress) or whose
-   transcript predates recording is refused with `-32004`.
+   transcript, ending with the session-end close below. A `queued`,
+   `provisioning` or `running` run with no session is refused with `-32004`
+   rather than held open - the container is still being built, or recovery is
+   starting the session - as is a finished run whose transcript predates
+   recording. The refusal is the answer, so a client that means to wait for a
+   session has to retry rather than expect the socket to stay open.
 3. Server then streams terminal output as **binary** frames.
 4. Client sends **text** control frames:
 

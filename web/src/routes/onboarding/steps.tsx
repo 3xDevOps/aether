@@ -788,6 +788,7 @@ export function FirstRunStep({
 }) {
   const navigate = useStore((s) => s.navigate)
   const setOnboarded = useStore((s) => s.setOnboarded)
+  const upsertRun = useStore((s) => s.upsertRun)
   // The draft outlives this component: the header can jump to another step
   // and back, which unmounts it.
   const draft = useStore((s) => s.onboardingFirstRun)
@@ -858,6 +859,8 @@ export function FirstRunStep({
         task: task.trim(),
         harness,
       })
+      // Seed the store so the terminal view attaches without a refetch.
+      upsertRun(run)
       setOnboarded(true)
       navigate('terminal', { runId: run.id })
     } catch (err) {

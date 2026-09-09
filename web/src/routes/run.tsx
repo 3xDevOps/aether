@@ -1,3 +1,4 @@
+import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
 import { timeAgo } from '@/lib/format'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -12,7 +13,7 @@ export function RunView({ params }: RouteProps) {
   )
 
   if (!run) {
-    return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
+    return <MissingRun />
   }
 
   return (

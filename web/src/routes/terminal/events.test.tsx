@@ -93,9 +93,11 @@ describe('run events tab', () => {
     expect(useStore.getState().feedFilters).toEqual(chosen)
   })
 
-  it('says so when the run is unknown', () => {
+  it('offers the way back when the run is unknown', () => {
     seed()
+    useStore.setState({ hydrated: true })
     render(<RunEvents params={{ runId: 'run_missing' }} client={eventsApi()} />)
-    expect(screen.getByText('Unknown run.')).toBeDefined()
+    expect(screen.getByText('This run is not on the server. It may have been deleted.')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Back to board' })).toBeDefined()
   })
 })

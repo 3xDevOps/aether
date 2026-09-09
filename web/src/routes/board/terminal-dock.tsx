@@ -1,8 +1,7 @@
-import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Dock } from '@/components/dock'
-import { TerminalPane } from '@/components/terminal-pane'
+import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import {
@@ -61,10 +60,13 @@ export function TerminalDock({
   const setHeight = useStore((s) => s.setTerminalDockHeight)
   const sendLine = useStore((s) => s.sendLine)
   const [confirmingStop, setConfirmingStop] = useState(false)
+  const [confirmingReset, setConfirmingReset] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [saving, setSaving] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [savedConfirmation, setSavedConfirmation] = useState(false)
+  const [stopError, setStopError] = useState<string | null>(null)
+  const [resetError, setResetError] = useState<string | null>(null)
   const [statusAttempt, setStatusAttempt] = useState(0)
   const [attachedTab, setAttachedTab] = useState<string | null>(null)
   const activeTab = dock.activeTab
@@ -193,8 +195,9 @@ export function TerminalDock({
         onExit: () => {
           setEnvTerminalSocketReady(socketKey, false)
           if (socketKey === 'main') {
+            const status = useStore.getState().envTerminal.status
             reset()
-            setStatus({ running: false, tabs: [] })
+            setStatus({ ...status, running: false, tabs: [] })
           } else {
             closeTab(socketKey)
           }
@@ -236,13 +239,14 @@ export function TerminalDock({
   const resetEnvironment = async () => {
     if (resetting) return
     setResetting(true)
+    setResetError(null)
     try {
       await rpc.envReset()
-      setConfirmingStop(false)
+      setConfirmingReset(false)
       reset()
       setStatus({ running: false, tabs: [], saved_image: '' })
     } catch (err) {
-      setStatus(useStore.getState().envTerminal.status, message(err))
+      setResetError(message(err))
     } finally {
       setResetting(false)
     }
@@ -251,13 +255,15 @@ export function TerminalDock({
   const stop = async () => {
     if (stopping) return
     setStopping(true)
+    setStopError(null)
     try {
       await rpc.terminalStop()
+      const status = useStore.getState().envTerminal.status
       setConfirmingStop(false)
       reset()
-      setStatus({ running: false, tabs: [] })
+      setStatus({ ...status, running: false, tabs: [] })
     } catch (err) {
-      setStatus(dock.status, message(err))
+      setStopError(message(err))
     } finally {
       setStopping(false)
     }
@@ -287,7 +293,7 @@ export function TerminalDock({
         collapsed={dock.collapsed}
         onToggleCollapse={() => setCollapsed(!dock.collapsed)}
         actions={
-          (dock.status?.running || dock.tabs.length > 0) && (
+          (!empty || !!dock.status?.saved_image) && (
             <div className="flex items-center gap-1">
               {dock.status?.running && (
                 <>
@@ -312,15 +318,33 @@ export function TerminalDock({
                 </Button>
                 </>
               )}
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setConfirmingStop(true)}
-                disabled={stopping}
-              >
-                Stop environment
-              </Button>
+              {!empty && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    setStopError(null)
+                    setConfirmingStop(true)
+                  }}
+                  disabled={stopping}
+                >
+                  Stop environment
+                </Button>
+              )}
+              {dock.status?.saved_image && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setResetError(null)
+                    setConfirmingReset(true)
+                  }}
+                  disabled={resetting}
+                >
+                  Reset to standard
+                </Button>
+              )}
               {savedConfirmation && (
                 <span className="text-xs text-muted-foreground">
                   Saved - new runs use this environment
@@ -371,18 +395,16 @@ export function TerminalDock({
             ) : (
               <TerminalPane controller={controller}>
                 {attachedTab !== activeTab && (
-                  <div
-                    role="status"
-                    className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
-                  >
-                    <Loader2 className="size-4 animate-spin" aria-hidden />
-                    {/* Only a terminal the dock has not seen running is
-                        starting a container. A second tab, a tab switch or an
-                        expanded dock is reattaching to one that is up. */}
-                    {dock.status?.running
-                      ? 'Connecting to your environment'
-                      : 'Starting your environment container'}
-                  </div>
+                  // Only a terminal the dock has not seen running is starting
+                  // a container. A second tab, a tab switch or an expanded
+                  // dock is reattaching to one that is up.
+                  <TerminalSpinner
+                    label={
+                      dock.status?.running
+                        ? 'Connecting to your environment'
+                        : 'Starting your environment container'
+                    }
+                  />
                 )}
               </TerminalPane>
             )}
@@ -390,33 +412,77 @@ export function TerminalDock({
         </div>
       </Dock>
       {confirmingStop && (
-        <Dialog open onOpenChange={setConfirmingStop}>
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            // The dialog is where a failed stop is reported, so Escape and an
+            // outside click stay shut off until the call settles.
+            if (!stopping) setConfirmingStop(open)
+          }}
+        >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Stop your environment?</DialogTitle>
               <DialogDescription>
-                The environment container stops now. Your home files remain and a later open starts it again. Reset to standard also discards your saved environment image; the next open starts from the standard image.
+                The environment container stops now. Your home files and your
+                saved image remain, and a later open starts it again.
               </DialogDescription>
             </DialogHeader>
+            {stopError && <p className="text-sm text-state-failed">{stopError}</p>}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setConfirmingStop(false)} disabled={stopping || resetting}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmingStop(false)}
+                disabled={stopping}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void stop()}
+                disabled={stopping}
+              >
+                {stopping ? 'Stopping...' : 'Stop environment'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {confirmingReset && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!resetting) setConfirmingReset(open)
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reset to the standard image?</DialogTitle>
+              <DialogDescription>
+                Your saved image {dock.status?.saved_image} is deleted
+                {dock.status?.running && ' and the environment container stops'}.
+                Your home files remain, and the next open starts from the
+                standard image.
+              </DialogDescription>
+            </DialogHeader>
+            {resetError && <p className="text-sm text-state-failed">{resetError}</p>}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmingReset(false)}
+                disabled={resetting}
+              >
                 Cancel
               </Button>
               <Button
                 type="button"
                 variant="destructive"
                 onClick={() => void resetEnvironment()}
-                disabled={stopping || resetting}
+                disabled={resetting}
               >
                 {resetting ? 'Resetting...' : 'Reset to standard'}
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => void stop()}
-                disabled={stopping || resetting}
-              >
-                {stopping ? 'Stopping...' : 'Stop environment'}
               </Button>
             </DialogFooter>
           </DialogContent>
