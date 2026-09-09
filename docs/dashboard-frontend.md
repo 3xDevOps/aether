@@ -465,9 +465,13 @@ The Terminal view is a vertical split. The agent terminal keeps the flexible
 space above a `RunDock` below it. The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and a resizer.
 Both docks start collapsed (`initialRunShellDock`, `initialEnvTerminal`), so
-the terminal a member came for owns the window until they ask for a shell;
-expanding holds for the session. `TerminalDock` mounted with `openOnMount`
-expands itself, because the Agents and GitHub steps type into it.
+the terminal a member came for owns the window until they ask for a shell.
+Neither flag is persisted, so a reload starts collapsed again, and the run
+dock's is per run because `shellDocks` is keyed by run id. The header strip
+stays live while a dock is shut, so its tab controls expand it: a tab whose
+dock is collapsed mounts no xterm host and would never attach.
+`TerminalDock` mounted with `openOnMount` expands itself once, because the
+Agents and GitHub steps type into it.
 Its tab state and socket registry live in `src/store/terminal.ts`, so opening
 Overview, Diff, or Events does not discard run-shell tabs or their attachments.
 Only the selected shell tab mounts an xterm host; switching tabs remounts that

@@ -85,7 +85,7 @@ terminal first.
 | `Ctrl+Shift+C` | Copy the selection. A plain `Ctrl+C` copies too when text is selected, and interrupts when none is. |
 | `Ctrl+Shift+V` | Paste. Plain `Ctrl+V` works as well. |
 | `Ctrl+Shift+F` | Open the find bar. `Enter` goes to the next match, `Shift+Enter` back, `Esc` closes it. |
-| `Ctrl+=` / `Ctrl+-` | Grow or shrink the terminal font, 8px to 32px. |
+| `Ctrl+=` / `Ctrl+-` | Grow or shrink the terminal font, 8px to 32px. `Ctrl+Shift+=` grows too, since that is how a keyboard without a numpad types `Ctrl++`. |
 | `Ctrl+0` | Back to the default 12px. |
 
 On macOS, `Cmd` works as well as `Ctrl` for the zoom keys. The font size is
@@ -95,11 +95,10 @@ scrollback of the terminal it was opened in.
 `Ctrl+Shift+-` and `Ctrl+Shift+0` are left alone, because `Ctrl+_` is
 readline's undo and vim's keymap switch.
 
-The zoom keys are also a browser's own page-zoom accelerators. The desktop app
-binds no competing zoom, and a browser that lets a page cancel the accelerator
-zooms only the terminal; the end-to-end suite checks that Chromium does. Where
-a browser reserves them, the page zooms as well; use the desktop app if that
-gets in the way.
+The zoom keys are also a browser's own page-zoom accelerators. The terminal
+cancels the key, and the desktop app binds no competing zoom. Where a browser
+keeps the accelerator for itself, the page zooms as well; use the desktop app
+if that gets in the way.
 
 ## Tabs and lifecycle
 
