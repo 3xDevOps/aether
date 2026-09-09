@@ -3,9 +3,10 @@
 // and the one-line description. The team view also asks for a jump-to-run
 // button; the Events tab is already pinned to one run and leaves it off.
 
-import { timeAgo } from '@/lib/format'
+import { typeLabel, type EventType } from '@/lib/events'
+import { budgetStateLabel, money, timeAgo } from '@/lib/format'
 import { runLabel } from '@/lib/status'
-import type { Event } from '@/lib/types'
+import type { BudgetState, Event } from '@/lib/types'
 import { useStore } from '@/store'
 
 export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: boolean }) {
@@ -24,7 +25,9 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
       <time className="shrink-0 text-muted-foreground" title={event.time}>
         {timeAgo(event.time)}
       </time>
-      <span className="shrink-0 text-muted-foreground">{event.type}</span>
+      <span className="shrink-0 text-muted-foreground" title={event.type}>
+        {typeLabel(event.type)}
+      </span>
       <span className="min-w-0 flex-1 break-words">{describe(event)}</span>
       {run && (
         <button
@@ -39,40 +42,57 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
   )
 }
 
-/** The one line of an event that belongs in a feed. */
-function describe(event: Event): string {
-  const p = (event.payload ?? {}) as Record<string, unknown>
-  switch (event.type) {
-    case 'run.status':
-      return join([p.to, p.reason])
-    case 'run.deleted':
-      return 'run deleted'
-    case 'run.title':
-      return String(p.title ?? '')
-    case 'run.agent':
-      return join([p.kind, p.tool, p.detail])
-    case 'run.diff':
-      return diffLine(p.files)
-    case 'workspace.timeline':
-      return join([p.kind, p.message])
-    case 'workspace.approval':
-      return join([p.action, p.decision])
-    case 'workspace.presence':
-      return join([p.state])
-    case 'run.cost':
-      return `${p.input_tokens} in, ${p.output_tokens} out`
-    case 'git.branch':
-      return join([p.branch, p.commit])
-    case 'server.update':
-      return join([p.phase, p.version, p.detail])
-    default:
-      return ''
-  }
+/**
+ * The one line of an event that belongs in a feed. Keyed by `EventType`, so a
+ * describer without a name in `eventLabel`, or a name without a describer, is a
+ * compile error rather than a row that renders half of itself.
+ */
+const describers: Record<EventType, (p: Record<string, unknown>) => string> = {
+  'run.status': (p) => join([p.to, p.reason]),
+  'run.deleted': () => 'record removed',
+  'run.protected': (p) => (p.protected ? 'protected' : 'unprotected'),
+  'run.title': (p) => String(p.title ?? ''),
+  'run.agent': (p) => join([p.kind, p.tool, p.detail]),
+  'run.diff': (p) => suffix(fileCount(p.files), 'changed'),
+  'run.cost': (p) => `${p.input_tokens} in, ${p.output_tokens} out`,
+  'run.overlap': (p) => overlapLine(p.with),
+  'workspace.timeline': (p) => join([p.kind, p.message]),
+  'workspace.approval': (p) => join([p.action, p.decision]),
+  'workspace.presence': (p) => join([p.state]),
+  'workspace.budget': (p) => budgetLine(p),
+  'git.branch': (p) => join([p.branch, p.commit]),
+  'sync.conflict': (p) => suffix(fileCount(p.files), 'in conflict'),
+  'server.update': (p) => join([p.phase, p.version, p.detail]),
 }
 
-function diffLine(files: unknown): string {
+function describe(event: Event): string {
+  if (!Object.hasOwn(describers, event.type)) return ''
+  return describers[event.type as EventType]((event.payload ?? {}) as Record<string, unknown>)
+}
+
+// An absent or empty `with` means the run's overlaps cleared.
+function overlapLine(peers: unknown): string {
+  if (!Array.isArray(peers) || peers.length === 0) return 'no longer overlapping'
+  return `${peers.length} ${peers.length === 1 ? 'run' : 'runs'} in the same files`
+}
+
+// The spend is a floor whenever a run went unmetered, so it is rendered as one.
+function budgetLine(p: Record<string, unknown>): string {
+  const spend = money.format(Number(p.spend_usd ?? 0))
+  const floor = Number(p.unmetered_runs ?? 0) > 0 ? '+' : ''
+  const cap = Number(p.limit_usd ?? 0)
+  const state = budgetStateLabel[p.state as BudgetState] ?? p.state
+  const of = cap > 0 ? ` of ${money.format(cap)}` : ''
+  return join([state, `${spend}${floor}${of}`, p.reason])
+}
+
+function suffix(count: string, tail: string): string {
+  return count ? `${count} ${tail}` : ''
+}
+
+function fileCount(files: unknown): string {
   if (!Array.isArray(files)) return ''
-  return `${files.length} ${files.length === 1 ? 'file' : 'files'} changed`
+  return `${files.length} ${files.length === 1 ? 'file' : 'files'}`
 }
 
 function join(parts: unknown[]): string {

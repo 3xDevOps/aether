@@ -70,7 +70,7 @@ describe('run events tab', () => {
 
     expect(await screen.findByText(/waiting on a question/)).toBeDefined()
     const rows = screen.getAllByRole('listitem')
-    expect(rows[0].textContent).toContain('run.status')
+    expect(rows[0].textContent).toContain('Run status')
     expect(rows[1].textContent).toContain('go test ./...')
 
     // Every page read is scoped to this run.

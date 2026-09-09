@@ -4,33 +4,45 @@ import { FeedEntry } from '@/components/feed-entry'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
+import { eventLabel, type EventType } from '@/lib/events'
 import { runLabel } from '@/lib/status'
 import type { RouteProps } from '@/routes/registry'
 import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 
 /** The event types worth offering as a filter; empty means everything. */
-const types = [
+const filterTypes: EventType[] = [
+  'run.status',
+  'run.title',
+  'run.agent',
+  'run.diff',
+  'workspace.timeline',
+  'workspace.approval',
+  'workspace.presence',
+  'workspace.budget',
+  'run.cost',
+  'run.overlap',
+  'git.branch',
+  'run.protected',
+  'sync.conflict',
+  'server.update',
+]
+
+const types: [string, string][] = [
   ['', 'Everything'],
-  ['run.status', 'Run status'],
-  ['run.title', 'Run titles'],
-  ['workspace.timeline', 'Steering'],
-  ['workspace.approval', 'Approvals'],
-  ['workspace.presence', 'Presence'],
-  ['run.cost', 'Cost'],
-  ['run.overlap', 'Conflicts'],
-  ['git.branch', 'Branches'],
-  ['server.update', 'Server updates'],
+  ...filterTypes.map((type): [string, string] => [type, eventLabel[type]]),
 ]
 
 /** The way into the feed, from the status bar. */
 export function TimelineStatus() {
   const navigate = useStore((s) => s.navigate)
+  if (!useCapability().hasMethod('workspace.timeline')) return null
   return (
     <button
       type="button"
       onClick={() => navigate('timeline')}
-      title="Workspace activity"
+      title="Open Activity"
       className="flex items-center gap-1 rounded px-1 hover:text-foreground"
     >
       <History className="size-3.5" aria-hidden />
@@ -95,7 +107,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
   return (
     <div className="flex h-full flex-col">
       <ViewHeader
-        title="Workspace activity"
+        title="Activity"
         subtitle={`${feed.length} ${feed.length === 1 ? 'entry' : 'entries'}`}
       />
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs">

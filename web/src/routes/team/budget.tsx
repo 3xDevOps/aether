@@ -1,12 +1,8 @@
 import { CircleAlert, TriangleAlert } from 'lucide-react'
+import { budgetStateLabel, money } from '@/lib/format'
 import type { BudgetState } from '@/lib/types'
 import { useStore } from '@/store'
 import { costTotals } from '@/store/cost'
-
-const money = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'USD',
-})
 
 /**
  * A budget is a soft cap: it warns and it reports being past the limit, and
@@ -17,12 +13,6 @@ const stateStyle: Record<BudgetState, string> = {
   ok: '',
   warn: 'text-state-waiting',
   exceeded: 'text-state-needs-attention',
-}
-
-const stateLabel: Record<BudgetState, string> = {
-  ok: 'within budget',
-  warn: 'nearing the cap',
-  exceeded: 'past the cap',
 }
 
 /** Workspace spend and budget state, in the status bar. */
@@ -36,7 +26,7 @@ export function BudgetStatus() {
     const name = workspaces[report.workspace_id]?.name ?? report.workspace_id
     return `${name}: ${money.format(report.spend.cost_usd)} of ${money.format(
       report.budget?.limit_usd ?? 0,
-    )} - ${stateLabel[report.state]}`
+    )} - ${budgetStateLabel[report.state]}`
   })
   lines.push('Budgets are advisory: a run is never stopped for being over one.')
   if (totals.advisory) {
@@ -50,7 +40,7 @@ export function BudgetStatus() {
     >
       <StateIcon state={totals.state} />
       <span>{money.format(totals.costUSD) + (totals.advisory ? '+' : '')}</span>
-      {totals.state !== 'ok' && <span>{stateLabel[totals.state]}</span>}
+      {totals.state !== 'ok' && <span>{budgetStateLabel[totals.state]}</span>}
     </span>
   )
 }
