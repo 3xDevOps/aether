@@ -29,7 +29,7 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
       {run && (
         <button
           type="button"
-          onClick={() => navigate('run', { runId: run.id })}
+          onClick={() => navigate('terminal', { runId: run.id })}
           className="max-w-40 shrink-0 truncate text-muted-foreground hover:text-foreground hover:underline"
         >
           {runLabel(run)}

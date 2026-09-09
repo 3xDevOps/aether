@@ -412,5 +412,8 @@ test('a conflict chip names the file and the member and opens their run', () => 
   expect(chip.textContent).toContain('Bob')
 
   fireEvent.click(chip)
-  expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: peerRun.id } })
+  expect(useStore.getState().route).toEqual({
+    name: 'terminal',
+    params: { runId: peerRun.id },
+  })
 })

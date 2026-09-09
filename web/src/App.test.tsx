@@ -8,10 +8,21 @@ vi.mock('@/lib/api', async () => {
   return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
 
+// jsdom has no layout engine, so the terminal's fit addon has nothing to
+// observe; without a stub its constructor throws and takes the shell down.
+class NoResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 // The shell opens the event stream on mount; keep it off the network.
 beforeAll(() => {
   StubSocket.install()
+  vi.stubGlobal('ResizeObserver', NoResizeObserver)
 })
+
+afterAll(() => vi.unstubAllGlobals())
 
 /**
  * Renders the app and acknowledges its subscription, which is what releases
@@ -54,15 +65,17 @@ describe('App', () => {
     ).toContain('512 MB / 2.0 GB')
   })
 
-  it('shows the run a sidebar row points at', async () => {
+  it('shows the terminal tab a sidebar row lands on', async () => {
     await mount()
     await vi.waitFor(() =>
       expect(sidebar().getByText('rewrite the checkout flow')).toBeDefined(),
     )
 
-    useStore.getState().navigate('run', { runId: 'run_1' })
+    useStore.getState().navigate('terminal', { runId: 'run_1' })
 
-    expect(await screen.findByText('aether/run-1-checkout')).toBeDefined()
+    // The row lands on the Terminal tab, whose subtitle names the run's
+    // harness and branch; the sidebar repeats the task, the subtitle does not.
+    expect(await screen.findByText('claude · aether/run-1-checkout')).toBeDefined()
   })
 
   // The launch form is hosted by the shell, not by the palette: a button on

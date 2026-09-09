@@ -84,7 +84,7 @@ function timeline(kind: 'pause' | 'resume', seq: number) {
 }
 
 describe('run board', () => {
-  it('deals runs into the three buckets, newest change first', () => {
+  it('deals runs into the three buckets, newest first, the working one bouncing', () => {
     seed([stalled, working, queued, merged])
     render(<Board />)
 
@@ -96,6 +96,9 @@ describe('run board', () => {
       .getAllByRole('article')
       .map((card) => within(card).getByRole('button').getAttribute('aria-label'))
     expect(tasks).toEqual(['not started', 'still going'])
+    // A card carries no state in words, so the running one bounces.
+    const card = column('Working').getByText('still going').closest('article')
+    expect(card?.querySelector('.working-dots')).not.toBeNull()
   })
 
   it('shows only the active workspace, and follows a switch', () => {
@@ -135,7 +138,7 @@ describe('run board', () => {
       at: stalled.started_at,
     })
     expect(useStore.getState().route).toEqual({
-      name: 'run',
+      name: 'terminal',
       params: { runId: stalled.id },
     })
   })

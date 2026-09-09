@@ -60,7 +60,7 @@ describe('team status bar', () => {
         }),
       ),
     })
-    seed({ route: { name: 'run', params: { runId: 'run_1' } } })
+    seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
     render(<TeamStatus client={client} />)
 
     expect(await screen.findByText('1 waiting')).toBeDefined()
@@ -291,6 +291,19 @@ describe('approval inbox', () => {
 
     expect(await screen.findByText(/Approved by Alice/, { selector: 'p' })).toBeDefined()
     expect(client.approvalDecide).toHaveBeenCalledWith('run_1', 'apr_1', true)
+  })
+
+  it('opens the run behind a request on its terminal tab', async () => {
+    const client = fakeApi({ approvalList: vi.fn(async () => [approval()]) })
+    seed({ inbox: { [workspace.id]: [approval()] } })
+    render(<ApprovalInbox params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByText('rewrite the checkout flow'))
+
+    expect(useStore.getState().route).toEqual({
+      name: 'terminal',
+      params: { runId: 'run_1' },
+    })
   })
 
   // The row names the scope the request belongs to, so a shared queue says

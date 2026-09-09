@@ -1,9 +1,27 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { RunList } from '@/components/run-list'
 import { runState } from '@/lib/status'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { alice, run } from '@/test/fixtures'
+
+describe('run list', () => {
+  it('bounces a working row and opens it on the terminal', () => {
+    useStore.setState({ hydrated: true, hydrationError: null, streamDead: false })
+    const listed = toRecord(run())
+    const rows = [{ run: listed, state: runState(listed.status), owner: alice }]
+    const { container } = render(<RunList runs={rows} empty="No runs yet" />)
+
+    expect(container.querySelector('.working-dots')).not.toBeNull()
+
+    fireEvent.click(screen.getByText('rewrite the checkout flow'))
+
+    expect(useStore.getState().route).toEqual({
+      name: 'terminal',
+      params: { runId: listed.id },
+    })
+  })
+})
 
 describe('run list empty states', () => {
   it('claims a retry while one is actually coming', () => {

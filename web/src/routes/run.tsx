@@ -1,9 +1,5 @@
-import { RunActions } from '@/components/run-actions'
-import { Shield } from 'lucide-react'
-import { StateDot } from '@/components/state-dot'
-import { ViewHeader } from '@/components/view-header'
+import { RunHeader } from '@/components/run-header'
 import { timeAgo } from '@/lib/format'
-import { pendingApprovalRuns, runLabel, runState, stateLabel } from '@/lib/status'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
@@ -14,44 +10,25 @@ export function RunView({ params }: RouteProps) {
   const account = useStore((s) =>
     run?.account_member_id ? s.members[run.account_member_id] : undefined,
   )
-  const pendingApproval = useStore((s) =>
-    pendingApprovalRuns(s.inbox).has(params.runId),
-  )
 
   if (!run) {
     return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
   }
-  const state = runState(run.status, pendingApproval)
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader
-        title={runLabel(run)}
-        titleAdornment={
-          run.protected ? (
-            <span
-              role="img"
-              aria-label="Protected: only the owner or an admin can steer or kill this run"
-              title="Protected: only the owner or an admin can steer or kill this run"
-              className="flex shrink-0 items-center text-muted-foreground"
-            >
-              <Shield className="size-3.5" aria-hidden />
-            </span>
-          ) : undefined
-        }
+      <RunHeader
+        run={run}
         subtitle={run.title?.trim() && run.task.trim() ? run.task.trim() : run.branch}
-        actions={<RunActions run={run} />}
       />
       <RunTabs runID={run.id} active="run" />
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 p-4 text-sm">
-        <dt className="text-muted-foreground">State</dt>
-        <dd className="flex items-center gap-2">
-          <StateDot state={state} />
-          {stateLabel[state]}
-          {run.reason && (
-            <span className="text-muted-foreground">- {run.reason}</span>
-          )}
-        </dd>
+        {run.reason && (
+          <>
+            <dt className="text-muted-foreground">Reason</dt>
+            <dd>{run.reason}</dd>
+          </>
+        )}
         <dt className="text-muted-foreground">Agent</dt>
         <dd>
           {run.harness} ({run.mode})

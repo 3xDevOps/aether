@@ -1,9 +1,8 @@
-import { StateDot } from '@/components/state-dot'
+import { StateIndicator } from '@/components/state-dot'
 import { Skeleton } from '@/components/ui/skeleton'
 import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
-import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { SidebarRun } from '@/store/selectors'
 
@@ -12,7 +11,6 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
   const navigate = useStore((s) => s.navigate)
-  const route = useStore((s) => s.route)
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && runs.length === 0)
 
@@ -43,16 +41,11 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
         <li key={run.id}>
           <button
             type="button"
-            onClick={() => navigate('run', { runId: run.id })}
+            onClick={() => navigate('terminal', { runId: run.id })}
             style={{ borderLeftColor: owner?.color }}
-            className={cn(
-              'flex w-full items-center gap-3 border-l-2 px-4 py-2 text-left hover:bg-accent/60',
-              route.name === 'run' && route.params.runId === run.id
-                ? 'bg-accent'
-                : 'border-l-transparent',
-            )}
+            className="flex w-full items-center gap-3 border-l-2 border-l-transparent px-4 py-2 text-left hover:bg-accent/60"
           >
-            <StateDot state={state} />
+            <StateIndicator state={state} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm">{runLabel(run)}</span>
               <span className="block truncate text-xs text-muted-foreground">

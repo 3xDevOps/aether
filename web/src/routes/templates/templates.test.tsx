@@ -106,7 +106,7 @@ describe('templates view', () => {
     // fakeApi's templateLaunch returns run_tpl; navigation lands on it.
     await waitFor(() => {
       expect(useStore.getState().route).toEqual({
-        name: 'run',
+        name: 'terminal',
         params: { runId: 'run_tpl' },
       })
     })

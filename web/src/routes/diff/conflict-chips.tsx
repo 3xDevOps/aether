@@ -22,7 +22,7 @@ export function ConflictChips({ run }: CardSlotProps) {
       <button
         key={peer.run_id}
         type="button"
-        onClick={() => navigate('run', { runId: peer.run_id })}
+        onClick={() => navigate('terminal', { runId: peer.run_id })}
         title={`${peer.files.join('\n')}\n\nalso being changed by ${who}`}
         aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their run`}
         className="flex min-w-0 items-center gap-1 rounded-full border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 py-0.5 text-[11px] hover:bg-state-needs-attention/20"

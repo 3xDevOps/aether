@@ -69,7 +69,7 @@ describe('command palette', () => {
     fireEvent.click(item)
 
     expect(useStore.getState().route).toEqual({
-      name: 'run',
+      name: 'terminal',
       params: { runId: 'run_1' },
     })
     expect(useStore.getState().paletteOpen).toBe(false)
@@ -111,7 +111,7 @@ describe('command palette', () => {
     // Hydration seeds pausedRuns from the run list's `paused` field, but a
     // legacy gateway sends none: with no entry the client cannot tell which
     // verb the server would accept, so it offers neither.
-    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'terminal', params: { runId: 'run_1' } } })
     open()
 
     await screen.findByText('Kill run')
@@ -203,7 +203,7 @@ describe('command palette', () => {
     )
     await waitFor(() =>
       expect(useStore.getState().route).toEqual({
-        name: 'run',
+        name: 'terminal',
         params: { runId: 'run_tpl' },
       }),
     )
@@ -260,7 +260,7 @@ describe('command palette', () => {
   it('pulls the focused run branch through the local gateway', async () => {
     useStore.setState({
       runs: { [active.id]: toRecord(run({ last_commit: 'abc1234' })) },
-      route: { name: 'run', params: { runId: 'run_1' } },
+      route: { name: 'terminal', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',
         methods: ['*'],
@@ -280,7 +280,7 @@ describe('command palette', () => {
     // server refuses to hand a run to someone who cannot own one.
     useStore.setState({
       members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera },
-      route: { name: 'run', params: { runId: 'run_1' } },
+      route: { name: 'terminal', params: { runId: 'run_1' } },
     })
     open()
 
@@ -295,7 +295,7 @@ describe('command palette', () => {
   it('offers relaunch only on a terminal run', async () => {
     useStore.setState({
       runs: { [active.id]: toRecord(run({ status: 'failed' })) },
-      route: { name: 'run', params: { runId: 'run_1' } },
+      route: { name: 'terminal', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',
         methods: ['*'],
