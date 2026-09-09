@@ -18,10 +18,13 @@ export function CenterView() {
   return (
     <div className="relative h-full">
       <View params={route.params} />
+      {/* The flash is motion, so a reader who asked for less of it gets none:
+          the reveal still happens, it just does not blink. */}
       <div
         aria-hidden
         className={cn(
-          'pointer-events-none absolute inset-0 z-30 bg-foreground/10 transition-opacity duration-500',
+          'pointer-events-none absolute inset-0 z-30 bg-foreground/10',
+          'transition-opacity duration-500 motion-reduce:hidden',
           flash ? 'opacity-100 duration-0' : 'opacity-0',
         )}
       />
