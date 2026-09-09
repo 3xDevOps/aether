@@ -35,7 +35,7 @@ jobs:
   release:
     needs: runner-policy
     if: ${{ needs.runner-policy.outputs.allowed == 'true' }}
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64, moss]
     steps:
       - uses: actions/checkout@v4
         with:

@@ -2,12 +2,14 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 // Kill terminates a run: any non-terminal state moves to abandoned with
@@ -44,7 +46,7 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	// No container yet (still provisioning): the provisioning checkpoints
 	// see killRequested and abort.
 	if cid != "" {
-		if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {
+		if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 			return err
 		}
 	}

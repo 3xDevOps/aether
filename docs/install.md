@@ -856,8 +856,8 @@ Publishing the release runs
 [`.github/workflows/release.yml`](../.github/workflows/release.yml): it vets,
 runs the unit tests, cross-compiles the full matrix with `make release`, writes
 `checksums.txt`, and uploads the binaries and standard image. Only an admin
-publisher runs this release job on the self-hosted runner; other publishers
-are skipped.
+publisher runs this release job on the self-hosted runner labeled `moss`;
+other publishers are skipped.
 
 If the release workflow fails after building, rerun it for the published
 release. The publisher uploads missing assets to the existing release and

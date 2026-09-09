@@ -114,6 +114,17 @@ func TestConcurrentCloseAndKill(t *testing.T) {
 		t.Fatal("terminal run must have FinishedAt")
 	}
 }
+func TestKillSucceedsWhenContainerIsAlreadyGone(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.rt.stopErr = runtime.ErrNotFound
+	run, c := e.launchFake(t, "already gone")
+
+	if err := e.sched.Kill(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	c.exitNow(137)
+	e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+}
 
 // TestRecoveryReissuesPersistedKill pins that a kill persisted to the
 // sidecar but interrupted by a reboot is re-issued when supervision

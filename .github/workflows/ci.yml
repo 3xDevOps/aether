@@ -38,14 +38,14 @@ jobs:
           fi
           # A failed lookup deliberately stays on the GitHub-hosted runner.
           if [ "$allowed" = true ]; then
-            echo "runner=self-hosted" >> "$GITHUB_OUTPUT"
+            echo 'runner=["self-hosted","Linux","X64","moss"]' >> "$GITHUB_OUTPUT"
           else
-            echo "runner=ubuntu-latest" >> "$GITHUB_OUTPUT"
+            echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           fi
 
   build-and-test:
     needs: runner-policy
-    runs-on: ${{ needs.runner-policy.outputs.runner }}
+    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,8 +89,8 @@ jobs:
 
   integration:
     needs: runner-policy
-    # Docker is preinstalled on ubuntu-latest runners.
-    runs-on: ${{ needs.runner-policy.outputs.runner }}
+    # The selected runner must provide Docker for these real-runtime tests.
+    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -143,7 +143,7 @@ jobs:
 
   dashboard:
     needs: runner-policy
-    runs-on: ${{ needs.runner-policy.outputs.runner }}
+    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -172,7 +172,7 @@ jobs:
   # gate and this one starts containers.
   dashboard-e2e:
     needs: runner-policy
-    runs-on: ${{ needs.runner-policy.outputs.runner }}
+    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -226,7 +226,7 @@ jobs:
   # unpacks the sources embedded in the CLI and runs electron-builder.
   desktop:
     needs: runner-policy
-    runs-on: ${{ needs.runner-policy.outputs.runner }}
+    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -322,7 +322,7 @@ jobs:
 
   release-build:
     needs: runner-policy
-    runs-on: ${{ needs.runner-policy.outputs.runner }}
+    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
         with:

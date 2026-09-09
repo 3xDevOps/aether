@@ -29,6 +29,7 @@ type fakeRuntime struct {
 	containerIP string
 	createErr   error
 	createHook  func()
+	stopErr     error
 	startErr    error
 	waitErr     error
 	startHook   func(c *fakeContainer)
@@ -219,6 +220,9 @@ func (r *fakeRuntime) Resume(_ context.Context, id runtime.ID) error {
 }
 
 func (r *fakeRuntime) Stop(_ context.Context, id runtime.ID, _ time.Duration) error {
+	if r.stopErr != nil {
+		return r.stopErr
+	}
 	c, err := r.get(id)
 	if err != nil {
 		return err
