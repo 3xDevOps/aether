@@ -206,80 +206,70 @@
   .steering-signal {
     position: absolute;
     top: 50%;
-    left: calc(100% + 0.25rem);
-    z-index: 1;
+    left: calc(100% + 0.35rem);
     display: block;
-    width: 0.25rem;
-    height: 0.25rem;
+    width: 3.25rem;
+    height: 1.25rem;
     color: var(--primary);
     pointer-events: none;
-    border-radius: 999px;
-    background: currentColor;
-    box-shadow: 0 0 0.35rem currentColor;
     transform: translateY(-50%);
-    animation: steering-signal 1.8s ease-out infinite;
   }
 
+  .steering-signal > span,
   .steering-signal::before,
   .steering-signal::after {
     position: absolute;
     top: 50%;
     left: 0;
-    width: 1.25rem;
+    width: 0.85rem;
     height: 1px;
     content: '';
-    background: linear-gradient(to right, currentColor, transparent);
-    transform-origin: left center;
+    background: linear-gradient(
+      to right,
+      transparent,
+      currentColor 18%,
+      currentColor 82%,
+      transparent
+    );
+    box-shadow: 0 0 0.35rem currentColor;
     opacity: 0;
+    transform: translateX(-100%);
+    animation: steering-stream 1.35s linear infinite;
   }
 
   .steering-signal::before {
-    --ray-angle: -24deg;
-    transform: translateY(-50%) rotate(-24deg) scaleX(0.2);
-    animation: steering-ray 1.8s ease-out infinite;
+    top: calc(50% - 0.4rem);
+    animation-delay: 0s;
   }
 
   .steering-signal::after {
-    --ray-angle: 24deg;
-    transform: translateY(-50%) rotate(24deg) scaleX(0.2);
-    animation: steering-ray 1.8s 0.45s ease-out infinite;
+    top: calc(50% + 0.4rem);
+    animation-delay: -0.9s;
   }
 
-  @keyframes steering-signal {
+  @keyframes steering-stream {
     0% {
-      opacity: 0.65;
+      opacity: 0;
+      transform: translateX(-100%);
     }
-    35%,
+    15%,
+    70% {
+      opacity: 0.9;
+    }
     100% {
-      opacity: 1;
+      opacity: 0;
+      transform: translateX(3.25rem);
     }
   }
 
-  @keyframes steering-ray {
-    0% {
-      opacity: 0;
-      transform: translateY(-50%) rotate(var(--ray-angle, -24deg)) scaleX(0.2);
-    }
-    18% {
-      opacity: 0.7;
-    }
-    72%,
-    100% {
-      opacity: 0;
-      transform: translateY(-50%) rotate(var(--ray-angle, -24deg)) scaleX(1);
-    }
-  }
 
   @media (prefers-reduced-motion: reduce) {
-    .steering-signal {
-      animation: none;
-    }
-
+    .steering-signal > span,
     .steering-signal::before,
     .steering-signal::after {
       animation: none;
       opacity: 0.35;
-      transform: translateY(-50%) rotate(var(--ray-angle, -24deg)) scaleX(0.75);
+      transform: translateX(0);
     }
   }
 
