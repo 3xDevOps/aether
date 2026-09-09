@@ -517,8 +517,10 @@ export const api = {
     local<DaemonInstallResult>('daemon.install', { server, repo }),
   localDaemonStatus: () => local<DaemonStatusResult>('daemon.status'),
   /** Whether the CLI on this machine, and the server it talks to, are
-   * behind the newest release. */
-  localUpdateCheck: () => local<UpdateStatus>('update.check'),
+   * behind the newest release. `refresh` skips the gateway's cached
+   * answer, for the read that names the release about to be installed. */
+  localUpdateCheck: (refresh?: boolean) =>
+    local<UpdateStatus>('update.check', { refresh }),
   /** Replaces the aether binary on this machine with the newest release. */
   localUpdateApply: () => local<UpdateApplyResult>('update.apply'),
   /** Progress of a desktop-app rebuild started by update.apply. */

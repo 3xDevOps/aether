@@ -217,10 +217,11 @@ func TestUpdateApplyDoesNotInstallTheSameReleaseTwice(t *testing.T) {
 
 // Once the rebuild the first click started has finished, a repeat click
 // on an unsupervised gateway must not build the app a second time under
-// the one the user may just have restarted.
+// the one the user may just have restarted. A newer release must, or the
+// CLI on disk and the app around it come from different releases.
 func TestUpdateApplyDoesNotRebuildAFinishedApp(t *testing.T) {
 	pinVersion(t)
-	g := updateGateway(t, &verbStubBackend{}, false)
+	g, setTag := releasingGateway(t, &verbStubBackend{}, false)
 	stubApply(t, func(context.Context, string, string) ([]string, error) {
 		return []string{"/usr/local/bin/aether"}, nil
 	})
@@ -249,6 +250,16 @@ func TestUpdateApplyDoesNotRebuildAFinishedApp(t *testing.T) {
 	}
 	if builds != 1 {
 		t.Fatalf("the app was built %d times, want once", builds)
+	}
+
+	setTag("v1.4.0")
+	third := applyForRebuild(t, g)
+	if third.Version != "v1.4.0" || !third.Rebuilding {
+		t.Fatalf("third apply = %+v, want the newer release rebuilt", third)
+	}
+	awaitPhase(t, g, localops.PhaseDone)
+	if builds != 2 {
+		t.Fatalf("the app was built %d times, want a build for each release", builds)
 	}
 }
 

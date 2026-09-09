@@ -33,6 +33,14 @@ export interface LocalSlice {
   update: UpdateStatus | null
   setUpdate: (update: UpdateStatus) => void
   /**
+   * Set while the Update button's install is running. The periodic release
+   * re-check stands down for it: that read answers from the cache the click
+   * just refreshed, so it could rename the banner over the release being
+   * installed behind it.
+   */
+  installingUpdate: boolean
+  setInstallingUpdate: (installingUpdate: boolean) => void
+  /**
    * Set once an in-app update tells the gateway it is going away and coming
    * back (`update.apply` answering `restarting`). Never cleared: the page
    * that reads it is on its way out regardless of how the reconnect goes.
@@ -58,6 +66,8 @@ export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
     set((s) => ({ pulls: { ...s.pulls, [runID]: result } })),
   update: null,
   setUpdate: (update) => set({ update }),
+  installingUpdate: false,
+  setInstallingUpdate: (installingUpdate) => set({ installingUpdate }),
   gatewayRestarting: false,
   setGatewayRestarting: (gatewayRestarting) => set({ gatewayRestarting }),
 })

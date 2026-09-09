@@ -16,12 +16,10 @@ import (
 // OptOutEnv disables the release check when set to a non-empty value.
 const OptOutEnv = "AETHER_NO_UPDATE_CHECK"
 
-// defaultTTL is how long a successful answer is reused. Releases are rare;
-// a dashboard reload must not cost a round trip to GitHub.
-const defaultTTL = 6 * time.Hour
+// defaultTTL is how long a successful answer is reused.
+const defaultTTL = time.Hour
 
-// failureTTL caches a failed check so an offline machine is not re-dialed
-// on every page load.
+// failureTTL caches a failed check, far more briefly than a success.
 const failureTTL = 5 * time.Minute
 
 // devVersion is what version.Version holds in a build without release
@@ -233,6 +231,12 @@ type Checker struct {
 	cached  Check
 	err     error
 	expires time.Time
+	// issued numbers lookups and stored holds the number behind the cached
+	// answer, so a lookup that started earlier cannot overwrite one that
+	// started later. Two that straddle a release would otherwise leave the
+	// superseded tag cached for a whole period.
+	issued uint64
+	stored uint64
 }
 
 // NewChecker builds a checker against a GitHub repository base URL such as
@@ -254,11 +258,27 @@ func (c *Checker) BaseURL() string { return c.baseURL }
 // until it expires. A dev build and an opted-out process never dial out.
 // Two callers arriving on an expired cache may both resolve the tag; that
 // costs one extra redirect at worst, where serializing them behind the
-// fetch would make one caller's cancelled context everyone's wait.
+// fetch would make one caller's cancelled context everyone's wait. The
+// loser of that race is handed the winner's answer rather than its own
+// error, which is the better information of the two.
 func (c *Checker) Check(ctx context.Context) (Check, error) {
 	if cached, err, ok := c.fresh(); ok {
 		return cached, err
 	}
+	out, err := c.CheckFresh(ctx)
+	if err != nil {
+		if cached, cachedErr, ok := c.fresh(); ok {
+			return cached, cachedErr
+		}
+	}
+	return out, err
+}
+
+// CheckFresh dials for the newest release, ignoring any cached answer, and
+// caches what it finds. A dial that fails is this caller's error: the
+// install path asks through here.
+func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
+	id := c.nextID()
 	out := Check{
 		Version:       version.Version,
 		Commit:        version.Commit,
@@ -280,33 +300,49 @@ func (c *Checker) Check(ctx context.Context) (Check, error) {
 			out.ReleaseURL = c.baseURL + "/releases/tag/" + latest
 		}
 	}
-	return c.store(out, err)
+	c.store(id, out, err)
+	return out, err
+}
+
+// nextID takes the number this lookup is ordered by.
+func (c *Checker) nextID() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.issued++
+	return c.issued
 }
 
 // fresh returns the cached answer while it is still valid.
 func (c *Checker) fresh() (Check, error, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.expires.IsZero() && c.now().Before(c.expires) {
+	if c.liveLocked() {
 		return c.cached, c.err, true
 	}
 	return Check{}, nil, false
 }
 
-// store caches one resolved answer and returns what the caller should see.
-// A failure never overwrites a success another caller resolved while this
-// one was dialing: that answer is both better information and the longer
-// cache, so this caller is handed it instead of its own error.
-func (c *Checker) store(out Check, err error) (Check, error) {
+func (c *Checker) liveLocked() bool {
+	return !c.expires.IsZero() && c.now().Before(c.expires)
+}
+
+// store caches the answer of lookup id. A failure never touches an answer
+// that is still live, so a cached failure keeps the window it already has
+// rather than being pushed out again by every retry behind it, and a lookup
+// that started earlier never replaces a resolved answer of one that started
+// later, however the two finish.
+func (c *Checker) store(id uint64, out Check, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err != nil && c.err == nil && c.now().Before(c.expires) {
-		return c.cached, nil
+	if err != nil && c.liveLocked() {
+		return
+	}
+	if id < c.stored && c.err == nil {
+		return
 	}
 	ttl := c.ttl
 	if err != nil {
 		ttl = failureTTL
 	}
-	c.cached, c.err, c.expires = out, err, c.now().Add(ttl)
-	return out, err
+	c.cached, c.err, c.expires, c.stored = out, err, c.now().Add(ttl), id
 }

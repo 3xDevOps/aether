@@ -31,9 +31,17 @@ var probeAccess = selfupdate.Probe
 // A server that does not answer costs the server half only. The CLI half
 // is about a binary on this machine and has nothing to do with the SSH
 // hop, and failing the whole verb would take the CLI banner down with it
-// during exactly the outage the user is most likely to be looking at.
-func (g *Gateway) localUpdateCheck(r *http.Request, _ []byte) (any, *protocol.Error) {
-	check, perr := g.checkRelease(r)
+// during exactly the outage the user is most likely to be looking at. A
+// refresh that cannot reach GitHub does fail the whole verb: the click
+// behind it has nothing to install either way.
+func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		Refresh bool `json:"refresh"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	check, perr := g.checkRelease(r, params.Refresh)
 	if perr != nil {
 		return nil, perr
 	}
@@ -88,17 +96,18 @@ func (g *Gateway) localUpdateCheck(r *http.Request, _ []byte) (any, *protocol.Er
 // dialog on screen with the password authorizing nothing. Closing the tab
 // or the app cancels the request, which kills the wait.
 func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Error) {
-	check, perr := g.checkRelease(r)
+	// One install at a time: a second click from another tab while the
+	// dialog is up would stack a second dialog and a second copy. Claimed
+	// before the release lookup, so the loser does not pay for a dial.
+	if !g.updating.CompareAndSwap(false, true) {
+		return nil, &protocol.Error{Code: protocol.CodeConflict,
+			Message: "a release lookup or install is already running in this gateway"}
+	}
+	defer g.updating.Store(false)
+	check, perr := g.checkRelease(r, true)
 	if perr != nil {
 		return nil, perr
 	}
-	// One install at a time: a second click from another tab while the
-	// dialog is up would stack a second dialog and a second copy.
-	if !g.updating.CompareAndSwap(false, true) {
-		return nil, &protocol.Error{Code: protocol.CodeConflict,
-			Message: "an update is already running in this gateway"}
-	}
-	defer g.updating.Store(false)
 	switch {
 	case check.Dev:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
@@ -138,11 +147,14 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	// process already finished is not run again for a repeat click: the
 	// app on disk is new, and only the restart is left.
 	outcome := rebuildNone
-	rebuilt := g.rebuild.snapshot().Phase == localops.PhaseDone
+	rebuilt := g.rebuild.builtRelease() == check.Latest
 	if len(updated) > 0 && !rebuilt {
-		outcome = g.startAppRebuild(updated[0])
+		outcome = g.startAppRebuild(updated[0], check.Latest)
 	}
-	rebuilding := outcome != rebuildNone
+	// A build for an earlier release covers nothing here: reporting it as
+	// this release's rebuild would have the dashboard watch it finish and
+	// then say the app was rebuilt, when it was built from the tag before.
+	rebuilding := outcome == rebuildStarted || outcome == rebuildBusy
 
 	note := "rerun aether gui to use the new binary"
 	switch {
@@ -153,6 +165,8 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 		// Saying a rebuild is running is the honest answer, and it must
 		// not exit: the first build is still swapping the app directory.
 		note = "a rebuild of the desktop app is already running"
+	case outcome == rebuildStale:
+		note = "a rebuild of an earlier release is still running; rerun the update once it finishes"
 	case rebuilding && g.cfg.Supervised:
 		note = "rebuilding the desktop app, then relaunching it"
 	case rebuilding:
@@ -231,10 +245,14 @@ func restartCommand(updated []string) string {
 	return ""
 }
 
-// checkRelease runs the cached release check, mapping an unreachable
-// GitHub to the same code every other unavailable dependency uses.
-func (g *Gateway) checkRelease(r *http.Request) (selfupdate.Check, *protocol.Error) {
-	check, err := g.cfg.Update.Check(r.Context())
+// checkRelease runs the release check, mapping an unreachable GitHub to
+// the same code every other unavailable dependency uses.
+func (g *Gateway) checkRelease(r *http.Request, fresh bool) (selfupdate.Check, *protocol.Error) {
+	resolve := g.cfg.Update.Check
+	if fresh {
+		resolve = g.cfg.Update.CheckFresh
+	}
+	check, err := resolve(r.Context())
 	if err != nil {
 		return check, &protocol.Error{Code: protocol.CodeUnavailable, Message: "check for releases: " + err.Error()}
 	}
