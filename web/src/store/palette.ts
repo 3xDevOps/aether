@@ -1,7 +1,11 @@
 import type { SliceCreator } from '@/store/slice'
 
 /** The palette's forms, each needing input the palette cannot take. */
-export type PaletteDialog = 'launch' | 'inject' | 'forward' | 'close'
+/** Every form the shell hosts, so a caller sweeping all of them cannot keep
+ * its own list and let it drift. */
+export const paletteDialogs = ['launch', 'inject', 'forward', 'close'] as const
+
+export type PaletteDialog = (typeof paletteDialogs)[number]
 
 export interface PaletteSlice {
   paletteOpen: boolean
