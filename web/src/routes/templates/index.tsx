@@ -81,7 +81,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
   const launch = async (template: Template) => {
     try {
       const result = await client.templateLaunch(workspaceID, template.name)
-      navigate('run', { runId: result.run.id })
+      navigate('terminal', { runId: result.run.id })
       toast.success('Run launched')
     } catch (err) {
       toast.error(message(err))

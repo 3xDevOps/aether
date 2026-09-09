@@ -230,12 +230,13 @@ attaches the server's output to the report.
 | `onboarding-configuration` | Bringing a member's own agent configuration across, from a fixture home holding an empty file and a file the secret scanner flags: the flagged file is named on the row and left out, everything else imports |
 | `onboarding-first-run` | Launching the first run on an agent installed into the member's environment home, and watching it reach needs-attention with its work committed; and, with nothing installed, the step offering "Set up an agent" instead of a picker and sending the reader back to Agents |
 | `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through, and the Git identity step reached in both directions between Link and Workspace |
+| `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
 | `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, and `Ctrl+Shift+F` finding what the shell printed and saying "No matches" when it did not |
 
 `onboarding-agents`, `onboarding-github`, `onboarding-first-run`'s launch
-scenario and `terminal-tools` need a reachable Docker daemon and skip without
-one, the way the Go suite skips its container scenarios. The rest need only
-git.
+scenario, `run-switch` and `terminal-tools` need a reachable Docker daemon
+and skip without one, the way the Go suite skips its container scenarios.
+The rest need only git.
 
 ### Adding a step to the wizard
 

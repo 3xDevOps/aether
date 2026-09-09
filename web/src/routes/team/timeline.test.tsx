@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { Api } from '@/lib/api'
 import type { Event, TimelinePage, TimelineQuery } from '@/lib/types'
 import { olderFeed, openFeed } from '@/routes/team/sync'
@@ -115,6 +115,24 @@ describe('workspace activity feed', () => {
       'background-color',
     )
     expect(windowsAsked(client)).toEqual([head - window])
+  })
+
+  it('opens the run a row names on its terminal tab', async () => {
+    const client = feedApi()
+    seed()
+    render(<TimelineFeed params={{}} client={client} />)
+
+    const row = (await screen.findByText(/waiting on a question/)).closest(
+      'li',
+    ) as HTMLElement
+    fireEvent.click(
+      within(row).getByRole('button', { name: 'rewrite the checkout flow' }),
+    )
+
+    expect(useStore.getState().route).toEqual({
+      name: 'terminal',
+      params: { runId: 'run_1' },
+    })
   })
 
   // A server update is an admin act like any other, so it lands in the

@@ -49,7 +49,7 @@ state without editing the shell.
 `registerRoute('board', Board)` at module scope; `src/routes/index.ts` imports
 it once for that side effect. The center view looks the current route up by
 name and renders it with `route.params`. Navigation is a store action -
-`navigate('run', { runId })` - not a URL router: the dashboard is a single
+`navigate('terminal', { runId })` - not a URL router: the dashboard is a single
 screen with a reveal path, and every surface routes through the same call.
 
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
@@ -141,13 +141,12 @@ stays in the existing local sync and the user's editor.
 
 `src/components/shell/title-bar.tsx` is the desktop shell's window chrome.
 The Electron window is frameless, so the SPA draws the bar itself: 36px tall,
-the Aether mark and the `aether` wordmark in VT323 (the landing page's display
-face, loaded in `index.css` as `--font-pixel` and used nowhere else), and -
-on Windows and Linux, where the shell draws no native buttons - minimize,
-maximize/restore and close wired to `window.aetherDesktop.controls`. The bar
-is `-webkit-app-region: drag` and every button `no-drag`; on macOS the native
-traffic lights are kept and the bar reserves 78px for them instead of drawing
-buttons.
+the Aether mark and the `aether` wordmark in VT323 (the display face
+[styles.md](styles.md) describes), and - on Windows and Linux, where the shell
+draws no native buttons - minimize, maximize/restore and close wired to
+`window.aetherDesktop.controls`. The bar is `-webkit-app-region: drag` and
+every button `no-drag`; on macOS the native traffic lights are kept and the
+bar reserves 78px for them instead of drawing buttons.
 
 `App.tsx` mounts it above the whole app, the `ConnectionError` page included:
 that page replaces the shell, and a frameless window without a title bar would
@@ -461,6 +460,24 @@ server would refuse.
 `/ws/attach/<run>` (`docs/local-gateway.md`). The run-detail routes share one
 tab strip (`tabs.tsx`), so Overview, Terminal, Diff and Events are registry
 routes on the same `runId`.
+
+Every way into a run navigates to `terminal`, because that is where the agent
+is: board card, sidebar row, run list, palette, feed entry, approval,
+conflict chip, template, and the launch and onboarding forms. Overview stays a
+tab for the metadata a finished run is read for, which `src/routes/run.tsx`
+renders as one list: the reason, the harness and its mode, the owner, the
+agent account where the run borrowed one, the created and changed times, and
+the last commit. All four tabs render one `RunHeader`
+(`src/components/run-header.tsx`), so the run's own state travels with the
+reader, and `isRunRoute` in `tabs.tsx` is what keeps a sidebar row lit while
+they move between the tabs.
+
+The center view renders the run-detail route without a key, so one
+`TerminalView` is reused across a run switch. The Terminal tab therefore
+clears the pane when the run id changes rather than waiting for the attach
+ack: a run that ended with no recorded terminal is refused and never acks,
+which would leave the previous run's output on screen under the new run's
+name.
 
 The Terminal view is a vertical split. The agent terminal keeps the flexible
 space above a `RunDock` below it. The dock has a persisted height
@@ -1060,9 +1077,9 @@ wherever the member is an admin.
 
 ## Styleguide
 
-- **Tokens only.** See [styles.md](styles.md) for the landing palette in dark, neutral in light, and `--state-*` tokens; components use token classes and no hex literals.
-  The exception is member attribution colour, which is data from the server and is
-  applied inline.
+- **Tokens only.** See [styles.md](styles.md) for the landing palette in dark,
+  neutral in light, the `--state-*` tokens, and the one inline-colour
+  exception; components use token classes and no hex literals.
 - **Dark, light, system.** The preference is stored, `system` follows
   `prefers-color-scheme` live.
 - **Two glyphs, two layers.** The harness glyph says who is running, the state
@@ -1070,6 +1087,22 @@ wherever the member is an admin.
   (`working`, `waiting`, `needs-attention`, `failed`, `done`, `idle`) are
   derived in `src/lib/status.ts`; the domain status enum is untouched. A group
   header shows the worst state of the runs under it.
+- **A working run moves.** `StateIndicator` swaps the static dot for three
+  dots bouncing in `--state-working`: on the board card, in the run header,
+  and in the run list that `routes/overview.tsx` and `routes/workspace.tsx`
+  both mount. Sidebar rows keep the dot and pulse its opacity
+  (`.state-pulse`), because a column of ten bouncing runs is noise. The
+  palette's run rows keep a plain static dot. The mark keeps the dot's 0.5rem
+  box in each case, so a row does not shift when its run starts or stops
+  working. Where the state is already printed in words the mark is passed
+  `decorative`, so a screen reader hears it once.
+- **Motion is optional.** The steering signal, the working dots and the
+  sidebar pulse each answer `prefers-reduced-motion: reduce` in `index.css` by
+  removing the movement and leaving the mark: the working dots collapse to the
+  static dot. The launch splash is not toned down but skipped -
+  `components/launch-splash.tsx` renders nothing when the query matches. The
+  spinner and skeleton loaders (Tailwind's `animate-spin` and `animate-pulse`)
+  have no such answer.
 - **Member colour attributes, it does not fill.** The avatar rings itself in
   the member's colour and keeps its initials in the foreground token, because
   the colour is arbitrary server data with no contrast guarantee in either
@@ -1179,6 +1212,12 @@ like a file marker - then the fetch, the truncation notice, a snapshot
 rendering its own interval and only that change, deselecting returning to the
 cumulative patch without a refetch, a snapshot carrying no tree staying
 unselectable, and a conflict chip naming its member and opening their run.
+Each entry point the Terminal view section lists is asserted to land on
+`terminal`, beside its own surface. The run header is rendered on all four
+tabs and asserted to name the state and carry `.working-dots` only while the
+run is working; the indicator has its own test for the label and the shape of
+every state; the sidebar row asserts `aria-current` across the run's tabs and
+`.state-pulse` on a working run.
 Full end-to-end coverage is `web/e2e/`: a Playwright suite that drives this
 dashboard in a real browser against a real `aether gui` gateway and a real
 server, with real git and real containers. It walks the onboarding wizard the

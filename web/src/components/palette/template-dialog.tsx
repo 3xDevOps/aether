@@ -55,7 +55,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
     try {
       const { run } = await api.templateLaunch(workspaceID, name)
       onClose()
-      navigate('run', { runId: run.id })
+      navigate('terminal', { runId: run.id })
       toast.success('Run launched')
     } catch (err) {
       setLaunching(false)

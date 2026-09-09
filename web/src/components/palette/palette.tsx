@@ -155,9 +155,9 @@ export function PaletteBody({
             <CommandItem
               key={run.id}
               value={`${run.task} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}`}
-              onSelect={() => go('run', { runId: run.id })}
+              onSelect={() => go('terminal', { runId: run.id })}
             >
-              <StateDot state={state} />
+              <StateDot state={state} decorative />
               <span className="truncate">{runLabel(run)}</span>
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">
                 {stateLabel[state]}

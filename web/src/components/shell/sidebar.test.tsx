@@ -49,9 +49,45 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByText('rewrite the checkout flow'))
 
     expect(useStore.getState().route).toEqual({
-      name: 'run',
+      name: 'terminal',
       params: { runId: 'run_1' },
     })
+  })
+
+  it('keeps the row lit across the run tabs, and breathes rather than bounces', () => {
+    render(<Sidebar />)
+    act(() =>
+      useStore.setState({ route: { name: 'diff', params: { runId: 'run_1' } } }),
+    )
+
+    const row = screen.getByRole('button', { name: /rewrite the checkout flow/ })
+    expect(row.getAttribute('aria-current')).toBe('page')
+    // A column of ten bouncing runs is noise, so the sidebar pulses the dot.
+    expect(row.querySelector('.state-pulse')).not.toBeNull()
+    expect(row.querySelector('.working-dots')).toBeNull()
+  })
+
+  it('lights the open run alone, and no row off the run tabs', () => {
+    const other = run({ id: 'run_api', task: 'tune the rate limiter' })
+    act(() =>
+      useStore.setState((s) => ({
+        runs: { ...s.runs, [other.id]: toRecord(other) },
+      })),
+    )
+    render(<Sidebar />)
+    const row = (task: string) =>
+      screen.getByRole('button', { name: new RegExp(task) })
+
+    act(() =>
+      useStore.setState({
+        route: { name: 'terminal', params: { runId: 'run_1' } },
+      }),
+    )
+    expect(row('rewrite the checkout flow').getAttribute('aria-current')).toBe('page')
+    expect(row('tune the rate limiter').getAttribute('aria-current')).toBeNull()
+
+    act(() => useStore.setState({ route: { name: 'board', params: {} } }))
+    expect(row('rewrite the checkout flow').getAttribute('aria-current')).toBeNull()
   })
 
   it('switches workspace, rescoping the run list', () => {

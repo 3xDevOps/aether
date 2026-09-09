@@ -21,8 +21,8 @@
   font-display: block;
 }
 
-/* VT323: the landing page's display face, kept here for the `aether` wordmark
-   in the title bar only, so the dashboard's UI type is untouched. Latin
+/* VT323: the landing page's display face, carried by `--font-pixel` for the
+   `aether` wordmark alone, so the dashboard's UI type is untouched. Latin
    subset; OFL, see public/fonts/LICENSE-vt323.txt. */
 @font-face {
   font-family: 'VT323';
@@ -280,6 +280,89 @@
       animation: none;
       opacity: 0.35;
       transform: translateY(-50%) rotate(var(--ray-angle, -24deg)) scaleX(0.75);
+    }
+  }
+
+  /* The box is the state dot's 0.5rem and the three dots overflow it, so a
+     row's leading column does not resize when its run starts or stops
+     working. */
+  .working-dots {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 0.125rem;
+    width: 0.5rem;
+    height: 0.5rem;
+    color: var(--state-working);
+  }
+
+  .working-dots span {
+    display: block;
+    flex: none;
+    width: 0.25rem;
+    height: 0.25rem;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.5;
+    animation: working-bounce 1.05s ease-in-out infinite;
+  }
+
+  .working-dots span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .working-dots span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  @keyframes working-bounce {
+    0%,
+    60%,
+    100% {
+      opacity: 0.5;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-0.125rem);
+    }
+  }
+
+  .state-pulse {
+    animation: state-pulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes state-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
+
+  /* One dot at the static mark's size, so the fallback is the same 0.5rem
+     round mark every other state draws. */
+  @media (prefers-reduced-motion: reduce) {
+    .working-dots span {
+      opacity: 1;
+      animation: none;
+    }
+
+    .working-dots span:first-child,
+    .working-dots span:last-child {
+      display: none;
+    }
+
+    .working-dots span:nth-child(2) {
+      width: 0.5rem;
+      height: 0.5rem;
+    }
+
+    .state-pulse {
+      animation: none;
     }
   }
 

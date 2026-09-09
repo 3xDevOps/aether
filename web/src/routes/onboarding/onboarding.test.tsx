@@ -1170,7 +1170,7 @@ describe('onboarding wizard', () => {
     // run view rather than holding a done screen.
     await waitFor(() => {
       expect(useStore.getState().route).toEqual({
-        name: 'run',
+        name: 'terminal',
         params: { runId: 'run_1' },
       })
     })

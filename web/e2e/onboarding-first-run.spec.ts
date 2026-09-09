@@ -40,14 +40,27 @@ test('the first run reaches needs-attention', async ({ page, aether }) => {
   await wizard.expectStep('First run')
   await wizard.firstRun.launch('claude', 'write the result file')
 
-  // Launching leaves the wizard for the run it created, which is where the
-  // run's own state arrives over the event stream.
+  // Launching leaves the wizard for the run's terminal, which is where the
+  // agent is; the run's own state arrives over the event stream from there.
   await expect(
     page.getByRole('heading', { name: 'write the result file', exact: true }),
   ).toBeVisible()
-  const state = page.getByRole('definition').first()
-  await expect(state).toContainText('Needs you', { timeout: 3 * 60 * 1000 })
-  await expect(state).toContainText('agent exited; results committed')
+  const tabs = page.getByRole('navigation', { name: 'Run tabs' })
+  await expect(tabs.getByRole('button', { name: 'Terminal' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+
+  // The header carries the state on the terminal tab, so nobody has to leave
+  // the agent to find out how the run is doing.
+  const header = page.locator('header').filter({ hasText: 'write the result file' })
+  await expect(header).toContainText('Needs you', { timeout: 3 * 60 * 1000 })
+
+  // The Overview tab keeps what the header cannot say: why the run stopped.
+  await tabs.getByRole('button', { name: 'Overview' }).click()
+  await expect(
+    page.getByRole('definition').filter({ hasText: 'agent exited; results committed' }),
+  ).toBeVisible()
 })
 
 test('with no agent installed the first run sends you back to Agents', async ({

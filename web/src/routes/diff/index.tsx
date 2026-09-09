@@ -1,11 +1,9 @@
 import { RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { RunActions } from '@/components/run-actions'
+import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
-import { ViewHeader } from '@/components/view-header'
 import { api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
-import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { Land } from '@/routes/diff/land'
@@ -60,11 +58,7 @@ function DiffView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader
-        title={runLabel(run)}
-        subtitle={run.branch}
-        actions={<RunActions run={run} />}
-      />
+      <RunHeader run={run} subtitle={run.branch} />
       <RunTabs runID={runID} active="diff" />
       <div className="px-4 pt-3">
         <Land run={run} />

@@ -1,7 +1,7 @@
 import { GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
-import { StateDot } from '@/components/state-dot'
+import { StateIndicator } from '@/components/state-dot'
 import { timeAgo } from '@/lib/format'
 import { runLabel, stateLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
@@ -39,7 +39,7 @@ export function RunCard({ card }: { card: BoardCard }) {
     >
       <div className="space-y-3 p-3">
         <div className="flex items-start gap-2">
-          <StateDot state={state} className="mt-1" />
+          <StateIndicator state={state} className="mt-1" />
           <span
             className={cn('min-w-0 flex-1 text-sm break-words', unseen && 'font-medium')}
           >
@@ -117,7 +117,7 @@ export function RunCard({ card }: { card: BoardCard }) {
       <button
         type="button"
         aria-label={runLabel(run)}
-        onClick={() => navigate('run', { runId: run.id })}
+        onClick={() => navigate('terminal', { runId: run.id })}
         className="absolute inset-0 z-10 rounded-md focus-visible:ring-[2px] focus-visible:ring-ring/50 focus-visible:outline-none"
       />
     </article>

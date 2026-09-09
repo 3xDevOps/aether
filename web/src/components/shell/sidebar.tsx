@@ -20,6 +20,7 @@ import { canLaunch } from '@/lib/commands'
 import { useDelayed } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
+import { isRunRoute } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { isUnseen } from '@/store/board'
 import {
@@ -315,11 +316,12 @@ function RunRow({ entry }: { entry: SidebarRun }) {
   const route = useStore((s) => s.route)
   // Acks are app-wide, so a row mutes at the same moment its board card does.
   const unseen = useStore((s) => isUnseen(s.acked, entry.run))
-  const selected = route.name === 'run' && route.params.runId === entry.run.id
+  const selected = isRunRoute(route, entry.run.id)
   return (
     <button
       type="button"
-      onClick={() => navigate('run', { runId: entry.run.id })}
+      aria-current={selected ? 'page' : undefined}
+      onClick={() => navigate('terminal', { runId: entry.run.id })}
       style={{ borderLeftColor: entry.owner?.color }}
       className={cn(
         'flex w-full items-center gap-2 border-l-2 py-1 pr-2 pl-4 text-left text-xs hover:bg-accent/60',
@@ -327,7 +329,10 @@ function RunRow({ entry }: { entry: SidebarRun }) {
         unseen ? 'font-medium' : 'text-muted-foreground',
       )}
     >
-      <StateDot state={entry.state} />
+      <StateDot
+        state={entry.state}
+        className={cn(entry.state === 'working' && 'state-pulse')}
+      />
       <span className="truncate">{runLabel(entry.run)}</span>
       <span className="ml-auto shrink-0 text-muted-foreground">
         {entry.run.harness}

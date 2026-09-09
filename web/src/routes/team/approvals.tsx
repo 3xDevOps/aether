@@ -186,7 +186,7 @@ function Row({
         {run && (
           <button
             type="button"
-            onClick={() => navigate('run', { runId: run.id })}
+            onClick={() => navigate('terminal', { runId: run.id })}
             className="max-w-60 truncate hover:text-foreground hover:underline"
           >
             {runLabel(run)}

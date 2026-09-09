@@ -859,7 +859,7 @@ export function FirstRunStep({
         harness,
       })
       setOnboarded(true)
-      navigate('run', { runId: run.id })
+      navigate('terminal', { runId: run.id })
     } catch (err) {
       setError(message(err))
     } finally {
