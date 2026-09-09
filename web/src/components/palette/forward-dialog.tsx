@@ -9,12 +9,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   api,
   type LocalForwardStatusResult,
 } from '@/lib/api'
 import { message } from '@/lib/format'
-import { field } from '@/lib/utils'
 import { useStore } from '@/store'
 
 export function ForwardDialog() {
@@ -125,20 +126,19 @@ export function ForwardDialog() {
             void start()
           }}
         >
-          <label className="block space-y-1 text-sm">
+          <Label className="block space-y-1">
             Port
-            <input
+            <Input
               autoFocus
               type="number"
               min={1}
               max={65535}
               step={1}
               inputMode="numeric"
-              className={field}
               value={port}
               onChange={(event) => setPort(event.target.value)}
             />
-          </label>
+          </Label>
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}

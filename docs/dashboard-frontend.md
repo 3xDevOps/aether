@@ -554,16 +554,18 @@ Everything the dashboard can do is reachable without a mouse, and every control
 a keyboard reaches draws the same focus indicator.
 
 **One focus indicator.** `focusRing` in `src/lib/utils.ts` is it, and it is
-the only one: the `Button` primitive composes it into the base of its `cva`,
-and so does every raw control that takes focus - buttons, fields, selects,
-links, `<summary>` elements, menu items, the dialog close, the resize
-handles. The shared `field` style beside it carries it for the house text
-input. A new control that is not a `Button` adds `focusRing` to its classes.
-No file writes a focus indicator of its own. The only `focus-visible:` classes
-a file adds are modifiers of this one: the inset offset below, and
-`focus-visible:opacity-100` where the dialog close would otherwise fade its
-outline along with its glyph. `a11y.test.tsx` reads the source tree to keep
-that true, control by control, the stylesheet included.
+the only one: the `Button`, `Input` and `Textarea` primitives compose it into
+their base, and so does every raw control that takes focus - buttons, selects,
+links, `<summary>` elements, menu items, the dialog close, the resize handles.
+The `field` style beside it there carries it for most of the native
+`<select>` elements, and the two that size their own box - the sidebar
+switcher and the activity filters - name `focusRing` themselves. A new control
+that is none of those adds `focusRing` to its classes. No file writes a focus
+indicator of its own. The only `focus-visible:` classes a file adds are
+modifiers of this one: the inset offset below, and `focus-visible:opacity-100`
+where the dialog close would otherwise fade its outline along with its glyph.
+`a11y.test.tsx` reads the source tree to keep that true, control by control,
+the stylesheet included.
 
 It is an outline rather than a ring, for two reasons. Windows High Contrast
 (`forced-colors: active`) discards box shadows, which is what Tailwind's
@@ -1449,6 +1451,19 @@ wherever the member is an admin.
   `motion-reduce:hidden`, since a flash is nothing but motion. The spinner and
   skeleton loaders (Tailwind's `animate-spin` and `animate-pulse`) have no
   such answer.
+- **Primitives, not raw form elements.** `src/components/ui/` holds the
+  shadcn/ui pieces the dashboard uses - `Button`, `Input`, `Textarea`,
+  `Label`, `Dialog`, `DropdownMenu`, `Command`, `Skeleton` - most of them
+  retuned to the house scale rather than taken at shadcn's own metrics, and
+  each focusable one composing `focusRing`. They are house copies rather than
+  registry output, so a `shadcn add` offering to overwrite one is declined. A
+  field draws its border from `--input` rather than the `--border` every other
+  element wears, dims while disabled, and prints its placeholder in the muted
+  token. No file outside that directory writes a raw text `<input>`,
+  `<textarea>` or `<label>`; a checkbox is exempt, drawing none of a field's
+  border, padding or text scale. `components/ui/fields.test.tsx` reads the
+  source tree to keep that true. A `Label` wraps the control it names rather
+  than pointing at it by id, so neither end needs one.
 - **One focus indicator, one source.** `focusRing` in `src/lib/utils.ts`; see
   [Keyboard and focus](#keyboard-and-focus).
 - **Member colour attributes, it does not fill.** The avatar rings itself in
@@ -1523,7 +1538,12 @@ finds has to carry the outline, written out as literal classes because a token
 compared against itself passes for any value. Two source scans stand behind
 it, because a sweep only sees what a test renders: one proves no second
 indicator exists anywhere in `web/src`, the other that every file drawing a
-raw control reaches for the shared one.
+raw control reaches for the shared one. `components/ui/fields.test.tsx` scans
+the same tree for the fields themselves, under the Styleguide rule above and
+its one carve-out, so a route cannot quietly redraw a field. Beside it,
+`Input` and `Textarea` are rendered to prove the outline is really on them,
+`Label` to pin the single class it adds against a registry overwrite, and a
+ref is followed to the DOM node four call sites focus through.
 
 The rest of the file is behaviour: arrow keys move focus around both strips and
 wrap without opening anything, a modifier chord goes to the browser, Enter and

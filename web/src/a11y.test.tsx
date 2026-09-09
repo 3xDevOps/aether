@@ -24,6 +24,7 @@ import { registeredRoutes } from '@/routes/registry'
 import { useStore } from '@/store'
 import { paletteDialogs } from '@/store/palette'
 import { hydrate } from '@/store/sync'
+import { openingTags, sourceFiles, type Tag } from '@/test/sources'
 import { alice, approval, fakeApi, run, workspace } from '@/test/fixtures'
 import { toRecord } from '@/store/runs'
 
@@ -197,32 +198,19 @@ describe('focus ring', () => {
   })
 })
 
-interface Tag {
-  name: string
-  attributes: string
-}
-
 /**
- * Every hand-written control in one file, with its own attributes and no
- * other. Per file is not enough: one ringed control would let every bare
- * control beside it through, and the exemption widens as a file grows.
- * `tabIndex={0}` is in here too, because a tab stop is a control whatever tag
- * carries it.
+ * Every hand-written control in one file. `tabIndex={0}` is in here too,
+ * because a tab stop is a control whatever tag carries it.
  */
-function openingTags(source: string): Tag[] {
-  const controls = /<(input|select|textarea|button|summary|a)[\s>]/g
-  const tags: Tag[] = []
-  for (const match of source.matchAll(controls)) {
-    let depth = 0
-    let end = match.index + match[0].length
-    // JSX puts expressions in braces, and a `>` inside one closes nothing.
-    while (end < source.length && (depth > 0 || source[end] !== '>')) {
-      if (source[end] === '{') depth += 1
-      if (source[end] === '}') depth -= 1
-      end += 1
-    }
-    tags.push({ name: match[1], attributes: source.slice(match.index, end) })
-  }
+function controls(source: string): Tag[] {
+  const tags = openingTags(source, [
+    'input',
+    'select',
+    'textarea',
+    'button',
+    'summary',
+    'a',
+  ])
   for (const match of source.matchAll(/tabIndex=\{0\}|contentEditable/g)) {
     const start = source.lastIndexOf('<', match.index)
     tags.push({ name: 'tab stop', attributes: source.slice(start, match.index + 200) })
@@ -230,16 +218,10 @@ function openingTags(source: string): Tag[] {
   return tags
 }
 
-/** Every source file the app ships, minus the one that defines the token. */
-async function sourceFiles(): Promise<string[]> {
-  const { readdir } = await import('node:fs/promises')
-  // Tests are left out on purpose: they name these classes to assert them.
-  const root = `${process.cwd()}/src`
-  const files = await readdir(root, { recursive: true, withFileTypes: true })
-  const sources = files
-    .filter((e) => e.isFile() && /\.(tsx?|css)$/.test(e.name) && !e.name.includes('.test.'))
-    .map((e) => `${e.parentPath ?? root}/${e.name}`)
-    .filter((path) => !path.endsWith('/lib/utils.ts'))
+/** The files this sweep reads: every source the app ships, minus the one that
+ * defines the token. */
+async function ringedSources(): Promise<string[]> {
+  const sources = (await sourceFiles()).filter((path) => !path.endsWith('/lib/utils.ts'))
   expect(sources.length).toBeGreaterThan(50)
   return sources
 }
@@ -249,7 +231,7 @@ describe('the ring is the only ring', () => {
   // file, and is what keeps the guide's "one ring, one source" claim true.
   it('is written in exactly one place', async () => {
     const { readFile } = await import('node:fs/promises')
-    const sources = await sourceFiles()
+    const sources = await ringedSources()
 
     // The width, colour and style of the outline. An offset or an opacity
     // under the same variant is a modifier of the one indicator, not a second.
@@ -277,8 +259,8 @@ describe('the ring is the only ring', () => {
   it('reaches every control drawn by hand, wherever it is', async () => {
     const { readFile } = await import('node:fs/promises')
     const bare: string[] = []
-    for (const path of await sourceFiles()) {
-      for (const tag of openingTags(await readFile(path, 'utf8'))) {
+    for (const path of await ringedSources()) {
+      for (const tag of controls(await readFile(path, 'utf8'))) {
         // A field may wear the outline through the shared `field` style;
         // nothing else can, so nothing else is let off with it. The Button
         // primitive counts for neither: a file that renders it can still

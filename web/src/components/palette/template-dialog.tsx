@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { api } from '@/lib/api'
 import type { Template } from '@/lib/types'
 import { field } from '@/lib/utils'
@@ -95,7 +96,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
               </span>
             )}
           </p>
-          <label className="block space-y-1 text-sm">
+          <Label className="block space-y-1">
             Template
             <select
               className={field}
@@ -109,7 +110,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </select>
-          </label>
+          </Label>
           {templates?.length === 0 && (
             <p className="text-xs text-muted-foreground">
               This workspace has no saved templates.

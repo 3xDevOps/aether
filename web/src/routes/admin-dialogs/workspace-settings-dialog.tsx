@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { api, type Api } from '@/lib/api'
 import { field } from '@/lib/utils'
 import { useStore } from '@/store'
@@ -76,7 +77,7 @@ export function WorkspaceSettingsDialog({
               {workspace?.base_branch || 'unknown'}
             </span>
           </p>
-          <label className="block space-y-1 text-sm">
+          <Label className="block space-y-1">
             Who may steer others' runs
             <select
               className={field}
@@ -86,7 +87,7 @@ export function WorkspaceSettingsDialog({
               <option value="">everyone with steer</option>
               <option value="admins_only">admins only</option>
             </select>
-          </label>
+          </Label>
         </form>
         {error && <p className="text-xs text-state-failed">{error}</p>}
         <DialogFooter>

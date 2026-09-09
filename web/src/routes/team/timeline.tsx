@@ -2,6 +2,7 @@ import { History } from 'lucide-react'
 import { useEffect } from 'react'
 import { FeedEntry } from '@/components/feed-entry'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { eventLabel, type EventType } from '@/lib/events'
@@ -187,14 +188,14 @@ function Select({
   options: (string[] | [string, string])[]
 }) {
   return (
-    <label className="flex items-center gap-2 text-muted-foreground">
+    <Label className="flex items-center gap-2 text-xs text-muted-foreground">
       {label}
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={cn(
           focusRing,
-          'max-w-44 truncate rounded-md border bg-background px-2 py-1 text-foreground',
+          'max-w-44 truncate rounded-md border border-input bg-background px-2 py-1 text-foreground',
         )}
       >
         {options.map(([id, name]) => (
@@ -203,6 +204,6 @@ function Select({
           </option>
         ))}
       </select>
-    </label>
+    </Label>
   )
 }

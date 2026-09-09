@@ -13,8 +13,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { api, type Api } from '@/lib/api'
-import { field } from '@/lib/utils'
 
 export function BudgetDialog({
   workspaceID,
@@ -70,29 +71,27 @@ export function BudgetDialog({
             void save(false)
           }}
         >
-          <label className="flex-1 space-y-1 text-sm">
+          <Label className="flex-1 space-y-1">
             Limit (USD)
-            <input
+            <Input
               autoFocus
               type="number"
               min="0"
               step="any"
-              className={field}
               value={limit}
               onChange={(e) => setLimit(e.target.value)}
             />
-          </label>
-          <label className="flex-1 space-y-1 text-sm">
+          </Label>
+          <Label className="flex-1 space-y-1">
             Warn at (USD)
-            <input
+            <Input
               type="number"
               min="0"
               step="any"
-              className={field}
               value={warn}
               onChange={(e) => setWarn(e.target.value)}
             />
-          </label>
+          </Label>
         </form>
         {error && <p className="text-xs text-state-failed">{error}</p>}
         <DialogFooter>

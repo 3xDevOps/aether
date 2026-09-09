@@ -5,9 +5,9 @@
 import { useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { api, type Api } from '@/lib/api'
 import type { Schedule } from '@/lib/types'
-import { field } from '@/lib/utils'
 
 export function ScheduleEditor({
   workspaceID,
@@ -73,8 +73,8 @@ export function ScheduleEditor({
           void save()
         }}
       >
-        <input
-          className={field}
+        <Input
+          aria-label="Cron schedule"
           placeholder="cron, e.g. 0 3 * * * (UTC)"
           value={cron}
           onChange={(e) => setCron(e.target.value)}
