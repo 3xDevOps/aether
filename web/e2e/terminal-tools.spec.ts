@@ -50,8 +50,10 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, aethe
 
   await page.reload()
   await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
-  await expect(dock.getByRole('status')).toBeHidden({ timeout: 60_000 })
-  expect(await fontSize()).toBe('14px')
+  // The reattach's spinner has not necessarily mounted yet, so wait for the
+  // rows the size is read off rather than for the spinner to go.
+  await expect(dock.locator('.xterm-rows')).toBeVisible({ timeout: 60_000 })
+  await expect.poll(fontSize).toBe('14px')
 
   // Find selects the match the shell printed; a term that is not there says
   // so rather than failing silently.
