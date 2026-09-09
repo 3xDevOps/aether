@@ -1,21 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Terminal } from '@xterm/xterm'
-import { attachClipboardKeys } from './term-clipboard'
+import { clipboardKeys } from './term-clipboard'
 
 type KeyHandler = (ev: KeyboardEvent) => boolean
 
 function mount(selection: string) {
-  let handler: KeyHandler = () => true
   const paste = vi.fn()
   const term = {
     hasSelection: () => selection.length > 0,
     getSelection: () => selection,
     paste,
-    attachCustomKeyEventHandler: (h: KeyHandler) => {
-      handler = h
-    },
   }
-  attachClipboardKeys(term as unknown as Terminal)
+  const handler: KeyHandler = clipboardKeys(term as unknown as Terminal)
   return { handler, paste }
 }
 

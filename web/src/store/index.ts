@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { clampTerminalFontSize } from '@/lib/term-font'
 import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
 import { createCostSlice, type CostSlice } from '@/store/cost'
@@ -61,6 +62,8 @@ const persistedUi = (s: RootState) => ({
   sidebarCollapsed: s.sidebarCollapsed,
   terminalDockHeight: s.terminalDockHeight,
   runDockHeight: s.runDockHeight,
+  terminalFontSize: s.terminalFontSize,
+  terminalControlTaken: s.terminalControlTaken,
   activeWorkspace: s.activeWorkspace,
   groupBy: s.groupBy,
   lastHarnessByAccount: s.lastHarnessByAccount,
@@ -136,6 +139,23 @@ export function createRootStore() {
             state.onboardingFurthest = state.onboardingStep
           }
           return state
+        },
+        // `migrate` only runs when the stored version differs, and xterm is
+        // the one consumer that does not validate `fontSize`, so a
+        // hand-edited or corrupted `terminalFontSize` would reach the
+        // terminal as-is and render nothing readable. The dock heights need
+        // no such guard; `clampDockHeight` runs at render.
+        merge: (persisted, current) => {
+          const stored = (persisted ?? {}) as PersistedState
+          return {
+            ...current,
+            ...stored,
+            terminalFontSize: clampTerminalFontSize(
+              Number(stored.terminalFontSize ?? current.terminalFontSize),
+            ),
+            terminalControlTaken:
+              stored.terminalControlTaken === true || current.terminalControlTaken,
+          }
         },
         // Only view preferences survive a reload; server data is re-hydrated.
         partialize: persistedUi,

@@ -1,4 +1,5 @@
 import { clampDockHeight } from '@/components/dock'
+import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
 import type {
   LinkRepoResult,
   RepoFastForwardResult,
@@ -89,6 +90,14 @@ export interface UiSlice {
   sidebarCollapsed: boolean
   terminalDockHeight: number
   runDockHeight: number
+  /** Zoom level shared by every terminal, in pixels. */
+  terminalFontSize: number
+  /**
+   * Whether the member has ever taken control of a run. Until they have, the
+   * Terminal tab says what the default attach is, because nothing else on
+   * screen distinguishes a read-only mirror from a steered session.
+   */
+  terminalControlTaken: boolean
   onboarded: boolean
   onboardingStep: OnboardingStep
   /**
@@ -127,6 +136,8 @@ export interface UiSlice {
   setSidebarWidth: (width: number) => void
   setTerminalDockHeight: (height: number) => void
   setRunDockHeight: (height: number) => void
+  setTerminalFontSize: (size: number) => void
+  markTerminalControlTaken: () => void
   toggleSidebar: () => void
   setOnboarded: (onboarded: boolean) => void
   setOnboardingStep: (step: OnboardingStep) => void
@@ -148,6 +159,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   sidebarCollapsed: false,
   terminalDockHeight: 280,
   runDockHeight: 240,
+  terminalFontSize: defaultTerminalFontSize,
+  terminalControlTaken: false,
   onboarded: false,
   onboardingStep: 'Link',
   onboardingFurthest: 'Link',
@@ -166,6 +179,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
     }),
   setTerminalDockHeight: (height) => set({ terminalDockHeight: clampDockHeight(height) }),
   setRunDockHeight: (height) => set({ runDockHeight: clampDockHeight(height) }),
+  setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
+  markTerminalControlTaken: () => set({ terminalControlTaken: true }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setOnboarded: (onboarded) =>
     set(

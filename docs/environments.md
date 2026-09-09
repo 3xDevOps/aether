@@ -37,8 +37,8 @@ aether workspace init <name> --base <branch>
 
 ## Install in the environment terminal
 
-Open the environment terminal with `aether terminal` or from the dashboard's
-terminal dock. This is where a member installs system tools and language
+Open the environment terminal with `aether terminal`, or open the dashboard's
+terminal dock from the chevron in its header strip. This is where a member installs system tools and language
 runtimes, for example with `sudo apt-get install -y postgresql-client`,
 Homebrew, or a language toolchain. The terminal is a persistent shell with
 the member home mounted at `$HOME`.

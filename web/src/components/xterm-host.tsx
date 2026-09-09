@@ -1,11 +1,18 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
-import { terminalFontFamily, whenTerminalFontReady } from '@/lib/term-font'
-import { attachClipboardKeys } from '@/lib/term-clipboard'
+import {
+  defaultTerminalFontSize,
+  terminalFontFamily,
+  terminalZoomKey,
+  whenTerminalFontReady,
+} from '@/lib/term-font'
+import { clipboardKeys } from '@/lib/term-clipboard'
+import { useStore } from '@/store'
 
 export interface XtermOptions {
   enabled?: boolean
@@ -26,6 +33,10 @@ export interface XtermController {
   hostRef: React.RefCallback<HTMLDivElement>
   terminal: Terminal | null
   ready: boolean
+  /** Backs the find bar `TerminalPane` draws over this terminal. */
+  search: SearchAddon | null
+  findOpen: boolean
+  setFindOpen: (open: boolean) => void
 }
 
 function rgba(color: string, alpha: number): string | undefined {
@@ -128,6 +139,13 @@ export function useXterm({
   const onResizeRef = useRef(onResize)
   const onLinkRef = useRef(onLink)
   const [terminal, setTerminal] = useState<Terminal | null>(null)
+  const [search, setSearch] = useState<SearchAddon | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
+  // Zoom is one preference across every terminal, so it comes from the store
+  // rather than from each caller.
+  const fontSize = useStore((s) => s.terminalFontSize)
+  const fitRef = useRef<FitAddon | null>(null)
+  const appliedFontSize = useRef(fontSize)
   onDataRef.current = onData
   onResizeRef.current = onResize
   onLinkRef.current = onLink
@@ -144,7 +162,9 @@ export function useXterm({
       window.open(uri, '_blank', 'noopener,noreferrer')
     }
     const created = new Terminal({
-      fontSize: 12,
+      // Read rather than watched: rebuilding the terminal on a zoom step
+      // would throw its scrollback away, so the size is applied below.
+      fontSize: (appliedFontSize.current = useStore.getState().terminalFontSize),
       fontFamily: terminalFontFamily,
       scrollback: 50_000,
       cursorBlink: false,
@@ -158,8 +178,35 @@ export function useXterm({
       const fit = new FitAddon()
       created.loadAddon(fit)
       created.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)))
+      const searchAddon = new SearchAddon()
+      created.loadAddon(searchAddon)
       created.open(host)
-      attachClipboardKeys(created)
+      fitRef.current = fit
+
+      // xterm keeps a single custom key handler, so zoom, find and the
+      // clipboard shortcuts are one chain: the first to claim the event stops
+      // it reaching the shell.
+      const clipboard = clipboardKeys(created)
+      created.attachCustomKeyEventHandler((ev) => {
+        if (ev.type !== 'keydown') return clipboard(ev)
+        const zoom = terminalZoomKey(ev)
+        if (zoom) {
+          ev.preventDefault()
+          const { terminalFontSize, setTerminalFontSize } = useStore.getState()
+          setTerminalFontSize(
+            zoom === 'reset'
+              ? defaultTerminalFontSize
+              : terminalFontSize + (zoom === 'in' ? 1 : -1),
+          )
+          return false
+        }
+        if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyF') {
+          ev.preventDefault()
+          setFindOpen(true)
+          return false
+        }
+        return clipboard(ev)
+      })
 
       const repaint = () => paint(host, created)
       repaint()
@@ -179,8 +226,10 @@ export function useXterm({
         observer.disconnect()
         themeWatch.disconnect()
         input.dispose()
+        fitRef.current = null
       }
       setTerminal(created)
+      setSearch(searchAddon)
     })
 
     return () => {
@@ -189,8 +238,38 @@ export function useXterm({
       teardown?.()
       created.dispose()
       setTerminal(null)
+      setSearch(null)
+      setFindOpen(false)
     }
   }, [enabled, host])
 
-  return { hostRef: setHost, terminal, ready: terminal !== null }
+  // A zoom step changes the cell size, so the pane has to be re-fitted and
+  // the new geometry sent to the shell; nothing else observes the resize. A
+  // terminal that was just built at this size is already fitted.
+  useEffect(() => {
+    if (!terminal || appliedFontSize.current === fontSize) return
+    appliedFontSize.current = fontSize
+    terminal.options.fontSize = fontSize
+    fitRef.current?.fit()
+    onResizeRef.current?.(terminal.cols, terminal.rows)
+  }, [fontSize, terminal])
+
+  // Closing the find bar hands the keyboard back to the shell; the match it
+  // selected stays selected, so it can still be copied.
+  const changeFind = useCallback(
+    (open: boolean) => {
+      setFindOpen(open)
+      if (!open) terminal?.focus()
+    },
+    [terminal],
+  )
+
+  return {
+    hostRef: setHost,
+    terminal,
+    ready: terminal !== null,
+    search,
+    findOpen,
+    setFindOpen: changeFind,
+  }
 }

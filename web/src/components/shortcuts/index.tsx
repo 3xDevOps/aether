@@ -52,10 +52,15 @@ const groups: { name: string; entries: [string, string][] }[] = [
     ],
   },
   {
-    name: 'Terminal',
+    name: 'Terminal (in the terminal that has focus)',
     entries: [
       ['Copy', 'Ctrl+Shift+C - a plain Ctrl+C copies too when text is selected'],
       ['Paste', 'Ctrl+Shift+V - plain Ctrl+V works as well'],
+      ['Find', 'Ctrl+Shift+F - Enter for the next match, Shift+Enter back, Esc closes'],
+      [
+        'Zoom',
+        '⌘= / Ctrl+= and ⌘- / Ctrl+- resize every terminal; ⌘0 / Ctrl+0 restores the default',
+      ],
     ],
   },
 ]

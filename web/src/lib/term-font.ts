@@ -56,3 +56,42 @@ export function whenTerminalFontReady(open: () => void): () => void {
     clearTimeout(timer)
   }
 }
+
+/**
+ * The range terminal zoom stays inside. Below 8px the DOM renderer's cells
+ * collapse into an unreadable smear; above 32px a full agent TUI no longer
+ * fits an 80-column pane.
+ */
+export const minTerminalFontSize = 8
+export const maxTerminalFontSize = 32
+export const defaultTerminalFontSize = 12
+
+/** Snaps any candidate zoom level into the supported range. */
+export function clampTerminalFontSize(px: number): number {
+  if (!Number.isFinite(px)) return defaultTerminalFontSize
+  return Math.min(maxTerminalFontSize, Math.max(minTerminalFontSize, Math.round(px)))
+}
+
+/**
+ * The zoom a key event asks for, or null when it asks for none. Ctrl (or Cmd
+ * on macOS) with `=`/`+` grows, `-` shrinks and `0` returns to the default.
+ * Keyed off physical codes, like the clipboard shortcuts, so a remapped
+ * layout cannot move them.
+ *
+ * Shift is allowed only on `=`, because `Ctrl+Shift+=` is how a keyboard
+ * without a numpad types `Ctrl++`. It is refused on the others: `Ctrl+_` is
+ * readline's undo and vim's keymap switch, and neither may be swallowed.
+ */
+export function terminalZoomKey(ev: KeyboardEvent): 'in' | 'out' | 'reset' | null {
+  if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return null
+  switch (ev.code) {
+    case 'Equal':
+      return 'in'
+    case 'Minus':
+      return ev.shiftKey ? null : 'out'
+    case 'Digit0':
+      return ev.shiftKey ? null : 'reset'
+    default:
+      return null
+  }
+}

@@ -1,4 +1,4 @@
-import { terminalFontFamily, whenTerminalFontReady } from '@/lib/term-font'
+import { terminalFontFamily, terminalZoomKey, whenTerminalFontReady } from '@/lib/term-font'
 
 // jsdom has no FontFaceSet; each case installs exactly the shape it needs.
 function stubFonts(fonts: unknown) {
@@ -114,5 +114,39 @@ describe('terminalFontFamily', () => {
     const families = terminalFontFamily.split(',').map((f) => f.trim())
     expect(families[0]).toBe('"JetBrainsMono NFM"')
     expect(families[families.length - 1]).toBe('monospace')
+  })
+})
+
+function key(init: KeyboardEventInit): KeyboardEvent {
+  return new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+}
+
+describe('terminal zoom keys', () => {
+  it('reads the zoom a modified key asks for', () => {
+    expect(terminalZoomKey(key({ code: 'Equal', ctrlKey: true }))).toBe('in')
+    expect(terminalZoomKey(key({ code: 'Minus', metaKey: true }))).toBe('out')
+    expect(terminalZoomKey(key({ code: 'Digit0', ctrlKey: true }))).toBe('reset')
+  })
+
+  it('leaves unmodified and Alt-modified keys to the shell', () => {
+    expect(terminalZoomKey(key({ code: 'Equal' }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'Minus', ctrlKey: true, altKey: true }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'KeyF', ctrlKey: true }))).toBeNull()
+  })
+
+  it('leaves the shifted forms the shell binds alone', () => {
+    // Ctrl+Shift+- is Ctrl+_, readline's undo and vim's keymap switch.
+    expect(terminalZoomKey(key({ code: 'Minus', ctrlKey: true, shiftKey: true }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'Digit0', ctrlKey: true, shiftKey: true }))).toBeNull()
+  })
+
+  it('still grows on Ctrl+Shift+=, the only way to type Ctrl++', () => {
+    expect(terminalZoomKey(key({ code: 'Equal', ctrlKey: true, shiftKey: true }))).toBe('in')
+  })
+
+  it('leaves the keypad alone, where Ctrl+0 would be Ctrl+Insert', () => {
+    expect(terminalZoomKey(key({ code: 'Numpad0', ctrlKey: true }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'NumpadAdd', ctrlKey: true }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'NumpadSubtract', ctrlKey: true }))).toBeNull()
   })
 })

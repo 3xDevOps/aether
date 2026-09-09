@@ -22,14 +22,14 @@ describe('clampDockHeight', () => {
   })
 })
 describe('Dock controls', () => {
-  it('disables the add control when the caller reaches its cap', () => {
+  it('names its own ceiling and disables the add control at it', () => {
     render(
       createElement(Dock, {
-        tabs: [],
-        activeTab: '',
+        tabs: [{ id: 't1', label: 't1' }, { id: 't2', label: 't2' }],
+        activeTab: 't1',
         onSelectTab: vi.fn(),
         onAddTab: vi.fn(),
-        addDisabled: true,
+        maxTabs: 2,
         height: 240,
         onHeightChange: vi.fn(),
         collapsed: false,
@@ -37,8 +37,10 @@ describe('Dock controls', () => {
         children: createElement('div'),
       }),
     )
-    expect((screen.getByRole('button', { name: 'Add terminal tab' }) as HTMLButtonElement).disabled).toBe(
-      true,
-    )
+    const add = screen.getByRole('button', { name: 'Add terminal tab' }) as HTMLButtonElement
+    expect(add.disabled).toBe(true)
+    // The sentence is what a member reads, and it arrives without warning, so
+    // it is announced rather than only drawn.
+    expect(screen.getByRole('status')).toHaveProperty('textContent', 'At most 2 tabs')
   })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { RunActions } from '@/components/run-actions'
+import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
@@ -36,6 +37,8 @@ function TerminalView({ params }: RouteProps) {
   const setTerminal = useStore((s) => s.setTerminal)
   const capability = useCapability()
   const self = useSelf()
+  const controlTaken = useStore((s) => s.terminalControlTaken)
+  const markControlTaken = useStore((s) => s.markTerminalControlTaken)
 
   const known = run !== undefined
   const attachRef = useRef<Attachment | null>(null)
@@ -45,7 +48,11 @@ function TerminalView({ params }: RouteProps) {
   // reattach without re-running the terminal's own effect.
   const writeRef = useRef(state.write)
   writeRef.current = state.write
-  const { hostRef, terminal } = useXterm({
+  // An owner's run attaches with write already asked for, which the server
+  // grants without the member touching anything. Only a request they made
+  // counts as taking control.
+  const askedForControl = useRef(false)
+  const controller = useXterm({
     enabled: known,
     onData: (data) => {
       if (!gate.current.muted()) attachRef.current?.send(data)
@@ -62,6 +69,7 @@ function TerminalView({ params }: RouteProps) {
       )
     },
   })
+  const terminal = controller.terminal
   terminalRef.current = terminal
   useEffect(() => {
     if (!terminal) return
@@ -71,13 +79,19 @@ function TerminalView({ params }: RouteProps) {
     const ownerSteering = run?.status === 'running' && run.member_id === self.id
     setTerminal(runID, { ...initialTerminal, write: ownerSteering })
     writeRef.current = ownerSteering
+    askedForControl.current = false
 
     const attachment = connectAttach(() => api.attachSocket(runID), {
       onData: gate.current.write,
       // Every attach starts with the server's transcript replay, so the pane
       // is never blank - and clearing first keeps a reconnect from stacking a
       // second copy of the scrollback under the first.
-      onAttached: () => {
+      onAttached: (write) => {
+        // The ack carries what the server granted, not what was asked: a
+        // refused request arrives as onWriteDenied instead. Marking control
+        // here rather than on the click keeps a denied first attempt from
+        // silencing the mirror hint for good.
+        if (write && askedForControl.current) markControlTaken()
         gate.current.unmute()
         terminal.reset()
         setTerminal(runID, { message: null, refused: false })
@@ -97,7 +111,7 @@ function TerminalView({ params }: RouteProps) {
       attachment.close()
       attachRef.current = null
     }
-  }, [run?.member_id, run?.status, runID, self.id, setTerminal, terminal])
+  }, [markControlTaken, run?.member_id, run?.status, runID, self.id, setTerminal, terminal])
 
   if (!run) {
     return <p className="p-4 text-sm text-muted-foreground">Unknown run.</p>
@@ -105,6 +119,7 @@ function TerminalView({ params }: RouteProps) {
 
   const toggleWrite = () => {
     writeRef.current = !state.write
+    if (writeRef.current) askedForControl.current = true
     setTerminal(runID, { write: writeRef.current })
     attachRef.current?.reopen()
   }
@@ -146,6 +161,18 @@ function TerminalView({ params }: RouteProps) {
             You cannot steer this run.
           </span>
         )}
+        {/* A disabled control shows no tooltip, so the reason is written out
+            beside it rather than hidden in a title attribute. */}
+        {run.status !== 'running' && !state.steerDenied && (
+          <span className="text-muted-foreground">This run is not running</span>
+        )}
+        {/* Nothing else on screen separates watching from steering, so the
+            attach says what it is until the member has taken control once. */}
+        {!controlTaken && !state.write && !state.steerDenied && run.status === 'running' && (
+          <span className="text-muted-foreground">
+            Read-only mirror. Take control to type into the agent.
+          </span>
+        )}
         {state.message && (
           <span className="truncate text-muted-foreground">
             {state.refused && !liveStatuses.includes(run.status)
@@ -160,7 +187,7 @@ function TerminalView({ params }: RouteProps) {
         )}
       </div>
       <div className="min-h-0 flex-1">
-        <div ref={hostRef} className="h-full min-h-0 bg-background p-2 text-foreground" />
+        <TerminalPane controller={controller} />
       </div>
       <RunDock runID={runID} />
     </div>

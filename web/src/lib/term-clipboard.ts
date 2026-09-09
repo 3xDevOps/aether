@@ -12,9 +12,13 @@ import type { Terminal } from '@xterm/xterm'
  * move them.
  */
 
-/** Install the clipboard shortcuts on a terminal. Call after open. */
-export function attachClipboardKeys(term: Terminal): void {
-  term.attachCustomKeyEventHandler((ev) => {
+/**
+ * The clipboard half of a terminal's key handling, returned as a predicate
+ * rather than installed directly: xterm keeps one custom key handler, and the
+ * host composes this with the zoom and find shortcuts.
+ */
+export function clipboardKeys(term: Terminal): (ev: KeyboardEvent) => boolean {
+  return (ev) => {
     if (ev.type !== 'keydown') return true
     if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') {
       ev.preventDefault()
@@ -41,7 +45,7 @@ export function attachClipboardKeys(term: Terminal): void {
       return false
     }
     return true
-  })
+  }
 }
 
 /** Copy the terminal's selection, reporting whether it reached a clipboard. */

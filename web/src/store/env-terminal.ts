@@ -16,7 +16,8 @@ export interface EnvTerminalState {
 export const initialEnvTerminal: EnvTerminalState = {
   tabs: [],
   activeTab: null,
-  collapsed: false,
+  // Collapsed on arrival; the board is the view, not the dock.
+  collapsed: true,
   status: null,
   statusError: null,
 }
@@ -175,7 +176,12 @@ export const createEnvTerminalSlice: SliceCreator<EnvTerminalSlice> = (set) => (
     for (const tab of sockets.keys()) unregisterEnvTerminalSocket(tab)
     pendingLines.clear()
     sentLines.clear()
-    set({ envTerminal: initialEnvTerminal })
+    // The shell exiting, a stop and a reset all land here, and none of them
+    // is the member asking for the dock to close: whether it is open is
+    // their choice, not part of the environment's state.
+    set((s) => ({
+      envTerminal: { ...initialEnvTerminal, collapsed: s.envTerminal.collapsed },
+    }))
   },
   sendLine: (tab, text) => {
     const line = `${text}\n`

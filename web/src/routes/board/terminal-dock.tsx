@@ -2,6 +2,7 @@ import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Dock } from '@/components/dock'
+import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import {
@@ -72,7 +73,7 @@ export function TerminalDock({
   const terminalRef = useRef<XtermController['terminal']>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
 
-  const { hostRef, terminal } = useXterm({
+  const controller = useXterm({
     enabled: activeTab !== null && !dock.collapsed,
     onData: (data) => {
       if (gate.current.muted()) return
@@ -94,7 +95,12 @@ export function TerminalDock({
       )
     },
   })
+  const terminal = controller.terminal
   terminalRef.current = terminal
+  const setFindOpen = controller.setFindOpen
+  useEffect(() => {
+    setFindOpen(false)
+  }, [activeTab, setFindOpen])
 
   useEffect(() => {
     if (!savedConfirmation) return
@@ -127,6 +133,17 @@ export function TerminalDock({
       live = false
     }
   }, [rpc, setStatus, statusAttempt])
+
+  // The dock is collapsed by default, but a caller that opens it on mount
+  // means to show the terminal - the Agents and GitHub steps type into it.
+  // Once only: re-running this whenever `collapsed` changed would undo the
+  // member's own press of the collapse chevron on the same tick.
+  const expandedOnMount = useRef(false)
+  useEffect(() => {
+    if (!openOnMount || expandedOnMount.current) return
+    expandedOnMount.current = true
+    setCollapsed(false)
+  }, [openOnMount, setCollapsed])
 
   useEffect(() => {
     if (!openOnMount) return
@@ -249,16 +266,21 @@ export function TerminalDock({
   const tabs = dock.tabs.map((tab) => ({ id: tab, label: tab, permanent: tab === 'main' }))
   const empty = dock.tabs.length === 0 && dock.status?.running !== true
   const loading = dock.status === null && dock.statusError === null
-  const addDisabled = dock.tabs.length >= maxTabs
 
   return (
     <>
       <Dock
         tabs={tabs}
         activeTab={activeTab ?? ''}
-        onSelectTab={selectTab}
-        onAddTab={openTab}
-        addDisabled={addDisabled}
+        onSelectTab={(tab) => {
+          setCollapsed(false)
+          selectTab(tab)
+        }}
+        onAddTab={() => {
+          setCollapsed(false)
+          openTab()
+        }}
+        maxTabs={maxTabs}
         onCloseTab={closeTab}
         height={terminalDockHeight}
         onHeightChange={setHeight}
@@ -347,12 +369,11 @@ export function TerminalDock({
                 </Button>
               </div>
             ) : (
-              <div className="relative h-full min-h-0">
-                <div ref={hostRef} className="h-full min-h-0 bg-background p-2 text-foreground" />
+              <TerminalPane controller={controller}>
                 {attachedTab !== activeTab && (
                   <div
                     role="status"
-                    className="absolute inset-0 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
+                    className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
                   >
                     <Loader2 className="size-4 animate-spin" aria-hidden />
                     {/* Only a terminal the dock has not seen running is
@@ -363,7 +384,7 @@ export function TerminalDock({
                       : 'Starting your environment container'}
                   </div>
                 )}
-              </div>
+              </TerminalPane>
             )}
           </div>
         </div>

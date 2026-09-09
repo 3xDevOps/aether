@@ -8,7 +8,11 @@ import { initialEnvTerminal } from '@/store/env-terminal'
 
 const xterm = vi.hoisted(() => ({
   hostRef: () => {},
-  terminal: { cols: 80, rows: 24, reset: vi.fn(), write: vi.fn() },
+  terminal: { cols: 80, rows: 24, reset: vi.fn(), write: vi.fn(), focus: vi.fn() },
+  ready: true,
+  search: null,
+  findOpen: false,
+  setFindOpen: vi.fn(),
 }))
 
 const attach = vi.hoisted(() => ({
@@ -19,7 +23,10 @@ const attach = vi.hoisted(() => ({
 }))
 
 vi.mock('@/components/xterm-host', () => ({
-  useXterm: () => xterm,
+  // A disabled hook has no terminal, which is what a collapsed dock gets and
+  // what stops its attach effect from running.
+  useXterm: (options?: { enabled?: boolean }) =>
+    options?.enabled === false ? { ...xterm, terminal: null, ready: false } : xterm,
 }))
 vi.mock('@/routes/terminal/attach', async (importOriginal) => ({
   ...(await importOriginal<typeof attachModule>()),
@@ -51,7 +58,8 @@ describe('environment terminal dock', () => {
     attach.handlers = null
     vi.clearAllMocks()
     useStore.setState({
-      envTerminal: initialEnvTerminal,
+      // The dock ships collapsed; these cases are about what it shows open.
+      envTerminal: { ...initialEnvTerminal, collapsed: false },
       terminalDockHeight: 280,
       capabilities: null,
       paletteDialog: null,
@@ -109,6 +117,9 @@ describe('environment terminal dock', () => {
 
     await waitFor(() => expect(api.terminalStop).toHaveBeenCalled())
     expect(useStore.getState().envTerminal.tabs).toEqual([])
+    // Whether the dock is open is the member's choice, not part of the
+    // environment's state, so stopping must not close it under them.
+    expect(useStore.getState().envTerminal.collapsed).toBe(false)
   })
   it('saves the running environment and hides the unsaved hint', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
@@ -148,6 +159,7 @@ describe('environment terminal dock', () => {
 
     await waitFor(() => expect(api.envReset).toHaveBeenCalledTimes(1))
     expect(useStore.getState().envTerminal.tabs).toEqual([])
+    expect(useStore.getState().envTerminal.collapsed).toBe(false)
     expect(useStore.getState().envTerminal.status).toEqual({
       running: false,
       tabs: [],
@@ -230,5 +242,78 @@ describe('environment terminal dock', () => {
 
     act(() => attach.handlers?.onAttached(true))
     await waitFor(() => expect(screen.queryByText('membership withdrawn')).toBeNull())
+  })
+
+  it('starts collapsed and opens from the header toggle', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock />)
+
+    expect(screen.queryByText('Your environment starts on first open')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand terminal dock' }))
+
+    expect(await screen.findByText('Your environment starts on first open')).toBeDefined()
+  })
+
+  it('opens itself for a caller that mounts it open, and still closes', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock openOnMount />)
+
+    await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse terminal dock' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Expand terminal dock' })).toBeDefined(),
+    )
+    expect(useStore.getState().envTerminal.collapsed).toBe(true)
+  })
+
+  it('opens the dock when a collapsed strip is asked for a tab', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock />)
+
+    // The strip's controls stay live while the dock is shut, and a tab with
+    // no mounted terminal never attaches, so + has to open the dock too.
+    fireEvent.click(await screen.findByRole('button', { name: 'Add terminal tab' }))
+
+    await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
+    expect(useStore.getState().envTerminal.tabs).toContain('main')
+  })
+
+  it('opens the dock when a collapsed strip tab is picked', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(useStore.getState().envTerminal.tabs).toContain('main'))
+    useStore.getState().setEnvTerminalCollapsed(true)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'main' }))
+
+    await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
+  })
+
+  it('closes the find bar when the tab under it changes', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(useStore.getState().envTerminal.tabs).toContain('main'))
+    xterm.setFindOpen.mockClear()
+
+    // The query and its answer belong to the buffer find was opened over.
+    fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
+
+    await waitFor(() => expect(xterm.setFindOpen).toHaveBeenCalledWith(false))
+  })
+
+  it('names the real tab ceiling when every environment tab is open', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+
+    const add = await screen.findByRole('button', { name: 'Add terminal tab' })
+    for (let n = 0; n < 5; n++) fireEvent.click(add)
+    await waitFor(() => expect(useStore.getState().envTerminal.tabs).toHaveLength(6))
+
+    expect(screen.getByText('At most 6 tabs')).toBeDefined()
+    expect((add as HTMLButtonElement).disabled).toBe(true)
   })
 })
