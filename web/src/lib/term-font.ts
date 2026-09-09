@@ -86,13 +86,10 @@ export function terminalZoomKey(ev: KeyboardEvent): 'in' | 'out' | 'reset' | nul
   if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return null
   switch (ev.code) {
     case 'Equal':
-    case 'NumpadAdd':
       return 'in'
     case 'Minus':
-    case 'NumpadSubtract':
       return ev.shiftKey ? null : 'out'
     case 'Digit0':
-    case 'Numpad0':
       return ev.shiftKey ? null : 'reset'
     default:
       return null
