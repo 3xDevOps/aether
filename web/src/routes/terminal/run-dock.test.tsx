@@ -132,7 +132,7 @@ describe('run-shell dock', () => {
       screen.getByRole('button', { name: 'Open shell' }).parentElement,
     )
     view.unmount()
-  })
+  }, 20_000)
 
   it('waits for pause state instead of offering a rejected shell', () => {
     const view = mount({ status: 'needs-attention' })

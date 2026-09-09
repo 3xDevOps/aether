@@ -168,12 +168,11 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	}
 
 	// Agent exits; the attach ends (server closes the channel after the
-	// session ends) and the run parks at needs-attention with the
-	// committed results published.
+	// session ends) and the run completes with committed results.
 	att.waitEnd(t)
-	ev := waitEvent(t, sub, &seen, "run.status needs-attention", statusOf(domain.RunNeedsAttention))
+	ev := waitEvent(t, sub, &seen, "run.status completed", statusOf(domain.RunCompleted))
 	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
-		t.Fatalf("needs-attention reason = %q", p.Reason)
+		t.Fatalf("completed reason = %q", p.Reason)
 	}
 	waitEvent(t, sub, &seen, "git.branch", func(e events.Event) bool {
 		p, ok := e.Payload.(events.GitBranchPayload)
@@ -251,7 +250,7 @@ func assertLifecycle(t *testing.T, seen []events.Event, run domain.RunID, actor 
 			banner = true
 		}
 	}
-	want := []domain.RunStatus{domain.RunProvisioning, domain.RunRunning, domain.RunNeedsAttention}
+	want := []domain.RunStatus{domain.RunProvisioning, domain.RunRunning, domain.RunCompleted}
 	if len(statuses) != len(want) {
 		t.Fatalf("run.status transitions = %v, want %v", statuses, want)
 	}
