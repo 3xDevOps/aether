@@ -601,16 +601,27 @@ Only the selected shell tab mounts an xterm host; switching tabs remounts that
 host and relies on transcript replay to restore its content.
 
 The board's `TerminalDock` exposes **Save environment** while the member's
-terminal is running, and its Stop dialog includes the destructive **Reset to
-standard** action. When the terminal is running and `saved_image` is empty, it
-shows the hint **Installs here reach agents after you save.** From the moment
-a tab opens until its attach is acked, a spinner covers the terminal, because
-the xterm host is blank until then. The words follow what the dock knows: a
-terminal it has not seen running is **Starting your environment container**,
-which is the wait Docker's container start accounts for; a second tab, a tab
-switch or an expanded dock is **Connecting to your environment**, with no
-container to start. A refused or failed start replaces the terminal with the
-gateway's own error instead.
+terminal is running. Stopping the container and discarding the saved image
+are different decisions, so they are separate actions with separate
+confirmations: **Stop environment** is the primary action in the dock and
+confirms with a plain primary button, saying the saved image is kept, while
+**Reset to standard** appears only when there is a `saved_image` to throw
+away, is an outline action, and confirms with the image's own name and
+carries the only destructive button either dialog has. That confirmation
+names the container only while there is one to stop, because Reset outlives
+it. Stopping therefore carries the rest of the status forward rather than
+replacing it, so the image survives the container in what the dock knows as
+well as on the server, and Reset stays on offer with the environment
+stopped. A stop or reset that fails renders the server's error inside the
+dialog that caused it. When the terminal is running and `saved_image` is
+empty, it shows the hint **Installs here reach agents after you save.** From
+the moment a tab opens until its attach is acked, a spinner covers the
+terminal, because the xterm host is blank until then. The words follow what
+the dock knows: a terminal it has not seen running is **Starting your
+environment container**, which is the wait Docker's container start accounts
+for; a second tab, a tab switch or an expanded dock is **Connecting to your
+environment**, with no container to start. A refused or failed start
+replaces the terminal with the gateway's own error instead.
 
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
