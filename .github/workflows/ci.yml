@@ -106,7 +106,10 @@ jobs:
       # The standard image is what runs actually execute on, so the agent
       # CLIs are smoke-tested on it and not on some thinner stand-in. It is
       # built here rather than pulled so the test matches this checkout,
-      # and cached so only a Dockerfile change pays for it.
+      # and cached so only a Dockerfile change pays for it. Only pushes to
+      # main write the cache: a pull_request_target run shares main's cache
+      # namespace, so a PR must not be able to write into it, and writes
+      # from there collide with main's own entries and fail the build.
       - name: Build the standard environment image
         uses: docker/build-push-action@v6
         with:
@@ -114,8 +117,8 @@ jobs:
           file: images/standard/Dockerfile
           load: true
           tags: aether-standard:ci
-          cache-from: type=gha,scope=standard-${{ github.event.pull_request.head.sha || github.ref_name }}
-          cache-to: type=gha,mode=max,scope=standard-${{ github.event.pull_request.head.sha || github.ref_name }}
+          cache-from: type=gha,scope=standard-main
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=standard-main' || '' }}
       # The agent CLIs on top, at whatever version their vendors ship
       # today: that is the drift this image exists to catch. It carries no
       # credentials, which is exactly what TestSmokeHeadlessNoLogin needs.
