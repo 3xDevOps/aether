@@ -50,6 +50,10 @@ export function RunDock({ runID }: { runID: string }) {
   })
   const terminal = controller.terminal
   terminalRef.current = terminal
+  const setFindOpen = controller.setFindOpen
+  useEffect(() => {
+    setFindOpen(false)
+  }, [activeTab, setFindOpen])
 
   useEffect(() => {
     if (!activeTab || !terminal || dock.refusedMessage !== null) return

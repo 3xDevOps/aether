@@ -97,6 +97,10 @@ export function TerminalDock({
   })
   const terminal = controller.terminal
   terminalRef.current = terminal
+  const setFindOpen = controller.setFindOpen
+  useEffect(() => {
+    setFindOpen(false)
+  }, [activeTab, setFindOpen])
 
   useEffect(() => {
     if (!savedConfirmation) return
