@@ -405,9 +405,9 @@ func TestIntegrationMultiMember(t *testing.T) {
 		t.Fatalf("bo run.inject after handoff: %v", err)
 	}
 	camAtt.waitOutput(t, "got:done")
-	waitEvent(t, sub, &seen, "collab run parked", func(e events.Event) bool {
+	waitEvent(t, sub, &seen, "collab run completed", func(e events.Event) bool {
 		p, ok := e.Payload.(events.RunStatusPayload)
-		return ok && string(e.RunID) == collab.ID && p.To == domain.RunNeedsAttention
+		return ok && string(e.RunID) == collab.ID && p.To == domain.RunCompleted
 	})
 
 	// The finished branch credits everyone: authored as Cam, who owns the

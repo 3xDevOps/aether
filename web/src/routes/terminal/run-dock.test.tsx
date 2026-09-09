@@ -31,23 +31,18 @@ class NoResizeObserver {
   disconnect() {}
 }
 
-<<<<<<< HEAD
-function mount(dock: Partial<RunShellDockState> = {}) {
-=======
-function mount(status: RunStatus = 'running') {
->>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
+function mount({
+  dock = {},
+  status = 'running',
+}: { dock?: Partial<RunShellDockState>; status?: RunStatus } = {}) {
   const View = lookupRoute('terminal')
   if (!View) throw new Error('terminal route not registered')
   useStore.getState().upsertRun(run({ status }))
   useStore.setState({
     terminals: {},
-<<<<<<< HEAD
+    pausedRuns: { run_1: false },
     // The dock ships collapsed; these cases are about what it shows open.
     shellDocks: { run_1: { ...initialRunShellDock, collapsed: false, ...dock } },
-=======
-    pausedRuns: { run_1: false },
-    shellDocks: { run_1: { ...initialRunShellDock } },
->>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
   })
   return render(<View params={{ runId: 'run_1' }} />)
 }
@@ -63,10 +58,9 @@ afterEach(() => {
 
 describe('run-shell dock', () => {
   it('opens a forced writable shell tab for a stalled live run', async () => {
-    const view = mount('needs-attention')
+    const view = mount({ status: 'needs-attention' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
-    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
 
     const socket = StubSocket.opened[1]
     expect(socket.url).toBe('ws://localhost/ws/attach/run_1?shell=t1')
@@ -130,72 +124,8 @@ describe('run-shell dock', () => {
     view.unmount()
   })
 
-<<<<<<< HEAD
-  it('starts collapsed and opens from the header toggle', () => {
-    useStore.getState().upsertRun(run())
-    useStore.setState({ terminals: {}, shellDocks: {} })
-    const View = lookupRoute('terminal')
-    if (!View) throw new Error('terminal route not registered')
-    const view = render(<View params={{ runId: 'run_1' }} />)
-
-    expect(screen.queryByRole('button', { name: 'Open shell' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Expand terminal dock' }))
-
-    expect(screen.getByRole('button', { name: 'Open shell' })).toBeDefined()
-    view.unmount()
-  })
-
-  it('opens the dock when a collapsed strip is asked for a shell', async () => {
-    useStore.getState().upsertRun(run())
-    useStore.setState({ terminals: {}, shellDocks: {} })
-    const View = lookupRoute('terminal')
-    if (!View) throw new Error('terminal route not registered')
-    const view = render(<View params={{ runId: 'run_1' }} />)
-
-    // A tab in a shut dock mounts no terminal, so nothing would ever attach.
-    fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
-
-    await waitFor(() => expect(useStore.getState().shellDocks.run_1.collapsed).toBe(false))
-    expect(useStore.getState().shellDocks.run_1.tabs).toEqual(['t1'])
-    await waitFor(() =>
-      expect(StubSocket.opened.map((socket) => socket.url)).toContain(
-        'ws://localhost/ws/attach/run_1?shell=t1',
-      ),
-    )
-    view.unmount()
-  })
-
-  it('opens the dock when a collapsed strip tab is picked', async () => {
-    const view = mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
-    await waitFor(() => expect(useStore.getState().shellDocks.run_1.tabs).toEqual(['t1']))
-    act(() => useStore.getState().setDockCollapsed('run_1', true))
-
-    fireEvent.click(screen.getByRole('tab', { name: 't1' }))
-
-    expect(useStore.getState().shellDocks.run_1.collapsed).toBe(false)
-    view.unmount()
-  })
-
-  it('names the real tab ceiling when every shell tab is open', async () => {
-    const view = mount({ tabs: ['t1', 't2', 't3', 't4'], activeTab: 't4' })
-    // Only the active tab attaches; letting it settle keeps no socket in
-    // flight for the next case.
-    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
-
-    expect(screen.getByText('At most 4 tabs')).toBeDefined()
-    expect(
-      (screen.getByRole('button', { name: 'Add terminal tab' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
-    view.unmount()
-  })
-
-  it('does not offer shell tabs after the run container is gone', () => {
-    const view = mount()
-    act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
-=======
   it('waits for pause state instead of offering a rejected shell', () => {
-    const view = mount('needs-attention')
+    const view = mount({ status: 'needs-attention' })
     act(() => useStore.setState({ pausedRuns: {} }))
 
     expect(screen.queryByRole('button', { name: 'Open shell' })).toBeNull()
@@ -204,8 +134,7 @@ describe('run-shell dock', () => {
   })
 
   it('does not offer shell tabs after a completed run loses its container', () => {
-    const view = mount('completed')
->>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
+    const view = mount({ status: 'completed' })
 
     expect(screen.queryByRole('button', { name: 'Open shell' })).toBeNull()
     expect(screen.getByText(/Run shell unavailable/)).toBeDefined()

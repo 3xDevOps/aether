@@ -123,7 +123,7 @@ func TestMemberHomePersistsAcrossContainers(t *testing.T) {
 	// Run 1 (member A) writes the marker into $HOME; the write lands in
 	// the member's persistent home on the host.
 	write := launchRun(t, ctrlA, string(ws.ID), "write", "claude")
-	waitRunStatus(t, sub, &seen, write.ID, domain.RunNeedsAttention)
+	waitRunStatus(t, sub, &seen, write.ID, domain.RunCompleted)
 	hostMarker := filepath.Join(dataDir, "homes", string(memberA.ID), ".local", "bin", "marker.txt")
 	if got, rerr := os.ReadFile(hostMarker); rerr != nil || string(got) != "marker-v1\n" {
 		t.Fatalf("host home marker = %q (err %v), want the container write", got, rerr)
@@ -131,12 +131,12 @@ func TestMemberHomePersistsAcrossContainers(t *testing.T) {
 
 	// Run 2 (member A) sees the marker; run 3 (member B) must not.
 	readA := launchRun(t, ctrlA, string(ws.ID), "read", "claude")
-	waitRunStatus(t, sub, &seen, readA.ID, domain.RunNeedsAttention)
+	waitRunStatus(t, sub, &seen, readA.ID, domain.RunCompleted)
 	if got := fetchRunFile(t, ctrlA, seedDir, gitEnv, repoURL, readA.ID, "marker-seen.txt"); got != "marker-v1\n" {
 		t.Fatalf("same member's next run saw %q, want the persisted marker", got)
 	}
 	readB := launchRun(t, ctrlB, string(ws.ID), "read", "claude")
-	waitRunStatus(t, sub, &seen, readB.ID, domain.RunNeedsAttention)
+	waitRunStatus(t, sub, &seen, readB.ID, domain.RunCompleted)
 	if got := fetchRunFile(t, ctrlB, seedDir, gitEnv, repoURL, readB.ID, "marker-seen.txt"); got != "absent\n" {
 		t.Fatalf("other member's run saw %q, want no marker", got)
 	}

@@ -41,17 +41,12 @@ export function RunDock({ runID }: { runID: string }) {
   activeTabRef.current = activeTab
   const terminalRef = useRef<XtermController['terminal']>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
-<<<<<<< HEAD
   const controller = useXterm({
-    enabled: activeTab !== null && !dock.collapsed && dock.refusedMessage === null,
-=======
-  const { hostRef, terminal } = useXterm({
     enabled:
       canOpenShell &&
       activeTab !== null &&
       !dock.collapsed &&
       dock.refusedMessage === null,
->>>>>>> 2d7500d (fix: reconcile run lifecycle and terminal actions)
     onData: (data) => {
       if (gate.current.muted()) return
       const tab = activeTabRef.current

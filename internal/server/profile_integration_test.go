@@ -184,7 +184,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 		t.Fatalf("run 2 pinned snapshot %q, want a fresh pin distinct from run 1's %q",
 			run2.ProfileSnapshotID, run1.ProfileSnapshotID)
 	}
-	waitRunStatus(t, sub, &seen, run2.ID, domain.RunNeedsAttention)
+	waitRunStatus(t, sub, &seen, run2.ID, domain.RunCompleted)
 	got2 := fetchRunFiles(t, ctrl, seedDir, gitEnv, repoURL, run2.ID)
 	if got2["skill-seen.txt"] != "skill-v2\n" {
 		t.Fatalf("run 2 saw profile %q, want the pushed v2", got2["skill-seen.txt"])
@@ -198,7 +198,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: run1.ID, Message: "go"}, nil); err != nil {
 		t.Fatalf("run.inject: %v", err)
 	}
-	waitRunStatus(t, sub, &seen, run1.ID, domain.RunNeedsAttention)
+	waitRunStatus(t, sub, &seen, run1.ID, domain.RunCompleted)
 	got1 := fetchRunFiles(t, ctrl, seedDir, gitEnv, repoURL, run1.ID)
 	if got1["skill-seen.txt"] != "skill-v2\n" {
 		t.Fatalf("run 1 saw profile %q after the mid-run push, want current v2", got1["skill-seen.txt"])

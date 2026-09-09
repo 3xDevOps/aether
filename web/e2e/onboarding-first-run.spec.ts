@@ -13,7 +13,7 @@ import { OnboardingWizard } from './pages/wizard'
  * from the run checkout the scheduler mounts at /workspace. */
 const agentShim = 'sh /workspace/agent.sh'
 
-test('the first run reaches needs-attention', async ({ page, aether }) => {
+test('the first run completes', async ({ page, aether }) => {
   test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
   const alice = await aether.member('alice')
@@ -52,9 +52,10 @@ test('the first run reaches needs-attention', async ({ page, aether }) => {
   )
 
   // The header carries the state on the terminal tab, so nobody has to leave
-  // the agent to find out how the run is doing.
+  // the agent to find out how the run is doing: the fake agent exits
+  // cleanly, which now completes the run with its work committed.
   const header = page.locator('header').filter({ hasText: 'write the result file' })
-  await expect(header).toContainText('Needs you', { timeout: 3 * 60 * 1000 })
+  await expect(header).toContainText('Done', { timeout: 3 * 60 * 1000 })
 
   // The Overview tab keeps what the header cannot say: why the run stopped.
   await tabs.getByRole('button', { name: 'Overview' }).click()
