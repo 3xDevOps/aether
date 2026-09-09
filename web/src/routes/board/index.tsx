@@ -117,7 +117,7 @@ function Column({
   placeholder: 'skeleton' | 'empty' | 'none'
 }) {
   return (
-    <section className="flex min-h-0 w-72 min-w-72 flex-col" aria-label={column.label}>
+    <section className="flex min-h-0 min-w-60 flex-1 flex-col" aria-label={column.label}>
       <ColumnHeader label={column.label} count={column.cards.length} />
       <div className="flex-1 space-y-2 overflow-y-auto pr-1">
         {column.cards.map((card) => (

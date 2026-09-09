@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** The repository root: this file lives at web/e2e/harness/. */
-const repoRoot = path.resolve(
+export const repoRoot = path.resolve(
   fileURLToPath(new URL('../../..', import.meta.url)),
 )
 

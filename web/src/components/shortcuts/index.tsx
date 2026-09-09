@@ -100,6 +100,7 @@ export function ShortcutsButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
+        aria-label="Keyboard shortcuts"
         title="Keyboard shortcuts"
         className="flex items-center gap-1 rounded px-1 hover:text-foreground"
       >

@@ -6,7 +6,7 @@ import {
   PanelLeftOpen,
   Rocket,
 } from 'lucide-react'
-import { useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -27,11 +27,42 @@ import {
 } from '@/store/hooks'
 import type { SidebarGroup, SidebarRun } from '@/store/selectors'
 
+/**
+ * The desktop shell cannot open a window narrower than 960px, so this matches
+ * at the smallest window there is: a sidebar at its default width plus three
+ * board columns does not fit in it, and the rail is what keeps the board
+ * readable.
+ */
+const narrowQuery = '(max-width: 1000px)'
+
 export function Sidebar() {
   const collapsed = useStore((s) => s.sidebarCollapsed)
   const width = useStore((s) => s.sidebarWidth)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
+  const [autoCollapsed, setAutoCollapsed] = useState(
+    () => window.matchMedia?.(narrowQuery).matches ?? false,
+  )
+  // Shadows sidebarCollapsed while the window is narrow, so the toggle answers
+  // the viewport without writing the preference the member stored.
+  const [expandedNarrow, setExpandedNarrow] = useState(false)
+
+  useEffect(() => {
+    const media = window.matchMedia?.(narrowQuery)
+    if (!media) return
+    const apply = (e: MediaQueryListEvent) => {
+      setAutoCollapsed(e.matches)
+      if (!e.matches) setExpandedNarrow(false)
+    }
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [])
+
+  const rail = autoCollapsed ? !expandedNarrow : collapsed
+  const toggle = useCallback(() => {
+    if (autoCollapsed) setExpandedNarrow((v) => !v)
+    else toggleSidebar()
+  }, [autoCollapsed, toggleSidebar])
 
   const startResize = useCallback(
     (e: React.PointerEvent) => {
@@ -47,14 +78,14 @@ export function Sidebar() {
     [setSidebarWidth],
   )
 
-  if (collapsed) {
+  if (rail) {
     return (
       <aside className="flex w-10 shrink-0 flex-col items-center border-r bg-sidebar py-2">
         <Button
           variant="ghost"
           size="icon"
           aria-label="Expand sidebar"
-          onClick={toggleSidebar}
+          onClick={toggle}
         >
           <PanelLeftOpen />
         </Button>
@@ -68,7 +99,7 @@ export function Sidebar() {
       style={{ width }}
       aria-label="Runs"
     >
-      <WorkspaceSwitcher onCollapse={toggleSidebar} />
+      <WorkspaceSwitcher onCollapse={toggle} />
       <SidebarHeader />
       <RunTree />
       <NavSection />

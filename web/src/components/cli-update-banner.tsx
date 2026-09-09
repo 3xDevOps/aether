@@ -7,10 +7,11 @@
 import { useEffect, useState } from 'react'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
-import { banner, Dismiss } from '@/components/update-banner-shared'
+import { banner, Dismiss, verbatim } from '@/components/update-banner-shared'
 import { ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { UpdateApplyResult, UpdateBuildStatus, UpdateStatus } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 
 type ApplyState =
@@ -233,7 +234,7 @@ export function CliBanner({ update, client }: { update: UpdateStatus; client: Ap
 
   return (
     <div role="status" className={banner}>
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0 flex-1 space-y-1">
         <p>
           <span className="font-medium">Aether {latest} is available.</span> You
           are running {update.cli.version}.
@@ -250,12 +251,12 @@ export function CliBanner({ update, client }: { update: UpdateStatus; client: Ap
           />
         )}
         {flow.name === 'applyFailed' && (
-          <p className="font-mono text-xs text-state-failed">{flow.detail}</p>
+          <p className={cn(verbatim, 'text-state-failed')}>{flow.detail}</p>
         )}
         {flow.name === 'applyCancelled' && (
           <>
             <p className="text-muted-foreground">Update cancelled, nothing was changed.</p>
-            <p className="font-mono text-xs text-muted-foreground">{flow.detail}</p>
+            <p className={cn(verbatim, 'text-muted-foreground')}>{flow.detail}</p>
           </>
         )}
         {flow.name === 'rebuilding' && (
@@ -272,13 +273,13 @@ export function CliBanner({ update, client }: { update: UpdateStatus; client: Ap
         )}
         {flow.name === 'rebuildFailed' && (
           <div className="space-y-1">
-            <p className="font-mono text-xs text-state-failed">{flow.error}</p>
+            <p className={cn(verbatim, 'text-state-failed')}>{flow.error}</p>
             <p className="text-muted-foreground">Rebuild it yourself:</p>
             <CopyableCommand command="aether gui build" />
           </div>
         )}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         {offerButton && (
           <Button size="sm" disabled={busy} onClick={() => void run()}>
             {buttonLabel}

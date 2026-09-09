@@ -258,6 +258,10 @@ function main() {
     win = new BrowserWindow({
       width: 1280,
       height: 840,
+      // The floor the dashboard's own layout is designed against; see
+      // docs/dashboard-frontend.md.
+      minWidth: 960,
+      minHeight: 600,
       // Frameless: the SPA draws a 36px title bar itself. On darwin the frame
       // stays (frame:false there would delete the traffic lights too); hiding
       // just the title bar keeps them, and y:11 centers the 12px lights in

@@ -7,8 +7,14 @@ import { Button } from '@/components/ui/button'
 import { useStore } from '@/store'
 import type { UpdateKind } from '@/store/ui'
 
+// One row, never wrapped: the prose column is the half that gives way.
 export const banner =
-  'flex flex-wrap items-start gap-x-3 gap-y-1 border-b bg-card px-3 py-2 text-sm'
+  'flex items-start gap-3 border-b bg-card px-3 py-2 text-sm'
+
+// Output a prompt shows verbatim, at whatever length it arrives. The
+// prompts stack, so an unbounded one scrolls the next prompt's controls out
+// of the strip.
+export const verbatim = 'max-h-24 overflow-y-auto break-words font-mono text-xs'
 
 /** The dismiss control every banner carries. */
 export function Dismiss({ kind, version }: { kind: UpdateKind; version: string }) {
@@ -17,7 +23,7 @@ export function Dismiss({ kind, version }: { kind: UpdateKind; version: string }
     <Button
       variant="ghost"
       size="icon"
-      className="ml-auto size-6"
+      className="size-6 shrink-0"
       aria-label="Dismiss"
       onClick={() => dismiss(kind, version)}
     >

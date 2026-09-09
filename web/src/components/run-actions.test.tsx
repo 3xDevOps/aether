@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { RunActions } from '@/components/run-actions'
 import { api } from '@/lib/api'
@@ -15,6 +15,35 @@ vi.mock('@/lib/api', async () => {
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
+
+// jsdom implements no ResizeObserver, and the More trigger watches its own
+// box so a menu left open when the row widens does not float loose. The stub
+// keeps every watcher against the element it observes, because the open menu
+// brings observers of its own and only the trigger's one is under test.
+type Resize = (entries: Array<{ contentRect: { width: number } }>) => void
+let watchers: { target: Element; notify: Resize }[] = []
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    constructor(private notify: Resize) {}
+    observe(target: Element) {
+      watchers.push({ target, notify: this.notify })
+    }
+    unobserve(target: Element) {
+      watchers = watchers.filter((w) => w.target !== target || w.notify !== this.notify)
+    }
+    disconnect() {
+      watchers = watchers.filter((w) => w.notify !== this.notify)
+    }
+  },
+)
+
+/** Reports a new width to whatever watches `target`'s box. */
+function resize(target: Element, width: number) {
+  const watching = watchers.filter((w) => w.target === target)
+  expect(watching.length).toBeGreaterThan(0)
+  for (const w of watching) w.notify([{ contentRect: { width } }])
+}
 
 const every: GatewayCapabilities = { gateway: 'remote', methods: ['*'], ws: [] }
 
@@ -49,6 +78,7 @@ function seed(
 
 beforeEach(() => {
   vi.clearAllMocks()
+  watchers = []
 })
 
 // The tri-state: hydration seeds the pause state from the run list, and a
@@ -309,4 +339,175 @@ test('a protected run and an admins-only workspace close steering to others', ()
   )
   expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
+})
+
+// jsdom evaluates no container query, so the row here keeps every button a
+// narrow header would hide. The menu's items are portalled and exist only
+// while it is open, so every check below opens it first.
+
+/** A run waiting on review with a local gateway offers the widest verb list. */
+function seedWidest() {
+  return seed({
+    paused: false,
+    local: ['pull', 'forward.start'],
+    members: [alice, bob],
+    run: { status: 'needs-attention', last_commit: 'a'.repeat(40) },
+  })
+}
+
+function openMore() {
+  fireEvent.keyDown(screen.getByRole('button', { name: 'More' }), { key: 'Enter' })
+  return screen.findByRole('menu')
+}
+
+/**
+ * The verbs on the row, split by the classes that decide their fate on a
+ * narrow header: one set stays, the other is hidden until `@4xl/header`.
+ * jsdom evaluates no container query, so this reads the classes and proves
+ * nothing about the resulting layout.
+ */
+function partition() {
+  const stays: string[] = []
+  const dropped: string[] = []
+  for (const button of screen.getAllByRole('button')) {
+    const name = button.textContent ?? ''
+    if (name === 'More') {
+      // The trigger appears at the same width the overflow verbs disappear.
+      // Drift one and those verbs are reachable at no width at all.
+      expect(button.className).toMatch(/@4xl\/header:hidden/)
+      continue
+    }
+    if (/\bhidden\b/.test(button.className)) {
+      expect(button.className).toMatch(/@4xl\/header:inline-flex/)
+      dropped.push(name)
+    } else {
+      stays.push(name)
+    }
+  }
+  return { stays: stays.sort(), dropped: dropped.sort() }
+}
+
+// The three run states it takes to see all six verbs the row keeps: resume
+// needs a live paused run and relaunch a finished one, so neither is on the
+// widest list.
+test('every verb keeps its own side of the narrow-header split', () => {
+  const widest = render(<RunActions run={seedWidest()} />)
+  expect(partition()).toEqual({
+    stays: ['Close', 'Pause', 'Send'],
+    dropped: ['Delete', 'Forward', 'Hand off', 'Protect', 'Pull'],
+  })
+  widest.unmount()
+
+  const paused = render(<RunActions run={seed({ paused: true })} />)
+  expect(partition()).toEqual({
+    stays: ['Kill', 'Resume', 'Send'],
+    dropped: ['Protect'],
+  })
+  paused.unmount()
+
+  render(<RunActions run={seed({ run: { status: 'merged' } })} />)
+  expect(partition()).toEqual({
+    stays: ['Relaunch'],
+    dropped: ['Delete', 'Protect'],
+  })
+})
+
+// CSS cannot close what it hides, so the menu has to notice the widening.
+test('the More menu closes itself when the row widens past the threshold', async () => {
+  render(<RunActions run={seedWidest()} />)
+  // The open menu hides the rest of the page from the accessibility tree, so
+  // the trigger has to be in hand before it opens.
+  const trigger = screen.getByRole('button', { name: 'More' })
+  await openMore()
+
+  // A trigger the container query has hidden measures 0x0.
+  act(() => resize(trigger, 0))
+
+  await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+})
+
+// Radix hands focus back to a trigger the widening has just hidden, which
+// leaves the member on the body with no tab position at all.
+test('the forced close leaves focus on the row, not on the body', async () => {
+  render(<RunActions run={seedWidest()} />)
+  const trigger = screen.getByRole('button', { name: 'More' })
+  await openMore()
+
+  act(() => resize(trigger, 0))
+
+  await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Pause' }))
+
+  // A close nobody forced still hands focus back the way Radix does.
+  fireEvent.keyDown(await openMore(), { key: 'Escape' })
+  await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+  expect(document.activeElement).toBe(trigger)
+})
+
+test('the More menu holds every verb the narrow row drops, and none of the rest', async () => {
+  const record = seedWidest()
+  render(<RunActions run={record} />)
+
+  // Steering the run is what the row keeps at every width.
+  for (const name of ['Pause', 'Send', 'Close']) {
+    expect(screen.getByRole('button', { name })).toBeTruthy()
+  }
+
+  const menu = within(await openMore())
+  for (const name of ['Forward', 'Delete', 'Protect', 'Pull', 'Hand off']) {
+    expect(menu.getByRole('menuitem', { name })).toBeTruthy()
+  }
+  for (const name of ['Pause', 'Send', 'Close']) {
+    expect(menu.queryByRole('menuitem', { name })).toBeNull()
+  }
+
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Protect' }))
+  await waitFor(() => expect(api.runProtect).toHaveBeenCalledWith(record.id, true))
+})
+
+// The menu is the only way to reach these verbs on a narrow header, so the
+// confirm step and the handoff picker have to open from there too.
+test('a verb picked from the More menu still asks first', async () => {
+  const record = seedWidest()
+  render(<RunActions run={record} />)
+
+  const menu = within(await openMore())
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Delete' }))
+  expect(await screen.findByText('Delete this run?')).toBeTruthy()
+  expect(api.runDelete).not.toHaveBeenCalled()
+
+  const dialog = within(screen.getByRole('dialog'))
+  fireEvent.click(dialog.getByRole('button', { name: 'Delete run' }))
+  await waitFor(() => expect(api.runDelete).toHaveBeenCalledWith(record.id))
+})
+
+test('hand off picked from the More menu opens the member picker', async () => {
+  const record = seedWidest()
+  render(<RunActions run={record} />)
+
+  const menu = within(await openMore())
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Hand off' }))
+
+  const dialog = within(await screen.findByRole('dialog'))
+  fireEvent.click(dialog.getByRole('button', { name: 'Hand off to Bob' }))
+  await waitFor(() =>
+    expect(api.runHandoff).toHaveBeenCalledWith(record.id, bob.id),
+  )
+})
+
+// The row buttons show their own spinner, but a verb fired from the menu
+// leaves the menu closed and the trigger is the only thing left to say that
+// something is in flight.
+test('the More trigger spins while a verb fired from it runs', async () => {
+  vi.mocked(api.localPull).mockReturnValue(new Promise(() => {}))
+  render(<RunActions run={seedWidest()} />)
+
+  const menu = within(await openMore())
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Pull' }))
+
+  await waitFor(() => {
+    const trigger = screen.getByRole('button', { name: 'More' })
+    expect(trigger).toHaveProperty('disabled', true)
+    expect(trigger.querySelector('.animate-spin')).toBeTruthy()
+  })
 })
