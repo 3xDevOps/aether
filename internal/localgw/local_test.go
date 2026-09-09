@@ -241,7 +241,7 @@ func TestLocalLinkStatus(t *testing.T) {
 	linked := cli.Config{
 		Addr: "host:2222", User: "alice", Repo: "/src/repo", Active: "prod",
 		Links: []cli.NamedLink{
-			{Name: "prod", Addr: "host:2222", User: "alice"},
+			{Name: "prod", Addr: "host:2222", User: "alice", Repo: "/src/repo"},
 			{Name: "staging", Addr: "staging:2222"},
 		},
 	}
@@ -259,6 +259,7 @@ func TestLocalLinkStatus(t *testing.T) {
 		Links            []struct {
 			Name string `json:"name"`
 			Addr string `json:"addr"`
+			Repo string `json:"repo"`
 		} `json:"links"`
 		Active string `json:"active"`
 	}
@@ -274,6 +275,11 @@ func TestLocalLinkStatus(t *testing.T) {
 	if len(got.Links) != 2 || got.Links[0].Name != "prod" || got.Links[0].Addr != "host:2222" ||
 		got.Links[1].Name != "staging" || got.Links[1].Addr != "staging:2222" {
 		t.Errorf("links = %+v", got.Links)
+	}
+	// The wizard suggests a profile's clone, so the folder rides along; a
+	// profile without one carries no key at all.
+	if got.Links[0].Repo != "/src/repo" || got.Links[1].Repo != "" {
+		t.Errorf("link repos = %+v", got.Links)
 	}
 
 	// An unlinked gateway reports linked:false rather than failing, and a
