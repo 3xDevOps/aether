@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
+import type { Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import { codeDenied } from '@/routes/terminal/attach'
@@ -26,9 +27,9 @@ function terminalRoute() {
   return View
 }
 
-function mount(seed: Partial<TerminalState> = {}) {
+function mount(seed: Partial<TerminalState> = {}, over: Partial<Run> = {}) {
   const View = terminalRoute()
-  useStore.getState().upsertRun(run())
+  useStore.getState().upsertRun(run(over))
   useStore.setState({
     info: serverInfo,
     terminals: { run_1: { ...initialTerminal, ...seed } },
@@ -273,6 +274,33 @@ describe('terminal view', () => {
 
     await new Promise((done) => setTimeout(done, 200))
     expect(pane()).not.toContain('RUN-ONE-OUTPUT')
+    view.unmount()
+  })
+
+  it.each(['queued', 'provisioning'] as const)(
+    'waits for the container instead of attaching to a %s run',
+    (status) => {
+      const view = mount({}, { status })
+
+      expect(StubSocket.opened).toHaveLength(0)
+      expect(screen.getByText("Starting the run's container")).toBeDefined()
+      expect(screen.queryByText('Offline')).toBeNull()
+      expect(screen.queryByText('Retry')).toBeNull()
+      expect(screen.queryByText('This run is not running')).toBeNull()
+      view.unmount()
+    },
+  )
+
+  it('attaches as soon as the container is up', () => {
+    const view = mount({}, { status: 'provisioning' })
+    expect(StubSocket.opened).toHaveLength(0)
+
+    act(() => useStore.getState().upsertRun(run({ status: 'running' })))
+    attached()
+
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(screen.queryByText("Starting the run's container")).toBeNull()
+    expect(screen.getByText('Attached')).toBeDefined()
     view.unmount()
   })
 

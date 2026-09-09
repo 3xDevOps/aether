@@ -2,12 +2,13 @@ import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
-import { TerminalPane } from '@/components/terminal-pane'
+import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { openOAuthLink } from '@/lib/oauth-forward'
+import type { RunStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
@@ -24,9 +25,19 @@ const connectionLabel: Record<string, string> = {
   offline: 'Offline',
 }
 
-/** Statuses that can still gain a live terminal session. Completed and final
- * runs can only replay a recorded terminal, if one exists. */
-const liveStatuses = ['queued', 'provisioning', 'running', 'needs-attention']
+/** Statuses that can still gain a live terminal session. Mirrors
+ * `replayableStatus` in internal/sshd/attach.go, which serves a transcript
+ * instead only once `domain.RunStatus.Terminal()` is true. */
+const liveStatuses: readonly RunStatus[] = [
+  'queued',
+  'provisioning',
+  'running',
+  'needs-attention',
+]
+
+/** Statuses whose container is still being built, so no PTY session exists
+ * to attach to yet. */
+const startingStatuses: readonly RunStatus[] = ['queued', 'provisioning']
 
 function TerminalView({ params }: RouteProps) {
   const runID = params.runId
@@ -39,6 +50,7 @@ function TerminalView({ params }: RouteProps) {
   const markControlTaken = useStore((s) => s.markTerminalControlTaken)
 
   const known = run !== undefined
+  const starting = run !== undefined && startingStatuses.includes(run.status)
   const attachRef = useRef<Attachment | null>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
   const terminalRef = useRef<XtermController['terminal']>(null)
@@ -81,6 +93,14 @@ function TerminalView({ params }: RouteProps) {
     writeRef.current = ownerSteering
     askedForControl.current = false
 
+    // No session exists yet to attach to (internal/ptyhost ErrNoSession),
+    // and the pane is cleared here because no ack will arrive to clear it.
+    if (starting) {
+      gate.current.unmute()
+      terminal.reset()
+      return
+    }
+
     const attachment = connectAttach(() => api.attachSocket(runID), {
       onData: gate.current.write,
       // Every attach starts with the server's transcript replay, so the pane
@@ -111,7 +131,7 @@ function TerminalView({ params }: RouteProps) {
       attachment.close()
       attachRef.current = null
     }
-  }, [markControlTaken, run?.member_id, run?.status, runID, self.id, setTerminal, terminal])
+  }, [markControlTaken, run?.member_id, run?.status, runID, self.id, setTerminal, starting, terminal])
 
   if (!run) {
     return <MissingRun />
@@ -134,14 +154,16 @@ function TerminalView({ params }: RouteProps) {
       <RunHeader run={run} subtitle={`${run.harness} · ${run.branch}`} />
       <RunTabs runID={runID} active="terminal" />
       <div className="flex items-center gap-3 border-b px-4 py-1.5 text-xs">
-        <span
-          className={cn(
-            'text-muted-foreground',
-            state.connection === 'offline' && 'text-state-failed',
-          )}
-        >
-          {connectionLabel[state.connection]}
-        </span>
+        {!starting && (
+          <span
+            className={cn(
+              'text-muted-foreground',
+              state.connection === 'offline' && 'text-state-failed',
+            )}
+          >
+            {connectionLabel[state.connection]}
+          </span>
+        )}
         <Button
           size="sm"
           variant={state.write ? 'default' : 'outline'}
@@ -166,7 +188,7 @@ function TerminalView({ params }: RouteProps) {
         )}
         {/* A disabled control shows no tooltip, so the reason is written out
             beside it rather than hidden in a title attribute. */}
-        {run.status !== 'running' && !state.steerDenied && (
+        {run.status !== 'running' && !starting && !state.steerDenied && (
           <span className="text-muted-foreground">This run is not running</span>
         )}
         {/* Nothing else on screen separates watching from steering, so the
@@ -190,7 +212,9 @@ function TerminalView({ params }: RouteProps) {
         )}
       </div>
       <div className="min-h-0 flex-1">
-        <TerminalPane key={runID} controller={controller} />
+        <TerminalPane key={runID} controller={controller}>
+          {starting && <TerminalSpinner label="Starting the run's container" />}
+        </TerminalPane>
       </div>
       <RunDock runID={runID} />
     </div>

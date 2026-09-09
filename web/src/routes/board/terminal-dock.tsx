@@ -1,8 +1,7 @@
-import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Dock } from '@/components/dock'
-import { TerminalPane } from '@/components/terminal-pane'
+import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import {
@@ -371,18 +370,16 @@ export function TerminalDock({
             ) : (
               <TerminalPane controller={controller}>
                 {attachedTab !== activeTab && (
-                  <div
-                    role="status"
-                    className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
-                  >
-                    <Loader2 className="size-4 animate-spin" aria-hidden />
-                    {/* Only a terminal the dock has not seen running is
-                        starting a container. A second tab, a tab switch or an
-                        expanded dock is reattaching to one that is up. */}
-                    {dock.status?.running
-                      ? 'Connecting to your environment'
-                      : 'Starting your environment container'}
-                  </div>
+                  // Only a terminal the dock has not seen running is starting
+                  // a container. A second tab, a tab switch or an expanded
+                  // dock is reattaching to one that is up.
+                  <TerminalSpinner
+                    label={
+                      dock.status?.running
+                        ? 'Connecting to your environment'
+                        : 'Starting your environment container'
+                    }
+                  />
                 )}
               </TerminalPane>
             )}

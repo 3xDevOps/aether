@@ -622,6 +622,25 @@ terminal and event stream reconnect on the same jittered schedule, and it
   the signal to stop reconnecting rather than loop replay -> EOF -> replay.
   Every other refusal (unknown run, transiently missing terminal) stops the
   reconnect loop and offers a retry.
+- **A missing session is not a dead terminal.** `-32004` means the run has no
+  PTY session, and `internal/sshd/attach.go` refuses rather than waits for
+  one, so the client is what has to tell a container that is still starting
+  apart from a terminal that is gone. It does it twice over. A `queued` or
+  `provisioning` run is not attached to at all: the tab clears the pane and
+  covers it with `TerminalSpinner`, the same overlay both docks use, reading
+  **Starting the run's container**, and reports no connection state while
+  nothing is connecting. The attach effect already re-runs on `run.status`,
+  so the run turning `running` attaches on its own. On a run that is up, a
+  `-32004` is retried a bounded number of times on the usual `backoff()`
+  before it counts as final, because the server names that case transient -
+  recovery starts a session under a row that already reads `running` - and
+  says the client's retry is what resolves it. Only then does the tab show
+  the gateway's error.
+- **A dead end gets no Retry.** The Retry button is offered only while the
+  run can still gain a session, since a finished run will never answer one.
+  A run that never started has no transcript either, and its `run.reason`
+  carries the provisioning failure, so the tab shows that reason rather than
+  sending the reader to the Overview tab for it.
 - **Run-shell tabs always write.** The `+` control opens names `t1`, `t2`,
   `t3`, and `t4`; four is the per-run limit, six is the environment dock's,
   and `Dock` writes whichever `maxTabs` it was given beside the disabled
@@ -1268,13 +1287,22 @@ acknowledgement, the mid-hydration event, the cursor held behind an unresolved
 fetch, the cursorless reconnect, and the hydration retry. The terminal is driven through the same
 stub: the attach client's own tests cover the header, the reconnect and the
 refusals, and the view is rendered with a real xterm instance to prove
-the toggle and the steer refusal reach the UI. The board and the palette are
+the toggle and the steer refusal reach the UI, that a `queued` or
+`provisioning` run opens no socket at all and waits behind the container
+spinner without the toolbar contradicting it, that the run turning `running`
+attaches on its own, that a `-32004` on a running run is waited out rather
+than reported, and that a run which died before it started shows its reason
+and no Retry. The attach client covers the bounded retry itself: four
+refusals reconnect, the fifth is the answer. The missing-run component is
+covered on its own: nothing before the delay, the unreachable server, and
+the sentence and **Back to board** once hydrated. The board and the palette are
 rendered against a seeded store: bucket membership and ordering, the board
 showing only the active workspace and following a switch, the board falling
 back to every run before hydration has named one, the ack muting a card and a
 later state change bringing the emphasis back, the paused badge going on and
 off through a real `workspace.timeline` pause and resume run through
-`applyEvent`, a slot contributor reaching the card, and the palette jumping,
+`applyEvent`, a slot contributor reaching the card, the card's branch carrying
+its full name and copying without opening the run, and the palette jumping,
 switching the active workspace and opening it, steering from a run-detail tab,
 withholding both pause and resume while the paused state is unknown, launching
 into the active workspace with either the caller's or a shared account, and
