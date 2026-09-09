@@ -35,7 +35,8 @@ function mount() {
   useStore.getState().upsertRun(run())
   useStore.setState({
     terminals: {},
-    shellDocks: { run_1: { ...initialRunShellDock } },
+    // The dock ships collapsed; these cases are about what it shows open.
+    shellDocks: { run_1: { ...initialRunShellDock, collapsed: false } },
   })
   return render(<View params={{ runId: 'run_1' }} />)
 }
@@ -115,6 +116,20 @@ describe('run-shell dock', () => {
     act(() => StubSocket.opened[1].onclose?.({ code: 1000 }))
 
     expect(useStore.getState().shellDocks.run_1.tabs).toEqual([])
+    view.unmount()
+  })
+
+  it('starts collapsed and opens from the header toggle', () => {
+    useStore.getState().upsertRun(run())
+    useStore.setState({ terminals: {}, shellDocks: {} })
+    const View = lookupRoute('terminal')
+    if (!View) throw new Error('terminal route not registered')
+    const view = render(<View params={{ runId: 'run_1' }} />)
+
+    expect(screen.queryByRole('button', { name: 'Open shell' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand terminal dock' }))
+
+    expect(screen.getByRole('button', { name: 'Open shell' })).toBeDefined()
     view.unmount()
   })
 

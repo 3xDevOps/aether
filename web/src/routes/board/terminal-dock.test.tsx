@@ -44,14 +44,14 @@ vi.mock('@/lib/api', () => ({
   },
 }))
 
-
 describe('environment terminal dock', () => {
   beforeEach(() => {
     useStore.getState().resetEnvTerminal()
     attach.handlers = null
     vi.clearAllMocks()
     useStore.setState({
-      envTerminal: initialEnvTerminal,
+      // The dock ships collapsed; these cases are about what it shows open.
+      envTerminal: { ...initialEnvTerminal, collapsed: false },
       terminalDockHeight: 280,
       capabilities: null,
       paletteDialog: null,
@@ -231,4 +231,16 @@ describe('environment terminal dock', () => {
     act(() => attach.handlers?.onAttached(true))
     await waitFor(() => expect(screen.queryByText('membership withdrawn')).toBeNull())
   })
+
+  it('starts collapsed and opens from the header toggle', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock />)
+
+    expect(screen.queryByText('Your environment starts on first open')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand terminal dock' }))
+
+    expect(await screen.findByText('Your environment starts on first open')).toBeDefined()
+  })
+
 })

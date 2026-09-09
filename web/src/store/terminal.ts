@@ -35,7 +35,9 @@ export interface RunShellDockState {
 export const initialRunShellDock: RunShellDockState = {
   tabs: [],
   activeTab: null,
-  collapsed: false,
+  // Collapsed on arrival: the run's own terminal owns the Terminal tab, and
+  // an open shell dock took a third of it before anyone asked for a shell.
+  collapsed: true,
   refusedMessage: null,
 }
 

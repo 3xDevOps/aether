@@ -132,12 +132,15 @@ export function TerminalDock({
 
   useEffect(() => {
     if (!openOnMount) return
+    // The dock is collapsed by default, but a caller that opens it on mount
+    // means to show the terminal - the Agents and GitHub steps type into it.
+    if (dock.collapsed) setCollapsed(false)
     if (!dock.tabs.includes('main')) {
       openTab()
     } else if (dock.activeTab !== 'main') {
       selectTab('main')
     }
-  }, [dock.activeTab, dock.tabs, openOnMount, openTab, selectTab])
+  }, [dock.activeTab, dock.collapsed, dock.tabs, openOnMount, openTab, selectTab, setCollapsed])
 
   useEffect(() => {
     if (!openOnMount || !initialLine || hasEnvTerminalLineSent('main', initialLine)) return

@@ -16,7 +16,9 @@ export interface EnvTerminalState {
 export const initialEnvTerminal: EnvTerminalState = {
   tabs: [],
   activeTab: null,
-  collapsed: false,
+  // Collapsed on arrival; the board is the view, not the dock. Expanding is
+  // one click on the header strip and the choice holds for the session.
+  collapsed: true,
   status: null,
   statusError: null,
 }
