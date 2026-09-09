@@ -5,6 +5,7 @@ import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
 import {
+  alice,
   approval,
   bob,
   fakeApi,
@@ -20,6 +21,7 @@ beforeEach(async () => {
     sidebarCollapsed: false,
     activeWorkspace: '',
     groupBy: 'status',
+    inbox: {},
     route: { name: 'overview', params: {} },
   })
   await hydrate(useStore, fakeApi())
@@ -41,7 +43,6 @@ describe('Sidebar', () => {
     act(() => useStore.setState({ sidebarCollapsed: true }))
     expect(getSidebar().className).toContain('bg-sidebar')
   })
-
 
   it('routes to a run when its row is clicked', () => {
     render(<Sidebar />)
@@ -211,13 +212,67 @@ describe('Sidebar', () => {
     expect(screen.queryByText('New run')).toBeNull()
   })
 
-  it('opens the flat every-run list', () => {
+  it('leads the nav with the two whole-workspace views, marking the active one', () => {
     useStore.setState({ route: { name: 'board', params: {} } })
     render(<Sidebar />)
+    const surfaces = within(screen.getByLabelText('Surfaces'))
 
-    fireEvent.click(within(screen.getByLabelText('Surfaces')).getByText('All runs'))
+    const names = surfaces.getAllByRole('button').map((b) => b.textContent)
+    expect(names.slice(0, 2)).toEqual(['Board', 'All runs'])
 
-    expect(useStore.getState().route).toEqual({ name: 'overview', params: {} })
+    const current = () =>
+      surfaces.getAllByRole('button').find((b) => b.getAttribute('aria-current') === 'page')
+    expect(current()?.textContent).toBe('Board')
+
+    fireEvent.click(surfaces.getByText('All runs'))
+    expect(current()?.textContent).toBe('All runs')
+  })
+
+  it('opens the approval inbox and the activity feed from the nav', () => {
+    render(<Sidebar />)
+    const surfaces = within(screen.getByLabelText('Surfaces'))
+
+    fireEvent.click(surfaces.getByText('Approvals'))
+    expect(useStore.getState().route).toEqual({ name: 'approvals', params: {} })
+
+    fireEvent.click(surfaces.getByText('Activity'))
+    expect(useStore.getState().route).toEqual({ name: 'timeline', params: {} })
+  })
+
+  it('counts the waiting requests on the Approvals entry', () => {
+    useStore.setState({ inbox: {} })
+    render(<Sidebar />)
+    const surfaces = within(screen.getByLabelText('Surfaces'))
+    expect(surfaces.getByRole('button', { name: 'Approvals' })).toBeDefined()
+
+    act(() => useStore.getState().setInbox(workspace.id, [approval()]))
+
+    // The count is part of the entry's name, not a second thing to find: it
+    // sits inside the button, so a reader hears one control, not two.
+    const entry = surfaces.getByRole('button', {
+      name: 'Approvals, 1 waiting on a decision',
+    })
+    expect(entry.textContent).toContain('1')
+  })
+
+  it('groups the runs by the pressed segment', () => {
+    render(<Sidebar />)
+    const control = within(screen.getByRole('group', { name: 'Group runs by' }))
+    const status = control.getByRole('button', { name: 'Status' })
+    const member = control.getByRole('button', { name: 'Member' })
+
+    // Both choices are on screen, so the pressed one is the state and the
+    // other one is the action.
+    expect(status.getAttribute('aria-pressed')).toBe('true')
+    expect(member.getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(member)
+
+    expect(useStore.getState().groupBy).toBe('member')
+    expect(member.getAttribute('aria-pressed')).toBe('true')
+    expect(status.getAttribute('aria-pressed')).toBe('false')
+    // The runs regroup under their owner rather than their state.
+    expect(screen.getByRole('heading', { name: alice.display_name })).toBeDefined()
   })
 
   it('shows the admin and desktop surfaces the gateway can serve', () => {
@@ -230,18 +285,22 @@ describe('Sidebar', () => {
       },
     })
     render(<Sidebar />)
+    const surfaces = within(screen.getByLabelText('Surfaces'))
 
-    fireEvent.click(screen.getByText('Members'))
+    fireEvent.click(surfaces.getByText('Members'))
 
     expect(useStore.getState().route).toEqual({ name: 'members', params: {} })
-    expect(screen.getByText('Onboarding')).toBeDefined()
-    expect(screen.getByText('Settings')).toBeDefined()
+    expect(surfaces.getByText('Files')).toBeDefined()
+    expect(surfaces.getByText('Onboarding')).toBeDefined()
+    expect(surfaces.getByText('Settings')).toBeDefined()
   })
 
-  it('keeps Members reachable behind the narrow remote allowlist', () => {
-    // The remote gateway advertises its allowlist: no admin methods and no
-    // local verbs, but member.list is on it, and the roster is readable by
-    // everyone, so Members is the one entry point that stays.
+  it('draws only what a narrow gateway can serve, and the two ungated views', () => {
+    // A gateway advertising a list with neither approval.list nor
+    // workspace.timeline on it: the methods behind those views would fail, so
+    // neither way in is drawn. member.list is on it and the roster is readable
+    // by everyone, so Members stays. Board and All runs are never gated -
+    // they are views of the runs the sidebar already has.
     useStore.setState({
       capabilities: {
         gateway: 'remote',
@@ -252,19 +311,27 @@ describe('Sidebar', () => {
     render(<Sidebar />)
 
     const surfaces = within(screen.getByLabelText('Surfaces'))
+    expect(surfaces.getByText('Board')).toBeDefined()
+    expect(surfaces.getByText('All runs')).toBeDefined()
     expect(surfaces.getByText('Members')).toBeDefined()
+    expect(surfaces.queryByText('Approvals')).toBeNull()
+    expect(surfaces.queryByText('Activity')).toBeNull()
     expect(surfaces.queryByText('Manage workspaces')).toBeNull()
     expect(surfaces.queryByText('Onboarding')).toBeNull()
     expect(surfaces.queryByText('Settings')).toBeNull()
   })
 
-  it('shows only Members on a legacy monitor without capabilities', () => {
+  it('shows the read surfaces on a legacy monitor without capabilities', () => {
     // The capabilities endpoint 404ed: only the pre-capabilities allowlist
-    // may be assumed. member.list is on it; no admin method is.
+    // may be assumed. approval.list, workspace.timeline and member.list are
+    // all on it, so the inbox, the feed and the roster stay reachable; no
+    // admin method is on it, so nothing behind one is drawn.
     useStore.setState({ capabilities: null })
     render(<Sidebar />)
 
     const surfaces = within(screen.getByLabelText('Surfaces'))
+    expect(surfaces.getByText('Approvals')).toBeDefined()
+    expect(surfaces.getByText('Activity')).toBeDefined()
     expect(surfaces.getByText('Members')).toBeDefined()
     expect(surfaces.queryByText('Templates')).toBeNull()
     expect(surfaces.queryByText('Agents')).toBeNull()

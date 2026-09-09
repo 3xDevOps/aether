@@ -20,7 +20,7 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, aethe
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   await wizard.agents.skip().click()
-  await page.getByRole('button', { name: 'Run board' }).click()
+  await page.getByRole('button', { name: 'Board', exact: true }).click()
 
   // Closed on arrival: the board keeps the window until a terminal is asked
   // for, and the header strip is the only thing the dock spends it on.

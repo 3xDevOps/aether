@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { CommandPalette } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
@@ -240,6 +240,11 @@ describe('command palette', () => {
 
     await screen.findByText('rewrite the checkout flow')
     expect(screen.getByText('Members')).toBeDefined()
+    // The gate lives in the shared list, so a palette that stopped using it
+    // would start offering these again.
+    expect(screen.queryByText('Approvals')).toBeNull()
+    expect(screen.queryByText('Activity')).toBeNull()
+    expect(screen.queryByText('Files')).toBeNull()
     expect(screen.queryByText('Manage workspaces')).toBeNull()
     expect(screen.queryByText('Onboarding')).toBeNull()
   })
@@ -255,6 +260,34 @@ describe('command palette', () => {
     expect(screen.queryByText('Manage workspaces')).toBeNull()
     expect(screen.queryByText('Templates')).toBeNull()
     expect(screen.queryByText('Agents')).toBeNull()
+  })
+
+  it('jumps to the approval inbox, the activity feed and the files tree', async () => {
+    // The three surfaces that were reachable only from an 11px status-bar
+    // button or the sidebar nav. The palette renders the same gated list the
+    // nav does, so they arrive together.
+    useStore.setState({
+      capabilities: {
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events', 'attach', 'terminal'],
+        local: ['link.status', 'daemon.status'],
+      },
+    })
+    open()
+    await screen.findByText('rewrite the checkout flow')
+
+    for (const [label, route] of [
+      ['Approvals', 'approvals'],
+      ['Activity', 'timeline'],
+      ['Files', 'files'],
+    ]) {
+      // Selecting an item closes the palette; reopen it for the next one
+      // rather than mounting a second copy of it.
+      act(() => useStore.setState({ paletteOpen: true }))
+      fireEvent.click(await screen.findByText(label))
+      expect(useStore.getState().route).toEqual({ name: route, params: {} })
+    }
   })
 
   it('pulls the focused run branch through the local gateway', async () => {
