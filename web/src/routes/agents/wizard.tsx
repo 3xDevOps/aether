@@ -7,10 +7,11 @@
 import { useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { api, type Api } from '@/lib/api'
 import { TerminalDock } from '@/routes/board/terminal-dock'
 import type { AgentInfo } from '@/lib/types'
-import { field } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
@@ -205,34 +206,31 @@ export function AgentWizard({
       }}
     >
       <p className="text-sm font-medium">Add an agent</p>
-      <label className="block space-y-1 text-sm">
+      <Label className="block space-y-1">
         Name
-        <input
+        <Input
           autoFocus
-          className={field}
           placeholder="claude"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
-      </label>
+      </Label>
       {!shipped && (
         <>
-          <label className="block space-y-1 text-sm">
+          <Label className="block space-y-1">
             TUI command
-            <input
-              className={field}
+            <Input
               value={tuiValue}
               onChange={(e) => setTui(e.target.value)}
             />
-          </label>
-          <label className="block space-y-1 text-sm">
+          </Label>
+          <Label className="block space-y-1">
             Headless command
-            <input
-              className={field}
+            <Input
               value={headlessValue}
               onChange={(e) => setHeadless(e.target.value)}
             />
-          </label>
+          </Label>
           <p className="text-xs text-muted-foreground">
             {'{task}'} is replaced with the run's task at launch.
           </p>

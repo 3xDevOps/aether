@@ -6,7 +6,10 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import type { Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
 import type {
@@ -139,39 +142,36 @@ export function LinkStep({
             void link()
           }}
         >
-          <label className="block space-y-1">
+          <Label className="block space-y-1">
             Server address
-            <input
-              className={field}
+            <Input
               required
               placeholder="server-host:2222"
               value={address}
               disabled={linking}
               onChange={(e) => setAddress(e.target.value)}
             />
-          </label>
-          <label className="block space-y-1">
+          </Label>
+          <Label className="block space-y-1">
             Invite code
-            <input
-              className={field}
+            <Input
               value={invite}
               disabled={linking}
               onChange={(e) => setInvite(e.target.value)}
             />
-          </label>
+          </Label>
           <p className="text-xs text-muted-foreground">
             Leave empty on a fresh server, where the first identity to link
             becomes the admin, or on a tailnet server.
           </p>
-          <label className="block space-y-1">
+          <Label className="block space-y-1">
             Your name
-            <input
-              className={field}
+            <Input
               value={name}
               disabled={linking}
               onChange={(e) => setName(e.target.value)}
             />
-          </label>
+          </Label>
           <Button type="submit" size="sm" disabled={linking || !address.trim()}>
             {linking ? 'Linking...' : 'Link'}
           </Button>
@@ -306,23 +306,21 @@ export function WorkspaceStep({
               repository plus the container the server builds for it, and
               every run in it starts from that same setup.
             </p>
-            <label className="block space-y-1 text-sm">
+            <Label className="block space-y-1">
               Name
-              <input
-                className={field}
+              <Input
                 value={name}
                 placeholder="myproject"
                 onChange={(e) => setName(e.target.value)}
               />
-            </label>
-            <label className="block space-y-1 text-sm">
+            </Label>
+            <Label className="block space-y-1">
               Base branch
-              <input
-                className={field}
+              <Input
                 value={baseBranch}
                 onChange={(e) => setBaseBranch(e.target.value)}
               />
-            </label>
+            </Label>
             <div className={actionRow}>
               <Button
                 type="submit"
@@ -535,15 +533,14 @@ export function RepoStep({
               void link()
             }}
           >
-            <label className="flex-1 space-y-1 text-sm">
+            <Label className="flex-1 space-y-1">
               Repository path
-              <input
-                className={field}
+              <Input
                 value={repo}
                 placeholder="/home/you/code/myproject"
                 onChange={(e) => setRepo(e.target.value)}
               />
-            </label>
+            </Label>
             <Button type="submit" size="sm" disabled={busy || !absolute}>
               Add remote
             </Button>
@@ -725,11 +722,11 @@ export function RepoStep({
                 </p>
               )}
               <div className="flex gap-2">
-                <input
+                <Input
                   ref={cmdRef}
                   readOnly
                   aria-label="Push command"
-                  className={cn(field, 'font-mono')}
+                  className="font-mono"
                   value={pushCmd}
                   onFocus={(e) => e.target.select()}
                 />
@@ -950,7 +947,7 @@ export function FirstRunStep({
       </p>
       {loading && <Skeleton className="h-16 w-full" />}
       {agents && (
-        <label className="block space-y-1 text-sm">
+        <Label className="block space-y-1">
           Agent
           <select
             className={field}
@@ -964,17 +961,17 @@ export function FirstRunStep({
               </option>
             ))}
           </select>
-        </label>
+        </Label>
       )}
-      <label className="block space-y-1 text-sm">
+      <Label className="block space-y-1">
         Task
-        <textarea
-          className={`${field} min-h-20`}
+        <Textarea
+          className="min-h-20"
           value={task}
           placeholder="add a health check endpoint"
           onChange={(e) => setDraft({ ...draft, task: e.target.value })}
         />
-      </label>
+      </Label>
       {error && <p className="text-xs text-state-failed">{error}</p>}
       {withoutASubscription}
       <div className={actionRow}>

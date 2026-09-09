@@ -5,11 +5,12 @@
 
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
-import { field } from '@/lib/utils'
 import { actionRow } from '@/routes/onboarding/steps'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
@@ -102,10 +103,9 @@ export function GitIdentityStep({
           void save()
         }}
       >
-        <label className="block space-y-1 text-sm">
+        <Label className="block space-y-1">
           Name
-          <input
-            className={field}
+          <Input
             value={name}
             placeholder="Ada Lovelace"
             disabled={busy}
@@ -114,11 +114,10 @@ export function GitIdentityStep({
               setName(e.target.value)
             }}
           />
-        </label>
-        <label className="block space-y-1 text-sm">
+        </Label>
+        <Label className="block space-y-1">
           Email
-          <input
-            className={field}
+          <Input
             type="email"
             value={email}
             placeholder="ada@example.com"
@@ -128,7 +127,7 @@ export function GitIdentityStep({
               setEmail(e.target.value)
             }}
           />
-        </label>
+        </Label>
         {error && <p className="text-xs text-state-failed">{error}</p>}
         <div className={actionRow}>
           <Button

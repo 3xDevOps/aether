@@ -3,13 +3,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import type { Workspace } from '@/lib/types'
-import { field } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
@@ -120,23 +121,21 @@ function AddForm({ client, onAdded }: { client: Api; onAdded: () => void }) {
       }}
     >
       <div className="flex items-end gap-3">
-        <label className="flex-1 space-y-1 text-sm">
+        <Label className="flex-1 space-y-1">
           Name
-          <input
-            className={field}
+          <Input
             value={name}
             placeholder="team"
             onChange={(e) => setName(e.target.value)}
           />
-        </label>
-        <label className="flex-1 space-y-1 text-sm">
+        </Label>
+        <Label className="flex-1 space-y-1">
           Base branch
-          <input
-            className={field}
+          <Input
             value={baseBranch}
             onChange={(e) => setBaseBranch(e.target.value)}
           />
-        </label>
+        </Label>
       </div>
       <Button
         type="submit"

@@ -10,6 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import type { AgentInfo, Member } from '@/lib/types'
 import { field } from '@/lib/utils'
@@ -174,19 +176,18 @@ export function LaunchDialog() {
               </span>
             )}
           </p>
-          <label className="block space-y-1 text-sm">
+          <Label className="block space-y-1">
             {mode === 'headless' ? 'Task (required)' : 'Task (optional)'}
-            <textarea
+            <Textarea
               autoFocus
               rows={3}
-              className={field}
               placeholder="What should the agent do?"
               value={task}
               onChange={(e) => setTask(e.target.value)}
             />
-          </label>
+          </Label>
           <div className="flex gap-3">
-            <label className="flex-1 space-y-1 text-sm">
+            <Label className="flex-1 space-y-1">
               Account
               <select
                 className={field}
@@ -200,8 +201,8 @@ export function LaunchDialog() {
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="flex-1 space-y-1 text-sm">
+            </Label>
+            <Label className="flex-1 space-y-1">
               Agent
               <select
                 className={field}
@@ -217,8 +218,8 @@ export function LaunchDialog() {
                 ))}
                 <option value="custom">custom</option>
               </select>
-            </label>
-            <label className="flex-1 space-y-1 text-sm">
+            </Label>
+            <Label className="flex-1 space-y-1">
               Mode
               <select
                 className={field}
@@ -228,7 +229,7 @@ export function LaunchDialog() {
                 <option value="tui">Interactive (tui)</option>
                 <option value="headless">Headless</option>
               </select>
-            </label>
+            </Label>
           </div>
           {agentError && (
             <p role="alert" className="text-xs text-state-failed">{agentError}</p>

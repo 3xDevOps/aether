@@ -190,7 +190,7 @@ function WorkspaceSwitcher({
           aria-label="Workspace"
           className={cn(
             focusRing,
-            'min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm',
+            'min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm',
           )}
           value={active}
           onChange={(e) => setActiveWorkspace(e.target.value)}

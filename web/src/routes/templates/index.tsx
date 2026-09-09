@@ -15,6 +15,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Schedule, Template } from '@/lib/types'
@@ -231,27 +234,25 @@ function TemplateForm({
             void save()
           }}
         >
-          <label className="block space-y-1 text-sm">
+          <Label className="block space-y-1">
             Name
-            <input
+            <Input
               autoFocus
-              className={field}
               value={name}
               readOnly={template !== undefined}
               onChange={(e) => setName(e.target.value)}
             />
-          </label>
-          <label className="block space-y-1 text-sm">
+          </Label>
+          <Label className="block space-y-1">
             Task
-            <textarea
+            <Textarea
               rows={4}
-              className={field}
               value={task}
               onChange={(e) => setTask(e.target.value)}
             />
-          </label>
+          </Label>
           <div className="flex gap-3">
-            <label className="flex-1 space-y-1 text-sm">
+            <Label className="flex-1 space-y-1">
               Agent
               <select
                 className={field}
@@ -264,8 +265,8 @@ function TemplateForm({
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="flex-1 space-y-1 text-sm">
+            </Label>
+            <Label className="flex-1 space-y-1">
               Mode
               <select
                 className={field}
@@ -275,7 +276,7 @@ function TemplateForm({
                 <option value="tui">tui</option>
                 <option value="headless">headless</option>
               </select>
-            </label>
+            </Label>
           </div>
         </form>
         {error && <p className="text-xs text-state-failed">{error}</p>}

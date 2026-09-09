@@ -10,9 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
-import { field } from '@/lib/utils'
 import { useStore } from '@/store'
 
 export function InjectDialog() {
@@ -51,10 +51,10 @@ export function InjectDialog() {
             void send()
           }}
         >
-          <textarea
+          <Textarea
             autoFocus
             rows={4}
-            className={field}
+            aria-label="Message"
             placeholder="Steer the agent..."
             value={text}
             onChange={(e) => setText(e.target.value)}

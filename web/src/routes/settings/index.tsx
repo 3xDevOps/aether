@@ -7,6 +7,8 @@ import { Copy } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
@@ -15,7 +17,7 @@ import type {
   DaemonStatusResult,
   RepoSyncResult,
 } from '@/lib/types'
-import { cn, field } from '@/lib/utils'
+import { field } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { SyncPanel } from '@/routes/run-sync'
 import { useStore } from '@/store'
@@ -233,11 +235,11 @@ function DaemonCard({ client }: { client: Api }) {
             Installed at <span className="font-mono">{installed.unit_path}</span>.
           </p>
           <div className="flex gap-2">
-            <input
+            <Input
               ref={noteRef}
               readOnly
               aria-label="Enable command"
-              className={cn(field, 'font-mono')}
+              className="font-mono"
               value={installed.note}
               onFocus={(e) => e.target.select()}
             />
@@ -257,22 +259,14 @@ function DaemonCard({ client }: { client: Api }) {
             void install()
           }}
         >
-          <label className="block space-y-1 text-xs text-muted-foreground">
+          <Label className="block space-y-1 text-xs text-muted-foreground">
             Server
-            <input
-              className={field}
-              value={server}
-              onChange={(e) => setServer(e.target.value)}
-            />
-          </label>
-          <label className="block space-y-1 text-xs text-muted-foreground">
+            <Input value={server} onChange={(e) => setServer(e.target.value)} />
+          </Label>
+          <Label className="block space-y-1 text-xs text-muted-foreground">
             Repository
-            <input
-              className={field}
-              value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-            />
-          </label>
+            <Input value={repo} onChange={(e) => setRepo(e.target.value)} />
+          </Label>
           <Button size="sm" type="submit" disabled={busy || !server || !repo}>
             Install
           </Button>
@@ -364,7 +358,7 @@ function OverlayCard({ client }: { client: Api }) {
         <p className="text-sm text-muted-foreground">No active runs.</p>
       )}
       {live.length > 0 && (
-        <label className="block max-w-md space-y-1 text-xs text-muted-foreground">
+        <Label className="block max-w-md space-y-1 text-xs text-muted-foreground">
           Run
           <select
             className={field}
@@ -378,7 +372,7 @@ function OverlayCard({ client }: { client: Api }) {
               </option>
             ))}
           </select>
-        </label>
+        </Label>
       )}
       {runID && <SyncPanel runID={runID} client={client} />}
     </section>

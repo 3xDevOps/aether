@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
@@ -411,11 +412,11 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
         {result ? (
           <div className="space-y-2">
             <div className="flex gap-2">
-              <input
+              <Input
                 ref={codeRef}
                 readOnly
                 aria-label="Invite code"
-                className={cn(field, 'font-mono')}
+                className="font-mono"
                 value={result.code}
                 onFocus={(e) => e.target.select()}
               />

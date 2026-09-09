@@ -9,7 +9,8 @@ import type * as React from 'react'
 import type { SearchAddon } from '@xterm/addon-search'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
-import { cn, focusRing } from '@/lib/utils'
+import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 
 function FindBar({
   search,
@@ -38,12 +39,12 @@ function FindBar({
 
   return (
     <div className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded-md border bg-card p-1 shadow-md">
-      <input
+      <Input
         ref={input}
         aria-label="Find in terminal"
         placeholder="Find"
         value={term}
-        className={cn(focusRing, 'w-40 rounded-md border bg-background px-2 py-1 text-sm')}
+        className="w-40"
         onChange={(event) => {
           setTerm(event.target.value)
           setMissing(false)

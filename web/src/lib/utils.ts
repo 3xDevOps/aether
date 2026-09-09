@@ -11,8 +11,11 @@ export function cn(...inputs: ClassValue[]) {
 export const focusRing =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
-/** The house text field, shared rather than redrawn in every route. */
+/** The house field style. Only the native `<select>` wears it directly; text
+ * fields come from `Input` and `Textarea`, which compose it. `border-input`
+ * rather than the base layer's `border-border`: the two part in dark, and a
+ * generated shadcn control hardcodes `border-input`. */
 export const field = cn(
   focusRing,
-  'w-full rounded-md border bg-background px-2 py-1 text-sm',
+  'w-full rounded-md border border-input bg-background px-2 py-1 text-sm',
 )

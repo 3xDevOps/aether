@@ -54,6 +54,11 @@ control cycles system, light, and dark.
 | `--scrollbar-thumb-hover` | `oklch(0.55 0.12 190 / 0.85)` | `oklch(0.78 0.13 190 / 0.86)` |
 | `--scrollbar-track` | `oklch(0.95 0.01 210 / 0.42)` | `oklch(0.2 0.03 220 / 0.62)` |
 
+`--border` is the default every element wears, applied to `*` in `index.css`.
+`--input` is the exception, worn by the fields and selects alone through the
+`field` style in `src/lib/utils.ts`: in dark a control you can type into is
+drawn a step brighter than the rules around it. In light the two are equal.
+
 ## Run state tokens
 
 The six `--state-*` tokens are the status vocabulary for a run's presentation
