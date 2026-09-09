@@ -142,9 +142,9 @@ export function createRootStore() {
         },
         // `migrate` only runs when the stored version differs, and xterm is
         // the one consumer that does not validate `fontSize`, so a
-        // hand-edited or corrupted entry would reach the terminal as-is and
-        // render nothing readable. The dock heights are re-clamped at render;
-        // these two are not.
+        // hand-edited or corrupted `terminalFontSize` would reach the
+        // terminal as-is and render nothing readable. The dock heights need
+        // no such guard; `clampDockHeight` runs at render.
         merge: (persisted, current) => {
           const stored = (persisted ?? {}) as PersistedState
           return {
