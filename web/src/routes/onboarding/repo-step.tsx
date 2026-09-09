@@ -4,10 +4,12 @@
 import { type ReactNode, useId, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { desktopBridge } from '@/components/shell/title-bar'
 import type { Api } from '@/lib/api'
 import type { LinkStatus, Workspace } from '@/lib/types'
-import { cn, field, focusRing } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import type { OnboardingRepo } from '@/store/ui'
@@ -256,14 +258,13 @@ export function RepoStep({
               void link()
             }}
           >
-            <div className="flex-1 space-y-1 text-sm">
-              <label className="block" htmlFor={fieldId}>
+            <div className="flex-1 space-y-1">
+              <Label className="block" htmlFor={fieldId}>
                 Repository path
-              </label>
+              </Label>
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   id={fieldId}
-                  className={field}
                   value={repo}
                   list={listId}
                   disabled={picking}
@@ -477,11 +478,11 @@ export function RepoStep({
                 </p>
               )}
               <div className="flex gap-2">
-                <input
+                <Input
                   ref={cmdRef}
                   readOnly
                   aria-label="Push command"
-                  className={cn(field, 'font-mono')}
+                  className="font-mono"
                   value={pushCmd}
                   onFocus={(e) => e.target.select()}
                 />
