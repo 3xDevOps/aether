@@ -78,7 +78,7 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	defer cancel()
 
 	rt, _, verifyNoLeaks := pickRuntime(t)
-	dataDir := filepath.Join(t.TempDir(), "data")
+	dataDir := filepath.Join(shortTempDir(t), "data")
 
 	// The binaries the update replaces. They are inert files, not the test
 	// process: the service is told where they are.

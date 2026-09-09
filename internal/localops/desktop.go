@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -63,9 +62,9 @@ func DesktopBuildDir() (string, error) {
 // kernel for the build's lifetime: a holder that crashes releases it
 // without any staleness guessing, and no two builders can hold it at
 // once. The pid is written for diagnostics only. Unlock releases the
-// range and closes the handle, which lets the empty file be removed on
-// platforms where an open handle blocks deletion (Windows). The returned
-// unlock is safe to call more than once.
+// range and closes the handle; the empty lock file remains as the stable
+// inode that waiting builders share. The returned unlock is safe to call
+// more than once.
 func lockDesktopBuild(ctx context.Context, buildDir string) (func(), error) {
 	if err := os.MkdirAll(buildDir, 0o755); err != nil {
 		return nil, fmt.Errorf("localops: create desktop build dir: %w", err)
@@ -86,11 +85,9 @@ func lockDesktopBuild(ctx context.Context, buildDir string) (func(), error) {
 		once.Do(func() {
 			_ = release()
 			_ = f.Close()
-			// Only the holder removes it: a concurrent builder that
-			// created its own lock meanwhile must not lose it.
-			if p, rerr := os.ReadFile(lockPath); rerr == nil && strings.TrimSpace(string(p)) == strconv.Itoa(os.Getpid()) {
-				_ = os.Remove(lockPath)
-			}
+			// Keep the lock file in place so a same-process builder cannot
+			// acquire a newly created inode while the next build holds the
+			// original one.
 		})
 	}, nil
 }

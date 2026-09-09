@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
-	"time"
 )
 
 func TestInstallDesktopLinuxRegistersLauncher(t *testing.T) {
@@ -346,9 +345,9 @@ func TestLockDesktopBuildSerializesAndUnlocks(t *testing.T) {
 		t.Fatal("second lockDesktopBuild succeeded while the first is held")
 	}
 	unlock()
-	// Give the second builder's closed handle and the removal a moment
-	// before the next holder opens the same file.
-	time.Sleep(50 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(dir, ".build-lock")); err != nil {
+		t.Fatalf("lock file after unlock: %v", err)
+	}
 	if _, err := lockDesktopBuild(t.Context(), dir); err != nil {
 		t.Fatalf("lockDesktopBuild after unlock: %v", err)
 	}

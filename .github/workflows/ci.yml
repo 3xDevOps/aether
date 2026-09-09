@@ -206,6 +206,8 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}-${{ github.event.pull_request.head.sha || github.ref_name }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}-
       # Runs on a cache hit too: it skips a browser that is already present
       # and installs the system libraries, which the cache never holds. A
       # cache that restored nothing usable then costs a download, never the
