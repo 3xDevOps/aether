@@ -402,7 +402,8 @@ needs-attention badge, and `aether://run/<id>` deep links. It is the same SPA
 with the same full SSH authority, just without a browser tab to lose. No
 release publishes it; the CLI builds it for you, and needs nothing installed
 first. Answering `client` to the install script's question runs this for you;
-this is the same command by hand.
+this is the same command by hand. The window opens at 1280 by 840 and stops
+at 960 by 600, the smallest size the dashboard's own layout holds.
 
 ```sh
 aether gui build
