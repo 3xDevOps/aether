@@ -1337,6 +1337,21 @@ describe('onboarding wizard', () => {
     ).toHaveProperty('disabled', true)
   })
 
+  it('keeps launch blocked until the agent list has answered', async () => {
+    // The draft is on screen at once; the list that decides whether its agent
+    // can run is a round trip behind it.
+    seed({ onboardingFirstRun: { harness: 'claude', task: 'write a result file' } })
+    const client = fakeApi({
+      agentList: vi.fn(() => new Promise<AgentInfo[]>(() => {})),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    expect(
+      await screen.findByRole('button', { name: 'Launch' }),
+    ).toHaveProperty('disabled', true)
+  })
+
   it('keeps the agent the member picked over the one Agents set up', async () => {
     seed({ onboardingFirstRun: { harness: 'myagent', task: 'write a file' } })
     render(

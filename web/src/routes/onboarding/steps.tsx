@@ -840,7 +840,13 @@ export function FirstRunStep({
   useEffect(loadAgents, [loadAgents])
 
   const loading = useDelayed(agents === null)
-  const ready = task.trim() !== '' && harness !== '' && workspace !== null
+  // Launchable only against an agent this account was reported to have. A
+  // persisted draft is on screen before agent.list answers, so a name it is
+  // about to reject must not be launchable in the meantime.
+  const ready =
+    task.trim() !== '' &&
+    workspace !== null &&
+    (agents ?? []).some((a) => a.name === harness)
 
   const launch = async () => {
     setBusy(true)
