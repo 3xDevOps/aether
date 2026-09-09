@@ -231,6 +231,7 @@ attaches the server's output to the report.
 | `onboarding-configuration` | Bringing a member's own agent configuration across, from a fixture home holding an empty file and a file the secret scanner flags: the flagged file is named on the row and left out, everything else imports |
 | `onboarding-first-run` | Launching the first run on an agent installed into the member's environment home, and watching it reach needs-attention with its work committed; and, with nothing installed, the step offering "Set up an agent" instead of a picker and sending the reader back to Agents |
 | `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through, and the Git identity step reached in both directions between Link and Workspace |
+| `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
 | `run-provisioning` | Opening a run while its container is still being built: the terminal tab waits behind "Starting the run's container" instead of showing the gateway's refusal as a dead terminal, and attaches by itself once the run turns running |
 | `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
 | `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, and `Ctrl+Shift+F` finding what the shell printed and saying "No matches" when it did not |
@@ -238,13 +239,13 @@ attaches the server's output to the report.
 | `status-bar-sizing` | The status bar carrying every readout the width allows, on a server that is then stopped so its longest notice appears: the palette, shortcuts and theme controls stay in the window and the readouts give way inside their own group |
 
 `board-card`, `onboarding-agents`, `onboarding-github`,
-`onboarding-first-run`'s launch scenario, `run-provisioning`, `run-switch`
-and `terminal-tools` need a reachable Docker daemon and skip without one,
-the way the Go suite skips its container scenarios. The rest need only git,
-except `window-sizing`, which needs neither: it starts a gateway of its own
-rather than taking the `aether` fixture, because the CLI half of
-`update.check` is answered on the member's own machine and no server is
-involved.
+`onboarding-first-run`'s launch scenario, `run-attach-retry`,
+`run-provisioning`, `run-switch` and `terminal-tools` need a reachable
+Docker daemon and skip without one, the way the Go suite skips its container
+scenarios. The rest need only git, except `window-sizing`, which needs
+neither: it starts a gateway of its own rather than taking the `aether`
+fixture, because the CLI half of `update.check` is answered on the member's
+own machine and no server is involved.
 
 ### Adding a step to the wizard
 

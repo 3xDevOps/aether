@@ -7,8 +7,10 @@ let outputKinds: Array<[string, string]> = []
 let states: ConnectionState[] = []
 let attaches = 0
 let refusal: string | null = null
+let refusalCode: number | undefined
 let denied = false
 let write = false
+let sessionPending = false
 
 function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
   output = []
@@ -16,6 +18,7 @@ function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
   states = []
   attaches = 0
   refusal = null
+  refusalCode = undefined
   denied = false
   const socketURL = typeof url === 'function' ? url : () => url
   return connectAttach(socketURL, {
@@ -28,16 +31,29 @@ function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
       attaches++
     },
     onState: (s) => states.push(s),
-    onRefused: (m) => {
+    onRefused: (m, code) => {
       refusal = m
+      refusalCode = code
     },
     onWriteDenied: () => {
       denied = true
       write = false
     },
+    sessionPending: () => sessionPending,
     geometry: () => ({ cols: 120, rows: 40 }),
     wantsWrite: () => write,
   })
+}
+
+// A missing-session refusal, plus the 1008 close the gateway sends behind
+// every refusal frame and the wait for the reconnect it schedules.
+function refuseMissingSession() {
+  StubSocket.last().onopen?.()
+  StubSocket.last().onmessage?.({
+    data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }),
+  })
+  StubSocket.last().onclose?.({ code: 1008 })
+  vi.advanceTimersByTime(60_000)
 }
 
 function ack(over: Record<string, unknown> = {}) {
@@ -50,6 +66,7 @@ beforeEach(() => {
   StubSocket.install()
   vi.useFakeTimers()
   write = false
+  sessionPending = false
 })
 
 afterEach(() => {
@@ -210,6 +227,23 @@ describe('connectAttach', () => {
     a.close()
   })
 
+  it('hands the refusal code to the caller with the message', () => {
+    const a = attach()
+    StubSocket.last().onopen?.()
+    StubSocket.last().onmessage?.({
+      data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }),
+    })
+
+    expect(refusalCode).toBe(-32004)
+
+    // A refusal the gateway delivers by closing the socket carries no code.
+    a.reopen()
+    StubSocket.last().onclose?.({ code: 1008 })
+    expect(refusal).toBe('dashboard token revoked or expired')
+    expect(refusalCode).toBeUndefined()
+    a.close()
+  })
+
   it('stops reconnecting when the attach itself is refused', () => {
     const a = attach()
     StubSocket.last().onopen?.()
@@ -226,6 +260,69 @@ describe('connectAttach', () => {
     // Retrying is the user's call, and it reconnects.
     a.reopen()
     expect(StubSocket.opened).toHaveLength(2)
+    a.close()
+  })
+
+  // internal/sshd/attach.go refuses rather than waits while a run that can
+  // still gain a session has none, and says the client's retry is what
+  // resolves it: recovery starts the PTY session under a row that already
+  // reads running.
+  it('waits out a missing session while the run can still gain one', () => {
+    sessionPending = true
+    const a = attach()
+
+    for (let n = 0; n < 4; n++) refuseMissingSession()
+    expect(StubSocket.opened).toHaveLength(5)
+    expect(refusal).toBeNull()
+    expect(states).not.toContain('offline')
+
+    // Past the bound the refusal is the server's answer, not a race.
+    refuseMissingSession()
+    expect(StubSocket.opened).toHaveLength(5)
+    expect(refusal).toBe('ptyhost: no session for run')
+    expect(states.at(-1)).toBe('offline')
+    a.close()
+  })
+
+  it('reports a missing session as soon as the run can no longer gain one', () => {
+    sessionPending = true
+    const a = attach()
+
+    refuseMissingSession()
+    refuseMissingSession()
+    expect(StubSocket.opened).toHaveLength(3)
+    expect(refusal).toBeNull()
+
+    // The run ended mid-retry, so the budget stops applying to it.
+    sessionPending = false
+    refuseMissingSession()
+
+    expect(StubSocket.opened).toHaveLength(3)
+    expect(refusal).toBe('ptyhost: no session for run')
+    expect(states.at(-1)).toBe('offline')
+    a.close()
+  })
+
+  it('keeps the missing-session budget clear of ordinary reconnects', () => {
+    sessionPending = true
+    const a = attach()
+
+    // Dropped sockets with no successful attach in between must not spend
+    // the budget a later missing session is owed.
+    for (let n = 0; n < 3; n++) {
+      StubSocket.last().onclose?.({ code: 1006 })
+      vi.advanceTimersByTime(60_000)
+    }
+    expect(StubSocket.opened).toHaveLength(4)
+
+    for (let n = 0; n < 4; n++) refuseMissingSession()
+    expect(refusal).toBeNull()
+    // The wait is deliberate, so nothing in it may paint a red Offline the
+    // reconnect behind it clears seconds later.
+    expect(states).not.toContain('offline')
+
+    refuseMissingSession()
+    expect(refusal).toBe('ptyhost: no session for run')
     a.close()
   })
 

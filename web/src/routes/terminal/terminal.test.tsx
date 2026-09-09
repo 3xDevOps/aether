@@ -50,6 +50,7 @@ function attached() {
 beforeEach(() => {
   StubSocket.install()
   vi.stubGlobal('ResizeObserver', NoResizeObserver)
+  useStore.setState({ runs: {} })
 })
 
 afterEach(() => {
@@ -202,11 +203,11 @@ describe('terminal view', () => {
     act(() => StubSocket.last().onopen?.())
     act(() =>
       StubSocket.last().onmessage?.({
-        data: JSON.stringify({ ok: false, code: -32004, error: 'no live terminal' }),
+        data: JSON.stringify({ ok: false, code: -32000, error: 'unknown run' }),
       }),
     )
 
-    expect(screen.getByText('no live terminal')).toBeDefined()
+    expect(screen.getByText('unknown run')).toBeDefined()
     fireEvent.click(screen.getByText('Retry'))
     expect(StubSocket.opened).toHaveLength(2)
     view.unmount()
@@ -304,6 +305,83 @@ describe('terminal view', () => {
     view.unmount()
   })
 
+  it('drops the container spinner when the run fails while provisioning', () => {
+    const view = mount({}, { status: 'provisioning' })
+    expect(StubSocket.opened).toHaveLength(0)
+
+    act(() =>
+      useStore.getState().upsertRun(
+        run({
+          status: 'failed',
+          started_at: null,
+          reason: 'provisioning: create checkout: no space left',
+        }),
+      ),
+    )
+    act(() => StubSocket.last().onopen?.())
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }),
+      }),
+    )
+
+    expect(screen.queryByText("Starting the run's container")).toBeNull()
+    expect(screen.getByText('provisioning: create checkout: no space left')).toBeDefined()
+    expect(screen.queryByText('Retry')).toBeNull()
+    view.unmount()
+  })
+
+  it('waits out a missing session on a running run rather than failing it', () => {
+    const view = mount()
+    act(() => StubSocket.last().onopen?.())
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }),
+      }),
+    )
+
+    expect(screen.queryByText('Offline')).toBeNull()
+    expect(screen.queryByText('ptyhost: no session for run')).toBeNull()
+    expect(screen.queryByText('Retry')).toBeNull()
+    view.unmount()
+  })
+
+  // The reader is standing on the Terminal tab when a launch fails, and a
+  // Retry that can never succeed is the dead end this ticket is about.
+  it('gives a run that died before it started its reason, not a retry', () => {
+    const view = mount(
+      {},
+      { status: 'failed', started_at: null, reason: 'provisioning: create checkout: no space left' },
+    )
+    act(() => StubSocket.last().onopen?.())
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }),
+      }),
+    )
+
+    expect(
+      screen.getByText('provisioning: create checkout: no space left'),
+    ).toBeDefined()
+    expect(screen.queryByText('Retry')).toBeNull()
+    view.unmount()
+  })
+
+  // A refusal that is not a missing session says nothing about the run, so
+  // the tab must not answer a dead token with a sentence about the run.
+  it('shows the gateway refusal itself when the session is not the problem', () => {
+    const view = mount()
+    act(() => useStore.getState().upsertRun(run({ status: 'completed' })))
+    act(() => StubSocket.last().onopen?.())
+    act(() => StubSocket.last().onclose?.({ code: 1008 }))
+
+    expect(screen.getByText('dashboard token revoked or expired')).toBeDefined()
+    expect(
+      screen.queryByText('This run has ended and left no recorded terminal to replay.'),
+    ).toBeNull()
+    view.unmount()
+  })
+
   it('says a completed run has ended instead of echoing the refusal', () => {
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ status: 'completed' })))
@@ -322,6 +400,39 @@ describe('terminal view', () => {
       screen.getByText('This run has ended and left no recorded terminal to replay.'),
     ).toBeDefined()
     expect(screen.queryByText('ptyhost: no session for run')).toBeNull()
+    view.unmount()
+  })
+
+  // A run waiting on its supervisor has not ended: it goes back to running,
+  // so telling it that it ended and taking its retry away is the dead end.
+  it('lets a stalled run be steered without calling it not running', () => {
+    const view = mount({}, { status: 'needs-attention' })
+    attached()
+
+    const toggle = screen.getByText('Steering') as HTMLButtonElement
+    expect(toggle.disabled).toBe(false)
+    expect(screen.queryByText('This run is not running')).toBeNull()
+    view.unmount()
+  })
+
+  // A run waiting on a human is not a finished one: the server keeps it on
+  // the live side of its own replay gate, so the tab must not answer its
+  // refusals with a sentence about a transcript, or take the retry away.
+  it('keeps the retry on a run that is only waiting for attention', () => {
+    const view = mount({}, { status: 'needs-attention' })
+    act(() => StubSocket.last().onopen?.())
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ ok: false, code: -32000, error: 'unknown run' }),
+      }),
+    )
+
+    expect(screen.getByText('unknown run')).toBeDefined()
+    expect(
+      screen.queryByText('This run has ended and left no recorded terminal to replay.'),
+    ).toBeNull()
+    fireEvent.click(screen.getByText('Retry'))
+    expect(StubSocket.opened).toHaveLength(2)
     view.unmount()
   })
 })

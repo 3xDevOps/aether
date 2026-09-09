@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
@@ -11,11 +11,17 @@ import { openOAuthLink } from '@/lib/oauth-forward'
 import type { RunStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
-import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
+import {
+  type Attachment,
+  codeUnavailable,
+  connectAttach,
+  replayGate,
+} from '@/routes/terminal/attach'
 import { RunDock } from '@/routes/terminal/run-dock'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
+import type { RunRecord } from '@/store/runs'
 import { initialTerminal } from '@/store/terminal'
 
 const connectionLabel: Record<string, string> = {
@@ -25,14 +31,30 @@ const connectionLabel: Record<string, string> = {
   offline: 'Offline',
 }
 
-/** Statuses that can still gain a live terminal session. Mirrors
- * `replayableStatus` in internal/sshd/attach.go, which serves a transcript
- * instead only once `domain.RunStatus.Terminal()` is true. */
-const liveStatuses: readonly RunStatus[] = [
-  'queued',
-  'provisioning',
-  'running',
-  'needs-attention',
+/**
+ * What a missing session on a finished run says. A run that never started has
+ * no transcript because it never got a terminal, and `reason` carries the
+ * provisioning failure that explains it - the reader is standing on the
+ * Terminal tab, not the Overview tab that renders the reason otherwise.
+ */
+function endedMessage(run: RunRecord): string {
+  if (!run.started_at && run.reason) return run.reason
+  return 'This run has ended and left no recorded terminal to replay.'
+}
+
+/**
+ * Statuses a run never leaves. Mirrors `replayableStatus` in
+ * internal/sshd/attach.go, which is `domain.RunStatus.Terminal()`: past these
+ * a run is permanently sessionless, so its refusal is the answer rather than
+ * a race worth waiting out, and no retry could ever help. `needs-attention`
+ * is not one of them - it is supervised and goes back to running.
+ */
+const endedStatuses: readonly RunStatus[] = [
+  'completed',
+  'merged',
+  'abandoned',
+  'failed',
+  'interrupted',
 ]
 
 /** Statuses whose container is still being built, so no PTY session exists
@@ -51,6 +73,13 @@ function TerminalView({ params }: RouteProps) {
 
   const known = run !== undefined
   const starting = run !== undefined && startingStatuses.includes(run.status)
+  // A stalled run still has a live agent session, so it steers like a
+  // running one. The disabled control and the reason beside it read this
+  // one answer rather than each testing the status themselves.
+  const steerable = run?.status === 'running' || run?.status === 'needs-attention'
+  // Only a missing session says anything about the run itself; every other
+  // refusal is about this attach and speaks for itself.
+  const [sessionMissing, setSessionMissing] = useState(false)
   const attachRef = useRef<Attachment | null>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
   const terminalRef = useRef<XtermController['terminal']>(null)
@@ -82,7 +111,7 @@ function TerminalView({ params }: RouteProps) {
   const terminal = controller.terminal
   terminalRef.current = terminal
   useEffect(() => {
-    if (!terminal) return
+    if (!terminal || !known) return
 
     // A stalled run still has a live, recoverable agent session. Completed
     // and final-run attaches replay history read-only.
@@ -92,6 +121,7 @@ function TerminalView({ params }: RouteProps) {
     setTerminal(runID, { ...initialTerminal, write: ownerSteering })
     writeRef.current = ownerSteering
     askedForControl.current = false
+    setSessionMissing(false)
 
     // No session exists yet to attach to (internal/ptyhost ErrNoSession),
     // and the pane is cleared here because no ack will arrive to clear it.
@@ -120,8 +150,12 @@ function TerminalView({ params }: RouteProps) {
         if (connection === 'offline') gate.current.unmute()
         setTerminal(runID, { connection })
       },
-      onRefused: (message) => setTerminal(runID, { message, refused: true }),
+      onRefused: (message, code) => {
+        setSessionMissing(code === codeUnavailable)
+        setTerminal(runID, { message, refused: true })
+      },
       onWriteDenied: () => setTerminal(runID, { steerDenied: true, write: false }),
+      sessionPending: () => run !== undefined && !endedStatuses.includes(run.status),
       geometry: () => ({ cols: terminal.cols, rows: terminal.rows }),
       wantsWrite: () => writeRef.current,
     })
@@ -131,7 +165,17 @@ function TerminalView({ params }: RouteProps) {
       attachment.close()
       attachRef.current = null
     }
-  }, [markControlTaken, run?.member_id, run?.status, runID, self.id, setTerminal, starting, terminal])
+  }, [
+    known,
+    markControlTaken,
+    run?.member_id,
+    run?.status,
+    runID,
+    self.id,
+    setTerminal,
+    starting,
+    terminal,
+  ])
 
   if (!run) {
     return <MissingRun />
@@ -167,10 +211,7 @@ function TerminalView({ params }: RouteProps) {
         <Button
           size="sm"
           variant={state.write ? 'default' : 'outline'}
-          disabled={
-            state.steerDenied ||
-            (run.status !== 'running' && run.status !== 'needs-attention')
-          }
+          disabled={state.steerDenied || !steerable}
           className="relative"
           onClick={toggleWrite}
         >
@@ -188,7 +229,7 @@ function TerminalView({ params }: RouteProps) {
         )}
         {/* A disabled control shows no tooltip, so the reason is written out
             beside it rather than hidden in a title attribute. */}
-        {run.status !== 'running' && !starting && !state.steerDenied && (
+        {!steerable && !starting && !state.steerDenied && (
           <span className="text-muted-foreground">This run is not running</span>
         )}
         {/* Nothing else on screen separates watching from steering, so the
@@ -200,12 +241,12 @@ function TerminalView({ params }: RouteProps) {
         )}
         {state.message && (
           <span className="truncate text-muted-foreground">
-            {state.refused && !liveStatuses.includes(run.status)
-              ? 'This run has ended and left no recorded terminal to replay.'
+            {state.refused && sessionMissing && endedStatuses.includes(run.status)
+              ? endedMessage(run)
               : state.message}
           </span>
         )}
-        {state.refused && (
+        {state.refused && !endedStatuses.includes(run.status) && (
           <Button size="sm" variant="ghost" onClick={retry}>
             Retry
           </Button>

@@ -9,6 +9,17 @@ import { type ConnectionState, backoff } from '@/lib/stream'
 /** JSON-RPC "permission denied": a write attach without the steer capability. */
 export const codeDenied = -32001
 
+/** JSON-RPC "unavailable": the run has no live PTY session. */
+export const codeUnavailable = -32004
+
+/**
+ * Retries of a `codeUnavailable` refusal before it counts as final.
+ * internal/sshd/attach.go calls a missing session on a run that can still
+ * gain one a transient race the client's retry resolves; four retries span
+ * enough `backoff()` to outlive the recovery that starts the session.
+ */
+const unavailableRetries = 4
+
 /** WebSocket policy violation: the gateway's authorization watch fired. */
 const policyClose = 1008
 
@@ -49,10 +60,20 @@ export interface AttachHandlers {
    */
   onAttached: (write: boolean) => void
   onState: (state: ConnectionState) => void
-  /** The attach was refused for good; no further reconnect is attempted. */
-  onRefused: (message: string) => void
+  /**
+   * The attach was refused for good; no further reconnect is attempted. The
+   * JSON-RPC code comes with a refusal frame, and is absent when the gateway
+   * refused by closing the socket instead.
+   */
+  onRefused: (message: string, code?: number) => void
   /** The member cannot steer this run. The attach continues as a mirror. */
   onWriteDenied: () => void
+  /**
+   * Whether a missing session on this run is worth waiting out rather than
+   * reporting. True only while the run can still gain one; read at every
+   * refusal, so a run that ends mid-retry stops being retried.
+   */
+  sessionPending?: () => boolean
   /** A terminal process exited and the gateway closed the socket normally. */
   onExit?: () => void
   /** Geometry to ask for, read at every connect. */
@@ -113,6 +134,14 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   let socket: WebSocket | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
+  // The missing-session budget is its own count: an ordinary reconnect must
+  // neither spend it nor be slowed by it.
+  let unavailableTries = 0
+  // A tolerated missing-session refusal reconnects like any dropped socket,
+  // so without this the deliberate wait would report itself offline once
+  // `attempt` had climbed past the threshold on earlier drops. Each socket
+  // earns it again, so a plain drop mid-wait is still reported as one.
+  let waitingForSession = false
   let disposed = false
   let refused = false
   let attached = false
@@ -124,6 +153,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   const open = () => {
     if (disposed) return
     attached = false
+    waitingForSession = false
     h.onState(attempt === 0 ? 'connecting' : 'reconnecting')
     let ws: WebSocket
     try {
@@ -175,6 +205,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (ack.ok) {
         attached = true
         attempt = 0
+        unavailableTries = 0
+        waitingForSession = false
         h.onState('live')
         h.onAttached(askedWrite)
         return
@@ -190,8 +222,21 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         attempt = 0
         return
       }
+      // Leaving `refused` unset is the whole retry: the gateway closes 1008
+      // behind every refusal frame, and onclose reconnects for any close it
+      // was not told to give up on.
+      if (
+        ack.code === codeUnavailable &&
+        unavailableTries < unavailableRetries &&
+        h.sessionPending?.()
+      ) {
+        unavailableTries++
+        waitingForSession = true
+        return
+      }
       refused = true
-      h.onRefused(ack.error ?? 'attach refused')
+      waitingForSession = false
+      h.onRefused(ack.error ?? 'attach refused', ack.code)
       h.onState('offline')
     }
     ws.onclose = (ev) => {
@@ -236,7 +281,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
 
   const retry = () => {
     if (disposed || refused) return
-    h.onState(attempt > 3 ? 'offline' : 'reconnecting')
+    h.onState(!waitingForSession && attempt > 3 ? 'offline' : 'reconnecting')
     timer = setTimeout(open, backoff(attempt))
     attempt++
   }
@@ -278,6 +323,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       timer = null
       refused = false
       attempt = 0
+      unavailableTries = 0
+      waitingForSession = false
       drop()
       open()
     },

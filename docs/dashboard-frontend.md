@@ -606,28 +606,31 @@ gateway's own error instead.
 terminal and event stream reconnect on the same jittered schedule, and it
   splits large input (a paste) into several ordered frames under the gateway's
   64 KiB frame cap, never splitting a surrogate pair.
-- **Steer on entry.** The agent header requests `write` on the first attach and
-  the active button carries a short pulse animation; the toggle reattaches
-  rather than upgrading in place. Until the member has taken control once
-  (`UiSlice.terminalControlTaken`, persisted, and set only when the member
-  asked for control and the attach ack granted it, so neither a refused
-  request nor an owner's automatic steer silences the hint) a live run they
-  are only watching says **Read-only mirror. Take control to type into the
-  agent.** A run that is not running says **This run is not running** beside
-  the disabled control, as visible text for the same reason the dock's tab
-  ceiling is. Whether the member may steer is the server's answer, never the
-  client's guess: a `-32001` refusal drops the request back to a mirror and
-  disables the toggle. A finished run attaches as a read-only replay of its
-  recorded transcript, which ends with a 1000 close, reason `session ended` -
-  the signal to stop reconnecting rather than loop replay -> EOF -> replay.
-  Every other refusal (unknown run, transiently missing terminal) stops the
-  reconnect loop and offers a retry.
-- **A missing session is not a dead terminal.** `-32004` means the run has no
-  PTY session, and `internal/sshd/attach.go` refuses rather than waits for
-  one, so the client is what has to tell a container that is still starting
-  apart from a terminal that is gone. It does it twice over. A `queued` or
-  `provisioning` run is not attached to at all: the tab clears the pane and
-  covers it with `TerminalSpinner`, the same overlay both docks use, reading
+- **Steer on entry.** The agent header requests `write` on the first attach
+  and the active button carries a short pulse animation; the toggle
+  reattaches rather than upgrading in place. Until the member has taken
+  control once (`UiSlice.terminalControlTaken`, persisted, and set only when
+  the member asked for control and the attach ack granted it, so neither a
+  refused request nor an owner's automatic steer silences the hint) a live
+  run they are only watching says **Read-only mirror. Take control to type
+  into the agent.** A run that can be steered at all - running, or stalled
+  on a question - says nothing there, and neither does one whose container
+  is still starting, because the spinner already speaks for it. Anything
+  else says **This run is not running** beside the disabled control, as
+  visible text for the same reason the dock's tab ceiling is; a run whose
+  container is still starting says nothing there, because the spinner below
+  already does. Whether the member may steer is the server's answer, never
+  the client's guess: a `-32001` refusal drops the request back to a mirror
+  and disables the toggle. A finished run attaches as a read-only replay of
+  its recorded transcript, which ends with a 1000 close, reason `session
+  ended` - the signal to stop reconnecting rather than loop replay -> EOF ->
+  replay. Every other refusal (unknown run) stops the reconnect loop.
+- **A missing session is not a dead terminal.** `-32004` means the run has
+  no PTY session, and `internal/sshd/attach.go` refuses rather than waits
+  for one, so the client is what has to tell a container that is still
+  starting apart from a terminal that is gone. A `queued` or `provisioning`
+  run is not attached to at all: the tab clears the pane and covers it with
+  `TerminalSpinner`, the overlay the environment dock uses, reading
   **Starting the run's container**, and reports no connection state while
   nothing is connecting. The attach effect already re-runs on `run.status`,
   so the run turning `running` attaches on its own. On a run that is up, a
@@ -636,11 +639,19 @@ terminal and event stream reconnect on the same jittered schedule, and it
   recovery starts a session under a row that already reads `running` - and
   says the client's retry is what resolves it. Only then does the tab show
   the gateway's error.
-- **A dead end gets no Retry.** The Retry button is offered only while the
-  run can still gain a session, since a finished run will never answer one.
-  A run that never started has no transcript either, and its `run.reason`
-  carries the provisioning failure, so the tab shows that reason rather than
-  sending the reader to the Overview tab for it.
+- **A dead end gets no Retry.** Retry is offered on every refusal except on
+  a run that has finished, where no session will ever answer it.
+  `endedStatuses` is that set, and it mirrors `replayableStatus` in
+  internal/sshd/attach.go, which is `domain.RunStatus.Terminal()`: the same
+  answer decides whether a missing session is worth waiting out, so the
+  client cannot drift from the server gate. A run waiting for a human is not
+  finished, so it keeps both its retry and the gateway's own words. A run
+  that never started has no transcript either, and its `run.reason` carries
+  the provisioning failure, so the tab shows that reason rather than sending
+  the reader to the Overview tab for it. That substitution is keyed on the
+  refusal's own code: only a missing session says anything about the run, so
+  a revoked token or a withdrawn membership still shows the gateway's own
+  message.
 - **Run-shell tabs always write.** The `+` control opens names `t1`, `t2`,
   `t3`, and `t4`; four is the per-run limit, six is the environment dock's,
   and `Dock` writes whichever `maxTabs` it was given beside the disabled
@@ -1290,21 +1301,28 @@ refusals, and the view is rendered with a real xterm instance to prove
 the toggle and the steer refusal reach the UI, that a `queued` or
 `provisioning` run opens no socket at all and waits behind the container
 spinner without the toolbar contradicting it, that the run turning `running`
-attaches on its own, that a `-32004` on a running run is waited out rather
-than reported, and that a run which died before it started shows its reason
-and no Retry. The attach client covers the bounded retry itself: four
-refusals reconnect, the fifth is the answer. The missing-run component is
-covered on its own: nothing before the delay, the unreachable server, and
-the sentence and **Back to board** once hydrated. The board and the palette are
-rendered against a seeded store: bucket membership and ordering, the board
-showing only the active workspace and following a switch, the board falling
+attaches on its own and that failing there drops the spinner, that a
+`-32004` on a running run is waited out rather than reported, that a run
+which died before it started shows its reason and no Retry, and that a
+refusal which is not a missing session shows the gateway's own message
+instead. The attach client covers the bounded retry itself: four refusals
+reconnect, the fifth is the answer, a run that ends mid-retry is reported at
+once, ordinary reconnects neither spend the budget nor are slowed by it, and
+the wait never reports itself offline on a counter earlier drops left
+standing. The missing-run component is
+covered on its own: nothing before the delay, the unreachable server, the
+dead token reported verbatim, and the sentence and **Back to board** once
+hydrated. The board and the palette are rendered against a seeded store:
+bucket membership and ordering, the board showing only the active workspace
+and following a switch, the board falling
 back to every run before hydration has named one, the ack muting a card and a
 later state change bringing the emphasis back, the paused badge going on and
 off through a real `workspace.timeline` pause and resume run through
 `applyEvent`, a slot contributor reaching the card, the card's branch carrying
-its full name and copying without opening the run, and the palette jumping,
-switching the active workspace and opening it, steering from a run-detail tab,
-withholding both pause and resume while the paused state is unknown, launching
+its full name, copying it, and selecting it instead where the clipboard is
+missing, and the palette jumping, switching the active workspace and opening
+it, steering from a run-detail tab, withholding both pause and resume while
+the paused state is unknown, launching
 into the active workspace with either the caller's or a shared account, and
 offering only members who can own a run as
 handoff targets, never a viewer. The buttons that render the same list are
