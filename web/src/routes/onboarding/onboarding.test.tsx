@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react'
 import type { Api } from '@/lib/api'
 import type {
+  AgentInfo,
   GatewayCapabilities,
   GitIdentity,
   RepoPushResult,
@@ -1245,6 +1246,37 @@ describe('onboarding wizard', () => {
       await screen.findByText('agent.list: environment home unreadable'),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined()
+  })
+
+  it('waits rather than claiming an empty account while a retry is in flight', async () => {
+    let answer: (agents: AgentInfo[]) => void = () => {}
+    // The Agents step asks first, so the failure is the standing answer until
+    // the retry, which is left hanging.
+    let hang = false
+    const client = fakeApi({
+      agentList: vi.fn(() =>
+        hang
+          ? new Promise<AgentInfo[]>((resolve) => {
+              answer = resolve
+            })
+          : Promise.reject(new Error('agent.list: environment home unreadable')),
+      ),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    hang = true
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+
+    // The gateway has said nothing yet, so neither does the step.
+    expect(screen.queryByText(/no agent is installed/i)).toBeNull()
+    expect(
+      screen.queryByText('agent.list: environment home unreadable'),
+    ).toBeNull()
+
+    await act(async () => answer([agentInfo()]))
+    expect(screen.getByLabelText('Agent')).toBeDefined()
   })
 
   it('jumps between the steps it has reached from the header', async () => {

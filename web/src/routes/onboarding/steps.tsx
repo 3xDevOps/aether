@@ -801,6 +801,10 @@ export function FirstRunStep({
 
   const loadAgents = useCallback(() => {
     let live = true
+    // Back to loading, not to an empty account: a retry that left the list at
+    // [] would tell the member nothing is installed while the call it is
+    // waiting on is the only thing that knows.
+    setAgents(null)
     setAgentsError(null)
     client
       .agentList()
