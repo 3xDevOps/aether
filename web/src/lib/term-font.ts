@@ -77,6 +77,10 @@ export function clampTerminalFontSize(px: number): number {
  * on macOS) with `=`/`+` grows, `-` shrinks and `0` returns to the default.
  * Keyed off physical codes, like the clipboard shortcuts, so a remapped
  * layout cannot move them.
+ *
+ * Shift is allowed only on `=`, because `Ctrl+Shift+=` is how a keyboard
+ * without a numpad types `Ctrl++`. It is refused on the others: `Ctrl+_` is
+ * readline's undo and vim's keymap switch, and neither may be swallowed.
  */
 export function terminalZoomKey(ev: KeyboardEvent): 'in' | 'out' | 'reset' | null {
   if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return null
@@ -86,10 +90,10 @@ export function terminalZoomKey(ev: KeyboardEvent): 'in' | 'out' | 'reset' | nul
       return 'in'
     case 'Minus':
     case 'NumpadSubtract':
-      return 'out'
+      return ev.shiftKey ? null : 'out'
     case 'Digit0':
     case 'Numpad0':
-      return 'reset'
+      return ev.shiftKey ? null : 'reset'
     default:
       return null
   }

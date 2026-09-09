@@ -1,4 +1,4 @@
-import { terminalFontFamily, whenTerminalFontReady } from '@/lib/term-font'
+import { terminalFontFamily, terminalZoomKey, whenTerminalFontReady } from '@/lib/term-font'
 
 // jsdom has no FontFaceSet; each case installs exactly the shape it needs.
 function stubFonts(fonts: unknown) {
@@ -116,8 +116,6 @@ describe('terminalFontFamily', () => {
     expect(families[families.length - 1]).toBe('monospace')
   })
 })
-import { describe, expect, it } from 'vitest'
-import { terminalZoomKey } from './term-font'
 
 function key(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
@@ -134,5 +132,12 @@ describe('terminal zoom keys', () => {
     expect(terminalZoomKey(key({ code: 'Equal' }))).toBeNull()
     expect(terminalZoomKey(key({ code: 'Minus', ctrlKey: true, altKey: true }))).toBeNull()
     expect(terminalZoomKey(key({ code: 'KeyF', ctrlKey: true }))).toBeNull()
+  })
+
+  it('leaves the shifted forms the shell binds alone', () => {
+    // Ctrl+_ is readline's undo; Ctrl+Shift+= is only how Ctrl++ is typed.
+    expect(terminalZoomKey(key({ code: 'Minus', ctrlKey: true, shiftKey: true }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'Digit0', ctrlKey: true, shiftKey: true }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'Equal', ctrlKey: true, shiftKey: true }))).toBe('in')
   })
 })
