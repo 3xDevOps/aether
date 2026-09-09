@@ -83,6 +83,14 @@ function timeline(kind: 'pause' | 'resume', seq: number) {
   )
 }
 
+// Every button on a card but the copy control, so the lookup still throws if
+// a card ever grows a second full-card target.
+const openRun = { name: /^(?!Copy branch)/ }
+
+// A stub left standing by a failing assertion would gut navigator for every
+// test after it, turning one real failure into a file full of them.
+afterEach(() => vi.unstubAllGlobals())
+
 describe('board', () => {
   it('deals runs into the three buckets, newest first, the working one bouncing', () => {
     seed([stalled, working, queued, merged])
@@ -94,11 +102,31 @@ describe('board', () => {
     // queued (11:00) changed after running (10:02), so it sorts above it.
     const tasks = column('Working')
       .getAllByRole('article')
-      .map((card) => within(card).getByRole('button').getAttribute('aria-label'))
+      .map((card) =>
+        within(card).getByRole('button', openRun).getAttribute('aria-label'),
+      )
     expect(tasks).toEqual(['not started', 'still going'])
     // A card carries no state in words, so the running one bounces.
     const card = column('Working').getByText('still going').closest('article')
     expect(card?.querySelector('.working-dots')).not.toBeNull()
+  })
+
+  it('carries the whole branch name', () => {
+    seed([working])
+    render(<Board />)
+
+    expect(within(screen.getByRole('article')).getByTitle(working.branch)).toBeDefined()
+  })
+
+  it('offers no branch chip for a run whose checkout never got one', () => {
+    // A run that failed in provisioning is marked failed before its branch is
+    // assigned, so the card would carry an empty name and copy an empty string.
+    seed([run({ id: 'run_nobranch', task: 'checkout failed', status: 'failed', branch: '' })])
+    render(<Board />)
+
+    const card = screen.getByRole('article')
+    expect(within(card).queryByRole('button', { name: /^Copy branch/ })).toBeNull()
+    expect(card.querySelector('.lucide-git-branch')).toBeNull()
   })
 
   it('shows only the active workspace, and follows a switch', () => {

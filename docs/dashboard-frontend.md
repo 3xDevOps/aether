@@ -390,6 +390,13 @@ because `useDelayed` has not answered yet and "not known" is not "empty";
 skeletons after that while the load is still running; and "Nothing here." once
 the board is hydrated.
 
+The card is one click target, laid over the text. Anything the reader has to
+select, hover or press has to be raised above that overlay, the way card slot
+content and the protected badge are. The branch chip is: the truncated name
+carries the whole branch in its `title`, the text can be selected, and the
+copy control beside it copies the branch instead of opening the run. Reaching
+for the branch is therefore not a way into the run; the rest of the card is.
+
 Two things the buckets do not come from the run status alone:
 
 - **Paused** is a badge, not a bucket. A paused run still reads `running` in
