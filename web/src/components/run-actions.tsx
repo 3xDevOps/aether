@@ -32,7 +32,15 @@ import { useCapability, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 /** The verbs that stay on the row at every width: whatever moves the run on. */
-const primaryCommands = new Set(['pause', 'resume', 'inject', 'close', 'kill', 'relaunch'])
+const primaryCommands: Record<string, true> = {
+  pause: true,
+  resume: true,
+  inject: true,
+  close: true,
+  kill: true,
+  delete: true,
+  relaunch: true,
+}
 
 export function RunActions({ run }: { run: RunRecord }) {
   const paused = useStore((s) => s.pausedRuns[run.id])
@@ -73,7 +81,7 @@ export function RunActions({ run }: { run: RunRecord }) {
   const confirm = asking?.confirm
   const commands = runCommands(context)
   const handoffs = handoffCommands(context)
-  const overflow = commands.filter((command) => !primaryCommands.has(command.id))
+  const overflow = commands.filter((command) => !primaryCommands[command.id])
 
   const start = (command: Command) => {
     setRunning(command.id)
@@ -89,7 +97,7 @@ export function RunActions({ run }: { run: RunRecord }) {
           size="sm"
           className={cn(
             'h-6 px-2',
-            !primaryCommands.has(command.id) && 'hidden @4xl/header:inline-flex',
+            !primaryCommands[command.id] && 'hidden @4xl/header:inline-flex',
           )}
           title={command.label}
           disabled={running !== null || command.disabled}

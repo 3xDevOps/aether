@@ -131,19 +131,13 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('keeps replay-only finished runs out of steering mode', () => {
+  it('keeps a live stalled run in steering mode', () => {
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
-    act(() => StubSocket.last().onopen?.())
+    attached()
 
-    const toggle = screen.getByText('Take control') as HTMLButtonElement
-    expect(toggle.disabled).toBe(true)
-    // A finished run cannot be steered at all, so the reason is on screen
-    // rather than in a title the disabled button would never show, and the
-    // mirror hint that leads nowhere stays away.
-    expect(screen.getByText('This run is not running')).toBeDefined()
-    expect(screen.queryByText('Read-only mirror. Take control to type into the agent.')).toBeNull()
-    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    expect(screen.getByText('Steering')).toBeDefined()
+    expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
     view.unmount()
   })
 
@@ -282,9 +276,9 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('says a finished run has ended instead of echoing the refusal', () => {
+  it('says a completed run has ended instead of echoing the refusal', () => {
     const view = mount()
-    act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
+    act(() => useStore.getState().upsertRun(run({ status: 'completed' })))
     act(() => StubSocket.last().onopen?.())
     act(() =>
       StubSocket.last().onmessage?.({

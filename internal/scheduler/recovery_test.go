@@ -66,7 +66,7 @@ func TestRebootRecoveryResumesSupervision(t *testing.T) {
 
 	// Exit under the new instance completes the lifecycle normally.
 	c.exitNow(0)
-	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
 		t.Fatalf("reason = %q", p.Reason)
 	}
@@ -114,7 +114,7 @@ func TestRecoveryOfLegacySidecarKeepsWorkspaceScope(t *testing.T) {
 	})
 
 	c.exitNow(0)
-	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	if ev.WorkspaceID != e.ws.ID {
 		t.Fatalf("recovered event workspace = %q, want %q", ev.WorkspaceID, e.ws.ID)
 	}
@@ -273,14 +273,14 @@ func TestRelaunchFromInterrupted(t *testing.T) {
 		t.Fatal("no container for relaunched run")
 	}
 	c.exitNow(0)
-	e.waitStoreStatus(t, next.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, next.ID, domain.RunCompleted)
 }
 
 func TestDeleteRunWaitsForRelaunchCheckout(t *testing.T) {
 	e := newTestEnv(t, nil)
 	old, oldContainer := e.launchFake(t, "delete relaunch")
 	oldContainer.exitNow(0)
-	e.waitStoreStatus(t, old.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, old.ID, domain.RunCompleted)
 	if err := e.sched.CloseRun(t.Context(), old.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun: %v", err)
 	}
@@ -481,11 +481,11 @@ func TestCrashExitBeforeMarker(t *testing.T) {
 	before := e.rt.attachCount()
 	startScheduler(t, s2)
 
-	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
 		t.Fatalf("reason = %q", p.Reason)
 	}
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: crash before marker" {
 		t.Fatalf("commits = %v", got)
 	}
@@ -531,11 +531,11 @@ func TestCrashExitAfterMarkerBeforeStatus(t *testing.T) {
 	before := e.rt.attachCount()
 	startScheduler(t, s2)
 
-	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
 		t.Fatalf("reason = %q", p.Reason)
 	}
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: crash after marker" {
 		t.Fatalf("commits = %v", got)
 	}
@@ -549,8 +549,8 @@ func TestCrashExitAfterMarkerBeforeStatus(t *testing.T) {
 }
 
 func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
-	// (c) Status already needs-attention, destroy not done: cleanup the
-	// leftover container, do not reattach, do not mark interrupted.
+	// (c) Status already completed, destroy not done: cleanup the leftover
+	// container without reattaching or marking the run interrupted.
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -571,7 +571,8 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 	if err = os.WriteFile(e.sched.sidecarPath(run.ID), data, 0o644); err != nil {
 		t.Fatalf("write sidecar: %v", err)
 	}
-	if err = e.db.UpdateRunStatus(ctx, run.ID, domain.RunNeedsAttention, "", nil, nil); err != nil {
+	now := time.Now().UTC()
+	if err = e.db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "", nil, &now); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	c.exitNow(0)
@@ -590,8 +591,8 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if fresh.Status != domain.RunNeedsAttention {
-		t.Fatalf("status = %s, want needs-attention (not interrupted)", fresh.Status)
+	if fresh.Status != domain.RunCompleted {
+		t.Fatalf("status = %s, want completed (not interrupted)", fresh.Status)
 	}
 	if e.rt.attachCount() != before {
 		t.Fatalf("reattached leftover container: attaches %d -> %d", before, e.rt.attachCount())
@@ -623,7 +624,7 @@ func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	if launched == nil {
 		t.Fatal("no container for the launched run")
 	}
-	wantLaunch := persistentAgentCommand([]string{"claude", "--session-id", session, "--dangerously-skip-permissions", "resume me"})
+	wantLaunch := []string{"claude", "--session-id", session, "--dangerously-skip-permissions", "resume me"}
 	if !slices.Equal(launched.spec.Command, wantLaunch) {
 		t.Fatalf("launch argv = %v, want the pinned session: %v", launched.spec.Command, wantLaunch)
 	}
@@ -646,7 +647,7 @@ func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	if c == nil {
 		t.Fatal("no container for the relaunched run")
 	}
-	want := persistentAgentCommand([]string{"claude", "--resume", session, "--dangerously-skip-permissions", "resume me"})
+	want := []string{"claude", "--resume", session, "--dangerously-skip-permissions", "resume me"}
 	if !slices.Equal(c.spec.Command, want) {
 		t.Fatalf("relaunch of an interrupted run = %v, want %v", c.spec.Command, want)
 	}
@@ -657,7 +658,7 @@ func TestRelaunchResumesTheHarnessSession(t *testing.T) {
 	// A run that reached a terminal state on its own has no conversation to
 	// resume, so its relaunch starts the agent fresh on a session of its own.
 	c.exitNow(0)
-	e.waitStoreStatus(t, next.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, next.ID, domain.RunCompleted)
 	if cerr := s2.CloseRun(t.Context(), next.ID, e.member.ID, domain.RunMerged); cerr != nil {
 		t.Fatalf("CloseRun: %v", cerr)
 	}
@@ -888,7 +889,7 @@ func TestRelaunchTwiceRefusesToShareOneConversation(t *testing.T) {
 		t.Fatal("no container for the first relaunch")
 	}
 	c.exitNow(0)
-	e.waitStoreStatus(t, first.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, first.ID, domain.RunCompleted)
 	if cerr := s2.CloseRun(ctx, first.ID, e.member.ID, domain.RunMerged); cerr != nil {
 		t.Fatalf("CloseRun: %v", cerr)
 	}
@@ -935,7 +936,7 @@ func TestRelaunchWithoutAPinnedSessionFallsBackToContinue(t *testing.T) {
 	if c == nil {
 		t.Fatal("no container for the relaunched run")
 	}
-	want := persistentAgentCommand([]string{"claude", "--continue", "--dangerously-skip-permissions", "resume me"})
+	want := []string{"claude", "--continue", "--dangerously-skip-permissions", "resume me"}
 	if !slices.Equal(c.spec.Command, want) {
 		t.Fatalf("relaunch without a pinned session = %v, want %v", c.spec.Command, want)
 	}

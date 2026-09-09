@@ -90,6 +90,11 @@ against the runtime's actual containers:
   persists as the container's creation key - and then the same wip-commit
   and interrupt applies.
 
+`completed` runs are not recovered: their committed result branch and status
+are already durable, their run containers are gone, and they remain
+`completed` across the restart. They are non-final only in the review sense:
+an authorized member can still close one as merged or abandoned.
+
 An interrupted run relaunches in one click (`aether relaunch <run>`, or the
 run card). The relaunch is a new run cloned from the published branch, and
 where the harness supports it the agent is asked to continue its own
@@ -158,8 +163,10 @@ The GC sweeps on boot and hourly. It only reclaims worktrees of runs that
 reached a terminal state longer than `--checkout-ttl` ago, and never a path
 an active run still names. **The branch is the artifact**: publishing
 happens before the checkout is reclaimable, so reclaiming a worktree never
-loses work. The dashboard's Delete action removes the checkout and durable
-run records after a live run has stopped; its timeline stays as audit history.
+loses work. An authorized member can use Delete at every run status. For a
+live run it first stops the container, waits for supervision to publish the
+final branch, then removes the checkout and durable run records; its timeline
+stays as audit history.
 
 Below `--min-free-disk`, `run.launch` and `run.relaunch` are refused with
 `-32004` (unavailable) and a message naming the numbers. Everything else -
@@ -171,25 +178,18 @@ exists to stop a disk from filling, not to stop the server.
 
 ### Agent stall or crash
 
-No agent output and no file changes past `--stall-threshold` parks a run at
-`needs-attention` with a reason that leads with `stalled:`. A headless agent
-crash marks the run `failed`; a TUI agent remains inside its run shell so you
-can recover without losing the container. Either way the worktree and
-transcript are preserved and a failed run's partial work is committed as
-`wip:`.
+No agent output and no file changes past `--stall-threshold` parks a live run
+at `needs-attention` with a reason that leads with `stalled:`. It remains
+supervised in its run container: while unpaused, members with the existing
+steer permission can attach, inject input, and open or reconnect a writable
+run-container shell to investigate it. Genuine agent output or a file change
+returns it to `running`; server-written steering echoes do not.
 
-The notification path from there:
-
-- **Dashboard**: the sidebar badges how many runs are waiting on a human,
-  those runs sort to the top, and the run card shows the reason.
-- **CLI**: `aether runs` prints a notice when any run is waiting;
-  `aether runs --attention` lists only those.
-
-If the first TUI agent crashes, exits because of a quota, or is interrupted
-with Ctrl-C, the run stays alive in a login shell with the agent's exit status
-printed in the terminal. Start another installed agent in the same checkout,
-or type `exit` to finish the run. Aether then commits the latest work to the
-run's branch and parks it in `needs-attention`.
+A clean agent exit commits the latest work to the run branch, destroys the
+container, and marks the run `completed`. A crashing agent marks the run
+`failed`; either outcome has no replacement login shell. The worktree and
+transcript are preserved as appropriate, and a failed run's partial work is
+committed as `wip:`.
 
 ### SSH drop mid-attach
 

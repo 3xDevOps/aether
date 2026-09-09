@@ -53,7 +53,7 @@ func (s *Scheduler) recordExitObserved(entry *supervised, code int) {
 
 // finalize implements the pinned exit handling (§6.6): stop the watches,
 // commit results ("aether:" on clean exit, "wip:" otherwise), publish the
-// run branch, record the terminal-or-parked status, destroy the container,
+// run branch, record the completed or final status, destroy the container,
 // and drop the sidecar. Checkout and transcript are always preserved.
 func (s *Scheduler) finalize(entry *supervised, code int) {
 	ctx, cancel := context.WithTimeout(context.Background(), finalizeTimeout)
@@ -89,7 +89,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	case killed:
 		to, reason, actor = domain.RunAbandoned, "killed", killActor
 	case code == 0:
-		to, reason = domain.RunNeedsAttention, "agent exited; results committed"
+		to, reason = domain.RunCompleted, "agent exited; results committed"
 	default:
 		to, reason = domain.RunFailed, fmt.Sprintf("agent exited %d", code)
 	}

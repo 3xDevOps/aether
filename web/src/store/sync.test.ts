@@ -373,7 +373,7 @@ describe('applyEvent', () => {
   it('stamps finished_at on a terminal transition', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
-    await applyEvent(store, statusEvent({ payload: { to: 'merged' } }), fakeApi())
+    await applyEvent(store, statusEvent({ payload: { to: 'completed' } }), fakeApi())
 
     expect(store.getState().runs.run_1.finished_at).toBe('2026-08-14T11:00:00Z')
   })

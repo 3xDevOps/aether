@@ -20,7 +20,8 @@ func (s *stubUpdates) Tick(context.Context) {
 
 // A working run holds a scheduled update back: restarting is safe for the
 // run itself, but the terminals attached to it are not worth dropping
-// while somebody is working.
+// while somebody is working. That remains true while an alive agent is
+// stalled at needs-attention; it can resume and its terminal is still live.
 func TestBusyCountsAWorkingRun(t *testing.T) {
 	e := newTestEnv(t, nil)
 	if got := e.sched.Busy(t.Context()); !got.Idle() {
@@ -32,12 +33,20 @@ func TestBusyCountsAWorkingRun(t *testing.T) {
 		t.Fatalf("busy with a live run = %+v, want 1 working run", got)
 	}
 
-	// A run parked at needs-attention is waiting on a person, not working,
-	// so it does not hold the update back.
+	if err := e.db.UpdateRunStatus(t.Context(), run.ID, domain.RunNeedsAttention, "stalled: no output", nil, nil); err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+	if got = e.sched.Busy(t.Context()); got.Idle() || got.Runs != 1 {
+		t.Fatalf("busy with a live stalled run = %+v, want 1 working run", got)
+	}
+
 	c.exitNow(0)
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	completed := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	if completed.FinishedAt == nil {
+		t.Fatal("completed run must have FinishedAt")
+	}
 	if got = e.sched.Busy(t.Context()); !got.Idle() {
-		t.Fatalf("busy with a parked run = %+v, want idle", got)
+		t.Fatalf("busy with a completed run = %+v, want idle", got)
 	}
 }
 

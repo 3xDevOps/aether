@@ -444,7 +444,7 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errNoSession)
 	e.pty.setTranscript(e.run.ID, []byte("recorded output"))
-	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunNeedsAttention, "", nil, nil); err != nil {
+	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 
@@ -476,7 +476,7 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 func TestAttachFinishedRunWithoutTranscriptStillRefuses(t *testing.T) {
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errNoSession)
-	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunNeedsAttention, "", nil, nil); err != nil {
+	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 

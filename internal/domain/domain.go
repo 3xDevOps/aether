@@ -61,9 +61,11 @@ func (s WorkspaceSelector) Valid() bool {
 //
 // The lifecycle is:
 //
-//	queued -> provisioning -> running -> (needs-attention) -> terminal
+//	queued -> provisioning -> running <-> needs-attention -> completed -> (merged | abandoned)
 //
-// where terminal is one of merged, abandoned, failed, interrupted.
+// A run can also become failed or interrupted before it completes. Completed
+// has no runtime resources and is excluded from active-run operations, but
+// remains closable until a final disposition is chosen.
 type RunStatus string
 
 const (
@@ -71,6 +73,7 @@ const (
 	RunProvisioning   RunStatus = "provisioning"
 	RunRunning        RunStatus = "running"
 	RunNeedsAttention RunStatus = "needs-attention"
+	RunCompleted      RunStatus = "completed"
 	RunMerged         RunStatus = "merged"
 	RunAbandoned      RunStatus = "abandoned"
 	RunFailed         RunStatus = "failed"
@@ -81,13 +84,22 @@ const (
 // the single source of truth consumers derive status sets from (e.g. the
 // store's non-terminal query); extend it when adding a status.
 var AllRunStatuses = []RunStatus{
-	RunQueued, RunProvisioning, RunRunning, RunNeedsAttention,
+	RunQueued, RunProvisioning, RunRunning, RunNeedsAttention, RunCompleted,
 	RunMerged, RunAbandoned, RunFailed, RunInterrupted,
 }
 
-// Terminal reports whether the status is a finished state: no further
-// transitions are possible.
+// Terminal reports whether the run has finished execution and therefore has
+// no live runtime resources.
 func (s RunStatus) Terminal() bool {
+	switch s {
+	case RunCompleted, RunMerged, RunAbandoned, RunFailed, RunInterrupted:
+		return true
+	}
+	return false
+}
+
+// Final reports whether the status is an immutable disposition.
+func (s RunStatus) Final() bool {
 	switch s {
 	case RunMerged, RunAbandoned, RunFailed, RunInterrupted:
 		return true

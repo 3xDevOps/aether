@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -285,14 +284,15 @@ func TestHappyPath(t *testing.T) {
 	})
 
 	c.exitNow(0)
-	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
-		t.Fatalf("needs-attention reason = %q", p.Reason)
+		t.Fatalf("completed reason = %q", p.Reason)
 	}
-	fresh := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if fresh.FinishedAt != nil {
-		t.Fatal("needs-attention must not set FinishedAt")
+	fresh := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	if fresh.FinishedAt == nil {
+		t.Fatal("completed run must set FinishedAt")
 	}
+	completedAt := *fresh.FinishedAt
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: fix the auth bug" {
 		t.Fatalf("commits = %v", got)
 	}
@@ -319,8 +319,8 @@ func TestHappyPath(t *testing.T) {
 		t.Fatalf("close actor = %s", closed.ActorID)
 	}
 	final := e.waitStoreStatus(t, run.ID, domain.RunMerged)
-	if final.FinishedAt == nil {
-		t.Fatal("terminal run must have FinishedAt")
+	if final.FinishedAt == nil || !final.FinishedAt.Equal(completedAt) {
+		t.Fatalf("merged FinishedAt = %v, want completion time %v", final.FinishedAt, completedAt)
 	}
 }
 
@@ -331,31 +331,6 @@ func TestHeadlessContainerKeepsTheAgentAsTheMainProcess(t *testing.T) {
 	spec := e.sched.containerSpec(run, e.member, []string{"agent", "--json"}, plan)
 	if want := []string{"agent", "--json"}; !slices.Equal(spec.Command, want) {
 		t.Fatalf("headless container command = %v, want %v", spec.Command, want)
-	}
-}
-
-func TestPersistentAgentReturnsToTheRunShell(t *testing.T) {
-	command := persistentAgentCommand([]string{"/bin/sh", "-c", "exit 42"})
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Stdin = strings.NewReader("printf 'second agent\n'\nexit\n")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("persistent agent command: %v; output: %s", err, output)
-	}
-	text := string(output)
-	if !strings.Contains(text, "Aether agent exited with status 42") || !strings.Contains(text, "second agent") {
-		t.Fatalf("persistent agent output = %q", text)
-	}
-}
-
-func TestPersistentAgentCleanExitEndsTheContainer(t *testing.T) {
-	command := persistentAgentCommand([]string{"/bin/sh", "-c", "exit 0"})
-	output, err := exec.Command(command[0], command[1:]...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("persistent clean exit: %v; output: %s", err, output)
-	}
-	if strings.Contains(string(output), "Start another agent") {
-		t.Fatalf("clean exit opened the recovery shell: %q", output)
 	}
 }
 
@@ -646,21 +621,24 @@ func TestReserveRunUserConflict(t *testing.T) {
 func TestLegalTransitions(t *testing.T) {
 	allowed := map[[2]domain.RunStatus]bool{}
 	for _, from := range domain.AllRunStatuses {
-		if from.Terminal() {
-			continue // terminal states never transition; verified below
-		}
+		allowed[[2]domain.RunStatus{from, domain.RunMerged}] = true
 		allowed[[2]domain.RunStatus{from, domain.RunAbandoned}] = true
+	}
+	for _, from := range []domain.RunStatus{
+		domain.RunQueued, domain.RunProvisioning, domain.RunRunning, domain.RunNeedsAttention,
+	} {
 		allowed[[2]domain.RunStatus{from, domain.RunInterrupted}] = true
 	}
 	allowed[[2]domain.RunStatus{domain.RunQueued, domain.RunProvisioning}] = true
 	allowed[[2]domain.RunStatus{domain.RunProvisioning, domain.RunRunning}] = true
 	allowed[[2]domain.RunStatus{domain.RunProvisioning, domain.RunFailed}] = true
 	allowed[[2]domain.RunStatus{domain.RunRunning, domain.RunNeedsAttention}] = true
+	allowed[[2]domain.RunStatus{domain.RunRunning, domain.RunCompleted}] = true
 	allowed[[2]domain.RunStatus{domain.RunRunning, domain.RunFailed}] = true
 	allowed[[2]domain.RunStatus{domain.RunNeedsAttention, domain.RunRunning}] = true
 	allowed[[2]domain.RunStatus{domain.RunNeedsAttention, domain.RunNeedsAttention}] = true
+	allowed[[2]domain.RunStatus{domain.RunNeedsAttention, domain.RunCompleted}] = true
 	allowed[[2]domain.RunStatus{domain.RunNeedsAttention, domain.RunFailed}] = true
-	allowed[[2]domain.RunStatus{domain.RunNeedsAttention, domain.RunMerged}] = true
 
 	for _, from := range domain.AllRunStatuses {
 		for _, to := range domain.AllRunStatuses {
@@ -677,9 +655,6 @@ func TestInvalidAPITransitions(t *testing.T) {
 	ctx := t.Context()
 
 	run, c := e.launchFake(t, "task")
-	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("CloseRun on running run: %v, want ErrInvalidTransition", err)
-	}
 	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Relaunch on running run: %v, want ErrInvalidTransition", err)
 	}
@@ -688,15 +663,12 @@ func TestInvalidAPITransitions(t *testing.T) {
 	}
 
 	c.exitNow(0)
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunFailed); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("CloseRun with outcome failed: %v, want ErrInvalidTransition", err)
 	}
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun: %v", err)
-	}
-	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("CloseRun on terminal run: %v, want ErrInvalidTransition", err)
 	}
 	if err := e.sched.Kill(ctx, run.ID, e.member.ID); err != nil {
 		t.Fatalf("Kill on terminal run: %v", err)

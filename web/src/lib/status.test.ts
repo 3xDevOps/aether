@@ -1,4 +1,4 @@
-import { runLabel } from '@/lib/status'
+import { runLabel, runState } from '@/lib/status'
 
 describe('runLabel', () => {
   it('prefers a terminal title over the task', () => {
@@ -10,5 +10,12 @@ describe('runLabel', () => {
   it('falls back to the task and then a placeholder', () => {
     expect(runLabel({ title: '', task: '  fix login  ' })).toBe('fix login')
     expect(runLabel({ task: '   ' })).toBe('Untitled run')
+  })
+})
+
+describe('run presentation', () => {
+  it('keeps live stalls distinct from completed execution', () => {
+    expect(runState('needs-attention')).toBe('needs-attention')
+    expect(runState('completed')).toBe('done')
   })
 })

@@ -116,9 +116,9 @@ test('kill asks first, then calls run.kill', async () => {
   expect(useStore.getState().runs[record.id]?.status).toBe('running')
 })
 
-test('delete asks first, calls run.delete, and removes the run', async () => {
-  // Delete is a post-mortem action: only a finished run offers it.
-  const record = seed({ run: { status: 'failed' } })
+test('delete asks first, calls run.delete, and removes a live run', async () => {
+  // Delete is authorized by the Kill policy, not by lifecycle status.
+  const record = seed({ run: { status: 'queued' } })
   render(<RunActions run={record} />)
 
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
@@ -177,7 +177,7 @@ test('relaunch is offered on a finished run only', () => {
   unmount()
   render(<RunActions run={seed({ run: { status: 'merged' } })} />)
   expect(screen.getByRole('button', { name: 'Relaunch' })).toBeTruthy()
-  // A finished agent has nothing to kill; Delete is the remaining end.
+  // A finished agent has nothing to kill, but remains deletable.
   expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
 })
@@ -275,8 +275,8 @@ test('a viewer is offered nothing to change', () => {
   expect(screen.getByRole('button', { name: 'Pull' })).toBeTruthy()
 })
 
-// A collaborator may steer and kill somebody else's run, but handing it on
-// and protecting it belong to its owner and to admins.
+// A collaborator may steer, kill, and delete somebody else's run, but handing
+// it on and protecting it belong to its owner and to admins.
 test('a collaborator on another member run may steer it but not give it away', () => {
   render(
     <RunActions
@@ -288,8 +288,9 @@ test('a collaborator on another member run may steer it but not give it away', (
   expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
   // Steering a run includes typing into it, which the bar calls Send.
   expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy()
-  // Delete is reserved for runs that already ended.
-  expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
+  // Delete and close hold at every stage that has a record.
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Protect' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()
 })
@@ -314,6 +315,7 @@ test('an admin keeps every verb on a protected run in an admins-only workspace',
   expect(screen.getByRole('button', { name: 'Kill' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Unprotect' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Hand off' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
 })
 
 // The two restrictions the policy adds on top of the role table.
@@ -325,6 +327,7 @@ test('a protected run and an admins-only workspace close steering to others', ()
   )
   expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
   unmount()
 
   render(
@@ -339,6 +342,7 @@ test('a protected run and an admins-only workspace close steering to others', ()
   )
   expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
 })
 
 // jsdom evaluates no container query, so the row here keeps every button a
@@ -393,22 +397,22 @@ function partition() {
 test('every verb keeps its own side of the narrow-header split', () => {
   const widest = render(<RunActions run={seedWidest()} />)
   expect(partition()).toEqual({
-    stays: ['Close', 'Pause', 'Send'],
-    dropped: ['Delete', 'Forward', 'Hand off', 'Protect', 'Pull'],
+    stays: ['Close', 'Delete', 'Pause', 'Send'],
+    dropped: ['Forward', 'Hand off', 'Protect', 'Pull'],
   })
   widest.unmount()
 
   const paused = render(<RunActions run={seed({ paused: true })} />)
   expect(partition()).toEqual({
-    stays: ['Kill', 'Resume', 'Send'],
+    stays: ['Close', 'Delete', 'Kill', 'Resume', 'Send'],
     dropped: ['Protect'],
   })
   paused.unmount()
 
   render(<RunActions run={seed({ run: { status: 'merged' } })} />)
   expect(partition()).toEqual({
-    stays: ['Relaunch'],
-    dropped: ['Delete', 'Protect'],
+    stays: ['Close', 'Delete', 'Relaunch'],
+    dropped: ['Protect'],
   })
 })
 
@@ -454,7 +458,7 @@ test('the More menu holds every verb the narrow row drops, and none of the rest'
   }
 
   const menu = within(await openMore())
-  for (const name of ['Forward', 'Delete', 'Protect', 'Pull', 'Hand off']) {
+  for (const name of ['Forward', 'Protect', 'Pull', 'Hand off']) {
     expect(menu.getByRole('menuitem', { name })).toBeTruthy()
   }
   for (const name of ['Pause', 'Send', 'Close']) {
@@ -466,19 +470,15 @@ test('the More menu holds every verb the narrow row drops, and none of the rest'
 })
 
 // The menu is the only way to reach these verbs on a narrow header, so the
-// confirm step and the handoff picker have to open from there too.
+// confirm step and the handoff picker have to open from there too. Delete
+// lives on the row now, so Protect stands in as the menu-only asker.
 test('a verb picked from the More menu still asks first', async () => {
   const record = seedWidest()
   render(<RunActions run={record} />)
 
   const menu = within(await openMore())
-  fireEvent.click(menu.getByRole('menuitem', { name: 'Delete' }))
-  expect(await screen.findByText('Delete this run?')).toBeTruthy()
-  expect(api.runDelete).not.toHaveBeenCalled()
-
-  const dialog = within(screen.getByRole('dialog'))
-  fireEvent.click(dialog.getByRole('button', { name: 'Delete run' }))
-  await waitFor(() => expect(api.runDelete).toHaveBeenCalledWith(record.id))
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Protect' }))
+  await waitFor(() => expect(api.runProtect).toHaveBeenCalledWith(record.id, true))
 })
 
 test('hand off picked from the More menu opens the member picker', async () => {

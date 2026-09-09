@@ -18,7 +18,7 @@ import (
 // TestIntegrationHappyPathDocker drives the full happy path against the
 // real Docker runtime: a scripted busybox "agent" runs on a TTY with the
 // checkout bind-mounted at /workspace, writes a file, exits cleanly, and
-// the run parks at needs-attention with results committed.
+// the run completes with results committed.
 func TestIntegrationHappyPathDocker(t *testing.T) {
 	docker, err := runtime.NewDocker(
 		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
@@ -58,9 +58,9 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 		t.Fatalf("run status after launch = %s, want running", run.Status)
 	}
 
-	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
-		t.Fatalf("needs-attention reason = %q", p.Reason)
+		t.Fatalf("completed reason = %q", p.Reason)
 	}
 
 	// The agent's TTY output reached the PTY seam.

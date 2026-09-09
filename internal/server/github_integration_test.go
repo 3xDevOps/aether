@@ -248,7 +248,7 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 	// records, signing with the home's settings, and Aether commits what
 	// the agent left behind when it exits.
 	run := launchRun(t, ctrl, string(ws.ID), "push from the run", "claude")
-	waitRunStatus(t, sub, &seen, run.ID, domain.RunNeedsAttention)
+	waitRunStatus(t, sub, &seen, run.ID, domain.RunCompleted)
 
 	allowedSigners := filepath.Join(t.TempDir(), "allowed_signers")
 	writeFile(t, allowedSigners, "octo@example.com "+conn.SigningKey+"\n")

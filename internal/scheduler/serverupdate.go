@@ -45,12 +45,11 @@ func (s *Scheduler) tickUpdates(ctx context.Context) {
 // boot - but it drops the streams of anyone attached, so live interactive
 // terminal attaches hold the update back too.
 //
-// Two kinds of run are not counted as working. A run parked at
-// needs-attention is waiting on a person; a paused run is a frozen
-// container. Neither has anything running inside it, both survive the
-// restart like any other, and counting either would leave a busy
-// deployment with no idle moment at all, since finished-but-unclosed and
-// paused runs sit for days.
+// A paused run is frozen. It survives restart like any other container but
+// has nothing running inside it, so it does not hold a deployment back.
+// A live needs-attention run is conservatively working: its agent can
+// resume, and its container and PTY remain available. Completed runs are
+// runtime-terminal and are absent from the active list.
 //
 // A store read that fails reports Unknown, which is never idle: an unknown
 // answer must not be the one that decides to restart.
@@ -65,7 +64,6 @@ func (s *Scheduler) Busy(ctx context.Context) domain.ServerBusy {
 	out.Shells = s.shells
 	for _, r := range active {
 		switch {
-		case r.Status == domain.RunNeedsAttention:
 		case s.runs[r.ID] != nil && s.runs[r.ID].paused:
 			out.Paused++
 		default:

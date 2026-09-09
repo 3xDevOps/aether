@@ -20,7 +20,7 @@ beforeEach(() => {
   useStore.setState({
     paletteDialog: 'close',
     paletteRunID: 'run_1',
-    runs: { run_1: toRecord(run({ id: 'run_1', status: 'needs-attention' })) },
+    runs: { run_1: toRecord(run({ id: 'run_1', status: 'completed' })) },
   })
 })
 
@@ -39,33 +39,64 @@ describe('close dialog', () => {
   })
 })
 
-// One ending action per lifecycle stage: Kill while the agent is alive,
-// Close while it waits for review, Delete once it has ended.
+// Delete is server-safe throughout the lifecycle. Close resolves the
+// outcome from any state that holds a record; only a queued run (no
+// record yet) cannot be closed.
 describe('ending commands by stage', () => {
-  const context = (status: 'running' | 'needs-attention' | 'merged') => ({
-    run: toRecord(run({ status })),
-    paused: false,
-    cap: { hasMethod: () => true, hasLocal: () => false, hasWS: () => true },
-    members: {},
-    self: { id: 'mem_alice' as string, role: 'collaborator' as const },
+  const ids = (
+    status:
+      | 'queued'
+      | 'provisioning'
+      | 'running'
+      | 'needs-attention'
+      | 'completed'
+      | 'merged'
+      | 'abandoned'
+      | 'failed'
+      | 'interrupted',
+  ) =>
+    runCommands({
+      run: toRecord(run({ status })),
+      paused: false,
+      cap: { hasMethod: () => true, hasLocal: () => false, hasWS: () => true },
+      members: {},
+      self: { id: 'mem_alice' as string, role: 'collaborator' as const },
+    }).map((command) => command.id)
+
+  it('offers delete and close at every stage with a record, kill only while live', () => {
+    for (const status of ['queued', 'provisioning', 'running'] as const) {
+      const live = ids(status)
+      expect(live).toContain('kill')
+      expect(live).toContain('delete')
+    }
+    // Queued has no record to close yet.
+    expect(ids('queued')).not.toContain('close')
+    for (const status of [
+      'provisioning',
+      'running',
+      'needs-attention',
+      'completed',
+      'merged',
+      'abandoned',
+      'failed',
+      'interrupted',
+    ] as const) {
+      expect(ids(status)).toContain('close')
+      expect(ids(status)).toContain('delete')
+    }
   })
-  const ids = (status: 'running' | 'needs-attention' | 'merged') =>
-    runCommands(context(status)).map((c) => c.id)
 
-  it('offers exactly one ending action per stage', () => {
-    const live = ids('running')
-    expect(live).toContain('kill')
-    expect(live).not.toContain('close')
-    expect(live).not.toContain('delete')
+  it('hides completed-run actions when the Kill policy denies them', () => {
+    const commands = runCommands({
+      run: toRecord(run({ status: 'completed', protected: true })),
+      paused: false,
+      cap: { hasMethod: () => true, hasLocal: () => false, hasWS: () => true },
+      members: {},
+      self: { id: 'mem_bob', role: 'collaborator' },
+      steerOthers: 'admins_only',
+    }).map((command) => command.id)
 
-    const waiting = ids('needs-attention')
-    expect(waiting).toContain('close')
-    expect(waiting).toContain('delete')
-    expect(waiting).not.toContain('kill')
-
-    const ended = ids('merged')
-    expect(ended).toContain('delete')
-    expect(ended).not.toContain('kill')
-    expect(ended).not.toContain('close')
+    expect(commands).not.toContain('close')
+    expect(commands).not.toContain('delete')
   })
 })

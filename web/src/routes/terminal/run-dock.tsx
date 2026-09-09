@@ -31,13 +31,22 @@ export function RunDock({ runID }: { runID: string }) {
   const removeShellTab = useStore((s) => s.removeShellTab)
 
   const activeTab = dock.activeTab
-  const canOpenShell = run?.status === 'running'
+  const paused = useStore((s) => s.pausedRuns[runID] ?? run?.paused)
+  const pauseKnown = paused !== undefined
+  const canOpenShell =
+    pauseKnown &&
+    (run?.status === 'running' || run?.status === 'needs-attention') &&
+    paused === false
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
   const terminalRef = useRef<XtermController['terminal']>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
   const controller = useXterm({
-    enabled: activeTab !== null && !dock.collapsed && dock.refusedMessage === null,
+    enabled:
+      canOpenShell &&
+      activeTab !== null &&
+      !dock.collapsed &&
+      dock.refusedMessage === null,
     onData: (data) => {
       if (gate.current.muted()) return
       const tab = activeTabRef.current
@@ -56,7 +65,7 @@ export function RunDock({ runID }: { runID: string }) {
   }, [activeTab, setFindOpen])
 
   useEffect(() => {
-    if (!activeTab || !terminal || dock.refusedMessage !== null) return
+    if (!canOpenShell || !activeTab || !terminal || dock.refusedMessage !== null) return
 
     const socketKey = activeTab
     const refuse = (message: string) => {
@@ -103,7 +112,15 @@ export function RunDock({ runID }: { runID: string }) {
     const unsubscribe = subscribeShellSocket(runID, socketKey, gate.current.write)
     if (existing) attachment.reopen()
     return unsubscribe
-  }, [activeTab, dock.refusedMessage, removeShellTab, runID, setShellRefused, terminal])
+  }, [
+    activeTab,
+    canOpenShell,
+    dock.refusedMessage,
+    removeShellTab,
+    runID,
+    setShellRefused,
+    terminal,
+  ])
 
   const tabs = canOpenShell ? dock.tabs.map((tab) => ({ id: tab, label: tab })) : []
   // The header strip stays live while the dock is collapsed, so a tab control
@@ -132,8 +149,9 @@ export function RunDock({ runID }: { runID: string }) {
     >
       {!canOpenShell ? (
         <div className="p-3 text-sm text-muted-foreground">
-          Run shell unavailable: this run has no live container. The Terminal
-          tab replays its recorded output.
+          {pauseKnown
+            ? 'Run shell unavailable: this run has no live container. The Terminal tab replays its recorded output.'
+            : 'Run shell unavailable: waiting for the run pause state.'}
         </div>
       ) : dock.refusedMessage !== null ? (
         <div className="p-3 text-sm text-muted-foreground">{dock.refusedMessage}</div>

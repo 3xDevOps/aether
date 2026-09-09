@@ -8,6 +8,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -44,7 +45,9 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	}
 	s.mu.Unlock()
 	// No container yet (still provisioning): the provisioning checkpoints
-	// see killRequested and abort.
+	// see killRequested and abort. The container may also vanish mid-call
+	// - a finalize that raced this stop destroyed it after transitioning
+	// the status - and gone is the goal, so not-found is success.
 	if cid != "" {
 		if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 			return err
@@ -112,7 +115,6 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 		s.mu.Lock()
 		entry := s.runs[run]
 		pending := s.pending[run]
-		alreadyKilling := entry != nil && entry.killRequested
 		terminal := entry != nil && entry.status.Terminal()
 		var done <-chan struct{}
 		if entry != nil {
@@ -128,7 +130,7 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 			continue
 		}
 		if entry != nil {
-			if !terminal && !alreadyKilling {
+			if !terminal {
 				if err := s.Kill(ctx, run, actor); err != nil {
 					return err
 				}
@@ -243,10 +245,9 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 	return entry != nil && entry.paused
 }
 
-// Inject writes a steering message into a live agent's PTY, attributed
-// to the actor, and stamps the act into the workspace timeline. A live
-// supervised run in running or needs-attention is accepted; a clean-exited
-// needs-attention run has no PTY and returns ptyhost.ErrNoSession.
+// Inject writes a steering message to the live run agent's PTY, ending
+// with the harness's submit sequence so the text reaches the agent's
+// conversation rather than sitting in its input box.
 func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -272,7 +273,15 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	if err != nil {
 		return err
 	}
-	if err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), m.DisplayName, m.Color, message); err != nil {
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return err
+	}
+	submit := "\r"
+	if p, ok := harness.Lookup(r.Harness); ok {
+		submit = p.SteerSuffix()
+	}
+	if err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), m.DisplayName, m.Color, message, submit); err != nil {
 		return err
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, message)
@@ -280,45 +289,72 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	return nil
 }
 
-// CloseRun resolves a needs-attention run to its human-decided outcome:
-// merged or abandoned, reason "closed". Any other source state or outcome
-// is an invalid transition.
+// CloseRun resolves a run's outcome on a human's say-so from any state
+// that holds a record. A live run is stopped first: the disposition lands
+// before the agent's exit so the board says what was decided, and
+// finalization then skips its own already-terminal transition while still
+// destroying the container and sidecar. A finished run is re-labeled in
+// place. Provisioning runs have no record yet to close; use Delete or
+// wait out the startup.
 func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error {
 	if outcome != domain.RunMerged && outcome != domain.RunAbandoned {
 		return fmt.Errorf("%w: close outcome must be merged or abandoned, got %q", ErrInvalidTransition, outcome)
 	}
 	s.mu.Lock()
-	if entry := s.runs[run]; entry != nil {
-		if entry.status != domain.RunNeedsAttention {
+	if pending := s.pending[run]; pending != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
+	}
+	entry := s.runs[run]
+	if entry == nil {
+		// Unsupervised: the status is read and transitioned under s.mu so
+		// a concurrent Kill or CloseRun cannot both win and overwrite
+		// each other's terminal disposition.
+		r, err := s.cfg.Store.GetRun(ctx, run)
+		if err != nil {
 			s.mu.Unlock()
-			return fmt.Errorf("%w: close requires needs-attention, run is %s", ErrInvalidTransition, entry.status)
+			return err
 		}
-		err := s.transitionLocked(ctx, run, entry.workspaceID, domain.RunNeedsAttention, outcome, "closed", actor)
-		cid := entry.containerID
+		if r.Status == domain.RunQueued {
+			s.mu.Unlock()
+			return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
+		}
+		if r.Status == outcome {
+			s.mu.Unlock()
+			return nil
+		}
+		var cid runtime.ID
+		if sc, serr := s.readSidecar(run); serr == nil {
+			cid = runtime.ID(sc.ContainerID)
+		}
+		err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
 		s.mu.Unlock()
 		if err != nil {
 			return err
 		}
-		// Closed while the (stalled but alive) container still runs: stop
-		// it; the wait goroutine commits partial work and cleans up.
-		if serr := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); serr != nil {
-			slog.Warn("scheduler: stop container on close", "run", run, "error", serr)
-		}
+		s.stopCloseContainer(ctx, cid)
 		return nil
 	}
-	// Unsupervised: the status is read and transitioned under s.mu so a
-	// concurrent Kill or CloseRun cannot both win and overwrite each
-	// other's terminal state.
-	r, err := s.cfg.Store.GetRun(ctx, run)
-	if err != nil {
+	workspace := entry.workspaceID
+	cid := entry.containerID
+	if entry.status == outcome {
 		s.mu.Unlock()
+		return nil
+	}
+	err := s.transitionLocked(ctx, run, workspace, entry.status, outcome, "closed", actor)
+	s.mu.Unlock()
+	if err != nil {
 		return err
 	}
-	if r.Status != domain.RunNeedsAttention {
-		s.mu.Unlock()
-		return fmt.Errorf("%w: close requires needs-attention, run is %s", ErrInvalidTransition, r.Status)
+	s.stopCloseContainer(ctx, cid)
+	return nil
+}
+
+func (s *Scheduler) stopCloseContainer(ctx context.Context, cid runtime.ID) {
+	if cid == "" {
+		return
 	}
-	err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
-	s.mu.Unlock()
-	return err
+	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		slog.Warn("scheduler: stop container behind closed run", "container", cid, "error", err)
+	}
 }

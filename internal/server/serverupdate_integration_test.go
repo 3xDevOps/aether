@@ -246,9 +246,9 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 		t.Fatalf("run.inject: %v", err)
 	}
 	att.waitEnd(t)
-	waitEvent(t, sub, &seen, "run.status needs-attention", func(e events.Event) bool {
+	waitEvent(t, sub, &seen, "run.status completed", func(e events.Event) bool {
 		p, ok := e.Payload.(events.RunStatusPayload)
-		return ok && e.RunID == runID && p.To == domain.RunNeedsAttention
+		return ok && e.RunID == runID && p.To == domain.RunCompleted
 	})
 
 	waitEvent(t, sub, &seen, "server.update applying", phaseOf(events.ServerUpdateApplying))

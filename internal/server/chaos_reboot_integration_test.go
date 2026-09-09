@@ -100,7 +100,7 @@ func TestIntegrationChaosRebootSurvivingContainer(t *testing.T) {
 	}
 	waitOutput(t, att, "got:resume-probe")
 
-	env.waitStatus(t, ctrl, runID, domain.RunNeedsAttention)
+	env.waitStatus(t, ctrl, runID, domain.RunCompleted)
 
 	// git survived too: the reattached supervisor committed and published
 	// the agent's work on the run's own branch.

@@ -13,7 +13,7 @@ import (
 
 // announce publishes the radar's view of one run's overlap set, the way
 // the index does when it changes.
-func (h *harness) announce(t *testing.T, run domain.RunID, peers ...events.OverlapPeer) {
+func (h *coordHarness) announce(t *testing.T, run domain.RunID, peers ...events.OverlapPeer) {
 	t.Helper()
 	if _, err := h.bus.Publish(context.Background(), events.Event{
 		WorkspaceID: h.workspace,
@@ -26,7 +26,7 @@ func (h *harness) announce(t *testing.T, run domain.RunID, peers ...events.Overl
 
 // waitForInjections waits until the notice injector has written n banners,
 // then returns them.
-func (h *harness) waitForInjections(t *testing.T, n int) []injection {
+func (h *coordHarness) waitForInjections(t *testing.T, n int) []injection {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -47,7 +47,7 @@ func (h *harness) waitForInjections(t *testing.T, n int) []injection {
 // order on one goroutine, so once the barrier's attempt lands, whatever
 // the test published earlier has been fully processed - no sleep needed,
 // and no vacuous assertion on a lagging consumer.
-func (h *harness) barrier(t *testing.T, run, peer domain.RunID) {
+func (h *coordHarness) barrier(t *testing.T, run, peer domain.RunID) {
 	t.Helper()
 	// The wait is keyed to the barrier run's own attempts: a global count
 	// would be satisfied by an attempt still in flight from an event the

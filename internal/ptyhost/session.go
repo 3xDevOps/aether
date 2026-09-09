@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,13 @@ const resizeTimeout = 5 * time.Second
 // standing against whatever the agent printed next.
 const echoWindow = time.Second
 
+// paintQuiet is how long agent output stays liveness-silent after the
+// session pokes the PTY with a redraw nudge. A TUI answers the nudge with
+// a full repaint; those bytes prove nothing about the agent's progress,
+// so they must not clear a stall the way a real answer would. Tests
+// shorten it to keep assertions off the real window.
+var paintQuiet = 3 * time.Second
+
 // maxPendingEcho caps the echo the session tracks at once. An expectation
 // past it is dropped whole: the bytes then count as the agent's, which only
 // costs a stall one more threshold, where an unbounded queue would grow for
@@ -46,19 +54,20 @@ type session struct {
 	stdinMu sync.Mutex
 	stdin   io.WriteCloser
 
-	mu         sync.Mutex
-	clients    map[*client]struct{}
-	ring       *ring
-	cols       uint
-	rows       uint
-	geoGen     uint64 // bumped whenever the PTY must be (re)sized
-	geoApplied uint64 // last geoGen an applier has picked up
-	ended      bool
-	stopped    bool
-	lastOut    time.Time
-	done       chan struct{}
-	title      titleScanner
-	onTitle    func(string)
+	mu              sync.Mutex
+	clients         map[*client]struct{}
+	ring            *ring
+	cols            uint
+	rows            uint
+	geoGen          uint64 // bumped whenever the PTY must be (re)sized
+	geoApplied      uint64 // last geoGen an applier has picked up
+	ended           bool
+	stopped         bool
+	lastOut         time.Time
+	paintQuietUntil time.Time
+	done            chan struct{}
+	title           titleScanner
+	onTitle         func(string)
 
 	// pendingEcho is the echo the terminal still owes for input the server
 	// wrote to the agent - an injected line, or a member's keystrokes. The
@@ -97,8 +106,8 @@ func (s *session) deliver(p []byte) {
 	}
 	// Viewers, the transcript and the title scanner get every byte; only
 	// the liveness clock discounts the terminal's echo of what the server
-	// wrote.
-	if s.consumeEcho(p, now) {
+	// wrote, and a repaint provoked by our own resize nudge.
+	if s.consumeEcho(p, now) && now.After(s.paintQuietUntil) {
 		s.lastOut = now
 	}
 	s.title.scan(p, s.onTitle)
@@ -266,6 +275,9 @@ func (s *session) applyResize() {
 		_ = s.att.Resize(ctx, cols, rows-1)
 	}
 	_ = s.att.Resize(ctx, cols, rows)
+	s.mu.Lock()
+	s.paintQuietUntil = time.Now().Add(paintQuiet)
+	s.mu.Unlock()
 }
 
 // writeStdin forwards keystrokes to the agent; false once the session is
@@ -291,9 +303,27 @@ func (s *session) writeStdin(p []byte) bool {
 	return err == nil
 }
 
-func (s *session) inject(actorName, actorColor, message string) error {
-	banner := renderBanner(actorName, actorColor, message)
-	line := []byte(message + "\r")
+func (s *session) annotateInjection(actorName, actorColor, message string) error {
+	safeActor, safeMessage := bannerText(actorName), bannerText(message)
+	banner := renderBanner(safeActor, actorColor, safeMessage)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return ErrNoSession
+	}
+	if s.ended {
+		return ErrSessionEnded
+	}
+	s.tr.output(banner)
+	s.tr.marker("inject by " + safeActor + ": " + safeMessage)
+	for c := range s.clients {
+		c.enqueue(banner)
+	}
+	return nil
+}
+
+func (s *session) inject(actorName, actorColor, message, submit string) error {
+	line := []byte(message + submit)
 	s.stdinMu.Lock()
 	defer s.stdinMu.Unlock()
 	s.mu.Lock()
@@ -309,16 +339,27 @@ func (s *session) inject(actorName, actorColor, message string) error {
 	// lastOut: stall detection reads that clock, and counting the server's
 	// own bytes would clear a stall for an agent that never answered.
 	s.expectEcho(line, time.Now())
-	s.tr.output(banner)
-	s.tr.marker("inject by " + actorName + ": " + message)
-	for c := range s.clients {
-		c.enqueue(banner)
-	}
 	s.mu.Unlock()
-
-	if _, err := s.stdin.Write(line); err != nil {
+	n, err := s.stdin.Write(line)
+	if err != nil {
 		s.dropEcho()
 		return fmt.Errorf("ptyhost: inject stdin write: %w", err)
+	}
+	if n != len(line) {
+		s.dropEcho()
+		return fmt.Errorf("ptyhost: inject stdin write: %w", io.ErrShortWrite)
+	}
+	if err := s.annotateInjection(actorName, actorColor, message); err != nil {
+		// The write above already accepted the full line: a session that
+		// ended in this window must not turn delivered input into a
+		// reported failure, which would invite a double-submitting retry.
+		// The banner has no viewers on a wound-down session, but the
+		// transcript still takes the attribution marker.
+		if errors.Is(err, ErrSessionEnded) || errors.Is(err, ErrNoSession) {
+			s.tr.lateMarker("inject by " + bannerText(actorName) + ": " + bannerText(message))
+			return nil
+		}
+		return err
 	}
 	return nil
 }
@@ -389,7 +430,7 @@ func (s *session) consumeEcho(p []byte, now time.Time) bool {
 	return n < len(p)
 }
 
-// renderBanner renders the attributed injection banner shown to viewers and
+// renderBanner renders an attributed injection banner shown to viewers and
 // recorded in the transcript; it is never written to the agent's input.
 func renderBanner(actorName, actorColor, message string) []byte {
 	var b bytes.Buffer
@@ -397,6 +438,20 @@ func renderBanner(actorName, actorColor, message string) []byte {
 	b.WriteString(attribution.ANSI(actorColor))
 	fmt.Fprintf(&b, "\x1b[7m ▸ %s injects \x1b[0m %s\r\n", actorName, message)
 	return b.Bytes()
+}
+
+// bannerText keeps user-controlled message bytes from becoming terminal
+// control sequences in the transcript or another member's terminal.
+func bannerText(text string) string {
+	var b strings.Builder
+	for _, r := range text {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+			fmt.Fprintf(&b, "\\x%02X", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // ring keeps the last max bytes of raw PTY output for replay-on-attach.

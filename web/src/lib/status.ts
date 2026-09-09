@@ -30,6 +30,7 @@ export function runState(status: RunStatus, pendingApproval = false): Presentati
     case 'failed':
     case 'interrupted':
       return 'failed'
+    case 'completed':
     case 'merged':
     case 'abandoned':
       return 'done'

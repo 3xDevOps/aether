@@ -84,7 +84,7 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 			t.Fatalf("run.inject %d: %v", i, err)
 		}
 		att.close()
-		env.waitStatus(t, launched.Run.ID, domain.RunNeedsAttention)
+		env.waitStatus(t, launched.Run.ID, domain.RunCompleted)
 		if err := env.ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
 			RunID: launched.Run.ID, Outcome: string(domain.RunMerged),
 		}, nil); err != nil {

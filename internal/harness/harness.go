@@ -229,6 +229,12 @@ type Profile struct {
 	// necessarily the interrupted run's own, and not necessarily one from
 	// the same workspace. See docs/failure-handling.md.
 	ResumeFlag string
+	// SteerSubmit is the literal bytes appended to a steering message
+	// written to the agent's stdin (run.inject). TUIs submit on Enter
+	// ("\r"), but some - opencode - treat the first Enter as "accept the
+	// text into the editor" and need a second one to send. Empty means
+	// the default single Enter; see SteerSuffix.
+	SteerSubmit string
 	// MCPConfigFlag is the harness's flag for a server-supplied MCP server
 	// config file (Claude Code's "--mcp-config"). Set means the harness can
 	// be pointed at the in-container coordination bridge at launch; empty
@@ -239,6 +245,15 @@ type Profile struct {
 	// member's terminal (aether terminal). It must install into ~/.local/bin.
 	// A failed install leaves the member in the terminal to install manually.
 	InstallScript string
+}
+
+// SteerSuffix returns the bytes that follow a steering message: the
+// profile's SteerSubmit, or the default single Enter.
+func (p Profile) SteerSuffix() string {
+	if p.SteerSubmit == "" {
+		return "\r"
+	}
+	return p.SteerSubmit
 }
 
 // profiles is the shipped registry. "custom" is the escape hatch: its
@@ -310,7 +325,10 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".local/share/opencode"},
 		LocalRoot:       ".local/share/opencode",
 		DenyNames:       []string{"auth.json", "token.json", "tokens.json"},
-		InstallScript:   "curl -fsSL https://opencode.ai/install | bash",
+		// The TUI accepts steered text into its editor on the first
+		// Enter and sends on the second.
+		SteerSubmit:   "\r\r",
+		InstallScript: "curl -fsSL https://opencode.ai/install | bash",
 	},
 	"custom": {Name: "custom"},
 }
