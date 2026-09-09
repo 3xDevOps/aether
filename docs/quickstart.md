@@ -448,7 +448,8 @@ login. Step 7 (`aether gui`) works too if you want to watch.
 Launching it is the CLI's job, though. `fake` is a server-side registration
 rather than an executable installed in your account, and the dashboard's two
 launch surfaces - the launch form and the wizard's **First run** step - offer
-only what is installed, so `fake` never appears in either.
+only agents installed in the account, plus the `custom` harness a deployment
+pins, so `fake` never appears in either.
 
 ```sh
 aether link <server-host>:2222

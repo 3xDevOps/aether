@@ -793,8 +793,8 @@ with the old path; a blank form there would ask again for a remote that
 already exists.
 
 The UI slice persists the resume point, the furthest step reached, the selected
-workspace, the connected repository and the First run draft; `setOnboarded` and
-navigating away from the wizard clear all five. The step is stored by name
+workspace, the connected repository and the First run draft; finishing the
+wizard or navigating away from it clears all five. The step is stored by name
 rather than by position, so inserting a step - as "Git identity" was - never
 relocates someone who is mid-wizard. The persisted state is versioned, and one
 migration in `web/src/store/index.ts` covers every older shape: versions 0
@@ -802,8 +802,8 @@ through 2 stored the resume point as an index, so those numbers are read back
 as the steps they named; versions 0 and 1 stored a Repository answer this build
 cannot use - version 0's predates the comparison states and version 1's carries
 no link id - so it is dropped rather than rehydrating a blank panel; and
-version 3 has no furthest step, so the resume point becomes it, or the first
-backward jump would turn every later step inert. Anything it cannot
+no version before 4 has a furthest step, so the resume point becomes it, or
+the first backward jump would turn every later step inert. Anything it cannot
 place starts over. Repository is where the workspace first becomes
 load-bearing, so resuming onto it or any later step without one falls back to
 the workspace picker; the steps before it resume where they were.
