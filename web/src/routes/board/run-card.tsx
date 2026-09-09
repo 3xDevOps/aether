@@ -1,7 +1,9 @@
-import { GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
+import { useRef, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { StateIndicator } from '@/components/state-dot'
+import { Button } from '@/components/ui/button'
+import { copyText } from '@/lib/clipboard'
 import { timeAgo } from '@/lib/format'
 import { runLabel, stateLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
@@ -22,6 +24,7 @@ import type { RunRecord } from '@/store/runs'
 export function RunCard({ card }: { card: BoardCard }) {
   const { run, state, owner, unseen, paused } = card
   const navigate = useStore((s) => s.navigate)
+  const branchRef = useRef<HTMLSpanElement>(null)
   // An approval pause fires no run.status event, so the run's reason stays
   // empty; the pending question itself is the summary the card needs then.
   const summary = useStore((s) =>
@@ -98,17 +101,28 @@ export function RunCard({ card }: { card: BoardCard }) {
 
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <HarnessGlyph harness={run.harness} mode={run.mode} />
-          {/* A run whose checkout failed carries no branch, so the chip
-              would name nothing. Raised above the card's click overlay:
-              without that the title never resolves and the truncated name
-              cannot be selected. The trade is that a click landing on the
-              chip itself no longer opens the run. */}
+          {/* A run whose checkout failed carries no branch, so the chip and
+              its copy button would name and copy nothing. Raised above the
+              card's click overlay: without that the title never resolves,
+              the truncated name cannot be selected, and the copy button is
+              unreachable. The trade is that a click landing on the chip
+              itself no longer opens the run. */}
           {run.branch && (
             <span className="relative z-20 flex min-w-0 items-center gap-1">
               <GitBranch className="size-3 shrink-0" aria-hidden />
-              <span className="truncate" title={run.branch}>
+              <span ref={branchRef} className="truncate" title={run.branch}>
                 {run.branch}
               </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Copy branch ${run.branch}`}
+                className="size-5 shrink-0"
+                onClick={() => void copyText(run.branch, branchRef.current)}
+              >
+                <Copy className="size-3" aria-hidden />
+              </Button>
             </span>
           )}
           {run.last_commit && (

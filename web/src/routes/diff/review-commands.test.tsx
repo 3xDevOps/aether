@@ -12,7 +12,7 @@ vi.mock('@/lib/api', async () => {
 })
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
 const active = run({ id: 'run_1' })

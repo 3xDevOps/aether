@@ -11,7 +11,7 @@ import { seedWorkspace } from './harness/setup'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('a card gives up its branch name', async ({ page, aether }) => {
+test('a card gives up its branch name without opening the run', async ({ page, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
@@ -47,13 +47,23 @@ test('a card gives up its branch name', async ({ page, aether }) => {
   })
   expect(tooltip).toBe(run.branch)
 
-  await name.dblclick()
-  // A double click takes a word out of the branch name itself, not just any
-  // text the page happens to have selected.
+  // A double click takes a whole word out of the branch name itself, not
+  // just any text the page happens to have selected. Aimed at the start of
+  // the name so the word is a known one: run branches are
+  // aether/run-<slug>-<id>, and the name is truncated, so which word sits
+  // under the middle of the chip depends on how wide the card is today.
+  await name.dblclick({ position: { x: 4, y: 4 } })
   const selected = await page.evaluate(
     () => window.getSelection()?.toString().trim() ?? '',
   )
-  expect(selected).not.toBe('')
-  expect(run.branch).toContain(selected)
+  expect(selected).toBe(run.branch.split('/')[0])
 
+  // Reaching for the branch is not a way into the run: both the name and the
+  // copy control sit above the overlay. The toast is waited for first, so
+  // the click is known to have reached the control and the board has had the
+  // time a navigation would have needed to land.
+  await card.getByRole('button', { name: `Copy branch ${run.branch}` }).click()
+  await expect(page.getByText(/Copied|Press Ctrl\+C to copy/)).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Run tabs' })).toHaveCount(0)
+  await expect(card).toBeVisible()
 })

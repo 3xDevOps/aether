@@ -83,10 +83,6 @@ function timeline(kind: 'pause' | 'resume', seq: number) {
   )
 }
 
-// Every button on a card but the copy control, so the lookup still throws if
-// a card ever grows a second full-card target.
-const openRun = { name: /^(?!Copy branch)/ }
-
 // A stub left standing by a failing assertion would gut navigator for every
 // test after it, turning one real failure into a file full of them.
 afterEach(() => vi.unstubAllGlobals())
@@ -102,8 +98,12 @@ describe('board', () => {
     // queued (11:00) changed after running (10:02), so it sorts above it.
     const tasks = column('Working')
       .getAllByRole('article')
+      // Named for the run it opens, which is what the sort is asserting;
+      // getByRole still throws if a card grows a second such button.
       .map((card) =>
-        within(card).getByRole('button', openRun).getAttribute('aria-label'),
+        within(card)
+          .getByRole('button', { name: /^(not started|still going)$/ })
+          .getAttribute('aria-label'),
       )
     expect(tasks).toEqual(['not started', 'still going'])
     // A card carries no state in words, so the running one bounces.
@@ -111,11 +111,38 @@ describe('board', () => {
     expect(card?.querySelector('.working-dots')).not.toBeNull()
   })
 
-  it('carries the whole branch name', () => {
+  it('carries the whole branch name and copies it', async () => {
+    seed([working])
+    render(<Board />)
+    const card = screen.getByRole('article')
+    // The name is truncated on the card, so the title carries all of it.
+    expect(within(card).getByTitle(working.branch)).toBeDefined()
+
+    const writeText = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    fireEvent.click(
+      within(card).getByRole('button', { name: `Copy branch ${working.branch}` }),
+    )
+
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(working.branch))
+  })
+
+  it('falls back to selecting the branch name where the clipboard is missing', async () => {
+    // jsdom ships no navigator.clipboard - the environment (plain-http
+    // origins, older engines) the fallback exists for. The click must not
+    // throw; it selects the branch name for a manual copy instead.
     seed([working])
     render(<Board />)
 
-    expect(within(screen.getByRole('article')).getByTitle(working.branch)).toBeDefined()
+    fireEvent.click(
+      screen.getByRole('button', { name: `Copy branch ${working.branch}` }),
+    )
+
+    await vi.waitFor(() => {
+      const selection = window.getSelection()
+      expect(selection?.rangeCount).toBe(1)
+      expect(selection?.getRangeAt(0).toString()).toBe(working.branch)
+    })
   })
 
   it('offers no branch chip for a run whose checkout never got one', () => {
