@@ -1,18 +1,26 @@
-// The Repository step: point a local clone at the workspace and seed it. It
-// lives apart from the other steps because it is the only one that talks to
-// three local verbs - link.repo, repo.push and repo.fast-forward - and holds
-// the answers of all three.
+// The Repository step: point a local clone at the workspace, then seed the
+// workspace from it through link.repo, repo.push and repo.fast-forward.
 
-import { type ReactNode, useRef, useState } from 'react'
+import { type ReactNode, useId, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { desktopBridge } from '@/components/shell/title-bar'
 import type { Api } from '@/lib/api'
-import type { Workspace } from '@/lib/types'
+import type { LinkStatus, Workspace } from '@/lib/types'
 import { cn, field, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import type { OnboardingRepo } from '@/store/ui'
 import { actionRow, pane } from '@/routes/onboarding/steps'
+
+/**
+ * Whether the typed path is rooted. All three shapes are accepted whatever
+ * this machine is, because the check exists only to catch a plainly relative
+ * path before it is sent: a POSIX gateway answers a Windows path with git's
+ * own error, and the reverse. Gating on the running platform instead would
+ * refuse the exact path the desktop shell's own folder dialog just returned.
+ */
+const rooted = (path: string) => /^(\/|\\\\|[A-Za-z]:[\\/])/.test(path)
 
 const short = (commit: string) => commit.slice(0, 7)
 const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`
@@ -29,6 +37,15 @@ const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`
 const stillLinked = (origin: OnboardingRepo) => {
   const current = useStore.getState().onboardingRepo
   return current && current.link === origin.link ? current : null
+}
+
+/**
+ * The repository folders this gateway already knows - the linked clone and
+ * every named profile's own - deduplicated, for the field's suggestions.
+ */
+const knownRepos = (status: LinkStatus | null): string[] => {
+  const paths = [status?.repo, ...(status?.links ?? []).map((l) => l.repo)]
+  return [...new Set(paths.filter((path): path is string => !!path))]
 }
 
 /**
@@ -67,6 +84,16 @@ export function RepoStep({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const setLinkStatus = useStore((s) => s.setLinkStatus)
+  // The desktop shell browses this machine's filesystem for the user; a
+  // browser tab has no such dialog and keeps the typed field alone.
+  const chooseFolder = desktopBridge()?.chooseFolder
+  // A second dialog is reachable where the chooser is not modal to the
+  // window - an out-of-process xdg-desktop-portal one is not - and its
+  // answer would land on top of the first.
+  const [picking, setPicking] = useState(false)
+  const suggestions = knownRepos(useStore((s) => s.linkStatus))
+  const fieldId = useId()
+  const listId = useId()
   // The push runs on its own flag: a failed push must not disable the link
   // form the user may want to correct, and the reverse.
   const [pushing, setPushing] = useState(false)
@@ -83,7 +110,7 @@ export function RepoStep({
   const branch = workspace?.base_branch ?? 'main'
   const pushCmd = `git push -u aether ${branch}`
   const canPush = caps.hasLocal('repo.push')
-  const absolute = repo.trim().startsWith('/')
+  const absolute = rooted(repo.trim())
   const pushed = connected?.push ?? null
   const forwarded = connected?.fastForward ?? null
   // Settled means the workspace and the clone agree: nothing is left to
@@ -163,6 +190,25 @@ export function RepoStep({
     }
   }
 
+  const pick = async () => {
+    if (!chooseFolder) return
+    setPicking(true)
+    try {
+      const picked = await chooseFolder()
+      // Cancelling answers with an empty string. It must leave both the
+      // typed path and the error explaining it alone: the error is often
+      // why the dialog was opened, and the user still needs to read it.
+      if (picked) {
+        setRepo(picked)
+        setError(null)
+      }
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setPicking(false)
+    }
+  }
+
   const repoint = () => {
     setRepo(connected?.path ?? '')
     setConnected(null)
@@ -206,15 +252,37 @@ export function RepoStep({
               void link()
             }}
           >
-            <label className="flex-1 space-y-1 text-sm">
-              Repository path
-              <input
-                className={field}
-                value={repo}
-                placeholder="/home/you/code/myproject"
-                onChange={(e) => setRepo(e.target.value)}
-              />
-            </label>
+            <div className="flex-1 space-y-1 text-sm">
+              <label className="block" htmlFor={fieldId}>
+                Repository path
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  id={fieldId}
+                  className={field}
+                  value={repo}
+                  list={listId}
+                  placeholder="/home/you/code/myproject"
+                  onChange={(e) => setRepo(e.target.value)}
+                />
+                <datalist id={listId}>
+                  {suggestions.map((path) => (
+                    <option key={path} value={path} />
+                  ))}
+                </datalist>
+                {chooseFolder && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={picking}
+                    onClick={() => void pick()}
+                  >
+                    Choose folder
+                  </Button>
+                )}
+              </div>
+            </div>
             <Button type="submit" size="sm" disabled={busy || !absolute}>
               Add remote
             </Button>
@@ -225,7 +293,11 @@ export function RepoStep({
               The path must be absolute.
             </p>
           )}
-          {error && <p className="text-xs text-state-failed">{error}</p>}
+          {error && (
+            <p aria-live="polite" className="text-xs text-state-failed">
+              {error}
+            </p>
+          )}
         </>
       )}
       {connected && (

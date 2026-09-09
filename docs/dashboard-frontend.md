@@ -170,6 +170,17 @@ draws no native buttons - minimize, maximize/restore and close wired to
 every button `no-drag`; on macOS the native traffic lights are kept and the
 bar reserves 78px for them instead of drawing buttons.
 
+The bridge carries one more thing the SPA cannot do for itself:
+`window.aetherDesktop.chooseFolder()` opens the shell's native directory
+dialog, parented to the asking window - a sheet on macOS, modal to the window
+on Windows; a Linux portal chooser runs out of process and is neither, which
+is why the caller disables its button while one is open - and resolves to the
+chosen absolute path, or `""` when it was cancelled. A window it cannot
+resolve rejects with `no window asked for the folder dialog` instead, so a
+caller can say what went wrong. It is optional on the type for the same
+reason `shellVersion` exists: a shell built by an older `aether gui build`
+does not have it.
+
 `App.tsx` mounts it above the whole app, the `ConnectionError` page included:
 that page replaces the shell, and a frameless window without a title bar would
 leave an offline user unable to move or close the app. In a browser
@@ -1059,10 +1070,10 @@ git's output verbatim; server refusals stay verbatim.
 identity, Workspace, Repository, Agents, First run. It renders only where the
 gateway serves the client-machine verbs (the capability descriptor lists
 `link.status`); a remote monitor gets an explanatory empty state instead of a
-broken wizard. Link, Workspace, Repository and First run live in `steps.tsx`;
-Git identity is `git-identity-step.tsx`, and Agents is `agents-step.tsx` with
-its GitHub part in `github-connect.tsx` and its configuration import in
-`profile-import.tsx`.
+broken wizard. Link, Workspace and First run live in `steps.tsx`; Repository
+is `repo-step.tsx`, Git identity is `git-identity-step.tsx`, and Agents is
+`agents-step.tsx` with its GitHub part in `github-connect.tsx` and its
+configuration import in `profile-import.tsx`.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
 whichever step has sub-screens. The Agents step owns both of today's - a
@@ -1093,12 +1104,27 @@ over both. **Skip** moves on and leaves the server's fallback in place, so the
 step never blocks the wizard. See [teams.md](teams.md) for what the identity
 does once it is set.
 
-The Repository step adds the `aether` remote (`link.repo`) and then seeds
-the workspace: where the gateway serves `repo.push` it shows a **Push now**
-button. The gateway compares the clone's base branch with the workspace's
-copy before pushing and answers with one of four states, so the second
-member to join a workspace reads what happened instead of git's
-`! [rejected] main -> main (fetch first)`.
+The Repository step asks for a clone on this machine, and the path must be
+absolute - a leading `/`, a drive letter, or a UNC prefix, all three accepted
+whatever the machine is, because the check only catches a plainly relative
+path and a Windows dialog answers `C:\...`. The field always offers the
+folders `link.status` already knows - the linked clone and every named
+profile's - as a `datalist`. In the desktop shell it also gets a **Choose
+folder** button, which opens the native directory dialog through
+`window.aetherDesktop.chooseFolder`, writes the answer into the field and
+clears any error the last attempt left; cancelling leaves both alone, a
+dialog that fails puts the shell's own error under the form, and the button
+is disabled while one is open, because a chooser that is not modal to the
+window would otherwise answer twice. Typing stays the fallback, because a
+browser tab has no dialog and a shell built by an older `aether gui build`
+has no method.
+
+The step adds the `aether` remote (`link.repo`) and then seeds the workspace:
+where the gateway serves `repo.push` it shows a **Push now** button. The
+gateway compares the clone's base branch with the workspace's copy before
+pushing and answers with one of four states, so the second member to join a
+workspace reads what happened instead of git's `! [rejected] main -> main
+(fetch first)`.
 
 When `link.repo` answers an `origin`, the connected line adds `Runs push to
 <origin>`: the upstream a run pushes to, the same one `aether link --repo`
@@ -1609,8 +1635,12 @@ step when none is installed, and a failed `agent.list` kept on screen as the
 server's own error rather than read as an empty account. The Repository step
 also covers each comparison state: which command is the copyable one in each,
 and the fast-forward reporting a dirty tree it did not touch while keeping
-both git outputs. The Git identity step covers the prefill from this machine
-and the save that advances, the member's own saved identity winning over the
+both git outputs. It covers the folder picker too: the deduplicated
+suggestion list, the dialog filling the field, cancelling keeping both the
+path and the error that sent the user there, the shell's own dialog error, a
+Windows path accepted as absolute, and a browser tab with no button at all.
+The Git identity step covers the prefill from this machine and the save that
+advances, the member's own saved identity winning over the
 machine's, a refusal rendered verbatim with the wizard staying put, the skip,
 the identity still shown when the user walks back in, a machine with no
 identity to read, a gateway that does not speak `git.identity`, typing that
