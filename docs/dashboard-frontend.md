@@ -142,6 +142,8 @@ overflow](#window-size-and-overflow)).
   Approvals carries the pending count
   in its accessible name; the status bar keeps its own copy of that count for
   when the member is looking elsewhere.
+- **The width handle is a window splitter**, keyboard included: see
+  [Keyboard and focus](#keyboard-and-focus).
 - **A nav entry is named what the view it opens is titled**, as are the
   Approvals and Activity tooltips in the status bar: a member who arrived from
   one is looking for that word again to come back. This is why the entry for
@@ -453,7 +455,8 @@ reports the outcome the same way everywhere: gateway verbs toast their
 past-tense name or the server's refusal verbatim. Deleting a run also removes
 it from the local run map after the server confirms deletion.
 - **The command palette** (`src/components/palette/`) is the cmdk palette:
-  `⌘K`/`Ctrl+K` anywhere, or the button it registers into the `statusbar`
+  `⌘K` on macOS and `Ctrl+K` elsewhere, anywhere in the app (see [Keyboard and
+  focus](#keyboard-and-focus)), or the button it registers into the `statusbar`
   slot (it has no home of its own in the shell, and the dialog portals out of
   the status bar anyway). It jumps to runs and workspaces - opening a
   workspace also makes it the active scope, so the sidebar and the board
@@ -545,12 +548,155 @@ Launching is gated on `run.launch` **and** on the launch permission
 behind it, so capability alone would put the button in front of someone the
 server would refuse.
 
+## Keyboard and focus
+
+Everything the dashboard can do is reachable without a mouse, and every control
+a keyboard reaches draws the same focus indicator.
+
+**One focus indicator.** `focusRing` in `src/lib/utils.ts` is it, and it is
+the only one: the `Button` primitive composes it into the base of its `cva`,
+and so does every raw control that takes focus - buttons, fields, selects,
+links, `<summary>` elements, menu items, the dialog close, the resize
+handles. The shared `field` style beside it carries it for the house text
+input. A new control that is not a `Button` adds `focusRing` to its classes.
+No file writes a focus indicator of its own. The only `focus-visible:` classes
+a file adds are modifiers of this one: the inset offset below, and
+`focus-visible:opacity-100` where the dialog close would otherwise fade its
+outline along with its glyph. `a11y.test.tsx` reads the source tree to keep
+that true, control by control, the stylesheet included.
+
+It is an outline rather than a ring, for two reasons. Windows High Contrast
+(`forced-colors: active`) discards box shadows, which is what Tailwind's
+`ring-*` compiles to, and would leave the app with no focus indicator at all.
+And `ring-*` already means "selected" on the member colour swatches, where a
+focus ring in the same property could not be told apart from the selection.
+
+The outline sits 2px outside the control, except where the control has no
+room outside it: a row that fills its scroll container - a sidebar run, a run
+list entry, a diff snapshot, a board card - and a menu item, which sits flush
+against its neighbours. There it is drawn 2px inside instead. An outline
+outside a full-bleed row is clipped at both edges by the scroller, and padding
+the container would inset the dividers that are meant to run edge to edge. The
+inset has to carry the same variant as the token
+(`focus-visible:-outline-offset-2`): a bare `-outline-offset-2` is one
+pseudo-class less specific and loses at the moment the outline is drawn.
+
+`DropdownMenuContent` and `DialogContent` suppress the outline on themselves:
+each takes focus programmatically when it opens and has nothing to show for
+it. Their contents are not the same case. A `DropdownMenuItem` takes real DOM
+focus under Radix's roving tabindex, so it wears the outline like any other
+control, keeping its `focus:` background as well. A `CommandItem` suppresses
+the outline too, and that one is deliberate: cmdk never moves focus to it at
+all, leaving it on the input and tracking the highlighted row with
+`aria-activedescendant`, so a background is all it has,
+and all it needs.
+
+**The shell's own keys**, listed in the shortcuts dialog behind the `?`
+trigger in the status bar. `⌘K` lives with the palette in
+`components/palette/index.tsx`, `Shift+/` with the dialog in
+`components/shortcuts/index.tsx`, and the rest in
+`components/shell/nav-shortcuts.ts`:
+
+| Key | What it does |
+| --- | --- |
+| `⌘K` / `Ctrl+K` | Open the command palette |
+| `Shift+/` | Open this reference |
+| `n` | Launch a run |
+| `g` then `b` | Go to the board |
+| `g` then `l` | Go to all runs |
+| `Esc` | Leave a run for the board |
+
+`n` is offered, on both surfaces, only to a member who may launch. The
+single-key ones carry no modifier, so `keyboardBusy` in `src/lib/keys.ts`
+stands them down whenever something else has the keyboard: a text field or a
+native select, a terminal, an open menu or list box, or an open dialog. A
+stray `n` typed at an agent has to reach the agent, and `n` in a menu is that
+menu's own typeahead. The `g` prefix waits 1.5s for the key that completes it,
+and any key that goes somewhere else ends the wait.
+
+`⌘K` is the exception, and has to be: it is modified, so nothing can mistake
+it for typing, and with the terminal holding the focus and swallowing Tab it
+is the way out of a run. It stands down for a modal rather than for anything
+that has the keyboard, through `inModal` and the store flag that names the
+form the shell is hosting. It takes the key from the browser either way, so a
+stand-down cannot land the reader in the address bar.
+
+That guard reads the event target rather than the document. Radix dismisses an
+overlay from a capturing document listener without stopping the event, and
+React commits the close in a microtask that runs before a window listener is
+reached: asking the DOM what is open would find the dialog already gone and
+let Escape both close the dialog and leave the run. The shell also stands down
+on `defaultPrevented`, which is how Radix marks the Escape it just acted on.
+The document is asked in one case only, by both guards: a key that landed on
+`body`, where focus falls when an overlay removes the control that was holding
+it, or merely disables it - Radix's focus scope watches for removals and does
+not take the keyboard back from a button that disabled itself mid-flight.
+There is no target left to read, so the fallback asks whether a dialog or a
+menu is open, and a dialog playing its exit animation does not count. It does
+not ask about terminals: focus on `body` with a terminal on screen is
+ordinary, and the run dock hands the keyboard to whichever body replaces its
+terminal - the refusal, the "Open shell" button, the unavailable notice -
+rather than orphaning it.
+
+**The modifier is named after the reader's keyboard.** The palette and the
+terminal zoom keys accept Ctrl and Meta alike, because one keyboard sends one
+and the other sends the other; only the printed label has to pick a side, and
+`shortcutLabel` in `src/lib/platform.ts` picks it from the platform. The
+palette badge reads `⌘K` on macOS and `Ctrl+K` everywhere else, and the
+shortcuts dialog says the same thing the badge does. Terminal copy, paste and
+find are Ctrl on every platform, because that is what xterm binds; see
+[terminal.md](terminal.md).
+
+**Tab strips behave as tab lists.** The run-detail strip (`tabs.tsx`) and both
+docks (`components/dock.tsx`) carry `role="tablist"`, `aria-selected`, a
+single tab stop that follows focus, and Left/Right/Home/End through
+`onTabListKeyDown` in `src/lib/keys.ts`.
+
+Neither strip is a Radix `Tabs`, though the library is already a dependency.
+The run strip cannot be: its four tabs are separate registry routes with no
+common parent to hold a `Tabs.Root`, and Radix would emit `aria-controls`
+pointing at panels that are not in the tree. The dock's strip could be, but
+each of its tabs carries a close button inside the list, which `Tabs.Trigger`
+would have to nest a button inside. What is left of the pattern either way is
+`onTabListKeyDown`, one function both strips share.
+
+Those keys move focus and nothing else. Selection does not follow focus here,
+which the ARIA tab list pattern reserves for panels that are cheap to swap:
+behind these tabs are a websocket attach, a patch fetch and an xterm host that
+replays a transcript, so arrowing from Overview to Events must not open the
+Terminal on the way past. Enter or Space opens the focused tab, a click opens
+the tab it landed on, and both work because every tab is a real `<button>`.
+
+Each run route names the body under the strip as its `tabpanel`, through
+`runTabPanel` in `tabs.tsx`, and in both strips the selected tab is the only
+one carrying `aria-controls`: on the run strip only one of the four routes is
+mounted at a time, so the other three would be naming a panel that is not in
+the tree. An open dock's
+body is the panel its selected tab names; a shut dock has no body, and a dock
+holding no tabs is no tab list at all, so neither names anything.
+
+Opening a run tab swaps the whole center view, which unmounts the strip that
+was activated, so the strip the next route draws takes the focus back -
+otherwise every tab press would drop a keyboard reader on `body`. It is armed
+from the activation rather than the key press, and only from one the keyboard
+produced, which carries no click count: a press that is cancelled arms
+nothing, and a pointer click leaves focus where the pointer put it. The dock's
+strip needs none of this, because it is not unmounted by its own tabs.
+
+**Resize handles are window splitters.** The sidebar's and the docks'
+`separator` handles take Tab, name the pane they size with `aria-controls`,
+report `aria-valuenow` against their own bounds, move 16px per arrow press,
+snap to those bounds on Home and End, and collapse the pane on Enter, handing
+focus to the control that restores it. Keyboard and pointer go through the
+same clamps and the same persisted store fields.
+
 ## Terminal view
 
 `src/routes/terminal/` is the run-detail Terminal tab: xterm.js over
 `/ws/attach/<run>` (`docs/local-gateway.md`). The run-detail routes share one
 tab strip (`tabs.tsx`), so Overview, Terminal, Diff and Events are registry
-routes on the same `runId`.
+routes on the same `runId`; the strip is a real tab list, arrow keys included
+(see [Keyboard and focus](#keyboard-and-focus)).
 
 Every way into a run navigates to `terminal`, because that is where the agent
 is: board card, sidebar row, run list, palette, feed entry, approval,
@@ -1298,9 +1444,13 @@ wherever the member is an admin.
   sidebar pulse each answer `prefers-reduced-motion: reduce` in `index.css` by
   removing the movement and leaving the mark: the working dots collapse to the
   static dot. The launch splash is not toned down but skipped -
-  `components/launch-splash.tsx` renders nothing when the query matches. The
-  spinner and skeleton loaders (Tailwind's `animate-spin` and `animate-pulse`)
-  have no such answer.
+  `components/launch-splash.tsx` renders nothing when the query matches, and
+  the reveal flash in `components/shell/center-view.tsx` goes with it under
+  `motion-reduce:hidden`, since a flash is nothing but motion. The spinner and
+  skeleton loaders (Tailwind's `animate-spin` and `animate-pulse`) have no
+  such answer.
+- **One focus indicator, one source.** `focusRing` in `src/lib/utils.ts`; see
+  [Keyboard and focus](#keyboard-and-focus).
 - **Member colour attributes, it does not fill.** The avatar rings itself in
   the member's colour and keeps its initials in the foreground token, because
   the colour is arbitrary server data with no contrast guarantee in either
@@ -1363,6 +1513,39 @@ sending setup to the Agents view.
 The palette covers the ending-action matrix: Delete for every status, Kill
 only while queued, provisioning, or running, and Close for every status that
 holds a record, where it chooses merged or abandoned.
+`src/a11y.test.tsx` holds the claims in [Keyboard and
+focus](#keyboard-and-focus). The focus sweep walks the route registry rather
+than a hand-kept list, so a view added later is swept without anyone
+remembering, and it renders the shell, the palette, its three forms, an open
+menu, the run strip and a dock beside it; every button, tab, link, field,
+select, checkbox, switch, menu item, focusable panel and resize handle it
+finds has to carry the outline, written out as literal classes because a token
+compared against itself passes for any value. Two source scans stand behind
+it, because a sweep only sees what a test renders: one proves no second
+indicator exists anywhere in `web/src`, the other that every file drawing a
+raw control reaches for the shared one.
+
+The rest of the file is behaviour: arrow keys move focus around both strips and
+wrap without opening anything, a modifier chord goes to the browser, Enter and
+Space open the focused tab and hand focus to the strip the next route draws
+while a pointer click and a cancelled press do not; a dock's panel and its
+selected tab name each other, and an empty or shut dock names neither; closing
+a tab leaves the stop on the selected one; both handles step, snap to their
+bounds and collapse from the keyboard, in either direction; and the reveal
+flash carries its `motion-reduce` guard.
+
+`nav-shortcuts.test.tsx` drives the shell keys through the real shell. Where a
+test asserts that nothing happened, it presses the same key somewhere it does
+work first, so it cannot pass by the shortcut never having fired. It covers
+the field, terminal, dialog, menu, list box and select cases, focus fallen to
+the body under a dialog, the chord expiring, surviving a reach for a modifier
+and being ended by a key that went elsewhere, and the Escape another layer
+already acted on. Two things only a browser can show are in the
+Playwright suite instead: that Escape on a dialog over a run closes the dialog
+without also leaving the run, and that a focused control actually paints an
+outline. The palette's own test proves the modifier glyph follows the platform
+rather than always reading macOS.
+
 The permission mirror is exercised through the bar: a viewer is offered
 nothing that mutates a run, a collaborator may steer, kill, and delete another
 member's run but not give it away or protect it, and a protected run and an

@@ -237,8 +237,9 @@ attaches the server's output to the report.
 | `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, and `Ctrl+Shift+F` finding what the shell printed and saying "No matches" when it did not |
 | `window-sizing` | The update prompts at the smallest window `desktop/main.js` allows, and at one smaller than that: every control the prompt carries sits on its first row in each state that offers one, and neither the app nor the status bar leaves the window |
 | `status-bar-sizing` | The status bar carrying every readout the width allows, on a server that is then stopped so its longest notice appears: the palette, shortcuts and theme controls stay in the window and the readouts give way inside their own group |
+| `keyboard-focus` | The two accessibility claims a jsdom test cannot make: Escape on a dialog over a run closes the dialog without also leaving the run, which turns on an ordering only a real key press produces; and a focused control paints the app's own outline, measured as computed style against the `--ring` token rather than as a class name |
 
-`board-card`, `onboarding-agents`, `onboarding-github`,
+`board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,
 `run-provisioning`, `run-switch` and `terminal-tools` need a reachable
 Docker daemon and skip without one, the way the Go suite skips its container
