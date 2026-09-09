@@ -182,7 +182,7 @@ describe('terminal shortcuts', () => {
 
     fireEvent.change(input, { target: { value: 'panic' } })
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(findNext).toHaveBeenCalledWith('panic', { incremental: true })
+    expect(findNext).toHaveBeenCalledWith('panic')
 
     fireEvent.click(screen.getByLabelText('Find previous'))
     expect(findPrevious).toHaveBeenCalledWith('panic')

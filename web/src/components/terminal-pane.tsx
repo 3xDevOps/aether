@@ -27,17 +27,12 @@ function FindBar({
     input.current?.select()
   }, [])
 
-  // `incremental` grows the current match while the term is still being
-  // typed, so the pane follows the search rather than jumping a match ahead.
-  const find = (direction: 'next' | 'previous', incremental = false) => {
+  const find = (direction: 'next' | 'previous') => {
     if (!search || !term) {
       setMissing(false)
       return
     }
-    const found =
-      direction === 'next'
-        ? search.findNext(term, { incremental })
-        : search.findPrevious(term)
+    const found = direction === 'next' ? search.findNext(term) : search.findPrevious(term)
     setMissing(!found)
   }
 
@@ -61,7 +56,7 @@ function FindBar({
           }
           if (event.key !== 'Enter') return
           event.preventDefault()
-          find(event.shiftKey ? 'previous' : 'next', !event.shiftKey)
+          find(event.shiftKey ? 'previous' : 'next')
         }}
       />
       {missing && (
