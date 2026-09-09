@@ -966,6 +966,8 @@ describe('the harness the step set up', () => {
     })
   })
 
+  // Another walk that already runs close to the default budget, so it
+  // names its own rather than timing out when the runner is busy.
   it('walks Back out of the setup screen before it leaves the Agents step', async () => {
     const client = fakeApi()
     seed()
@@ -995,8 +997,10 @@ describe('the harness the step set up', () => {
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
     ).toContain('4. Repository')
-  })
+  }, 20_000)
 
+  // A whole wizard walk, several seconds of real awaits even idle, so it
+  // carries its own budget rather than sitting just under the default.
   it('reaches the First run step through the whole wizard', async () => {
     const client = fakeApi()
     seed()
@@ -1026,5 +1030,5 @@ describe('the harness the step set up', () => {
         'claude',
       )
     })
-  })
+  }, 20_000)
 })

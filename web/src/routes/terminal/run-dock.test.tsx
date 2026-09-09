@@ -69,6 +69,8 @@ describe('run-shell dock', () => {
     view.unmount()
   })
 
+  // Another walk that already runs close to the default budget, so it
+  // names its own rather than timing out when the runner is busy.
   it('recreates the terminal host after collapsing and expanding the dock', async () => {
     const open = vi.spyOn(Terminal.prototype, 'open')
     const view = mount()
@@ -89,7 +91,7 @@ describe('run-shell dock', () => {
     })
     open.mockRestore()
     view.unmount()
-  })
+  }, 20_000)
 
   it('shows the fixed refusal sentence and does not reconnect on denied shells', async () => {
     const view = mount()
