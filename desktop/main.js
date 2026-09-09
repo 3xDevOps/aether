@@ -245,6 +245,21 @@ function main() {
   })
   ipcMain.handle('window:is-maximized', (event) => senderWindow(event)?.isMaximized() ?? false)
 
+  // The folder picker behind the onboarding wizard's Repository step. Modal
+  // to the asking window - a sheet on macOS - so it cannot be lost behind
+  // it. An empty string means the user cancelled, and only that: a window
+  // that could not be resolved is a real failure and rejects, so the step
+  // shows what went wrong rather than a button that does nothing.
+  ipcMain.handle('dialog:choose-folder', async (event) => {
+    const target = senderWindow(event)
+    if (!target) throw new Error('no window asked for the folder dialog')
+    const { canceled, filePaths } = await dialog.showOpenDialog(target, {
+      title: 'Choose repository folder',
+      properties: ['openDirectory'],
+    })
+    return canceled ? '' : filePaths[0]
+  })
+
   // --- window ---------------------------------------------------------------
 
   function openWindow() {
