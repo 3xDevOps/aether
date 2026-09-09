@@ -1,6 +1,7 @@
 package localops
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -326,4 +327,29 @@ func TestStampShellVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLockDesktopBuildSerializesAndUnlocks(t *testing.T) {
+	// The build directory need not exist yet; the lock creates it.
+	dir := filepath.Join(t.TempDir(), "nested", "desktop-build")
+	ctx, cancel := context.WithCancel(t.Context())
+
+	unlock, err := lockDesktopBuild(ctx, dir)
+	if err != nil {
+		t.Fatalf("lockDesktopBuild: %v", err)
+	}
+	cancel()
+	// A held lock makes a second builder fail through the canceled
+	// context instead of racing the first one's node_modules.
+	if _, err := lockDesktopBuild(ctx, dir); err == nil {
+		t.Fatal("second lockDesktopBuild succeeded while the first is held")
+	}
+	unlock()
+	if _, err := os.Stat(filepath.Join(dir, ".build-lock")); err != nil {
+		t.Fatalf("lock file after unlock: %v", err)
+	}
+	if _, err := lockDesktopBuild(t.Context(), dir); err != nil {
+		t.Fatalf("lockDesktopBuild after unlock: %v", err)
+	}
+	unlock()
 }

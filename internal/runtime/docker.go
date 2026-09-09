@@ -432,7 +432,7 @@ func (d *Docker) Stop(ctx context.Context, id ID, grace time.Duration) error {
 		opts.Timeout = &secs
 	}
 	if err := d.cli.ContainerStop(ctx, string(id), opts); err != nil {
-		return fmt.Errorf("runtime: stop container: %w", err)
+		return dockerWaitError("stop", id, err)
 	}
 	return nil
 }
