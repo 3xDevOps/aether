@@ -135,9 +135,18 @@ describe('terminal zoom keys', () => {
   })
 
   it('leaves the shifted forms the shell binds alone', () => {
-    // Ctrl+_ is readline's undo; Ctrl+Shift+= is only how Ctrl++ is typed.
+    // Ctrl+Shift+- is Ctrl+_, readline's undo and vim's keymap switch.
     expect(terminalZoomKey(key({ code: 'Minus', ctrlKey: true, shiftKey: true }))).toBeNull()
     expect(terminalZoomKey(key({ code: 'Digit0', ctrlKey: true, shiftKey: true }))).toBeNull()
+  })
+
+  it('still grows on Ctrl+Shift+=, the only way to type Ctrl++', () => {
     expect(terminalZoomKey(key({ code: 'Equal', ctrlKey: true, shiftKey: true }))).toBe('in')
+  })
+
+  it('leaves the keypad alone, where Ctrl+0 would be Ctrl+Insert', () => {
+    expect(terminalZoomKey(key({ code: 'Numpad0', ctrlKey: true }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'NumpadAdd', ctrlKey: true }))).toBeNull()
+    expect(terminalZoomKey(key({ code: 'NumpadSubtract', ctrlKey: true }))).toBeNull()
   })
 })
