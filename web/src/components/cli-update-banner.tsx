@@ -1,5 +1,5 @@
-// The CLI-is-behind prompt. One `update.check` call to the local gateway
-// says whether a release is out and how `update.apply` would get to write
+// The CLI-is-behind prompt. `update.check` on the local gateway says
+// whether a release is out and how `update.apply` would get to write
 // the binary: straight into a writable directory, through the macOS
 // administrator password dialog, or not at all - in which case the banner
 // hands over the sudo command rather than a button that could not work.
@@ -22,6 +22,10 @@ type ApplyState =
   // The member closed the administrator dialog, or macOS refused the
   // password. Not a failure: nothing was downloaded into place.
   | { name: 'cancelled'; detail: string }
+  // The check the click makes first says this machine is already on the
+  // newest release. The version it was made about, so the verdict does not
+  // outlive the answer behind it.
+  | { name: 'current'; version: string }
 
 /**
  * What the button, and everything above it, show. Derived from the apply
@@ -51,6 +55,7 @@ function deriveFlow(apply: ApplyState, build: UpdateBuildStatus | null): Flow {
   if (apply.name === 'cancelled') {
     return { name: 'applyCancelled', detail: apply.detail }
   }
+  if (apply.name === 'current') return { name: 'idle' }
   const { result } = apply
   if (!result.rebuilding) return { name: 'applied', result }
   if (build?.phase === 'error') {
@@ -74,7 +79,7 @@ function Applied({ result, note }: { result: UpdateApplyResult; note?: string })
   // is over the caller passes what actually happened instead, so the
   // banner does not keep saying a finished rebuild is still running.
   const trailing =
-    note ?? (result.restarting ? 'Restarting the dashboard.' : result.note ?? '')
+    note ?? result.note ?? (result.restarting ? 'Restarting the dashboard.' : '')
   return (
     <div className="space-y-1 text-muted-foreground">
       <p>
@@ -141,10 +146,19 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
  * The CLI is behind. Every member sees this: the binary is on their own
  * machine, so no role gates it.
  */
-export function CliBanner({ update, client }: { update: UpdateStatus; client: Api }) {
+export function CliBanner({
+  update,
+  client,
+  recheck,
+}: {
+  update: UpdateStatus
+  client: Api
+  recheck: (refresh?: boolean) => Promise<UpdateStatus>
+}) {
   const latest = update.cli.latest ?? ''
   const dismissed = useStore((s) => s.dismissedUpdates.cli)
   const setGatewayRestarting = useStore((s) => s.setGatewayRestarting)
+  const setInstallingUpdate = useStore((s) => s.setInstallingUpdate)
   const [apply, setApply] = useState<ApplyState>({ name: 'idle' })
   const [build, setBuild] = useState<UpdateBuildStatus | null>(null)
 
@@ -177,12 +191,16 @@ export function CliBanner({ update, client }: { update: UpdateStatus; client: Ap
     }
   }, [apply, client])
 
-  if (!update.cli.update_available || !latest || dismissed === latest) return null
-
   const run = async () => {
     setApply({ name: 'applying' })
     setBuild(null)
     try {
+      const fresh = await recheck(true)
+      if (!fresh.cli.update_available) {
+        setApply({ name: 'current', version: fresh.cli.version })
+        return
+      }
+      setInstallingUpdate(true)
       const result = await client.localUpdateApply()
       // The page must stop showing the connection-error screen while the
       // gateway is deliberately going away. `restarting` is exactly that
@@ -194,24 +212,42 @@ export function CliBanner({ update, client }: { update: UpdateStatus; client: Ap
     } catch (err) {
       // 403 is the gateway's word for "administrator access was not
       // granted": the member closed the dialog or macOS refused the
-      // password. A bearer-token refusal is 401, so nothing else on this
-      // verb answers 403. Every other failure keeps the gateway's own
-      // message, verbatim: it names the directory and the exact sudo
-      // command when the binary is not writable.
+      // password. A bearer-token refusal is 401, and neither update.check
+      // nor update.apply answers 403 for anything else.
       if (err instanceof ApiError && err.status === 403) {
         setApply({ name: 'cancelled', detail: message(err) })
       } else {
         setApply({ name: 'failed', detail: message(err) })
       }
+    } finally {
+      setInstallingUpdate(false)
     }
   }
 
   const flow = deriveFlow(apply, build)
-  // Nothing is left for the button to do once the CLI is swapped: a second
-  // apply would only answer that this is already the newest release, and a
-  // failed rebuild is fixed by the command the banner already shows. A
-  // binary the gateway cannot write never gets a button at all.
+  // The click found nothing to install. The verdict is about the answer it
+  // was made from, so a later release drops it and the offer comes back.
+  const current =
+    apply.name === 'current' &&
+    apply.version === update.cli.version &&
+    !update.cli.update_available
+  // Once update.apply has answered, the banner reports what happened and
+  // says what is left to do - the replaced paths, the server unit to
+  // restart, a rebuild still running. The release check keeps moving under
+  // it and answers `update_available: false` from the next read onwards, so
+  // what the install said has to outlive it.
+  const installed = apply.name === 'done' ? apply.result.version : ''
+  if (!current && !installed && (!update.cli.update_available || !latest)) {
+    return null
+  }
+  const version = current ? update.cli.version : installed || latest
+  if (dismissed === version) return null
+  // Applied names the release itself; the rebuild states have no Applied
+  // block, so they carry the lead instead.
+  const installLead =
+    installed !== '' && flow.name !== 'applied' && flow.name !== 'rebuilt'
   const offerButton =
+    !current &&
     update.cli.can_self_update &&
     update.install_method !== 'manual' &&
     flow.name !== 'applied' &&
@@ -229,17 +265,34 @@ export function CliBanner({ update, client }: { update: UpdateStatus; client: Ap
           : 'Update now'
   const applyingLine =
     update.install_method === 'admin-prompt'
-      ? `Downloading ${latest}, then macOS asks for an administrator password...`
+      ? `Downloading ${version}, then macOS asks for an administrator password...`
       : 'Updating the CLI...'
 
   return (
     <div role="status" className={banner}>
       <div className="min-w-0 flex-1 space-y-1">
-        <p>
-          <span className="font-medium">Aether {latest} is available.</span> You
-          are running {update.cli.version}.
-        </p>
-        <HowItInstalls update={update} />
+        {current && (
+          <p>
+            <span className="font-medium">
+              Aether {version} is the newest release.
+            </span>{' '}
+            Nothing was downloaded.
+          </p>
+        )}
+        {!current && !installed && (
+          <>
+            <p>
+              <span className="font-medium">Aether {version} is available.</span>{' '}
+              You are running {update.cli.version}.
+            </p>
+            <HowItInstalls update={update} />
+          </>
+        )}
+        {installLead && (
+          <p>
+            <span className="font-medium">Aether {version} is installed.</span>
+          </p>
+        )}
         {flow.name === 'applying' && (
           <p className="text-muted-foreground">{applyingLine}</p>
         )}
@@ -296,7 +349,7 @@ export function CliBanner({ update, client }: { update: UpdateStatus; client: Ap
           </a>
         )}
       </div>
-      <Dismiss kind="cli" version={latest} />
+      <Dismiss kind="cli" version={version} />
     </div>
   )
 }

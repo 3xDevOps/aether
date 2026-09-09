@@ -121,12 +121,14 @@ gone, and the bootstrap image is no longer published. Saved member images
 live only in the server's Docker daemon; `aether env reset` removes a saved
 image and returns that member to the standard image.
 
-**From the dashboard.** The **Update now** button runs the same swap from the
-`aether gui` process, which runs as you. A CLI in a directory you own -
-`~/.local/bin`, a Homebrew prefix - is replaced without a question on macOS
-and Linux (Windows has no self-update). A CLI in a directory this account
-cannot write, such as `/usr/local/bin`, splits by platform, and the banner
-says which case you are in before you click:
+**From the dashboard.** The **Update now** button installs whatever is newest
+at the click: the version in the banner is re-read first, so it names the
+release the install is about to write. It runs the same swap from the
+`aether gui` process, which runs as you. A CLI in
+a directory you own - `~/.local/bin`, a Homebrew prefix - is replaced without
+a question on macOS and Linux (Windows has no self-update). A CLI in a
+directory this account cannot write, such as `/usr/local/bin`, splits by
+platform, and the banner says which case you are in before you click:
 
 - **macOS.** The banner says *macOS will ask for an administrator password:
   /usr/local/bin/aether is in a directory this account cannot write to. The
@@ -199,10 +201,13 @@ cannot be ordered against anything and never reports an update.
 **In the dashboard.** `aether gui` runs the same check in the background and
 prints one line to stderr when a newer release exists. The dashboard shows a
 dismissible banner naming the new version, with an **Update now** button that
-replaces the binary on this machine. The restart takes the gateway's own work
-with it - attached terminals and any running `aether sync` session stop, while
-the runs themselves keep going on the server. Dismissing silences that version
-only - the next release shows the banner again.
+replaces the binary on this machine. It re-checks about every half hour while
+the window is on screen, and again whenever you come back to it, so a release
+that lands after launch shows up without restarting the app. The restart takes
+the gateway's own work with it - attached terminals and any running
+`aether sync` session stop, while the runs themselves keep going on the
+server. Dismissing silences that version only - the next release shows the
+banner again.
 
 The button does the same two steps the command does. It swaps the binaries,
 then rebuilds the app when one is installed, and the banner follows along:

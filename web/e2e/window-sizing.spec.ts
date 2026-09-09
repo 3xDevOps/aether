@@ -113,6 +113,10 @@ async function openDesktop(page: Page, gateway: Gateway): Promise<void> {
 /** The opening words of the two prompts a stale desktop shell puts up. */
 const prompts = ['The desktop app is out of date.', 'is available.']
 
+/** The same pair once update.apply has answered: the CLI prompt reports
+ * what it installed rather than what is on offer. */
+const installedPrompts = ['The desktop app is out of date.', 'is installed.']
+
 /**
  * Both prompts carry their controls on their own first row. This is the
  * regression: while the strip wrapped, the controls sat under the prose
@@ -121,7 +125,10 @@ const prompts = ['The desktop app is out of date.', 'is available.']
  * the three: the controls share the row only above 1580px, and sit 76px to
  * 160px down at every size below it.
  */
-async function expectControlsOnFirstRow(page: Page): Promise<void> {
+async function expectControlsOnFirstRow(
+  page: Page,
+  headlines: string[] = prompts,
+): Promise<void> {
   // The prompts are found by their own opening words rather than by role
   // alone: other surfaces announce themselves with role="status" too, and a
   // walk that escaped the strip would measure the app instead.
@@ -139,7 +146,7 @@ async function expectControlsOnFirstRow(page: Page): Promise<void> {
         .filter((control) => !prose?.contains(control))
         .map((control) => Math.round(control.getBoundingClientRect().top - top))
     })
-  }, prompts)
+  }, headlines)
   for (const offsets of rows) {
     expect(offsets).not.toBeNull()
     expect(offsets?.length).toBeGreaterThan(0)
@@ -222,7 +229,7 @@ test('the update prompt keeps its button in place while the app rebuilds', async
   await expect(page.getByRole('button', { name: 'Rebuilding...' })).toBeInViewport({
     ratio: 1,
   })
-  await expectControlsOnFirstRow(page)
+  await expectControlsOnFirstRow(page, installedPrompts)
 })
 
 for (const [state, status, detail] of [

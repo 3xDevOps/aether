@@ -1079,13 +1079,31 @@ gateway to serve `update.check` - a remote monitor cannot update anything on
 your machine - while the server prompt asks the server about itself and shows
 wherever the member is an admin.
 
-- **Two reads.** The host reads `update.check` once on mount
-  (`docs/local-gateway.md`; the gateway caches the release lookup, so this
-  costs no request to GitHub) and puts the answer on the `local` slice, which
-  is also what the status bar reads. It reads `server.update_status` as well -
-  any member may - and re-reads it on every reconnect and whenever
-  `server.info` names a different version. The reconnect is the one that
-  matters: a server that updates itself re-executes, so the socket drops and
+- **Two reads.** The host reads `update.check` on mount, again every half
+  hour, and again whenever the window comes back to the front, on `focus` and
+  on `visibilitychange` alike. No read runs while the window is hidden, the
+  timer included, so the freshness this buys is best-effort on a minimized
+  app and immediate when the member returns to it. The desktop app runs for
+  days, so a release that ships after launch has to arrive on its own, and
+  the half-hour timer is half the gateway's cache period
+  (`docs/local-gateway.md`) rather than all of it, which bounds the wait at
+  the two added together. One reader serves both the re-checks and the
+  Update button. A re-check never starts while a lookup is out, and every
+  read is numbered so that only the newest one's answer is written: a read
+  issued before the click is served the cache the click has yet to refresh,
+  and would otherwise bring the superseded release back. The re-checks also
+  stand down for the length of an install, so nothing renames the banner
+  over the release being written to disk. A successful lookup is cached for
+  an hour, so the re-checks cost the gateway one request to GitHub an hour
+  at most; a failed one is cached for five minutes, so an unreachable GitHub
+  is retried sooner. The answer goes on the `local` slice, which is also
+  what the status bar reads. A re-check that fails is swallowed, as the
+  first read always was: it leaves the last good answer standing rather than
+  blanking a banner that is already on screen, and the next re-check still
+  runs. It reads `server.update_status` as well - any member may - and
+  re-reads it on every reconnect and whenever `server.info` names a different
+  version. The reconnect is the one that matters: a server that updates
+  itself re-executes, so the socket drops and
   comes back, and that fresh status is what ends the banner and the notice.
   `connect()` re-hydrates on the same signal while an update is in flight,
   even with a cursor to replay from, because only a fresh `server.info` says
@@ -1108,16 +1126,34 @@ wherever the member is an admin.
   cannot write, Windows, or a macOS gateway the dialog cannot serve - the
   rule is in `docs/local-gateway.md`) offers no button and shows the
   command to run instead - `sudo aether update` with a copy button, or the
-  release link where the platform has no self-update at all. Clicking Update calls
-  `update.apply` and the banner goes to a restarting state; nothing else
-  reconnects, because the existing `ConnectionError` page already owns a
-  gateway that goes away. The done state names every binary the swap replaced
-  and, on a single-box install where `aether-server` was one of them, the
-  `restart_command` the gateway sends back: the server keeps running the old
-  code until its unit restarts, and the CLI prints that same line. A `-32001`
-  (denied) answer is the dialog cancelled or the password refused: the banner
-  shows *Update cancelled, nothing was changed.* muted rather than as a
-  failure, and the button comes back. Any other refusal is rendered verbatim -
+  release link where the platform has no self-update at all. Clicking
+  **Update now** first re-reads `update.check` with `refresh: true`, which
+  skips the gateway's cached answer, and puts that on the store, so the
+  version the banner names while the download runs is the release that was
+  newest a moment before `update.apply` resolved its own. A fresh answer
+  saying this machine is already current - the update ran in a terminal
+  while the app was open - installs nothing and says so, *Aether vX is the
+  newest release. Nothing was downloaded.*, rather than taking the banner
+  away under the click. That notice is about the answer it was made from:
+  when a later release lands, the offer and its button come back. A fresh
+  check that cannot reach GitHub shows the gateway's message and leaves the
+  button usable. Otherwise the call goes on to `update.apply` and the banner
+  follows the phases below; nothing else reconnects, because the existing
+  `ConnectionError` page already owns a gateway that goes away. The done
+  state names what the gateway said is left to do, every binary the swap
+  replaced and, on a single-box install where `aether-server` was one of
+  them, the `restart_command` the gateway sends back: the server keeps
+  running the old code until its unit restarts, and the CLI prints that same
+  line. Everything from `update.apply` onwards is rendered from that answer
+  rather than from `update.check`, because the re-checks carry on behind it
+  and report this machine as current the moment the swap lands - which would
+  otherwise take the restart command, and a rebuild still running, off the
+  screen. The offer headline gives way to *Aether vX is installed.* there,
+  since the release is no longer on offer. A `-32001` (denied) answer is the
+  dialog cancelled or the password refused: the banner shows *Update
+  cancelled, nothing was changed.* muted rather than as a failure, and the
+  button comes back. Any other refusal is
+  rendered verbatim -
   the gateway's own message, ending in the command to run where there is one -
   and the button becomes usable again.
 - **The server banner is for admins, and it acts.** Capability is half the
@@ -1161,7 +1197,8 @@ wherever the member is an admin.
 - **Dismissal is per version and it persists.** `dismissedUpdates` on the `ui`
   slice records which version was dismissed for each banner and rides the same
   persisted preferences as the theme and the sidebar, so a dismissal survives a
-  reload and the next release shows the banner again. It silences the offer,
+  reload, and the next release shows the banner again - without a reload,
+  when a re-check is what brings that release in. It silences the offer,
   not an update already moving: a scheduled or applying server comes back
   regardless, because that banner is why the server is about to restart.
 - **The status bar carries the badge.** The `aether {version}` label gets a dot

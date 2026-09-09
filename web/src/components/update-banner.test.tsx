@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { UpdateBanners } from '@/components/update-banner'
+import { RECHECK_MS, UpdateBanners } from '@/components/update-banner'
 import type { Api } from '@/lib/api'
 import type { AetherDesktop } from '@/components/shell/title-bar'
 import type {
@@ -23,7 +23,13 @@ import {
   workspace,
 } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
-import { caps, seed } from '@/test/update-banner-harness'
+import {
+  cachedUntilRefreshed,
+  caps,
+  seed,
+  settle,
+  withLatest,
+} from '@/test/update-banner-harness'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
@@ -62,8 +68,17 @@ beforeEach(() => {
   delete shellWindow.aetherDesktop
 })
 
+/** Drives document.visibilityState, which jsdom pins to "visible". */
+function hide(hidden: boolean) {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => (hidden ? 'hidden' : 'visible'),
+  })
+}
+
 afterEach(() => {
   vi.useRealTimers()
+  hide(false)
 })
 
 test('renders nothing where the gateway does not serve update.check', async () => {
@@ -560,5 +575,166 @@ describe('the desktop app rebuild notice', () => {
     })
     render(<UpdateBanners client={fakeApi()} />)
     expect(await screen.findByText(notice)).toBeTruthy()
+  })
+})
+
+describe('the CLI release re-check', () => {
+  /** update.check answering the seeded release once, then `next`. */
+  function releasesThen(next: string) {
+    const status = updateStatus()
+    return vi
+      .fn()
+      .mockResolvedValueOnce(status)
+      .mockResolvedValue(withLatest(status, next))
+  }
+
+  test('picks up a release that lands while the app is open', async () => {
+    vi.useFakeTimers()
+    const client = fakeApi({ localUpdateCheck: releasesThen('v1.4.0') })
+    seed()
+    render(<UpdateBanners client={client} />)
+    await settle()
+    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECHECK_MS)
+    })
+    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+  })
+
+  // Coming back to a window fires both events. One return is one read: a
+  // second read is served the answer the first one has yet to refresh, and
+  // landing later it would put that older release back on the banner.
+  test('asks once when the window comes back to the front', async () => {
+    vi.useFakeTimers()
+    const status = updateStatus()
+    let reads = 0
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => {
+        reads += 1
+        if (reads < 2) return status
+        if (reads === 2) return withLatest(status, 'v1.4.0')
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        return status
+      }),
+    })
+    seed()
+    render(<UpdateBanners client={client} />)
+    await settle()
+
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      window.dispatchEvent(new Event('focus'))
+      await vi.advanceTimersByTimeAsync(200)
+    })
+    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+  })
+
+  test('reads nothing while the window is hidden', async () => {
+    vi.useFakeTimers()
+    const client = fakeApi({ localUpdateCheck: releasesThen('v1.4.0') })
+    seed()
+    render(<UpdateBanners client={client} />)
+    await settle()
+    hide(true)
+
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(RECHECK_MS * 4)
+    })
+    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+  })
+
+  // The re-check is a network read nobody asked for: a failed one leaves the
+  // banner it already drew, and does not stop the checks after it.
+  test('a failed re-check keeps the last good answer and retries', async () => {
+    vi.useFakeTimers()
+    const status = updateStatus()
+    const client = fakeApi({
+      localUpdateCheck: vi
+        .fn()
+        .mockResolvedValueOnce(status)
+        .mockRejectedValueOnce(new Error('dial github.com: no route to host'))
+        .mockResolvedValue({ ...status, cli: { ...status.cli, latest: 'v1.4.0' } }),
+    })
+    seed()
+    render(<UpdateBanners client={client} />)
+    await settle()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECHECK_MS)
+    })
+    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECHECK_MS)
+    })
+    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+  })
+
+  // Dismissal is keyed by version, so the next release is not silenced by
+  // the dismissal of the one before it - including without a reload.
+  test('a release that lands after a dismissal brings the banner back', async () => {
+    vi.useFakeTimers()
+    const client = fakeApi({ localUpdateCheck: releasesThen('v1.4.0') })
+    seed({ dismissedUpdates: { cli: 'v1.3.0', server: '', shell: '' } })
+    render(<UpdateBanners client={client} />)
+    await settle()
+    expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECHECK_MS)
+    })
+    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+  })
+
+  // The re-checks must not bypass the gateway's cache: every open tab
+  // dialing GitHub twice an hour is what that cache exists to prevent.
+  test('the periodic read takes the cached answer', async () => {
+    vi.useFakeTimers()
+    const client = fakeApi({ localUpdateCheck: cachedUntilRefreshed('v1.4.0') })
+    seed()
+    render(<UpdateBanners client={client} />)
+    await settle()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECHECK_MS * 3)
+    })
+    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+  })
+
+  test('a read still out at unmount never writes the answer', async () => {
+    vi.useFakeTimers()
+    const status = updateStatus()
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        return status
+      }),
+    })
+    seed()
+    render(<UpdateBanners client={client} />).unmount()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(useStore.getState().update).toBeNull()
+  })
+
+  test('stops reading once the banners are gone', async () => {
+    vi.useFakeTimers()
+    const client = fakeApi({ localUpdateCheck: releasesThen('v1.4.0') })
+    seed()
+    const view = render(<UpdateBanners client={client} />)
+    await settle()
+    view.unmount()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'))
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(RECHECK_MS * 4)
+    })
+    expect(client.localUpdateCheck).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().update?.cli.latest).toBe('v1.3.0')
   })
 })

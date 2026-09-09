@@ -1,13 +1,13 @@
 // The update prompts, above everything the shell renders: the CLI on this
 // machine is behind (cli-update-banner.tsx), the desktop app around the
 // dashboard is stale, or the server it talks to is behind. The CLI half
-// comes from one `update.check` call to the local gateway; the server half
+// comes from `update.check` on the local gateway; the server half
 // comes from `server.update_status`, which any member may read and which
 // says whether the server can replace its own binaries. A server that
 // cannot - the documented unprivileged install - still gets the two
 // commands to run on its host rather than a button that could not work.
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CliBanner } from '@/components/cli-update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { desktopBridge } from '@/components/shell/title-bar'
@@ -33,6 +33,9 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+
+/** How often the CLI release check is repeated while the app stays open. */
+export const RECHECK_MS = 30 * 60 * 1000
 
 /**
  * Whether the desktop app was built by a different CLI than the one serving
@@ -70,21 +73,60 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
   const connection = useStore((s) => s.connection)
   const [statusReads, setStatusReads] = useState(0)
 
+  const live = useRef(true)
+  const pending = useRef(0)
+  const issued = useRef(0)
+  useEffect(() => {
+    live.current = true
+    return () => {
+      live.current = false
+    }
+  }, [])
+
+  // The one reader of `update.check`, shared with the Update button, and the
+  // only writer of the answer. Every read takes the next number and only the
+  // answer still holding the highest one is written, so the click - which
+  // always takes a fresh number - makes every read before it stale. `pending`
+  // counts readers rather than flagging them: with a boolean the first of two
+  // overlapping lookups would clear it for the second, letting a plain read
+  // start under the click's and win with the tag the click superseded.
+  const recheck = useCallback(
+    async (refresh?: boolean) => {
+      const id = ++issued.current
+      pending.current += 1
+      try {
+        const status = await client.localUpdateCheck(refresh)
+        if (live.current && id === issued.current) setUpdate(status)
+        return status
+      } finally {
+        pending.current -= 1
+      }
+    },
+    [client, setUpdate],
+  )
+
   useEffect(() => {
     if (!serves) return
-    let live = true
-    void client
-      .localUpdateCheck()
-      .then((status) => {
-        if (live) setUpdate(status)
-      })
-      // A failed check is not worth a banner of its own: the release lookup
-      // is a network read the member did not ask for.
-      .catch(() => {})
-    return () => {
-      live = false
+    const read = () => {
+      if (pending.current > 0 || document.visibilityState === 'hidden') return
+      // An install holds the banner: what it names has to stay the release
+      // being written to disk until that finishes.
+      if (useStore.getState().installingUpdate) return
+      void recheck()
+        // A failed check is not worth a banner of its own: the release
+        // lookup is a network read the member did not ask for.
+        .catch(() => {})
     }
-  }, [serves, client, setUpdate])
+    read()
+    const timer = setInterval(read, RECHECK_MS)
+    window.addEventListener('focus', read)
+    document.addEventListener('visibilitychange', read)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', read)
+      document.removeEventListener('visibilitychange', read)
+    }
+  }, [serves, recheck])
 
   useEffect(() => {
     if (!readsServerUpdate || !serverVersion) return
@@ -120,7 +162,9 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
           notice exists for and the one where no update is available any
           more. */}
       <ShellBanner />
-      {serves && update && <CliBanner update={update} client={client} />}
+      {serves && update && (
+        <CliBanner update={update} client={client} recheck={recheck} />
+      )}
       {/* Not gated on `update.check`: the server answers for itself, so an
           admin on any gateway can act on it. */}
       <ServerBanner client={client} onRetry={() => setStatusReads((n) => n + 1)} />
