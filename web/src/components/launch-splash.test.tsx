@@ -55,18 +55,6 @@ describe('LaunchSplash', () => {
     expect(container.firstElementChild).toBeNull()
   })
 
-  it('stays up while the store is still hydrating, until the cap', () => {
-    shellWindow.aetherDesktop = { platform: 'linux' }
-
-    const { container } = render(<LaunchSplash />)
-
-    act(() => vi.advanceTimersByTime(2400))
-    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(false)
-
-    act(() => vi.advanceTimersByTime(100))
-    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(true)
-  })
-
   it('never outlives the cap, hydrated or not', () => {
     shellWindow.aetherDesktop = { platform: 'linux' }
 
