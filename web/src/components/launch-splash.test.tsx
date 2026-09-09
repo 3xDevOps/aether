@@ -72,7 +72,12 @@ describe('LaunchSplash', () => {
 
     const { container } = render(<LaunchSplash />)
 
-    act(() => vi.advanceTimersByTime(2500))
+    // Up to the cap it is still there, so this cannot pass against a splash
+    // that leaves on a shorter timer of its own.
+    act(() => vi.advanceTimersByTime(2499))
+    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(false)
+
+    act(() => vi.advanceTimersByTime(1))
     act(() => vi.advanceTimersByTime(260))
 
     expect(useStore.getState().hydrated).toBe(false)
