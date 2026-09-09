@@ -17,15 +17,16 @@ aether terminal stop
 ```
 
 In the dashboard, open the terminal dock on the run board. The dock starts
-collapsed, so the board keeps the window; the chevron in its header strip
-opens it, and it stays open for the rest of the session. The first open starts
-the environment; the dock says **Starting your environment container** until the
-shell attaches, and shows the server's own error if the start fails. Later tabs
-and tab switches reach a container that is already up, so those say **Connecting
-to your environment**. The dock reconnects and replays terminal output when the
-page or network reconnects. The stream ack identifies the replay byte count, so
-the dashboard mutes terminal-generated replies until that scrollback is parsed.
-Closing a tab only detaches it; opening that tab again reattaches to its shell.
+collapsed, so the board keeps the window; the chevron in its header strip opens
+it, and so does `+` or a tab in that strip. It stays open until you reload the
+page. The first open starts the environment; the dock says **Starting your
+environment container** until the shell attaches, and shows the server's own
+error if the start fails. Later tabs and tab switches reach a container that is
+already up, so those say **Connecting to your environment**. The dock reconnects
+and replays terminal output when the page or network reconnects. The stream ack
+identifies the replay byte count, so the dashboard mutes terminal-generated
+replies until that scrollback is parsed. Closing a tab only detaches it;
+opening that tab again reattaches to its shell.
 
 `aether attach` mutes the same window, and does it by discarding: keystrokes
 that arrive before the announced replay has been written to your terminal are
@@ -77,8 +78,7 @@ removes the saved image, and makes the next open use the standard image. See
 
 These work in every terminal Aether draws - the environment dock, a run's
 terminal, and a run shell - and only in the terminal that has focus, because
-the terminal itself claims them before the shell sees them. Click into a
-terminal first.
+the terminal itself claims them before the shell sees them.
 
 | Key | What it does |
 | --- | --- |
@@ -88,11 +88,11 @@ terminal first.
 | `Ctrl+=` / `Ctrl+-` | Grow or shrink the terminal font, 8px to 32px. `Ctrl+Shift+=` grows too, since that is how a keyboard without a numpad types `Ctrl++`. |
 | `Ctrl+0` | Back to the default 12px. |
 
-On macOS, `Cmd` works as well as `Ctrl` for the zoom keys. The font size is
-one preference across every terminal and survives a reload; find searches the
-scrollback of the terminal it was opened in.
+`Cmd`, or the `Super`/`Windows` key, works as well as `Ctrl` for the zoom keys.
+The font size is one preference across every terminal and survives a reload;
+find searches the scrollback of the terminal it was opened in.
 
-`Ctrl+Shift+-` and `Ctrl+Shift+0` are left alone, because `Ctrl+_` is
+Both shifted forms are left to the shell; `Ctrl+Shift+-` is `Ctrl+_`,
 readline's undo and vim's keymap switch.
 
 The zoom keys are also a browser's own page-zoom accelerators. The terminal

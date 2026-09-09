@@ -58,8 +58,9 @@ one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `local`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
-collapse state, `activeWorkspace`, grouping, dismissed update versions) are
-persisted; server data is always re-fetched.
+collapse state, `activeWorkspace`, grouping, dismissed update versions,
+terminal zoom) are persisted; `persistedUi` in `store/index.ts` is the list
+that decides. Server data is always re-fetched.
 
 **`activeWorkspace` is the scope every surface reads.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,
@@ -463,7 +464,8 @@ routes on the same `runId`.
 
 The Terminal view is a vertical split. The agent terminal keeps the flexible
 space above a `RunDock` below it. The dock has a persisted height
-(`UiSlice.runDockHeight`, default 240px), a collapse toggle, and a resizer.
+(`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once
+expanded, a resizer.
 Both docks start collapsed (`initialRunShellDock`, `initialEnvTerminal`), so
 the terminal a member came for owns the window until they ask for a shell.
 Neither flag is persisted, so a reload starts collapsed again, and the run
@@ -497,14 +499,15 @@ terminal and event stream reconnect on the same jittered schedule, and it
 - **Steer on entry.** The agent header requests `write` on the first attach and
   the active button carries a short pulse animation; the toggle reattaches
   rather than upgrading in place. Until the member has taken control once
-  (`UiSlice.terminalControlTaken`, persisted, and set from the attach ack that
-  granted write rather than from the click that asked for it) a live run they
+  (`UiSlice.terminalControlTaken`, persisted, and set only when the member
+  asked for control and the attach ack granted it, so neither a refused
+  request nor an owner's automatic steer silences the hint) a live run they
   are only watching says **Read-only mirror. Take control to type into the
   agent.** A run that is not running says **This run is not running** beside
   the disabled control, as visible text for the same reason the dock's tab
-  ceiling is. Whether the member may steer is the server's
-  answer, never the client's guess: a `-32001` refusal drops the request back
-  to a mirror and disables the toggle. A finished run attaches as a read-only replay of its
+  ceiling is. Whether the member may steer is the server's answer, never the
+  client's guess: a `-32001` refusal drops the request back to a mirror and
+  disables the toggle. A finished run attaches as a read-only replay of its
   recorded transcript, which ends with a 1000 close, reason `session ended` -
   the signal to stop reconnecting rather than loop replay -> EOF -> replay.
   Every other refusal (unknown run, transiently missing terminal) stops the
