@@ -20,9 +20,14 @@ class NoResizeObserver {
   disconnect() {}
 }
 
-function mount(seed: Partial<TerminalState> = {}) {
+function terminalRoute() {
   const View = lookupRoute('terminal')
   if (!View) throw new Error('terminal route not registered')
+  return View
+}
+
+function mount(seed: Partial<TerminalState> = {}) {
+  const View = terminalRoute()
   useStore.getState().upsertRun(run())
   useStore.setState({
     info: serverInfo,
@@ -209,6 +214,71 @@ describe('terminal view', () => {
     expect(screen.getByText('no live terminal')).toBeDefined()
     fireEvent.click(screen.getByText('Retry'))
     expect(StubSocket.opened).toHaveLength(2)
+    view.unmount()
+  })
+
+  // Switching runs keeps the same view mounted, so the pane has to be cleared
+  // by the switch: a finished run with no recorded terminal is refused, and a
+  // refusal never acks, so it would show the previous run's output for good.
+  it('clears the previous run before showing the next one', async () => {
+    const view = mount()
+    attached()
+    const pane = () => document.querySelector('.xterm-rows')?.textContent ?? ''
+
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: new TextEncoder().encode('run one output').buffer,
+      }),
+    )
+    await vi.waitFor(() => expect(pane()).toContain('run one output'))
+
+    act(() => useStore.getState().upsertRun(run({ id: 'run_2', status: 'merged' })))
+    const View = terminalRoute()
+    view.rerender(<View params={{ runId: 'run_2' }} />)
+    act(() => StubSocket.last().onopen?.())
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: -32004,
+          error: 'ptyhost: no session for run',
+        }),
+      }),
+    )
+
+    expect(pane()).not.toContain('run one output')
+    view.unmount()
+  })
+
+  // The switch has to land even while the previous run is still draining:
+  // xterm parses in slices, and a reset leaves whatever is already queued to
+  // arrive after it.
+  it('shows nothing of the previous run when the switch lands mid-replay', async () => {
+    const view = mount()
+    attached()
+    const pane = () => document.querySelector('.xterm-rows')?.textContent ?? ''
+
+    const chunk = new TextEncoder().encode('RUN-ONE-OUTPUT '.repeat(4000)).buffer
+    for (let i = 0; i < 16; i++) {
+      act(() => StubSocket.last().onmessage?.({ data: chunk }))
+    }
+
+    const View = terminalRoute()
+    act(() => useStore.getState().upsertRun(run({ id: 'run_2', status: 'merged' })))
+    view.rerender(<View params={{ runId: 'run_2' }} />)
+    act(() => StubSocket.last().onopen?.())
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: -32004,
+          error: 'ptyhost: no session for run',
+        }),
+      }),
+    )
+
+    await new Promise((done) => setTimeout(done, 200))
+    expect(pane()).not.toContain('RUN-ONE-OUTPUT')
     view.unmount()
   })
 

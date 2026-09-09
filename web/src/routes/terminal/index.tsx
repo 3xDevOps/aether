@@ -1,14 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
-import { RunActions } from '@/components/run-actions'
+import { RunHeader } from '@/components/run-header'
 import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
-import { ViewHeader } from '@/components/view-header'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { openOAuthLink } from '@/lib/oauth-forward'
-import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
@@ -131,11 +129,7 @@ function TerminalView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader
-        title={runLabel(run)}
-        subtitle={`${run.harness} · ${run.branch}`}
-        actions={<RunActions run={run} />}
-      />
+      <RunHeader run={run} subtitle={`${run.harness} · ${run.branch}`} />
       <RunTabs runID={runID} active="terminal" />
       <div className="flex items-center gap-3 border-b px-4 py-1.5 text-xs">
         <span
@@ -187,7 +181,7 @@ function TerminalView({ params }: RouteProps) {
         )}
       </div>
       <div className="min-h-0 flex-1">
-        <TerminalPane controller={controller} />
+        <TerminalPane key={runID} controller={controller} />
       </div>
       <RunDock runID={runID} />
     </div>
