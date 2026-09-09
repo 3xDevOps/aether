@@ -16,7 +16,7 @@ aether terminal status
 aether terminal stop
 ```
 
-In the dashboard, open the terminal dock on the run board. The dock starts
+In the dashboard, open the terminal dock on the Board view. The dock starts
 collapsed, so the board keeps the window; the chevron in its header strip opens
 it, and so does `+` or a tab in that strip. It stays open until you reload the
 page. The first open starts the environment; the dock says **Starting your

@@ -1,11 +1,4 @@
-import {
-  Bot,
-  Compass,
-  FileText,
-  FolderGit2,
-  Settings,
-  Users,
-} from 'lucide-react'
+import { FolderGit2 } from 'lucide-react'
 import { StateDot } from '@/components/state-dot'
 import {
   CommandEmpty,
@@ -23,6 +16,7 @@ import {
   type Command,
 } from '@/lib/commands'
 import { runLabel, stateLabel } from '@/lib/status'
+import { surfaces } from '@/lib/surfaces'
 import { useStore } from '@/store'
 import { useAttentionRuns, useCapability, useSelf } from '@/store/hooks'
 
@@ -57,6 +51,8 @@ export function PaletteBody({
   const focused = route.params.runId
     ? runs.find((r) => r.run.id === route.params.runId)
     : undefined
+
+  const goTo = surfaces(cap)
 
   const go = (name: string, params?: Record<string, string>) => {
     onDone()
@@ -104,49 +100,14 @@ export function PaletteBody({
           {boardCommands({ cap, role: self.role }).map(item)}
         </CommandGroup>
 
-        {(cap.hasMethod('member.list') ||
-          cap.hasMethod('workspace.add') ||
-          cap.hasMethod('template.save') ||
-          cap.hasMethod('agent.list') ||
-          cap.hasLocal('daemon.status') ||
-          cap.hasLocal('link.status')) && (
+        {goTo.length > 0 && (
           <CommandGroup heading="Go to">
-            {cap.hasMethod('member.list') && (
-              <CommandItem onSelect={() => go('members')}>
-                <Users />
-                Members
+            {goTo.map(({ name, label, Icon }) => (
+              <CommandItem key={name} value={`${label} ${name}`} onSelect={() => go(name)}>
+                <Icon />
+                {label}
               </CommandItem>
-            )}
-            {cap.hasMethod('workspace.add') && (
-              <CommandItem onSelect={() => go('workspaces')}>
-                <FolderGit2 />
-                Manage workspaces
-              </CommandItem>
-            )}
-            {cap.hasMethod('template.save') && (
-              <CommandItem onSelect={() => go('templates')}>
-                <FileText />
-                Templates
-              </CommandItem>
-            )}
-            {cap.hasMethod('agent.list') && (
-              <CommandItem onSelect={() => go('agents')}>
-                <Bot />
-                Agents
-              </CommandItem>
-            )}
-            {cap.hasLocal('daemon.status') && (
-              <CommandItem onSelect={() => go('settings')}>
-                <Settings />
-                Settings
-              </CommandItem>
-            )}
-            {cap.hasLocal('link.status') && (
-              <CommandItem onSelect={() => go('onboarding')}>
-                <Compass />
-                Onboarding
-              </CommandItem>
-            )}
+            ))}
           </CommandGroup>
         )}
 

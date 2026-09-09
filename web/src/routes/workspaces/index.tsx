@@ -38,7 +38,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   return (
     <div className="flex h-full flex-col">
       <ViewHeader
-        title="Workspaces"
+        title="Manage workspaces"
         subtitle={workspaces ? `${workspaces.length} total` : undefined}
       />
       <div className="flex-1 space-y-6 overflow-y-auto p-4">

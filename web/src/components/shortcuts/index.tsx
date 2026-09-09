@@ -39,14 +39,17 @@ const groups: { name: string; entries: [string, string][] }[] = [
   {
     name: 'Go to',
     entries: [
-      ['Members, Workspaces, Templates, Agents', 'Admin surfaces, when the gateway serves them'],
-      ['Settings, Onboarding', 'Local gateway surfaces, when a link is configured'],
+      [
+        'Approvals, Activity, Members, Manage workspaces, Templates, Agents, Files',
+        'Surfaces, when the gateway serves their methods',
+      ],
+      ['Onboarding, Settings', 'Local gateway surfaces, when a link is configured'],
     ],
   },
   {
     name: 'Board',
     entries: [
-      ['Open the run board / list', 'Jump between the board and the flat overview'],
+      ['Open the board / all runs', 'Jump between the board and the flat list'],
       ['Launch a run / from a template', 'Start new work'],
       ['Mark all runs seen', 'Clear the attention markers'],
     ],

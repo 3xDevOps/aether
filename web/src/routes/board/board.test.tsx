@@ -83,12 +83,12 @@ function timeline(kind: 'pause' | 'resume', seq: number) {
   )
 }
 
-describe('run board', () => {
+describe('board', () => {
   it('deals runs into the three buckets, newest first, the working one bouncing', () => {
     seed([stalled, working, queued, merged])
     render(<Board />)
 
-    expect(column('Needs You').getByText('waiting on a question')).toBeDefined()
+    expect(column('Needs you').getByText('waiting on a question')).toBeDefined()
     expect(column('Done').getByText('landed already')).toBeDefined()
 
     // queued (11:00) changed after running (10:02), so it sorts above it.
@@ -190,10 +190,10 @@ describe('run board', () => {
     )
 
     expect(screen.getByLabelText('Unseen')).toBeDefined()
-    expect(column('Needs You').getByText('plan approval')).toBeDefined()
+    expect(column('Needs you').getByText('plan approval')).toBeDefined()
   })
 
-  it('deals a running run with a pending approval into Needs You', () => {
+  it('deals a running run with a pending approval into Needs you', () => {
     seed([working])
     render(<Board />)
     expect(column('Working').getByText('still going')).toBeDefined()
@@ -205,11 +205,11 @@ describe('run board', () => {
         .setInbox(workspace.id, [approval({ run_id: working.id })]),
     )
 
-    expect(column('Needs You').getByText('still going')).toBeDefined()
+    expect(column('Needs you').getByText('still going')).toBeDefined()
     expect(useStore.getState().runs[working.id].status).toBe('running')
     // No run.status event fired, so the run has no reason; the card's
     // summary is the pending question itself.
-    expect(column('Needs You').getByText('write src/checkout.ts')).toBeDefined()
+    expect(column('Needs you').getByText('write src/checkout.ts')).toBeDefined()
 
     // Deciding the request sends the card back to Working.
     act(() =>
@@ -248,16 +248,90 @@ describe('run board', () => {
     expect(useStore.getState().paletteDialog).toBe('launch')
   })
 
-  it('offers the way in from an empty workspace, keeping the buckets', () => {
+  it('says an empty workspace is empty once, not four times', () => {
     seed([])
     render(<Board />)
 
-    // The columns stay: an empty board is exactly when a new member is
-    // learning that the three buckets exist. The notice above them says what
-    // a run is and offers the one thing left to do.
-    expect(screen.getByRole('region', { name: 'Working' })).toBeDefined()
+    // The notice replaces the column row rather than sitting above it: three
+    // empty buckets each saying "Nothing here." add nothing to the one notice
+    // that says what a run is and offers the way to start one.
     const notice = screen.getByText(/No runs yet/).closest('div') as HTMLElement
     expect(within(notice).getByTitle('Launch a run')).toBeDefined()
+    expect(screen.queryAllByText('Nothing here.')).toHaveLength(0)
+    for (const bucket of ['Needs you', 'Working', 'Done']) {
+      expect(screen.queryByRole('region', { name: bucket })).toBeNull()
+    }
+  })
+
+  it('says nothing in a bucket it has not heard about yet', () => {
+    // A cold load: not hydrated, and useDelayed holds the skeletons back
+    // 200ms, so this is the window where the buckets used to print the same
+    // "Nothing here." three times that the one notice exists to replace.
+    seed([])
+    useStore.setState({ hydrated: false })
+    render(<Board />)
+
+    expect(screen.queryAllByText('Nothing here.')).toHaveLength(0)
+    expect(screen.queryByText(/No runs yet/)).toBeNull()
+    // The buckets themselves are there - only their placeholder is withheld.
+    expect(screen.getByRole('region', { name: 'Working' })).toBeDefined()
+  })
+
+  it('says "Nothing here." only in the buckets a filled board left empty', () => {
+    // The other two placeholder states. One run means the notice is gone, so
+    // the empty buckets are worth labelling: they are empty, not unknown.
+    seed([working])
+    render(<Board />)
+
+    expect(column('Working').getByText('still going')).toBeDefined()
+    expect(column('Needs you').getByText('Nothing here.')).toBeDefined()
+    expect(column('Done').getByText('Nothing here.')).toBeDefined()
+    expect(column('Working').queryByText('Nothing here.')).toBeNull()
+  })
+
+  it('shows skeletons once a slow load has run past the delay', () => {
+    vi.useFakeTimers()
+    try {
+      seed([])
+      useStore.setState({ hydrated: false })
+      render(<Board />)
+      expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0)
+
+      // useDelayed flips at 200ms, which is what keeps the skeletons from
+      // flashing on a load that was never slow.
+      act(() => vi.advanceTimersByTime(200))
+
+      expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0)
+      expect(screen.queryAllByText('Nothing here.')).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('returns to the notice when the last run is deleted', () => {
+    // The other way a member reaches the notice, and the transition the
+    // empty-to-populated test above does not cover.
+    seed([working])
+    render(<Board />)
+    expect(screen.queryByText(/No runs yet/)).toBeNull()
+
+    act(() => useStore.setState({ runs: {} }))
+
+    expect(screen.getByText(/No runs yet/)).toBeDefined()
+    expect(screen.queryAllByText('Nothing here.')).toHaveLength(0)
+  })
+
+  it('brings the buckets back as soon as a run lands', () => {
+    seed([])
+    render(<Board />)
+    expect(screen.queryByRole('region', { name: 'Working' })).toBeNull()
+
+    act(() =>
+      useStore.setState({ runs: { [working.id]: toRecord(working) } }),
+    )
+
+    expect(screen.getByRole('region', { name: 'Working' })).toBeDefined()
+    expect(screen.queryByText(/No runs yet/)).toBeNull()
   })
 
   it('renders what another feature registered into a card slot', () => {

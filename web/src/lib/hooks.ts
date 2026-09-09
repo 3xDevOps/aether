@@ -15,5 +15,5 @@ export function useDelayed(active: boolean, delayMs = 200): boolean {
     const timer = setTimeout(() => setShown(true), delayMs)
     return () => clearTimeout(timer)
   }, [active, delayMs])
-  return shown
+  return active && shown
 }

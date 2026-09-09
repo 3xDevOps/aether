@@ -23,6 +23,15 @@ function seed(extra: Partial<RootState> = {}) {
 // so these tests advertise every method; a desktop gateway narrows this
 // via /capabilities.
 describe('workspaces view', () => {
+  it('is titled the words its nav entry uses', async () => {
+    const client = fakeApi()
+    render(<WorkspacesRoute params={{}} client={client} />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Manage workspaces' }),
+    ).toBeDefined()
+  })
+
   it('submits a workspace with no image selection', async () => {
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => []),

@@ -6,7 +6,7 @@ import { Board } from '@/routes/board'
 import { TeamStatus } from '@/routes/team'
 import { ApprovalInbox } from '@/routes/team/approvals'
 import { BudgetStatus } from '@/routes/team/budget'
-import { heartbeat, refreshTeam } from '@/routes/team/sync'
+import { heartbeat, refreshInbox, refreshTeam } from '@/routes/team/sync'
 import { useStore, type RootState } from '@/store'
 import { toRecord } from '@/store/runs'
 import {
@@ -35,6 +35,7 @@ function seed(extra: Partial<RootState> = {}) {
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: { run_1: toRecord(run()) },
     inbox: {},
+    inboxError: null,
     presence: [],
     budgets: {},
     showDecided: false,
@@ -314,6 +315,68 @@ describe('approval inbox', () => {
     render(<ApprovalInbox params={{}} client={client} />)
 
     expect(await screen.findByText(workspace.name)).toBeDefined()
+  })
+
+  it('is titled the word its nav entry uses', async () => {
+    const client = fakeApi({ approvalList: vi.fn(async () => [approval()]) })
+    seed({ inbox: { [workspace.id]: [approval()] } })
+    render(<ApprovalInbox params={{}} client={client} />)
+
+    expect(await screen.findByRole('heading', { name: 'Approvals' })).toBeDefined()
+  })
+
+  it('reports a failed read instead of saying nothing is waiting', async () => {
+    // A swallowed 403 used to render as an empty queue, which reads as "no
+    // agent is blocked" on the surface a member now watches for exactly that.
+    const client = fakeApi({
+      approvalList: vi.fn(async () => {
+        throw new ApiError(403, 'approval.list: permission denied')
+      }),
+    })
+    seed({ inbox: {} })
+    render(<ApprovalInbox params={{}} client={client} />)
+
+    expect(await screen.findByText(/permission denied/)).toBeDefined()
+    expect(screen.queryByText('Nothing is waiting on a decision.')).toBeNull()
+  })
+
+  it('lists the workspaces that answered beside the failure, then clears it', async () => {
+    const approvalList = vi
+      .fn()
+      .mockImplementation(async (id: string) => {
+        if (id === workspace.id) throw new ApiError(403, 'approval.list: denied')
+        return [approval({ workspace_id: otherWorkspace.id })]
+      })
+    seed({
+      workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
+    })
+    render(<ApprovalInbox params={{}} client={fakeApi({ approvalList })} />)
+
+    // A workspace that answered is still shown; the failure sits above it.
+    expect(await screen.findByText(/denied/)).toBeDefined()
+    expect(screen.getByText(otherWorkspace.name)).toBeDefined()
+
+    approvalList.mockImplementation(async () => [])
+    await act(() => refreshInbox(useStore, fakeApi({ approvalList })))
+
+    expect(screen.queryByText(/denied/)).toBeNull()
+    expect(screen.getByText('Nothing is waiting on a decision.')).toBeDefined()
+  })
+
+  it('cannot let a slow failed read overwrite a newer good one', async () => {
+    seed()
+    let reject: (e: Error) => void = () => {}
+    const slow = fakeApi({
+      approvalList: () => new Promise((_, r) => { reject = () => r(new Error('stale: denied')) }),
+    })
+    const first = refreshInbox(useStore, slow)
+    await refreshInbox(useStore, fakeApi({ approvalList: async () => [approval()] }))
+    expect(useStore.getState().inboxError).toBeNull()
+
+    reject(new Error('stale: denied'))
+    await first
+
+    expect(useStore.getState().inboxError).toBeNull()
   })
 
   it('surfaces the server refusal instead of guessing at the capability', async () => {

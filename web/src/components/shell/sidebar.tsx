@@ -1,16 +1,10 @@
 import {
-  Bot,
-  Compass,
-  FileText,
   FolderGit2,
-  FolderTree,
   LayoutGrid,
   List,
   PanelLeftClose,
   PanelLeftOpen,
   Rocket,
-  Settings,
-  Users,
 } from 'lucide-react'
 import { useCallback } from 'react'
 import { StateDot } from '@/components/state-dot'
@@ -19,9 +13,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { canLaunch } from '@/lib/commands'
 import { useDelayed } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
+import { surfaces, type Surface } from '@/lib/surfaces'
 import { cn } from '@/lib/utils'
 import { isRunRoute } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
+import { pendingApprovals } from '@/store/approvals'
 import { isUnseen } from '@/store/board'
 import {
   useAttentionCount,
@@ -140,15 +136,12 @@ function WorkspaceSwitcher({ onCollapse }: { onCollapse: () => void }) {
 }
 
 function SidebarHeader() {
-  const groupBy = useStore((s) => s.groupBy)
-  const setGroupBy = useStore((s) => s.setGroupBy)
-  const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
   // The launch form is hosted app-wide, so the sidebar only has to ask for
   // it. A member who cannot start a run is not offered the way in.
   const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
   return (
-    <div className="flex items-center gap-1 border-b px-2 py-1.5">
+    <div className="flex flex-wrap items-center gap-1 border-b px-2 py-1.5">
       <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         Runs
       </span>
@@ -165,24 +158,39 @@ function SidebarHeader() {
             New run
           </Button>
         )}
+        <GroupByControl />
+      </div>
+    </div>
+  )
+}
+
+function GroupByControl() {
+  const groupBy = useStore((s) => s.groupBy)
+  const setGroupBy = useStore((s) => s.setGroupBy)
+  return (
+    <div
+      role="group"
+      aria-label="Group runs by"
+      className="flex items-center rounded-md border"
+    >
+      {([['status', 'Status'], ['member', 'Member']] as const).map(([mode, label]) => (
         <Button
-          variant="ghost"
-          size="icon"
-          title="Run board"
-          aria-label="Run board"
-          onClick={() => navigate('board')}
-        >
-          <LayoutGrid />
-        </Button>
-        <Button
+          key={mode}
           variant="ghost"
           size="sm"
-          title="Group runs"
-          onClick={() => setGroupBy(groupBy === 'status' ? 'member' : 'status')}
+          aria-pressed={groupBy === mode}
+          title={`Group runs by ${label.toLowerCase()}`}
+          onClick={() => setGroupBy(mode)}
+          className={cn(
+            'rounded-none first:rounded-l-md last:rounded-r-md',
+            groupBy === mode
+              ? 'bg-accent font-medium text-accent-foreground'
+              : 'text-muted-foreground',
+          )}
         >
-          {groupBy === 'status' ? 'Status' : 'Member'}
+          {label}
         </Button>
-      </div>
+      ))}
     </div>
   )
 }
@@ -248,42 +256,36 @@ function RunTree() {
   )
 }
 
-/**
- * Entry points for the views the tree above cannot reach. All runs is the
- * flat every-run list, and it is always there: it needs no capability the
- * sidebar itself does not already have. Every admin and desktop link below
- * it is gated on the capability that powers its view, so a gateway that
- * cannot serve a surface never shows the way in. Members is the exception
- * that reads: member.list is on the remote allowlist, the roster is worth
- * seeing, and the admin verbs inside it are gated one by one on role too.
- */
+function approvalsLabel(label: string, waiting: number, error: string | null): string {
+  if (error) return `${label}, queue could not be read`
+  return waiting > 0 ? `${label}, ${waiting} waiting on a decision` : label
+}
+
+/** Board and All runs need no gate: both are views of the runs above them. */
 function NavSection() {
   const cap = useCapability()
   const navigate = useStore((s) => s.navigate)
   const route = useStore((s) => s.route)
-  const links: { name: string; label: string; Icon: typeof Users }[] = [
+  const inbox = useStore((s) => s.inbox)
+  const inboxError = useStore((s) => s.inboxError)
+  const waiting = pendingApprovals(inbox).length
+  const links: Surface[] = [
+    { name: 'board', label: 'Board', Icon: LayoutGrid },
     { name: 'overview', label: 'All runs', Icon: List },
+    ...surfaces(cap),
   ]
-  if (cap.hasMethod('member.list'))
-    links.push({ name: 'members', label: 'Members', Icon: Users })
-  if (cap.hasMethod('workspace.add'))
-    links.push({ name: 'workspaces', label: 'Manage workspaces', Icon: FolderGit2 })
-  if (cap.hasMethod('template.save'))
-    links.push({ name: 'templates', label: 'Templates', Icon: FileText })
-  if (cap.hasMethod('agent.list'))
-    links.push({ name: 'agents', label: 'Agents', Icon: Bot })
-  if (cap.hasMethod('files.tree'))
-    links.push({ name: 'files', label: 'Files', Icon: FolderTree })
-  if (cap.hasLocal('link.status'))
-    links.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass })
-  if (cap.hasLocal('daemon.status'))
-    links.push({ name: 'settings', label: 'Settings', Icon: Settings })
   return (
     <nav aria-label="Surfaces" className="shrink-0 border-t py-1">
       {links.map(({ name, label, Icon }) => (
         <button
           key={name}
           type="button"
+          aria-label={
+            name === 'approvals'
+              ? approvalsLabel(label, waiting, inboxError)
+              : undefined
+          }
+          aria-current={route.name === name ? 'page' : undefined}
           onClick={() => navigate(name)}
           className={cn(
             'flex w-full items-center gap-2 border-l-2 border-transparent px-2 py-1 text-left text-sm hover:bg-accent/60',
@@ -292,6 +294,18 @@ function NavSection() {
         >
           <Icon className="size-3.5 text-muted-foreground" />
           {label}
+          {name === 'approvals' && (waiting > 0 || inboxError !== null) && (
+            <span
+              aria-hidden
+              title={inboxError ?? 'Requests waiting on a decision'}
+              className={cn(
+                'ml-auto rounded-full bg-state-needs-attention/15 px-1.5',
+                'text-[11px] font-medium text-state-needs-attention',
+              )}
+            >
+              {inboxError ? '?' : waiting}
+            </span>
+          )}
         </button>
       ))}
     </nav>

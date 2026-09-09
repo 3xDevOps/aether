@@ -42,7 +42,7 @@ export interface BoardInput {
 }
 
 export const bucketLabel: Record<Bucket, string> = {
-  'needs-you': 'Needs You',
+  'needs-you': 'Needs you',
   working: 'Working',
   done: 'Done',
 }

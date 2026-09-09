@@ -310,13 +310,13 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   const list: Command[] = [
     {
       id: 'board',
-      label: 'Open the run board',
+      label: 'Open the board',
       Icon: LayoutGrid,
       perform: (d) => d.navigate('board'),
     },
     {
       id: 'overview',
-      label: 'Open every run as a list',
+      label: 'Open all runs',
       Icon: List,
       perform: (d) => d.navigate('overview'),
     },

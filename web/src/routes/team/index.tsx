@@ -1,5 +1,5 @@
 // The team surfaces: presence, the shared approval inbox, the workspace
-// activity feed, and budgets. They reach into the run board and the status
+// activity feed, and budgets. They reach into the board and the status
 // bar through the slots those views expose, and the two full views are
 // ordinary registry routes.
 

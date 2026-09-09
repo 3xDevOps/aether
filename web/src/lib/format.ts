@@ -1,3 +1,5 @@
+import type { BudgetState } from '@/lib/types'
+
 const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 
 export function formatBytes(bytes: number): string {
@@ -43,6 +45,19 @@ export function bareVersion(version: string): string {
 export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
+
+export const money = new Intl.NumberFormat(undefined, {
+  style: 'currency',
+  currency: 'USD',
+})
+
+/** What a budget state is called wherever it is shown. */
+export const budgetStateLabel: Record<BudgetState, string> = {
+  ok: 'within budget',
+  warn: 'nearing the cap',
+  exceeded: 'past the cap',
+}
+
 /** Display names for the setup-capable harnesses. */
 export const friendly: Record<string, string> = {
   claude: 'Claude Code',
