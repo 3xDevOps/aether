@@ -42,7 +42,7 @@ that typechecks and tests the SPA on its own.
 
 ## The three extension seams
 
-Later waves (run board, terminal, diff timeline, team surfaces) add views and
+Later waves (the board, terminal, diff timeline, team surfaces) add views and
 state without editing the shell.
 
 **Route registry** (`src/routes/registry.ts`). A route file calls
@@ -105,10 +105,11 @@ badges () belong in these slots, not in `run-card.tsx`.
 ## Sidebar
 
 `src/components/shell/sidebar.tsx` is a workspace switcher over a flat list of
-that workspace's runs. There is no run tree: one workspace is in view at a
-time, so the outer level had nothing left to hold, and the runs group instead
-by state or by owning member (the `groupBy` preference, toggled in the header
-and persisted). The only collapse state left is the whole sidebar's.
+that workspace's runs, with the nav for every other view under it. There is no
+run tree: one workspace is in view at a time, so the outer level had nothing
+left to hold, and the runs group instead by state or by owning member (the
+`groupBy` preference, persisted). The only collapse state left is the whole
+sidebar's.
 
 - **The switcher sits above everything it scopes**, and appears only when there
   is a choice: a single workspace renders as a plain label with its base branch
@@ -121,13 +122,31 @@ and persisted). The only collapse state left is the whole sidebar's.
 - **The attention badge counts, it does not navigate.** The runs below are
   already sorted worst-first, so the number is for a scrolled sidebar or a
   stall that landed while the member was elsewhere in the app.
-- **The header carries the way in.** New run opens the launch form (gated on
-  `canLaunch`), the board button and All runs switch between the two
-  whole-workspace views, and the group-by toggle sits beside them.
-- **Below the runs, the nav links are capability-gated** on the method or local
-  verb that powers each view, so a gateway that cannot serve a surface never
-  shows the way in. All runs is the exception: it is a view of the runs the
-  sidebar is already showing, so it needs no gate.
+- **The header carries New run and the grouping.** New run opens the launch
+  form (gated on `canLaunch`). Grouping is a two-segment control, Status and
+  Member, with `aria-pressed` on the current one, so the pressed segment is the
+  state and the other one is the action.
+- **Below the runs, one nav list reaches every other view**, the active entry
+  marked with `aria-current`. Board and All runs lead it, the two
+  whole-workspace views, and neither is gated: both are views of the runs the
+  sidebar already has.
+- **The scope-wide surfaces under them come from `src/lib/surfaces.ts`**, which
+  the palette's "Go to" group renders too, so a surface cannot be named one
+  thing in the sidebar and another in the palette, and neither can forget its
+  gate. Each is gated on the method or local verb that powers its view, so a
+  gateway that cannot serve a surface never shows the way in. Approvals and
+  Activity lead that list: the inbox is where an agent's permission request
+  waits for a human, and they and Members are the only three of these surfaces
+  whose method is on the legacy remote allowlist in `src/store/hooks.ts`.
+  Approvals carries the pending count
+  in its accessible name; the status bar keeps its own copy of that count for
+  when the member is looking elsewhere.
+- **A nav entry is named what the view it opens is titled**, as are the
+  Approvals and Activity tooltips in the status bar: a member who arrived from
+  one is looking for that word again to come back. This is why the entry for
+  `routes/workspaces/` is "Manage workspaces" everywhere rather than
+  "Workspaces" - the palette already heads its jump-to-a-workspace group with
+  that word, and those items open a single workspace instead.
 
 ## Files view
 
@@ -285,11 +304,11 @@ itself, and the gauge is labelled as that: it is the number that says whether
 the box is running out of room, and claiming it as Aether's own usage would
 be an invention.
 
-## Run board
+## Board
 
 `src/routes/board/` is the default center view: the active workspace's run
 cards in the three buckets the GUI spec copies from Orca. `needs-attention` is
-Needs You (both stalls and clean exits waiting on `run.close` - the card's
+Needs you (both stalls and clean exits waiting on `run.close` - the card's
 reason line tells them apart), `queued`/`provisioning`/`running` is Working,
 the terminal statuses are Done.
 An active run whose approval request is still pending also presents as
@@ -300,9 +319,15 @@ untinted and the card carries the state colour.
 
 Three buckets, and no Idle column: a card is a run, and no run status maps
 to idle, so an idle column could only ever hold something that is not a card.
-A workspace with nothing in it says so once rather than as three empty
-columns: what a run is, and the New run button, because an empty board is the
-first thing a new member sees.
+A workspace with nothing in it says so once: the notice replaces the column
+row rather than sitting above it, because three empty buckets each saying
+"Nothing here." repeat the notice three times without adding to it. What is
+left is what a run is, and New run as the primary button.
+
+A bucket with no cards shows nothing for the first 200ms of a cold load,
+because `useDelayed` has not answered yet and "not known" is not "empty";
+skeletons after that while the load is still running; and "Nothing here." once
+the board is hydrated.
 
 Two things the buckets do not come from the run status alone:
 
@@ -327,7 +352,7 @@ Two things the buckets do not come from the run status alone:
 
 ### Reason and paused on the wire
 
-**The Needs You reason survives a fetch.** `protocol.Run` carries `reason` -
+**The Needs you reason survives a fetch.** `protocol.Run` carries `reason` -
 the last `run.status` reason, persisted with the run and sanitized
 server-side - so a run that was already in needs-attention when the tab
 loaded shows its reason line, and the card tells a stall from a clean exit
@@ -371,13 +396,16 @@ Two surfaces render that one list, so a label or a gate can never drift:
   workspace also makes it the active scope, so the sidebar and the board
   follow - and steers **the run the center view is showing**, any run-detail
   tab, since it keys on `route.params.runId` rather than on a route name.
-  From the board there is none, so reveal a run first.
+  From the board there is none, so reveal a run first. Its "Go to" group is
+  `src/lib/surfaces.ts` - the gated list the sidebar nav renders below Board
+  and All runs - so a scope-wide surface cannot be reachable from one and not
+  the other.
 - **Visible buttons**, so nothing important is reachable only by a shortcut:
   New run in the sidebar header, in the board header and in the notice an
-  empty board carries above its columns; All runs in the sidebar nav; and the
-  run action bar (`src/components/run-actions.tsx`) in the header of every
-  run-detail tab, which is where the run verbs live for a member who has not
-  learned `⌘K` yet.
+  empty board shows in place of its columns; every view in the sidebar nav;
+  and the run action bar (`src/components/run-actions.tsx`) in the header of
+  every run-detail tab, which is where the run verbs live for a member who has
+  not learned `⌘K` yet.
 
 Two things the buttons add. A `Command` carrying a `confirm` field - kill,
 delete and both close actions - opens a dialog naming the run before it runs;
@@ -658,7 +686,8 @@ activity feed and budgets - the four readouts of the team features
 (`internal/approvals`, `internal/timeline`, `internal/cost`). None of them owns
 a view of its own in the shell: they reach the run card and the status bar
 through the slots those surfaces expose, and the two full views are registry
-routes (`approvals`, `timeline`).
+routes (`approvals`, `timeline`), reached from the sidebar nav and the palette
+like every other view, and gated on the same method the nav gates them on.
 
 - **They refresh from the event cursor, not a timer.** Every event the store
   applies advances `lastSeq`, and that is the only signal available that a
@@ -678,6 +707,12 @@ routes (`approvals`, `timeline`).
   whole queue - and a workspace does not stop being over its cap or holding an
   undecided request when its last run finishes, so no subset could answer
   either one. Failures leave the last good data in place.
+- **An unreadable queue says so.** `refreshInbox` keeps the first
+  per-workspace `approval.list` failure, and the inbox, the nav entry and the
+  status-bar chip report it rather than "Nothing is waiting on a decision.",
+  which over a failed read means "no agent is blocked". Workspaces that
+  answered are still listed. Each read is stamped, so a slow failure cannot
+  overwrite a newer good answer.
 - **The heartbeat is narrower.** It claims only the workspace in view -
   `focusedWorkspace` prefers the route's `workspaceId`, then the workspace of
   the run in view, then `activeWorkspace` - because presence is keyed on
@@ -710,6 +745,15 @@ routes (`approvals`, `timeline`).
   against another is the question the view exists to answer; it opens on the
   active workspace and switching it clears the run filter, since a run belongs
   to exactly one workspace.
+- **A feed row names the event's type; it does not print it.** The name comes
+  from `src/lib/events.ts`, which is also where the type filter's options are
+  named from, so an option and the rows it selects cannot call one type two
+  different things. The wire string stays as the row's tooltip. The describer
+  table in `src/components/feed-entry.tsx` is keyed by the map's own type, and
+  `filterTypes` by those keys too, so a type cannot gain a name without a
+  description, or the reverse, without failing the build. A type the map has
+  never heard of renders as its wire string, because a server newer than the
+  dashboard can emit one.
 - **A budget warns, it never stops anything.** The status bar shows the spend
   and the worst state any workspace is in (`ok`, `warn`, `exceeded`) - every
   workspace, ones with nothing running included, which is what the wide read
@@ -1138,23 +1182,34 @@ covered where they live: the run action bar showing pause, resume or neither
 as the pause state is known, asking before a kill and only then killing,
 offering the hand-off targets who may own a run and no button at all when
 there are none, and gating pull and relaunch; the sidebar offering New run to
-a member who may start one and not to a viewer, and All runs opening the flat
-list; the board header opening the launch form and an empty workspace saying
-so once rather than three times; and the launch form refusing a headless run
-with no task while sending nothing the server already defaults, offering only
-installed agents beside the `custom` escape hatch, keeping Launch disabled
-both when none is installed and when `agent.list` fails, and sending setup to
-the Agents view. The sidebar also covers the switcher naming a sole workspace
-instead of offering a picker, a switch rescoping the run list, and the
-attention badge counting. The permission mirror is exercised through the bar
-rather than on its own: a viewer is offered nothing that mutates a run, a
-collaborator may steer and kill another member's run but not give it away or
-protect it, and a protected run and an `admins_only` workspace both close
-steering to everyone but the owner. Two more cover the shared runner: a
-refused kill toasts the server's message verbatim, and a slow pull locks the
-whole bar, names the ref it fetched and leaves its git output on the store for
-the diff tab. The shell test clicks New run in the sidebar and finds the real
-form, which is what proves the host is the shell's rather than the palette's.
+a member who may start one and not to a viewer; the board header opening the
+launch form, an empty workspace saying so once, each of the three bucket
+placeholders in its own state, and both transitions into and out of the notice;
+and the launch form refusing a headless run with no task while sending nothing
+the server already defaults, offering only installed agents beside the `custom`
+escape hatch, keeping Launch disabled both when none is installed and when
+`agent.list` fails, and sending setup to the Agents view. The sidebar also
+covers the switcher naming a sole workspace instead of offering a picker, a
+switch rescoping the run list, and the attention badge counting.
+
+The navigation's own claims are tested from both sides: every nav and palette
+entry appears only when its gate is served, `aria-current` marks the active
+entry, Approvals folds its count - or an unreadable queue - into its accessible
+name, and each view asserts the title its nav entry uses so the rename cannot
+come apart. `src/lib/events.test.tsx` renders one event of every named type and
+proves no row shows half of itself; `team.test.tsx` proves a failed
+`approval.list` reaches the reader instead of an empty queue, beside the
+workspaces that answered, and that a stale failure loses to a newer read.
+
+The permission mirror is exercised through the bar rather than on its own: a
+viewer is offered nothing that mutates a run, a collaborator may steer and kill
+another member's run but not give it away or protect it, and a protected run
+and an `admins_only` workspace both close steering to everyone but the owner.
+Two more cover the shared runner: a refused kill toasts the server's message
+verbatim, and a slow pull locks the whole bar, names the ref it fetched and
+leaves its git output on the store for the diff tab. The shell test clicks New
+run in the sidebar and finds the real form, which is what proves the host is
+the shell's rather than the palette's.
 The team surfaces are driven through the same stub API: the status bar reading
 roster, queue and budget and rendering all three, the approval badge and
 watcher avatars reaching a real run card, a decision going out as
