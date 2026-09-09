@@ -20,7 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { banner, Dismiss } from '@/components/update-banner-shared'
+import { banner, Dismiss, verbatim } from '@/components/update-banner-shared'
 import { api, type Api } from '@/lib/api'
 import { bareVersion, message } from '@/lib/format'
 import type {
@@ -29,6 +29,7 @@ import type {
   ServerUpdateWaiting,
   ServerUpdateWhen,
 } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -146,7 +147,7 @@ function ShellBanner() {
 
   return (
     <div role="status" className={banner}>
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0 flex-1 space-y-1">
         <p>
           <span className="font-medium">The desktop app is out of date.</span>{' '}
           It was built by aether {desktopBridge()?.shellVersion}, and {cliVersion}{' '}
@@ -159,7 +160,8 @@ function ShellBanner() {
         {buildError && (
           <>
             <p className="text-muted-foreground">The last rebuild failed:</p>
-            <p className="font-mono text-xs text-state-failed">{buildError}</p>
+            {/* This prompt renders above the CLI and server ones. */}
+            <p className={cn(verbatim, 'text-state-failed')}>{buildError}</p>
           </>
         )}
         <p className="text-muted-foreground">Rebuild it in a terminal:</p>
@@ -362,7 +364,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
 
   return (
     <div role="status" className={banner}>
-      <div className="min-w-0 space-y-1">
+      <div className="min-w-0 flex-1 space-y-1">
         <p>
           <span className="font-medium">The server is behind.</span> Server{' '}
           {running}, latest {latest}.
@@ -399,10 +401,10 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
             <p className="text-muted-foreground">
               The update failed and nothing was replaced.
             </p>
-            <p className="font-mono text-xs text-state-failed">{flow.detail}</p>
+            <p className={cn(verbatim, 'text-state-failed')}>{flow.detail}</p>
           </>
         )}
-        {error && <p className="font-mono text-xs text-state-failed">{error}</p>}
+        {error && <p className={cn(verbatim, 'text-state-failed')}>{error}</p>}
         {(!capable || flow.name === 'failed') && (
           <>
             <p className="text-muted-foreground">
@@ -419,14 +421,14 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
         )}
       </div>
       {!status && statusError && (
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <Button size="sm" variant="outline" onClick={onRetry}>
             Retry
           </Button>
         </div>
       )}
       {canUpdate && capable && (
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {flow.name === 'scheduled' ? (
             <Button
               size="sm"
