@@ -207,7 +207,6 @@
     position: absolute;
     top: 50%;
     left: calc(100% + 0.35rem);
-    z-index: 1;
     display: block;
     width: 3.25rem;
     height: 1.25rem;
