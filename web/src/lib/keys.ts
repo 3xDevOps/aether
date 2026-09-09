@@ -11,19 +11,26 @@ const overlays =
  * The subset that owns the keyboard outright while it is open. A terminal does
  * not: it is on the page throughout a run and only takes what is typed into
  * it. A dialog on its way out does not either - Radix keeps it mounted for the
- * length of its exit animation.
+ * length of its exit animation. An open select list is one of these and has
+ * to be: it is portalled out of whatever hosts it, so there is no dialog above
+ * it to stand a chord down, and it does not close with one either.
  */
 const open = ':not([data-state="closed"])'
-const modals = ['dialog', 'alertdialog', 'menu']
-  .map((role) => `[role="${role}"]${open}`)
-  .join(', ')
+const modals = [
+  ...['dialog', 'alertdialog', 'menu'].map((role) => `[role="${role}"]${open}`),
+  // A select list says when it is open; cmdk's list carries no state at all,
+  // and the palette's own rows must not stand down the chord that closes it.
+  '[role="listbox"][data-state="open"]',
+].join(', ')
 
-/** True inside anything that takes typing, a native select's typeahead
- * included. */
+/** True inside anything that takes typing, a select's typeahead included. A
+ * select is a `combobox` rather than a tag of its own: it is a button, and it
+ * answers a bare letter by jumping to the option that starts with it. */
 function inField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   if (target.isContentEditable) return true
-  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+  if (target.getAttribute('role') === 'combobox') return true
+  return ['INPUT', 'TEXTAREA'].includes(target.tagName)
 }
 
 /**

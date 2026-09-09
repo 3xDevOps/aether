@@ -40,14 +40,6 @@ const localCaps: GatewayCapabilities = {
   ],
 }
 
-// jsdom has no layout engine, so the terminal's fit addon has nothing to
-// observe.
-class NoResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function seed(caps: GatewayCapabilities = localCaps) {
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
@@ -137,7 +129,6 @@ async function toAgentsStep() {
 
 beforeEach(() => {
   StubSocket.install()
-  vi.stubGlobal('ResizeObserver', NoResizeObserver)
 })
 
 afterEach(() => {
@@ -320,7 +311,10 @@ describe('agents step', () => {
     expect(await screen.findByText('12 skills, 4 commands - 179 KB')).toBeDefined()
     expect(screen.getByText('/home/alice/.claude')).toBeDefined()
     // The exclusions carry the guard's own reason, file by file.
-    expect(screen.getByText('Left out of Claude Code: 1 entry')).toBeDefined()
+    // The list itself is behind the disclosure the count names.
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Left out of Claude Code: 1 entry' }),
+    )
     expect(screen.getByText('.credentials.json')).toBeDefined()
     expect(
       screen.getByText(/credential file excluded for claude/),
@@ -356,6 +350,9 @@ describe('agents step', () => {
     expect(
       await screen.findByText('Left out of Claude Code: 1403 entries'),
     ).toBeDefined()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Left out of Claude Code: 1403 entries' }),
+    )
     expect(screen.getByText('and 1402 more')).toBeDefined()
   })
 
@@ -746,6 +743,8 @@ describe('agents step', () => {
       frame({ type: 'output', line: 'reading ~/.claude' })
     })
     expect(await screen.findByRole('status')).toBeDefined()
+    // The scan's own output is behind the disclosure beside the status line.
+    fireEvent.click(screen.getByRole('button', { name: 'View process' }))
     expect(screen.getByText('reading ~/.claude')).toBeDefined()
 
     act(() =>
@@ -770,14 +769,14 @@ describe('agents step', () => {
       }),
     )
 
-    const claude = await screen.findByRole<HTMLInputElement>('checkbox', {
+    const claude = await screen.findByRole('checkbox', {
       name: 'Bring Claude Code configuration',
     })
-    const codex = screen.getByRole<HTMLInputElement>('checkbox', {
+    const codex = screen.getByRole('checkbox', {
       name: 'Bring Codex configuration',
     })
-    expect(claude.checked).toBe(true)
-    expect(codex.checked).toBe(false)
+    expect(claude.getAttribute('aria-checked')).toBe('true')
+    expect(codex.getAttribute('aria-checked')).toBe('false')
     // Each one-sentence reason sits next to its own row.
     expect(
       screen.getByText('your skills cover the languages in this repository'),
@@ -944,9 +943,7 @@ describe('the harness the step set up', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe(
-        'claude',
-      )
+      expect(screen.getByLabelText('Agent').textContent).toBe('claude')
     })
   })
 
@@ -1026,9 +1023,7 @@ describe('the harness the step set up', () => {
       await screen.findByRole('region', { name: 'First run' }),
     ).toBeDefined()
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe(
-        'claude',
-      )
+      expect(screen.getByLabelText('Agent').textContent).toBe('claude')
     })
   }, 20_000)
 })

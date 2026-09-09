@@ -533,10 +533,11 @@ surface, so the form disables Launch and says why rather than sending a
 request the gateway will refuse (`runLaunch` in `internal/sshd/handlers.go` is
 the same rule). Only what was actually chosen goes on the wire: an empty task
 and the default `tui` mode are the server's own defaults. The **Agent** field
-is always there: a leading "Choose an agent" option, then the installed
-entries from `agent.list`, then `custom`, the escape hatch that `agent.list`
-never returns and that only launches where the deployment pinned a harness
-with `--harness-definitions`. `agent.list` reports installation from the
+is always there. It reads "Choose an agent" until one is picked, and there is
+no way back to that state once one is. Under it are the installed entries from
+`agent.list`, then `custom`, the escape hatch that `agent.list` never returns
+and that only launches where the deployment pinned a harness with
+`--harness-definitions`. `agent.list` reports installation from the
 selected account's persistent `~/.local/bin`; uninstalled shipped entries
 remain visible on the Agents page so setup can install them. The launch form
 also remembers the most recently used installed agent for each account and
@@ -565,14 +566,13 @@ Everything the dashboard can do is reachable without a mouse, and every control
 a keyboard reaches draws the same focus indicator.
 
 **One focus indicator.** `focusRing` in `src/lib/utils.ts` is it, and it is
-the only one: the `Button`, `Input` and `Textarea` primitives compose it into
-their base, and so does every raw control that takes focus - buttons, selects,
-links, `<summary>` elements, menu items, the dialog close, the resize handles.
-The `field` style beside it there carries it for most of the native
-`<select>` elements, and the two that size their own box - the sidebar
-switcher and the activity filters - name `focusRing` themselves. A new control
-that is none of those adds `focusRing` to its classes. No file writes a focus
-indicator of its own. The only `focus-visible:` classes a file adds are
+the only one: every primitive in `components/ui` that takes focus composes it
+into its base - `Button`, `Input`, `Textarea`, `SelectTrigger`, `SelectItem`,
+`Checkbox`, `CollapsibleTrigger`, `DropdownMenuItem`, `CommandInput`,
+`DialogClose` - and so does every control still drawn by hand outside them:
+links, hand-drawn buttons, focusable panels and the resize handles. A new
+control that is neither adds `focusRing` to its classes. No file writes a
+focus indicator of its own. The only `focus-visible:` classes a file adds are
 modifiers of this one: the inset offset below, and `focus-visible:opacity-100`
 where the dialog close would otherwise fade its outline along with its glyph.
 `a11y.test.tsx` reads the source tree to keep that true, control by control,
@@ -598,11 +598,14 @@ pseudo-class less specific and loses at the moment the outline is drawn.
 each takes focus programmatically when it opens and has nothing to show for
 it. Their contents are not the same case. A `DropdownMenuItem` takes real DOM
 focus under Radix's roving tabindex, so it wears the outline like any other
-control, keeping its `focus:` background as well. A `CommandItem` suppresses
-the outline too, and that one is deliberate: cmdk never moves focus to it at
-all, leaving it on the input and tracking the highlighted row with
-`aria-activedescendant`, so a background is all it has,
-and all it needs.
+control, keeping its `focus:` background as well. A `SelectItem` is that case
+again: Radix moves DOM focus onto the highlighted option, so it wears the
+outline inset like a menu item, and `SelectContent` suppresses its own for the
+reason the other two containers do. A `CommandItem` suppresses the outline
+too, and that one is deliberate: cmdk never moves focus to it at all, leaving
+it on the input and tracking the highlighted row with `aria-activedescendant`,
+so a background is all it has, and all it needs. It is the one row the focus
+sweep is told to skip.
 
 **The shell's own keys**, listed in the shortcuts dialog behind the `?`
 trigger in the status bar. `⌘K` lives with the palette in
@@ -622,10 +625,12 @@ trigger in the status bar. `⌘K` lives with the palette in
 `n` is offered, on both surfaces, only to a member who may launch. The
 single-key ones carry no modifier, so `keyboardBusy` in `src/lib/keys.ts`
 stands them down whenever something else has the keyboard: a text field or a
-native select, a terminal, an open menu or list box, or an open dialog. A
-stray `n` typed at an agent has to reach the agent, and `n` in a menu is that
-menu's own typeahead. The `g` prefix waits 1.5s for the key that completes it,
-and any key that goes somewhere else ends the wait.
+select, a terminal, an open menu or list box, or an open dialog. A stray `n`
+typed at an agent has to reach the agent, `n` in a menu is that menu's own
+typeahead, and `n` on a select jumps to the option that starts with it - the
+guard finds a select by its `combobox` role, since the control is a button.
+The `g` prefix waits 1.5s for the key that completes it, and any key that goes
+somewhere else ends the wait.
 
 `⌘K` is the exception, and has to be: it is modified, so nothing can mistake
 it for typing, and with the terminal holding the focus and swallowing Tab it
@@ -1481,17 +1486,35 @@ wherever the member is an admin.
   such answer.
 - **Primitives, not raw form elements.** `src/components/ui/` holds the
   shadcn/ui pieces the dashboard uses - `Button`, `Input`, `Textarea`,
-  `Label`, `Dialog`, `DropdownMenu`, `Command`, `Skeleton` - most of them
-  retuned to the house scale rather than taken at shadcn's own metrics, and
-  each focusable one composing `focusRing`. They are house copies rather than
-  registry output, so a `shadcn add` offering to overwrite one is declined. A
-  field draws its border from `--input` rather than the `--border` every other
-  element wears, dims while disabled, and prints its placeholder in the muted
-  token. No file outside that directory writes a raw text `<input>`,
-  `<textarea>` or `<label>`; a checkbox is exempt, drawing none of a field's
-  border, padding or text scale. `components/ui/fields.test.tsx` reads the
-  source tree to keep that true. A `Label` wraps the control it names rather
-  than pointing at it by id, so neither end needs one.
+  `Label`, `Select`, `Checkbox`, `Collapsible`, `Dialog`, `DropdownMenu`,
+  `Command`, `Skeleton` - most of them retuned to the house scale rather than
+  taken at shadcn's own metrics, and each focusable one composing `focusRing`.
+  They are house copies rather than registry output, so a `shadcn add`
+  offering to overwrite one is declined. `Input`, `Textarea` and
+  `SelectTrigger` draw one box between them, the `field` style in
+  `src/lib/utils.ts`: `--input` for the border rather than the `--border`
+  every other element wears, and dimmed while disabled. Each colours its own
+  placeholder in the muted token. No file outside that directory writes a raw
+  `<input>`, `<textarea>`, `<label>`, `<select>`, `<details>` or `<summary>`,
+  and there is no exemption; `components/ui/primitives.test.tsx` reads the
+  source tree to keep that true.
+- **The empty string belongs to the placeholder.** A `SelectItem` carrying it
+  is a row that can never be chosen and never shown, because Radix reads an
+  empty value as "nothing is picked". Where empty is a real value the server
+  or a filter understands, it travels through the list as a named sentinel and
+  is mapped back at the boundary - `all`, `everyone` and `noRun` are the
+  three. `primitives.test.tsx` holds both halves: no item may carry it,
+  and `Select` drops the empty report Radix sends back through the hidden
+  native select it mirrors a value into inside a form.
+- **A caption names its control two ways.** A `Label` wraps a text field, so
+  neither end needs an id. A select is the exception: its trigger is a
+  `<button>`, and a button takes its accessible name from its own contents, so
+  a label wrapped around one would leave the control announcing itself as
+  whichever option is chosen. Those captions carry `htmlFor` and the trigger
+  the matching `id`.
+- **A disclosure mounts its body when it opens.** A shut `Collapsible` holds
+  nothing at all, so nothing can reach into one: not a test, not the browser's
+  own find-in-page. Its trigger draws its own marker.
 - **One focus indicator, one source.** `focusRing` in `src/lib/utils.ts`; see
   [Keyboard and focus](#keyboard-and-focus).
 - **Member colour attributes, it does not fill.** The avatar rings itself in
@@ -1559,19 +1582,25 @@ holds a record, where it chooses merged or abandoned.
 `src/a11y.test.tsx` holds the claims in [Keyboard and
 focus](#keyboard-and-focus). The focus sweep walks the route registry rather
 than a hand-kept list, so a view added later is swept without anyone
-remembering, and it renders the shell, the palette, its three forms, an open
-menu, the run strip and a dock beside it; every button, tab, link, field,
-select, checkbox, switch, menu item, focusable panel and resize handle it
-finds has to carry the outline, written out as literal classes because a token
-compared against itself passes for any value. Two source scans stand behind
-it, because a sweep only sees what a test renders: one proves no second
-indicator exists anywhere in `web/src`, the other that every file drawing a
-raw control reaches for the shared one. `components/ui/fields.test.tsx` scans
-the same tree for the fields themselves, under the Styleguide rule above and
-its one carve-out, so a route cannot quietly redraw a field. Beside it,
-`Input` and `Textarea` are rendered to prove the outline is really on them,
-`Label` to pin the single class it adds against a registry overwrite, and a
-ref is followed to the DOM node four call sites focus through.
+remembering, and it renders the shell, the palette, its four forms, an open
+menu, an open select, a checkbox, the run strip and a dock beside it; every
+button, tab,
+link, field, select, option, checkbox, switch, menu item, focusable panel and
+resize handle it finds has to carry the outline, written out as literal
+classes because a token compared against itself passes for any value. Two
+source scans stand behind it, because a sweep only sees what a test renders:
+one proves no second indicator exists anywhere in `web/src`, the other that
+every file drawing a raw control reaches for the shared one.
+`components/ui/primitives.test.tsx` scans the same tree for the controls the
+primitives own, under the Styleguide rule above and with no carve-out, so a
+route cannot quietly redraw one. Beside it, each of the five focusable
+primitives it owns - `Input`, `Textarea`, `Checkbox`, `SelectTrigger` and
+`CollapsibleTrigger` - is rendered to prove the outline is really on it,
+`Label` is pinned to the single class it adds against a registry overwrite and
+shown naming a select by id rather than by wrapping it, a ref is followed to
+the DOM node four call sites focus through, a collapsible is opened to show
+its body arriving with it, and a select is driven by both the keyboard and the
+mouse, since Radix commits a choice differently for each.
 
 The rest of the file is behaviour: arrow keys move focus around both strips and
 wrap without opening anything, a modifier chord goes to the browser, Enter and

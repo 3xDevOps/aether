@@ -14,6 +14,7 @@ import {
   run,
   workspace,
 } from '@/test/fixtures'
+import { pickOption } from '@/test/select'
 
 // Well past the 500-seq window, so the arithmetic is visible: an
 // implementation that ignored the probe and started at zero would fail.
@@ -213,16 +214,19 @@ describe('workspace activity feed', () => {
     render(<TimelineFeed params={{}} client={client} />)
     await screen.findByText(/waiting on a question/)
 
-    fireEvent.change(screen.getByLabelText('Run'), { target: { value: 'run_1' } })
+    await pickOption(screen.getByLabelText('Run'), 'rewrite the checkout flow')
     await vi.waitFor(() =>
       expect(useStore.getState().feedFilters.runID).toBe('run_1'),
+    )
+    // Closing a list hands focus back to the trigger it dropped from, so the
+    // next filter can only be opened once that has landed.
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText('Run')),
     )
 
     // A run belongs to one workspace: keeping the filter would query the new
     // workspace for a run it does not have.
-    fireEvent.change(screen.getByLabelText('Workspace'), {
-      target: { value: otherWorkspace.id },
-    })
+    await pickOption(screen.getByLabelText('Workspace'), otherWorkspace.name)
 
     await vi.waitFor(() => {
       const f = useStore.getState().feedFilters
@@ -237,9 +241,7 @@ describe('workspace activity feed', () => {
     render(<TimelineFeed params={{}} client={client} />)
     await screen.findByText(/waiting on a question/)
 
-    fireEvent.change(screen.getByLabelText('Type'), {
-      target: { value: 'run.status' },
-    })
+    await pickOption(screen.getByLabelText('Type'), 'Run status')
 
     await vi.waitFor(() =>
       expect(client.workspaceTimeline).toHaveBeenCalledWith(
@@ -254,9 +256,7 @@ describe('workspace activity feed', () => {
     render(<TimelineFeed params={{}} client={client} />)
     await screen.findByText(/waiting on a question/)
 
-    fireEvent.change(screen.getByLabelText('Type'), {
-      target: { value: 'run.title' },
-    })
+    await pickOption(screen.getByLabelText('Type'), 'Run title')
 
     await vi.waitFor(() =>
       expect(client.workspaceTimeline).toHaveBeenCalledWith(

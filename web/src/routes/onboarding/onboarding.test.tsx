@@ -19,6 +19,7 @@ import { OnboardingRoute } from '@/routes/onboarding'
 import { FirstRunStep } from '@/routes/onboarding/steps'
 import { useStore, type RootState } from '@/store'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
+import { openSelect, pickOption } from '@/test/select'
 import {
   agentInfo,
   alice,
@@ -909,7 +910,9 @@ describe('onboarding wizard', () => {
     )
     // Open, not merely present: the reader who needs to tell "[new branch]"
     // from "Everything up-to-date" would not know to go looking.
-    expect(output.closest('details')?.open).toBe(true)
+    expect(
+      screen.getByRole('button', { name: 'What git did' }).getAttribute('aria-expanded'),
+    ).toBe('true')
     // Nothing invites a second push, and Continue moves on.
     expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
     // The command stays copyable: the two tips agree, so it is still the
@@ -967,9 +970,11 @@ describe('onboarding wizard', () => {
       'Workspace already has main at 9f1c2ab. Nothing to push.',
     )
     expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
+    // Git's own answer, and the panel holding it open so the reader meets it.
+    expect(screen.getByText(/FETCH_HEAD/)).toBeDefined()
     expect(
-      screen.getByText(/FETCH_HEAD/).closest('details')?.open,
-    ).toBe(true)
+      screen.getByRole('button', { name: 'What git did' }).getAttribute('aria-expanded'),
+    ).toBe('true')
   })
 
   it('fast-forwards the clone when the workspace is ahead', async () => {
@@ -1354,9 +1359,7 @@ describe('onboarding wizard', () => {
     // scope again.
     expect(screen.queryByLabelText('Workspace')).toBeNull()
 
-    fireEvent.change(screen.getByLabelText('Agent'), {
-      target: { value: 'claude' },
-    })
+    await pickOption(screen.getByLabelText('Agent'), 'claude')
     fireEvent.change(screen.getByLabelText('Task'), {
       target: { value: 'write a result file' },
     })
@@ -1406,9 +1409,10 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
-    const picker = await screen.findByLabelText<HTMLSelectElement>('Agent')
-    const options = [...picker.options].map((o) => o.value)
-    expect(options).toEqual(['', 'claude'])
+    const list = await openSelect(await screen.findByLabelText('Agent'))
+    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'claude',
+    ])
   })
 
   it('sends the reader back to Agents when nothing is installed', async () => {
@@ -1532,7 +1536,8 @@ describe('onboarding wizard', () => {
     await toFirstRunStep()
 
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe('')
+      // Nothing is picked, so the trigger still prints its placeholder.
+      expect(screen.getByLabelText('Agent').textContent).toBe('Choose an agent')
     })
     expect(useStore.getState().onboardingFirstRun.harness).toBe('')
     expect(
@@ -1567,7 +1572,7 @@ describe('onboarding wizard', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByLabelText<HTMLSelectElement>('Agent').value).toBe('myagent')
+      expect(screen.getByLabelText('Agent').textContent).toBe('myagent')
     })
   })
 
@@ -1616,9 +1621,7 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
-    fireEvent.change(await screen.findByLabelText('Agent'), {
-      target: { value: 'claude' },
-    })
+    await pickOption(await screen.findByLabelText('Agent'), 'claude')
     fireEvent.change(screen.getByLabelText('Task'), {
       target: { value: 'write a result file' },
     })

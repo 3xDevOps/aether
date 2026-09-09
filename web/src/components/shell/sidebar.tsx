@@ -9,6 +9,13 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { canLaunch } from '@/lib/commands'
 import { useDelayed, useDrag } from '@/lib/hooks'
@@ -186,21 +193,18 @@ function WorkspaceSwitcher({
     <div className="flex h-9 items-center gap-2 border-b px-2">
       <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
       {list.length > 1 ? (
-        <select
-          aria-label="Workspace"
-          className={cn(
-            focusRing,
-            'min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm',
-          )}
-          value={active}
-          onChange={(e) => setActiveWorkspace(e.target.value)}
-        >
-          {list.map((workspace) => (
-            <option key={workspace.id} value={workspace.id}>
-              {workspace.name}
-            </option>
-          ))}
-        </select>
+        <Select value={active} onValueChange={setActiveWorkspace}>
+          <SelectTrigger aria-label="Workspace" className="min-w-0 flex-1">
+            <SelectValue placeholder="Choose a workspace" />
+          </SelectTrigger>
+          <SelectContent>
+            {list.map((workspace) => (
+              <SelectItem key={workspace.id} value={workspace.id}>
+                {workspace.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       ) : (
         <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
           <span className="truncate text-sm font-medium">

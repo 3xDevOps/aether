@@ -2,7 +2,12 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { GatewayCapabilities } from '@/lib/types'
 import { SettingsRoute } from '@/routes/settings'
 import { useStore, type RootState } from '@/store'
-import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
+import { runLabel } from '@/lib/status'
+import { toRecord } from '@/store/runs'
+import { alice, fakeApi, run, serverInfo, workspace } from '@/test/fixtures'
+import { pickOption } from '@/test/select'
+
+const active = run({ id: 'run_1', task: 'rewrite the checkout flow' })
 
 // The local gateway's descriptor: the client-machine verbs settings rides on.
 const localCaps: GatewayCapabilities = {
@@ -38,6 +43,22 @@ function seed(extra: Partial<RootState> = {}) {
 }
 
 describe('settings view', () => {
+  // Picking a run is what opens the mirror panel, so picking none again has
+  // to be a choice a reader can make; it was an option row before the select
+  // became a primitive and a placeholder cannot be chosen.
+  it('opens the mirror panel for a run and closes it again', async () => {
+    seed({ runs: { [active.id]: toRecord(active) } })
+    render(<SettingsRoute params={{}} client={fakeApi()} />)
+
+    const picker = screen.getByLabelText('Run')
+    await pickOption(picker, runLabel(active))
+    expect(screen.getByRole('region', { name: 'Sync' })).toBeDefined()
+
+    await pickOption(picker, 'Pick a run')
+
+    expect(screen.queryByRole('region', { name: 'Sync' })).toBeNull()
+  })
+
   it('renders the desktop-only empty state on a remote gateway', () => {
     // The remote descriptor has no local verbs, so there is nothing to manage.
     seed({

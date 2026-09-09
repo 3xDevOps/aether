@@ -19,6 +19,11 @@ export async function sourceFiles(): Promise<string[]> {
  * Every opening tag of the named elements in one file, with its own
  * attributes and no other. Per file is not enough: one compliant tag would
  * let every tag beside it through, and the exemption widens as a file grows.
+ *
+ * A regex rather than a parser, so one of these names written inside a comment
+ * or a string counts as a tag. That fails a scan rather than letting a real
+ * one through, but it is why a comment naming an element it must not draw is
+ * worth avoiding.
  */
 export function openingTags(source: string, names: string[]): Tag[] {
   const tags: Tag[] = []

@@ -104,9 +104,13 @@ export class RepositoryStep extends Step {
     return this.button('Push now')
   }
 
-  /** The "What git did" panel: git's own output, verbatim. */
+  /** The "What git did" panel: git's own output, verbatim. A `Collapsible`
+   * carries no role of its own, so this goes by the slot instead. */
   gitOutput(): Locator {
-    return this.section.getByRole('group').filter({ hasText: 'What git did' }).locator('pre')
+    return this.section
+      .locator('[data-slot="collapsible"]')
+      .filter({ hasText: 'What git did' })
+      .locator('pre')
   }
 
   continue(): Locator {
@@ -219,7 +223,10 @@ export class FirstRunStep extends Step {
    * installed, so a scenario installs one before it gets here.
    */
   async launch(agent: string, task: string): Promise<void> {
-    await this.section.getByRole('combobox', { name: 'Agent' }).selectOption(agent)
+    await this.section.getByRole('combobox', { name: 'Agent' }).click()
+    // The list is portalled to the end of the document, so it is off the
+    // step's own subtree.
+    await this.page.getByRole('option', { name: agent, exact: true }).click()
     await this.section.getByRole('textbox', { name: 'Task' }).fill(task)
     await this.button('Launch').click()
   }

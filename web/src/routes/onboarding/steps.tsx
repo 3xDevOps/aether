@@ -8,6 +8,13 @@ import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import type { Api } from '@/lib/api'
@@ -18,7 +25,6 @@ import type {
   LinkStatus,
   Workspace,
 } from '@/lib/types'
-import { field } from '@/lib/utils'
 import { useStore } from '@/store'
 import { onboardingStepIndex } from '@/store/ui'
 import type { Capability } from '@/store/hooks'
@@ -529,21 +535,24 @@ export function FirstRunStep({
       </p>
       {loading && <Skeleton className="h-16 w-full" />}
       {agents && (
-        <Label className="block space-y-1">
-          Agent
-          <select
-            className={field}
+        <div className="space-y-1 text-sm">
+          <Label htmlFor="first-run-agent">Agent</Label>
+          <Select
             value={harness}
-            onChange={(e) => setDraft({ ...draft, harness: e.target.value })}
+            onValueChange={(value) => setDraft({ ...draft, harness: value })}
           >
-            <option value="">Choose an agent</option>
-            {agents.map((a) => (
-              <option key={a.name} value={a.name}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-        </Label>
+            <SelectTrigger id="first-run-agent">
+              <SelectValue placeholder="Choose an agent" />
+            </SelectTrigger>
+            <SelectContent>
+              {agents.map((a) => (
+                <SelectItem key={a.name} value={a.name}>
+                  {a.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
       <Label className="block space-y-1">
         Task

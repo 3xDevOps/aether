@@ -10,6 +10,7 @@ import {
   template,
   workspace,
 } from '@/test/fixtures'
+import { pickOption } from '@/test/select'
 
 const schedule: Schedule = {
   id: 'sch_1',
@@ -57,7 +58,7 @@ describe('templates view', () => {
     fireEvent.change(dialog.getByLabelText(/^Task/), {
       target: { value: 'sweep the flaky tests' },
     })
-    fireEvent.change(dialog.getByLabelText(/^Mode/), { target: { value: 'headless' } })
+    await pickOption(dialog.getByLabelText(/^Mode/), 'headless')
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(client.templateSave).toHaveBeenCalledWith({

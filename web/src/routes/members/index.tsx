@@ -17,11 +17,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
 import type { Member } from '@/lib/types'
-import { cn, field, focusRing } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
@@ -229,20 +236,25 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                       // No client-side prediction of who may be demoted: the
                       // server refuses to demote the last admin and says so,
                       // and that invariant is not recomputed here.
-                      <select
-                        className={field}
-                        aria-label={`Role for ${member.display_name}`}
+                      <Select
                         value={member.role}
-                        onChange={(e) =>
-                          changeRole(member, e.target.value as Member['role'])
+                        onValueChange={(role) =>
+                          changeRole(member, role as Member['role'])
                         }
                       >
-                        {roles.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger
+                          aria-label={`Role for ${member.display_name}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {roles.map((role) => (
+                            <SelectItem key={role} value={role}>
+                              {role}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     ) : (
                       member.role
                     )}
