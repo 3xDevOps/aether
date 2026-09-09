@@ -190,25 +190,25 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: web
       # The browser download is keyed on the pinned Playwright version, so a
-      # run only pays for it when that pin moves.
+      # run only pays for it when that pin moves. actions/cache stores paths
+      # relative to the workspace, so an archive saved on a self-hosted
+      # runner unpacks somewhere else on a GitHub-hosted one; keying on the
+      # environment keeps the two layouts apart.
       - name: Resolve the pinned Playwright version
         id: playwright
         run: |
           version=$(jq -r '.devDependencies["@playwright/test"]' web/package.json)
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
-        id: browser-cache
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ github.event.pull_request.head.sha || github.ref_name }}
+          key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}-${{ github.event.pull_request.head.sha || github.ref_name }}
+      # Runs on a cache hit too: it skips a browser that is already present
+      # and installs the system libraries, which the cache never holds. A
+      # cache that restored nothing usable then costs a download, never the
+      # suite.
       - name: Install the browser
-        if: steps.browser-cache.outputs.cache-hit != 'true'
         run: bunx playwright install --with-deps chromium
-        working-directory: web
-      # System libraries are not in the cache, only the browser itself.
-      - name: Install browser system dependencies
-        if: steps.browser-cache.outputs.cache-hit == 'true'
-        run: bunx playwright install-deps chromium
         working-directory: web
       - name: Dashboard end-to-end suite
         run: make test-e2e
