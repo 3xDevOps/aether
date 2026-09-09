@@ -140,10 +140,11 @@ export function createRootStore() {
           }
           return state
         },
-        // Stored state is a file on the member's disk, not a value this
-        // build wrote: `migrate` only runs when the version differs, and
-        // xterm does not validate `fontSize`, so a hand-edited or corrupted
-        // entry would reach the terminal as-is and render nothing readable.
+        // `migrate` only runs when the stored version differs, and xterm is
+        // the one consumer that does not validate `fontSize`, so a
+        // hand-edited or corrupted entry would reach the terminal as-is and
+        // render nothing readable. The dock heights are re-clamped at render;
+        // these two are not.
         merge: (persisted, current) => {
           const stored = (persisted ?? {}) as PersistedState
           return {
@@ -152,7 +153,8 @@ export function createRootStore() {
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),
-            terminalControlTaken: stored.terminalControlTaken === true,
+            terminalControlTaken:
+              stored.terminalControlTaken === true || current.terminalControlTaken,
           }
         },
         // Only view preferences survive a reload; server data is re-hydrated.
