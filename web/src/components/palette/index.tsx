@@ -41,14 +41,18 @@ export function CommandPalette() {
 
   return (
     <>
+      {/* The word drops out below lg, so the label rather than the button's
+          content has to carry the accessible name, and it has to be that same
+          word: voice control matches on what a member can read. */}
       <button
         type="button"
         onClick={() => toggle(true)}
+        aria-label="Commands"
         title="Command palette"
         className="flex items-center gap-1 rounded px-1 hover:text-foreground"
       >
         <kbd className="rounded border px-1 font-sans text-[10px]">⌘K</kbd>
-        Commands
+        <span className="hidden lg:inline">Commands</span>
       </button>
       <CommandDialog
         open={open}

@@ -80,7 +80,8 @@ function ServerUpdateNotice() {
   return (
     <span
       role="status"
-      className="rounded-full bg-state-waiting/15 px-2 py-0.5 text-[11px] font-medium"
+      title={notice}
+      className="min-w-0 truncate rounded-full bg-state-waiting/15 px-2 py-0.5 text-[11px] font-medium"
     >
       {notice}
     </span>
@@ -104,7 +105,7 @@ function LocalStatus() {
       type="button"
       onClick={() => navigate(linked ? 'settings' : 'onboarding')}
       title={linked ? `Linked to ${link?.repo}` : 'Link a repository'}
-      className="flex items-center gap-1.5 rounded px-1 hover:text-foreground"
+      className="hidden shrink-0 items-center gap-1.5 rounded px-1 hover:text-foreground md:flex"
     >
       <span
         className={cn(
@@ -133,7 +134,13 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
     update !== null &&
     (update.cli.update_available || (update.server_behind && isAdmin))
 
-  if (!available) return <span title={`protocol ${protocol}`}>{label}</span>
+  if (!available) {
+    return (
+      <span className="shrink-0 whitespace-nowrap" title={`protocol ${protocol}`}>
+        {label}
+      </span>
+    )
+  }
 
   const latest = update.cli.latest ?? ''
   return (
@@ -142,7 +149,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
       onClick={clearDismissedUpdates}
       aria-label={`Update available: ${latest}`}
       title={`${latest} is available - show the update banner`}
-      className="flex items-center gap-1.5 rounded px-1 hover:text-foreground"
+      className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1 hover:text-foreground"
     >
       {label}
       <span className="size-2 rounded-full bg-state-waiting" aria-hidden />
@@ -150,6 +157,8 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
   )
 }
 
+// The bar is one row and nothing here scrolls sideways, so anything pushed
+// past the right edge is unreachable rather than merely off screen.
 export function StatusBar() {
   const connection = useStore((s) => s.connection)
   const unreachable = useStore((s) => s.unreachable)
@@ -158,48 +167,58 @@ export function StatusBar() {
 
   return (
     <footer className="flex h-8 shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
-      <span className="flex items-center gap-1.5">
-        <span
-          className={cn('size-2 rounded-full', connectionDot[connection])}
-          aria-hidden
-        />
-        {connectionLabel[connection]}
-      </span>
-      {unreachable !== null && (
-        <span
-          role="status"
-          className="rounded-full bg-state-needs-attention/15 px-2 py-0.5 text-[11px] font-medium text-state-needs-attention"
-        >
-          {unreachableLabel[unreachable]}
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span
+            className={cn('size-2 rounded-full', connectionDot[connection])}
+            aria-hidden
+          />
+          {connectionLabel[connection]}
         </span>
-      )}
-      {info && (
-        <VersionLabel
-          version={info.server_version}
-          protocol={info.protocol_version}
-        />
-      )}
-      {info && <span>{info.member.display_name}</span>}
-      <ServerUpdateNotice />
-      {disk && disk.total_bytes > 0 && (
-        <span
-          className="flex items-center gap-1.5"
-          aria-label="Disk usage"
-          title={diskBreakdown(disk)}
-        >
-          <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-            <span
-              className="block h-full bg-foreground/50"
-              style={{
-                width: `${Math.min(100, (disk.used_bytes / disk.total_bytes) * 100)}%`,
-              }}
-            />
+        {unreachable !== null && (
+          <span
+            role="status"
+            title={unreachableLabel[unreachable]}
+            className="min-w-0 truncate rounded-full bg-state-needs-attention/15 px-2 py-0.5 text-[11px] font-medium text-state-needs-attention"
+          >
+            {unreachableLabel[unreachable]}
           </span>
-          {formatBytes(disk.used_bytes)} / {formatBytes(disk.total_bytes)}
-        </span>
-      )}
-      <LocalStatus />
-      <span className="ml-auto flex items-center gap-3">
+        )}
+        <ServerUpdateNotice />
+        {info && (
+          <VersionLabel
+            version={info.server_version}
+            protocol={info.protocol_version}
+          />
+        )}
+        <LocalStatus />
+        {info && (
+          <span
+            title={info.member.display_name}
+            className="hidden max-w-40 truncate lg:block"
+          >
+            {info.member.display_name}
+          </span>
+        )}
+        {disk && disk.total_bytes > 0 && (
+          <span
+            className="hidden shrink-0 items-center gap-1.5 xl:flex"
+            aria-label="Disk usage"
+            title={diskBreakdown(disk)}
+          >
+            <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+              <span
+                className="block h-full bg-foreground/50"
+                style={{
+                  width: `${Math.min(100, (disk.used_bytes / disk.total_bytes) * 100)}%`,
+                }}
+              />
+            </span>
+            {formatBytes(disk.used_bytes)} / {formatBytes(disk.total_bytes)}
+          </span>
+        )}
+      </div>
+      <span className="flex shrink-0 items-center gap-3">
         <Slot name="statusbar" />
         <ThemeToggle />
       </span>
