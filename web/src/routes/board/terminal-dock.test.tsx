@@ -8,7 +8,11 @@ import { initialEnvTerminal } from '@/store/env-terminal'
 
 const xterm = vi.hoisted(() => ({
   hostRef: () => {},
-  terminal: { cols: 80, rows: 24, reset: vi.fn(), write: vi.fn() },
+  terminal: { cols: 80, rows: 24, reset: vi.fn(), write: vi.fn(), focus: vi.fn() },
+  ready: true,
+  search: null,
+  findOpen: false,
+  setFindOpen: vi.fn(),
 }))
 
 const attach = vi.hoisted(() => ({
@@ -19,7 +23,10 @@ const attach = vi.hoisted(() => ({
 }))
 
 vi.mock('@/components/xterm-host', () => ({
-  useXterm: () => xterm,
+  // A disabled hook has no terminal, which is what a collapsed dock gets and
+  // what stops its attach effect from running.
+  useXterm: (options?: { enabled?: boolean }) =>
+    options?.enabled === false ? { ...xterm, terminal: null, ready: false } : xterm,
 }))
 vi.mock('@/routes/terminal/attach', async (importOriginal) => ({
   ...(await importOriginal<typeof attachModule>()),
@@ -273,6 +280,29 @@ describe('environment terminal dock', () => {
 
     await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
     expect(useStore.getState().envTerminal.tabs).toContain('main')
+  })
+
+  it('opens the dock when a collapsed strip tab is picked', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(useStore.getState().envTerminal.tabs).toContain('main'))
+    useStore.getState().setEnvTerminalCollapsed(true)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'main' }))
+
+    await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
+  })
+
+  it('closes the find bar when the tab under it changes', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(useStore.getState().envTerminal.tabs).toContain('main'))
+    xterm.setFindOpen.mockClear()
+
+    // The query and its answer belong to the buffer find was opened over.
+    fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
+
+    await waitFor(() => expect(xterm.setFindOpen).toHaveBeenCalledWith(false))
   })
 
   it('names the real tab ceiling when every environment tab is open', async () => {
