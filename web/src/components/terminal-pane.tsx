@@ -64,7 +64,11 @@ function FindBar({
           find(event.shiftKey ? 'previous' : 'next', !event.shiftKey)
         }}
       />
-      {missing && <span className="px-1 text-xs text-muted-foreground">No matches</span>}
+      {missing && (
+        <span role="status" className="px-1 text-xs text-muted-foreground">
+          No matches
+        </span>
+      )}
       <Button
         type="button"
         variant="ghost"

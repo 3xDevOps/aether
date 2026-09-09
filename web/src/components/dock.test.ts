@@ -39,9 +39,8 @@ describe('Dock controls', () => {
     )
     const add = screen.getByRole('button', { name: 'Add terminal tab' }) as HTMLButtonElement
     expect(add.disabled).toBe(true)
-    // The sentence is what a member reads; the button points at it, because
-    // a disabled control has no tooltip to carry the reason.
-    const limit = screen.getByText('At most 2 tabs')
-    expect(add.getAttribute('aria-describedby')).toBe(limit.id)
+    // The sentence is what a member reads, and it arrives without warning, so
+    // it is announced rather than only drawn.
+    expect(screen.getByRole('status')).toHaveProperty('textContent', 'At most 2 tabs')
   })
 })

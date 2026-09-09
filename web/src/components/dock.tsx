@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react'
-import { useCallback, useId } from 'react'
+import { useCallback } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -47,7 +47,6 @@ export function Dock({
   children,
 }: DockProps) {
   const atLimit = tabs.length >= maxTabs
-  const limitID = useId()
 
   const startResize = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -125,7 +124,6 @@ export function Dock({
               variant="ghost"
               size="icon"
               aria-label="Add terminal tab"
-              aria-describedby={atLimit ? limitID : undefined}
               disabled={atLimit}
               onClick={onAddTab}
             >
@@ -135,7 +133,7 @@ export function Dock({
           {atLimit && (
             // A disabled control shows no tooltip, so the ceiling is written
             // out instead of hidden in a title attribute.
-            <span id={limitID} className="px-1 text-xs text-muted-foreground">
+            <span role="status" className="px-1 text-xs text-muted-foreground">
               At most {maxTabs} tabs
             </span>
           )}
