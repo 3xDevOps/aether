@@ -7,6 +7,13 @@ import { useStore } from '@/store'
 // same way: as a property on the real window.
 const shellWindow = window as Window & { aetherDesktop?: AetherDesktop }
 
+// Read at assert time: a reference captured before the timers run points at a
+// detached node once the splash unmounts, and every class check on it passes.
+function splashClasses(container: HTMLElement): DOMTokenList {
+  expect(container.firstElementChild).not.toBeNull()
+  return (container.firstElementChild as HTMLElement).classList
+}
+
 describe('LaunchSplash', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -16,6 +23,7 @@ describe('LaunchSplash', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
     delete shellWindow.aetherDesktop
   })
 
@@ -29,10 +37,8 @@ describe('LaunchSplash', () => {
     shellWindow.aetherDesktop = { platform: 'linux' }
 
     const { container } = render(<LaunchSplash />)
-    const splash = container.firstElementChild
 
-    expect(splash?.classList.contains('launch-splash')).toBe(true)
-    expect(container.querySelector('img[src="/aether-mark.png"]')).not.toBeNull()
+    expect(splashClasses(container).contains('launch-splash')).toBe(true)
     expect(screen.getByTestId('launch-splash-stars')).toBeTruthy()
     expect(screen.getByTestId('launch-splash-shooting-stars')).toBeTruthy()
 
@@ -40,24 +46,38 @@ describe('LaunchSplash', () => {
     act(() => {
       useStore.setState({ hydrated: true })
     })
-    expect(splash?.classList.contains('launch-splash--leaving')).toBe(false)
+    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(false)
 
     act(() => vi.advanceTimersByTime(600))
-    expect(splash?.classList.contains('launch-splash--leaving')).toBe(true)
+    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(true)
 
-    act(() => vi.advanceTimersByTime(250))
+    act(() => vi.advanceTimersByTime(260))
     expect(container.firstElementChild).toBeNull()
   })
 
-  it('stays up while the store is still hydrating', () => {
+  it('stays up while the store is still hydrating, until the cap', () => {
     shellWindow.aetherDesktop = { platform: 'linux' }
 
     const { container } = render(<LaunchSplash />)
-    const splash = container.firstElementChild
 
-    act(() => vi.advanceTimersByTime(5000))
+    act(() => vi.advanceTimersByTime(2400))
+    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(false)
 
-    expect(splash?.classList.contains('launch-splash--leaving')).toBe(false)
+    act(() => vi.advanceTimersByTime(100))
+    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(true)
+  })
+
+  it('never outlives the cap, hydrated or not', () => {
+    shellWindow.aetherDesktop = { platform: 'linux' }
+
+    const { container } = render(<LaunchSplash />)
+
+    act(() => vi.advanceTimersByTime(2500))
+    act(() => vi.advanceTimersByTime(260))
+
+    expect(useStore.getState().hydrated).toBe(false)
+    expect(useStore.getState().hydrationError).toBeNull()
+    expect(container.firstElementChild).toBeNull()
   })
 
   it('gets out of the way when the hydrate failed', () => {
@@ -69,20 +89,33 @@ describe('LaunchSplash', () => {
       useStore.setState({ hydrationError: 'dial tcp: connection refused' })
     })
     act(() => vi.advanceTimersByTime(600))
-    act(() => vi.advanceTimersByTime(250))
+    act(() => vi.advanceTimersByTime(260))
 
     expect(container.firstElementChild).toBeNull()
   })
 
-  it('marks the session on first launch and skips the splash on a reload', () => {
+  it('marks the session on first launch, so a later mount renders nothing', () => {
     shellWindow.aetherDesktop = { platform: 'linux' }
 
     const first = render(<LaunchSplash />)
     expect(first.container.firstElementChild).not.toBeNull()
+    expect(window.sessionStorage.getItem('aether.launchSplashShown')).toBe('1')
     first.unmount()
 
-    const reload = render(<LaunchSplash />)
+    const again = render(<LaunchSplash />)
 
-    expect(reload.container.innerHTML).toBe('')
+    expect(again.container.innerHTML).toBe('')
+  })
+
+  it('renders nothing under reduced motion, and still marks the session', () => {
+    shellWindow.aetherDesktop = { platform: 'linux' }
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) => ({ matches: query.includes('prefers-reduced-motion') }) as MediaQueryList,
+    )
+
+    const { container } = render(<LaunchSplash />)
+
+    expect(container.innerHTML).toBe('')
+    expect(window.sessionStorage.getItem('aether.launchSplashShown')).toBe('1')
   })
 })

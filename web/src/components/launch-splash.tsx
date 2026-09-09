@@ -4,8 +4,16 @@ import { useStore } from '@/store'
 
 /** Held this long so a fast hydrate reads as a beat rather than a flicker. */
 const MIN_VISIBLE_MS = 600
-/** The fade in index.css runs 260ms; unmount just as it finishes. */
-const FADE_MS = 250
+/**
+ * Hard ceiling on the splash. It covers the frameless window's title bar, so
+ * while it is up the member cannot drag, minimize or close the window and
+ * cannot read the connection error. The store only reports a failed hydrate
+ * after the stream has retried for several seconds, and a socket that hangs
+ * never reports at all, so nothing else brings the window controls back.
+ */
+const MAX_VISIBLE_MS = 2500
+/** The fade in index.css runs 260ms; unmount as it finishes. */
+const FADE_MS = 260
 
 const SHOWN_KEY = 'aether.launchSplashShown'
 
@@ -45,26 +53,35 @@ export function LaunchSplash() {
   // what the member needs to read, not a night sky that never ends.
   const failed = useStore((s) => s.hydrationError !== null)
   const [held, setHeld] = useState(true)
+  const [capped, setCapped] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const [removed, setRemoved] = useState(false)
 
   useEffect(() => {
-    if (!show) return
+    // The shell session counts as launched whether or not the splash played,
+    // so a reduced-motion launch does not leave the key unwritten and make the
+    // next reload in the same window look like a first launch.
+    if (!desktopBridge()) return
     try {
       window.sessionStorage.setItem(SHOWN_KEY, '1')
     } catch {
       // Storage is blocked; the splash repeats rather than the app breaking.
     }
+    if (!show) return
     const hold = window.setTimeout(() => setHeld(false), MIN_VISIBLE_MS)
-    return () => window.clearTimeout(hold)
+    const cap = window.setTimeout(() => setCapped(true), MAX_VISIBLE_MS)
+    return () => {
+      window.clearTimeout(hold)
+      window.clearTimeout(cap)
+    }
   }, [show])
 
   useEffect(() => {
-    if (!show || held || !(hydrated || failed)) return
+    if (!show || held || !(hydrated || failed || capped)) return
     setLeaving(true)
     const remove = window.setTimeout(() => setRemoved(true), FADE_MS)
     return () => window.clearTimeout(remove)
-  }, [show, held, hydrated, failed])
+  }, [show, held, hydrated, failed, capped])
 
   if (!show || removed) return null
 
@@ -101,7 +118,7 @@ export function LaunchSplash() {
       </div>
 
       <div className="launch-splash__logo">
-        <img src="/aether-mark.png" alt="Aether" />
+        <img src="/aether-mark.png" alt="" />
         <span className="launch-splash__wordmark">aether</span>
       </div>
     </div>
