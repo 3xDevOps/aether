@@ -27,7 +27,7 @@ describe('App offline state', () => {
     render(<App />)
 
     expect(screen.getByRole('heading', { name: 'Cannot reach your Aether server' })).toBeDefined()
-    expect(screen.queryByText('Run board')).toBeNull()
+    expect(screen.queryAllByText('Board')).toHaveLength(0)
   })
 
   it('does not also toast what the page already says', () => {

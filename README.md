@@ -65,7 +65,7 @@ while you sleep.**
 
 The desktop app builds on top of the CLI and serves the dashboard and control entrypoint from your own client machine. 
 
-Inside: a workspace switcher, a run board bucketed by what needs attention, a
+Inside: a workspace switcher, a board bucketed by what needs attention, a
 live read-only terminal mirror of any run, per-run diff timelines, the event
 feed, the shared approval inbox, presence indicators, the member roster, and a
 disk gauge. Launch, inject, pause, kill, close, relaunch and handoff all call

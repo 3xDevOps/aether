@@ -55,8 +55,9 @@ describe('App', () => {
     expect(
       (screen.getByLabelText('Workspace') as HTMLSelectElement).value,
     ).toBe('wsp_1')
-    // Center view, from the default route in the registry.
-    expect(screen.getByText('Run board')).toBeDefined()
+    // Center view, from the default route in the registry. By role: the
+    // sidebar nav entry carries the same words.
+    expect(screen.getByRole('heading', { level: 1, name: 'Board' })).toBeDefined()
     // Status bar, from server.info.
     expect(screen.getByText('aether 1.2.3')).toBeDefined()
     expect(
