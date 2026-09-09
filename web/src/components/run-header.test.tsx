@@ -85,13 +85,11 @@ describe('run header', () => {
   it.each(tabs)('marks the %s tab as the open one in the strip', (name) => {
     seed()
     renderTab(name)
-    const strip = within(screen.getByRole('navigation', { name: 'Run tabs' }))
+    const strip = within(screen.getByRole('tablist', { name: 'Run tabs' }))
 
     for (const tab of runTabs) {
-      const button = strip.getByRole('button', { name: tab.label })
-      expect(button.getAttribute('aria-current')).toBe(
-        tab.route === name ? 'page' : null,
-      )
+      const button = strip.getByRole('tab', { name: tab.label })
+      expect(button.getAttribute('aria-selected')).toBe(String(tab.route === name))
     }
   })
 

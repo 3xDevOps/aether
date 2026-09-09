@@ -6,15 +6,16 @@ import {
   PanelLeftOpen,
   Rocket,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { canLaunch } from '@/lib/commands'
-import { useDelayed } from '@/lib/hooks'
+import { useDelayed, useDrag } from '@/lib/hooks'
+import { splitterTarget } from '@/lib/keys'
 import { runLabel } from '@/lib/status'
 import { surfaces, type Surface } from '@/lib/surfaces'
-import { cn } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 import { isRunRoute } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { pendingApprovals } from '@/store/approvals'
@@ -26,6 +27,7 @@ import {
   useSidebarGroups,
 } from '@/store/hooks'
 import type { SidebarGroup, SidebarRun } from '@/store/selectors'
+import { maxSidebarWidth, minSidebarWidth } from '@/store/ui'
 
 /**
  * The desktop shell cannot open a window narrower than 960px, so this matches
@@ -64,28 +66,66 @@ export function Sidebar() {
     else toggleSidebar()
   }, [autoCollapsed, toggleSidebar])
 
+  // Either direction unmounts the control that was pressed, so its opposite
+  // takes the focus. They are different elements, which is why this waits for
+  // the render rather than moving focus first.
+  const toggleControl = useRef<HTMLButtonElement>(null)
+  const takeToggle = useRef(false)
+  useEffect(() => {
+    if (!takeToggle.current) return
+    takeToggle.current = false
+    toggleControl.current?.focus()
+  }, [rail])
+  const toggleAndFollow = useCallback(() => {
+    takeToggle.current = true
+    toggle()
+  }, [toggle])
+
+  const beginDrag = useDrag()
+
   const startResize = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault()
+      const drag = beginDrag()
       const move = (ev: PointerEvent) => setSidebarWidth(ev.clientX)
-      const stop = () => {
-        window.removeEventListener('pointermove', move)
-        window.removeEventListener('pointerup', stop)
+      window.addEventListener('pointermove', move, { signal: drag.signal })
+      for (const end of ['pointerup', 'pointercancel']) {
+        window.addEventListener(end, () => drag.abort(), { signal: drag.signal })
       }
-      window.addEventListener('pointermove', move)
-      window.addEventListener('pointerup', stop)
     },
-    [setSidebarWidth],
+    [beginDrag, setSidebarWidth],
+  )
+
+  const resizeKey = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        toggleAndFollow()
+        return
+      }
+      const next = splitterTarget(e.key, {
+        value: width,
+        min: minSidebarWidth,
+        max: maxSidebarWidth,
+        grow: 'ArrowRight',
+        shrink: 'ArrowLeft',
+      })
+      if (next === null) return
+      e.preventDefault()
+      setSidebarWidth(next)
+    },
+    [setSidebarWidth, toggleAndFollow, width],
   )
 
   if (rail) {
     return (
       <aside className="flex w-10 shrink-0 flex-col items-center border-r bg-sidebar py-2">
         <Button
+          ref={toggleControl}
           variant="ghost"
           size="icon"
           aria-label="Expand sidebar"
-          onClick={toggle}
+          onClick={toggleAndFollow}
         >
           <PanelLeftOpen />
         </Button>
@@ -95,11 +135,12 @@ export function Sidebar() {
 
   return (
     <aside
+      id="sidebar"
       className="relative flex shrink-0 flex-col border-r bg-sidebar"
       style={{ width }}
       aria-label="Runs"
     >
-      <WorkspaceSwitcher onCollapse={toggle} />
+      <WorkspaceSwitcher onCollapse={toggleAndFollow} controlRef={toggleControl} />
       <SidebarHeader />
       <RunTree />
       <NavSection />
@@ -107,8 +148,17 @@ export function Sidebar() {
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize sidebar"
+        aria-controls="sidebar"
+        aria-valuenow={Math.round(width)}
+        aria-valuemin={minSidebarWidth}
+        aria-valuemax={maxSidebarWidth}
+        tabIndex={0}
         onPointerDown={startResize}
-        className="absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-accent"
+        onKeyDown={resizeKey}
+        className={cn(
+          focusRing,
+          'absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-accent',
+        )}
       />
     </aside>
   )
@@ -119,7 +169,13 @@ export function Sidebar() {
  * no picker, so it renders as a plain label: the affordance appears only
  * when there is a choice to make.
  */
-function WorkspaceSwitcher({ onCollapse }: { onCollapse: () => void }) {
+function WorkspaceSwitcher({
+  onCollapse,
+  controlRef,
+}: {
+  onCollapse: () => void
+  controlRef: React.RefObject<HTMLButtonElement | null>
+}) {
   const workspaces = useStore((s) => s.workspaces)
   const active = useStore((s) => s.activeWorkspace)
   const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
@@ -132,7 +188,10 @@ function WorkspaceSwitcher({ onCollapse }: { onCollapse: () => void }) {
       {list.length > 1 ? (
         <select
           aria-label="Workspace"
-          className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm"
+          className={cn(
+            focusRing,
+            'min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm',
+          )}
           value={active}
           onChange={(e) => setActiveWorkspace(e.target.value)}
         >
@@ -155,6 +214,7 @@ function WorkspaceSwitcher({ onCollapse }: { onCollapse: () => void }) {
         </span>
       )}
       <Button
+        ref={controlRef}
         variant="ghost"
         size="icon"
         aria-label="Collapse sidebar"
@@ -319,6 +379,7 @@ function NavSection() {
           aria-current={route.name === name ? 'page' : undefined}
           onClick={() => navigate(name)}
           className={cn(
+            focusRing,
             'flex w-full items-center gap-2 border-l-2 border-transparent px-2 py-1 text-left text-sm hover:bg-accent/60',
             route.name === name && 'bg-accent border-primary',
           )}
@@ -369,6 +430,10 @@ function RunRow({ entry }: { entry: SidebarRun }) {
       onClick={() => navigate('terminal', { runId: entry.run.id })}
       style={{ borderLeftColor: entry.owner?.color }}
       className={cn(
+        focusRing,
+        // Full bleed inside a scroll container: an outline drawn outside the
+        // row would be clipped at both edges.
+        'focus-visible:-outline-offset-2',
         'flex w-full items-center gap-2 border-l-2 py-1 pr-2 pl-4 text-left text-xs hover:bg-accent/60',
         selected ? 'bg-accent' : 'border-l-transparent',
         unseen ? 'font-medium' : 'text-muted-foreground',

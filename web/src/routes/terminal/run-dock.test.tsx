@@ -106,9 +106,12 @@ describe('run-shell dock', () => {
       })
     })
 
-    expect(
-      screen.getByText('You can view this run but not open a shell in it'),
-    ).toBeDefined()
+    const refusal = screen.getByText('You can view this run but not open a shell in it')
+    expect(refusal).toBeDefined()
+    // The refusal disposes the terminal that had the keyboard. Left on
+    // <body>, the reader's next keystroke would reach the shell's shortcuts
+    // and leave the run.
+    expect(document.activeElement).toBe(refusal)
     await waitFor(
       () => expect(StubSocket.opened).toHaveLength(2),
       { timeout: 100 },
@@ -123,6 +126,11 @@ describe('run-shell dock', () => {
     act(() => StubSocket.opened[1].onclose?.({ code: 1000 }))
 
     expect(useStore.getState().shellDocks.run_1.tabs).toEqual([])
+    // The last shell exiting disposes the terminal that had the keyboard, so
+    // the body it leaves behind takes it rather than <body>.
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Open shell' }).parentElement,
+    )
     view.unmount()
   })
 

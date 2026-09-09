@@ -18,7 +18,7 @@ import {
   replayGate,
 } from '@/routes/terminal/attach'
 import { RunDock } from '@/routes/terminal/run-dock'
-import { RunTabs } from '@/routes/terminal/tabs'
+import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -197,67 +197,69 @@ function TerminalView({ params }: RouteProps) {
     <div className="flex h-full flex-col">
       <RunHeader run={run} subtitle={`${run.harness} · ${run.branch}`} />
       <RunTabs runID={runID} active="terminal" />
-      <div className="flex items-center gap-3 border-b px-4 py-1.5 text-xs">
-        {!starting && (
-          <span
-            className={cn(
-              'text-muted-foreground',
-              state.connection === 'offline' && 'text-state-failed',
-            )}
-          >
-            {connectionLabel[state.connection]}
-          </span>
-        )}
-        <Button
-          size="sm"
-          variant={state.write ? 'default' : 'outline'}
-          disabled={state.steerDenied || !steerable}
-          className="relative"
-          onClick={toggleWrite}
-        >
-          {state.write ? 'Steering' : 'Take control'}
-          {state.write && (
-            <span aria-hidden className="steering-signal">
-              <span />
+      <div {...runTabPanel('terminal', 'flex min-h-0 flex-1 flex-col')}>
+        <div className="flex items-center gap-3 border-b px-4 py-1.5 text-xs">
+          {!starting && (
+            <span
+              className={cn(
+                'text-muted-foreground',
+                state.connection === 'offline' && 'text-state-failed',
+              )}
+            >
+              {connectionLabel[state.connection]}
             </span>
           )}
-        </Button>
-        {state.steerDenied && (
-          <span className="text-muted-foreground">
-            You cannot steer this run.
-          </span>
-        )}
-        {/* A disabled control shows no tooltip, so the reason is written out
-            beside it rather than hidden in a title attribute. */}
-        {!steerable && !starting && !state.steerDenied && (
-          <span className="text-muted-foreground">This run is not running</span>
-        )}
-        {/* Nothing else on screen separates watching from steering, so the
-            attach says what it is until the member has taken control once. */}
-        {!controlTaken && !state.write && !state.steerDenied && run.status === 'running' && (
-          <span className="text-muted-foreground">
-            Read-only mirror. Take control to type into the agent.
-          </span>
-        )}
-        {state.message && (
-          <span className="truncate text-muted-foreground">
-            {state.refused && sessionMissing && endedStatuses.includes(run.status)
-              ? endedMessage(run)
-              : state.message}
-          </span>
-        )}
-        {state.refused && !endedStatuses.includes(run.status) && (
-          <Button size="sm" variant="ghost" onClick={retry}>
-            Retry
+          <Button
+            size="sm"
+            variant={state.write ? 'default' : 'outline'}
+            disabled={state.steerDenied || !steerable}
+            className="relative"
+            onClick={toggleWrite}
+          >
+            {state.write ? 'Steering' : 'Take control'}
+            {state.write && (
+              <span aria-hidden className="steering-signal">
+                <span />
+              </span>
+            )}
           </Button>
-        )}
+          {state.steerDenied && (
+            <span className="text-muted-foreground">
+              You cannot steer this run.
+            </span>
+          )}
+          {/* A disabled control shows no tooltip, so the reason is written out
+              beside it rather than hidden in a title attribute. */}
+          {!steerable && !starting && !state.steerDenied && (
+            <span className="text-muted-foreground">This run is not running</span>
+          )}
+          {/* Nothing else on screen separates watching from steering, so the
+              attach says what it is until the member has taken control once. */}
+          {!controlTaken && !state.write && !state.steerDenied && run.status === 'running' && (
+            <span className="text-muted-foreground">
+              Read-only mirror. Take control to type into the agent.
+            </span>
+          )}
+          {state.message && (
+            <span className="truncate text-muted-foreground">
+              {state.refused && sessionMissing && endedStatuses.includes(run.status)
+                ? endedMessage(run)
+                : state.message}
+            </span>
+          )}
+          {state.refused && !endedStatuses.includes(run.status) && (
+            <Button size="sm" variant="ghost" onClick={retry}>
+              Retry
+            </Button>
+          )}
+        </div>
+        <div className="min-h-0 flex-1">
+          <TerminalPane key={runID} controller={controller}>
+            {starting && <TerminalSpinner label="Starting the run's container" />}
+          </TerminalPane>
+        </div>
+        <RunDock runID={runID} />
       </div>
-      <div className="min-h-0 flex-1">
-        <TerminalPane key={runID} controller={controller}>
-          {starting && <TerminalSpinner label="Starting the run's container" />}
-        </TerminalPane>
-      </div>
-      <RunDock runID={runID} />
     </div>
   )
 }

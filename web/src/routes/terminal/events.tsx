@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
-import { RunTabs } from '@/routes/terminal/tabs'
+import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 
 export function RunEvents({ params, client = api }: RouteProps & { client?: Api }) {
@@ -61,7 +61,7 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
     <div className="flex h-full flex-col">
       <RunHeader run={run} subtitle={run.branch} />
       <RunTabs runID={runID} active="events" />
-      <div className="flex-1 overflow-y-auto p-3">
+      <div {...runTabPanel('events', 'flex-1 overflow-y-auto p-3', true)}>
         {error && <p className="mb-2 text-xs text-state-failed">{error}</p>}
         <ol className="space-y-1">
           {[...feed].reverse().map((event) => (
