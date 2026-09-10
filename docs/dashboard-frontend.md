@@ -143,7 +143,7 @@ The slots that exist:
 | Slot | Props | Where it renders |
 | --- | --- | --- |
 | `card:badges` | `{ run }` | the run card's title row, after the paused and unseen markers |
-| `card:chips` | `{ run }` | the wrapping row under the task, beside harness and branch |
+| `card:chips` | `{ run }` | the wrapping metadata row after the harness, branch and last-commit readout |
 | `card:footer` | `{ run }` | the card's bottom row, right of the owner and timestamp |
 | `statusbar` | none | the status bar, for refresh, shortcuts and other live contributors |
 
@@ -151,10 +151,10 @@ The `statusbar` Slot is mounted once, even when narrow layouts collapse its
 details. The command palette is not a status contributor; it has one
 independent host in `AppShell`.
 
-Card slot content sits above the card's click overlay, so a contributor may
-render its own links and buttons; everything else on the card is one target
-that reveals the run. Conflict chips () and watcher avatars and approval
-badges () belong in these slots, not in `run-card.tsx`.
+Card slot content may render its own links and buttons; the article's pointer
+handler ignores interactive descendants, so those controls stay interactive.
+Conflict chips, watcher avatars and approval badges belong in these slots, not
+in `run-card.tsx`.
 
 ## Sidebar
 
@@ -182,6 +182,7 @@ width handle remains a keyboard and pointer window splitter (see
   worst-state-first, then most-recently-changed-first, so what needs a human is
   at the top of whichever group it is in. An empty scope shows every run, which
   is what the list falls back to before hydration has named a workspace.
+- **The shared `RunList` keeps visible run labels to two lines**, while each row button retains the full label as its `aria-label`.
 - **The attention badge counts, it does not navigate.** The runs below are
   already sorted worst-first, so the number is for a scrolled sidebar or a
   stall that landed while the member was elsewhere in the app.
@@ -272,13 +273,13 @@ the same rules degrade below it rather than break.
   secondary readouts in a bounded, keyboard-reachable popup; wide layouts
   expand them inline. The single status Slot remains mounted while details are
   collapsed.
-- **The run header** keeps the title, task, branch and harness mode readable
-  with compact 35px headers, 22-28px rows and a wrapping action group.
-  Terminal tabs remain one keyboard stop with internal horizontal overflow.
+- **The run header** keeps the title, task, branch and harness mode readable with
+  compact headers and a wrapping action group. Terminal tabs remain one keyboard
+  stop with internal horizontal overflow.
 - **The board** uses one column on narrow screens and three columns from the
-  medium breakpoint, with compact square run items and vertical scrolling on
-  small screens. State labels remain visible; empty, loading and error panels
-  use the same bounded surface hierarchy.
+  large breakpoint, with compact flat run cards and vertical scrolling on small
+  screens. State labels remain visible; empty, loading and error panels use the
+  same bounded surface hierarchy.
 - **The workspace/run sidebar** collapses at 1000px and narrower into the
   persistent 48px activity rail, which exposes **Expand sidebar** without
   changing the stored preference. At 640px and narrower its expanded pane
@@ -415,17 +416,20 @@ a pending flag fed from the approval inbox. Cards sort by last state change,
 newest first.
 
 The board header wraps its title, run count Chip, descriptive copy and toolbar.
-Its grid is one column on narrow screens and three columns at the medium
-breakpoint, with a compact bordered surface, readable state headers and
-bounded card content. An empty workspace shows one centered "Ready for a task"
-panel and a primary New run action rather than three repeated empty columns.
-Loading uses delayed skeletons, and hydrated empty buckets say "Nothing here."
-without confusing an in-flight request with an empty result.
-The card is one click target, laid over the text. Anything the reader has to
-select, hover or press has to be raised above that overlay, the way card
-slot content and the protected badge are. The branch chip is: the truncated
-name carries the whole branch in its `title`, the text can be selected, and
-the copy control beside it copies the branch instead of opening the run.
+Its grid is one column on narrow screens and three columns from the large
+breakpoint, with flat bordered columns, readable state headers and bounded card
+content. The visible run label is capped at three lines; its title button keeps
+the full `runLabel` as the accessible name. An empty workspace shows one "Ready
+for a task" panel and a primary New run action rather than three repeated empty
+columns. Loading uses delayed skeletons, and hydrated empty buckets say "Nothing
+here." without confusing an in-flight request with an empty result.
+The card's article is a pointer surface for noninteractive metadata, and its
+title block is a keyboard-focusable button. Interactive descendants and any
+non-collapsed text selection are ignored by the article handler, so selecting
+noninteractive metadata does not navigate in the background. Branch text is
+explicitly navigation-exempt so it can be selected or copied without opening
+the run. The branch metadata row shows the full branch in its `title` and has
+a copy button beside it.
 Reaching for the branch is therefore not a way into the run; the rest of the
 card is. Copying goes through `src/lib/clipboard.ts`, shared with
 `CopyableCommand`, because an origin without `navigator.clipboard` - plain
@@ -751,12 +755,15 @@ Every way into a run navigates to `terminal`, because that is where the agent
 is: board card, sidebar row, run list, palette, feed entry, approval,
 conflict chip, template, and the launch and onboarding forms. Overview stays a
 tab for the metadata a finished run is read for, which `src/routes/run.tsx`
-renders as one list: the reason, the harness and its mode, the owner, the
-agent account where the run borrowed one, the created and changed times, and
-the last commit. All four tabs render one `RunHeader`
-(`src/components/run-header.tsx`), so the run's own state travels with the
-reader, and `isRunRoute` in `tabs.tsx` is what keeps a sidebar row lit while
-they move between the tabs.
+renders as one list: the reason, owner, agent account where the run borrowed
+one, the created and changed times, and the last commit. The shared
+`RunHeader` owns the run title, task, state, harness and mode above every tab;
+each caller supplies the branch as its subtitle. All four tabs render one
+`RunHeader` (`src/components/run-header.tsx`), so the run's own state travels
+with the reader, and `isRunRoute` in `tabs.tsx` is what keeps a sidebar row lit
+while they move between the tabs.
+`RunHeader` keeps long task text behind a **View full task** disclosure, so its
+compact summary never discards the task.
 
 A run id none of the four tabs can find renders one shared `MissingRun`
 (`src/components/missing-run.tsx`) instead of that header, its tab strip and
@@ -779,14 +786,15 @@ which would leave the previous run's output on screen under the new run's
 name.
 
 The Terminal view is a vertical split. The agent terminal keeps flexible space
-above a `RunDock` below it. The run header keeps the task, branch, harness mode
-and status readable while its actions wrap at narrow widths. The terminal
-status toolbar also wraps without truncating real gateway errors.
+above a `RunDock` below it. The shared run header keeps the title, task, branch,
+harness mode and status readable while its actions wrap at narrow widths. The
+terminal status toolbar also wraps without truncating real gateway errors.
 
-The dock header is 40px tall and its tab strip scrolls horizontally. Add,
-close and collapse controls stay keyboard and pointer reachable, as does the
-splitter. The shell tab strip is a custom manual tab list with one keyboard stop
-and overflow scrolling; it does not use a component-level tab primitive.
+The dock header starts at 36px and its tab strip scrolls horizontally; its
+actions can wrap below the tabs on narrow screens. Add, close and collapse
+controls stay keyboard and pointer reachable, as does the splitter. The shell
+tab strip is a custom manual tab list with one keyboard stop and overflow
+scrolling; it does not use a component-level tab primitive.
 
 `TerminalPane` keeps xterm's host geometry intact while layering Find, shared
 zoom/reset, and copy/paste controls over it through the existing controller,
@@ -1080,6 +1088,7 @@ like every other view, and gated on the same method the nav gates them on.
   description, or the reverse, without failing the build. A type the map has
   never heard of renders as its wire string, because a server newer than the
   dashboard can emit one.
+- **Activity run links preview labels to two lines**, while the button retains the full label in its accessible name and `title`.
 - **A budget warns, it never stops anything.** The status bar shows the spend
   and the worst state any workspace is in (`ok`, `warn`, `exceeded`) - every
   workspace, ones with nothing running included, which is what the wide read
@@ -1102,17 +1111,19 @@ like every other view, and gated on the same method the nav gates them on.
 
 ## Manage workspaces
 
-`src/routes/workspaces/` renders each workspace as a card with its base branch
-and steering policy.
+`src/routes/workspaces/` renders a flat, bordered list of workspaces. Each row
+shows its name, creation time, base branch, steering policy and an **Open**
+button.
 
 ## Settings
 
-`src/routes/settings/` shows the local link, the sync daemon, and **Mirror run
-files to your repository**, the card that starts and stops a live run's sync
-overlay. When the local capability includes `repo.sync`, the Base branch
-card's **Sync from origin** button fast-forwards the server's workspace base
-branch from this machine's `origin` remote. It shows the returned branch and
-git's output verbatim; server refusals stay verbatim.
+`src/routes/settings/` shows the local link, the sync daemon and **Mirror run
+files to your repository** in flat bordered sections. That section starts and
+stops a live run's sync overlay. When the local capability includes
+`repo.sync`, the **Base branch** section's **Sync from origin** button
+fast-forwards the server's workspace base branch from this machine's `origin`
+remote. It shows the returned branch and git's output verbatim; server
+refusals stay verbatim.
 
 ## Onboarding wizard
 

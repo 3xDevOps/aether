@@ -56,13 +56,13 @@ Use compact workbench geometry rather than landing-page ornament:
 
 - 35px title and command bar, 48px activity rail with 24px icons, and a
   preferred 260px workspace/run sidebar constrained to 200-520px.
-- 35px view and tab headers, 22px section and status rows, and 22-28px list
-  rows according to real content.
+- 35px view and section headers; 36px run and dock tab strips; 22px status
+  rows and 22-28px list rows according to real content.
 - 26px fields and buttons, 22px compact tools, 12px form gaps, 4px label
   gaps, 16px content gutters and 12px compact gutters.
-- Adjoining panes, sections, rows and tab strips have zero radius. Compact
-  controls and chips use 2px; fields, buttons, popups and dialogs use at most
-  4px. Full circles are reserved for actual avatars, status dots, radio
+- Adjoining panes, sections, rows, run cards and tab strips have zero radius.
+  Compact controls and chips use 2px; fields, buttons, popups and dialogs use at
+  most 4px. Full circles are reserved for actual avatars, status dots, radio
   controls and switch knobs.
 - Radius tokens are limited to 0, 2px and 4px; content panels have no shadows.
   Restrained shadows are limited to actual floating menus, quick input and
