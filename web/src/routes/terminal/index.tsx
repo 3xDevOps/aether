@@ -192,7 +192,7 @@ function TerminalView({ params }: RouteProps) {
               className={cn(
                 'shrink-0 rounded-[2px] border border-border bg-background px-2 py-0.5 text-[12px] font-medium text-muted-foreground',
                 state.connection === 'offline' &&
-                  'border-state-failed/40 bg-state-failed/10 text-state-failed',
+                  'border-state-failed/40 bg-state-failed/10 text-danger-soft-foreground',
               )}
             >
               {connectionLabel[state.connection]}

@@ -120,7 +120,8 @@ export function RunHeader({ run, subtitle }: { run: RunRecord; subtitle?: string
         )}
         {run.reason && (
           <div
-            className={`mt-1 max-h-24 min-w-0 max-w-full overflow-y-auto border-l-2 px-2 py-1 text-[13px] leading-5 text-foreground/90 ${reasonTone(state)}`}
+            tabIndex={0}
+            className={`${focusRing} mt-1 max-h-24 min-w-0 max-w-full overflow-y-auto border-l-2 px-2 py-1 text-[13px] leading-5 text-foreground/90 ${reasonTone(state)}`}
           >
             <span className="mr-1.5 font-medium text-muted-foreground">Reason</span>
             <span className="whitespace-pre-wrap break-words select-text">{run.reason}</span>
