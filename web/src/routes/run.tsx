@@ -34,14 +34,6 @@ export function RunView({ params }: RouteProps) {
           </header>
           <section aria-label="Run metadata" className="min-w-0 border-y border-border/80">
             <dl className="divide-y divide-border/70">
-              {run.reason && (
-                <div className="grid min-w-0 gap-1 px-3 py-2.5 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
-                  <dt className="text-xs font-medium text-muted-foreground">Reason</dt>
-                  <dd className="min-w-0 whitespace-pre-wrap break-words text-[13px] leading-5">
-                    {run.reason}
-                  </dd>
-                </div>
-              )}
               <div className="grid min-w-0 gap-1 px-3 py-2.5 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
                 <dt className="text-xs font-medium text-muted-foreground">Owner</dt>
                 <dd className="min-w-0 break-words text-[13px]" style={{ color: owner?.color }}>

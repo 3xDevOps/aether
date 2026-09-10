@@ -35,25 +35,18 @@ it('marks a protected run in the view header', () => {
   ).toBeDefined()
 })
 
-it('names why the run last changed state', () => {
+it('shows the provided run reason once', () => {
   seed()
+  const reason = 'waiting on a question'
   useStore.setState({
-    runs: { run_1: toRecord(run({ reason: 'waiting on a question' })) },
+    runs: { run_1: toRecord(run({ reason })) },
   })
 
   render(<RunView params={{ runId: 'run_1' }} />)
 
-  expect(screen.getByText('Reason')).toBeDefined()
-  expect(screen.getByText('waiting on a question')).toBeDefined()
+  expect(screen.getAllByText(reason)).toHaveLength(1)
 })
 
-it('drops the reason row for a run that has none', () => {
-  seed()
-
-  render(<RunView params={{ runId: 'run_1' }} />)
-
-  expect(screen.queryByText('Reason')).toBeNull()
-})
 
 it('shows the last commit row only when its timestamp is set', () => {
   useStore.setState({

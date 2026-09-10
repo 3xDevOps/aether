@@ -23,6 +23,17 @@ function stateTone(state: PresentationState) {
   }
 }
 
+function reasonTone(state: PresentationState) {
+  switch (state) {
+    case 'failed':
+      return 'border-state-failed bg-state-failed/10'
+    case 'needs-attention':
+      return 'border-state-needs-attention/60 bg-state-needs-attention/10'
+    default:
+      return 'border-border/80 bg-muted/20'
+  }
+}
+
 /**
  * The title row every run-detail tab opens with. The state travels with the
  * header, so the Terminal, Diff and Events tabs say how the run is doing
@@ -102,6 +113,14 @@ export function RunHeader({ run, subtitle }: { run: RunRecord; subtitle?: string
                 {detail}
               </span>
             )}
+          </div>
+        )}
+        {run.reason && (
+          <div
+            className={`mt-1 max-h-24 min-w-0 max-w-full overflow-y-auto border-l-2 px-2 py-1 text-[13px] leading-5 text-foreground/90 ${reasonTone(state)}`}
+          >
+            <span className="mr-1.5 font-medium text-muted-foreground">Reason</span>
+            <span className="whitespace-pre-wrap break-words select-text">{run.reason}</span>
           </div>
         )}
       </div>

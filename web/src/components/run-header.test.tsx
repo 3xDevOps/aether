@@ -17,6 +17,12 @@ vi.mock('@/lib/api', async () => {
 })
 
 const tabs = runTabs.map((tab) => tab.route)
+const reasonStates = ['needs-attention', 'failed'] as const
+
+const reasonCases = tabs.flatMap((name) =>
+  reasonStates.map((status) => [name, status] as const),
+)
+
 
 function seed(over: Partial<Run> = {}) {
   useStore.setState({
@@ -72,6 +78,19 @@ describe('run header', () => {
 
     expect(within(bar).getByText('Done')).toBeDefined()
   })
+
+  it.each(reasonCases)(
+    'shows a provided reason once on the %s tab for a %s run',
+    (name, status) => {
+      const reason = `${status} reason for this run: ${'context '.repeat(32)}`
+      seed({ status, reason })
+      const bar = runHeader(name)
+
+      expect(within(bar).getByText(reason)).toBeDefined()
+      expect(screen.getAllByText(reason)).toHaveLength(1)
+      expect(within(bar).getByRole('toolbar')).toBeDefined()
+    },
+  )
 
   it.each(tabs)('marks the %s tab as the open one in the strip', (name) => {
     seed()
