@@ -69,24 +69,26 @@ export function Board() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        {unreachable && total === 0 ? (
-          <div
-            role="alert"
-            className="min-h-24 border-b border-state-failed/35 bg-state-failed/10 px-4 py-2 text-[13px] leading-5 text-state-failed"
-          >
-            <span className="break-words whitespace-pre-wrap">
-              {dead ? error : 'Cannot reach the server. Retrying.'}
-            </span>
-          </div>
-        ) : empty ? (
-          <EmptyNotice />
-        ) : (
-          <div className="grid min-h-24 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-3 lg:overflow-hidden">
-            {columns.map((column) => (
-              <Column key={column.key} column={column} placeholder={placeholder} />
-            ))}
-          </div>
-        )}
+        <div className="min-h-24 min-w-0 flex-1 overflow-y-auto">
+          {unreachable && total === 0 ? (
+            <div
+              role="alert"
+              className="border-b border-state-failed/35 bg-state-failed/10 px-4 py-2 text-[13px] leading-5 text-state-failed"
+            >
+              <span className="break-words whitespace-pre-wrap">
+                {dead ? error : 'Cannot reach the server. Retrying.'}
+              </span>
+            </div>
+          ) : empty ? (
+            <EmptyNotice />
+          ) : (
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-3 lg:overflow-hidden">
+              {columns.map((column) => (
+                <Column key={column.key} column={column} placeholder={placeholder} />
+              ))}
+            </div>
+          )}
+        </div>
         {caps.hasWS('terminal') && <TerminalDock containment="parent" />}
       </div>
     </div>
@@ -134,7 +136,7 @@ function NewRunButton({
 /** What an empty workspace says, in place of the columns. */
 function EmptyNotice() {
   return (
-    <div className="flex min-h-24 flex-1 items-start p-4 sm:p-6">
+    <div className="flex min-h-0 flex-1 items-start p-4 sm:p-6">
       <div className="w-full max-w-2xl border-y border-border px-4 py-5">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Ready for a task
