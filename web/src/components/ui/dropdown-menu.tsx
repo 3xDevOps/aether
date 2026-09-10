@@ -28,8 +28,8 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-32 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg outline-none",
-          className
+          'z-50 min-w-40 overflow-hidden rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg outline-none',
+          className,
         )}
         {...props}
       />
@@ -49,9 +49,9 @@ function DropdownMenuItem({
         // The item sits flush against its neighbours, so the outline is drawn
         // inside it. The background highlight stays for the pointer, but a
         // background is all forced-colors mode discards.
-        "focus-visible:-outline-offset-2",
-        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        className
+        'relative flex min-h-8 cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-[13px] select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4',
+        'focus-visible:-outline-offset-2',
+        className,
       )}
       {...props}
     />

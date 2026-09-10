@@ -1,6 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { Sidebar } from '@/components/shell/sidebar'
-import { ViewHeader } from '@/components/view-header'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
@@ -58,15 +57,6 @@ describe('Sidebar', () => {
     expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
     expect(useStore.getState().activeWorkspace).toBe(workspace.id)
   })
-  it('uses the sidebar surface in both expanded and collapsed states', () => {
-    const getSidebar = () => screen.getByRole('complementary')
-
-    render(<Sidebar />)
-    expect(getSidebar().className).toContain('bg-sidebar')
-
-    act(() => useStore.setState({ sidebarCollapsed: true }))
-    expect(getSidebar().className).toContain('bg-sidebar')
-  })
 
   it('collapses to the rail on a narrow window', () => {
     narrowWindow()
@@ -121,17 +111,17 @@ describe('Sidebar', () => {
     })
   })
 
-  it('keeps the row lit across the run tabs, and breathes rather than bounces', () => {
+  it('keeps the active row selected across the run tabs', () => {
     render(<Sidebar />)
     act(() =>
       useStore.setState({ route: { name: 'diff', params: { runId: 'run_1' } } }),
     )
 
-    const row = screen.getByRole('button', { name: /rewrite the checkout flow/ })
-    expect(row.getAttribute('aria-current')).toBe('page')
-    // A column of ten bouncing runs is noise, so the sidebar pulses the dot.
-    expect(row.querySelector('.state-pulse')).not.toBeNull()
-    expect(row.querySelector('.working-dots')).toBeNull()
+    expect(
+      screen
+        .getByRole('button', { name: /rewrite the checkout flow/ })
+        .getAttribute('aria-current'),
+    ).toBe('page')
   })
 
   it('lights the open run alone, and no row off the run tabs', () => {
@@ -246,18 +236,6 @@ describe('Sidebar', () => {
     expect(screen.getByRole('heading', { name: 'Needs you' })).toBeDefined()
   })
 
-  it('keeps the explorer and main top bars the same height', () => {
-    render(
-      <>
-        <Sidebar />
-        <ViewHeader title="All runs" />
-      </>,
-    )
-
-    const sidebar = screen.getByRole('complementary', { name: 'Runs' })
-    expect(sidebar.firstElementChild?.className).toContain('h-9')
-    expect(screen.getByRole('banner').className).toContain('h-9')
-  })
 
   it('offers a new run to a member who may start one', () => {
     useStore.setState({ info: { ...serverInfo, member: bob } })

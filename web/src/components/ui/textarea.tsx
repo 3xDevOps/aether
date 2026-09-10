@@ -7,7 +7,7 @@ export function Textarea({ className, ...props }: React.ComponentProps<'textarea
       data-slot="textarea"
       className={cn(
         field,
-        'placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
+        'min-h-20 resize-y transition-colors placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
       {...props}
