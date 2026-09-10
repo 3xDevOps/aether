@@ -216,7 +216,7 @@ export function ShortcutsButton() {
             tabIndex={0}
             className={cn(
               focusRing,
-              'min-h-0 min-w-0 space-y-2 overflow-y-auto px-2 py-2 sm:px-3',
+              'focus-visible:-outline-offset-2 min-h-0 min-w-0 space-y-2 overflow-y-auto px-2 py-2 sm:px-3',
             )}
           >
             <section aria-labelledby="shortcut-shell" className="space-y-1">
