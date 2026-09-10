@@ -456,7 +456,10 @@ function ReadDocument({
   return (
     <div
       tabIndex={0}
-      className={cn(focusRing, 'min-h-0 flex-1 overflow-auto overscroll-contain')}
+      className={cn(
+        focusRing,
+        'focus-visible:-outline-offset-2 min-h-0 flex-1 overflow-auto overscroll-contain',
+      )}
     >
       {state.truncated && (
         <p className="border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">
@@ -510,7 +513,7 @@ function NumberedText({ content }: { content: string }) {
     >
       {lines.map((line, index) => (
         <span key={index} className="flex min-w-max">
-          <span className="mr-3 inline-block w-10 select-none text-right text-muted-foreground/70">
+          <span className="mr-3 inline-block w-10 select-none text-right text-muted-foreground">
             {index + 1}
           </span>
           <span>{line || ' '}</span>
