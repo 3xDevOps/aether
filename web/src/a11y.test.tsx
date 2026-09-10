@@ -299,8 +299,10 @@ describe('dock', () => {
 
     rerender(<Dock {...props} tabs={[props.tabs[0], props.tabs[2]]} />)
     const build = screen.getByRole('tab', { name: 'Build' })
-    expect(document.activeElement).toBe(build)
+    // Closing an inactive tab must not steal focus from the selected tab.
+    expect(document.activeElement).toBe(main)
 
+    build.focus()
     fireEvent.keyDown(build, { key: 'Delete' })
     expect(onCloseTab).toHaveBeenLastCalledWith('build')
     rerender(<Dock {...props} tabs={[props.tabs[0]]} />)
@@ -336,6 +338,76 @@ describe('dock', () => {
       screen.getByRole('button', { name: 'Add terminal tab' }),
     )
   })
+
+  it('does not steal focus after a delayed close when focus moved elsewhere', () => {
+    const onCloseTab = vi.fn()
+    const props = {
+      tabs: [
+        { id: 'a', label: 'Shell' },
+        { id: 'b', label: 'Logs' },
+      ],
+      activeTab: 'a',
+      onSelectTab: vi.fn(),
+      onCloseTab,
+      maxTabs: 4,
+      height: 240,
+      onHeightChange: vi.fn(),
+      collapsed: false,
+      onToggleCollapse: vi.fn(),
+      children: <div>terminal</div>,
+    }
+    const { rerender } = render(<Dock {...props} />)
+    const closing = screen.getByRole('tab', { name: 'Logs' })
+    closing.focus()
+    fireEvent.keyDown(closing, { key: 'Delete' })
+
+    const elsewhere = spare()
+    elsewhere.focus()
+    rerender(<Dock {...props} tabs={[props.tabs[0]]} />)
+
+    expect(document.activeElement).toBe(elsewhere)
+  })
+  it('cancels delayed close after external focus then body focus', () => {
+    const onCloseTab = vi.fn()
+    const props = {
+      tabs: [
+        { id: 'a', label: 'Shell' },
+        { id: 'b', label: 'Logs' },
+      ],
+      activeTab: 'a',
+      onSelectTab: vi.fn(),
+      onCloseTab,
+      maxTabs: 4,
+      height: 240,
+      onHeightChange: vi.fn(),
+      collapsed: false,
+      onToggleCollapse: vi.fn(),
+      children: <div>terminal</div>,
+    }
+    const { rerender } = render(<Dock {...props} />)
+    const closing = screen.getByRole('tab', { name: 'Logs' })
+    closing.focus()
+    fireEvent.keyDown(closing, { key: 'Delete' })
+
+    const elsewhere = spare()
+    elsewhere.focus()
+    fireEvent.focusIn(elsewhere)
+    const body = document.body
+    const priorTabIndex = body.getAttribute('tabindex')
+    body.tabIndex = -1
+    try {
+      body.focus()
+      fireEvent.focusIn(body)
+      expect(document.activeElement).toBe(body)
+
+      rerender(<Dock {...props} tabs={[props.tabs[0]]} />)
+      expect(document.activeElement).toBe(body)
+    } finally {
+      if (priorTabIndex === null) body.removeAttribute('tabindex')
+      else body.setAttribute('tabindex', priorTabIndex)
+    }
+  })
+
 
   it('keeps the tab stop on the selected tab when another closes', () => {
     const { rerender } = render(

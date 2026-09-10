@@ -126,8 +126,20 @@ export function Dock({
   const pendingClose = useRef<{
     id: string
     index: number
+    // Null means an inactive tab was closed, so its removal must not steal focus.
     focus: Element | null
   } | null>(null)
+  useEffect(() => {
+    const cancelPendingClose = (event: FocusEvent) => {
+      const close = pendingClose.current
+      if (!close?.focus || event.target === close.focus) return
+      const bodyFocusFromClosedTab =
+        event.target === document.body && !close.focus.isConnected
+      if (!bodyFocusFromClosedTab) pendingClose.current = null
+    }
+    document.addEventListener('focusin', cancelPendingClose)
+    return () => document.removeEventListener('focusin', cancelPendingClose)
+  }, [])
   const focusRepairLength = useRef<number | null>(null)
   const addTab = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -158,9 +170,13 @@ export function Dock({
     headerRef.current?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus()
   }, [tabs])
   const requestClose = useCallback(
-    (tab: DockTab, tabIndex: number) => {
+    (tab: DockTab, tabIndex: number, owner: Element) => {
       if (!onCloseTab || tab.permanent) return
-      pendingClose.current = { id: tab.id, index: tabIndex, focus: document.activeElement }
+      pendingClose.current = {
+        id: tab.id,
+        index: tabIndex,
+        focus: document.activeElement === owner ? owner : null,
+      }
       onCloseTab(tab.id)
     },
     [onCloseTab],
@@ -293,7 +309,7 @@ export function Dock({
                     ) {
                       event.preventDefault()
                       event.stopPropagation()
-                      requestClose(tab, i)
+                      requestClose(tab, i, event.currentTarget)
                       return
                     }
                     onSelectTab(tab.id)
@@ -309,7 +325,7 @@ export function Dock({
                       (event.key === 'Delete' || event.key === 'Backspace')
                     ) {
                       event.preventDefault()
-                      requestClose(tab, i)
+                      requestClose(tab, i, event.currentTarget)
                       return
                     }
                     onTabListKeyDown(event, tabs.length, stop, setFocused)

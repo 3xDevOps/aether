@@ -80,31 +80,10 @@ export function RunDock({ runID }: { runID: string }) {
   const terminal = controller.terminal
   terminalRef.current = terminal
   const setFindOpen = controller.setFindOpen
+  const focusTerminal = controller.focusTerminal
   useEffect(() => {
     setFindOpen(false)
   }, [activeTab, setFindOpen])
-  // Search resets are state-only. User actions hand focus to xterm explicitly;
-  // an intent survives until a terminal is mounted after a new tab or expand.
-  const focusIntent = useRef<HTMLElement | null>(null)
-  const focusTerminalAfterAction = () => {
-    const activeElement = document.activeElement
-    if (terminal) {
-      terminal.focus()
-    } else if (activeElement instanceof HTMLElement) {
-      focusIntent.current = activeElement
-    }
-  }
-  useEffect(() => {
-    const intent = focusIntent.current
-    if (!intent || !terminal) return
-    focusIntent.current = null
-    if (
-      document.activeElement === intent ||
-      (document.activeElement === document.body && !intent.isConnected)
-    ) {
-      terminal.focus()
-    }
-  }, [terminal])
 
   useEffect(() => {
     if (!canOpenShell || !activeTab || !terminal || dock.refusedMessage !== null) return
@@ -171,7 +150,7 @@ export function RunDock({ runID }: { runID: string }) {
   const open = () => {
     setDockCollapsed(runID, false)
     const opened = openShellTab(runID)
-    if (opened) focusTerminalAfterAction()
+    if (opened) focusTerminal()
   }
 
   return (
@@ -181,7 +160,7 @@ export function RunDock({ runID }: { runID: string }) {
       onSelectTab={(tab) => {
         setDockCollapsed(runID, false)
         selectShellTab(runID, tab)
-        focusTerminalAfterAction()
+        focusTerminal()
       }}
       onAddTab={canOpenShell ? open : undefined}
       maxTabs={maxShellTabs}
@@ -192,7 +171,7 @@ export function RunDock({ runID }: { runID: string }) {
       onToggleCollapse={() => {
         const expanding = dock.collapsed
         setDockCollapsed(runID, !dock.collapsed)
-        if (expanding && canOpenShell) focusTerminalAfterAction()
+        if (expanding && canOpenShell) focusTerminal()
       }}
       containment="parent"
     >

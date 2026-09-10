@@ -255,8 +255,8 @@ export function TerminalPane({
           <FindBar
             search={controller.search}
             onClose={() => {
+              controller.focusTerminal()
               controller.setFindOpen(false)
-              controller.terminal?.focus()
             }}
           />
         )}

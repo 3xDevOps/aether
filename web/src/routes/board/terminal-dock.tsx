@@ -109,31 +109,10 @@ export function TerminalDock({
   const terminal = controller.terminal
   terminalRef.current = terminal
   const setFindOpen = controller.setFindOpen
+  const focusTerminal = controller.focusTerminal
   useEffect(() => {
     setFindOpen(false)
   }, [activeTab, setFindOpen])
-  // Search resets are state-only. User actions hand focus to xterm explicitly;
-  // an intent survives until a terminal is mounted after a new tab or expand.
-  const focusIntent = useRef<HTMLElement | null>(null)
-  const focusTerminalAfterAction = () => {
-    const activeElement = document.activeElement
-    if (terminal) {
-      terminal.focus()
-    } else if (activeElement instanceof HTMLElement) {
-      focusIntent.current = activeElement
-    }
-  }
-  useEffect(() => {
-    const intent = focusIntent.current
-    if (!intent || !terminal) return
-    focusIntent.current = null
-    if (
-      document.activeElement === intent ||
-      (document.activeElement === document.body && !intent.isConnected)
-    ) {
-      terminal.focus()
-    }
-  }, [terminal])
 
   useEffect(() => {
     if (!savedConfirmation) return
@@ -306,7 +285,7 @@ export function TerminalDock({
   const open = () => {
     setCollapsed(false)
     const opened = openTab()
-    if (opened) focusTerminalAfterAction()
+    if (opened) focusTerminal()
   }
 
   return (
@@ -317,7 +296,7 @@ export function TerminalDock({
         onSelectTab={(tab) => {
           setCollapsed(false)
           selectTab(tab)
-          focusTerminalAfterAction()
+          focusTerminal()
         }}
         onAddTab={open}
         maxTabs={maxTabs}
@@ -329,7 +308,7 @@ export function TerminalDock({
         onToggleCollapse={() => {
           const expanding = dock.collapsed
           setCollapsed(!dock.collapsed)
-          if (expanding && activeTab !== null) focusTerminalAfterAction()
+          if (expanding && activeTab !== null) focusTerminal()
         }}
         actions={
           (!empty || !!dock.status?.saved_image) && (
