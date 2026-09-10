@@ -112,6 +112,28 @@ export function TerminalDock({
   useEffect(() => {
     setFindOpen(false)
   }, [activeTab, setFindOpen])
+  // Search resets are state-only. User actions hand focus to xterm explicitly;
+  // an intent survives until a terminal is mounted after a new tab or expand.
+  const focusIntent = useRef<HTMLElement | null>(null)
+  const focusTerminalAfterAction = () => {
+    const activeElement = document.activeElement
+    if (terminal) {
+      terminal.focus()
+    } else if (activeElement instanceof HTMLElement) {
+      focusIntent.current = activeElement
+    }
+  }
+  useEffect(() => {
+    const intent = focusIntent.current
+    if (!intent || !terminal) return
+    focusIntent.current = null
+    if (
+      document.activeElement === intent ||
+      (document.activeElement === document.body && !intent.isConnected)
+    ) {
+      terminal.focus()
+    }
+  }, [terminal])
 
   useEffect(() => {
     if (!savedConfirmation) return
@@ -281,6 +303,11 @@ export function TerminalDock({
   const tabs = dock.tabs.map((tab) => ({ id: tab, label: tab, permanent: tab === 'main' }))
   const empty = dock.tabs.length === 0 && dock.status?.running !== true
   const loading = dock.status === null && dock.statusError === null
+  const open = () => {
+    setCollapsed(false)
+    const opened = openTab()
+    if (opened) focusTerminalAfterAction()
+  }
 
   return (
     <>
@@ -290,18 +317,20 @@ export function TerminalDock({
         onSelectTab={(tab) => {
           setCollapsed(false)
           selectTab(tab)
+          focusTerminalAfterAction()
         }}
-        onAddTab={() => {
-          setCollapsed(false)
-          openTab()
-        }}
+        onAddTab={open}
         maxTabs={maxTabs}
         onCloseTab={closeTab}
         height={terminalDockHeight}
         onHeightChange={setHeight}
         collapsed={dock.collapsed}
         containment={containment}
-        onToggleCollapse={() => setCollapsed(!dock.collapsed)}
+        onToggleCollapse={() => {
+          const expanding = dock.collapsed
+          setCollapsed(!dock.collapsed)
+          if (expanding && activeTab !== null) focusTerminalAfterAction()
+        }}
         actions={
           (!empty || !!dock.status?.saved_image) && (
             <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
@@ -393,13 +422,13 @@ export function TerminalDock({
             ) : empty ? (
               <div className="space-y-2 bg-background p-3 text-[13px]">
                 <p>Your environment starts on first open</p>
-                <Button type="button" size="sm" onClick={openTab}>
+                <Button type="button" size="sm" onClick={open}>
                   Open
                 </Button>
               </div>
             ) : activeTab === null ? (
               <div className="bg-background p-3">
-                <Button type="button" size="sm" onClick={openTab}>
+                <Button type="button" size="sm" onClick={open}>
                   Open
                 </Button>
               </div>

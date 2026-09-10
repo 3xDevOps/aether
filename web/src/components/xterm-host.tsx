@@ -3,7 +3,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import {
   defaultTerminalFontSize,
@@ -254,22 +254,12 @@ export function useXterm({
     onResizeRef.current?.(terminal.cols, terminal.rows)
   }, [fontSize, terminal])
 
-  // Closing the find bar hands the keyboard back to the shell; the match it
-  // selected stays selected, so it can still be copied.
-  const changeFind = useCallback(
-    (open: boolean) => {
-      setFindOpen(open)
-      if (!open) terminal?.focus()
-    },
-    [terminal],
-  )
-
   return {
     hostRef: setHost,
     terminal,
     ready: terminal !== null,
     search,
     findOpen,
-    setFindOpen: changeFind,
+    setFindOpen,
   }
 }
