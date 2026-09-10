@@ -73,26 +73,24 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
-        <DialogHeader>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+        <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Launch from a template</DialogTitle>
           <DialogDescription>
-            The template's saved task starts as a new run in the workspace.
+            The template&apos;s saved task starts as a new run in the workspace.
           </DialogDescription>
         </DialogHeader>
         <form
           id="launch-template"
-          className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1"
+          className="min-h-0 min-w-0 space-y-3 overflow-y-auto px-3 py-3 sm:px-4"
           onSubmit={(e) => {
             e.preventDefault()
             void launch()
           }}
         >
-          <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-2.5">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Target workspace
-            </p>
-            <p className="mt-1 text-sm" aria-label="Target workspace">
+          <div className="border-y border-border/70 px-2 py-2">
+            <p className="text-xs font-medium text-muted-foreground">Target workspace</p>
+            <p className="mt-0.5 break-words text-[13px]" aria-label="Target workspace">
               {workspace ? (
                 <>
                   <span className="font-medium">{workspace.name}</span>{' '}
@@ -101,9 +99,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
                   </span>
                 </>
               ) : (
-                <span className="text-muted-foreground">
-                  Pick a workspace in the sidebar first.
-                </span>
+                <span className="text-muted-foreground">Pick a workspace in the sidebar first.</span>
               )}
             </p>
           </div>
@@ -121,30 +117,28 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs leading-4 text-muted-foreground">
               Choose a saved task from this workspace.
             </p>
           </div>
           {templates === null && (
-            <p className="text-sm text-muted-foreground">Loading templates...</p>
+            <p className="text-[13px] text-muted-foreground">Loading templates...</p>
           )}
           {templates?.length === 0 && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               This workspace has no saved templates.
             </p>
           )}
           {selected && (
-            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2.5">
-              <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                Saved task
-              </p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            <div className="border-y border-border/70 px-2 py-2">
+              <p className="text-xs font-medium text-muted-foreground">Saved task</p>
+              <p className="mt-0.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
                 {selected.harness} ({selected.mode}) - {selected.task}
               </p>
             </div>
           )}
         </form>
-        <DialogFooter className="border-t pt-4">
+        <DialogFooter className="border-t px-3 py-3 sm:px-4">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>

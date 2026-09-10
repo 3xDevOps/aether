@@ -33,7 +33,7 @@ export function ConflictChips({ run }: CardSlotProps) {
               aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their run`}
               className={cn(
                 focusRing,
-                'inline-flex min-w-0 items-center gap-1.5 rounded-md border border-state-needs-attention/40 bg-state-needs-attention/10 px-2 py-1 text-xs hover:bg-state-needs-attention/20',
+                'inline-flex min-h-[22px] min-w-0 max-w-full items-center gap-1.5 border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 text-[12px] hover:bg-state-needs-attention/20',
               )}
             >
               <TriangleAlert className="size-3.5 shrink-0 text-state-needs-attention" aria-hidden />

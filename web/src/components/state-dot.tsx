@@ -31,9 +31,9 @@ export function StateDot({ state, className, decorative = false }: MarkProps) {
 function WorkingDots({ state, className, decorative = false }: MarkProps) {
   return (
     <span {...labelling(state, decorative)} className={cn('working-dots', className)}>
-      <span />
-      <span />
-      <span />
+      <span aria-hidden />
+      <span aria-hidden />
+      <span aria-hidden />
     </span>
   )
 }

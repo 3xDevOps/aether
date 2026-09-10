@@ -62,28 +62,28 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
       <RunHeader run={run} subtitle={run.branch} />
       <RunTabs runID={runID} active="events" />
       <div
-        {...runTabPanel('events', 'min-h-0 flex-1 overflow-y-auto bg-muted/10 p-4 sm:p-5', true)}
+        {...runTabPanel('events', 'min-h-0 min-w-0 flex-1 overflow-y-auto bg-background p-3 sm:p-4', true)}
       >
         {error && (
           <p
             role="alert"
-            className="mb-4 rounded-md border border-state-failed/35 bg-state-failed/10 px-3 py-2 text-[13px] leading-5 text-state-failed"
+            className="mb-4 min-w-0 break-words whitespace-pre-wrap border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] leading-5 text-state-failed"
           >
             {error}
           </p>
         )}
-        <ol className="space-y-2">
+        <ol className="space-y-0">
           {[...feed].reverse().map((event) => (
             <FeedEntry key={event.id} event={event} />
           ))}
         </ol>
         {feed.length === 0 && !loading && (
-          <p className="rounded-md border border-dashed border-border/80 bg-background/45 px-4 py-8 text-center text-sm text-muted-foreground">
+          <p className="border border-dashed border-border px-4 py-6 text-center text-[13px] text-muted-foreground">
             Nothing here yet.
           </p>
         )}
         {truncated && (
-          <p className="mt-3 rounded-sm border border-border/60 bg-background/35 px-3 py-2 text-[13px] leading-5 text-muted-foreground">
+          <p className="mt-3 border-l-2 border-border bg-sidebar px-3 py-2 text-[13px] leading-5 text-muted-foreground">
             Stopped after {pageBudget} entries, so part of this stretch of
             history is not shown.
           </p>

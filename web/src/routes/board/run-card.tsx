@@ -1,5 +1,5 @@
 import { Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
-import { useRef, type ReactNode } from 'react'
+import { useRef, type MouseEvent, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { StateIndicator } from '@/components/state-dot'
 import { Chip } from '@/components/ui/heroui'
@@ -18,9 +18,12 @@ import type { RunRecord } from '@/store/runs'
 /**
  * One run, as it appears on the board. Another feature contributes to the
  * card through the slots (`card:badges`, `card:chips`, `card:footer`); the
- * card's own content is written here. The whole card is one click target: an
- * overlay button sits above the text and below the slots and the branch chip,
- * so those stay readable and interactive.
+ * card's own content is written here.
+ *
+ * The article is a forgiving pointer surface for its noninteractive metadata,
+ * while the title block is a real button for keyboard users. Branch text and
+ * slot controls opt out of the article surface so selecting or copying a
+ * branch never reveals the run.
  */
 export function RunCard({ card }: { card: BoardCard }) {
   const { run, state, owner, unseen, paused } = card
@@ -33,33 +36,46 @@ export function RunCard({ card }: { card: BoardCard }) {
       ? (approvalsForRun(s.inbox, run.id)[0]?.action ?? '')
       : run.reason,
   )
+  const handleCardClick = (event: MouseEvent<HTMLElement>) => {
+    const target = event.target
+    if (
+      target instanceof Element &&
+      target.closest('button, a, input, select, textarea, [data-run-navigation-exempt]')
+    ) {
+      return
+    }
+    if (window.getSelection()?.isCollapsed === false) {
+      return
+    }
+    navigate('terminal', { runId: run.id })
+  }
 
   return (
     <article
+      onClick={handleCardClick}
       style={{ borderLeftColor: owner?.color }}
       className={cn(
-        'relative overflow-hidden rounded-lg border border-l-3 bg-card shadow-xs transition-[border-color,background-color,box-shadow] duration-150 hover:border-foreground/20 hover:bg-accent/40 hover:shadow-sm',
+        'group min-w-0 cursor-pointer border-b border-l-2 border-border bg-background px-3 py-2.5 transition-colors duration-100 hover:bg-toolbar-hover',
         unseen ? 'border-foreground/25' : 'opacity-90',
       )}
     >
-      {/* First in the DOM so a keyboard reaches the run before the card's
-          secondary controls; z-index, not order, keeps it under them. */}
-      <button
-        type="button"
-        aria-label={runLabel(run)}
-        onClick={() => navigate('terminal', { runId: run.id })}
-        className={cn(
-          focusRing,
-          'focus-visible:-outline-offset-2',
-          'absolute inset-0 z-10 rounded-lg',
-        )}
-      />
-
-      <div className="space-y-3.5 p-4">
-        <div className="flex items-start gap-2.5">
+      <div className="flex min-w-0 items-start gap-2">
+        {/* This is the first actionable element in each card for keyboard users. */}
+        <button
+          type="button"
+          aria-label={runLabel(run)}
+          onClick={(event) => {
+            event.stopPropagation()
+            navigate('terminal', { runId: run.id })
+          }}
+          className={cn(
+            focusRing,
+            'flex min-w-0 flex-1 items-start gap-2 rounded-[2px] text-left',
+          )}
+        >
           <StateIndicator state={state} decorative className="mt-1.5" />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
+          <span className="min-w-0 flex-1">
+            <span className="flex flex-wrap items-center gap-1.5">
               <StateChip state={state} />
               {unseen && (
                 <Chip
@@ -79,88 +95,92 @@ export function RunCard({ card }: { card: BoardCard }) {
                   </Chip>
                 </span>
               )}
-            </div>
-            <h3
+            </span>
+            <span
               className={cn(
-                'mt-2 line-clamp-2 break-words text-[15px] font-medium leading-5',
+                'mt-1 block break-words text-[14px] font-medium leading-5',
                 unseen && 'font-semibold',
               )}
             >
               {runLabel(run)}
-            </h3>
+            </span>
             {run.title?.trim() && run.task.trim() && (
-              <p className="mt-1 line-clamp-2 break-words text-[13px] leading-5 text-muted-foreground">
+              <span className="mt-0.5 block break-words text-xs leading-4 text-muted-foreground">
                 {run.task.trim()}
-              </p>
-            )}
-          </div>
-          <div className="relative z-20 flex shrink-0 items-center gap-1">
-            {run.protected && (
-              <span
-                role="img"
-                aria-label="Protected: only the owner or an admin can steer or kill this run"
-                title="Protected: only the owner or an admin can steer or kill this run"
-                className="flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent"
-              >
-                <Shield className="size-3.5" aria-hidden />
               </span>
             )}
-            <CardSlot name="card:badges" run={run} />
-          </div>
-        </div>
-
-        {state === 'needs-attention' && summary && (
-          <div className="relative z-20 rounded-md border border-state-needs-attention/25 bg-state-needs-attention/10 px-3 py-2">
-            <p className="text-[13px] leading-5 text-foreground/85">{summary}</p>
-          </div>
-        )}
-
-        <div className="relative z-20 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t pt-3 text-[13px] text-muted-foreground">
-          <HarnessGlyph harness={run.harness} mode={run.mode} />
-          {/* A run whose checkout failed carries no branch, so the chip and
-              its copy button would name and copy nothing. Raised above the
-              card's click overlay: without that the title never resolves,
-              the truncated name cannot be selected, and the copy button is
-              unreachable. The trade is that a click landing on the chip
-              itself no longer opens the run. */}
-          {run.branch && (
-            <span className="relative z-20 flex min-w-0 max-w-full items-center gap-1">
-              <GitBranch className="size-3.5 shrink-0" aria-hidden />
-              <span ref={branchRef} className="max-w-48 truncate select-text font-mono text-xs" title={run.branch}>
-                {run.branch}
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label={`Copy branch ${run.branch}`}
-                className="size-6 shrink-0"
-                onClick={() => void copyText(run.branch, branchRef.current)}
-              >
-                <Copy className="size-3" aria-hidden />
-              </Button>
-            </span>
-          )}
-          {run.last_commit && (
+          </span>
+        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {run.protected && (
             <span
-              className="flex items-center gap-1"
-              title={run.last_commit}
+              role="img"
+              aria-label="Protected: only the owner or an admin can steer or kill this run"
+              title="Protected: only the owner or an admin can steer or kill this run"
+              className="flex size-[22px] items-center justify-center rounded-[2px] text-muted-foreground"
             >
-              <GitCommit className="size-3.5 shrink-0" aria-hidden />
-              committed {timeAgo(run.last_commit_at ?? run.created_at)}
+              <Shield className="size-3.5" aria-hidden />
             </span>
           )}
-          <CardSlot name="card:chips" run={run} />
+          <CardSlot name="card:badges" run={run} />
         </div>
+      </div>
 
-        <div className="relative z-20 flex min-w-0 items-center gap-2 border-t pt-3 text-[13px] text-muted-foreground">
-          <MemberAvatar member={owner} fallback={run.member_id} className="size-6 text-[10px]" />
-          <span className="min-w-0 truncate">{owner?.display_name ?? run.member_id}</span>
-          <time className="ml-auto shrink-0 text-xs" title={timestamps(card)}>
-            {timeAgo(run.stateChangedAt)}
-          </time>
-          <CardSlot name="card:footer" run={run} />
+      {state === 'needs-attention' && summary && (
+        <div className="mt-2 border-l-2 border-state-needs-attention/60 bg-state-needs-attention/10 px-2.5 py-1.5">
+          <p className="break-words text-xs leading-4 text-foreground/85">{summary}</p>
         </div>
+      )}
+
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/80 pt-2 text-xs text-muted-foreground">
+        <HarnessGlyph harness={run.harness} mode={run.mode} />
+        {/* Branch content is selectable and intentionally outside navigation. */}
+        {run.branch && (
+          <span
+            data-run-navigation-exempt
+            className="flex min-w-0 max-w-full items-center gap-1"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <GitBranch className="size-3.5 shrink-0" aria-hidden />
+            <span
+              ref={branchRef}
+              className="min-w-0 break-all select-text font-mono text-xs"
+              title={run.branch}
+            >
+              {run.branch}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={`Copy branch ${run.branch}`}
+              className="size-[22px] shrink-0"
+              onClick={(event) => {
+                event.stopPropagation()
+                void copyText(run.branch, branchRef.current)
+              }}
+            >
+              <Copy className="size-3" aria-hidden />
+            </Button>
+          </span>
+        )}
+        {run.last_commit && (
+          <span className="flex items-center gap-1" title={run.last_commit}>
+            <GitCommit className="size-3.5 shrink-0" aria-hidden />
+            committed {timeAgo(run.last_commit_at ?? run.created_at)}
+          </span>
+        )}
+        <CardSlot name="card:chips" run={run} />
+      </div>
+
+      <div className="mt-2 flex min-w-0 items-center gap-2 border-t border-border/80 pt-2 text-xs text-muted-foreground">
+        <MemberAvatar member={owner} fallback={run.member_id} className="size-5 text-[9px]" />
+        <span className="min-w-0 truncate">{owner?.display_name ?? run.member_id}</span>
+        <time className="ml-auto shrink-0 tabular-nums" title={timestamps(card)}>
+          {timeAgo(run.stateChangedAt)}
+        </time>
+        <CardSlot name="card:footer" run={run} />
       </div>
     </article>
   )
@@ -191,10 +211,10 @@ function StateChip({ state }: { state: PresentationState }) {
   )
 }
 
-/** Slot content stays above the card's click overlay so it can be clicked. */
+/** Slot content may contain its own links or buttons. */
 function CardSlot({ name, run }: { name: CardSlotName; run: RunRecord }): ReactNode {
   return (
-    <span className="relative z-20 flex flex-wrap items-center gap-1 empty:hidden">
+    <span className="flex flex-wrap items-center gap-1 empty:hidden">
       <Slot name={name} run={run} />
     </span>
   )

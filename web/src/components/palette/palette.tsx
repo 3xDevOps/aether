@@ -106,8 +106,8 @@ export function PaletteBody({
   return (
     <>
       <CommandInput placeholder="Search commands, runs, workspaces..." />
-      <CommandList className="min-h-0 px-1 pb-2">
-        <CommandEmpty className="py-10">No commands, runs, or workspaces match.</CommandEmpty>
+      <CommandList className="min-h-0 px-1 pb-1">
+        <CommandEmpty className="py-4">No commands, runs, or workspaces match.</CommandEmpty>
 
         {focusedContext && (
           <>

@@ -1,5 +1,6 @@
-// The header row cannot scroll, so a row too narrow for every verb has to
-// hide buttons rather than push them past the right edge.
+// The header stays readable at narrow widths: primary verbs keep their icon
+// and tooltip, while their text label yields before the action group wraps.
+// Secondary verbs remain in the overflow menu when the row is constrained.
 
 import { Ellipsis, Loader2, UserPlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -102,6 +103,7 @@ export function RunActions({ run }: { run: RunRecord }) {
     <>
       {commands.map((command) => {
         const blocked = running !== null || command.disabled === true
+        const buttonLabel = command.short ?? command.label
         return (
           <Tooltip key={command.id}>
             <Tooltip.Trigger<'button'>
@@ -110,8 +112,9 @@ export function RunActions({ run }: { run: RunRecord }) {
                   {...triggerProps}
                   variant={primaryCommands[command.id] ? 'secondary' : 'ghost'}
                   size="sm"
+                  aria-label={buttonLabel}
                   className={cn(
-                    'h-8 px-2.5 text-[13px]',
+                    'h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2',
                     !primaryCommands[command.id] &&
                       'hidden @4xl/run-header:inline-flex',
                   )}
@@ -127,7 +130,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                   ) : (
                     <command.Icon className="size-3" aria-hidden />
                   )}
-                  {command.short ?? command.label}
+                  <span className="sr-only @sm/run-header:not-sr-only">{buttonLabel}</span>
                 </Button>
               )}
             />
@@ -147,7 +150,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                 {...triggerProps}
                 variant="ghost"
                 size="sm"
-                className="hidden h-8 px-2.5 text-[13px] @4xl/run-header:inline-flex"
+                className="hidden h-[22px] min-h-[22px] px-2 text-[12px] @4xl/run-header:inline-flex"
                 aria-disabled={running !== null || undefined}
                 onClick={() => {
                   if (running !== null) return
@@ -179,7 +182,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                     ref={moreTrigger}
                     variant="ghost"
                     size="sm"
-                    className="h-8 px-2.5 text-[13px] @4xl/run-header:hidden"
+                    className="h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2 @4xl/run-header:hidden"
                     aria-disabled={running !== null || undefined}
                   >
                     {running !== null ? (
@@ -187,7 +190,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                     ) : (
                       <Ellipsis className="size-3" aria-hidden />
                     )}
-                    More
+                    <span className="sr-only @sm/run-header:not-sr-only">More</span>
                   </Button>
                 </DropdownMenuTrigger>
               )}
@@ -234,11 +237,11 @@ export function RunActions({ run }: { run: RunRecord }) {
 
       {asking && confirm && (
         <AlertDialog open onOpenChange={() => setAsking(null)}>
-          <AlertDialogContent>
+          <AlertDialogContent className="max-w-[min(420px,calc(100%-2rem))] p-3 sm:p-4">
             <AlertDialogHeader>
               <AlertDialogTitle>{confirm.title}</AlertDialogTitle>
               <AlertDialogDescription>
-                "{runLabel(run)}" - {confirm.body}
+                &quot;{runLabel(run)}&quot; - {confirm.body}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -255,18 +258,19 @@ export function RunActions({ run }: { run: RunRecord }) {
 
       {handoff && (
         <Dialog open onOpenChange={() => setHandoff(false)}>
-          <DialogContent>
+          <DialogContent className="max-w-[min(420px,calc(100%-2rem))] p-3 sm:p-4">
             <DialogHeader>
               <DialogTitle>Hand off this run</DialogTitle>
               <DialogDescription>
-                Whoever you pick owns "{runLabel(run)}" from here on.
+                Whoever you pick owns &quot;{runLabel(run)}&quot; from here on.
               </DialogDescription>
             </DialogHeader>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1">
               {handoffs.map((command) => (
                 <Button
                   key={command.id}
                   variant="outline"
+                  size="sm"
                   className="justify-start"
                   onClick={() => {
                     setHandoff(false)

@@ -70,15 +70,18 @@ export function Board() {
 
       <div className="flex min-h-0 flex-1 flex-col">
         {unreachable && total === 0 ? (
-          <div className="m-4 rounded-lg border border-state-failed/30 bg-state-failed/10 p-4 sm:m-6">
-            <p className="text-sm text-state-failed">
+          <div
+            role="alert"
+            className="border-b border-state-failed/35 bg-state-failed/10 px-4 py-2 text-[13px] leading-5 text-state-failed"
+          >
+            <span className="break-words whitespace-pre-wrap">
               {dead ? error : 'Cannot reach the server. Retrying.'}
-            </p>
+            </span>
           </div>
         ) : empty ? (
           <EmptyNotice />
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-4 sm:p-6 md:grid-cols-3 md:overflow-hidden">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-3 lg:overflow-hidden">
             {columns.map((column) => (
               <Column key={column.key} column={column} placeholder={placeholder} />
             ))}
@@ -131,17 +134,17 @@ function NewRunButton({
 /** What an empty workspace says, in place of the columns. */
 function EmptyNotice() {
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
-      <div className="w-full max-w-xl rounded-lg border bg-card p-6 shadow-xs sm:p-8">
+    <div className="flex min-h-0 flex-1 items-start p-4 sm:p-6">
+      <div className="w-full max-w-2xl border-y border-border px-4 py-5">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Ready for a task
         </p>
-        <h2 className="mt-2 text-xl font-semibold tracking-tight">No runs yet</h2>
-        <p className="mt-2 max-w-prose text-sm leading-6 text-muted-foreground">
+        <h2 className="mt-1.5 text-[16px] font-semibold leading-5">No runs yet</h2>
+        <p className="mt-1.5 max-w-prose text-[13px] leading-5 text-muted-foreground">
           A run is one agent working on its own branch of this workspace, in its
           own container.
         </p>
-        <div className="mt-5">
+        <div className="mt-4">
           <NewRunButton variant="default" size="default" />
         </div>
       </div>
@@ -158,22 +161,22 @@ function Column({
 }) {
   return (
     <section
-      className="flex min-w-0 flex-col rounded-lg border bg-muted/30 p-3 md:min-h-0"
+      className="flex min-w-0 flex-col border-b border-border bg-sidebar/35 last:border-b-0 lg:min-h-0 lg:border-b-0 lg:border-r lg:last:border-r-0"
       aria-label={column.label}
     >
       <ColumnHeader label={column.label} count={column.cards.length} />
-      <div className="space-y-2 md:min-h-0 md:flex-1 md:overflow-y-auto md:pr-1">
+      <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {column.cards.map((card) => (
           <RunCard key={card.run.id} card={card} />
         ))}
         {column.cards.length === 0 && placeholder === 'skeleton' && (
           <>
-            <Skeleton className="h-28 rounded-md" />
-            <Skeleton className="h-28 rounded-md" />
+            <Skeleton className="h-20 rounded-none border-b" />
+            <Skeleton className="h-20 rounded-none border-b" />
           </>
         )}
         {column.cards.length === 0 && placeholder === 'empty' && (
-          <p className="rounded-md border border-dashed px-3 py-4 text-[13px] text-muted-foreground">
+          <p className="border-b border-dashed px-3 py-3 text-[13px] text-muted-foreground">
             Nothing here.
           </p>
         )}
@@ -184,8 +187,8 @@ function Column({
 
 function ColumnHeader({ label, count }: { label: string; count: number }) {
   return (
-    <header className="mb-3 flex items-center justify-between gap-3 border-b pb-3">
-      <h2 className="text-sm font-semibold tracking-tight">{label}</h2>
+    <header className="flex min-h-[35px] shrink-0 items-center justify-between gap-3 border-b border-border px-3">
+      <h2 className="text-[13px] font-semibold leading-5">{label}</h2>
       <Chip color="default" variant="tertiary" size="sm" aria-label={`${count} runs`}>
         <Chip.Label>{count}</Chip.Label>
       </Chip>

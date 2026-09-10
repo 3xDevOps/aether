@@ -170,7 +170,7 @@ export function RunDock({ runID }: { runID: string }) {
       {showing === 'unavailable' ? (
         <div
           {...takesFocus}
-          className={cn(focusRing, 'bg-muted/10 p-4 text-[13px] leading-5 text-muted-foreground')}
+          className={cn(focusRing, 'bg-background px-3 py-2 text-[13px] leading-5 text-muted-foreground')}
         >
           {pauseKnown
             ? 'Run shell unavailable: this run has no live container. The Terminal tab replays its recorded output.'
@@ -181,13 +181,13 @@ export function RunDock({ runID }: { runID: string }) {
           {...takesFocus}
           className={cn(
             focusRing,
-            'bg-state-failed/10 p-4 text-[13px] leading-5 text-state-failed',
+            'min-w-0 break-words whitespace-pre-wrap overflow-y-auto bg-state-failed/10 px-3 py-2 text-[13px] leading-5 text-state-failed',
           )}
         >
           {dock.refusedMessage}
         </div>
       ) : showing === 'closed' ? (
-        <div {...takesFocus} className={cn(focusRing, 'flex items-center bg-muted/10 p-4')}>
+        <div {...takesFocus} className={cn(focusRing, 'flex items-center bg-background px-3 py-2')}>
           <Button type="button" size="sm" onClick={open}>
             Open shell
           </Button>

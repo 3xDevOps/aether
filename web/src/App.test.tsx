@@ -61,11 +61,16 @@ describe('App', () => {
       expect(sidebar().getByText('rewrite the checkout flow')).toBeDefined(),
     )
 
-    useStore.getState().navigate('terminal', { runId: 'run_1' })
+    const row = sidebar().getByRole('button', { name: /rewrite the checkout flow/ })
+    fireEvent.click(row)
 
-    // The row lands on the Terminal tab, whose subtitle names the run's
-    // harness and branch; the sidebar repeats the task, the subtitle does not.
-    expect(await screen.findByText('claude · aether/run-1-checkout')).toBeDefined()
+    expect(row.getAttribute('aria-current')).toBe('page')
+    const strip = await screen.findByRole('tablist', { name: 'Run tabs' })
+    await vi.waitFor(() =>
+      expect(
+        within(strip).getByRole('tab', { name: 'Terminal' }).getAttribute('aria-selected'),
+      ).toBe('true'),
+    )
   })
 
   // The launch form is hosted by the shell, not by the palette: a button on

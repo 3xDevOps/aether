@@ -1,5 +1,5 @@
-import { createElement } from 'react'
-import { render, screen } from '@testing-library/react'
+import { createElement, useState } from 'react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Dock, clampDockHeight } from '@/components/dock'
 
@@ -42,5 +42,32 @@ describe('Dock controls', () => {
     // The sentence is what a member reads, and it arrives without warning, so
     // it is announced rather than only drawn.
     expect(screen.getByRole('status')).toHaveProperty('textContent', 'At most 2 tabs')
+  })
+
+  it('focuses the expand control when Enter collapses the dock separator', () => {
+    function FocusableDock() {
+      const [collapsed, setCollapsed] = useState(false)
+      return createElement(Dock, {
+        tabs: [{ id: 't1', label: 't1' }],
+        activeTab: 't1',
+        onSelectTab: vi.fn(),
+        maxTabs: 1,
+        height: 240,
+        onHeightChange: vi.fn(),
+        collapsed,
+        onToggleCollapse: () => setCollapsed(true),
+        children: createElement('div'),
+      })
+    }
+
+    render(createElement(FocusableDock))
+    fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize terminal dock' }), {
+      key: 'Enter',
+    })
+
+    expect(screen.queryByRole('tabpanel')).toBeNull()
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Expand terminal dock' }),
+    )
   })
 })

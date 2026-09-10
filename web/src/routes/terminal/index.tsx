@@ -195,14 +195,14 @@ function TerminalView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden">
-      <RunHeader run={run} subtitle={`${run.harness} · ${run.branch}`} />
+      <RunHeader run={run} subtitle={run.branch} />
       <RunTabs runID={runID} active="terminal" />
-      <div {...runTabPanel('terminal', 'flex min-h-0 flex-1 flex-col overflow-hidden')}>
-        <div className="flex min-h-11 flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border/75 bg-muted/20 px-4 py-2 text-[13px]">
+      <div {...runTabPanel('terminal', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden')}>
+        <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-sidebar px-3 py-1 text-[13px]">
           {!starting && (
             <span
               className={cn(
-                'shrink-0 rounded-sm border border-border/70 bg-background/70 px-2 py-1 font-medium text-muted-foreground',
+                'shrink-0 rounded-[2px] border border-border bg-background px-2 py-0.5 text-[12px] font-medium text-muted-foreground',
                 state.connection === 'offline' &&
                   'border-state-failed/40 bg-state-failed/10 text-state-failed',
               )}
@@ -244,7 +244,7 @@ function TerminalView({ params }: RouteProps) {
             </span>
           )}
           {state.message && (
-            <span className="min-w-0 flex-1 break-words text-muted-foreground">
+            <span className="min-w-0 flex-1 break-words whitespace-pre-wrap text-muted-foreground">
               {state.refused && sessionMissing && endedStatuses.includes(run.status)
                 ? endedMessage(run)
                 : state.message}
@@ -256,7 +256,7 @@ function TerminalView({ params }: RouteProps) {
             </Button>
           )}
         </div>
-        <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-background">
           <TerminalPane key={runID} controller={controller}>
             {starting && <TerminalSpinner label="Starting the run's container" />}
           </TerminalPane>

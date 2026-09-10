@@ -17,11 +17,11 @@ function Overview() {
             <Chip.Label>{runs.length} total</Chip.Label>
           </Chip>
         }
-        subtitle="Current workspace, ordered by attention and recent change"
+        subtitle="Current workspace · attention first"
       />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <main className="min-h-0 flex-1 overflow-y-auto">
         <RunList runs={runs} empty="No runs yet." />
-      </div>
+      </main>
     </div>
   )
 }

@@ -114,7 +114,7 @@ export function Dock({
   return (
     <section
       id={dockID}
-      className="relative flex shrink-0 flex-col border-t border-border/90 bg-card/35"
+      className="relative flex shrink-0 flex-col border-t border-border bg-sidebar"
       style={collapsed ? undefined : { height: clampDockHeight(height, viewport) }}
       aria-label="Terminal dock"
     >
@@ -132,14 +132,14 @@ export function Dock({
           onKeyDown={resizeKey}
           className={cn(
             focusRing,
-            'absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize rounded-sm bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20',
+            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20',
           )}
         />
       )}
-      <div className="flex h-10 min-h-10 items-center gap-1 border-b border-border/75 bg-background/65 px-2">
+      <div className="flex min-h-9 flex-wrap items-center gap-x-1 border-b border-border bg-sidebar px-2">
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <div
-            className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex min-w-0 max-w-full items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             role={tabs.length > 0 ? 'tablist' : undefined}
             aria-label={tabs.length > 0 ? 'Terminal tabs' : undefined}
           >
@@ -147,9 +147,8 @@ export function Dock({
               <div
                 key={tab.id}
                 className={cn(
-                  'flex min-w-0 shrink-0 items-center rounded-md border border-transparent',
-                  activeTab === tab.id &&
-                    'border-primary/20 bg-[var(--accent-soft)] text-[var(--accent-soft-foreground)]',
+                  'flex min-w-0 shrink-0 items-center border-b-2 border-transparent text-muted-foreground',
+                  activeTab === tab.id && 'border-b-primary text-foreground',
                 )}
               >
                 <button
@@ -163,7 +162,7 @@ export function Dock({
                   tabIndex={i === stop ? 0 : -1}
                   className={cn(
                     focusRing,
-                    'min-h-8 min-w-0 max-w-40 truncate rounded-sm px-2.5 py-1.5 text-[13px] font-medium',
+                    'min-h-9 min-w-0 max-w-40 truncate rounded-none border-0 px-2.5 py-0 text-[13px] font-medium',
                   )}
                   onFocus={() => setFocused(i)}
                   onClick={() => onSelectTab(tab.id)}
@@ -178,7 +177,7 @@ export function Dock({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="mr-0.5 size-7 rounded-sm"
+                    className="mr-0.5 size-[22px] rounded-none"
                     aria-label={`Close ${tab.label}`}
                     onClick={(event) => {
                       event.stopPropagation()
@@ -206,14 +205,19 @@ export function Dock({
           {atLimit && (
             // A disabled control shows no tooltip, so the ceiling is written
             // out instead of hidden in a title attribute.
-            <span role="status" className="px-1 text-xs text-muted-foreground">
+            <span role="status" className="px-1 text-[12px] text-muted-foreground">
               At most {maxTabs} tabs
             </span>
           )}
         </div>
-        {actions}
+        {actions && (
+          <div className="flex min-w-0 max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[640px]:order-3 max-[640px]:max-w-full max-[640px]:basis-full max-[640px]:justify-end max-[640px]:border-t max-[640px]:border-border max-[640px]:py-1">
+            {actions}
+          </div>
+        )}
         <Button
           ref={collapse}
+          className="max-[640px]:order-2"
           type="button"
           variant="ghost"
           size="icon"
@@ -230,7 +234,7 @@ export function Dock({
           id={panelID}
           aria-labelledby={tabs[index] ? tabID(tabs[index].id) : undefined}
           tabIndex={tabs.length > 0 ? 0 : undefined}
-          className={cn(focusRing, 'min-h-0 flex-1')}
+          className={cn(focusRing, 'min-h-0 min-w-0 flex-1 overflow-hidden')}
         >
           {children}
         </div>

@@ -70,7 +70,7 @@ export function RunTabs({ runID, active }: { runID: string; active: string }) {
     <div
       role="tablist"
       aria-label="Run tabs"
-      className="flex min-h-11 items-end gap-1 overflow-x-auto border-b border-border/80 bg-muted/30 px-3 pt-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex h-9 min-h-9 items-end gap-0 overflow-x-auto border-b border-border bg-sidebar px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {runTabs.map(({ route, label }, i) => (
         <button
@@ -99,10 +99,10 @@ export function RunTabs({ runID, active }: { runID: string; active: string }) {
           }
           className={cn(
             focusRing,
-            'min-h-9 shrink-0 rounded-t-md border border-transparent px-3 py-1.5 text-[13px] font-medium transition-[background-color,border-color,color,box-shadow,transform]',
+            'min-h-9 shrink-0 rounded-none border-0 border-b-2 border-transparent px-3 py-0 text-[13px] font-medium transition-[background-color,border-color,color,box-shadow] duration-100 motion-reduce:transition-none',
             route === active
-              ? 'border-border/80 border-b-background bg-background text-foreground shadow-[0_-1px_2px_rgb(15_23_42/0.04)]'
-              : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+              ? 'border-b-primary bg-transparent text-foreground'
+              : 'text-muted-foreground hover:bg-toolbar-hover hover:text-foreground',
           )}
         >
           {label}

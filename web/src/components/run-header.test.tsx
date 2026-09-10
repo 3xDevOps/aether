@@ -34,9 +34,12 @@ function renderTab(name: string) {
   return render(<View params={{ runId: 'run_1' }} />).container
 }
 
-function header(name: string) {
-  renderTab(name)
-  return screen.getByRole('banner')
+function runHeader(name: string) {
+  const view = renderTab(name)
+  const title = within(view).getByRole('heading', { level: 1 })
+  const bar = title.closest('header')
+  if (!bar) throw new Error('RunHeader heading is not inside a header')
+  return bar
 }
 
 beforeEach(() => {
@@ -48,7 +51,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('run header', () => {
   it.each(tabs)('names the run state on the %s tab', (name) => {
     seed()
-    const bar = header(name)
+    const bar = runHeader(name)
 
     expect(within(bar).getByText('Working')).toBeDefined()
   })
@@ -56,7 +59,7 @@ describe('run header', () => {
   it.each(tabs)('shows the pending approval as needs-you on the %s tab', (name) => {
     seed()
     useStore.setState({ inbox: { [workspace.id]: [approval()] } })
-    const bar = header(name)
+    const bar = runHeader(name)
 
     // The domain status still reads `running`; only the presentation state
     // knows the agent is parked on a question.
@@ -65,7 +68,7 @@ describe('run header', () => {
 
   it.each(tabs)('shows the finished state on the %s tab', (name) => {
     seed({ status: 'merged' })
-    const bar = header(name)
+    const bar = runHeader(name)
 
     expect(within(bar).getByText('Done')).toBeDefined()
   })
@@ -85,7 +88,7 @@ describe('run header', () => {
   // anyone reaches for the steer button it is warning about.
   it('warns that a run is protected on the tab that steers it', () => {
     seed({ protected: true })
-    const bar = header('terminal')
+    const bar = runHeader('terminal')
 
     expect(within(bar).getByTitle(/^Protected:/)).toBeDefined()
   })

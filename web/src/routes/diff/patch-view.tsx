@@ -20,13 +20,13 @@ const lineClass = {
  * dashboard reads code, it never edits it. */
 export function FilePatch({ file }: { file: PatchFile }) {
   return (
-    <section className="overflow-hidden rounded-lg border bg-card">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/30 px-3 py-2 text-xs">
-        <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium" title={file.path}>
+    <section className="overflow-hidden border-b border-border/80 bg-background">
+      <header className="flex min-h-[35px] flex-wrap items-center gap-x-3 gap-y-1 border-b bg-sidebar px-3 py-1 text-[12px]">
+        <span className="min-w-0 flex-[1_1_16rem] truncate font-mono font-medium" title={file.path}>
           {file.path}
         </span>
         {statusLabel[file.status] && (
-          <span className="rounded-sm bg-muted px-1.5 py-0.5 text-muted-foreground">
+          <span className="shrink-0 text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
             {statusLabel[file.status]}
           </span>
         )}
@@ -34,13 +34,13 @@ export function FilePatch({ file }: { file: PatchFile }) {
         <span className="shrink-0 font-mono text-destructive">-{file.deletions}</span>
       </header>
       <div className="min-w-0 overflow-x-auto overscroll-x-contain">
-        <pre className="w-max min-w-full font-mono text-[13px] leading-6">
+        <pre className="w-max min-w-full font-mono text-[12px] leading-[22px]">
           {file.lines.map((line, i) => (
             <code
               // Diff lines have no identity of their own; the list is only
               // ever replaced wholesale by the next fetch.
               key={i}
-              className={cn('block whitespace-pre px-3', lineClass[line.kind])}
+              className={cn('block min-w-max whitespace-pre px-3', lineClass[line.kind])}
             >
               {prefix[line.kind]}
               {line.text || ' '}

@@ -43,26 +43,28 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
 
   if (!capabilities.hasMethod('files.tree')) return null
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader title="Files" subtitle="Read-only repository browser" />
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
         <aside
           className={cn(
-            'min-h-0 flex-1 overflow-y-auto border-b bg-muted/10 p-4 sm:p-6 md:w-72 md:flex-none md:border-b-0 md:border-r',
+            'min-h-0 min-w-0 flex-1 overflow-y-auto border-b bg-sidebar md:w-[280px] md:flex-none md:border-b-0 md:border-r',
             mobileView === 'viewer' && 'hidden md:block',
           )}
           aria-label="Files"
         >
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium">Repository sources</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Choose a base or live run checkout.
+          <div className="flex min-h-[35px] items-center justify-between gap-3 border-b px-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <FolderTree className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <p className="truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Explorer
               </p>
             </div>
-            <FolderTree className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              {Object.keys(workspaces).length} {Object.keys(workspaces).length === 1 ? 'source' : 'sources'}
+            </span>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-1 p-2">
             {Object.values(workspaces).map((workspace) => (
               <WorkspaceTree
                 key={workspace.id}
@@ -72,11 +74,12 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
                 )}
                 client={client}
                 onSelect={select}
+                selected={selection}
               />
             ))}
           </div>
           {Object.keys(workspaces).length === 0 && (
-            <p className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+            <p className="mx-2 border border-dashed px-3 py-3 text-xs text-muted-foreground">
               No workspaces available.
             </p>
           )}
@@ -110,20 +113,22 @@ function WorkspaceTree({
   runs,
   client,
   onSelect,
+  selected,
 }: {
   workspace: Workspace
   runs: Run[]
   client: Api
   onSelect: (source: FileSource, path: string) => void
+  selected: Selection | null
 }) {
   const [expanded, setExpanded] = useState(true)
   return (
-    <section className="space-y-1">
+    <section className="space-y-0.5">
       <button
         type="button"
         className={cn(
           focusRing,
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-accent',
+          'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[13px] font-medium hover:bg-toolbar-hover',
         )}
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
@@ -133,16 +138,17 @@ function WorkspaceTree({
         ) : (
           <ChevronRight className="size-3.5 shrink-0" aria-hidden />
         )}
-        <FolderTree className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="truncate">{workspace.name}</span>
+        <FolderTree className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
       </button>
       {expanded && (
-        <div className="ml-2 space-y-1 border-l border-border/70 pl-2">
+        <div className="ml-2 border-l border-border/70 pl-1.5">
           <TreeDirectory
             source={{ workspaceID: workspace.id, runID: '', label: `base: ${workspace.base_branch}` }}
             path=""
             client={client}
             onSelect={onSelect}
+            selected={selected}
           />
           {runs.map((run) => (
             <TreeDirectory
@@ -151,6 +157,7 @@ function WorkspaceTree({
               path=""
               client={client}
               onSelect={onSelect}
+              selected={selected}
               touched={touchedPaths(run.id)}
             />
           ))}
@@ -170,12 +177,14 @@ function TreeDirectory({
   path,
   client,
   onSelect,
+  selected,
   touched = new Set<string>(),
 }: {
   source: FileSource
   path: string
   client: Api
   onSelect: (source: FileSource, path: string) => void
+  selected: Selection | null
   touched?: Set<string>
 }) {
   const key = filesKey(source.workspaceID, source.runID, path)
@@ -208,24 +217,24 @@ function TreeDirectory({
         type="button"
         className={cn(
           focusRing,
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent',
+          'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
         )}
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
       >
         {expanded ? (
-          <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+          <ChevronDown className="size-3 shrink-0" aria-hidden />
         ) : (
-          <ChevronRight className="size-3.5 shrink-0" aria-hidden />
+          <ChevronRight className="size-3 shrink-0" aria-hidden />
         )}
         <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="min-w-0 flex-1 truncate">{label}</span>
       </button>
       {expanded && (
-        <div className="ml-4 border-l border-border/50 pl-2">
-          {cached?.loading && <p className="px-2 py-1 text-xs text-muted-foreground">Loading files...</p>}
+        <div className="ml-3 border-l border-border/50 pl-1.5">
+          {cached?.loading && <p className="px-1.5 py-1 text-[12px] text-muted-foreground">Loading files...</p>}
           {notice && (
-            <p className="rounded-sm px-2 py-1.5 text-xs leading-5 text-state-failed">{notice}</p>
+            <p className="px-1.5 py-1.5 text-[12px] leading-4 text-state-failed">{notice}</p>
           )}
           {cached?.entries.map((entry) => {
             const childPath = path ? `${path}/${entry.name}` : entry.name
@@ -237,18 +246,25 @@ function TreeDirectory({
                   path={childPath}
                   client={client}
                   onSelect={onSelect}
+                  selected={selected}
                   touched={touched}
                 />
               )
             }
             const marked = touched.has(childPath)
+            const isSelected =
+              selected?.workspaceID === source.workspaceID &&
+              selected.runID === source.runID &&
+              selected.path === childPath
             return (
               <button
                 key={childPath}
                 type="button"
+                aria-current={isSelected ? 'page' : undefined}
                 className={cn(
                   focusRing,
-                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent',
+                  'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
+                  isSelected && 'bg-selection text-selection-foreground',
                 )}
                 onClick={() => onSelect(source, childPath)}
               >
@@ -339,36 +355,38 @@ function FileViewer({
 
   if (!selection) {
     return (
-      <div className="flex min-w-0 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
+      <div className="flex min-w-0 flex-1 items-center justify-center border-l text-center text-[12px] text-muted-foreground">
         Select a file from the repository tree.
       </div>
     )
   }
   return (
     <article className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/10 px-3 py-2.5">
+      <header className="flex min-h-[35px] shrink-0 flex-wrap items-center gap-2 border-b bg-sidebar px-2">
         <button
           type="button"
           className={cn(
             focusRing,
-            'inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-2 text-[13px] font-medium md:hidden',
+            'inline-flex h-[26px] items-center gap-1.5 border border-input bg-background px-2 text-[12px] font-medium md:hidden',
           )}
           onClick={onBrowse}
         >
           <ArrowLeft className="size-3.5" aria-hidden />
           Browse
         </button>
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-[13px] font-medium" title={selection.path}>
+        <div className="min-w-0 flex-[1_1_14rem]">
+          <p className="truncate font-mono text-[12px] font-medium" title={selection.path}>
             {selection.path}
           </p>
-          <p className="truncate text-xs text-muted-foreground">{selection.label}</p>
+          <p className="truncate text-[11px] text-muted-foreground" title={selection.label}>
+            {selection.label}
+          </p>
         </div>
         {selection.runID && (
           <div
             role="tablist"
             aria-label="File view"
-            className="flex shrink-0 rounded-md border bg-background p-0.5"
+            className="flex max-w-full shrink-0 overflow-x-auto border border-input bg-background p-0.5"
           >
             <button
               type="button"
@@ -376,10 +394,10 @@ function FileViewer({
               aria-selected={mode === 'file'}
               className={cn(
                 focusRing,
-                'rounded-sm px-2 py-1 text-xs font-medium',
+                'min-h-[22px] shrink-0 px-2 text-[12px] font-medium',
                 mode === 'file'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-accent/60',
+                  ? 'bg-selection text-selection-foreground'
+                  : 'text-muted-foreground hover:bg-toolbar-hover',
               )}
               onClick={() => onMode('file')}
             >
@@ -391,10 +409,10 @@ function FileViewer({
               aria-selected={mode === 'diff'}
               className={cn(
                 focusRing,
-                'rounded-sm px-2 py-1 text-xs font-medium',
+                'min-h-[22px] shrink-0 px-2 text-[12px] font-medium',
                 mode === 'diff'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-accent/60',
+                  ? 'bg-selection text-selection-foreground'
+                  : 'text-muted-foreground hover:bg-toolbar-hover',
               )}
               onClick={() => onMode('diff')}
             >
@@ -404,7 +422,7 @@ function FileViewer({
         )}
       </header>
       {error && (
-        <p role="alert" className="shrink-0 border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">
+        <p role="alert" className="shrink-0 border-b bg-destructive/10 px-3 py-1.5 text-[12px] text-destructive">
           {error}
         </p>
       )}
@@ -416,7 +434,6 @@ function FileViewer({
     </article>
   )
 }
-
 function ReadDocument({
   state,
 }: {
@@ -424,14 +441,14 @@ function ReadDocument({
 }) {
   if (!state || state.loading) {
     return (
-      <p className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+      <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">
         Loading file...
       </p>
     )
   }
   if (state.binary) {
     return (
-      <p className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+      <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">
         Binary file
       </p>
     )
@@ -439,7 +456,7 @@ function ReadDocument({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
       {state.truncated && (
-        <p className="border-b bg-state-waiting/10 px-4 py-2 text-xs text-muted-foreground">
+        <p className="border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">
           Truncated at 512 KiB
         </p>
       )}
@@ -457,7 +474,7 @@ function DiffDocument({
 }) {
   if (!state || state.loading) {
     return (
-      <p className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+      <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">
         Loading diff...
       </p>
     )
@@ -466,14 +483,14 @@ function DiffDocument({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">
       {state.truncated && (
-        <p className="border-b bg-state-waiting/10 px-4 py-2 text-xs text-muted-foreground">
+        <p className="border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">
           Truncated at 512 KiB
         </p>
       )}
       {files.length === 0 ? (
-        <p className="p-6 text-sm text-muted-foreground">No changes.</p>
+        <p className="p-4 text-[12px] text-muted-foreground">No changes.</p>
       ) : (
-        <div className="space-y-3 p-3">
+        <div>
           {files.map((file) => (
             <FilePatch key={file.path} file={file} />
           ))}
@@ -487,12 +504,12 @@ function NumberedText({ content }: { content: string }) {
   const lines = content.split('\n')
   return (
     <pre
-      className="min-w-max p-4 text-[13px] leading-6"
+      className="min-w-max px-3 py-2 text-[12px] leading-[22px]"
       style={{ fontFamily: terminalFontFamily }}
     >
       {lines.map((line, index) => (
         <span key={index} className="flex min-w-max">
-          <span className="mr-4 inline-block w-10 select-none text-right text-muted-foreground/70">
+          <span className="mr-3 inline-block w-10 select-none text-right text-muted-foreground/70">
             {index + 1}
           </span>
           <span>{line || ' '}</span>

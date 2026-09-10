@@ -79,14 +79,14 @@ export function WorkspaceView({ params }: RouteProps) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <section
           aria-labelledby="workspace-context-heading"
-          className="mx-auto mt-4 w-[calc(100%-2rem)] max-w-[1200px] rounded-lg border bg-card p-4 shadow-xs sm:mt-6 sm:p-5"
+          className="border-b border-border bg-sidebar/30 px-4 py-3 sm:px-5"
         >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 id="workspace-context-heading" className="text-sm font-semibold">
+          <div className="mx-auto flex w-full max-w-[1400px] flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 id="workspace-context-heading" className="text-[13px] font-semibold leading-5">
                 Workspace context
               </h2>
-              <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+              <p className="mt-0.5 text-xs leading-4 text-muted-foreground">
                 Runs stay scoped to this workspace and branch.
               </p>
             </div>
@@ -94,33 +94,31 @@ export function WorkspaceView({ params }: RouteProps) {
               <Chip.Label>{runs.length} {runs.length === 1 ? 'run' : 'runs'}</Chip.Label>
             </Chip>
           </div>
-          <dl className="mt-4 grid gap-3 border-t pt-4 text-[13px] sm:grid-cols-3">
-            <div className="min-w-0">
+          <dl className="mx-auto mt-3 grid w-full max-w-[1400px] gap-3 border-t border-border pt-3 text-xs sm:grid-cols-3 sm:divide-x sm:divide-border">
+            <div className="min-w-0 sm:pr-4">
               <dt className="text-muted-foreground">Base branch</dt>
-              <dd className="mt-1 truncate font-mono text-foreground" title={workspace.base_branch}>
+              <dd className="mt-0.5 truncate font-mono text-foreground" title={workspace.base_branch}>
                 {workspace.base_branch}
               </dd>
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 sm:px-4">
               <dt className="text-muted-foreground">Steering policy</dt>
-              <dd className="mt-1 text-foreground">{policy}</dd>
+              <dd className="mt-0.5 break-words text-foreground">{policy}</dd>
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 sm:pl-4">
               <dt className="text-muted-foreground">Created</dt>
-              <dd className="mt-1 text-foreground">
+              <dd className="mt-0.5 text-foreground">
                 <time dateTime={workspace.created_at}>{timeAgo(workspace.created_at)}</time>
               </dd>
             </div>
           </dl>
         </section>
-        <section aria-labelledby="workspace-runs-heading" className="mt-2">
-          <div className="mx-auto flex w-[calc(100%-2rem)] max-w-[1200px] items-center gap-2 px-0 pt-4">
-            <h2 id="workspace-runs-heading" className="text-sm font-semibold">
+        <section aria-labelledby="workspace-runs-heading" className="min-w-0">
+          <div className="mx-auto flex min-h-[35px] w-full max-w-[1400px] items-center gap-2 border-b border-border px-4 sm:px-5">
+            <h2 id="workspace-runs-heading" className="text-[13px] font-semibold leading-5">
               Runs
             </h2>
-            <span className="text-[13px] text-muted-foreground">
-              attention first
-            </span>
+            <span className="text-xs text-muted-foreground">attention first</span>
           </div>
           <RunList runs={runs} empty="No runs in this workspace yet." />
         </section>

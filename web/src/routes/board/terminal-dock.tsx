@@ -296,7 +296,7 @@ export function TerminalDock({
         onToggleCollapse={() => setCollapsed(!dock.collapsed)}
         actions={
           (!empty || !!dock.status?.saved_image) && (
-            <div className="flex items-center gap-1">
+            <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
               {dock.status?.running && (
                 <>
                 {capability.hasLocal('forward.start') && (
@@ -356,17 +356,17 @@ export function TerminalDock({
           )
         }
       >
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">
           {dock.status?.running && !dock.status.saved_image && (
-            <p className="text-xs text-muted-foreground px-3 pt-1">
+            <p className="shrink-0 border-b border-border bg-sidebar px-3 py-1 text-[12px] text-muted-foreground">
               Installs here reach agents after you save.
             </p>
           )}
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1 overflow-hidden">
             {loading ? (
-              <p className="p-3 text-sm text-muted-foreground">Checking environment...</p>
+              <p className="bg-background p-3 text-[13px] text-muted-foreground">Checking environment...</p>
             ) : dock.statusError ? (
-              <div className="space-y-2 p-3 text-sm">
+              <div className="h-full min-h-0 min-w-0 space-y-2 overflow-y-auto break-words whitespace-pre-wrap bg-background p-3 text-[13px]">
                 <p className="text-state-failed">{dock.statusError}</p>
                 {empty && (
                   <Button
@@ -382,14 +382,14 @@ export function TerminalDock({
                 )}
               </div>
             ) : empty ? (
-              <div className="space-y-2 p-3 text-sm">
+              <div className="space-y-2 bg-background p-3 text-[13px]">
                 <p>Your environment starts on first open</p>
                 <Button type="button" size="sm" onClick={openTab}>
                   Open
                 </Button>
               </div>
             ) : activeTab === null ? (
-              <div className="p-3">
+              <div className="bg-background p-3">
                 <Button type="button" size="sm" onClick={openTab}>
                   Open
                 </Button>

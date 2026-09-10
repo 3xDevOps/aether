@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/heroui'
+import { Chip, Tooltip } from '@/components/ui/heroui'
 import { api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
 import { cn, focusRing } from '@/lib/utils'
@@ -59,21 +59,19 @@ function DiffView({ params }: RouteProps) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <RunHeader run={run} subtitle={run.branch} />
       <RunTabs runID={runID} active="diff" />
-      <div {...runTabPanel('diff', 'flex min-h-0 flex-1 flex-col')}>
-        <div className="shrink-0 px-4 pt-3">
-          <Land run={run} />
-        </div>
+      <div {...runTabPanel('diff', 'flex min-h-0 min-w-0 flex-1 flex-col')}>
+        <Land run={run} />
 
-        <div className="shrink-0 border-b bg-muted/10 px-4 py-3">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-foreground">
+        <div className="shrink-0 bg-sidebar">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2 text-[12px] text-muted-foreground">
+            <div className="min-w-0 flex-[1_1_16rem]">
+              <p className="truncate font-medium text-foreground">
                 {snapshot ? 'Interval review' : 'Current diff'}
               </p>
-              <p className="mt-0.5 truncate">
+              <p className="truncate">
                 {snapshot ? (
                   <>What changed {timeAgo(snapshot.time)}</>
                 ) : (
@@ -86,66 +84,71 @@ function DiffView({ params }: RouteProps) {
                 )}
               </p>
             </div>
-            <span className="font-mono">
-              {shown.length} file{shown.length === 1 ? '' : 's'}
-            </span>
-            <span className="font-mono text-state-done">+{total(shown, 'additions')}</span>
-            <span className="font-mono text-destructive">-{total(shown, 'deletions')}</span>
-            <ConflictChips run={run} />
-            {snapshot && (
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+              <Chip color="default" variant="tertiary" size="sm">
+                <Chip.Label className="font-mono">
+                  {shown.length} file{shown.length === 1 ? '' : 's'}
+                </Chip.Label>
+              </Chip>
+              <Chip color="success" variant="tertiary" size="sm">
+                <Chip.Label className="font-mono">+{total(shown, 'additions')}</Chip.Label>
+              </Chip>
+              <Chip color="danger" variant="tertiary" size="sm">
+                <Chip.Label className="font-mono">-{total(shown, 'deletions')}</Chip.Label>
+              </Chip>
+              <ConflictChips run={run} />
+              {snapshot && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Show current diff"
+                  onClick={() => setSelected(null)}
+                >
+                  Current diff
+                </Button>
+              )}
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                className="h-8"
-                aria-label="Show current diff"
-                onClick={() => setSelected(null)}
+                className="px-2"
+                onClick={() => useStore.getState().refreshDiff(runID)}
               >
-                Current diff
+                <RefreshCw
+                  className={cn('size-3.5', state.status === 'loading' && 'animate-spin')}
+                  aria-hidden
+                />
+                Refresh
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2"
-              onClick={() => useStore.getState().refreshDiff(runID)}
-            >
-              <RefreshCw
-                className={cn('size-3.5', state.status === 'loading' && 'animate-spin')}
-                aria-hidden
-              />
-              Refresh
-            </Button>
+            </div>
           </div>
-          <div className="mt-3">
-            <ReviewCommands run={run} />
-          </div>
+          <ReviewCommands run={run} />
         </div>
 
         {failed && (
-          <p role="alert" className="shrink-0 border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          <p role="alert" className="shrink-0 border-b bg-destructive/10 px-3 py-1.5 text-[12px] text-destructive">
             {error ?? 'The diff could not be loaded.'}
           </p>
         )}
         {truncated && (
-          <p className="shrink-0 border-b bg-state-waiting/10 px-4 py-2 text-sm text-muted-foreground">
+          <p className="shrink-0 border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">
             This diff is too large to render in full; everything below the cut is
             missing. Fetch the run branch to read it whole.
           </p>
         )}
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[13rem_1fr]">
+        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[14rem_minmax(0,1fr)]">
           <Timeline
             snapshots={state.snapshots}
             selected={selected}
             onSelect={(time) => setSelected(time === selected ? null : time)}
           />
-          <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-3">
-            <div className="space-y-3">
+          <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-background">
+            <div>
               {shown.map((file) => (
                 <FilePatch key={file.path} file={file} />
               ))}
               {shown.length === 0 && note && (
-                <p className="rounded-lg border border-dashed bg-card p-6 text-sm text-muted-foreground">
+                <p className="border-b border-dashed p-4 text-[12px] text-muted-foreground">
                   {note}
                 </p>
               )}
@@ -199,16 +202,16 @@ function Timeline({
   onSelect: (time: string) => void
 }) {
   return (
-    <aside className="min-h-0 max-h-56 overflow-y-auto border-b bg-muted/10 md:max-h-none md:border-b-0 md:border-r">
-      <div className="sticky top-0 z-10 border-b bg-muted/90 px-3 py-2 backdrop-blur">
-        <h2 className="text-xs font-medium text-foreground">Change intervals</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+    <aside className="min-h-0 max-h-52 overflow-y-auto border-b bg-sidebar md:max-h-none md:border-b-0 md:border-r">
+      <div className="sticky top-0 z-10 min-h-[35px] border-b bg-sidebar px-3 py-2">
+        <h2 className="text-[12px] font-medium text-foreground">Change intervals</h2>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
           {snapshots.length === 0
             ? 'Nothing since you opened the dashboard.'
             : 'Select an interval to review what changed.'}
         </p>
       </div>
-      <ul className="p-1.5">
+      <ul className="p-1">
         {snapshots.map((snap, i) => {
           const shownable = range(snap) !== null
           return (
@@ -230,13 +233,18 @@ function Timeline({
                       aria-pressed={selected === snap.time}
                       className={cn(
                         focusRing,
-                        'w-full rounded-md px-2.5 py-2 text-left text-xs hover:not-aria-disabled:bg-accent/60',
+                        'min-h-10 w-full border-l-2 border-transparent px-2 py-1.5 text-left text-[12px] hover:not-aria-disabled:bg-toolbar-hover',
                         'aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
-                        selected === snap.time && 'bg-accent text-accent-foreground',
+                        selected === snap.time && 'border-primary bg-selection text-selection-foreground',
                       )}
                     >
-                      <span className="block font-medium">{timeAgo(snap.time)}</span>
-                      <span className="mt-0.5 block text-muted-foreground">
+                      <span className="block truncate font-medium">{timeAgo(snap.time)}</span>
+                      <span
+                        className={cn(
+                          'mt-0.5 block text-[11px] text-muted-foreground',
+                          selected === snap.time && 'text-selection-foreground/80',
+                        )}
+                      >
                         {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
                         {' · '}
                         <span className="font-mono text-state-done">
