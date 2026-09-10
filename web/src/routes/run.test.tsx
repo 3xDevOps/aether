@@ -35,19 +35,6 @@ it('marks a protected run in the view header', () => {
   ).toBeDefined()
 })
 
-it('shows the provided run reason once', () => {
-  seed()
-  const reason = 'waiting on a question'
-  useStore.setState({
-    runs: { run_1: toRecord(run({ reason })) },
-  })
-
-  render(<RunView params={{ runId: 'run_1' }} />)
-
-  expect(screen.getAllByText(reason)).toHaveLength(1)
-})
-
-
 it('shows the last commit row only when its timestamp is set', () => {
   useStore.setState({
     workspaces: { [workspace.id]: workspace },

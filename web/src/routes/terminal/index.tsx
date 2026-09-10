@@ -21,7 +21,6 @@ import { RunDock } from '@/routes/terminal/run-dock'
 import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
-import type { RunRecord } from '@/store/runs'
 import { initialTerminal } from '@/store/terminal'
 
 const connectionLabel: Record<string, string> = {
@@ -29,17 +28,6 @@ const connectionLabel: Record<string, string> = {
   live: 'Attached',
   reconnecting: 'Reconnecting',
   offline: 'Offline',
-}
-
-/**
- * What a missing session on a finished run says. A run that never started has
- * no transcript because it never got a terminal, and `reason` carries the
- * provisioning failure that explains it - the reader is standing on the
- * Terminal tab, not the Overview tab that renders the reason otherwise.
- */
-function endedMessage(run: RunRecord): string {
-  if (!run.started_at && run.reason) return run.reason
-  return 'This run has ended and left no recorded terminal to replay.'
 }
 
 /**
@@ -246,7 +234,7 @@ function TerminalView({ params }: RouteProps) {
           {state.message && (
             <span className="min-w-0 flex-1 break-words whitespace-pre-wrap text-muted-foreground">
               {state.refused && sessionMissing && endedStatuses.includes(run.status)
-                ? endedMessage(run)
+                ? 'This run has ended and left no recorded terminal to replay.'
                 : state.message}
             </span>
           )}
