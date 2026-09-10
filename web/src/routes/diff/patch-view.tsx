@@ -30,7 +30,7 @@ export function FilePatch({ file }: { file: PatchFile }) {
             {statusLabel[file.status]}
           </span>
         )}
-        <span className="shrink-0 font-mono text-state-done">+{file.additions}</span>
+        <span className="shrink-0 font-mono text-success-foreground">+{file.additions}</span>
         <span className="shrink-0 font-mono text-destructive">-{file.deletions}</span>
       </header>
       <div className="min-w-0 overflow-x-auto overscroll-x-contain">
