@@ -166,6 +166,7 @@ export function RunDock({ runID }: { runID: string }) {
       onHeightChange={setRunDockHeight}
       collapsed={dock.collapsed}
       onToggleCollapse={() => setDockCollapsed(runID, !dock.collapsed)}
+      containment="parent"
     >
       {showing === 'unavailable' ? (
         <div

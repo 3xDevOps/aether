@@ -87,7 +87,7 @@ export function Board() {
             ))}
           </div>
         )}
-        {caps.hasWS('terminal') && <TerminalDock />}
+        {caps.hasWS('terminal') && <TerminalDock containment="parent" />}
       </div>
     </div>
   )

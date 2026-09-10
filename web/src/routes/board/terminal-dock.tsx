@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Dock } from '@/components/dock'
+import { Dock, type DockContainment } from '@/components/dock'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import {
@@ -41,13 +41,20 @@ export interface TerminalDockProps {
   openOnMount?: boolean
   /** A line to type into the main tab after its first attach. */
   initialLine?: string
+  /**
+   * Whether the dock is bounded by its immediate parent. Embedded, intrinsic
+   * sections use the viewport cap; fixed flex layouts opt into their boundary.
+   */
+  containment?: DockContainment
 }
 
 export function TerminalDock({
   client = api,
   openOnMount = false,
   initialLine,
+  containment = 'viewport',
 }: TerminalDockProps) {
+
   const rpc = client
   const dock = useStore((s) => s.envTerminal ?? initialEnvTerminal)
   const terminalDockHeight = useStore((s) => s.terminalDockHeight)
@@ -293,6 +300,7 @@ export function TerminalDock({
         height={terminalDockHeight}
         onHeightChange={setHeight}
         collapsed={dock.collapsed}
+        containment={containment}
         onToggleCollapse={() => setCollapsed(!dock.collapsed)}
         actions={
           (!empty || !!dock.status?.saved_image) && (

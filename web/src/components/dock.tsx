@@ -12,6 +12,8 @@ export interface DockTab {
   permanent?: boolean
 }
 
+export type DockContainment = 'viewport' | 'parent'
+
 export interface DockProps {
   tabs: DockTab[]
   activeTab: string
@@ -24,6 +26,11 @@ export interface DockProps {
   onHeightChange: (height: number) => void
   collapsed: boolean
   onToggleCollapse: () => void
+  /**
+   * Use the immediate parent as a fixed-size boundary, or keep the dock
+   * independent of intrinsic parent sizing and use the viewport cap.
+   */
+  containment?: DockContainment
   actions?: React.ReactNode
   children: React.ReactNode
 }
@@ -53,6 +60,7 @@ export function Dock({
   onHeightChange,
   collapsed,
   onToggleCollapse,
+  containment = 'viewport',
   actions,
   children,
 }: DockProps) {
@@ -69,26 +77,27 @@ export function Dock({
   const [parentHeight, setParentHeight] = useState<number | null>(null)
   useLayoutEffect(() => {
     const dockElement = dockRef.current
-    const parent = dockElement?.parentElement
-    if (!dockElement || !parent) return
+    if (!dockElement) return
+    const parent = containment === 'parent' ? dockElement.parentElement : null
 
     const measure = () => {
       const measuredHeader = headerRef.current?.getBoundingClientRect().height ?? 0
-      const measuredParent = parent.getBoundingClientRect().height
       if (measuredHeader > 0) setHeaderHeight(Math.ceil(measuredHeader))
-      if (measuredParent > 0) setParentHeight(Math.floor(measuredParent))
+      setParentHeight(
+        parent ? Math.max(0, Math.floor(parent.getBoundingClientRect().height)) : null,
+      )
     }
     measure()
     const observer = new ResizeObserver(measure)
     if (headerRef.current) observer.observe(headerRef.current)
-    observer.observe(parent)
+    if (parent) observer.observe(parent)
     return () => observer.disconnect()
-  }, [])
+  }, [containment])
   const viewportMax = maxDockHeight(viewport)
   const max =
     parentHeight === null
       ? viewportMax
-      : Math.min(viewportMax, Math.max(0, Math.floor(parentHeight)))
+      : Math.min(viewportMax, parentHeight)
   const min = Math.min(
     Math.max(minDockHeight, Math.ceil(headerHeight) + minDockBodyHeight),
     max,
@@ -150,7 +159,7 @@ export function Dock({
     <section
       ref={dockRef}
       id={dockID}
-      className="relative flex shrink-0 flex-col border-t border-border bg-sidebar"
+      className="relative flex min-h-0 shrink-0 flex-col border-t border-border bg-sidebar"
       style={collapsed ? undefined : { height: currentHeight }}
       aria-label="Terminal dock"
     >
