@@ -251,7 +251,7 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
   const firstGroup = sidebar.getByRole('heading').first()
   const groupBy = sidebar.getByRole('group', { name: 'Group runs by' })
   const member = groupBy.getByRole('button', { name: 'Member', exact: true })
-  const launch = sidebar.getByTitle('Launch a run')
+  const launch = sidebar.getByRole('button', { name: 'New run', exact: true })
   await expect(member).toBeVisible()
   await expect(launch).toBeVisible()
 

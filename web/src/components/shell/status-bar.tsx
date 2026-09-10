@@ -276,9 +276,9 @@ export function StatusBar() {
           <CollapsibleContent
             id="status-details"
             forceMount
-            className="block h-[22px] min-w-0 data-[state=closed]:hidden xl:flex-1"
+            className="block min-w-0 data-[state=closed]:hidden xl:h-[22px] xl:flex-1"
           >
-            <div className="fixed inset-x-2 bottom-7 z-50 mb-1 flex max-h-[70vh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground shadow-lg xl:static xl:flex xl:h-[22px] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:shadow-none">
+            <div className="fixed inset-x-2 bottom-7 z-50 mb-1 flex max-h-[70vh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-4 shadow-lg xl:static xl:flex xl:h-[22px] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none">
               {unreachable !== null && (
                 // needs-attention has no HeroUI colour of its own, so the
                 // chip carries the state token rather than the nearest

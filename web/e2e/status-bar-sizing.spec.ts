@@ -56,6 +56,12 @@ test('the status bar keeps its controls on screen with every readout up', async 
   await expect(page.getByRole('contentinfo')).toContainText('aether ')
   const footer = page.getByRole('contentinfo')
 
+  // TeamStatus starts its independent disk read after hydration. Wait for the
+  // actual gauge at the wide layout before taking the server away; the version
+  // label above only proves server.info answered.
+  await page.setViewportSize(wideSize)
+  await expect(footer.locator('[aria-label="Disk usage"]')).toBeVisible()
+
   await aether.server.stop()
 
   for (const size of sizes) {
@@ -77,7 +83,7 @@ test('the status bar keeps its controls on screen with every readout up', async 
     await expect(notice).toHaveText(unreachableNotice)
     const localStatus = footer.getByRole('button', { name: 'Not linked', exact: true })
     const memberRow = footer.getByText(longName, { exact: true })
-    const diskRow = footer.getByLabel('Disk usage')
+    const diskRow = footer.locator('[aria-label="Disk usage"]')
     await expect(localStatus).toBeVisible()
     await expect(memberRow).toBeVisible()
     await expect(diskRow).toBeVisible()
@@ -118,6 +124,14 @@ test('the status bar keeps its controls on screen with every readout up', async 
       return left ? left.scrollWidth - left.clientWidth : -1
     })
     expect(overflow).toBe(0)
+
+    const verticalOverflow = await page.evaluate(() =>
+      Math.max(
+        document.documentElement.scrollHeight - document.documentElement.clientHeight,
+        document.body.scrollHeight - document.body.clientHeight,
+      ),
+    )
+    expect(verticalOverflow).toBe(0)
   }
 
   await page.setViewportSize(wideSize)
@@ -129,7 +143,7 @@ test('the status bar keeps its controls on screen with every readout up', async 
     await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 })
   }
   const wideMember = footer.getByText(longName, { exact: true })
-  const wideDisk = footer.getByLabel('Disk usage')
+  const wideDisk = footer.locator('[aria-label="Disk usage"]')
   await expect(wideMember).toBeVisible()
   const wideMemberMetrics = await wideMember.evaluate((element) => {
     const memberElement = element as HTMLElement
@@ -166,6 +180,14 @@ test('the status bar keeps its controls on screen with every readout up', async 
     ),
   )
   expect(mobileOverflow).toBe(0)
+
+  const mobileVerticalOverflow = await page.evaluate(() =>
+    Math.max(
+      document.documentElement.scrollHeight - document.documentElement.clientHeight,
+      document.body.scrollHeight - document.body.clientHeight,
+    ),
+  )
+  expect(mobileVerticalOverflow).toBe(0)
 
   // Exercise the bottom-edge control with the same pointer sequence that can
   // lose the target when an active style grows the document.
