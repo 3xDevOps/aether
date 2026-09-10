@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
+import type { AetherDesktop } from '@/components/shell/title-bar'
 import type { Api } from '@/lib/api'
 import type {
   AgentInfo,
@@ -87,6 +88,14 @@ const connectedRepo = {
   push: null,
   fastForward: null,
 }
+
+// The Electron preload injects the bridge onto the real window, so a test
+// installs and removes it the same way.
+const shellWindow = window as Window & { aetherDesktop?: AetherDesktop }
+
+afterEach(() => {
+  delete shellWindow.aetherDesktop
+})
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
@@ -653,6 +662,198 @@ describe('onboarding wizard', () => {
     expect(cmd.value).toContain('git push -u aether')
     // This clone had no pushable origin to record, so the step claims none.
     expect(screen.queryByText(/Runs push to/)).toBeNull()
+  })
+
+  it('offers the folders the gateway already knows as suggestions', async () => {
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => ({
+        server_configured: true,
+        linked: true,
+        addr: 'host:2222',
+        user: 'alice',
+        repo: '/src/repo',
+        // The default link's folder repeats here; a suggestion list must not
+        // show it twice, and a profile without a folder adds nothing.
+        links: [
+          { name: 'prod', addr: 'host:2222', repo: '/src/repo' },
+          { name: 'staging', addr: 'staging:2222', repo: '/src/other' },
+          { name: 'lab', addr: 'lab:2222' },
+        ],
+      })),
+    })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toRepoStep()
+
+    // Through the input's own list linkage: a suggestion list the field
+    // does not point at is one the user never sees.
+    const path =
+      await screen.findByLabelText<HTMLInputElement>('Repository path')
+    const list = document.getElementById(path.getAttribute('list') ?? '')
+    expect(list).not.toBeNull()
+    const options = within(list as HTMLElement).getAllByRole('option', {
+      hidden: true,
+    })
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual([
+      '/src/repo',
+      '/src/other',
+    ])
+  })
+
+  it('fills the path from the desktop shell folder dialog', async () => {
+    const chooseFolder = vi.fn(async () => '/home/alice/code/myproject')
+    shellWindow.aetherDesktop = { platform: 'linux', chooseFolder }
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toRepoStep()
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Choose folder' }),
+    )
+
+    const path =
+      await screen.findByLabelText<HTMLInputElement>('Repository path')
+    await waitFor(() => expect(path.value).toBe('/home/alice/code/myproject'))
+
+    // Cancelling answers with an empty string, which must leave the path put.
+    chooseFolder.mockResolvedValueOnce('')
+    fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }))
+    await waitFor(() => expect(chooseFolder).toHaveBeenCalledTimes(2))
+    expect(path.value).toBe('/home/alice/code/myproject')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+    await waitFor(() => {
+      expect(client.localLinkRepo).toHaveBeenCalledWith(
+        '/home/alice/code/myproject',
+        workspace.id,
+      )
+    })
+  })
+
+  it('shows the dialog error when the shell could not open a folder', async () => {
+    shellWindow.aetherDesktop = {
+      platform: 'linux',
+      chooseFolder: vi.fn(async () => {
+        throw new Error('no dialog available')
+      }),
+    }
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toRepoStep()
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Choose folder' }),
+    )
+
+    expect(await screen.findByText('no dialog available')).toBeDefined()
+  })
+
+  it('keeps the error that sent the user to the dialog when they cancel', async () => {
+    const chooseFolder = vi.fn(async () => '')
+    shellWindow.aetherDesktop = { platform: 'linux', chooseFolder }
+    seed()
+    render(
+      <OnboardingRoute
+        params={{}}
+        client={fakeApi({
+          localLinkRepo: vi.fn(async () => {
+            throw new Error('/home/alice/typo is not a git repository')
+          }),
+        })}
+      />,
+    )
+    await toRepoStep()
+
+    fireEvent.change(await screen.findByLabelText('Repository path'), {
+      target: { value: '/home/alice/typo' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+    const failure = await screen.findByText(
+      '/home/alice/typo is not a git repository',
+    )
+
+    // Opening the dialog to correct the path and backing out must not clear
+    // the only thing on screen saying why Add remote refused.
+    fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }))
+    await waitFor(() => expect(chooseFolder).toHaveBeenCalled())
+    expect(failure.isConnected).toBe(true)
+  })
+
+  it('takes the Windows path the shell dialog answers with', async () => {
+    shellWindow.aetherDesktop = {
+      platform: 'win32',
+      chooseFolder: vi.fn(async () => 'C:\\Users\\alice\\code\\myproject'),
+    }
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toRepoStep()
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Choose folder' }),
+    )
+
+    // A drive-letter path is absolute, so Add remote must not sit disabled
+    // telling the user the folder they just picked is not absolute.
+    const add = await screen.findByRole('button', { name: 'Add remote' })
+    await waitFor(() => expect(add.hasAttribute('disabled')).toBe(false))
+    expect(screen.queryByText('The path must be absolute.')).toBeNull()
+
+    fireEvent.click(add)
+    await waitFor(() => {
+      expect(client.localLinkRepo).toHaveBeenCalledWith(
+        'C:\\Users\\alice\\code\\myproject',
+        workspace.id,
+      )
+    })
+  })
+
+  it('freezes the path form while a folder dialog is open', async () => {
+    let answer!: (path: string) => void
+    const chooseFolder = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          answer = resolve
+        }),
+    )
+    shellWindow.aetherDesktop = { platform: 'linux', chooseFolder }
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toRepoStep()
+
+    fireEvent.change(await screen.findByLabelText('Repository path'), {
+      target: { value: '/home/alice/code/first' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }))
+
+    // Where the chooser is not modal to the window the rest of the form is
+    // still clickable, and a dialog answering late would land on top of
+    // whatever was done in the meantime.
+    const path = screen.getByLabelText<HTMLInputElement>('Repository path')
+    await waitFor(() => expect(path.disabled).toBe(true))
+    expect(
+      screen.getByRole('button', { name: 'Add remote' }).hasAttribute('disabled'),
+    ).toBe(true)
+
+    answer('/home/alice/code/picked')
+
+    await waitFor(() => expect(path.value).toBe('/home/alice/code/picked'))
+    expect(path.disabled).toBe(false)
+    expect(
+      screen.getByRole('button', { name: 'Add remote' }).hasAttribute('disabled'),
+    ).toBe(false)
+  })
+
+  it('has no folder picker in a browser tab', async () => {
+    // Last of the bridge tests on purpose: it is also the guard that the
+    // cleanup above really removes the bridge the two before it installed.
+    const client = fakeApi()
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toRepoStep()
+
+    expect(screen.queryByRole('button', { name: 'Choose folder' })).toBeNull()
   })
 
   it('names the upstream origin the link recorded', async () => {

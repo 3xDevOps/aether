@@ -163,7 +163,9 @@ run can push to; [teams.md](teams.md#workspaces) has the rule for other
 hosts.
 
 In the dashboard, the onboarding wizard's Repository step does both for
-you: it adds the remote, then its **Push now** button compares your clone
+you. Point it at your clone: type the absolute path, or, in the desktop app,
+pick it with **Choose folder**. The step adds the remote, then its
+**Push now** button compares your clone
 with the workspace and pushes when there is something to push, keeping git's
 own output on the page. It runs the same push with `--no-follow-tags`, so the
 command above also sends your tags if you have `push.followTags` set. The step

@@ -165,10 +165,12 @@ func decodeParams(body []byte, v any) *protocol.Error {
 }
 
 // linkRef is one named server profile as link.status reports it: enough
-// for a switcher to list, nothing secret.
+// for a switcher to list and for the onboarding wizard to suggest the
+// profile's own clone, nothing secret.
 type linkRef struct {
 	Name string `json:"name"`
 	Addr string `json:"addr"`
+	Repo string `json:"repo,omitempty"`
 }
 
 // namedLinks projects cfg.Links for link.status; nil when none are saved
@@ -179,7 +181,7 @@ func namedLinks(cfg cli.Config) []linkRef {
 	}
 	links := make([]linkRef, len(cfg.Links))
 	for i, l := range cfg.Links {
-		links[i] = linkRef{Name: l.Name, Addr: l.Addr}
+		links[i] = linkRef{Name: l.Name, Addr: l.Addr, Repo: l.Repo}
 	}
 	return links
 }

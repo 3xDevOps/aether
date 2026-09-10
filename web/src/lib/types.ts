@@ -491,8 +491,11 @@ export interface LinkStatus {
   addr: string
   user: string
   repo: string
-  /** Named server profiles from `aether link --name`; absent when none. */
-  links?: { name: string; addr: string }[]
+  /**
+   * Named server profiles from `aether link --name`; absent when none.
+   * `repo` is the profile's own clone, absent when it has none.
+   */
+  links?: { name: string; addr: string; repo?: string }[]
   /** The profile this gateway runs on; absent on the top-level link. */
   active?: string
 }

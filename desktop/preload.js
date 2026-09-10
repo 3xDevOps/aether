@@ -38,6 +38,9 @@ const controls =
 
 contextBridge.exposeInMainWorld('aetherDesktop', {
   platform: process.platform,
+  // The onboarding wizard's Repository step asks for a folder on this
+  // machine, which only the main process can browse.
+  chooseFolder: () => ipcRenderer.invoke('dialog:choose-folder'),
   ...(shellVersion ? { shellVersion } : {}),
   ...(controls ? { controls } : {}),
 })
