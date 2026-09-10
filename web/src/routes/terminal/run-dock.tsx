@@ -181,7 +181,7 @@ export function RunDock({ runID }: { runID: string }) {
           {...takesFocus}
           className={cn(
             focusRing,
-            'min-w-0 break-words whitespace-pre-wrap overflow-y-auto bg-state-failed/10 px-3 py-2 text-[13px] leading-5 text-state-failed',
+            'h-full min-h-0 min-w-0 break-words whitespace-pre-wrap overflow-y-auto bg-state-failed/10 px-3 py-2 text-[13px] leading-5 text-state-failed',
           )}
         >
           {dock.refusedMessage}

@@ -39,7 +39,7 @@ export function RunHeader({ run, subtitle }: { run: RunRecord; subtitle?: string
 
   return (
     <div className="@container/run-header min-w-0">
-      <header className="grid min-w-0 grid-cols-1 border-b border-border/80 @sm/run-header:grid-cols-[minmax(0,1fr)_auto]">
+      <header className="grid min-w-0 grid-cols-1 border-b border-border/80 @lg/run-header:grid-cols-[minmax(16rem,1fr)_minmax(0,auto)]">
       <div className="min-w-0 px-3 py-1 sm:px-4">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs leading-4 text-muted-foreground">
           <h1

@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react'
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { useDrag, useWindowHeight } from '@/lib/hooks'
@@ -29,6 +29,9 @@ export interface DockProps {
 }
 
 const minDockHeight = 120
+// The panel needs its guidance, 36px terminal toolbar, and one terminal row.
+const minDockBodyHeight = 96
+const defaultDockHeaderHeight = 36
 
 /** What is left of the window once the shell's own chrome has its share. */
 function maxDockHeight(viewport: number): number {
@@ -60,7 +63,37 @@ export function Dock({
   const dockID = `${id}-dock`
   const viewport = useWindowHeight()
   const beginDrag = useDrag()
-  const max = maxDockHeight(viewport)
+  const dockRef = useRef<HTMLElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
+  const [headerHeight, setHeaderHeight] = useState(defaultDockHeaderHeight)
+  const [parentHeight, setParentHeight] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const dockElement = dockRef.current
+    const parent = dockElement?.parentElement
+    if (!dockElement || !parent) return
+
+    const measure = () => {
+      const measuredHeader = headerRef.current?.getBoundingClientRect().height ?? 0
+      const measuredParent = parent.getBoundingClientRect().height
+      if (measuredHeader > 0) setHeaderHeight(Math.ceil(measuredHeader))
+      if (measuredParent > 0) setParentHeight(Math.floor(measuredParent))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    if (headerRef.current) observer.observe(headerRef.current)
+    observer.observe(parent)
+    return () => observer.disconnect()
+  }, [])
+  const viewportMax = maxDockHeight(viewport)
+  const max =
+    parentHeight === null
+      ? viewportMax
+      : Math.min(viewportMax, Math.max(0, Math.floor(parentHeight)))
+  const min = Math.min(
+    Math.max(minDockHeight, Math.ceil(headerHeight) + minDockBodyHeight),
+    max,
+  )
+  const currentHeight = Math.min(max, Math.max(min, height))
   const index = Math.max(
     0,
     tabs.findIndex((tab) => tab.id === activeTab),
@@ -76,17 +109,19 @@ export function Dock({
     (event: React.PointerEvent<HTMLDivElement>) => {
       event.preventDefault()
       const startY = event.clientY
-      const startHeight = height
+      const startHeight = currentHeight
       const drag = beginDrag()
       const move = (ev: PointerEvent) => {
-        onHeightChange(clampDockHeight(startHeight + startY - ev.clientY, viewport))
+        onHeightChange(
+          Math.min(max, Math.max(min, startHeight + startY - ev.clientY)),
+        )
       }
       window.addEventListener('pointermove', move, { signal: drag.signal })
       for (const end of ['pointerup', 'pointercancel']) {
         window.addEventListener(end, () => drag.abort(), { signal: drag.signal })
       }
     },
-    [beginDrag, height, onHeightChange, viewport],
+    [beginDrag, currentHeight, max, min, onHeightChange],
   )
 
   const resizeKey = useCallback(
@@ -98,24 +133,25 @@ export function Dock({
         return
       }
       const next = splitterTarget(event.key, {
-        value: height,
-        min: minDockHeight,
+        value: currentHeight,
+        min,
         max,
         grow: 'ArrowUp',
         shrink: 'ArrowDown',
       })
       if (next === null) return
       event.preventDefault()
-      onHeightChange(clampDockHeight(next, viewport))
+      onHeightChange(Math.min(max, Math.max(min, next)))
     },
-    [height, max, onHeightChange, onToggleCollapse, viewport],
+    [currentHeight, max, min, onHeightChange, onToggleCollapse],
   )
 
   return (
     <section
+      ref={dockRef}
       id={dockID}
       className="relative flex shrink-0 flex-col border-t border-border bg-sidebar"
-      style={collapsed ? undefined : { height: clampDockHeight(height, viewport) }}
+      style={collapsed ? undefined : { height: currentHeight }}
       aria-label="Terminal dock"
     >
       {!collapsed && (
@@ -124,8 +160,8 @@ export function Dock({
           aria-orientation="horizontal"
           aria-label="Resize terminal dock"
           aria-controls={dockID}
-          aria-valuenow={Math.round(clampDockHeight(height, viewport))}
-          aria-valuemin={minDockHeight}
+          aria-valuenow={Math.round(currentHeight)}
+          aria-valuemin={Math.round(min)}
           aria-valuemax={Math.round(max)}
           tabIndex={0}
           onPointerDown={startResize}
@@ -136,7 +172,10 @@ export function Dock({
           )}
         />
       )}
-      <div className="flex min-h-9 flex-wrap items-center gap-x-1 border-b border-border bg-sidebar px-2">
+      <div
+        ref={headerRef}
+        className="flex min-h-9 flex-wrap items-center gap-x-1 border-b border-border bg-sidebar px-2"
+      >
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <div
             className="flex min-w-0 max-w-full items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -210,7 +249,7 @@ export function Dock({
             </span>
           )}
         </div>
-        {actions && (
+        {!collapsed && actions && (
           <div className="flex min-w-0 max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[640px]:order-3 max-[640px]:max-w-full max-[640px]:basis-full max-[640px]:justify-end max-[640px]:border-t max-[640px]:border-border max-[640px]:py-1">
             {actions}
           </div>

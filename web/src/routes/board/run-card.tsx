@@ -105,7 +105,7 @@ export function RunCard({ card }: { card: BoardCard }) {
               {runLabel(run)}
             </span>
             {run.title?.trim() && run.task.trim() && (
-              <span className="mt-0.5 block break-words text-xs leading-4 text-muted-foreground">
+              <span className="mt-0.5 line-clamp-3 break-words text-xs leading-4 text-muted-foreground">
                 {run.task.trim()}
               </span>
             )}

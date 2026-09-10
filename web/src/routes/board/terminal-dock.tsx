@@ -324,6 +324,7 @@ export function TerminalDock({
                 <Button
                   type="button"
                   size="sm"
+                  variant="ghost"
                   onClick={() => {
                     setStopError(null)
                     setConfirmingStop(true)
