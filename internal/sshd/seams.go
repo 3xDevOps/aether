@@ -58,6 +58,9 @@ type RunController interface {
 	// ConnectGitHub finishes the GitHub login the member started with gh
 	// auth login in their environment terminal.
 	ConnectGitHub(ctx context.Context, member domain.MemberID) (domain.GitHubConnection, error)
+	// ProbeGitHubCLI reports the gh in the member's environment terminal
+	// before the member is asked to log in with it.
+	ProbeGitHubCLI(ctx context.Context, member domain.MemberID) (domain.GitHubCLI, error)
 	// HoldShell counts one live interactive terminal attach for the
 	// self-update idle check; the returned func releases it.
 	HoldShell() func()

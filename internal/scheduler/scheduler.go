@@ -47,21 +47,25 @@ const DefaultMinFreeBytes = 1 << 30
 
 // Config wires the scheduler's dependencies and tuning knobs.
 type Config struct {
-	Store          store.Store
-	Runtime        runtime.Runtime
-	Bus            events.Bus
-	Git            GitEngine
-	PTY            PTYHost
-	StateDir       string
-	Homes          *memberhome.Manager
-	Profiles       profileService
-	ReposDir       string
-	WorktreeMount  string
-	StandardImage  string
-	StallThreshold time.Duration
-	PollInterval   time.Duration
-	StopGrace      time.Duration // default 10s
-	CheckoutTTL    time.Duration // default 72h; negative disables GC
+	Store         store.Store
+	Runtime       runtime.Runtime
+	Bus           events.Bus
+	Git           GitEngine
+	PTY           PTYHost
+	StateDir      string
+	Homes         *memberhome.Manager
+	Profiles      profileService
+	ReposDir      string
+	WorktreeMount string
+	StandardImage string
+	// DefaultStandardImage is the image this build ships with, before any
+	// --standard-image the operator set. A server update only moves the
+	// standard image when the two are the same.
+	DefaultStandardImage string
+	StallThreshold       time.Duration
+	PollInterval         time.Duration
+	StopGrace            time.Duration // default 10s
+	CheckoutTTL          time.Duration // default 72h; negative disables GC
 	// MinFreeBytes is the free-space floor: a launch or relaunch that
 	// would start below it is refused with ErrDiskFull rather than filling
 	// the disk out from under the runs already on it. Runs already

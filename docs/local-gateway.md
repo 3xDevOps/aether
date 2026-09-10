@@ -289,6 +289,7 @@ listener on the server.
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 | `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
 | `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
+| `github.probe` | none | `GitHubProbeResult` (`{"status":"ok","version":"2.100.0","minimum":"2.81.0","detail":"gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.7"}`) - the gh in the calling member's environment terminal |
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit. `from` and `to` select
@@ -303,15 +304,54 @@ listener on the server.
   unavailable. All three files methods also answer `-32602` for a rejected
   path. The underlying errors name server-side paths,
   so they are not echoed to the client.
-- `github.connect` is member-scoped and takes no parameters: it acts on the
-  calling member's own environment terminal. It runs `gh` inside that
-  container, so it answers `-32002` (invalid state) when the terminal is not
-  running, and again when gh is not logged in to `github.com` there - that
-  second message ends with gh's own reason for the account, such as `HTTP
-  401: Bad credentials`, so the dashboard and the CLI can show what gh said
-  rather than a summary. `signing_key` is the public key line and
-  `fingerprint` its `SHA256:` fingerprint; the private key never leaves the
-  server. The dashboard's Agents step calls this after the member
+- `github.probe` is what a caller asks before it prints the login command.
+  `status` is `ok`, `missing` (nothing named gh on `PATH`, exit 127),
+  `broken` (gh is there and exited non-zero, including the 126 of a file
+  that will not run) or `outdated` (older than `minimum`, the
+  oldest release whose `gh auth status --json` the login check can read).
+  `image` is the image that container is running and `saved_image` the
+  member's own saved one; `version` is the release gh printed and `detail`
+  what gh, or the container that could not run it, printed - prefixed with
+  `gh --version exited <code>` when the status is `broken`, and the output
+  after it when there was any. A gh that
+  cannot do the login also carries `remedy`, the command the member runs,
+  and `admin_remedy`, what a server admin has to run first when the
+  server's own standard image is the one without a usable gh:
+
+  ```json
+  {"status":"missing","minimum":"2.81.0","detail":"OCI runtime exec failed: exec failed: unable to start container process: exec: \"gh\": executable file not found in $PATH","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.5","remedy":"aether terminal stop","admin_remedy":"aether server update"}
+  ```
+
+  `status`, `minimum` and `image` are always there; `version`, `detail`,
+  `saved_image`, `path`, `remedy` and `admin_remedy` are omitted when
+  empty.
+  `path` is present only when the gh that answered is a file inside the
+  caller's own environment home, which comes first on `PATH` and outlives
+  every image - so when it is set, no image remedy is sent with it.
+  `admin_remedy` appears only when the standard image is the one at fault,
+  which is never a member who has saved an environment, so it and
+  `saved_image` never appear together.
+- Like `github.connect`, `github.probe` runs `gh --version` in the
+  container the member already has. It answers `-32002` (invalid state)
+  when the terminal is not running, and for a container that goes away
+  under it, rather than opening one: opening a container, or even resolving
+  an image, can pull, and this gateway drops a control round-trip that
+  takes more than sixty seconds. The exec itself failing answers `-32603`.
+  The probe takes no terminal lock and gives up after twenty seconds, well
+  inside that.
+- `github.connect` is member-scoped and takes no parameters: it acts on
+  the calling member's own environment terminal. It runs `gh` inside that
+  container, so it answers `-32002` (invalid state) when the terminal is
+  not running, when that container has no gh, has one that will not run,
+  or has one older than `minimum` above, and when gh is not logged in to
+  `github.com` there. The gh refusals come before the login is asked about
+  at all, and carry the same way out the probe reports, though as one
+  sentence rather than the separate `remedy` and `admin_remedy` fields;
+  the login refusal ends with gh's own reason for the account, such as
+  `HTTP 401: Bad credentials`, so the dashboard and the CLI can show what
+  gh said rather than a summary. `signing_key` is the public key line and
+  `fingerprint` its `SHA256:` fingerprint; the private key never leaves
+  the server. The dashboard's Agents step calls this after the member
   finishes `gh auth login` in the terminal dock; see
   [environment-home.md](environment-home.md#connect-github).
 

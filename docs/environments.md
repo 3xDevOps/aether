@@ -25,7 +25,34 @@ and point `--standard-image` at it.
 The image ships `gh` and `ssh-keygen` for GitHub's sake: connecting GitHub
 in the environment terminal and signing commits inside a run need them, so
 nothing has to be installed first. A team publishing its own standard image
-should keep both.
+should keep both, and keep gh at 2.81.0 or newer: that release added
+`gh auth status --json`, which is how the server reads a member's login
+back.
+
+Docker pulls a tag it does not already hold, so the standard image is
+refreshed only when the tag changes. Each release uses its own tag, and
+the default follows the server build, so `aether server update` brings a
+new image with it ([install.md](install.md#upgrading)).
+
+A server that was started with `--standard-image` keeps that value across
+an update, so the pin is what has to move. A tag naming one release never
+moves in a registry either, and a digest names one image forever; both are
+repointed:
+
+```sh
+sudo aether-server config set standard-image <a newer image> && sudo systemctl restart aether-server
+```
+
+A tag an operator reuses (`:latest`, or a team's own image) keeps whatever
+the daemon already has until an admin repulls it on the server host:
+
+```sh
+docker pull ghcr.io/3xdevops/aether-standard:latest
+```
+
+A container keeps the image it started from, and nothing recreates it
+while it runs, so a refreshed standard image reaches a member only when
+they stop their environment terminal and open it again.
 
 Workspace creation does not choose an image. The command needs only the
 workspace name and, optionally, its base branch:

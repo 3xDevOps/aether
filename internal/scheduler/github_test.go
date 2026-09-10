@@ -16,6 +16,29 @@ import (
 
 const ghStatusLoggedIn = `{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"gist, read:org, repo, admin:ssh_signing_key"}]}}`
 
+// ghVersionCurrent is what the gh in the standard image answers.
+const ghVersionCurrent = "gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0\n"
+
+// ghVersionUbuntu is Ubuntu 24.04's packaged gh, which predates
+// auth status --json and carries the distribution build on the same line.
+const ghVersionUbuntu = "gh version 2.45.0 (2025-07-18 Ubuntu 2.45.0-1ubuntu0.3)\nhttps://github.com/cli/cli/releases/tag/v2.45.0\n"
+
+// ghNotFound is what the container runtime answers for an executable the
+// image does not have, verbatim from a real docker exec, with exit 127.
+const ghNotFound = `OCI runtime exec failed: exec failed: unable to start container process: exec: "gh": executable file not found in $PATH`
+
+// ghWhere is what the container answers when the probe asks whose gh it is:
+// the home, then the path gh resolves to.
+func ghWhere(path string) string { return "/root\n" + path + "\n" }
+
+// asksWhereGhIs reports the probe's second exec, the one that decides
+// whether the gh that answered is a file in the member's own home. The
+// argv is matched whole: a probe that asked about some other program
+// would otherwise be answered as though it had asked about gh.
+func asksWhereGhIs(argv []string) bool {
+	return slices.Equal(argv, []string{"sh", "-c", `printf '%s\n%s\n' "$HOME" "$(command -v gh || true)"`})
+}
+
 func requireSSHKeygen(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
@@ -35,6 +58,9 @@ func TestConnectGitHubReportsAnUnfinishedLogin(t *testing.T) {
 	e := newTestEnv(t, nil)
 	const output = `{"hosts":{"github.com":[{"state":"timeout","active":true,"login":"octocat"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		if slices.Contains(argv, "--version") {
+			return 0, ghVersionCurrent, nil
+		}
 		if slices.Contains(argv, "status") {
 			return 0, output, nil
 		}
@@ -60,6 +86,9 @@ func TestConnectGitHubSurfacesSetupGitFailure(t *testing.T) {
 	requireSSHKeygen(t)
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		if slices.Contains(argv, "--version") {
+			return 0, ghVersionCurrent, nil
+		}
 		if slices.Contains(argv, "status") {
 			return 0, ghStatusLoggedIn, nil
 		}
@@ -85,6 +114,8 @@ func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 	}
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
+		case slices.Contains(argv, "--version"):
+			return 0, ghVersionCurrent, nil
 		case slices.Contains(argv, "status"):
 			return 0, ghStatusLoggedIn, nil
 		case slices.Contains(argv, "list"):
@@ -116,7 +147,8 @@ func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantArgv := [][]string{
-		{"gh", "auth", "status", "--hostname", "github.com", "--active", "--json", "hosts"},
+		{"gh", "--version"},
+		{"gh", "auth", "status", "--hostname", "github.com", "--json", "hosts"},
 		{"gh", "auth", "setup-git", "--hostname", "github.com"},
 		{"gh", "ssh-key", "add", ".ssh/aether_signing.pub", "--type", "signing", "--title", "aether " + string(e.member.ID)},
 		{"gh", "ssh-key", "list"},
@@ -188,6 +220,9 @@ func TestConnectGitHubReportsTheAccountsOwnError(t *testing.T) {
 	e := newTestEnv(t, nil)
 	const output = `{"hosts":{"github.com":[{"state":"error","active":true,"login":"octocat","error":"HTTP 401: Bad credentials"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		if slices.Contains(argv, "--version") {
+			return 0, ghVersionCurrent, nil
+		}
 		if slices.Contains(argv, "status") {
 			return 0, output, nil
 		}
@@ -216,6 +251,9 @@ func TestConnectGitHubRefusesALoginWithoutTheSigningScope(t *testing.T) {
 	e := newTestEnv(t, nil)
 	const output = `{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"gist, read:org, repo"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		if slices.Contains(argv, "--version") {
+			return 0, ghVersionCurrent, nil
+		}
 		if slices.Contains(argv, "status") {
 			return 0, output, nil
 		}
@@ -254,6 +292,8 @@ func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
+		case slices.Contains(argv, "--version"):
+			return 0, ghVersionCurrent, nil
 		case slices.Contains(argv, "status"):
 			return 0, ghStatusLoggedIn, nil
 		case slices.Contains(argv, "list"):
@@ -270,6 +310,222 @@ func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), homeKeyFingerprint(t, e)) {
 		t.Errorf("error %q does not name the member's own fingerprint", err)
+	}
+}
+
+// An environment saved, or a standard image pulled, before the image
+// shipped gh has none. The member used to be handed a login command that
+// container cannot run; now the refusal names both halves of the remedy -
+// the admin's and their own - and keeps the container's own line.
+func TestConnectGitHubReportsAMissingGh(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		switch {
+		case slices.Contains(argv, "--version"):
+			return 127, ghNotFound, nil
+		case asksWhereGhIs(argv):
+			return 0, ghWhere("/usr/bin/gh"), nil
+		}
+		t.Errorf("unexpected exec %v with no gh in the container", argv)
+		return 0, "", nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if !errors.Is(err, ErrGitHubCLIMissing) {
+		t.Fatalf("ConnectGitHub error = %v, want %v", err, ErrGitHubCLIMissing)
+	}
+	if errors.Is(err, ErrGitHubNotLoggedIn) {
+		t.Errorf("error %q reads as a missing login", err)
+	}
+	if !strings.Contains(err.Error(), ghNotFound) {
+		t.Errorf("error %q does not carry the container's own line", err)
+	}
+	// Repulling the image does not touch a container that is already up,
+	// so the refusal has to name the reopen as well.
+	for _, want := range []string{"docker pull " + e.cfg.StandardImage, "aether terminal stop"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+}
+
+// gh 2.45 - Ubuntu 24.04's package, and what a member reaches for after
+// "command not found" - rejects auth status --json and exits 1. That used
+// to be reported as a failed login, which sent the member back to a login
+// that was already good.
+func TestConnectGitHubReportsAGhTooOldForTheLoginCheck(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		switch {
+		case slices.Contains(argv, "--version"):
+			return 0, ghVersionUbuntu, nil
+		case asksWhereGhIs(argv):
+			return 0, ghWhere("/usr/bin/gh"), nil
+		}
+		t.Errorf("unexpected exec %v with a gh too old to answer it", argv)
+		return 0, "", nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if !errors.Is(err, ErrGitHubCLIOutdated) {
+		t.Fatalf("ConnectGitHub error = %v, want %v", err, ErrGitHubCLIOutdated)
+	}
+	if errors.Is(err, ErrGitHubNotLoggedIn) {
+		t.Errorf("error %q reads as a missing login", err)
+	}
+	for _, want := range []string{"2.45.0", "2.81.0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %s", err, want)
+		}
+	}
+}
+
+// gh reports one account with no active marker when the host holds only
+// that account. Dropping --active is what makes the entry visible at all,
+// so the check has to accept it.
+func TestConnectGitHubAcceptsTheOnlyAccountOnTheHost(t *testing.T) {
+	requireSSHKeygen(t)
+	e := newTestEnv(t, nil)
+	const output = `{"hosts":{"github.com":[{"state":"success","login":"octocat","scopes":"repo, admin:ssh_signing_key"}]}}`
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		switch {
+		case slices.Contains(argv, "--version"):
+			return 0, ghVersionCurrent, nil
+		case slices.Contains(argv, "status"):
+			return 0, output, nil
+		case slices.Contains(argv, "list"):
+			return 0, "aether\t" + homeKeyFingerprint(t, e) + "\t2026-01-01\t1\tsigning\n", nil
+		}
+		return 0, "", nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	conn, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("ConnectGitHub: %v", err)
+	}
+	if conn.Login != "octocat" {
+		t.Errorf("login = %q, want octocat", conn.Login)
+	}
+}
+
+// gh exits 0 from auth status --json whatever it thinks of the account, so
+// a non-zero exit is a fatal error and never a missing login. Reporting it
+// as one would be the same lie in a narrower place.
+func TestConnectGitHubDoesNotReadAFatalStatusAsNoLogin(t *testing.T) {
+	e := newTestEnv(t, nil)
+	const output = "error connecting to api.github.com"
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		if slices.Contains(argv, "--version") {
+			return 0, ghVersionCurrent, nil
+		}
+		return 1, output, nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if err == nil || !strings.Contains(err.Error(), output) {
+		t.Fatalf("ConnectGitHub error = %v, want gh's own output", err)
+	}
+	if errors.Is(err, ErrGitHubNotLoggedIn) {
+		t.Errorf("error %q reads as a missing login", err)
+	}
+}
+
+// A gh whose version line this cannot read is not an old gh. Refusing it
+// would repeat the bug: a working login blamed on something else.
+func TestConnectGitHubTrustsAGhWithAnUnreadableVersion(t *testing.T) {
+	requireSSHKeygen(t)
+	e := newTestEnv(t, nil)
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		switch {
+		case slices.Contains(argv, "--version"):
+			return 0, "gh version built from source\n", nil
+		case slices.Contains(argv, "status"):
+			return 0, ghStatusLoggedIn, nil
+		case slices.Contains(argv, "list"):
+			return 0, "aether\t" + homeKeyFingerprint(t, e) + "\t2026-01-01\t1\tsigning\n", nil
+		}
+		return 0, "", nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	if _, err := e.sched.ConnectGitHub(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("ConnectGitHub: %v", err)
+	}
+}
+
+// The connect refuses a container the standard image has moved out from
+// under with the same one-step answer the probe gives, not the admin's.
+func TestConnectGitHubSendsAStaleContainerToReopen(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		switch {
+		case slices.Contains(argv, "--version"):
+			return 127, ghNotFound, nil
+		case asksWhereGhIs(argv):
+			return 0, ghWhere("/usr/bin/gh"), nil
+		}
+		t.Errorf("unexpected exec %v with no gh in the container", argv)
+		return 0, "", nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	e.sched.mu.Lock()
+	e.sched.terminals[e.member.ID].image = "ghcr.io/3xdevops/aether-standard:v0.1.0"
+	e.sched.mu.Unlock()
+
+	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if !errors.Is(err, ErrGitHubCLIMissing) {
+		t.Fatalf("ConnectGitHub error = %v, want %v", err, ErrGitHubCLIMissing)
+	}
+	if !strings.Contains(err.Error(), "still running the image it started from") {
+		t.Errorf("error %q does not name the reopen", err)
+	}
+	if strings.Contains(err.Error(), "server admin") {
+		t.Errorf("error %q asks for an admin the member does not need", err)
+	}
+}
+
+// A member on their own saved image is not told to throw it away: the
+// refusal offers the way out that keeps it first.
+func TestConnectGitHubKeepsASavedEnvironmentOnOffer(t *testing.T) {
+	e := newTestEnv(t, nil)
+	if err := e.db.UpdateMemberImage(t.Context(), e.member.ID, "aether/member-test:1"); err != nil {
+		t.Fatalf("UpdateMemberImage: %v", err)
+	}
+	if err := e.rt.Commit(t.Context(), "c-saved", "aether/member-test:1"); err != nil {
+		t.Fatalf("seed the saved image: %v", err)
+	}
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		switch {
+		case slices.Contains(argv, "--version"):
+			return 0, ghVersionUbuntu, nil
+		case asksWhereGhIs(argv):
+			return 0, ghWhere("/usr/bin/gh"), nil
+		}
+		t.Errorf("unexpected exec %v with a gh too old to answer it", argv)
+		return 0, "", nil
+	}
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
+	if !errors.Is(err, ErrGitHubCLIOutdated) {
+		t.Fatalf("ConnectGitHub error = %v, want %v", err, ErrGitHubCLIOutdated)
+	}
+	for _, want := range []string{"save the environment again", "remove the saved image"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not say %q", err, want)
+		}
 	}
 }
 

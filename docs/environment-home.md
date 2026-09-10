@@ -62,6 +62,13 @@ Connect GitHub once and every later run of yours can push branches to the
 workspace's upstream repository, open pull requests, and sign its commits.
 Both halves happen in the member home, so no run needs its own credentials.
 
+The login runs in your environment terminal, so that container needs
+`gh` 2.81.0 or newer - the release that added `gh auth status --json`,
+which is how the server reads your login back. The standard image ships a
+current one. An environment saved, or a standard image pulled, before the
+image started shipping gh has none; see [No gh in the
+environment](#no-gh-in-the-environment) below.
+
 Open the [environment terminal](terminal.md) and log in there:
 
 ```sh
@@ -118,7 +125,38 @@ That one command does five things, all on the server:
 Re-running it is safe. An existing key is reused rather than replaced, and
 GitHub accepts a key it already holds without an error.
 
-Four failures have their own messages. Without a terminal login:
+Seven failures have their own messages. An environment whose gh cannot do
+the login is refused before the login is asked about at all, naming the
+way out and ending with what gh - or the container that could not run it -
+actually printed. With no gh at all, on the server's standard image:
+
+```
+github: gh is not on PATH in the environment terminal; ask a server admin to run aether server update, then run aether terminal stop and open the terminal again: OCI runtime exec failed: exec failed: unable to start container process: exec: "gh": executable file not found in $PATH
+```
+
+Both halves are there because a newer image on the server reaches you only
+when you open the terminal again
+([environments.md](environments.md#the-standard-image)). Which command the
+admin gets depends on the server's image; see [No gh in the
+environment](#no-gh-in-the-environment) below.
+
+With a gh too old to answer the check - Ubuntu 24.04 packages 2.45.0 - in
+an environment you saved yourself, the way out is yours alone:
+
+```
+github: the gh in the environment terminal is too old to check the login: 2.81.0 is the oldest gh that answers auth status --json; install a current gh there and save the environment again, or run aether env reset to remove the saved image and return to the standard one: gh version 2.45.0 (2025-07-18 Ubuntu 2.45.0-1ubuntu0.3)
+```
+
+When the image you should be on has already moved - after a reset, or a
+server update - the container is the only thing left behind, and the
+refusal asks for nothing but `aether terminal stop` and a reopen. A gh that
+is on `PATH` but exits non-zero is refused the same way, as `gh in the
+environment terminal would not run`, ending with what it printed. The
+dashboard's GitHub step checks all of this before it prints the login
+command, so it shows the remedy instead of a login that container cannot
+run.
+
+Without a terminal login:
 
 ```
 github: not logged in to github.com in the environment terminal; run gh auth login there first: HTTP 401: Bad credentials
@@ -126,7 +164,10 @@ github: not logged in to github.com in the environment terminal; run gh auth log
 
 The line ends with gh's own reason for that account - `HTTP 401: Bad
 credentials` when the token was revoked or expired - or with gh's whole
-output when it reported no account at all.
+output when it reported no account at all. A gh that fails the check
+outright, rather than reporting on an account, is not a missing login and
+does not read as one: `gh auth status exited <code>` ends with what it
+printed.
 
 A login made without `--scopes admin:ssh_signing_key` is refused before
 anything in the home changes: no key is generated and no `.gitconfig` is
@@ -136,12 +177,10 @@ rewritten.
 github: the gh login on github.com lacks the admin:ssh_signing_key scope; run gh auth refresh -h github.com -s admin:ssh_signing_key in the environment terminal
 ```
 
-A saved environment built before `gh` shipped in the standard image answers
-that `gh is not on PATH in the environment terminal`; install it there and
-save again, or `aether env reset`. And when the **server host** has no
-`ssh-keygen`, the command refuses before generating anything, because that
-binary is what signs Aether's own commits; install the OpenSSH client
-package on the server ([install.md](install.md#server-prerequisites)).
+When the **server host** has no `ssh-keygen`, the command refuses before
+generating anything, because that binary is what signs Aether's own
+commits; install the OpenSSH client package on the server
+([install.md](install.md#server-prerequisites)).
 
 `aether member git` keeps `~/.gitconfig` in step: once a signing key
 exists, changing your name or address rewrites the identity in the home's
@@ -150,6 +189,51 @@ exists, changing your name or address rewrites the identity in the home's
 Container root in every run using this account can read and replace the
 credentials and the key. Read [security.md](security.md#github-credentials-and-signing-keys)
 before connecting an account whose reach is wider than this workspace.
+
+## No gh in the environment
+
+The standard image has shipped `gh` since the v0.2.0-alpha.6 release. Three
+kinds of environment can still be without a usable one.
+
+A **saved environment** committed before then keeps whatever was installed
+when it was saved. Install gh in the terminal and save again, or drop back
+to the standard image:
+
+```sh
+aether env reset
+```
+
+A **standard image** is the server's, not yours, so only an admin can move
+it. Each release publishes its own tag and the server defaults to the tag
+matching its own build, so a server still on an image without gh is a
+server on a release without gh, and the answer is a server update
+([install.md](install.md#upgrading)):
+
+```sh
+aether server update
+```
+
+That assumes the server takes the default; a pinned or rebuilt
+`--standard-image` is refreshed some other way
+([environments.md](environments.md#the-standard-image)). Aether picks the
+command from the image the server is configured with, so the one to run is
+the one in the refusal.
+
+Either way the new image is not yours until you open the terminal again:
+
+```sh
+aether terminal stop
+```
+
+A **gh you installed yourself** into your environment home is the third,
+and no image remedy reaches it: `~/.local/bin` comes first on `PATH` and
+the home is kept across every image. Aether names the file it found when
+that is what answered, so the way out is to remove it and let the image's
+own gh take over, or to replace it with 2.81.0 or newer:
+
+```sh
+rm ~/.local/bin/gh
+```
 
 ## Profile sync
 
