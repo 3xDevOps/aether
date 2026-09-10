@@ -192,7 +192,7 @@ function TerminalView({ params }: RouteProps) {
               className={cn(
                 'shrink-0 rounded-[2px] border border-border bg-background px-2 py-0.5 text-[12px] font-medium text-muted-foreground',
                 state.connection === 'offline' &&
-                  'border-state-failed/40 bg-state-failed/10 text-state-failed',
+                  'border-state-failed/40 bg-state-failed/10 text-[var(--danger-soft-foreground)]',
               )}
             >
               {connectionLabel[state.connection]}
@@ -232,7 +232,7 @@ function TerminalView({ params }: RouteProps) {
             </span>
           )}
           {state.message && (
-            <span className="min-w-0 flex-1 break-words whitespace-pre-wrap text-muted-foreground">
+            <span className="min-w-0 flex-[1_1_16rem] break-words whitespace-pre-wrap text-muted-foreground">
               {state.refused && sessionMissing && endedStatuses.includes(run.status)
                 ? 'This run has ended and left no recorded terminal to replay.'
                 : state.message}
