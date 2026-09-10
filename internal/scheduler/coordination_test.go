@@ -178,6 +178,10 @@ func TestRunCarriesCoordinationAssets(t *testing.T) {
 	waitFor(t, "coordination release", func() bool {
 		return slices.Contains(coord.releasedRuns(), run.ID)
 	})
+	waitFor(t, "coordination directory removal", func() bool {
+		_, err := os.Stat(dir.HostPath)
+		return os.IsNotExist(err)
+	})
 	if _, err := os.Stat(dir.HostPath); !os.IsNotExist(err) {
 		t.Fatalf("coordination directory survived the container: %v", err)
 	}
