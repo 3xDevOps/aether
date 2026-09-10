@@ -873,11 +873,11 @@ paused. Delete them once you have salvaged what you want.
 ## Releases
 
 Push the tag, then publish an ordinary, non-draft GitHub release for it. Alpha
-versions use the same tag syntax, for example `v0.3.0-alpha.1`:
+versions use the same tag syntax, for example `v0.4.0-alpha.1`:
 
 ```sh
-git push origin v0.3.0-alpha.1
-gh release create v0.3.0-alpha.1 --title v0.3.0-alpha.1 --generate-notes
+git push origin v0.4.0-alpha.1
+gh release create v0.4.0-alpha.1 --title v0.4.0-alpha.1 --generate-notes
 ```
 
 Publish alpha tags as normal releases, not GitHub prereleases, because
