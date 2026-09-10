@@ -8,10 +8,10 @@ import { useStore } from '@/store'
 import type { UpdateKind } from '@/store/ui'
 
 // Notices keep the icon, summary, action cluster, and dismiss control in
-// explicit columns on wide workbenches. At narrow widths actions take their
-// own row so long diagnostics never hide them.
+// explicit columns from the existing md workbench breakpoint. At narrow
+// widths actions take their own row so long diagnostics never hide them.
 export const banner =
-  'grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 border-b border-border bg-card px-3 py-2 text-[13px] lg:grid-cols-[auto_minmax(0,1fr)_auto_auto]'
+  'grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 border-b border-border bg-card px-3 py-2 text-[13px] md:grid-cols-[auto_minmax(0,1fr)_auto_auto]'
 
 export const bannerContent = 'col-start-2 row-start-1 min-w-0 space-y-1'
 
@@ -19,7 +19,7 @@ export const bannerIcon =
   'mt-px grid size-[22px] shrink-0 place-items-center rounded-sm bg-primary/10 text-primary'
 
 export const bannerActions =
-  'col-start-2 row-start-2 flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1 lg:col-start-3 lg:row-start-1 lg:justify-end'
+  'col-start-2 row-start-2 flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1 md:col-start-3 md:row-start-1 md:justify-end'
 
 // Technical output is bounded so a failed rebuild cannot push the workbench
 // or its actions out of reach. It remains selectable and scrollable in place.
@@ -33,7 +33,7 @@ export function Dismiss({ kind, version }: { kind: UpdateKind; version: string }
     <Button
       variant="ghost"
       size="icon"
-      className="col-start-3 row-start-1 size-6 shrink-0 lg:col-start-4"
+      className="col-start-3 row-start-1 size-6 shrink-0 md:col-start-4"
       aria-label="Dismiss"
       onClick={() => dismiss(kind, version)}
     >

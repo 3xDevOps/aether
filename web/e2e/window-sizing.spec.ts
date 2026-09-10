@@ -124,9 +124,9 @@ const prompts = ['The desktop app is out of date.', 'is available.']
 const installedPrompts = ['The desktop app is out of date.', 'is installed.']
 
 /**
- * Both prompts carry their controls on their own first row. This is the
- * regression: while the strip wrapped, the controls sat under the prose
- * wherever the prose was too wide to share the row.
+ * Both prompts expose their actionable controls on their own first row. This
+ * is the regression: while the strip wrapped, the controls sat under the
+ * prose wherever it was too wide to share the row.
  */
 async function expectControlsOnFirstRow(
   page: Page,
@@ -136,19 +136,32 @@ async function expectControlsOnFirstRow(
   // alone: other surfaces announce themselves with role="status" too, and a
   // walk that escaped the strip would measure the app instead.
   const rows = await page.evaluate((headlines: string[]) => {
+    const primaryActionNames: Record<string, true> = {
+      'Update now': true,
+      'Updating...': true,
+      'Rebuilding...': true,
+      'Relaunching...': true,
+    }
     return headlines.map((headline) => {
       const prompt = [...document.querySelectorAll('[role="status"]')].find((el) =>
         el.textContent?.includes(headline),
       )
       if (!prompt) return null
-      // The icon is the first child and the prose column the second. Copy
-      // controls inside that prose are not the prompt's action cluster.
-      const prose = prompt.children[1]
+      // Select the controls by their visible semantics, not by the
+      // implementation's child order or utility classes.
+      const controls = [...prompt.querySelectorAll<HTMLElement>('button, a')].filter(
+        (control) => {
+          if (control.getAttribute('aria-label') === 'Dismiss') return true
+          if (control.tagName === 'BUTTON') {
+            return primaryActionNames[control.textContent?.trim() ?? ''] === true
+          }
+          return control.textContent?.trim() === 'Release notes'
+        },
+      )
       const top = prompt.getBoundingClientRect().top
-      return [...prompt.querySelectorAll('button, a')]
+      return controls
         .filter(
           (control) =>
-            !prose?.contains(control) &&
             control.getClientRects().length > 0 &&
             getComputedStyle(control).visibility !== 'hidden',
         )
@@ -284,14 +297,13 @@ test('a long build error cannot hide the prompt underneath it', async ({
 
   await openDesktop(page, gateway)
   // The seed really did reach the bound: without this the case cannot tell a
-  // clamped error from one that was short enough all along.
-  const clamped = await page.evaluate(() => {
-    const prompt = [...document.querySelectorAll('[role="status"]')].find((el) =>
-      el.textContent?.includes('The desktop app is out of date.'),
-    )
-    const output = prompt?.querySelector('p.max-h-24')
-    return output ? output.scrollHeight > output.clientHeight : false
-  })
+  // clamped error from one that was short enough all along. Locate the exact
+  // provided text so the assertion does not depend on how it is styled.
+  const output = page.getByText(buildError, { exact: true })
+  await expect(output).toBeVisible()
+  const clamped = await output.evaluate(
+    (element) => element.scrollHeight > element.clientHeight,
+  )
   expect(clamped).toBe(true)
 
   // Bounded where it is printed, so however long it runs it cannot scroll the
