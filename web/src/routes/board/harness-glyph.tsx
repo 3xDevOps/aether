@@ -19,7 +19,7 @@ export function HarnessGlyph({ harness, mode }: { harness: string; mode: string 
     >
       <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="min-w-0 truncate">{harness}</span>
-      <span className="shrink-0 text-muted-foreground/80">({mode})</span>
+      <span className="shrink-0 text-muted-foreground">({mode})</span>
     </span>
   )
 }

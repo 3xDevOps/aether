@@ -56,7 +56,7 @@ export function RunCard({ card }: { card: BoardCard }) {
       style={{ borderLeftColor: owner?.color }}
       className={cn(
         'group min-w-0 cursor-pointer border-b border-l-2 border-border bg-background px-3 py-2.5 transition-colors duration-100 hover:bg-toolbar-hover',
-        unseen ? 'border-foreground/25' : 'opacity-90',
+        unseen && 'border-foreground/25',
       )}
     >
       <div className="flex min-w-0 items-start gap-2">
