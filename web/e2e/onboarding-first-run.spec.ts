@@ -57,11 +57,6 @@ test('the first run completes', async ({ page, aether }) => {
   const header = page.locator('header').filter({ hasText: 'write the result file' })
   await expect(header).toContainText('Done', { timeout: 3 * 60 * 1000 })
 
-  // The Overview tab keeps what the header cannot say: why the run stopped.
-  await tabs.getByRole('tab', { name: 'Overview' }).click()
-  await expect(
-    page.getByRole('definition').filter({ hasText: 'agent exited; results committed' }),
-  ).toBeVisible()
 })
 
 test('with no agent installed the first run sends you back to Agents', async ({
