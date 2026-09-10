@@ -124,7 +124,7 @@
   --danger: var(--destructive);
   --danger-foreground: var(--destructive-foreground);
   --danger-soft: color-mix(in srgb, var(--destructive) 14%, transparent);
-  --danger-soft-foreground: var(--destructive);
+  --danger-soft-foreground: #a1260d;
   --field-background: #ffffff;
   --field-foreground: var(--foreground);
   --field-placeholder: #767676;
@@ -197,11 +197,11 @@
   --warning: var(--state-waiting);
   --warning-foreground: #f5d08a;
   --warning-soft: color-mix(in srgb, var(--state-waiting) 18%, transparent);
-  --warning-soft-foreground: var(--state-waiting);
+  --warning-soft-foreground: var(--warning-foreground);
   --danger: var(--destructive);
   --danger-foreground: var(--destructive-foreground);
   --danger-soft: color-mix(in srgb, var(--destructive) 18%, transparent);
-  --danger-soft-foreground: var(--destructive);
+  --danger-soft-foreground: #f48771;
   --field-background: #313131;
   --field-foreground: var(--foreground);
   --field-placeholder: #989898;

@@ -36,7 +36,8 @@ preference remains `system`, `light` or `dark`, with `system` following
 | `--primary` | `#005fb8` | `#0078d4` | Interaction blue and focus |
 | `--accent-soft-foreground` | `#005fb8` | `#4daafc` | Text on soft accent surfaces; lighter dark-mode blue is separate from the `--primary` button fill |
 | `--success-soft-foreground` | `#1f521f` | `#89d185` | Text on success-soft surfaces; light uses the readable success foreground |
-| `--warning-soft-foreground` | `#5c4500` | `#cca700` | Text on warning-soft surfaces; light uses the readable warning foreground |
+| `--warning-soft-foreground` | `#5c4500` | `#f5d08a` | Text on warning-soft surfaces; light and dark use the readable warning foreground |
+| `--danger-soft-foreground` | `#a1260d` | `#f48771` | Text on danger-soft surfaces; VS Code error foregrounds keep the label readable |
 | `--primary-hover` | `#0258a8` | `#026ec1` | Primary hover |
 | `--toolbar-hover` | `#f2f2f2` | `#2a2d2e` | Flat toolbar and row hover |
 | `--selection` | `#e8e8e8` | `#04395e` | Selected rows and text |
