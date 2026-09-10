@@ -212,7 +212,13 @@ export function ShortcutsButton() {
               Keep your hands on the workbench. Shortcuts yield to focused fields and open dialogs.
             </DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 min-w-0 space-y-2 overflow-y-auto px-2 py-2 sm:px-3">
+          <div
+            tabIndex={0}
+            className={cn(
+              focusRing,
+              'min-h-0 min-w-0 space-y-2 overflow-y-auto px-2 py-2 sm:px-3',
+            )}
+          >
             <section aria-labelledby="shortcut-shell" className="space-y-1">
               <h3
                 id="shortcut-shell"

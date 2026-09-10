@@ -454,13 +454,19 @@ function ReadDocument({
     )
   }
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+    <div
+      tabIndex={0}
+      className={cn(focusRing, 'min-h-0 flex-1 overflow-y-auto overscroll-contain')}
+    >
       {state.truncated && (
         <p className="border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">
           Truncated at 512 KiB
         </p>
       )}
-      <div className="overflow-x-auto overscroll-x-contain">
+      <div
+        tabIndex={0}
+        className={cn(focusRing, 'overflow-x-auto overscroll-x-contain')}
+      >
         <NumberedText content={state.content} />
       </div>
     </div>

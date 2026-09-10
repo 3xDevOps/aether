@@ -1,5 +1,6 @@
 import { GitCommitHorizontal } from 'lucide-react'
 import { MissingRun } from '@/components/missing-run'
+import { MemberAvatar } from '@/routes/board/member-avatar'
 import { RunHeader } from '@/components/run-header'
 import { timeAgo } from '@/lib/format'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -36,18 +37,23 @@ export function RunView({ params }: RouteProps) {
             <dl className="divide-y divide-border/70">
               <div className="grid min-w-0 gap-1 px-3 py-2.5 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
                 <dt className="text-xs font-medium text-muted-foreground">Owner</dt>
-                <dd className="min-w-0 break-words text-[13px]" style={{ color: owner?.color }}>
-                  {owner?.display_name ?? run.member_id}
+                <dd className="flex min-w-0 items-center gap-2 break-words text-[13px] text-foreground">
+                  <MemberAvatar member={owner} fallback={run.member_id} className="size-5 text-[9px]" />
+                  <span className="min-w-0 break-words">{owner?.display_name ?? run.member_id}</span>
                 </dd>
               </div>
               {run.account_member_id && run.account_member_id !== run.member_id && (
                 <div className="grid min-w-0 gap-1 px-3 py-2.5 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
                   <dt className="text-xs font-medium text-muted-foreground">Agent account</dt>
-                  <dd
-                    className="min-w-0 break-words text-[13px]"
-                    style={{ color: account?.color }}
-                  >
-                    {account?.display_name ?? run.account_member_id}
+                  <dd className="flex min-w-0 items-center gap-2 break-words text-[13px] text-foreground">
+                    <MemberAvatar
+                      member={account}
+                      fallback={run.account_member_id}
+                      className="size-5 text-[9px]"
+                    />
+                    <span className="min-w-0 break-words">
+                      {account?.display_name ?? run.account_member_id}
+                    </span>
                   </dd>
                 </div>
               )}
