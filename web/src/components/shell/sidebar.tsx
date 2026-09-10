@@ -477,7 +477,9 @@ export function ActivityRail({
                     variant="soft"
                     size="sm"
                     aria-hidden
-                    title={inboxError ?? 'Requests waiting on a decision'}
+                    render={(props) => (
+                      <span {...props} title={inboxError ?? 'Requests waiting on a decision'} />
+                    )}
                     className="absolute bottom-1 right-1 !h-4 !min-h-4 !min-w-4 !rounded-sm !px-0.5 !text-[10px] font-medium !leading-3 bg-state-needs-attention/15 text-state-needs-attention"
                   >
                     <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
