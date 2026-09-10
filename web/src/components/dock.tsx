@@ -75,14 +75,23 @@ export function Dock({
   const headerRef = useRef<HTMLDivElement>(null)
   const [headerHeight, setHeaderHeight] = useState(defaultDockHeaderHeight)
   const [parentHeight, setParentHeight] = useState<number | null>(null)
+  // Parent-contained callers give the primary sibling a CSS minimum. Reserve
+  // that declared constraint, rather than its changing flex height.
+  const [primaryMinHeight, setPrimaryMinHeight] = useState(0)
   useLayoutEffect(() => {
     const dockElement = dockRef.current
     if (!dockElement) return
     const parent = containment === 'parent' ? dockElement.parentElement : null
+    const primary = parent?.firstElementChild
 
     const measure = () => {
       const measuredHeader = headerRef.current?.getBoundingClientRect().height ?? 0
+      const measuredPrimary =
+        primary ? Number.parseFloat(getComputedStyle(primary).minHeight) : 0
       if (measuredHeader > 0) setHeaderHeight(Math.ceil(measuredHeader))
+      setPrimaryMinHeight(
+        Number.isFinite(measuredPrimary) ? Math.max(0, Math.ceil(measuredPrimary)) : 0,
+      )
       setParentHeight(
         parent ? Math.max(0, Math.floor(parent.getBoundingClientRect().height)) : null,
       )
@@ -90,18 +99,22 @@ export function Dock({
     measure()
     const observer = new ResizeObserver(measure)
     if (headerRef.current) observer.observe(headerRef.current)
+    if (primary) observer.observe(primary)
     if (parent) observer.observe(parent)
     return () => observer.disconnect()
   }, [containment])
   const viewportMax = maxDockHeight(viewport)
+  const requiredMinimum = Math.max(minDockHeight, Math.ceil(headerHeight) + minDockBodyHeight)
   const max =
     parentHeight === null
       ? viewportMax
-      : Math.min(viewportMax, parentHeight)
-  const min = Math.min(
-    Math.max(minDockHeight, Math.ceil(headerHeight) + minDockBodyHeight),
-    max,
-  )
+      : parentHeight === 0
+        ? 0
+        : Math.max(
+            requiredMinimum,
+            Math.min(viewportMax, Math.max(0, parentHeight - primaryMinHeight)),
+          )
+  const min = Math.min(requiredMinimum, max)
   const currentHeight = Math.min(max, Math.max(min, height))
   const index = Math.max(
     0,

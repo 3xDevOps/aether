@@ -256,8 +256,8 @@ function TerminalView({ params }: RouteProps) {
             </Button>
           )}
         </div>
-        <div className="relative min-h-0 flex flex-1 flex-col overflow-hidden">
-          <div className="relative min-h-0 flex-1 overflow-hidden bg-background">
+        <div className="relative min-h-0 flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
+          <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
             <TerminalPane key={runID} controller={controller}>
               {starting && <TerminalSpinner label="Starting the run's container" />}
             </TerminalPane>
