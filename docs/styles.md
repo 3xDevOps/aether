@@ -56,8 +56,9 @@ Use compact workbench geometry rather than landing-page ornament:
 
 - 35px title and command bar, 48px activity rail with 24px icons, and a
   preferred 260px workspace/run sidebar constrained to 200-520px.
-- 35px view and section headers; 36px run and dock tab strips; 22px status
-  rows and 22-28px list rows according to real content.
+- 35px view and section headers; run tab strips stay 36px, while dock
+  headers use a `min-h-9` strip whose actions can wrap to another row; 22px
+  status rows and 22-28px list rows according to real content.
 - 26px fields and buttons, 22px compact tools, 12px form gaps, 4px label
   gaps, 16px content gutters and 12px compact gutters.
 - Adjoining panes, sections, rows, run cards and tab strips have zero radius.

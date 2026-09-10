@@ -277,9 +277,9 @@ the same rules degrade below it rather than break.
   compact headers and a wrapping action group. Terminal tabs remain one keyboard
   stop with internal horizontal overflow.
 - **The board** uses one column on narrow screens and three columns from the
-  large breakpoint, with compact flat run cards and vertical scrolling on small
-  screens. State labels remain visible; empty, loading and error panels use the
-  same bounded surface hierarchy.
+  `lg`/1024px breakpoint, with compact flat run cards and vertical scrolling on
+  small screens. State labels remain visible; empty, loading and error panels
+  use the same bounded surface hierarchy.
 - **The workspace/run sidebar** collapses at 1000px and narrower into the
   persistent 48px activity rail, which exposes **Expand sidebar** without
   changing the stored preference. At 640px and narrower its expanded pane
@@ -416,20 +416,21 @@ a pending flag fed from the approval inbox. Cards sort by last state change,
 newest first.
 
 The board header wraps its title, run count Chip, descriptive copy and toolbar.
-Its grid is one column on narrow screens and three columns from the large
-breakpoint, with flat bordered columns, readable state headers and bounded card
-content. The visible run label is capped at three lines; its title button keeps
-the full `runLabel` as the accessible name. An empty workspace shows one "Ready
-for a task" panel and a primary New run action rather than three repeated empty
-columns. Loading uses delayed skeletons, and hydrated empty buckets say "Nothing
-here." without confusing an in-flight request with an empty result.
-The card's article is a pointer surface for noninteractive metadata, and its
-title block is a keyboard-focusable button. Interactive descendants and any
-non-collapsed text selection are ignored by the article handler, so selecting
-noninteractive metadata does not navigate in the background. Branch text is
-explicitly navigation-exempt so it can be selected or copied without opening
-the run. The branch metadata row shows the full branch in its `title` and has
-a copy button beside it.
+Its grid is one column on narrow screens and three columns from the
+`lg`/1024px breakpoint, with flat bordered columns, readable state headers and
+bounded card content. The primary run-card button contains the state and
+title/task metadata as bounded previews, each capped at three lines; the button
+keeps the full `runLabel` as its accessible name, and the shared `RunHeader`
+exposes the full task through **View full task**. An empty workspace
+shows one "Ready for a task" panel and a primary New run action rather than
+three repeated empty columns. Loading uses delayed skeletons, and hydrated
+empty buckets say "Nothing here." without confusing an in-flight request with
+an empty result.
+The card's article remains a pointer surface for noninteractive metadata, while
+interactive descendants and any non-collapsed text selection are ignored by
+the article handler. Branch text is explicitly navigation-exempt so it can be
+selected or copied without opening the run. The branch metadata row shows the
+full branch in its `title` and has a copy button beside it.
 Reaching for the branch is therefore not a way into the run; the rest of the
 card is. Copying goes through `src/lib/clipboard.ts`, shared with
 `CopyableCommand`, because an origin without `navigator.clipboard` - plain
@@ -738,10 +739,10 @@ strip needs none of this, because it is not unmounted by its own tabs.
 
 **Resize handles are window splitters.** The sidebar's and the docks'
 `separator` handles take Tab, name the pane they size with `aria-controls`,
-report `aria-valuenow` against their own bounds, move 16px per arrow press,
-snap to those bounds on Home and End, and collapse the pane on Enter, handing
-focus to the control that restores it. Keyboard and pointer go through the
-same clamps and the same persisted store fields.
+report `aria-valuenow` against their available bounds, move 16px per arrow
+press, snap to those bounds on Home and End, and collapse the pane on Enter,
+handing focus to the control that restores it. Pointer dragging stays within
+the available space and follows the same bounds.
 
 ## Terminal view
 
@@ -790,11 +791,12 @@ above a `RunDock` below it. The shared run header keeps the title, task, branch,
 harness mode and status readable while its actions wrap at narrow widths. The
 terminal status toolbar also wraps without truncating real gateway errors.
 
-The dock header starts at 36px and its tab strip scrolls horizontally; its
-actions can wrap below the tabs on narrow screens. Add, close and collapse
-controls stay keyboard and pointer reachable, as does the splitter. The shell
-tab strip is a custom manual tab list with one keyboard stop and overflow
-scrolling; it does not use a component-level tab primitive.
+The dock header uses a `min-h-9` strip rather than a fixed 40px height. It can
+wrap actions below the tabs on narrow screens, while the tab list scrolls
+horizontally. Add, close and collapse controls stay keyboard and pointer
+reachable, as does the splitter. The shell tab strip is a custom manual tab
+list with one keyboard stop and overflow scrolling; it does not use a
+component-level tab primitive.
 
 `TerminalPane` keeps xterm's host geometry intact while layering Find, shared
 zoom/reset, and copy/paste controls over it through the existing controller,
@@ -809,9 +811,9 @@ for owns the window until they ask for a shell. Neither flag is persisted, so a
 reload starts collapsed again, and the run dock's is per run because
 `shellDocks` is keyed by run id. The header strip stays live while a dock is
 shut, so its tab controls expand it: a tab whose dock is collapsed mounts no
-xterm host and would never attach.
-`TerminalDock` mounted with `openOnMount` expands itself once, because the
-Agents and GitHub steps type into it.
+xterm host and would never attach. Expanded-only dock actions are omitted while
+the dock is collapsed. `TerminalDock` mounted with `openOnMount` expands itself
+once, because the Agents and GitHub steps type into it.
 Its tab state and socket registry live in `src/store/terminal.ts`, so opening
 Overview, Diff, or Events does not discard run-shell tabs or their attachments.
 Only the selected shell tab mounts an xterm host; switching tabs remounts that
