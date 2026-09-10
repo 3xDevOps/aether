@@ -37,6 +37,8 @@ export interface XtermController {
   search: SearchAddon | null
   findOpen: boolean
   setFindOpen: (open: boolean) => void
+  /** Focuses xterm now, or records the focused action owner until it mounts. */
+  focusTerminal: () => void
 }
 
 function rgba(color: string, alpha: number): string | undefined {
@@ -141,6 +143,7 @@ export function useXterm({
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   const [search, setSearch] = useState<SearchAddon | null>(null)
   const [findOpen, setFindOpen] = useState(false)
+  const focusIntent = useRef<Element | null>(null)
   // Zoom is one preference across every terminal, so it comes from the store
   // rather than from each caller.
   const fontSize = useStore((s) => s.terminalFontSize)
@@ -149,6 +152,46 @@ export function useXterm({
   onDataRef.current = onData
   onResizeRef.current = onResize
   onLinkRef.current = onLink
+  const focusTerminal = useCallback(() => {
+    const activeElement = document.activeElement
+    if (terminal) {
+      focusIntent.current = null
+      terminal.focus()
+      return
+    }
+    focusIntent.current = activeElement
+  }, [terminal])
+  useEffect(() => {
+    const intent = focusIntent.current
+    if (!intent || !terminal) return
+    const activeElement = document.activeElement
+    // An action can remove or disable its trigger, which sends focus to body.
+    // Restore only for that transition; unrelated focus movement cancels it.
+    const ownerWasDisabledOrRemoved =
+      activeElement === document.body &&
+      (!intent.isConnected ||
+        (intent instanceof HTMLButtonElement && intent.disabled))
+    if (activeElement === intent || ownerWasDisabledOrRemoved) {
+      focusIntent.current = null
+      terminal.focus()
+      return
+    }
+    focusIntent.current = null
+  }, [terminal])
+  useEffect(() => {
+    const cancelFocusIntent = (event: FocusEvent) => {
+      const intent = focusIntent.current
+      if (!intent || event.target === intent) return
+      const bodyFocusFromOwnerLoss =
+        event.target === document.body &&
+        (!intent.isConnected ||
+          (intent instanceof HTMLButtonElement && intent.disabled))
+      if (!bodyFocusFromOwnerLoss) focusIntent.current = null
+    }
+    document.addEventListener('focusin', cancelFocusIntent)
+    return () => document.removeEventListener('focusin', cancelFocusIntent)
+  }, [])
+
 
   useEffect(() => {
     if (!enabled || !host) return
@@ -254,22 +297,13 @@ export function useXterm({
     onResizeRef.current?.(terminal.cols, terminal.rows)
   }, [fontSize, terminal])
 
-  // Closing the find bar hands the keyboard back to the shell; the match it
-  // selected stays selected, so it can still be copied.
-  const changeFind = useCallback(
-    (open: boolean) => {
-      setFindOpen(open)
-      if (!open) terminal?.focus()
-    },
-    [terminal],
-  )
-
   return {
     hostRef: setHost,
     terminal,
     ready: terminal !== null,
     search,
     findOpen,
-    setFindOpen: changeFind,
+    setFindOpen,
+    focusTerminal,
   }
 }

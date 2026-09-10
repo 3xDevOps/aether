@@ -243,6 +243,7 @@ describe('terminal shortcuts', () => {
           search: null,
           findOpen: true,
           setFindOpen: () => {},
+          focusTerminal: () => {},
         }}
       />,
     )
@@ -267,6 +268,7 @@ describe('the terminal toolbar', () => {
           search: null,
           findOpen: false,
           setFindOpen: () => {},
+          focusTerminal: () => {},
         }}
       />,
     )

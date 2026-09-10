@@ -80,6 +80,7 @@ export function RunDock({ runID }: { runID: string }) {
   const terminal = controller.terminal
   terminalRef.current = terminal
   const setFindOpen = controller.setFindOpen
+  const focusTerminal = controller.focusTerminal
   useEffect(() => {
     setFindOpen(false)
   }, [activeTab, setFindOpen])
@@ -148,7 +149,8 @@ export function RunDock({ runID }: { runID: string }) {
   // terminal mounted to attach it.
   const open = () => {
     setDockCollapsed(runID, false)
-    openShellTab(runID)
+    const opened = openShellTab(runID)
+    if (opened) focusTerminal()
   }
 
   return (
@@ -158,6 +160,7 @@ export function RunDock({ runID }: { runID: string }) {
       onSelectTab={(tab) => {
         setDockCollapsed(runID, false)
         selectShellTab(runID, tab)
+        focusTerminal()
       }}
       onAddTab={canOpenShell ? open : undefined}
       maxTabs={maxShellTabs}
@@ -165,7 +168,11 @@ export function RunDock({ runID }: { runID: string }) {
       height={runDockHeight}
       onHeightChange={setRunDockHeight}
       collapsed={dock.collapsed}
-      onToggleCollapse={() => setDockCollapsed(runID, !dock.collapsed)}
+      onToggleCollapse={() => {
+        const expanding = dock.collapsed
+        setDockCollapsed(runID, !dock.collapsed)
+        if (expanding && canOpenShell) focusTerminal()
+      }}
       containment="parent"
     >
       {showing === 'unavailable' ? (

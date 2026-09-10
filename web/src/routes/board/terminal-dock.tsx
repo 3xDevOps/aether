@@ -109,6 +109,7 @@ export function TerminalDock({
   const terminal = controller.terminal
   terminalRef.current = terminal
   const setFindOpen = controller.setFindOpen
+  const focusTerminal = controller.focusTerminal
   useEffect(() => {
     setFindOpen(false)
   }, [activeTab, setFindOpen])
@@ -281,6 +282,11 @@ export function TerminalDock({
   const tabs = dock.tabs.map((tab) => ({ id: tab, label: tab, permanent: tab === 'main' }))
   const empty = dock.tabs.length === 0 && dock.status?.running !== true
   const loading = dock.status === null && dock.statusError === null
+  const open = () => {
+    setCollapsed(false)
+    const opened = openTab()
+    if (opened) focusTerminal()
+  }
 
   return (
     <>
@@ -290,18 +296,20 @@ export function TerminalDock({
         onSelectTab={(tab) => {
           setCollapsed(false)
           selectTab(tab)
+          focusTerminal()
         }}
-        onAddTab={() => {
-          setCollapsed(false)
-          openTab()
-        }}
+        onAddTab={open}
         maxTabs={maxTabs}
         onCloseTab={closeTab}
         height={terminalDockHeight}
         onHeightChange={setHeight}
         collapsed={dock.collapsed}
         containment={containment}
-        onToggleCollapse={() => setCollapsed(!dock.collapsed)}
+        onToggleCollapse={() => {
+          const expanding = dock.collapsed
+          setCollapsed(!dock.collapsed)
+          if (expanding && activeTab !== null) focusTerminal()
+        }}
         actions={
           (!empty || !!dock.status?.saved_image) && (
             <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
@@ -393,13 +401,13 @@ export function TerminalDock({
             ) : empty ? (
               <div className="space-y-2 bg-background p-3 text-[13px]">
                 <p>Your environment starts on first open</p>
-                <Button type="button" size="sm" onClick={openTab}>
+                <Button type="button" size="sm" onClick={open}>
                   Open
                 </Button>
               </div>
             ) : activeTab === null ? (
               <div className="bg-background p-3">
-                <Button type="button" size="sm" onClick={openTab}>
+                <Button type="button" size="sm" onClick={open}>
                   Open
                 </Button>
               </div>

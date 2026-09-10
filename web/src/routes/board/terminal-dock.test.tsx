@@ -13,6 +13,7 @@ const xterm = vi.hoisted(() => ({
   search: null,
   findOpen: false,
   setFindOpen: vi.fn(),
+  focusTerminal: vi.fn(),
 }))
 
 const attach = vi.hoisted(() => ({

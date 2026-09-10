@@ -252,7 +252,13 @@ export function TerminalPane({
         {!controller.findOpen ? (
           <TerminalTools controller={controller} />
         ) : (
-          <FindBar search={controller.search} onClose={() => controller.setFindOpen(false)} />
+          <FindBar
+            search={controller.search}
+            onClose={() => {
+              controller.focusTerminal()
+              controller.setFindOpen(false)
+            }}
+          />
         )}
       </div>
       <div

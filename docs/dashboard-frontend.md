@@ -704,23 +704,26 @@ platform, because that is what xterm binds; see [terminal.md](terminal.md).
 **Tab strips behave as tab lists.** The run-detail strip (`tabs.tsx`) and both
 docks (`components/dock.tsx`) carry `role="tablist"`, `aria-selected`, a
 single tab stop that follows focus, and Left/Right/Home/End through
-`onTabListKeyDown` in `src/lib/keys.ts`.
+`onTabListKeyDown` in `src/lib/keys.ts`. A removable dock tab advertises
+unmodified Delete and Backspace through `aria-keyshortcuts`.
 
 Neither strip is a Radix `Tabs`, though the library is already a dependency.
 The run strip cannot be: its four tabs are separate registry routes with no
 common parent to hold a `Tabs.Root`, and Radix would emit `aria-controls`
-pointing at panels that are not in the tree. The dock's strip could be, but
-each of its tabs carries a close button inside the list, which `Tabs.Trigger`
-would have to nest a button inside. What is left of the pattern either way is
-`onTabListKeyDown`, one function both strips share.
+pointing at panels that are not in the tree. The dock keeps each tab's close
+affordance inside its native tab button instead of nesting another button
+inside the tab list; pointer closing stops that tab's activation. What is left
+of the pattern either way is `onTabListKeyDown`, one function both strips share.
 
 Those keys move focus and nothing else. Selection does not follow focus here,
 which the ARIA tab list pattern reserves for panels that are cheap to swap:
 behind these tabs are a websocket attach, a patch fetch and an xterm host that
-replays a transcript, so arrowing from Overview to Events must not open the
-Terminal on the way past. Enter or Space opens the focused tab, a click opens
-the tab it landed on, and both work because every tab is a real `<button>`.
-
+replays a transcript, so arrowing from Overview to Events must not open the tab
+it lands on. Enter or Space opens the focused tab, a click opens the tab it
+landed on, and both work because every tab is a real `<button>`.
+Delete or Backspace closes the focused removable dock tab. A close repairs
+focus to the next surviving tab, the previous one when closing the last tab, or
+the Add terminal tab when the dock becomes empty.
 Each run route names the body under the strip as its `tabpanel`, through
 `runTabPanel` in `tabs.tsx`, and in both strips the selected tab is the only
 one carrying `aria-controls`: on the run strip only one of the four routes is
@@ -793,10 +796,12 @@ terminal status toolbar also wraps without truncating real gateway errors.
 
 The dock header uses a `min-h-9` strip rather than a fixed 40px height. It can
 wrap actions below the tabs on narrow screens, while the tab list scrolls
-horizontally. Add, close and collapse controls stay keyboard and pointer
-reachable, as does the splitter. The shell tab strip is a custom manual tab
-list with one keyboard stop and overflow scrolling; it does not use a
-component-level tab primitive.
+horizontally. Add and collapse controls stay keyboard and pointer reachable;
+the close affordance is pointer reachable inside each removable tab, and its
+Delete/Backspace shortcut is available while that tab has focus. The splitter
+is reachable too. The shell tab strip is a custom manual tab list with one
+keyboard stop and overflow scrolling; it does not use a component-level tab
+primitive.
 
 `TerminalPane` keeps xterm's host geometry intact while layering Find, shared
 zoom/reset, and copy/paste controls over it through the existing controller,
@@ -1668,8 +1673,8 @@ accessible names, focus handoff, keyboard actions, navigation, loading and
 empty states, server errors, capability gates and mutation results.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar splitter
-with keyboard events: arrow navigation, Enter and Space activation, focus
-handoff, clamped resizing and collapse. `src/components/shell/nav-shortcuts.test.tsx`
+with keyboard events: arrow navigation, Enter and Space activation, Delete and
+Backspace close, focus handoff, clamped resizing and collapse. `src/components/shell/nav-shortcuts.test.tsx`
 covers the shell shortcut precedence across fields, dialogs, menus, lists and
 selects. `src/components/ui/fields.test.tsx` checks that a wrapped Label names
 its actual input and that an Input ref reaches the field DOM node. These are
