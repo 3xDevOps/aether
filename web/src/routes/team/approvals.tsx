@@ -33,7 +33,7 @@ export function ApprovalStatus() {
             }}
             className={cn(
               focusRing,
-              'flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent hover:text-foreground',
+              'flex h-[22px] items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
             )}
           >
             <ShieldQuestion

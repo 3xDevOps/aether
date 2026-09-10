@@ -3,27 +3,27 @@ import type * as React from 'react'
 import { cn, focusRing } from '@/lib/utils'
 
 const buttonVariants = cva(
-  // A control blocked with `aria-disabled` keeps its focus and its pointer, so
-  // the hover and the press each variant paints have to stand down on their
-  // own rather than through `pointer-events-none`.
-  `inline-flex min-h-8 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[background-color,border-color,color,box-shadow,transform] duration-150 ${focusRing} active:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:active:translate-y-0 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4`,
+  // An `aria-disabled` control stays focusable and keeps its pointer, so each
+  // variant suppresses hover and pressed-state paints without removing it.
+  `inline-flex min-h-[26px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[2px] text-[13px] font-medium transition-[background-color,border-color,color,box-shadow] duration-100 motion-reduce:transition-none ${focusRing} disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4`,
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:not-aria-disabled:bg-primary/90',
+        default:
+          'bg-primary text-primary-foreground hover:not-aria-disabled:bg-primary-hover active:not-aria-disabled:bg-primary-hover',
         secondary:
-          'bg-secondary text-secondary-foreground hover:not-aria-disabled:bg-secondary/80',
+          'bg-secondary text-secondary-foreground hover:not-aria-disabled:bg-toolbar-hover active:not-aria-disabled:bg-toolbar-hover',
         outline:
-          'border border-input bg-background hover:not-aria-disabled:bg-accent hover:not-aria-disabled:text-accent-foreground',
+          'border border-input bg-background hover:not-aria-disabled:bg-toolbar-hover hover:not-aria-disabled:text-foreground active:not-aria-disabled:bg-toolbar-hover',
         ghost:
-          'hover:not-aria-disabled:bg-accent hover:not-aria-disabled:text-accent-foreground',
+          'hover:not-aria-disabled:bg-toolbar-hover hover:not-aria-disabled:text-foreground active:not-aria-disabled:bg-toolbar-hover',
         destructive:
-          'bg-destructive text-destructive-foreground hover:not-aria-disabled:bg-destructive/90',
+          'bg-destructive text-destructive-foreground hover:not-aria-disabled:bg-destructive/90 active:not-aria-disabled:bg-destructive/90',
       },
       size: {
-        default: 'h-9 rounded-md px-3.5 py-2 text-sm',
-        sm: 'h-8 rounded-sm px-2.5 py-1.5 text-[13px]',
-        icon: 'size-8 min-h-8 min-w-8 rounded-md',
+        default: 'h-[26px] rounded-[2px] px-2.5 py-0',
+        sm: 'h-[22px] min-h-[22px] rounded-[2px] px-2 py-0 text-[12px]',
+        icon: 'size-[22px] min-h-[22px] min-w-[22px] rounded-[2px] p-0',
       },
     },
     defaultVariants: { variant: 'default', size: 'default' },

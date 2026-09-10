@@ -1,11 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { CommandPalette } from '@/components/palette'
+import { CommandPalette, CommandPaletteTrigger } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { agentInfo, alice, bob, otherWorkspace, run, vera, workspace } from '@/test/fixtures'
+import { hintOn } from '@/test/tooltip'
 import { openSelect, pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
@@ -98,6 +99,35 @@ describe('command palette', () => {
     expect(useStore.getState().paletteOpen).toBe(opens)
   })
 
+  it.each([
+    ['Ctrl+K', { key: 'k', ctrlKey: true }],
+    ['Ctrl+Shift+P', { key: 'p', ctrlKey: true, shiftKey: true }],
+  ])('opens from a focused terminal descendant before its handler sees %s', async (_, init) => {
+    render(<CommandPalette />)
+    const host = document.createElement('div')
+    host.className = 'xterm'
+    const terminalInput = document.createElement('textarea')
+    host.append(terminalInput)
+    document.body.append(host)
+
+    let descendantHandled = false
+    const terminalHandler = (event: KeyboardEvent) => {
+      descendantHandled = true
+      event.stopPropagation()
+    }
+    terminalInput.addEventListener('keydown', terminalHandler)
+    onTestFinished(() => {
+      terminalInput.removeEventListener('keydown', terminalHandler)
+      host.remove()
+    })
+
+    terminalInput.focus()
+    fireEvent.keyDown(terminalInput, init)
+
+    expect(descendantHandled).toBe(false)
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+  })
+
   // A control that disables itself mid-flight - the Send button on the form
   // this key would stack over - drops the keyboard on the body without a
   // focusout, and Radix's focus scope watches children rather than attributes,
@@ -159,13 +189,43 @@ describe('command palette', () => {
     })
 
     platform('Linux x86_64')
-    const { unmount } = render(<CommandPalette />)
-    expect(screen.getByRole('button', { name: 'Commands' }).textContent).toContain('Ctrl+K')
+    const { unmount } = render(<CommandPaletteTrigger />)
+    expect(screen.getByRole('button', { name: 'Commands' }).textContent).toContain('Ctrl+Shift+P')
     unmount()
 
     platform('MacIntel')
-    render(<CommandPalette />)
-    expect(screen.getByRole('button', { name: 'Commands' }).textContent).toContain('⌘K')
+    render(<CommandPaletteTrigger />)
+    expect(screen.getByRole('button', { name: 'Commands' }).textContent).toContain('⌘Shift+P')
+  })
+
+  it('shows the command hint and lets Escape dismiss it', async () => {
+    render(<CommandPaletteTrigger />)
+    const trigger = screen.getByRole('button', { name: 'Commands' })
+
+    expect(await hintOn(trigger)).toBe('Command palette')
+    await userEvent.keyboard('{Escape}')
+
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(useStore.getState().paletteOpen).toBe(false)
+  })
+  it('returns focus to the opener when Escape dismisses the palette', async () => {
+    render(
+      <>
+        <CommandPaletteTrigger />
+        <CommandPalette />
+      </>,
+    )
+    const trigger = screen.getByRole('button', { name: 'Commands' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    await screen.findByRole('dialog')
+
+    const focused = document.activeElement ?? document.body
+    fireEvent.keyDown(focused, { key: 'Escape' })
+
+    await waitFor(() => expect(useStore.getState().paletteOpen).toBe(false))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(document.activeElement).toBe(trigger)
   })
 
   it('opens on the shortcut and jumps to a run', async () => {
@@ -185,6 +245,7 @@ describe('command palette', () => {
       at: active.started_at,
     })
   })
+
 
   it('switches the active workspace and opens it', async () => {
     open()

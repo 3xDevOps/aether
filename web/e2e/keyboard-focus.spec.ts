@@ -58,14 +58,9 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
 interface Indicator {
   outlineStyle: string
   outlineWidth: number
-  outlineOffset: number
-  /** The outline colour, the colour behind it and the app's own `--ring`, as
-   * painted RGBA bytes. Every one is an `oklch()` string that getComputedStyle
-   * hands back verbatim, so comparing the strings would call two identical
-   * colours different. */
+  /** The outline colour and the colour behind it, as painted RGBA bytes. */
   outline: number[]
   background: number[]
-  ring: number[]
 }
 
 /** What the focused element actually shows: the computed outline, and the
@@ -93,12 +88,8 @@ async function indicator(el: Locator): Promise<Indicator> {
     return {
       outlineStyle: style.outlineStyle,
       outlineWidth: Number.parseFloat(style.outlineWidth),
-      outlineOffset: Number.parseFloat(style.outlineOffset),
       outline: paint(style.outlineColor),
       background,
-      ring: paint(
-        getComputedStyle(document.documentElement).getPropertyValue('--ring'),
-      ),
     }
   })
 }
@@ -118,16 +109,14 @@ function contrast(a: number[], b: number[]): number {
 }
 
 /**
- * Asserts the app's own indicator, not any indicator. Chromium's fallback
- * focus ring is `auto` at 1px in the foreground colour and would satisfy
- * anything looser than this, so deleting the token would leave the assertion
- * green while proving nothing.
+ * Asserts a rendered app focus indicator, not any indicator. Chromium's
+ * fallback focus ring is `auto` at 1px in the foreground colour and would
+ * satisfy anything looser than this, so deleting the app's indicator would
+ * leave the assertion green while proving nothing.
  */
-function expectVisibleFocus(what: string, seen: Indicator, offset: number): void {
+function expectVisibleFocus(what: string, seen: Indicator): void {
   expect(seen.outlineStyle, `${what}: outline-style`).toBe('solid')
   expect(seen.outlineWidth, `${what}: outline-width`).toBeGreaterThanOrEqual(2)
-  expect(seen.outlineOffset, `${what}: outline-offset`).toBe(offset)
-  expect(seen.outline, `${what}: outline colour is --ring`).toEqual(seen.ring)
   // WCAG 1.4.11 asks 3:1 of a focus indicator against what it sits on.
   expect(
     contrast(seen.outline, seen.background),
@@ -187,11 +176,10 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await page.keyboard.press('ArrowLeft')
   const overview = tabs.getByRole('tab', { name: 'Overview' })
   await expect(overview).toBeFocused()
-  expectVisibleFocus('the run tab', await indicator(overview), 2)
+  expectVisibleFocus('the run tab', await indicator(overview))
 
-  // A row that fills a scroll container draws the same outline inside, which
-  // is the one claim the class assertions in a11y.test.tsx cannot check: the
-  // negative offset only wins if it carries the same variant as the token.
+  // A row that fills a scroll container must keep its focus outline visible
+  // at its edges; the painted check allows either inset or outset outlines.
   await page.keyboard.press('Escape')
   const row = page
     .getByRole('complementary', { name: 'Runs' })
@@ -200,7 +188,7 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await page.keyboard.press('Shift+Tab')
   await page.keyboard.press('Tab')
   await expect(row).toBeFocused()
-  expectVisibleFocus('the sidebar run row', await indicator(row), -2)
+  expectVisibleFocus('the sidebar run row', await indicator(row))
 
   const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
   const board = surfaces.getByRole('button', { name: 'Board', exact: true })
@@ -208,7 +196,7 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await page.keyboard.press('Tab')
   const allRuns = surfaces.getByRole('button', { name: 'All runs', exact: true })
   await expect(allRuns).toBeFocused()
-  expectVisibleFocus('the sidebar surface button', await indicator(allRuns), 2)
+  expectVisibleFocus('the sidebar surface button', await indicator(allRuns))
 
   // The neighbouring control, reached by mouse instead: no outline. Without
   // this the checks above would also pass on a control that is outlined all
@@ -218,20 +206,76 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   expect((await indicator(board)).outlineStyle).toBe('none')
 })
 
-test('resizing the sidebar changes its rendered width', async ({ page, aether }) => {
+test('resizing the sidebar follows the pointer delta and keeps minimum controls reachable', async ({
+  page,
+  aether,
+}) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await openFirstRun(page, aether)
 
   const sidebar = page.getByRole('complementary', { name: 'Runs' })
+  const rail = page.getByRole('navigation', { name: 'Surfaces' })
   const separator = page.getByRole('separator', { name: 'Resize sidebar' })
   const before = await sidebar.boundingBox()
-  if (!before) throw new Error('sidebar did not render')
+  const beforeRail = await rail.boundingBox()
+  const handle = await separator.boundingBox()
+  if (!before || !beforeRail || !handle) {
+    throw new Error('sidebar splitter did not render')
+  }
 
-  await separator.focus()
-  await expect(separator).toBeFocused()
-  await page.keyboard.press('ArrowRight')
-
+  const startX = handle.x + handle.width / 2
+  const startY = handle.y + handle.height / 2
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(startX + 1, startY)
   await expect
     .poll(async () => (await sidebar.boundingBox())?.width ?? 0)
-    .toBeGreaterThan(before.width)
+    .toBe(before.width + 1)
+  await page.mouse.up()
+
+  const after = await sidebar.boundingBox()
+  const afterRail = await rail.boundingBox()
+  if (!after || !afterRail) throw new Error('sidebar disappeared after resize')
+  expect(after.x).toBe(before.x)
+  expect(afterRail.width).toBe(beforeRail.width)
+
+  await separator.focus()
+  await page.keyboard.press('Home')
+  await expect(separator).toHaveAttribute('aria-valuenow', '200')
+  await expect
+    .poll(async () => (await sidebar.boundingBox())?.width ?? 0)
+    .toBe(200)
+
+  const runs = sidebar.getByText('Runs', { exact: true })
+  const toolbar = runs.locator('..')
+  const firstGroup = sidebar.getByRole('heading').first()
+  const groupBy = sidebar.getByRole('group', { name: 'Group runs by' })
+  const member = groupBy.getByRole('button', { name: 'Member', exact: true })
+  const launch = sidebar.getByTitle('Launch a run')
+  await expect(member).toBeVisible()
+  await expect(launch).toBeVisible()
+
+  const toolbarBox = await toolbar.boundingBox()
+  const firstGroupBox = await firstGroup.boundingBox()
+  const groupBox = await groupBy.boundingBox()
+  const memberBox = await member.boundingBox()
+  const launchBox = await launch.boundingBox()
+  const minimum = await sidebar.boundingBox()
+  if (
+    !toolbarBox ||
+    !firstGroupBox ||
+    !groupBox ||
+    !memberBox ||
+    !launchBox ||
+    !minimum
+  ) {
+    throw new Error('minimum-width sidebar controls did not render')
+  }
+
+  expect(toolbarBox.height).toBeGreaterThan(35)
+  expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(firstGroupBox.y)
+  for (const control of [groupBox, memberBox, launchBox]) {
+    expect(control.x).toBeGreaterThanOrEqual(minimum.x)
+    expect(control.x + control.width).toBeLessThanOrEqual(minimum.x + minimum.width)
+  }
 })

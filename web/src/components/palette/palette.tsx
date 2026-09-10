@@ -1,4 +1,5 @@
 import { FolderGit2 } from 'lucide-react'
+import { useRef } from 'react'
 import { StateDot } from '@/components/state-dot'
 import {
   CommandEmpty,
@@ -20,6 +21,16 @@ import { surfaces } from '@/lib/surfaces'
 import { useStore } from '@/store'
 import { useAttentionRuns, useCapability, useSelf } from '@/store/hooks'
 
+const destinationCommandIDs: Record<string, true> = {
+  board: true,
+  overview: true,
+  launch: true,
+  template: true,
+  inject: true,
+  forward: true,
+  close: true,
+}
+
 /**
  * Everything the palette can do. The verbs themselves live in
  * `src/lib/commands.ts` so the visible buttons offer exactly the same list;
@@ -30,7 +41,7 @@ export function PaletteBody({
   onDone,
   onTemplates,
 }: {
-  onDone: () => void
+  onDone: (restoreFocus?: boolean) => void
   // The template form's open state lives with the dialog host, not the
   // store: store dialogs know the launch, inject and forward forms.
   onTemplates: () => void
@@ -43,7 +54,13 @@ export function PaletteBody({
   const pausedRuns = useStore((s) => s.pausedRuns)
   const cap = useCapability()
   const self = useSelf()
-  const perform = useCommandRunner({ onDone, onTemplates })
+  const selected = useRef<Command | null>(null)
+  const complete = () => {
+    const command = selected.current
+    selected.current = null
+    onDone(!command || !destinationCommandIDs[command.id])
+  }
+  const perform = useCommandRunner({ onDone: complete, onTemplates })
 
   // Steering acts on the run the centre view is showing, whichever of the run
   // detail routes is showing it - the terminal tab is exactly where a human
@@ -55,7 +72,7 @@ export function PaletteBody({
   const goTo = surfaces(cap)
 
   const go = (name: string, params?: Record<string, string>) => {
-    onDone()
+    onDone(false)
     navigate(name, params)
   }
 
@@ -64,12 +81,12 @@ export function PaletteBody({
       key={command.id}
       value={command.value}
       disabled={command.disabled}
-      onSelect={() => void perform(command)}
-      className="min-h-11 gap-3 px-3 py-2"
+      onSelect={() => {
+        selected.current = command
+        void perform(command)
+      }}
     >
-      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground transition-colors group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground">
-        <command.Icon />
-      </span>
+      <command.Icon />
       <span className="min-w-0 flex-1 truncate">{command.label}</span>
       {command.disabled && (
         <span className="shrink-0 text-xs text-muted-foreground">Unavailable</span>
@@ -88,11 +105,8 @@ export function PaletteBody({
 
   return (
     <>
-      <CommandInput
-        placeholder="Search commands, runs, workspaces..."
-        className="h-11 px-2 text-[15px]"
-      />
-      <CommandList className="min-h-0 max-h-[min(520px,calc(100dvh-9rem))] px-1 pb-2">
+      <CommandInput placeholder="Search commands, runs, workspaces..." />
+      <CommandList className="min-h-0 px-1 pb-2">
         <CommandEmpty className="py-10">No commands, runs, or workspaces match.</CommandEmpty>
 
         {focusedContext && (
@@ -116,12 +130,9 @@ export function PaletteBody({
                 key={name}
                 value={`${label} ${name}`}
                 onSelect={() => go(name)}
-                className="min-h-11 gap-3 px-3 py-2"
               >
-                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-                  <Icon />
-                </span>
-                <span className="truncate">{label}</span>
+                <Icon />
+                <span className="min-w-0 truncate">{label}</span>
               </CommandItem>
             ))}
           </CommandGroup>
@@ -133,9 +144,9 @@ export function PaletteBody({
               key={run.id}
               value={`${run.task} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}`}
               onSelect={() => go('terminal', { runId: run.id })}
-              className="min-h-11 gap-3 px-3 py-2"
+              className="items-start py-1"
             >
-              <StateDot state={state} decorative className="mx-1 shrink-0" />
+              <StateDot state={state} decorative className="mx-1 mt-1 shrink-0" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{runLabel(run)}</span>
                 <span className="block truncate text-xs text-muted-foreground">
@@ -155,11 +166,8 @@ export function PaletteBody({
               key={w.id}
               value={`${w.name} ${w.base_branch} ${w.id}`}
               onSelect={() => go('workspace', { workspaceId: w.id })}
-              className="min-h-11 gap-3 px-3 py-2"
             >
-              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-                <FolderGit2 />
-              </span>
+              <FolderGit2 />
               <span className="min-w-0 flex-1 truncate">{w.name}</span>
               <span className="max-w-32 truncate text-xs text-muted-foreground">{w.base_branch}</span>
             </CommandItem>

@@ -18,19 +18,22 @@ export function MissingRun() {
   const loading = useDelayed(!hydrated && !unreachable)
 
   if (unreachable) {
-    // A dead token is not an unreachable server: nothing retries, and only a
-    // fresh token helps, so the tab says what the error recorded.
+    // A dead token is not an unreachable server: nothing retries, and only
+    // a fresh token helps, so the tab says what the error recorded.
     return (
       <section
         aria-label="Run unavailable"
-        className="mx-auto flex h-full w-full max-w-xl items-center justify-center p-6"
+        className="flex h-full w-full items-start px-3 py-4 sm:px-4 sm:py-6"
       >
-        <div className="w-full rounded-lg border border-state-failed/40 bg-state-failed/10 p-5">
-          <div className="flex items-start gap-3">
-            <CircleAlert className="mt-0.5 size-5 shrink-0 text-state-failed" aria-hidden />
-            <div>
-              <h1 className="text-base font-semibold">Run unavailable</h1>
-              <p role="alert" className="mt-1 text-sm leading-6 text-muted-foreground">
+        <div className="w-full max-w-2xl border-l-2 border-state-failed bg-state-failed/10 px-3 py-3 sm:px-4">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <CircleAlert className="mt-0.5 size-4 shrink-0 text-state-failed" aria-hidden />
+            <div className="min-w-0">
+              <h1 className="text-[15px] font-semibold leading-5">Run unavailable</h1>
+              <p
+                role="alert"
+                className="mt-1 break-words whitespace-pre-wrap text-[13px] leading-5 text-muted-foreground"
+              >
                 {dead ? error : 'Cannot reach the server. Retrying.'}
               </p>
             </div>
@@ -38,7 +41,7 @@ export function MissingRun() {
           <Button
             variant="outline"
             size="sm"
-            className="mt-4"
+            className="mt-3"
             onClick={() => navigate('board')}
           >
             <ArrowLeft className="size-3.5" aria-hidden />
@@ -51,12 +54,15 @@ export function MissingRun() {
 
   if (!hydrated) {
     return loading ? (
-      <div role="status" aria-label="Loading the run" className="mx-auto w-full max-w-xl space-y-3 p-6">
+      <div role="status" aria-label="Loading the run" className="w-full max-w-2xl px-3 py-4 sm:px-4 sm:py-6">
         <div className="flex items-center gap-2">
           <LoaderCircle className="size-4 animate-spin text-muted-foreground" aria-hidden />
-          <p className="text-sm text-muted-foreground">Loading run details...</p>
+          <p className="text-[13px] leading-5 text-muted-foreground">Loading run details...</p>
         </div>
-        <Skeleton className="h-24 w-full rounded-lg" />
+        <div className="mt-3 grid gap-1.5">
+          <Skeleton className="h-7 rounded-sm" />
+          <Skeleton className="h-7 rounded-sm" />
+        </div>
       </div>
     ) : null
   }
@@ -64,14 +70,14 @@ export function MissingRun() {
   return (
     <section
       aria-label="Run not found"
-      className="mx-auto flex h-full w-full max-w-xl items-center justify-center p-6"
+      className="flex h-full w-full items-start px-3 py-4 sm:px-4 sm:py-6"
     >
-      <div className="w-full rounded-lg border bg-card p-5">
-        <h1 className="text-base font-semibold">Run not found</h1>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+      <div className="w-full max-w-2xl border-y border-border/80 px-3 py-3 sm:px-4">
+        <h1 className="text-[15px] font-semibold leading-5">Run not found</h1>
+        <p className="mt-1 break-words text-[13px] leading-5 text-muted-foreground">
           This run is not on the server. It may have been deleted.
         </p>
-        <Button size="sm" className="mt-4" onClick={() => navigate('board')}>
+        <Button size="sm" className="mt-3" onClick={() => navigate('board')}>
           <ArrowLeft className="size-3.5" aria-hidden />
           Back to board
         </Button>
