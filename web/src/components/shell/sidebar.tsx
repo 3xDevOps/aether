@@ -472,18 +472,20 @@ export function ActivityRail({
                 <Icon className="size-6" aria-hidden />
                 <span className="sr-only">{label}</span>
                 {name === 'approvals' && (waiting > 0 || inboxError !== null) && (
-                  <Chip
-                    color="warning"
-                    variant="soft"
-                    size="sm"
+                  <span
                     aria-hidden
-                    render={(props) => (
-                      <span {...props} title={inboxError ?? 'Requests waiting on a decision'} />
-                    )}
-                    className="absolute bottom-1 right-1 !h-4 !min-h-4 !min-w-4 !rounded-sm !px-0.5 !text-[10px] font-medium !leading-3 bg-state-needs-attention/15 text-state-needs-attention"
+                    title={inboxError ?? 'Requests waiting on a decision'}
+                    className="absolute bottom-1 right-1 flex"
                   >
-                    <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
-                  </Chip>
+                    <Chip
+                      color="warning"
+                      variant="soft"
+                      size="sm"
+                      className="!h-4 !min-h-4 !min-w-4 !rounded-sm !px-0.5 !text-[10px] font-medium !leading-3 bg-state-needs-attention/15 text-state-needs-attention"
+                    >
+                      <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
+                    </Chip>
+                  </span>
                 )}
               </button>
             )}
