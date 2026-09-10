@@ -33,8 +33,13 @@ function gatewayEnv(home: string, configDir: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
     HOME: home,
+    SSH_AUTH_SOCK: '',
     USERPROFILE: home,
     AETHER_CONFIG_DIR: configDir,
+    // Git identity probes run from this process. Pin every file-backed config
+    // source so the host's global or system identity cannot leak in.
+    GIT_CONFIG_GLOBAL: path.join(home, '.gitconfig'),
+    GIT_CONFIG_NOSYSTEM: '1',
     // env.harnesses widens PATH from the login shell before it reports which
     // agents are installed on this machine. A fixed shell and PATH keep that
     // answer the same on a developer's laptop and on a CI runner.
@@ -68,6 +73,7 @@ export async function startGateway(dir: string, name: string): Promise<Gateway> 
     binaries().cli,
     ['gui', '--json', '--port', String(port)],
     gatewayEnv(home, configDir),
+    home,
   )
 
   const firstLine = () => child.output().split('\n')[0] ?? ''

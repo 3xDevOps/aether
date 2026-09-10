@@ -1,9 +1,9 @@
 // The live sync overlay for one run: the local gateway mirrors the run's
 // worktree into the linked repository in the background. This panel owns the
-// sync.* verbs for a single run and mirrors sync.status into the store, so
-// the board badge and this view agree on what is running.
+// sync.* verbs for a single run and mirrors sync.status into the store, so the
+// board badge and this view agree on what is running.
 
-import { RefreshCw } from 'lucide-react'
+import { CircleAlert, CheckCircle2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import type { CardSlotProps } from '@/components/slots'
@@ -27,10 +27,11 @@ export function SyncBadge({ run }: CardSlotProps) {
       onClick={() => navigate('settings', {})}
       className={cn(
         focusRing,
-        'flex shrink-0 items-center rounded-sm bg-state-working/15 px-1 text-[11px] text-state-working',
+        'flex shrink-0 items-center gap-1 rounded-sm bg-state-working/15 px-1.5 py-0.5 text-[11px] text-state-working',
       )}
     >
       <RefreshCw className="size-3.5" aria-hidden />
+      <span className="sr-only">Running</span>
     </button>
   )
 }
@@ -119,20 +120,36 @@ export function SyncPanel({
   const active = session?.state === 'running' || session?.state === 'conflict'
 
   return (
-    <section aria-label="Sync" className="space-y-2">
-      <p className="text-sm">
-        {session ? `Overlay ${session.state}` : 'No sync session for this run.'}
-      </p>
+    <section aria-label="Sync" className="space-y-3 rounded-lg border bg-card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium">Local sync overlay</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Mirror this run's worktree into the linked repository.
+          </p>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs font-medium">
+          {active ? (
+            <RefreshCw className="size-3.5 text-state-working" aria-hidden />
+          ) : (
+            <CheckCircle2 className="size-3.5 text-muted-foreground" aria-hidden />
+          )}
+          {session ? `Overlay ${session.state}` : 'No sync session for this run.'}
+        </span>
+      </div>
       {session?.state === 'conflict' && session.conflict && (
-        <div className="space-y-1">
-          <p className="text-xs text-state-needs-attention">{session.conflict}</p>
-          <p className="text-xs text-muted-foreground">
+        <div className="rounded-md border border-state-needs-attention/40 bg-state-needs-attention/10 p-3">
+          <p className="flex items-start gap-2 text-xs font-medium text-state-needs-attention">
+            <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            <span>{session.conflict}</span>
+          </p>
+          <p className="mt-1 pl-5 text-xs leading-5 text-muted-foreground">
             The conflict was reported to the server; the session is paused until
             it is resolved.
           </p>
         </div>
       )}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {active ? (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => void stop()}>
             Stop
@@ -144,12 +161,13 @@ export function SyncPanel({
         )}
       </div>
       {error && (
-        <div className="space-y-1">
+        <div role="alert" className="rounded-md border border-state-failed/40 bg-state-failed/10 p-3">
           <p className="text-xs text-state-failed">{error.text}</p>
           {error.verb === 'start' && (
             <Button
               size="sm"
               variant="outline"
+              className="mt-2"
               disabled={busy}
               onClick={() => void start(true)}
             >

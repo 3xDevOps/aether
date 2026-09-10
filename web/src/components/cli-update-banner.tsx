@@ -5,9 +5,17 @@
 // hands over the sudo command rather than a button that could not work.
 
 import { useEffect, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Download, LoaderCircle } from 'lucide-react'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
-import { banner, Dismiss, verbatim } from '@/components/update-banner-shared'
+import {
+  banner,
+  bannerActions,
+  bannerContent,
+  bannerIcon,
+  Dismiss,
+  verbatim,
+} from '@/components/update-banner-shared'
 import { ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { UpdateApplyResult, UpdateBuildStatus, UpdateStatus } from '@/lib/types'
@@ -81,16 +89,20 @@ function Applied({ result, note }: { result: UpdateApplyResult; note?: string })
   const trailing =
     note ?? result.note ?? (result.restarting ? 'Restarting the dashboard.' : '')
   return (
-    <div className="space-y-1 text-muted-foreground">
-      <p>
+    <div className="space-y-1.5 text-muted-foreground">
+      <p className="font-medium text-foreground">
         Updated to {result.version}.{trailing ? ` ${trailing}` : ''}
       </p>
-      <p className="font-mono text-[11px]">{result.updated.join(', ')}</p>
+      <p className="rounded-sm border border-border/70 bg-muted/30 px-2 py-1 font-mono text-[11px] leading-5">
+        {result.updated.join(', ')}
+      </p>
       {result.restart_command && (
-        <>
-          <p>The server binary beside it was replaced too. Restart the unit:</p>
-          <CopyableCommand command={result.restart_command} />
-        </>
+        <div className="space-y-1">
+          <p className="text-xs">The server binary beside it was replaced too. Restart the unit:</p>
+          <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
+            <CopyableCommand command={result.restart_command} />
+          </div>
+        </div>
       )}
     </div>
   )
@@ -105,7 +117,7 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
   const { cli, cli_path: path, install_method: method } = update
   if (!cli.can_self_update) {
     return (
-      <p className="text-muted-foreground">
+      <p className="text-xs leading-5 text-muted-foreground">
         Self-update is not supported on Windows. Download {cli.latest} from the
         release page and replace the binary yourself.
       </p>
@@ -113,32 +125,46 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
   }
   if (method === 'manual') {
     return (
-      <>
-        <p className="text-muted-foreground">
+      <div className="space-y-1.5">
+        <p className="text-xs leading-5 text-muted-foreground">
           {path} is not writable by this account. Update it from a terminal:
         </p>
-        <CopyableCommand command="sudo aether update" />
-      </>
+        <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
+          <CopyableCommand command="sudo aether update" />
+        </div>
+      </div>
     )
   }
   return (
-    <>
-      <p className="text-muted-foreground">
-        Updating replaces the aether binary on this machine and restarts the
-        dashboard. Attached terminals and any running file sync stop with it;
-        the runs themselves keep going on the server.
-      </p>
-      {method === 'admin-prompt' && (
-        // The dialog carries osascript's name, not Aether's, and a member
-        // who has never heard of osascript would rightly refuse it.
-        <p className="text-muted-foreground">
-          macOS will ask for an administrator password: {path} is in a
-          directory this account cannot write to. The dialog is labelled
-          osascript, the tool Aether asks through. Aether never sees your
-          password.
+    <details className="text-xs text-muted-foreground">
+      <summary
+        className={cn(
+          focusRing,
+          'cursor-pointer select-none font-medium hover:text-foreground',
+        )}
+      >
+        {method === 'admin-prompt'
+          ? 'Install details: macOS administrator approval'
+          : 'Install details: what updating changes'}
+      </summary>
+      <div className="mt-1.5 space-y-1.5 leading-5">
+        <p>
+          Updating replaces the aether binary on this machine and restarts the
+          dashboard. Attached terminals and any running file sync stop with it;
+          the runs themselves keep going on the server.
         </p>
-      )}
-    </>
+        {method === 'admin-prompt' && (
+          // The dialog carries osascript's name, not Aether's, and a member
+          // who has never heard of osascript would rightly refuse it.
+          <p>
+            macOS will ask for an administrator password: {path} is in a
+            directory this account cannot write to. The dialog is labelled
+            osascript, the tool Aether asks through. Aether never sees your
+            password.
+          </p>
+        )}
+      </div>
+    </details>
   )
 }
 
@@ -267,32 +293,45 @@ export function CliBanner({
     update.install_method === 'admin-prompt'
       ? `Downloading ${version}, then macOS asks for an administrator password...`
       : 'Updating the CLI...'
+  const NoticeIcon =
+    current || flow.name === 'applied' || flow.name === 'rebuilt'
+      ? CheckCircle2
+      : flow.name === 'applyFailed' || flow.name === 'rebuildFailed'
+        ? AlertTriangle
+        : flow.name === 'applying' || flow.name === 'rebuilding' || flow.name === 'relaunching'
+          ? LoaderCircle
+          : Download
 
   return (
     <div role="status" className={banner}>
-      <div className="min-w-0 flex-1 space-y-1">
+      <div aria-hidden className={bannerIcon}>
+        <NoticeIcon
+          className={cn(
+            'size-4',
+            (flow.name === 'applying' ||
+              flow.name === 'rebuilding' ||
+              flow.name === 'relaunching') &&
+              'animate-spin motion-reduce:animate-none',
+          )}
+        />
+      </div>
+      <div className={bannerContent}>
         {current && (
           <p>
-            <span className="font-medium">
-              Aether {version} is the newest release.
-            </span>{' '}
-            Nothing was downloaded.
+            <span className="font-medium">Aether {version} is the newest release.</span>{' '}
+            <span className="font-normal text-muted-foreground">Nothing was downloaded.</span>
           </p>
         )}
         {!current && !installed && (
           <>
-            <p>
-              <span className="font-medium">Aether {version} is available.</span>{' '}
-              You are running {update.cli.version}.
-            </p>
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <p className="font-medium">Aether {version} is available.</p>
+              <p className="text-xs text-muted-foreground">You are running {update.cli.version}.</p>
+            </div>
             <HowItInstalls update={update} />
           </>
         )}
-        {installLead && (
-          <p>
-            <span className="font-medium">Aether {version} is installed.</span>
-          </p>
-        )}
+        {installLead && <p className="font-medium">Aether {version} is installed.</p>}
         {flow.name === 'applying' && (
           <p className="text-muted-foreground">{applyingLine}</p>
         )}
@@ -318,40 +357,46 @@ export function CliBanner({
               Rebuilding the app (about a minute; the first time also fetches
               Node)...
             </p>
-            {flow.phase && <p className="font-mono text-[11px]">{flow.phase}</p>}
+            {flow.phase && (
+              <p className="font-mono text-xs leading-5">{flow.phase}</p>
+            )}
           </div>
         )}
         {flow.name === 'relaunching' && (
           <p className="text-muted-foreground">Relaunching</p>
         )}
         {flow.name === 'rebuildFailed' && (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <p className={cn(verbatim, 'text-state-failed')}>{flow.error}</p>
             <p className="text-muted-foreground">Rebuild it yourself:</p>
-            <CopyableCommand command="aether gui build" />
+            <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
+              <CopyableCommand command="aether gui build" />
+            </div>
           </div>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        {offerButton && (
-          <Button size="sm" disabled={busy} onClick={() => void run()}>
-            {buttonLabel}
-          </Button>
-        )}
-        {update.cli.release_url && (
-          <a
-            href={update.cli.release_url}
-            target="_blank"
-            rel="noreferrer"
-            className={cn(
-              focusRing,
-              'text-xs underline underline-offset-2 hover:text-foreground',
-            )}
-          >
-            Release notes
-          </a>
-        )}
-      </div>
+      {(offerButton || update.cli.release_url) && (
+        <div className={bannerActions}>
+          {offerButton && (
+            <Button size="sm" disabled={busy} onClick={() => void run()}>
+              {buttonLabel}
+            </Button>
+          )}
+          {update.cli.release_url && (
+            <a
+              href={update.cli.release_url}
+              target="_blank"
+              rel="noreferrer"
+              className={cn(
+                focusRing,
+                'inline-flex min-h-8 items-center whitespace-nowrap text-xs underline underline-offset-2 hover:text-foreground',
+              )}
+            >
+              Release notes
+            </a>
+          )}
+        </div>
+      )}
       <Dismiss kind="cli" version={version} />
     </div>
   )

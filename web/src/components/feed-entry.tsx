@@ -8,6 +8,7 @@ import { budgetStateLabel, money, timeAgo } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import type { BudgetState, Event } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
+import { Chip } from '@/components/ui/heroui'
 import { useStore } from '@/store'
 
 export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: boolean }) {
@@ -16,32 +17,44 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
   const navigate = useStore((s) => s.navigate)
 
   return (
-    <li className="flex items-baseline gap-2 rounded-sm px-1 py-0.5 text-xs hover:bg-accent/50">
+    <li className="group grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 rounded-md border border-transparent px-3 py-2.5 text-sm transition-colors hover:border-border/60 hover:bg-accent/35">
       <span
         aria-label={actor?.display_name ?? 'system'}
         title={actor?.display_name ?? 'system'}
-        className="size-2 shrink-0 translate-y-px rounded-full bg-muted"
+        className="mt-1 size-2 shrink-0 rounded-full bg-muted-foreground/45"
         style={actor ? { backgroundColor: actor.color } : undefined}
       />
-      <time className="shrink-0 text-muted-foreground" title={event.time}>
+      <time
+        className="shrink-0 pt-px text-[13px] tabular-nums text-muted-foreground"
+        title={event.time}
+      >
         {timeAgo(event.time)}
       </time>
-      <span className="shrink-0 text-muted-foreground" title={event.type}>
-        {typeLabel(event.type)}
+      <span title={event.type} className="min-w-0 max-w-full">
+        <Chip
+          color="default"
+          variant="tertiary"
+          size="sm"
+          className="min-w-0 max-w-full justify-self-start"
+        >
+          <Chip.Label className="truncate">{typeLabel(event.type)}</Chip.Label>
+        </Chip>
       </span>
-      <span className="min-w-0 flex-1 break-words">{describe(event)}</span>
       {run && (
         <button
           type="button"
           onClick={() => navigate('terminal', { runId: run.id })}
           className={cn(
             focusRing,
-            'max-w-40 shrink-0 truncate text-muted-foreground hover:text-foreground hover:underline',
+            'col-start-3 row-start-2 max-w-full justify-self-start truncate text-[13px] text-muted-foreground hover:text-foreground hover:underline sm:col-start-4 sm:row-start-1 sm:max-w-40 sm:justify-self-end',
           )}
         >
           {runLabel(run)}
         </button>
       )}
+      <span className="col-start-2 min-w-0 break-words leading-5 text-foreground/90 sm:col-start-3">
+        {describe(event)}
+      </span>
     </li>
   )
 }

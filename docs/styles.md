@@ -1,70 +1,81 @@
 # Styles
 
-## Landing foundations
+## Design language
 
-| Token | Value | Use |
-| --- | --- | --- |
-| Ink | `#05070f` | Deepest background |
-| Panel | `#070b16` | Cards and popovers |
-| Bar | `#0b1120` | Bars and raised surfaces |
-| Text | `#dce6f2` | Primary text |
-| Mint | `#6ee7d6` | Landing accent; the app dims it to `#5cb7aa` for interactive fills |
-| Steel | `#4a6fa5` | Dark borders, at 28% alpha (`--border`) and 36% (`--input`) |
-| Fonts | VT323, JetBrainsMono NFM | VT323 draws the `aether` wordmark in the title bar and the launch splash, nothing else; JetBrainsMono NFM is the terminal font. The rest of the UI uses the platform sans stack |
-| Geometry | `--radius: 0.25rem` | `index.css` derives `--radius-sm` (0), `--radius-md` (2px) and `--radius-lg` (4px) from it; `rounded-md` is the usual surface radius. Round marks take `rounded-full`, and `index.css` writes `border-radius: 999px` where it draws one itself. `rounded-xl` and `rounded-xs` name no token here, so they keep Tailwind's own values (`components/connection-error.tsx`, `components/ui/dialog.tsx`) |
-| Launch splash | Sky gradient, grain, clouds, twinkling stars, glows, amber `#ff9d6b`, violet `#a78bfa` | The full-screen splash the SPA shows at startup (`.launch-splash` in `index.css`); skipped under `prefers-reduced-motion` |
-| Not ported | Scanlines, and VT323 for body text | Deliberate scope boundary |
+The dashboard uses one cool-neutral palette in both themes with a mint primary
+accent. Surfaces are quiet and structured rather than decorative: semantic
+tokens describe backgrounds, borders, fields, overlays and run states, while
+components use those tokens through Tailwind utilities and the shared shadcn
+primitives.
+
+Geist is the body and UI face, loaded locally through `next/font/local` as the
+`--font-geist-sans` variable. JetBrainsMono NFM is used for terminal output,
+commands and code. VT323 is reserved for the Aether wordmark. The base body
+size is 14px with a 1.4 line height; supporting copy is usually 13px and
+section titles are typically 20-24px. Do not use the pixel face for body copy.
+
+Spacing follows Tailwind's 4px unit (`--spacing: 0.25rem`). The shared radius
+scale is 4, 6, 8, 12, 16, 20, 24 and 32px (`xs` through `4xl`), with 8px
+(`--radius` and `md`) as the ordinary surface radius. Compact controls and
+metadata use the smaller steps; dialogs and major panels may use the larger
+steps. Full pills use `rounded-full`.
+
+View headers and page bodies share 16px horizontal gutters, increasing to
+24px at `sm`. Header actions move below the title and context in narrow panes.
+Inputs and selects are 36px high; textareas retain their row height.
+Scrollable dialog forms reserve equal space on both sides for focus
+outlines without shifting fields away from their header and footer.
 
 ## App tokens
 
-`web/src/index.css` defines every colour the dashboard uses; components reach
-them through token classes and carry no hex literals. Member colour is the
-exception: the six swatches a member picks from are a hard-coded constant in
-`web/src/routes/members/index.tsx`, the chosen colour comes back from the
-server on the member record, and it is applied inline wherever a member is
-attributed - run rows in the sidebar and the run list, board cards and
-avatars, the run detail, feed entries, approval rows and conflict chips.
-Light is the shadcn neutral base, dark is the landing palette. The theme
-control cycles system, light, and dark.
+`web/src/index.css` is authoritative. Light and dark are the same semantic
+system, not separate palettes. The theme preference cycles `system`, `light`
+and `dark`; `system` follows `prefers-color-scheme` live.
 
 | Token | Light | Dark |
 | --- | --- | --- |
-| `--radius` | `0.25rem` | `0.25rem` |
-| `--background` | `oklch(1 0 0)` | `#05070f` |
-| `--foreground` | `oklch(0.145 0 0)` | `#dce6f2` |
-| `--card` | `oklch(1 0 0)` | `#070b16` |
-| `--card-foreground` | `oklch(0.145 0 0)` | `#dce6f2` |
-| `--popover` | `oklch(1 0 0)` | `#070b16` |
-| `--popover-foreground` | `oklch(0.145 0 0)` | `#dce6f2` |
-| `--primary` | `oklch(0.55 0.11 175)` | `#5cb7aa` |
-| `--primary-foreground` | `oklch(0.985 0 0)` | `#05070f` |
-| `--sidebar` | `oklch(0.97 0 0)` | `#0b1120` |
-| `--secondary` | `oklch(0.97 0 0)` | `#0b1120` |
-| `--secondary-foreground` | `oklch(0.205 0 0)` | `#dce6f2` |
-| `--muted` | `oklch(0.97 0 0)` | `#0b1120` |
-| `--muted-foreground` | `oklch(0.556 0 0)` | `rgb(220 230 242 / 0.62)` |
-| `--accent` | `oklch(0.97 0 0)` | `#242e40` |
-| `--accent-foreground` | `oklch(0.205 0 0)` | `#dce6f2` |
-| `--destructive` | `oklch(0.577 0.245 27.325)` | `oklch(0.704 0.191 22.216)` |
-| `--destructive-foreground` | `oklch(0.985 0 0)` | `oklch(0.985 0 0)` |
-| `--border` | `oklch(0.922 0 0)` | `rgb(74 111 165 / 0.28)` |
-| `--input` | `oklch(0.922 0 0)` | `rgb(74 111 165 / 0.36)` |
-| `--ring` | `oklch(0.55 0.11 175)` | `#5cb7aa` |
-| `--scrollbar-thumb` | `oklch(0.63 0.08 190 / 0.62)` | `oklch(0.73 0.12 190 / 0.58)` |
-| `--scrollbar-thumb-hover` | `oklch(0.55 0.12 190 / 0.85)` | `oklch(0.78 0.13 190 / 0.86)` |
-| `--scrollbar-track` | `oklch(0.95 0.01 210 / 0.42)` | `oklch(0.2 0.03 220 / 0.62)` |
+| `--radius` | `0.5rem` | `0.5rem` |
+| `--background` | `oklch(0.985 0.004 240)` | `oklch(0.14 0.012 240)` |
+| `--foreground` | `oklch(0.2 0.015 240)` | `oklch(0.93 0.012 240)` |
+| `--card` | `oklch(0.998 0.002 240)` | `oklch(0.175 0.014 240)` |
+| `--popover` | `oklch(0.998 0.002 240)` | `oklch(0.19 0.014 240)` |
+| `--primary` | `oklch(0.49 0.105 174)` | `oklch(0.78 0.12 174)` |
+| `--primary-foreground` | `oklch(0.99 0 0)` | `oklch(0.16 0.018 174)` |
+| `--sidebar` | `oklch(0.965 0.008 240)` | `oklch(0.155 0.013 240)` |
+| `--secondary` / `--muted` | `oklch(0.948 0.01 240)` | `oklch(0.205 0.015 240)` |
+| `--muted-foreground` | `oklch(0.43 0.02 240)` | `oklch(0.74 0.015 240)` |
+| `--accent` | `oklch(0.925 0.014 240)` | `oklch(0.25 0.018 240)` |
+| `--destructive` | `oklch(0.56 0.19 26)` | `oklch(0.66 0.19 27)` |
+| `--border` | `oklch(0.87 0.015 240)` | `oklch(0.31 0.018 240)` |
+| `--input` | `oklch(0.63 0.02 240)` | `oklch(0.51 0.018 240)` |
+| `--scrim` | `rgb(0 0 0 / 0.56)` | `rgb(0 0 0 / 0.56)` |
+| `--ring` | `oklch(0.49 0.105 174)` | `oklch(0.78 0.12 174)` |
 
-`--border` is the default every element wears, applied to `*` in `index.css`.
-`--input` is the exception, worn by the fields and selects alone through the
-`field` style in `src/lib/utils.ts`: in dark a control you can type into is
-drawn a step brighter than the rules around it. In light the two are equal.
+`--input` is the shared boundary token for inputs, selects and textareas. Its
+OKLCH lightness is tuned independently from the quieter `--border`: conversion
+to sRGB and WCAG relative luminance gives ratios of 3.34:1 and 3.47:1 in light
+mode against `--background` and `--card`, and 3.47:1 and 3.31:1 in dark mode.
+The `system` preference resolves to the corresponding light or dark token.
+Dialog overlays use the theme-independent `--scrim` token, a black 56%
+scrim in both modes, so a light foreground never washes out dark surfaces.
+
+Card, popover, secondary, muted and accent foregrounds follow
+`--foreground` unless a component needs a contrast-specific value. The same
+file exports HeroUI-compatible aliases for default, overlay, segment, focus,
+separator, field and soft success, warning and danger surfaces. Those aliases
+point at the shadcn tokens rather than defining a second colour system.
+
+Scrollbars use semantic `--scrollbar-thumb`, `--scrollbar-thumb-hover` and
+`--scrollbar-track` values. Member colours are the only arbitrary server data
+applied inline: avatars and attribution rails use the member record's colour,
+while text stays in the foreground token.
 
 ## Run state tokens
 
 The six `--state-*` tokens are the status vocabulary for a run's presentation
-state. `@theme` re-exports them, so components read them as `bg-state-*` and
-`text-state-*` utilities and `.working-dots` reads `--state-working` directly
-as its `color`. Changing a status colour is one edit either way.
+state. `@theme` re-exports them as `bg-state-*` and `text-state-*` utilities;
+the working indicator reads `--state-working` directly. Domain status enums
+remain unchanged.
 
 | Token | Light | Dark |
 | --- | --- | --- |
@@ -73,14 +84,34 @@ as its `color`. Changing a status colour is one edit either way.
 | `--state-needs-attention` | `oklch(0.65 0.19 35)` | `oklch(0.72 0.17 35)` |
 | `--state-failed` | `oklch(0.58 0.22 27)` | `oklch(0.68 0.2 25)` |
 | `--state-done` | `oklch(0.62 0.13 155)` | `oklch(0.72 0.12 155)` |
-| `--state-idle` | `oklch(0.7 0 0)` | `oklch(0.55 0 0)` |
+| `--state-idle` | `oklch(0.62 0 0)` | `oklch(0.58 0 0)` |
 
-`--state-working` also drives the working indicator; the Styleguide section of
-[dashboard-frontend.md](dashboard-frontend.md) has the rule.
+`StateIndicator` uses bouncing dots for working runs in cards, headers and
+lists. Sidebar rows pulse one dot and palette rows remain static. The steering
+signal, working dots and sidebar pulse stop moving under
+`prefers-reduced-motion: reduce`; state meaning remains available as text and
+labels. Loading spinners and delayed skeletons remain functional feedback.
 
-Rows carry a 2px left border, and the two kinds of row spend it differently.
-The sidebar's nav items use it for selection: the active one is `bg-accent`
-with `border-primary`. Run rows use it for attribution - `shell/sidebar.tsx`
-and `run-list.tsx` both set `borderLeftColor` inline from the owner's colour,
-whether the row is selected or not - so a selected sidebar run row is marked
-by `bg-accent` alone, and the run list has no selected state.
+The desktop first-launch splash is a finite branded handoff, not a loading
+screen. Its dark sky, grain, clouds, twinkling field and shooting stars stay
+visible for at least 600ms and leave by the 2500ms cap, followed by a 260ms
+fade. The mark enters over 700ms. Shooting-star trails use opacity and
+`translate3d` only: the recovered 35, 42 and 30 degree trajectories run for
+1.35s, 1.55s and 1.7s with staggered entry. The splash is session-only,
+unmounts after the fade, and is skipped under
+`prefers-reduced-motion: reduce`.
+
+## Component roles
+
+`src/components/ui/` contains the shadcn primitives, tuned to the shared
+spacing, radius, field and focus tokens. `src/components/ui/heroui.tsx` is the
+only dashboard entry point for HeroUI v3 wrappers: use `Tabs` for component
+tab panels, `Chip` for status or metadata, and `Tooltip` for supplemental
+hover and keyboard help. The wrapper styles import only the HeroUI tabs, chip
+and tooltip layers and map them to the dashboard tokens.
+
+Run and dock tab strips intentionally keep their custom manual tab semantics
+because they coordinate route changes, focus handoff and overflow behavior.
+They are not replaced by the HeroUI Tabs wrapper. Use the shared `focusRing`
+utility for an immediate keyboard outline, without a colour transition, and
+use semantic tokens instead of route-specific colour literals.

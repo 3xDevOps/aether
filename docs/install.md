@@ -7,6 +7,22 @@ For the fastest path from nothing to a finished run, follow
 [quickstart.md](quickstart.md). This file is the reference: what the installer
 does, how to run the server as a service, and what lives in the data directory.
 
+## Building from source
+
+Source builds require Go 1.25+, GNU make, Bun 1.3+, and Node.js 22+. Bun
+installs the web dependencies and drives the scripts; Node.js runs the Next
+build and development server.
+
+```sh
+make dashboard         # build the static dashboard export in web/dist
+make build             # dashboard, then the Go server and CLI into dist/
+cd web && bun run dev  # development server
+```
+
+The production web build is a Next static export in `web/dist`, embedded into
+the Go server and CLI through `web/embed.go`. Running an installed server or
+CLI needs no Node.js and no Next server.
+
 ## The install script
 
 ```sh
@@ -851,12 +867,17 @@ paused. Delete them once you have salvaged what you want.
 
 ## Releases
 
-Push the `vX.Y.Z` tag, then publish a non-draft GitHub release for that tag:
+Push the tag, then publish an ordinary, non-draft GitHub release for it. Alpha
+versions use the same tag syntax, for example `v0.3.0-alpha.1`:
 
 ```sh
-git push origin vX.Y.Z
-gh release create vX.Y.Z --title vX.Y.Z --generate-notes
+git push origin v0.3.0-alpha.1
+gh release create v0.3.0-alpha.1 --title v0.3.0-alpha.1 --generate-notes
 ```
+
+Publish alpha tags as normal releases, not GitHub prereleases, because
+`scripts/install.sh` and `internal/selfupdate` resolve GitHub's
+`/releases/latest` endpoint. Do not add `--prerelease` or `--draft`.
 
 Publishing the release runs
 [`.github/workflows/release.yml`](../.github/workflows/release.yml): it vets,

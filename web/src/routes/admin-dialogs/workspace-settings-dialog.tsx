@@ -53,7 +53,7 @@ export function WorkspaceSettingsDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Workspace settings</DialogTitle>
           <DialogDescription>
@@ -62,40 +62,51 @@ export function WorkspaceSettingsDialog({
         </DialogHeader>
         <form
           id="workspace-settings"
-          className="space-y-3"
+          className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1"
           onSubmit={(e) => {
             e.preventDefault()
             void save()
           }}
         >
-          {/* The base branch is not editable here; runs already forked from
-              it. It is shown so the policy and the branch it governs read
-              together. */}
-          <p className="text-sm">
-            Base branch{' '}
-            <span className="font-mono text-muted-foreground">
+          <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-2.5">
+            <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Base branch
+            </p>
+            <p className="mt-1 font-mono text-sm" aria-label="Base branch">
               {workspace?.base_branch || 'unknown'}
-            </span>
-          </p>
-          <Label className="block space-y-1">
-            Who may steer others' runs
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              New runs fork from this branch.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="workspace-steer-others">Who may steer others&apos; runs</Label>
             <select
+              id="workspace-steer-others"
               className={field}
               value={steerOthers}
               onChange={(e) => setSteerOthers(e.target.value)}
+              aria-describedby="workspace-steer-help"
             >
               <option value="">everyone with steer</option>
               <option value="admins_only">admins only</option>
             </select>
-          </Label>
+            <p id="workspace-steer-help" className="text-xs text-muted-foreground">
+              This policy controls steering for runs owned by another member.
+            </p>
+          </div>
+          {error && (
+            <p role="alert" className="text-xs text-state-failed">
+              {error}
+            </p>
+          )}
         </form>
-        {error && <p className="text-xs text-state-failed">{error}</p>}
-        <DialogFooter>
+        <DialogFooter className="border-t pt-4">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" form="workspace-settings" disabled={busy}>
-            Save
+            {busy ? 'Saving...' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>

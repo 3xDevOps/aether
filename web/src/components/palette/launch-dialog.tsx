@@ -146,49 +146,60 @@ export function LaunchDialog() {
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Launch a run</DialogTitle>
           <DialogDescription>
-            The agent starts in a container on the workspace's base branch and
-            drops you into its terminal.
+            Start an agent in a container on the workspace&apos;s base branch.
+            Interactive runs open a terminal; headless runs need a task.
           </DialogDescription>
         </DialogHeader>
         <form
           id="launch-run"
-          className="space-y-3"
+          className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1"
           onSubmit={(e) => {
             e.preventDefault()
             void launch()
           }}
         >
-          {/* Where the run lands, stated rather than asked: the sidebar's
-              switcher is the one place scope changes. */}
-          <p className="text-sm" aria-label="Target workspace">
-            {workspace ? (
-              <>
-                Launching into <span className="font-medium">{workspace.name}</span>{' '}
-                <span className="text-muted-foreground">({workspace.base_branch})</span>
-              </>
-            ) : (
-              <span className="text-muted-foreground">
-                Pick a workspace in the sidebar first.
-              </span>
-            )}
-          </p>
-          <Label className="block space-y-1">
-            {mode === 'headless' ? 'Task (required)' : 'Task (optional)'}
+          <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-2.5">
+            <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Target workspace
+            </p>
+            <p className="mt-1 text-sm" aria-label="Target workspace">
+              {workspace ? (
+                <>
+                  <span className="font-medium">{workspace.name}</span>{' '}
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {workspace.base_branch}
+                  </span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">
+                  Pick a workspace in the sidebar first.
+                </span>
+              )}
+            </p>
+          </div>
+          <Label className="block space-y-1.5">
+            <span>{mode === 'headless' ? 'Task (required)' : 'Task (optional)'}</span>
             <Textarea
               autoFocus
+              required={mode === 'headless'}
               rows={3}
               placeholder="What should the agent do?"
               value={task}
               onChange={(e) => setTask(e.target.value)}
             />
+            <span className="block text-xs font-normal text-muted-foreground">
+              {mode === 'headless'
+                ? 'Headless runs start with this task and have no terminal.'
+                : 'Leave blank to open an interactive terminal without a seeded task.'}
+            </span>
           </Label>
-          <div className="flex gap-3">
-            <Label className="flex-1 space-y-1">
-              Account
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Label className="block space-y-1.5">
+              <span>Account</span>
               <select
                 className={field}
                 value={account}
@@ -202,8 +213,8 @@ export function LaunchDialog() {
                 ))}
               </select>
             </Label>
-            <Label className="flex-1 space-y-1">
-              Agent
+            <Label className="block space-y-1.5">
+              <span>Agent</span>
               <select
                 className={field}
                 value={harness}
@@ -219,8 +230,8 @@ export function LaunchDialog() {
                 <option value="custom">custom</option>
               </select>
             </Label>
-            <Label className="flex-1 space-y-1">
-              Mode
+            <Label className="block space-y-1.5">
+              <span>Mode</span>
               <select
                 className={field}
                 value={mode}
@@ -232,38 +243,45 @@ export function LaunchDialog() {
             </Label>
           </div>
           {agentError && (
-            <p role="alert" className="text-xs text-state-failed">{agentError}</p>
+            <p role="alert" className="rounded-md border border-state-failed/30 bg-state-failed/5 px-3 py-2 text-[13px] text-state-failed">
+              {agentError}
+            </p>
           )}
           {noAgents && !agentError && (
-            <div className="space-y-2">
-              <p className="text-sm">No agent is installed in this account.</p>
-              <Button type="button" size="sm" onClick={setUpAgent}>
+            <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-3">
+              <p className="text-sm font-medium">No agent is installed in this account.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Set one up before launching work for this account.
+              </p>
+              <Button type="button" size="sm" className="mt-3" onClick={setUpAgent}>
                 Set up an agent
               </Button>
             </div>
           )}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={harnessLoading || launching}
-            onClick={() => setAgentRefresh((current) => current + 1)}
-          >
-            Refresh agents
-          </Button>
-          {account && account !== ownAccountID && (
-            <p className="text-xs text-muted-foreground">
-              This run uses the selected member&apos;s environment, agent login,
-              profile, and vendor quota. You remain its owner and actor.
-            </p>
-          )}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={harnessLoading || launching}
+              onClick={() => setAgentRefresh((current) => current + 1)}
+            >
+              Refresh agents
+            </Button>
+            {account && account !== ownAccountID && (
+              <p className="max-w-[34ch] text-right text-xs text-muted-foreground">
+                Uses the selected member&apos;s environment, agent login, profile,
+                and vendor quota. You remain its owner and actor.
+              </p>
+            )}
+          </div>
           {needsTask && (
-            <p id="launch-needs-task" className="text-xs text-muted-foreground">
+            <p id="launch-needs-task" className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
               A headless run has no terminal to type into, so it needs a task.
             </p>
           )}
         </form>
-        <DialogFooter>
+        <DialogFooter className="border-t pt-4">
           <Button variant="outline" onClick={close}>
             Cancel
           </Button>

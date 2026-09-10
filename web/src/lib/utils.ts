@@ -9,12 +9,9 @@ export function cn(...inputs: ClassValue[]) {
  * forced-colors mode discards box shadows, and ring classes already mean
  * "selected" on some controls. */
 export const focusRing =
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring focus-visible:transition-none'
 
-/** The house field style. Native selects may use this directly; text fields
- * compose it and add their own fixed height. Fields stay 36px tall at minimum
- * while textareas retain room for their rows. */
 export const field = cn(
   focusRing,
-  'w-full min-h-9 rounded-sm border border-input bg-background px-3 py-2 text-sm leading-5',
+  'w-full h-9 min-h-9 rounded-sm border border-input bg-background px-3 py-2 text-sm leading-5',
 )

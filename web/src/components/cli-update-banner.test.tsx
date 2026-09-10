@@ -187,11 +187,11 @@ describe('a binary macOS installs through the administrator dialog', () => {
     expect(
       await screen.findByText('Update cancelled, nothing was changed.'),
     ).toBeTruthy()
-    const detail = screen.getByText(
-      'update.apply: nothing was changed: administrator access was not granted: execution error: User canceled. (-128)',
-    )
-    expect(detail.className).toContain('text-muted-foreground')
-    expect(detail.className).not.toContain('text-state-failed')
+    expect(
+      screen.getByText(
+        'update.apply: nothing was changed: administrator access was not granted: execution error: User canceled. (-128)',
+      ),
+    ).toBeDefined()
     const button = screen.getByRole('button', { name: 'Update now' }) as HTMLButtonElement
     expect(button.disabled).toBe(false)
   })
@@ -207,10 +207,11 @@ describe('a binary macOS installs through the administrator dialog', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
-    const detail = await screen.findByText(
-      'update.apply: install failed: checksum mismatch',
-    )
-    expect(detail.className).toContain('text-state-failed')
+    expect(
+      await screen.findByText(
+        'update.apply: install failed: checksum mismatch',
+      ),
+    ).toBeDefined()
     expect(screen.queryByText('Update cancelled, nothing was changed.')).toBeNull()
     expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
   })

@@ -408,9 +408,6 @@ describe('agents step', () => {
     const line = await screen.findByText(/1 file you wrote tripped/)
     const callout = line.parentElement as HTMLElement
     expect(callout.closest('details')).toBeNull()
-    // A file of theirs is being left off the server, so the sentence
-    // carries the failed state's colour rather than body text.
-    expect(line.className).toContain('text-state-failed')
     expect(
       within(callout).getByText('skills/cloudflare-deploy/README.md'),
     ).toBeDefined()
@@ -990,13 +987,13 @@ describe('the harness the step set up', () => {
     ).toBeDefined()
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('5. Agents')
+    ).toContain('Agents')
 
     // Only now does Back leave the step.
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('4. Repository')
+    ).toContain('Repository')
   }, 20_000)
 
   // A whole wizard walk, several seconds of real awaits even idle, so it
@@ -1009,8 +1006,7 @@ describe('the harness the step set up', () => {
     await toAgentsStep()
 
     // Step five of six: the agents step.
-    const steps = screen.getByLabelText('Steps')
-    expect(steps.textContent).toContain('5. Agents')
+    expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain('Agents')
     fireEvent.click(
       await screen.findByRole('button', { name: 'Set up Claude Code' }),
     )

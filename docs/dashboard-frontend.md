@@ -1,44 +1,87 @@
 # Dashboard SPA (`web/`)
 
-The browser client the server embeds and serves. Bun installs packages and
-runs the scripts, Vite bundles, React 19 + TypeScript render, Tailwind v4 and
-shadcn/ui (new-york, neutral, CSS variables) style, Zustand holds the state.
+The browser client the server embeds and serves. Next.js 16.3.4 produces the
+static export, while React 19 + TypeScript render the client runtime, Tailwind
+v4 and shadcn/ui (new-york, neutral, CSS variables) provide the base style,
+selected HeroUI v3 wrappers provide Tabs, Chip and Tooltip, and Zustand holds
+the state.
 
 The gateway it talks to is documented in `docs/local-gateway.md`; this guide
 describes the dashboard's public route, store, and component structure.
 
-## Commands
+## Runtime boundary and commands
+
+`src/app/page.tsx` is a minimal Next App Router page. It loads
+`src/app/client-runtime.tsx`, which is a client component that dynamically
+imports `src/App.tsx` with `ssr: false`. This boundary keeps the browser-only
+store, WebSocket, xterm and Electron bridge out of static prerendering. Next
+still emits the document, CSS, fonts and JavaScript assets; the existing
+client-side registry and in-memory `navigate()` state remain the dashboard's
+navigation model. Next does not run in production.
 
 ```sh
-make dashboard   # bun install --frozen-lockfile && bun run build (from repo root)
-make build       # the same, then the Go binaries
-cd web && bun run dev        # dev server, proxying /api and /ws to a running server
+make dashboard   # Bun install, then Node 22+ and next build (from repo root)
+make build       # dashboard export, then the Go binaries
+cd web && bun run dev -- --port 3000 --hostname 127.0.0.1
 cd web && bun run test       # vitest
 cd web && bun run typecheck  # tsc --noEmit
 ```
 
-`bun run dev` proxies to `http://127.0.0.1:8080` by default; point it
-elsewhere with `AETHER_DASHBOARD=http://127.0.0.1:<port>` naming a running
-`aether gui --port <port>`.
+`bun run dev` starts `dev-server.mjs`, the development-only Node loopback
+server. It defaults to `127.0.0.1:3000`, accepts `--port`/`-p` and
+`--hostname`/`-H`, and uses `AETHER_DASHBOARD` as its gateway target (the
+standard local gateway is `http://127.0.0.1:8080`). Requests under `/api` and
+`/local` are proxied over HTTP; `/ws` upgrades are proxied with WebSocket
+support. The proxy preserves the browser `Host` and `Origin` headers so the
+gateway remains the WebSocket origin boundary. Other requests and Next HMR
+upgrades go to Next's development handler. The Next Node inspector attach
+endpoint is unavailable through this server.
+
+Run a local gateway and start the dev server in separate terminals. The gateway
+prints a tokened URL; copy its `token` query value onto the dev URL:
+
+```sh
+# terminal 1
+aether gui --port 8080 --url
+
+# terminal 2
+cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
+  bun run dev -- --port 3000 --hostname 127.0.0.1
+# open http://127.0.0.1:3000/?token=<token-from-aether-gui>
+```
+
+The client moves `?token=` into `sessionStorage` under `aether.token`, removes
+only that query parameter from the address bar, and sends the value as a
+Bearer token on HTTP or a `token` query parameter on WebSockets. The token is
+minted per `aether gui` process and stops working when that process exits.
+
+Node 22+ is required for a hand-run dashboard build. The complete contributor
+toolchain and the optional desktop installer workflow are in
+[CONTRIBUTING.md](../CONTRIBUTING.md#toolchain).
 
 ## Build pipeline and the embed
+
+`web/next.config.ts` sets `output: 'export'` and `distDir: 'dist'` outside
+development. `next build` therefore writes a static `web/dist` artifact:
+HTML, `_next` assets, CSS and copied public files. There is no production Next
+server or Node process in the shipped dashboard.
 
 `web/embed.go` embeds `web/dist` with `//go:embed all:dist`, which fails to
 compile against an empty directory. The build output is not committed, so the
 invariant is kept by two placeholder files:
 
-- `web/dist/.gitkeep` is committed - a clean checkout compiles the Go server
+- `web/dist/.gitkeep` is committed so a clean checkout compiles the Go server
   before anyone has run the web build.
-- `web/public/.gitkeep` is copied into `dist` by every Vite build, so emptying
+- `web/public/.gitkeep` is copied into `dist` by every Next build, so emptying
   the output directory never breaks the next Go build.
 
-`.gitignore` therefore ignores all of `web/dist` except `.gitkeep`. A binary
-built without running the web build serves the gateway's "dashboard not built"
-response rather than a blank page.
+`.gitignore` ignores generated `web/dist` and Next metadata while retaining
+`web/dist/.gitkeep`. A binary built without running the web build serves the
+gateway's "dashboard not built" response rather than a blank page.
 
 CI installs Bun with `oven-sh/setup-bun` (version pinned in `web/.bun-version`)
-in every job that runs `make build` or `make release`, plus a `dashboard` job
-that typechecks and tests the SPA on its own.
+in jobs that run `make build` or `make release`, plus a dashboard job that
+typechecks and tests the SPA on its own.
 
 ## The three extension seams
 
@@ -49,8 +92,10 @@ state without editing the shell.
 `registerRoute('board', Board)` at module scope; `src/routes/index.ts` imports
 it once for that side effect. The center view looks the current route up by
 name and renders it with `route.params`. Navigation is a store action -
-`navigate('terminal', { runId })` - not a URL router: the dashboard is a single
-screen with a reveal path, and every surface routes through the same call.
+`navigate('terminal', { runId })` - rather than a URL router: Next supplies the
+document and static assets, while the dashboard remains one client screen and
+every surface uses the same action.
+
 
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
 one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
@@ -105,12 +150,16 @@ badges () belong in these slots, not in `run-card.tsx`.
 ## Sidebar
 
 `src/components/shell/sidebar.tsx` is a workspace switcher over a flat list of
-that workspace's runs, with the nav for every other view under it. There is no
-run tree: one workspace is in view at a time, so the outer level had nothing
-left to hold, and the runs group instead by state or by owning member (the
-`groupBy` preference, persisted). The only collapse state left is the whole
-sidebar's, which a narrow window sets for itself (see [Window size and
-overflow](#window-size-and-overflow)).
+that workspace's runs, with the nav for every other view under it. Its
+workspace band is 48px tall; the runs header and navigation use compact rows
+with a 36px minimum height. There is no run tree: one workspace is in view at a
+time, so the runs group instead by state or by owning member (the `groupBy`
+preference, persisted). The only stored collapse state is the whole sidebar's.
+At 1000px and narrower it auto-collapses to a 40px rail without changing that
+preference; at 640px and narrower an expanded sidebar overlays the center
+content and remains keyboard reachable through **Expand sidebar**.
+The width handle remains a keyboard and pointer window splitter (see
+[Keyboard and focus](#keyboard-and-focus)).
 
 - **The switcher sits above everything it scopes**, and appears only when there
   is a choice: a single workspace renders as a plain label with its base branch
@@ -159,6 +208,13 @@ directory request in `src/store/files.ts`, and reads file contents through
 `files.read`. Run files can switch to a one-file `files.diff` patch; editing
 stays in the existing local sync and the user's editor.
 
+The tree is a browse pane beside the viewer at medium widths, with a compact
+source header and a bordered code surface. On narrow screens the tree is the
+first view; selecting a file moves to the viewer, whose **Browse files** action
+returns to the tree. Code scrolls horizontally inside the viewer rather than
+forcing the page wider. Loading, empty, binary, truncated and error states keep
+their exact server details and use bounded panels.
+
 ## Title bar
 
 `src/components/shell/title-bar.tsx` is the desktop shell's window chrome.
@@ -170,24 +226,19 @@ draws no native buttons - minimize, maximize/restore and close wired to
 every button `no-drag`; on macOS the native traffic lights are kept and the
 bar reserves 78px for them instead of drawing buttons.
 
-`App.tsx` mounts it above the whole app, the `ConnectionError` page included:
-that page replaces the shell, and a frameless window without a title bar would
-leave an offline user unable to move or close the app. In a browser
-`window.aetherDesktop` is absent, the component renders nothing, and the tab
-keeps the browser's own chrome.
+`App.tsx` mounts `TitleBar` above both the normal shell and the connection
+error page. The frameless Electron window therefore keeps a way to move and
+close itself even when the gateway is unavailable. In a browser,
+`window.aetherDesktop` is absent and the component renders nothing.
 
-`App.tsx` mounts one more thing above everything:
-`src/components/launch-splash.tsx`, the night sky the desktop window opens on.
-It reads the same `window.aetherDesktop` bridge and a `sessionStorage` key, so
-it belongs to a shell window opening rather than to loading: a browser tab
-never sees it, and neither does a reload inside a window already open. It
-leaves as soon as the store reports hydrated or that the hydrate failed, after
-a 600ms minimum that keeps a fast start from flickering, and after 2.5s
-whatever the store says: a socket that hangs reports neither, and the splash
-covers the frameless window's title bar, so nothing else would bring the
-window controls and `ConnectionError` back. It is decoration, so it is
-`aria-hidden` and announces nothing, and `prefers-reduced-motion` skips it
-entirely.
+On the first desktop launch only, `App.tsx` also mounts a brief
+`LaunchSplash`. It uses the existing Aether mark and VT323 wordmark on a calm
+token-based surface below the title bar, is `aria-hidden` and
+`pointer-events: none`, and fades after hydration or failure. A 320ms minimum
+prevents a fast start from flickering and a 1.6s cap prevents a stalled
+connection from blocking the window. `sessionStorage` suppresses it on later
+launches in the same session. There is no sky, star, cloud or reveal-flash
+animation, and a browser tab does not show the desktop splash.
 
 ## Window size and overflow
 
@@ -200,43 +251,29 @@ gives way first.
 the rules below are designed against; a browser tab has no such floor, so they
 degrade below it rather than break.
 
-- **The update prompts** each keep their prose in one shrinking column and
-  their controls on the first row beside it, so the button is where the
-  prompt starts at every width. A prompt that prints verbatim output - a
-  failed rebuild's error - bounds it at 6rem with its own scroll, because
-  prompts stack and one prompt's output must not push the next one's controls
-  out of the strip. The strip itself scrolls, and the row below it holds a
-  10rem floor, so prompts taller than the window give way rather than taking
-  the app off the bottom of it.
-- **The status bar** shrinks its left group and never its right one, whose
-  only concession is the palette trigger dropping the word "Commands" below
-  `lg` and keeping its shortcut badge. The left group sheds its lowest
-  priority readouts first: the disk gauge below `xl`, the member name below
-  `lg`, the local link below `md`. Connection state, the unreachable and
-  server-update notices and the version label stay at every width. What
-  truncates rather than hiding keeps its whole text in a `title`, because the
-  half of an outage notice that says what to do about it is the half that
-  goes off the edge.
-- **The run header** truncates the title and the subtitle, each carrying its
-  full text in a `title` attribute. The run views pass the whole task as the
-  subtitle, so the subtitle is the half that gives way first: a run's own name
-  is what identifies the view. The action bar never shrinks. The split is a
-  container query on the header itself, not on the window, because the sidebar
-  beside it is resizable between 200px and 520px and one window width
-  therefore leaves this row 320px more or less room. Below a 928px row -
-  `@4xl` measured against the header's content box, chosen over the 768px step
-  so the title keeps some room - it holds the verbs that steer the run now
-  (pause/resume, send, close, kill, relaunch) and moves the rest into a
-  **More** menu, which closes itself if the row widens back past the
-  threshold while it is open and hands the keyboard to the row that replaced
-  it.
-- **The board columns** are `flex-1` over a 15rem floor, so they share a wide
-  window and fall back to the row's horizontal scroll only when even that
-  floor does not fit.
+- **Update notices** keep the message, status icon and action hierarchy visible.
+  Their actions become a narrow-screen grid and return to a desktop flex row;
+  technical output is bounded and expandable, and the dismiss control remains
+  keyboard reachable at 32px.
+- **The status bar** keeps connection state and the theme control visible at
+  every width. From 768px through 1279px, registered status-slot actions stay
+  beside the theme while secondary readouts use a keyboard-reachable native
+  details menu. Below 768px those actions join the menu's bounded fixed popup;
+  from 1280px the details open automatically into the inline row. Readouts
+  wrap in the menu, so the full error and update text remains available.
+- **The run header** keeps the title, task, branch and harness mode readable.
+  Status is a semantic Chip, and the action group wraps rather than shrinking
+  the labels into an unreachable strip. Terminal tabs remain one keyboard stop
+  with horizontal overflow for the tab list.
+- **The board** uses one column on narrow screens and three columns from the
+  medium breakpoint, with compact token cards and vertical scrolling on small
+  screens. Column and run-card state labels remain visible; empty, loading and
+  error panels use the same bounded surface hierarchy.
 - **The sidebar** drops to its rail on its own at 1000px and narrower. That
   answers the viewport, not the stored preference: expanding it there lasts
   until the window widens again, and widening restores exactly what the
-  member had stored.
+  member had stored. At 640px and narrower an expanded sidebar overlays the
+  main view instead of pushing it off screen.
 
 Two end-to-end specs hold these rules. `web/e2e/window-sizing.spec.ts` drives
 the update prompts at the shell's own minimum - it reads `minWidth` and
@@ -247,8 +284,10 @@ row and the app to the window, and repeats both at a size the shell now
 refuses but a browser tab can still reach.
 `web/e2e/status-bar-sizing.spec.ts` fills the bar from a real server and then
 stops that server, which is how its longest notice comes up without seeding
-the store behind the app's back, and holds the palette, shortcuts and theme
-controls inside the window at both sizes.
+the store behind the app's back. It checks keyboard access to the details
+menu, keeps the palette, shortcuts and theme controls in view at 960px and
+800px, checks the full fixed popup at 390px, and preserves the expanded row
+at 1280px without horizontal overflow.
 
 ## Data flow
 
@@ -373,25 +412,19 @@ be an invention.
 `src/routes/board/` is the default center view: the active workspace's run
 cards in the three buckets the GUI spec copies from Orca. `needs-attention` is
 Needs You for a live stalled run, `queued`/`provisioning`/`running` is Working,
-and `completed` plus the final statuses are Done.
-An active run whose approval request is still pending also presents as
-needs-attention on the board and in the sidebar - the pause is invisible in
-the domain status, so `runState` takes a pending flag fed from the approval
-inbox. Cards sort by last state change, newest first; the columns are
-untinted and the card carries the state colour.
+and `completed` plus the final statuses are Done. An active run whose approval
+request is still pending also presents as needs-attention on the board and in
+the sidebar - the pause is invisible in the domain status, so `runState` takes
+a pending flag fed from the approval inbox. Cards sort by last state change,
+newest first.
 
-Three buckets, and no Idle column: a card is a run, and no run status maps
-to idle, so an idle column could only ever hold something that is not a card.
-A workspace with nothing in it says so once: the notice replaces the column
-row rather than sitting above it, because three empty buckets each saying
-"Nothing here." repeat the notice three times without adding to it. What is
-left is what a run is, and New run as the primary button.
-
-A bucket with no cards shows nothing for the first 200ms of a cold load,
-because `useDelayed` has not answered yet and "not known" is not "empty";
-skeletons after that while the load is still running; and "Nothing here." once
-the board is hydrated.
-
+The board header wraps its title, run count Chip, descriptive copy and toolbar.
+Its grid is one column on narrow screens and three columns at the medium
+breakpoint, with a compact bordered surface, readable state headers and
+bounded card content. An empty workspace shows one centered "Ready for a task"
+panel and a primary New run action rather than three repeated empty columns.
+Loading uses delayed skeletons, and hydrated empty buckets say "Nothing here."
+without confusing an in-flight request with an empty result.
 The card is one click target, laid over the text. Anything the reader has to
 select, hover or press has to be raised above that overlay, the way card
 slot content and the protected badge are. The branch chip is: the truncated
@@ -553,19 +586,15 @@ server would refuse.
 Everything the dashboard can do is reachable without a mouse, and every control
 a keyboard reaches draws the same focus indicator.
 
-**One focus indicator.** `focusRing` in `src/lib/utils.ts` is it, and it is
-the only one: the `Button`, `Input` and `Textarea` primitives compose it into
-their base, and so does every raw control that takes focus - buttons, selects,
-links, `<summary>` elements, menu items, the dialog close, the resize handles.
-The `field` style beside it there carries it for most of the native
-`<select>` elements, and the two that size their own box - the sidebar
-switcher and the activity filters - name `focusRing` themselves. A new control
-that is none of those adds `focusRing` to its classes. No file writes a focus
-indicator of its own. The only `focus-visible:` classes a file adds are
-modifiers of this one: the inset offset below, and `focus-visible:opacity-100`
-where the dialog close would otherwise fade its outline along with its glyph.
-`a11y.test.tsx` reads the source tree to keep that true, control by control,
-the stylesheet included.
+**One focus indicator.** `focusRing` in `src/lib/utils.ts` is the shared
+outline utility. The `Button`, `Input` and `Textarea` primitives compose it,
+as do the raw controls that need focus - buttons, selects, links, summaries,
+menu items, dialog close controls and resize handles. Controls that fill a
+scroll container use the inset variant so the outline is not clipped.
+Component tests exercise focusable behavior with real DOM nodes; the browser
+`keyboard-focus` scenario confirms keyboard ordering and that a focused
+control actually paints the outline. Source scans and literal class checks are
+not used as behavior coverage.
 
 It is an outline rather than a ring, for two reasons. Windows High Contrast
 (`forced-colors: active`) discards box shadows, which is what Tailwind's
@@ -731,16 +760,31 @@ ack: a run that ended with no recorded terminal is refused and never acks,
 which would leave the previous run's output on screen under the new run's
 name.
 
-The Terminal view is a vertical split. The agent terminal keeps the flexible
-space above a `RunDock` below it. The dock has a persisted height
+The Terminal view is a vertical split. The agent terminal keeps flexible space
+above a `RunDock` below it. The run header keeps the task, branch, harness mode
+and status readable while its actions wrap at narrow widths. The terminal
+status toolbar also wraps without truncating real gateway errors.
+
+The dock header is 40px tall and its tab strip scrolls horizontally. Add,
+close and collapse controls stay keyboard and pointer reachable, as does the
+splitter. The shell tab strip is a custom manual tab list with one keyboard stop
+and overflow scrolling; it remains separate from the HeroUI Tabs wrapper used
+for component-level tab surfaces.
+
+`TerminalPane` keeps xterm's host geometry intact while layering Find, shared
+zoom/reset, and copy/paste controls over it through the existing controller,
+store and clipboard APIs. The find overlay sizes to the available width, so a
+narrow pane clips neither its input nor its close control.
+
+The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once
-expanded, a resizer.
-Both docks start collapsed (`initialRunShellDock`, `initialEnvTerminal`), so
-the terminal a member came for owns the window until they ask for a shell.
-Neither flag is persisted, so a reload starts collapsed again, and the run
-dock's is per run because `shellDocks` is keyed by run id. The header strip
-stays live while a dock is shut, so its tab controls expand it: a tab whose
-dock is collapsed mounts no xterm host and would never attach.
+expanded, a resizer. Both docks start collapsed
+(`initialRunShellDock`, `initialEnvTerminal`), so the terminal a member came
+for owns the window until they ask for a shell. Neither flag is persisted, so a
+reload starts collapsed again, and the run dock's is per run because
+`shellDocks` is keyed by run id. The header strip stays live while a dock is
+shut, so its tab controls expand it: a tab whose dock is collapsed mounts no
+xterm host and would never attach.
 `TerminalDock` mounted with `openOnMount` expands itself once, because the
 Agents and GitHub steps type into it.
 Its tab state and socket registry live in `src/store/terminal.ts`, so opening
@@ -1423,49 +1467,44 @@ wherever the member is an admin.
 
 ## Styleguide
 
-- **Tokens only.** See [styles.md](styles.md) for the landing palette in dark,
-  neutral in light, the `--state-*` tokens, and the one inline-colour
-  exception; components use token classes and no hex literals.
-- **Dark, light, system.** The preference is stored, `system` follows
-  `prefers-color-scheme` live.
+- **Tokens only.** See [styles.md](styles.md) for the cool-neutral palette,
+  mint primary, dark/light values, `--state-*` tokens, radii, fonts and the
+  one inline-colour exception for member attributes. Components use semantic
+  token classes rather than route-specific colour literals.
+- **Dark, light, system.** The preference is stored, and `system` follows
+  `prefers-color-scheme` live. There is no additional theme mode.
+- **Typography and density.** Geist is the body and UI face from
+  `next/font/local`; JetBrainsMono NFM is terminal and code; VT323 is only the
+  Aether wordmark. The base is 14px with 13px supporting copy, 20-24px titles,
+  and a 4px spacing unit. Controls and cards use the shared radius scale.
 - **Two glyphs, two layers.** The harness glyph says who is running, the state
   dot says what state - never merged into one mark. Presentation states
   (`working`, `waiting`, `needs-attention`, `failed`, `done`, `idle`) are
   derived in `src/lib/status.ts`; the domain status enum is untouched. A group
   header shows the worst state of the runs under it.
 - **A working run moves.** `StateIndicator` swaps the static dot for three
-  dots bouncing in `--state-working`: on the board card, in the run header,
-  and in the run list that `routes/overview.tsx` and `routes/workspace.tsx`
-  both mount. Sidebar rows keep the dot and pulse its opacity
-  (`.state-pulse`), because a column of ten bouncing runs is noise. The
-  palette's run rows keep a plain static dot. The mark keeps the dot's 0.5rem
-  box in each case, so a row does not shift when its run starts or stops
-  working. Where the state is already printed in words the mark is passed
-  `decorative`, so a screen reader hears it once.
-- **Motion is optional.** The steering signal, the working dots and the
-  sidebar pulse each answer `prefers-reduced-motion: reduce` in `index.css` by
-  removing the movement and leaving the mark: the working dots collapse to the
-  static dot. The launch splash is not toned down but skipped -
-  `components/launch-splash.tsx` renders nothing when the query matches, and
-  the reveal flash in `components/shell/center-view.tsx` goes with it under
-  `motion-reduce:hidden`, since a flash is nothing but motion. The spinner and
-  skeleton loaders (Tailwind's `animate-spin` and `animate-pulse`) have no
-  such answer.
-- **Primitives, not raw form elements.** `src/components/ui/` holds the
-  shadcn/ui pieces the dashboard uses - `Button`, `Input`, `Textarea`,
-  `Label`, `Dialog`, `DropdownMenu`, `Command`, `Skeleton` - most of them
-  retuned to the house scale rather than taken at shadcn's own metrics, and
-  each focusable one composing `focusRing`. They are house copies rather than
-  registry output, so a `shadcn add` offering to overwrite one is declined. A
-  field draws its border from `--input` rather than the `--border` every other
-  element wears, dims while disabled, and prints its placeholder in the muted
-  token. No file outside that directory writes a raw text `<input>`,
-  `<textarea>` or `<label>`; a checkbox is exempt, drawing none of a field's
-  border, padding or text scale. `components/ui/fields.test.tsx` reads the
-  source tree to keep that true. A `Label` wraps the control it names rather
-  than pointing at it by id, so neither end needs one.
+  dots bouncing in `--state-working` on board cards, run headers and run lists.
+  Sidebar rows keep one dot and pulse its opacity; palette rows stay static.
+  The fixed dot box prevents a row shifting when a run starts or stops.
+- **Motion is optional.** The steering signal, working dots and sidebar pulse
+  answer `prefers-reduced-motion: reduce` in `index.css` by removing movement.
+  Launch loading stays functional and does not add decorative motion; there is
+  no reveal-flash animation. Spinner and skeleton feedback remains available.
+- **Primitives first.** `src/components/ui/` holds the shadcn/ui pieces such
+  as `Button`, `Input`, `Textarea`, `Label`, `Dialog`, `DropdownMenu`,
+  `Command` and `Skeleton`, retuned to the house scale and shared
+  `focusRing`. Use these wrappers instead of redrawing controls so labels,
+  disabled states, field tokens and keyboard behavior stay consistent.
+- **HeroUI has a narrow role.** `src/components/ui/heroui.tsx` wraps HeroUI v3
+  `Tabs`, `Chip` and `Tooltip` and adds the `aether-*` classes that map them
+  back to the house tokens. Use `Tabs` for component-level tab panels, `Chip`
+  for status or metadata, and `Tooltip` for supplemental hover and keyboard
+  help. The run and dock tab strips intentionally retain their custom manual
+  tab semantics and are not replaced by HeroUI.
 - **One focus indicator, one source.** `focusRing` in `src/lib/utils.ts`; see
-  [Keyboard and focus](#keyboard-and-focus).
+  [Keyboard and focus](#keyboard-and-focus). Browser checks verify the
+  resulting focus outline; source scans and class-name assertions are not
+  behavior coverage.
 - **Member colour attributes, it does not fill.** The avatar rings itself in
   the member's colour and keeps its initials in the foreground token, because
   the colour is arbitrary server data with no contrast guarantee in either
@@ -1475,178 +1514,47 @@ wherever the member is an admin.
 
 ## Tests
 
-`vitest` with jsdom and testing-library. The store slices and selectors are
-tested directly; the sidebar and the whole shell are rendered against a
-hydrated store with a stub API (`src/test/fixtures.ts`) to prove they follow
-live data. The stream and the hydrate/stream lifecycle are driven through a
-stub WebSocket (`src/test/stub-socket.ts`): subscribe frames, replay after a
-dropped socket, the 4000 close, hydration waiting on the subscription
-acknowledgement, the mid-hydration event, the cursor held behind an unresolved
-fetch, the cursorless reconnect, and the hydration retry. The terminal is driven through the same
-stub: the attach client's own tests cover the header, the reconnect and the
-refusals, and the view is rendered with a real xterm instance to prove
-the toggle and the steer refusal reach the UI, that a `queued` or
-`provisioning` run opens no socket at all and waits behind the container
-spinner without the toolbar contradicting it, that the run turning `running`
-attaches on its own and that failing there drops the spinner, that a
-`-32004` on a running run is waited out rather than reported, that a run
-which died before it started shows its reason and no Retry, and that a
-refusal which is not a missing session shows the gateway's own message
-instead. The attach client covers the bounded retry itself: four refusals
-reconnect, the fifth is the answer, a run that ends mid-retry is reported at
-once, ordinary reconnects neither spend the budget nor are slowed by it, and
-the wait never reports itself offline on a counter earlier drops left
-standing. The missing-run component is
-covered on its own: nothing before the delay, the unreachable server, the
-dead token reported verbatim, and the sentence and **Back to board** once
-hydrated. The board and the palette are rendered against a seeded store:
-bucket membership and ordering, the board showing only the active workspace
-and following a switch, the board falling
-back to every run before hydration has named one, the ack muting a card and a
-later state change bringing the emphasis back, the paused badge going on and
-off through a real `workspace.timeline` pause and resume run through
-`applyEvent`, a slot contributor reaching the card, the card's branch carrying
-its full name, copying it, and selecting it instead where the clipboard is
-missing, and the palette jumping, switching the active workspace and opening
-it, steering from a run-detail tab, withholding both pause and resume while
-the paused state is unknown, launching
-into the active workspace with either the caller's or a shared account, and
-offering only members who can own a run as
-handoff targets, never a viewer. The buttons that render the same list are
-covered where they live: the run action bar showing pause, resume or neither
-as the pause state is known, asking before a kill and delete and only then
-calling them, offering the hand-off targets who may own a run and no button at
-all when there are none, and gating pull and relaunch; the sidebar offering New
-run to a member who may start one and not to a viewer, and All runs opening the
-flat list; the board header opening the launch form, an empty workspace saying
-so once, each of the three bucket placeholders in its own state, and both
-transitions into and out of the notice; and the launch form refusing a
-headless run with no task while sending nothing the server already defaults,
-offering only installed agents beside the `custom` escape hatch, keeping
-Launch disabled both when none is installed and when `agent.list` fails, and
-sending setup to the Agents view.
-The palette covers the ending-action matrix: Delete for every status, Kill
-only while queued, provisioning, or running, and Close for every status that
-holds a record, where it chooses merged or abandoned.
-`src/a11y.test.tsx` holds the claims in [Keyboard and
-focus](#keyboard-and-focus). The focus sweep walks the route registry rather
-than a hand-kept list, so a view added later is swept without anyone
-remembering, and it renders the shell, the palette, its three forms, an open
-menu, the run strip and a dock beside it; every button, tab, link, field,
-select, checkbox, switch, menu item, focusable panel and resize handle it
-finds has to carry the outline, written out as literal classes because a token
-compared against itself passes for any value. Two source scans stand behind
-it, because a sweep only sees what a test renders: one proves no second
-indicator exists anywhere in `web/src`, the other that every file drawing a
-raw control reaches for the shared one. `components/ui/fields.test.tsx` scans
-the same tree for the fields themselves, under the Styleguide rule above and
-its one carve-out, so a route cannot quietly redraw a field. Beside it,
-`Input` and `Textarea` are rendered to prove the outline is really on them,
-`Label` to pin the single class it adds against a registry overwrite, and a
-ref is followed to the DOM node four call sites focus through.
+The dashboard test suite uses Vitest, jsdom and Testing Library for client
+behavior, with fixtures and stub API/WebSocket transports where a server is
+not required. Store slices, selectors, API token bootstrap, stream lifecycle,
+terminal attach/reconnect behavior, permissions and error paths are tested as
+observable state transitions. Component tests render real DOM controls and
+assert labels, accessible names, focus handoff, keyboard actions, navigation,
+loading and empty states, server errors, capability gates and mutation
+results.
 
-The rest of the file is behaviour: arrow keys move focus around both strips and
-wrap without opening anything, a modifier chord goes to the browser, Enter and
-Space open the focused tab and hand focus to the strip the next route draws
-while a pointer click and a cancelled press do not; a dock's panel and its
-selected tab name each other, and an empty or shut dock names neither; closing
-a tab leaves the stop on the selected one; both handles step, snap to their
-bounds and collapse from the keyboard, in either direction; and the reveal
-flash carries its `motion-reduce` guard.
+`src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar splitter
+with keyboard events: arrow navigation, Enter and Space activation, focus
+handoff, clamped resizing and collapse. `src/components/shell/nav-shortcuts.test.tsx`
+covers the shell shortcut precedence across fields, dialogs, menus, lists and
+selects. `src/components/ui/fields.test.tsx` checks that a wrapped Label names
+its actual input and that an Input ref reaches the field DOM node. These are
+behavior assertions against rendered controls; source scans, literal class
+assertions and CSS text checks are not behavior coverage and are not listed as
+tests.
 
-`nav-shortcuts.test.tsx` drives the shell keys through the real shell. Where a
-test asserts that nothing happened, it presses the same key somewhere it does
-work first, so it cannot pass by the shortcut never having fired. It covers
-the field, terminal, dialog, menu, list box and select cases, focus fallen to
-the body under a dialog, the chord expiring, surviving a reach for a modifier
-and being ended by a key that went elsewhere, and the Escape another layer
-already acted on. Two things only a browser can show are in the
-Playwright suite instead: that Escape on a dialog over a run closes the dialog
-without also leaving the run, and that a focused control actually paints an
-outline. The palette's own test proves the modifier glyph follows the platform
-rather than always reading macOS.
+Route tests cover the board, run detail, terminal, diff, files, workspace,
+onboarding, team, members, settings, agents, templates, palette and update
+surfaces. Keep assertions on what a member can observe: a route or control
+appears or disappears under its capability and role, a focus or navigation
+action lands in the expected view, a loading or error message is shown, or the
+API receives the mutation only after the relevant confirmation. Preserve
+verbatim gateway errors in assertions when they are part of the contract.
 
-The permission mirror is exercised through the bar: a viewer is offered
-nothing that mutates a run, a collaborator may steer, kill, and delete another
-member's run but not give it away or protect it, and a protected run and an
-`admins_only` workspace both hide the Kill-policy verbs from everyone but the
-owner. A refused kill toasts the server's message verbatim, and a slow pull
-locks the whole bar, names the ref it fetched and leaves its git output on the
-store for the diff tab. The shell test clicks New run in the sidebar and finds
-the real form, which is what proves the host is the shell's rather than the
-palette's. The window size rules are covered as the classes that encode them,
-jsdom having no layout engine to measure: which verbs keep their place on a
-narrow run header and which move into the More menu, that menu closing itself
-when the row widens back, the header being the named container the split
-measures against, the order the status bar gives its readouts up in and every
-truncated readout keeping its whole text in a `title`, and the sidebar dropping
-to its rail on a narrow window without writing what the member stored. The
-team surfaces are driven through the same stub API: the status bar reading
-roster, queue and budget and rendering all three, the approval badge and
-watcher avatars reaching a real run card, a decision going out as
-`approval.decide` and coming back attributed, a steer refusal surfacing
-instead of being guessed at, the refresh covering every workspace rather than
-only the ones with live runs, the heartbeat claiming only the workspace in
-view, an over-cap workspace staying in the readout after its last run
-finishes, and the feed opening its window at the log head, walking it back
-without re-reading, narrowing on a filter, and abandoning a page that belongs
-to filters the user has left. The Members roster is rendered both ways: an
-admin approving, inviting and changing another member's role with the roster
-refetching after, the server's refusal rendered verbatim when a role change is
-denied, the confirmation an admin must clear before giving up their own admin
-role, and a non-admin getting the same roster as read-only text with no admin
-verbs - which the sidebar and the palette match by keeping Members reachable
-behind the narrow remote allowlist while every other admin entry stays hidden.
-The onboarding wizard walks all six steps against the stub API, and covers
-what navigation must not lose: Back leaving the Agents setup screen before it
-leaves the step and rendering inside the step it belongs to, the header
-jumping between steps already reached while leaving a step never reached
-inert, the First run draft surviving a jump away and back, and the Repository
-step still showing its connected clone and push result after a walk away and
-back. The First run step is covered on all three of its answers: only
-installed agents in the picker, **Set up an agent** returning to the Agents
-step when none is installed, and a failed `agent.list` kept on screen as the
-server's own error rather than read as an empty account. The Repository step
-also covers each comparison state: which command is the copyable one in each,
-and the fast-forward reporting a dirty tree it did not touch while keeping
-both git outputs. The Git identity step covers the prefill from this machine
-and the save that advances, the member's own saved identity winning over the
-machine's, a refusal rendered verbatim with the wizard staying put, the skip,
-the identity still shown when the user walks back in, a machine with no
-identity to read, a gateway that does not speak `git.identity`, typing that
-survives a late prefill, a field cleared on purpose staying empty, the refusal
-to save half an identity, and a server-info refresh landing mid-save without
-losing either change. The persisted resume point is covered from both sides:
-in the store, a version 0 payload losing its stale push answer and nothing
-else, a version 1 payload losing an answer with no link id, a version 2
-payload keeping its answer while its step is renamed, every old index mapping
-to the step it named at every version behind this one, an unplaceable value
-starting over, and a payload at this version left untouched; in the wizard,
-every step from Repository on falling back to the workspace picker when no
-workspace survived, the steps before it resuming where they were, and a
-resumed Repository step holding its connected clone through a walk back to
-Workspace and a walk forward past Git identity. The Agents step tests
-setup-capable harness detection, the live terminal dock, the environment save
-that follows a confirmed install, the GitHub connect screen - the login
-command reaching the dock, the account and fingerprint it reports, a refusal
-rendered verbatim, the CLI path without a terminal socket, and Back closing it
-without leaving the step - profile previews and exclusions, profile
-recommendations, cancellation, secret and plugin guards, push refusals, and
-the optional skip paths. The diff tab covers the parser on the shapes that
-would break it - a deletion, a new file, a removed line that reads exactly
-like a file marker - then the fetch, the truncation notice, a snapshot
-rendering its own interval and only that change, deselecting returning to the
-cumulative patch without a refetch, a snapshot carrying no tree staying
-unselectable, and a conflict chip naming its member and opening their run.
-Each entry point the Terminal view section lists is asserted to land on
-`terminal`, beside its own surface. The run header is rendered on all four
-tabs and asserted to name the state and carry `.working-dots` only while the
-run is working; the indicator has its own test for the label and the shape of
-every state; the sidebar row asserts `aria-current` across the run's tabs and
-`.state-pulse` on a working run.
-Full end-to-end coverage is `web/e2e/`: a Playwright suite that drives this
-dashboard in a real browser against a real `aether gui` gateway and a real
-server, with real git and real containers. It walks the onboarding wizard the
-way a person does - link, workspace, clone and push, the environment terminal,
-a first run - and it is `make test-e2e`. docs/testing.md describes what each
-scenario covers and how to add a step to it.
+`web/e2e/` is the layout and browser-behavior layer. Playwright drives a real
+browser against a real `aether gui` gateway and server. `keyboard-focus`
+checks Escape ordering across an open dialog and run view and confirms that a
+focused control paints the app outline. `window-sizing` and
+`status-bar-sizing` exercise update notices and status controls at narrow and
+desktop dimensions. `board-card`, `run-switch`, `run-attach-retry`,
+`run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
+corresponding real UI transitions, gateway responses and terminal behavior.
+Run the full browser workflow with `make test-e2e`; its scenario inventory and
+setup details live in [testing.md](testing.md).
+
+When changing a visible contract, update the assertion at the layer that can
+observe it. Use a component test for state, text, role, focus and navigation
+behavior. Use Playwright for computed layout, actual browser focus outlines,
+responsive overflow, Escape ordering and gateway-backed flows. Do not add a
+test that only proves a class name, selector, source pattern, token string or
+implementation detail.

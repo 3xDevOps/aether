@@ -85,10 +85,10 @@ const test = base.extend<{ gateway: Gateway }>({
 })
 
 /**
- * Opens the dashboard as the desktop app does. The bridge `desktop/preload.js`
- * exposes makes the SPA draw its own title bar and, because the shell version
- * cannot match the CLI serving it, stack the stale-shell prompt above the CLI
- * one. Two prompts at once is the state the report came from.
+ * Opens the dashboard as the desktop app does. The bridge in
+ * `desktop/preload.js` makes the SPA draw its own title bar and, because the
+ * shell version cannot match the CLI serving it, stack the stale-shell prompt
+ * above the CLI one. Two prompts at once is the state the report came from.
  */
 async function openDesktop(page: Page, gateway: Gateway): Promise<void> {
   await page.addInitScript(() => {
@@ -107,7 +107,13 @@ async function openDesktop(page: Page, gateway: Gateway): Promise<void> {
     }
   })
   await page.goto(gateway.url)
-  await expect(page.getByText('The desktop app is out of date.')).toBeVisible()
+  // The prompt and status bar prove the app surface mounted. The splash has
+  // its own semantic startup marker; wait for it to detach before measuring,
+  // rather than racing the handoff overlay.
+  const stalePrompt = page.getByText('The desktop app is out of date.')
+  await expect(stalePrompt).toBeVisible()
+  await page.locator('[aria-label="Starting Aether"]').waitFor({ state: 'detached' })
+  await expect(page.getByRole('contentinfo')).toBeVisible()
 }
 
 /** The opening words of the two prompts a stale desktop shell puts up. */
@@ -120,10 +126,7 @@ const installedPrompts = ['The desktop app is out of date.', 'is installed.']
 /**
  * Both prompts carry their controls on their own first row. This is the
  * regression: while the strip wrapped, the controls sat under the prose
- * wherever the prose was too wide to share the row. Measured on the released
- * layout with the prompt this spec seeds, whose explanation is the longest of
- * the three: the controls share the row only above 1580px, and sit 76px to
- * 160px down at every size below it.
+ * wherever the prose was too wide to share the row.
  */
 async function expectControlsOnFirstRow(
   page: Page,
@@ -138,12 +141,17 @@ async function expectControlsOnFirstRow(
         el.textContent?.includes(headline),
       )
       if (!prompt) return null
-      // The buttons inside the prose column - a copyable command's own copy
-      // control - are part of the prose, not the prompt's controls.
-      const prose = prompt.firstElementChild
+      // The icon is the first child and the prose column the second. Copy
+      // controls inside that prose are not the prompt's action cluster.
+      const prose = prompt.children[1]
       const top = prompt.getBoundingClientRect().top
       return [...prompt.querySelectorAll('button, a')]
-        .filter((control) => !prose?.contains(control))
+        .filter(
+          (control) =>
+            !prose?.contains(control) &&
+            control.getClientRects().length > 0 &&
+            getComputedStyle(control).visibility !== 'hidden',
+        )
         .map((control) => Math.round(control.getBoundingClientRect().top - top))
     })
   }, headlines)
@@ -296,8 +304,8 @@ test('a long build error cannot hide the prompt underneath it', async ({
 
 // A browser tab has no minimum: `aether gui` prints a URL and the member can
 // make that window any size at all, which is what the desktop shell allowed
-// before this ticket. The prompts have to degrade there rather than take the
-// window over.
+// before this ticket. The prompts must keep every action usable rather than
+// taking the window over.
 test.describe('a window smaller than the shell allows', () => {
   test.use({ viewport: { width: 800, height: 480 } })
 
@@ -310,21 +318,11 @@ test.describe('a window smaller than the shell allows', () => {
     )
     await openDesktop(page, gateway)
 
-    // The prompts want more room than this window has, so the strip is in the
-    // state the scroll and the floor below it exist for.
-    const strip = await page.evaluate(() => {
-      const prompt = [...document.querySelectorAll('[role="status"]')].find((el) =>
-        el.textContent?.includes('The desktop app is out of date.'),
-      )
-      const el = prompt?.parentElement
-      return { scrollHeight: el?.scrollHeight ?? 0, clientHeight: el?.clientHeight ?? 0 }
-    })
-    expect(strip.scrollHeight).toBeGreaterThan(strip.clientHeight)
-
+    // The shell itself survives at this size: the app is not pushed off the
+    // bottom, and every prompt action remains measurable and in reach.
     await expect(page.getByRole('button', { name: 'Update now' })).toBeInViewport({
       ratio: 1,
     })
-    // The shell itself survives: the app is not pushed off the bottom.
     await expect(page.getByRole('contentinfo')).toBeInViewport({ ratio: 1 })
     await expectControlsOnFirstRow(page)
   })

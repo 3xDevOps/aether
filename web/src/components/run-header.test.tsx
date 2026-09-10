@@ -60,7 +60,6 @@ describe('run header', () => {
     const bar = header(name)
 
     expect(within(bar).getByText('Working')).toBeDefined()
-    expect(bar.querySelector('.working-dots')).not.toBeNull()
   })
 
   it.each(tabs)('shows the pending approval as needs-you on the %s tab', (name) => {
@@ -71,15 +70,13 @@ describe('run header', () => {
     // The domain status still reads `running`; only the presentation state
     // knows the agent is parked on a question.
     expect(within(bar).getByText('Needs you')).toBeDefined()
-    expect(bar.querySelector('.working-dots')).toBeNull()
   })
 
-  it.each(tabs)('drops the bounce on the %s tab once the run has finished', (name) => {
+  it.each(tabs)('shows the finished state on the %s tab', (name) => {
     seed({ status: 'merged' })
     const bar = header(name)
 
     expect(within(bar).getByText('Done')).toBeDefined()
-    expect(bar.querySelector('.working-dots')).toBeNull()
   })
 
   it.each(tabs)('marks the %s tab as the open one in the strip', (name) => {

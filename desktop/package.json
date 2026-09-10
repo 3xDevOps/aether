@@ -1,6 +1,6 @@
 {
   "name": "aether-desktop",
-  "version": "0.1.0",
+  "version": "0.3.0-alpha.1",
   "description": "Desktop shell for the Aether dashboard: spawns `aether gui` and renders its tokened loopback gateway.",
   "private": true,
   "homepage": "https://github.com/3xDevOps/Aether",

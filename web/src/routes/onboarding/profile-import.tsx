@@ -303,32 +303,36 @@ export function ProfileImport({
   }
 
   return (
-    <section aria-label="Bring your configuration" className="space-y-3">
-      <h2 className="text-sm font-medium">Bring your configuration</h2>
-      <p className="text-sm text-muted-foreground">
-        Your skills, custom commands, standing instructions, settings, MCP
-        servers and plugins live on this machine. Aether can copy them to the
-        server so an agent there runs with your configuration. Credential
-        files are excluded before anything is read, a file over 1 MiB or
-        past the 20 MiB a snapshot holds is left behind, and a push carries
-        an agent's whole configuration minus what is listed as left out.
-      </p>
-
+    <section
+      aria-label="Bring your configuration"
+      className="space-y-4 rounded-md border bg-background p-4 sm:p-5"
+    >
+      <div className="space-y-1">
+        <h3 className="text-base font-semibold">Bring your configuration</h3>
+        <p className="text-sm leading-6 text-muted-foreground">
+          Your skills, custom commands, standing instructions, settings, MCP
+          servers and plugins live on this machine. Aether can copy them to the
+          server so an agent there runs with your configuration. Credential
+          files are excluded before anything is read, a file over 1 MiB or
+          past the 20 MiB a snapshot holds is left behind, and a push carries
+          an agent's whole configuration minus what is listed as left out.
+        </p>
+      </div>
       {served && looking === '' && !looked && (
-        <div className="space-y-1">
+        <div className="rounded-md border bg-card p-3">
           <Button size="sm" onClick={() => void runPreviews()}>
             {previewed.length > 0 ? 'Look again' : 'Look at what is here'}
           </Button>
-          <p className="text-xs text-muted-foreground">
+          <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
             Reads the file list under each agent's configuration directory
             on this machine and checks it for secrets. Nothing is uploaded,
-            and nothing runs until you press it - a large configuration
+            and nothing runs until you press it. A large configuration
             directory takes a while to read.
           </p>
         </div>
       )}
       {looking !== '' && (
-        <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-state-working/30 bg-state-working/5 p-3">
           <p className="text-sm" role="status">
             Reading {friendly[looking] ?? looking}...
           </p>
@@ -338,8 +342,8 @@ export function ProfileImport({
         </div>
       )}
       {Object.entries(previewErrors).map(([name, detail]) => (
-        <div key={name} className="space-y-1">
-          <p className="text-xs text-state-failed">
+        <div key={name} className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3">
+          <p className="text-sm text-state-failed">
             Reading the {friendly[name] ?? name} configuration failed:{' '}
             {detail}
           </p>
@@ -347,11 +351,11 @@ export function ProfileImport({
       ))}
 
       {served && looked && scanHarness && phase.name === 'idle' && (
-        <div className="space-y-1">
+        <div className="rounded-md border bg-card p-3">
           <Button size="sm" variant="outline" onClick={startScan}>
             Ask an agent which configuration to bring
           </Button>
-          <p className="text-xs text-muted-foreground">
+          <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
             {friendly[scanHarness] ?? scanHarness} runs on this machine and
             proposes what is worth bringing. It sees paths and counts, never
             file contents. Nothing is copied until you approve the list.
@@ -359,11 +363,11 @@ export function ProfileImport({
         </div>
       )}
       {phase.name === 'scanning' && (
-        <div className="space-y-2">
+        <div className="space-y-3 rounded-md border border-state-working/30 bg-state-working/5 p-3">
           <p className="text-sm" role="status">
             {statusLine[phase.status]}
           </p>
-          <details className="rounded-md border bg-card">
+          <details className="overflow-hidden rounded-md border bg-card">
             <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-sm')}>
               View process
             </summary>
@@ -375,18 +379,18 @@ export function ProfileImport({
         </div>
       )}
       {phase.name === 'failed' && (
-        <div className="space-y-2">
-          <p className="text-sm">The agent did not finish.</p>
-          <p className="text-xs text-state-failed">{phase.detail}</p>
+        <div className="space-y-3 rounded-md border border-state-failed/30 bg-state-failed/5 p-3">
+          <p className="text-sm font-medium">The agent did not finish.</p>
+          <p className="text-sm text-state-failed">{phase.detail}</p>
           {phase.outputTail && (
-            <details className="rounded-md border bg-card">
+            <details className="overflow-hidden rounded-md border bg-card">
               <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-sm')}>
                 Last output
               </summary>
               <pre className={pane}>{phase.outputTail}</pre>
             </details>
           )}
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[13px] leading-5 text-muted-foreground">
             Choose what to bring below instead, or skip this step.
           </p>
           <Button size="sm" variant="outline" onClick={startScan}>
@@ -396,7 +400,7 @@ export function ProfileImport({
       )}
 
       {!served && (
-        <p className="text-sm text-muted-foreground">
+        <p className="rounded-md border bg-card p-3 text-sm text-muted-foreground">
           This gateway does not serve the profile verbs, so the import runs
           from a terminal with{' '}
           <span className="font-mono">aether profile push --agent claude</span>
@@ -409,7 +413,7 @@ export function ProfileImport({
         looked &&
         Object.keys(previewErrors).length === 0 &&
         present.length === 0 && (
-          <p className="text-sm text-muted-foreground">
+          <p className="rounded-md border bg-card p-3 text-sm text-muted-foreground">
             No agent configuration was found on this machine, so there is
             nothing to bring.
           </p>
@@ -417,7 +421,7 @@ export function ProfileImport({
 
       {present.length > 0 && (
         <>
-          <ul className="divide-y rounded-md border">
+          <ul className="overflow-hidden rounded-lg border bg-card">
             {present.map((preview) => (
               <ProfileRow
                 key={preview.harness}
@@ -485,7 +489,7 @@ function ProfileRow({
     .join(' ')
 
   return (
-    <li className="space-y-1 px-3 py-2 text-sm">
+    <li className="space-y-3 border-b p-4 last:border-b-0 sm:p-5 text-sm">
       <div className="flex items-start gap-3">
         <input
           type="checkbox"
@@ -494,24 +498,29 @@ function ProfileRow({
           checked={checked}
           onChange={(e) => onToggle(e.target.checked)}
         />
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="font-medium">{label}</p>
-          <p className="text-xs text-muted-foreground">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium">{label}</p>
+            <span className="rounded-sm bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+              {checked ? 'Selected' : 'Not selected'}
+            </span>
+          </div>
+          <p className="text-[13px] leading-5 text-muted-foreground">
             {previewSummary(preview)}
           </p>
           <p className="font-mono text-xs text-muted-foreground">
             {preview.root}
           </p>
           {snapshot && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[13px] leading-5 text-muted-foreground">
               Already imported on{' '}
               {new Date(snapshot.created_at).toLocaleDateString()}. Importing
               again replaces it with what is on this machine now.
             </p>
           )}
-          {reason && <p className="text-xs">{reason}</p>}
+          {reason && <p className="text-[13px] leading-5">{reason}</p>}
           {own.entries.length > 0 && (
-            <div className="space-y-1 rounded-md border bg-card p-3 text-xs">
+            <div className="space-y-2 rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-xs">
               <p className="text-state-failed">
                 {own.atLeast ? 'At least ' : ''}
                 {own.entries.length}{' '}
@@ -544,7 +553,7 @@ function ProfileRow({
             </div>
           )}
           {vendored.count > 0 && (
-            <p className="text-xs text-muted-foreground">
+            <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-xs text-state-failed">
               {vendored.atLeast ? 'At least ' : ''}
               {vendored.count} {vendored.count === 1 ? 'file' : 'files'} under{' '}
               <span className="font-mono">plugins/cache</span> and{' '}
@@ -555,7 +564,7 @@ function ProfileRow({
             </p>
           )}
           {suggested && suggested.length > 0 && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[13px] leading-5 text-muted-foreground">
               The agent pointed at {suggested.join(', ')}; a push carries the
               whole configuration.
             </p>
@@ -563,8 +572,8 @@ function ProfileRow({
         </div>
       </div>
       {excludedTotal > 0 && (
-        <details className="rounded-md border bg-card">
-          <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-xs')}>
+        <details className="overflow-hidden rounded-md border bg-background">
+          <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-[13px]')}>
             {`Left out of ${label}: ${excludedTotal} ${
               excludedTotal === 1 ? 'entry' : 'entries'
             }`}
@@ -589,14 +598,14 @@ function ProfileRow({
       )}
       {result && (
         <>
-          <p className="text-xs">
+          <p className="rounded-md border border-state-done/30 bg-state-done/5 p-3 text-sm text-state-done">
             Imported {result.files} files, {formatBytes(result.bytes)}, as
             snapshot <span className="font-mono">{result.snapshot_id}</span>.
           </p>
           {/* The push succeeded without these, so this is the only place
               the user learns they are not on the server. */}
           {result.skipped && result.skipped.length > 0 && (
-            <ul className="space-y-1 text-xs text-muted-foreground">
+            <ul className="space-y-1 rounded-md border bg-background p-3 text-xs text-muted-foreground">
               {result.skipped.map((e) => (
                 <li key={e.path}>
                   <span className="font-mono">{e.path}</span> was not sent -{' '}
@@ -607,7 +616,11 @@ function ProfileRow({
           )}
         </>
       )}
-      {failure && <p className="text-xs text-state-failed">{failure}</p>}
+      {failure && (
+        <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+          {failure}
+        </p>
+      )}
     </li>
   )
 }

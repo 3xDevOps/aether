@@ -227,12 +227,12 @@ describe('connect GitHub', () => {
     })
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('5. Agents')
+    ).toContain('Agents')
 
     // Only now does Back leave the step.
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('4. Repository')
+    ).toContain('Repository')
   }, 20_000)
 })

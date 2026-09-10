@@ -27,7 +27,6 @@ import {
   githubSubStep,
 } from '@/routes/onboarding/github-connect'
 import { ProfileImport } from '@/routes/onboarding/profile-import'
-import { actionRow } from '@/routes/onboarding/steps'
 import type { Capability } from '@/store/hooks'
 
 /**
@@ -117,7 +116,7 @@ export function AgentsStep({
   // has been set up, the primary Continue joins it rather than replacing
   // it, so "skip" never reads as "undo what I just did".
   const onward = (
-    <div className={actionRow}>
+    <div className="sticky bottom-0 z-10 -mx-5 mt-1 flex flex-wrap items-center gap-2 border-t bg-background/95 px-5 pb-5 pt-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
       {(done.length > 0 || github !== null) && (
         <Button size="sm" onClick={onNext}>
           Continue
@@ -132,7 +131,10 @@ export function AgentsStep({
 
   if (setup) {
     return (
-      <section aria-label="Agents" className="space-y-3">
+      <section
+        aria-label="Agents"
+        className="mx-auto w-full max-w-5xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+      >
         {setup === githubSubStep ? (
           <GitHubConnect
             client={client}
@@ -161,42 +163,63 @@ export function AgentsStep({
   }
 
   return (
-    <section aria-label="Agents" className="space-y-4">
-      <section aria-label="Set up an agent" className="space-y-3">
-        <h2 className="text-sm font-medium">Set up an agent on the server</h2>
-        <p className="text-sm text-muted-foreground">
-          Runs launch a coding agent on the server. Every agent the server
-          knows how to launch is listed below, installed or not, and a run
-          can only use one you have installed and logged in. Setup installs
-          the agent into your environment home, once for every workspace,
-          and it is safe to re-run. Confirming the install saves your
-          environment, so runs start with the agent already there.
+    <section
+      aria-label="Agents"
+      className="mx-auto w-full max-w-5xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+    >
+      <div className="space-y-1">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Step 5
         </p>
-        {loading && <Skeleton className="h-16 w-full" />}
+        <h2 className="text-xl font-semibold tracking-tight">Prepare your agents</h2>
+        <p className="text-sm leading-6 text-muted-foreground">
+          These optional setup paths make runs useful without blocking the
+          rest of onboarding.
+        </p>
+      </div>
+      <section
+        aria-label="Set up an agent"
+        className="space-y-4 rounded-md border bg-background p-4 sm:p-5"
+      >
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold">Set up an agent on the server</h3>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Runs launch a coding agent on the server. Every agent the server
+            knows how to launch is listed below, installed or not, and a run
+            can only use one you have installed and logged in. Setup installs
+            the agent into your environment home, once for every workspace,
+            and it is safe to re-run. Confirming the install saves your
+            environment, so runs start with the agent already there.
+          </p>
+        </div>
+
+        {loading && <Skeleton className="h-20 w-full rounded-md" />}
         {listError && (
-          <div className="space-y-2">
-            <p className="text-xs text-state-failed">{listError}</p>
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-state-failed/30 bg-state-failed/5 p-3">
+            <p className="text-sm text-state-failed">{listError}</p>
             <Button size="sm" variant="outline" onClick={loadHarnesses}>
               Retry
             </Button>
           </div>
         )}
         {agentsError && (
-          <p className="text-xs text-state-failed">{agentsError}</p>
+          <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+            {agentsError}
+          </p>
         )}
         {harnesses && harnesses.length > 0 && (
-          <ul className="divide-y rounded-md border">
+          <ul className="overflow-hidden rounded-lg border bg-card">
             {harnesses.map((h) => {
               const label = friendly[h.name] ?? h.name
               const listed = (agents ?? []).some((a) => a.name === h.name)
               return (
                 <li
                   key={h.name}
-                  className="flex items-start gap-3 px-3 py-2 text-sm"
+                  className="flex flex-wrap items-start gap-4 border-b px-4 py-3 last:border-b-0 sm:px-5"
                 >
-                  <span className="min-w-0 flex-1 space-y-0.5">
+                  <span className="min-w-0 flex-1 space-y-1 text-sm">
                     <span className="block font-medium">{label}</span>
-                    <span className="block text-xs text-muted-foreground">
+                    <span className="block text-[13px] leading-5 text-muted-foreground">
                       {h.installed
                         ? 'installed on this machine'
                         : 'not installed on this machine'}
@@ -206,7 +229,7 @@ export function AgentsStep({
                         : `the server does not list ${h.name}`}
                     </span>
                     {done.includes(h.name) && (
-                      <span className="block text-xs">
+                      <span className="block text-[13px] leading-5 text-state-done">
                         Set up in this session: the login and the installed
                         tools persist in your environment home.
                       </span>

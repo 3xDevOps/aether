@@ -36,8 +36,39 @@ function isPath(pathname, prefix) {
   return pathname === prefix || pathname.startsWith(`${prefix}/`)
 }
 
-function shouldProxy(requestURL, prefix) {
-  return isPath(new URL(requestURL || '/', 'http://localhost').pathname, prefix)
+function parseRequestPathname(requestURL) {
+  try {
+    return new URL(requestURL || '/', 'http://localhost').pathname
+  } catch {
+    return null
+  }
+}
+
+function shouldProxy(pathname, prefix) {
+  return pathname !== null && isPath(pathname, prefix)
+}
+
+const nextInspectorPath = '/__nextjs_attach-nodejs-inspector'
+
+function isInspectorActivation(requestURL) {
+  try {
+    // Match Next's WHATWG URL parsing, then account for its repeated-slash
+    // redirect normalization before the dev middleware chain.
+    const pathname = new URL(`http://n${requestURL || '/'}`).pathname
+    return pathname.replace(/\/+/g, '/') === nextInspectorPath
+  } catch {
+    return false
+  }
+}
+
+function rejectInspectorActivation(response) {
+  response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+  response.end('Not Found\n')
+}
+
+function rejectMalformedRequest(response) {
+  response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+  response.end('Bad Request\n')
 }
 
 function proxyHTTP(request, response) {
@@ -58,26 +89,41 @@ const app = next({ dev: true, hostname, port })
 await app.prepare()
 
 const handle = app.getRequestHandler()
-const handleUpgrade = app.getUpgradeHandler()
 
 const server = createServer((request, response) => {
   const requestURL = request.url || '/'
-  if (shouldProxy(requestURL, '/api') || shouldProxy(requestURL, '/local')) {
+  const pathname = parseRequestPathname(requestURL)
+  if (pathname === null) {
+    rejectMalformedRequest(response)
+    return
+  }
+  if (isInspectorActivation(requestURL)) {
+    rejectInspectorActivation(response)
+    return
+  }
+  if (shouldProxy(pathname, '/api') || shouldProxy(pathname, '/local')) {
     proxyHTTP(request, response)
     return
   }
   handle(request, response)
 })
 
+// The Next request handler installs its upgrade listener on the first request.
+// Keep this listener for the gateway path only; forwarding Next upgrades here
+// as well would make its HMR WebSocket handler consume each socket twice.
 server.on('upgrade', (request, socket, head) => {
-  if (shouldProxy(request.url || '/', '/ws')) {
+  const pathname = parseRequestPathname(request.url || '/')
+  if (pathname === null) {
+    socket.destroy()
+    return
+  }
+  if (shouldProxy(pathname, '/ws')) {
     proxy.ws(request, socket, head, (error) => {
       if (error) console.error(`Aether gateway WebSocket proxy failed: ${error.message}`)
       socket.destroy()
     })
     return
   }
-  void handleUpgrade(request, socket, head).catch(() => socket.destroy())
 })
 
 server.listen(port, hostname, () => {

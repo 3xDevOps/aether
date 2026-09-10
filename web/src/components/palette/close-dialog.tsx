@@ -24,23 +24,27 @@ export function CloseDialog() {
   const run = useStore((s) => (s.paletteRunID ? s.runs[s.paletteRunID] : undefined))
   const close = useStore((s) => s.closePaletteDialog)
   const [closing, setClosing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const finish = async (outcome: 'merged' | 'abandoned') => {
     if (!runID) return
     setClosing(true)
+    setError(null)
     try {
       await api.runClose(runID, outcome)
       close()
       toast.success(`Closed as ${outcome}`)
     } catch (err) {
       setClosing(false)
-      toast.error(`Close failed: ${message(err)}`)
+      const detail = `Close failed: ${message(err)}`
+      setError(detail)
+      toast.error(detail)
     }
   }
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Close this run?</DialogTitle>
           <DialogDescription>
@@ -48,7 +52,14 @@ export function CloseDialog() {
             board. Its branch stays.
           </DialogDescription>
         </DialogHeader>
-        <DialogFooter>
+        <div className="min-h-0 overflow-y-auto -mx-1 px-1">
+          {error && (
+            <p role="alert" className="text-xs text-state-failed">
+              {error}
+            </p>
+          )}
+        </div>
+        <DialogFooter className="border-t pt-4">
           <Button variant="outline" onClick={close}>
             Cancel
           </Button>

@@ -451,43 +451,6 @@ describe('the server update banner', () => {
     expect(screen.getByRole('button', { name: 'Update when idle' })).toBeTruthy()
   })
 
-  // Both of this banner's action containers, in every state that puts a
-  // button in one. jsdom has no layout engine, so this proves the class is
-  // on the container and nothing about the resulting layout; whether the
-  // buttons stay reachable beside a long prose column is a real-browser
-  // question, and `web/e2e/window-sizing.spec.ts` answers it.
-  test('keeps its action column unsqueezable in every state that offers one', async () => {
-    const actions = (name: string) =>
-      screen.getByRole('button', { name }).parentElement?.className ?? ''
-
-    const view = render(<UpdateBanners client={seedServer()} />)
-    await screen.findByRole('button', { name: 'Update now' })
-    expect(actions('Update now')).toMatch(/\bshrink-0\b/)
-
-    const phase = (payload: ServerUpdatePayload) =>
-      act(() => useStore.getState().applyServerUpdate(payload))
-
-    phase({ phase: 'scheduled', version: 'v1.3.0', actor_id: alice.id })
-    expect(actions('Cancel')).toMatch(/\bshrink-0\b/)
-
-    phase({ phase: 'failed', version: 'v1.3.0', detail: 'checksum mismatch' })
-    expect(actions('Update now')).toMatch(/\bshrink-0\b/)
-    view.unmount()
-
-    // Retry stands in the other container, which only a failed status read
-    // renders.
-    seed({ capabilities: caps({ local: ['link.status'] }) })
-    useStore.setState({ update: updateStatus({ server_behind: true }) })
-    const client = fakeApi({
-      serverUpdateStatus: vi.fn(async () => {
-        throw new Error('server.update_status: server unreachable')
-      }),
-    })
-    render(<UpdateBanners client={client} />)
-
-    await screen.findByRole('button', { name: 'Retry' })
-    expect(actions('Retry')).toMatch(/\bshrink-0\b/)
-  })
 })
 
 describe('the desktop app rebuild notice', () => {

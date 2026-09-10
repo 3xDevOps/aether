@@ -12,6 +12,7 @@ LDFLAGS := -s -w \
 
 DIST := dist
 BUN  := bun
+NODE := node
 
 # The Go version go.mod pins: the `toolchain` line when it names one, else the
 # `go` directive. `toolchain default` is legal and names no version, so only a
@@ -82,11 +83,16 @@ fmt-check:
 public-audit:
 	sh scripts/public-audit.sh
 
-# The server binary embeds web/dist (web/embed.go), so the SPA is built before
-# Go compiles. Bun installs and runs the scripts; Vite is the bundler.
+# The server binary embeds web/dist (web/embed.go), so the static dashboard
+# export is built before Go compiles. Bun installs dependencies; Node runs the
+# Next build.
 dashboard:
 	@command -v $(BUN) >/dev/null 2>&1 || { \
-		echo "make dashboard: $(BUN) not found - install Bun 1.3+ (https://bun.sh) to build the dashboard SPA in web/"; \
+		echo "make dashboard: $(BUN) not found - install Bun 1.3+ (https://bun.sh) to build the dashboard in web/"; \
+		exit 1; \
+	}
+	@command -v $(NODE) >/dev/null 2>&1 || { \
+		echo "make dashboard: $(NODE) not found - install Node.js 22+ to build the Next dashboard in web/"; \
 		exit 1; \
 	}
 	cd web && $(BUN) install --frozen-lockfile && $(BUN) run build

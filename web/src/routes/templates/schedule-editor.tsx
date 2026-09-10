@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { api, type Api } from '@/lib/api'
 import type { Schedule } from '@/lib/types'
 
@@ -64,42 +65,51 @@ export function ScheduleEditor({
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       <form
-        className="flex items-center gap-2"
+        className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end"
         aria-label={`Schedule for ${template}`}
         onSubmit={(e) => {
           e.preventDefault()
           void save()
         }}
       >
-        <Input
-          aria-label="Cron schedule"
-          placeholder="cron, e.g. 0 3 * * * (UTC)"
-          value={cron}
-          onChange={(e) => setCron(e.target.value)}
-        />
-        <Button type="submit" size="sm" variant="outline" disabled={busy || !cron.trim()}>
-          Schedule
-        </Button>
-        {current && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={() => void remove()}
-          >
-            Unschedule
+        <Label className="min-w-0 flex-1 space-y-1">
+          <span>Schedule (UTC)</span>
+          <Input
+            aria-label="Cron schedule"
+            placeholder="cron, e.g. 0 3 * * * (UTC)"
+            value={cron}
+            onChange={(e) => setCron(e.target.value)}
+          />
+        </Label>
+        <div className="flex flex-wrap gap-2 sm:shrink-0">
+          <Button type="submit" size="sm" variant="outline" disabled={busy || !cron.trim()}>
+            Schedule
           </Button>
-        )}
+          {current && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => void remove()}
+            >
+              Unschedule
+            </Button>
+          )}
+        </div>
       </form>
       {current?.next_fire_at && (
         <p className="text-xs text-muted-foreground">
           Next fire {current.next_fire_at}
         </p>
       )}
-      {error && <p className="text-xs text-state-failed">{error}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-state-failed">
+          {error}
+        </p>
+      )}
     </div>
   )
 }

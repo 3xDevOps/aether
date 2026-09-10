@@ -65,9 +65,15 @@ export function PaletteBody({
       value={command.value}
       disabled={command.disabled}
       onSelect={() => void perform(command)}
+      className="min-h-11 gap-3 px-3 py-2"
     >
-      <command.Icon />
-      {command.label}
+      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground transition-colors group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground">
+        <command.Icon />
+      </span>
+      <span className="min-w-0 flex-1 truncate">{command.label}</span>
+      {command.disabled && (
+        <span className="shrink-0 text-xs text-muted-foreground">Unavailable</span>
+      )}
     </CommandItem>
   )
 
@@ -82,13 +88,16 @@ export function PaletteBody({
 
   return (
     <>
-      <CommandInput placeholder="Jump to a run, or type a command..." />
-      <CommandList>
-        <CommandEmpty>Nothing matches.</CommandEmpty>
+      <CommandInput
+        placeholder="Search commands, runs, workspaces..."
+        className="h-11 px-2 text-[15px]"
+      />
+      <CommandList className="min-h-0 max-h-[min(520px,calc(100dvh-9rem))] px-1 pb-2">
+        <CommandEmpty className="py-10">No commands, runs, or workspaces match.</CommandEmpty>
 
         {focusedContext && (
           <>
-            <CommandGroup heading={runLabel(focusedContext.run)}>
+            <CommandGroup heading={`Focused run · ${runLabel(focusedContext.run)}`}>
               {runCommands(focusedContext).map(item)}
               {handoffCommands(focusedContext).map(item)}
             </CommandGroup>
@@ -96,31 +105,44 @@ export function PaletteBody({
           </>
         )}
 
-        <CommandGroup heading="Board">
+        <CommandGroup heading="Board actions">
           {boardCommands({ cap, role: self.role }).map(item)}
         </CommandGroup>
 
         {goTo.length > 0 && (
-          <CommandGroup heading="Go to">
+          <CommandGroup heading="Navigate">
             {goTo.map(({ name, label, Icon }) => (
-              <CommandItem key={name} value={`${label} ${name}`} onSelect={() => go(name)}>
-                <Icon />
-                {label}
+              <CommandItem
+                key={name}
+                value={`${label} ${name}`}
+                onSelect={() => go(name)}
+                className="min-h-11 gap-3 px-3 py-2"
+              >
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                  <Icon />
+                </span>
+                <span className="truncate">{label}</span>
               </CommandItem>
             ))}
           </CommandGroup>
         )}
 
-        <CommandGroup heading="Runs">
+        <CommandGroup heading="Attention runs">
           {runs.map(({ run, state }) => (
             <CommandItem
               key={run.id}
               value={`${run.task} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}`}
               onSelect={() => go('terminal', { runId: run.id })}
+              className="min-h-11 gap-3 px-3 py-2"
             >
-              <StateDot state={state} decorative />
-              <span className="truncate">{runLabel(run)}</span>
-              <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+              <StateDot state={state} decorative className="mx-1 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{runLabel(run)}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {workspaces[run.workspace_id]?.name ?? 'Workspace'} · {run.branch || 'No branch'}
+                </span>
+              </span>
+              <span className="shrink-0 text-xs font-medium text-muted-foreground">
                 {stateLabel[state]}
               </span>
             </CommandItem>
@@ -132,12 +154,14 @@ export function PaletteBody({
             <CommandItem
               key={w.id}
               value={`${w.name} ${w.base_branch} ${w.id}`}
-              // Opening a workspace also makes it the active scope, so the
-              // sidebar, the board and every launch follow.
               onSelect={() => go('workspace', { workspaceId: w.id })}
+              className="min-h-11 gap-3 px-3 py-2"
             >
-              <FolderGit2 />
-              <span className="truncate">{w.name}</span>
+              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                <FolderGit2 />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{w.name}</span>
+              <span className="max-w-32 truncate text-xs text-muted-foreground">{w.base_branch}</span>
             </CommandItem>
           ))}
         </CommandGroup>

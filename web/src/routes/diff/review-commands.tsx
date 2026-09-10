@@ -15,26 +15,39 @@ export function ReviewCommands({ run }: { run: RunRecord }) {
   const base = useStore((s) => s.diffs[run.id]?.base ?? '')
   const pulled = useStore((s) => s.pulls[run.id])
 
+  if (!pulled && !run.branch) return null
+
   return (
-    <>
-      {pulled && (
-        <details className="basis-full">
-          <summary className={cn(focusRing, 'cursor-pointer select-none')}>
-            fetched {pulled.ref}
-          </summary>
-          <pre className="mt-1 max-h-48 overflow-auto rounded-md border bg-muted/50 p-2 font-mono text-[11px] whitespace-pre-wrap">
-            {pulled.output}
-          </pre>
-        </details>
-      )}
+    <section
+      aria-label="Review locally"
+      className="basis-full rounded-md border bg-card p-2.5"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div>
+          <h2 className="text-xs font-medium text-foreground">Review locally</h2>
+          <p className="text-xs text-muted-foreground">
+            Copy a command to inspect this branch in your repository.
+          </p>
+        </div>
+        {pulled && (
+          <details className="min-w-0">
+            <summary className={cn(focusRing, 'cursor-pointer select-none text-xs')}>
+              fetched {pulled.ref}
+            </summary>
+            <pre className="mt-2 max-h-48 max-w-full overflow-auto rounded-md border bg-muted/50 p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
+              {pulled.output}
+            </pre>
+          </details>
+        )}
+      </div>
       {run.branch && (
-        <div className="basis-full space-y-1">
+        <div className="mt-2 grid min-w-0 gap-1.5 md:grid-cols-2">
           <CopyableCommand command={`git log --oneline aether/${run.branch}`} />
           <CopyableCommand
             command={`git diff ${base.slice(0, 8) || 'main'}...aether/${run.branch}`}
           />
         </div>
       )}
-    </>
+    </section>
   )
 }

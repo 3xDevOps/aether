@@ -31,7 +31,7 @@ import type { OnboardingRepo } from '@/store/ui'
  * of reach is the reason Back moved here.
  */
 export const actionRow =
-  'sticky bottom-0 z-10 -mx-4 -mb-4 flex gap-2 border-t bg-background px-4 pb-7 pt-3'
+  'sticky bottom-0 z-10 -mx-5 -mb-5 mt-6 flex flex-wrap items-center gap-2 border-t bg-card/95 px-5 pb-5 pt-4 backdrop-blur-sm'
 
 // Raw command output - git's, and gh's on the Connect GitHub screen:
 // scrollable, wrapped, never truncated.
@@ -104,24 +104,35 @@ export function LinkStep({
   const serverConfigured = status?.server_configured === true
 
   return (
-    <section aria-label="Link" className="space-y-3">
-      <h2 className="text-sm font-medium">Link to your server</h2>
-      {loading && <Skeleton className="h-16 w-full" />}
-      {statusError && <p className="text-xs text-state-failed">{statusError}</p>}
+    <section
+      aria-label="Link"
+      className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+    >
+      <div className="space-y-1">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Step 1
+        </p>
+        <h2 className="text-xl font-semibold tracking-tight">Link to your server</h2>
+      </div>
+      {loading && <Skeleton className="h-20 w-full rounded-md" />}
       {statusError && (
-        <Button size="sm" variant="outline" onClick={() => void check()}>
-          Retry
-        </Button>
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-state-failed/30 bg-state-failed/5 p-3">
+          <p className="text-sm text-state-failed">{statusError}</p>
+          <Button size="sm" variant="outline" onClick={() => void check()}>
+            Retry
+          </Button>
+        </div>
       )}
       {success && (
-        <div className="space-y-2 text-sm">
+        <div className="space-y-3 rounded-md border border-state-done/30 bg-state-done/5 p-4 text-sm">
+          <p className="font-medium text-state-done">Server linked</p>
           <p>
             Linked to <span className="font-mono">{success.addr}</span> as{' '}
             <span className="font-medium">{success.member.display_name}</span> (
             {success.member.role}).
           </p>
           {success.key_generated && (
-            <p>
+            <p className="text-muted-foreground">
               Created SSH key <span className="font-mono">{success.key_generated}</span>.
             </p>
           )}
@@ -135,36 +146,38 @@ export function LinkStep({
       )}
       {status && !serverConfigured && !success && (
         <form
-          className="space-y-3 text-sm"
+          className="max-w-2xl space-y-4 text-sm"
           aria-label="Link server"
           onSubmit={(e) => {
             e.preventDefault()
             void link()
           }}
         >
-          <Label className="block space-y-1">
-            Server address
-            <Input
-              required
-              placeholder="server-host:2222"
-              value={address}
-              disabled={linking}
-              onChange={(e) => setAddress(e.target.value)}
-            />
-          </Label>
-          <Label className="block space-y-1">
-            Invite code
-            <Input
-              value={invite}
-              disabled={linking}
-              onChange={(e) => setInvite(e.target.value)}
-            />
-          </Label>
-          <p className="text-xs text-muted-foreground">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Label className="block space-y-1.5">
+              Server address
+              <Input
+                required
+                placeholder="server-host:2222"
+                value={address}
+                disabled={linking}
+                onChange={(e) => setAddress(e.target.value)}
+              />
+            </Label>
+            <Label className="block space-y-1.5">
+              Invite code
+              <Input
+                value={invite}
+                disabled={linking}
+                onChange={(e) => setInvite(e.target.value)}
+              />
+            </Label>
+          </div>
+          <p className="text-[13px] leading-5 text-muted-foreground">
             Leave empty on a fresh server, where the first identity to link
             becomes the admin, or on a tailnet server.
           </p>
-          <Label className="block space-y-1">
+          <Label className="block max-w-sm space-y-1.5">
             Your name
             <Input
               value={name}
@@ -172,14 +185,17 @@ export function LinkStep({
               onChange={(e) => setName(e.target.value)}
             />
           </Label>
-          <Button type="submit" size="sm" disabled={linking || !address.trim()}>
-            {linking ? 'Linking...' : 'Link'}
-          </Button>
-          {linkError && <p className="text-xs text-state-failed">{linkError}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" size="sm" disabled={linking || !address.trim()}>
+              {linking ? 'Linking...' : 'Link'}
+            </Button>
+            {linkError && <p className="text-sm text-state-failed">{linkError}</p>}
+          </div>
         </form>
       )}
       {status && serverConfigured && !status.linked && !success && (
-        <div className="space-y-2 text-sm">
+        <div className="space-y-3 rounded-md border bg-muted/30 p-4 text-sm">
+          <p className="font-medium">Server is ready</p>
           <p>
             Connected to <span className="font-mono">{status.addr}</span> as{' '}
             <span className="font-medium">{status.user}</span>.
@@ -196,7 +212,8 @@ export function LinkStep({
         </div>
       )}
       {status && serverConfigured && status.linked && !success && (
-        <>
+        <div className="space-y-3 rounded-md border border-state-done/30 bg-state-done/5 p-4">
+          <p className="text-sm font-medium text-state-done">Already linked</p>
           <p className="text-sm">
             Linked to <span className="font-mono">{status.addr}</span> as{' '}
             <span className="font-medium">{status.user}</span>, with{' '}
@@ -208,7 +225,7 @@ export function LinkStep({
           >
             Continue
           </Button>
-        </>
+        </div>
       )}
     </section>
   )
@@ -267,16 +284,34 @@ export function WorkspaceStep({
   }
 
   return (
-    <section aria-label="Workspace" className="space-y-3">
-      <h2 className="text-sm font-medium">Choose a workspace</h2>
-      {loading && <Skeleton className="h-16 w-full" />}
-      {error && <p className="text-xs text-state-failed">{error}</p>}
+    <section
+      aria-label="Workspace"
+      className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+    >
+      <div className="space-y-1">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Step 3
+        </p>
+        <h2 className="text-xl font-semibold tracking-tight">Choose a workspace</h2>
+        <p className="text-sm leading-6 text-muted-foreground">
+          Runs share a repository and base branch inside one workspace.
+        </p>
+      </div>
+      {loading && <Skeleton className="h-20 w-full rounded-md" />}
+      {error && (
+        <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+          {error}
+        </p>
+      )}
       {workspaces && workspaces.length > 0 && (
-        <ul className="divide-y rounded-md border">
+        <ul className="overflow-hidden rounded-lg border bg-background">
           {workspaces.map((w) => (
-            <li key={w.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-              <span className="min-w-0 flex-1 truncate">{w.name}</span>
-              <span className="font-mono text-xs text-muted-foreground">
+            <li
+              key={w.id}
+              className="flex flex-wrap items-center gap-3 border-b px-4 py-3 last:border-b-0 sm:px-5"
+            >
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{w.name}</span>
+              <span className="rounded-sm bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
                 {w.base_branch}
               </span>
               <Button
@@ -285,7 +320,7 @@ export function WorkspaceStep({
                 aria-label={`Use ${w.name}`}
                 onClick={() => onNext(w)}
               >
-                Use
+                Use workspace
               </Button>
             </li>
           ))}
@@ -294,33 +329,34 @@ export function WorkspaceStep({
       {workspaces?.length === 0 &&
         (creating ? (
           <form
-            className="space-y-3"
+            className="max-w-2xl space-y-4"
             aria-label="Create workspace"
             onSubmit={(e) => {
               e.preventDefault()
               void create()
             }}
           >
-            <p className="text-sm text-muted-foreground">
-              No workspaces yet - create the first one. A workspace is one
-              repository plus the container the server builds for it, and
-              every run in it starts from that same setup.
+            <p className="rounded-md bg-muted/50 p-3 text-sm leading-6 text-muted-foreground">
+              No workspaces yet. Create the first one so the server has a
+              repository and container setup to use for every run.
             </p>
-            <Label className="block space-y-1">
-              Name
-              <Input
-                value={name}
-                placeholder="myproject"
-                onChange={(e) => setName(e.target.value)}
-              />
-            </Label>
-            <Label className="block space-y-1">
-              Base branch
-              <Input
-                value={baseBranch}
-                onChange={(e) => setBaseBranch(e.target.value)}
-              />
-            </Label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Label className="block space-y-1.5">
+                Name
+                <Input
+                  value={name}
+                  placeholder="myproject"
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </Label>
+              <Label className="block space-y-1.5">
+                Base branch
+                <Input
+                  value={baseBranch}
+                  onChange={(e) => setBaseBranch(e.target.value)}
+                />
+              </Label>
+            </div>
             <div className={actionRow}>
               <Button
                 type="submit"
@@ -514,26 +550,34 @@ export function RepoStep({
   }
 
   return (
-    <section aria-label="Repository" className="space-y-3">
-      <h2 className="text-sm font-medium">Connect your repository</h2>
-      <p className="text-sm text-muted-foreground">
-        The gateway adds an <span className="font-mono">aether</span> git
-        remote to a clone on this machine.{' '}
-        {canPush
-          ? 'Aether can then push your base branch for you - the history stays yours.'
-          : 'Pushing stays manual - the history is yours.'}
-      </p>
+    <section
+      aria-label="Repository"
+      className="mx-auto w-full max-w-4xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+    >
+      <div className="space-y-1">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Step 4
+        </p>
+        <h2 className="text-xl font-semibold tracking-tight">Connect your repository</h2>
+        <p className="text-sm leading-6 text-muted-foreground">
+          The gateway adds an <span className="font-mono">aether</span> git
+          remote to a clone on this machine.{' '}
+          {canPush
+            ? 'Aether can then push your base branch for you. The history stays yours.'
+            : 'Pushing stays manual. The history is yours.'}
+        </p>
+      </div>
       {!connected && (
         <>
           <form
-            className="flex items-end gap-3"
+            className="max-w-2xl space-y-4"
             aria-label="Link repository"
             onSubmit={(e) => {
               e.preventDefault()
               void link()
             }}
           >
-            <Label className="flex-1 space-y-1">
+            <Label className="block space-y-1.5">
               Repository path
               <Input
                 value={repo}
@@ -541,21 +585,27 @@ export function RepoStep({
                 onChange={(e) => setRepo(e.target.value)}
               />
             </Label>
-            <Button type="submit" size="sm" disabled={busy || !absolute}>
-              Add remote
-            </Button>
-            {back}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="submit" size="sm" disabled={busy || !absolute}>
+                Add remote
+              </Button>
+              {back}
+            </div>
           </form>
           {repo.trim() !== '' && !absolute && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               The path must be absolute.
             </p>
           )}
-          {error && <p className="text-xs text-state-failed">{error}</p>}
+          {error && (
+            <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+              {error}
+            </p>
+          )}
         </>
       )}
       {connected && (
-        <div className="space-y-2">
+        <div className="space-y-4 rounded-md border bg-background p-4 sm:p-5">
           <p className="text-sm">
             Connected <span className="font-mono">{connected.path}</span>.
             Remote <span className="font-mono">{connected.remote.remote}</span>{' '}
@@ -591,7 +641,7 @@ export function RepoStep({
             )}
           </p>
           {pushed?.state === 'behind' && !forwarded && (
-            <div className="space-y-2" aria-live="polite">
+            <div className="space-y-3 rounded-md border border-state-waiting/30 bg-state-waiting/5 p-4" aria-live="polite">
               <p className="text-sm">
                 The workspace is {commits(pushed.behind)} ahead of your clone.
               </p>
@@ -616,7 +666,7 @@ export function RepoStep({
                   <p className="text-xs text-state-failed">
                     The fast-forward failed:
                   </p>
-                  <pre className={`rounded-md border bg-card ${pane}`}>
+                  <pre className={`rounded-md border border-state-failed/30 bg-state-failed/5 ${pane}`}>
                     {forwardError}
                   </pre>
                 </div>
@@ -627,7 +677,7 @@ export function RepoStep({
             </div>
           )}
           {pushed?.state === 'diverged' && (
-            <div className="space-y-2" aria-live="polite">
+            <div className="space-y-3 rounded-md border border-state-needs-attention/30 bg-state-needs-attention/5 p-4" aria-live="polite">
               <p className="text-sm">
                 Your clone and the workspace have both moved on:{' '}
                 {commits(pushed.ahead)} here, {pushed.behind} there. Aether
@@ -644,7 +694,7 @@ export function RepoStep({
               </p>
               <p className="text-sm">Resolve it by hand, then push again:</p>
               <div className="flex items-start gap-2">
-                <pre className={`flex-1 rounded-md border bg-card ${pane}`}>
+                <pre className={`flex-1 rounded-md border bg-background ${pane}`}>
                   {resolveCmds}
                 </pre>
                 <Button
@@ -659,7 +709,7 @@ export function RepoStep({
             </div>
           )}
           {forwarded && (
-            <p className="text-sm" aria-live="polite">
+            <p className="rounded-md border border-state-done/30 bg-state-done/5 p-3 text-sm" aria-live="polite">
               {forwarded.current ? (
                 <>
                   Fast-forwarded{' '}
@@ -684,7 +734,7 @@ export function RepoStep({
             // branch]" both mean success and say different things, and the
             // reader who needs that distinction is the one who would not
             // know to go looking for it.
-            <details open className="rounded-md border bg-card">
+            <details open className="overflow-hidden rounded-md border bg-card">
               <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-sm')}>
                 What git did
               </summary>
@@ -706,7 +756,7 @@ export function RepoStep({
                     <p className="text-xs text-state-failed">
                       The push failed. Git said:
                     </p>
-                    <pre className={`rounded-md border bg-card ${pane}`}>
+                    <pre className={`rounded-md border border-state-failed/30 bg-state-failed/5 ${pane}`}>
                       {pushError}
                     </pre>
                   </div>
@@ -721,7 +771,7 @@ export function RepoStep({
                   {settled ? 'The same push, by hand:' : 'or run it yourself:'}
                 </p>
               )}
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <Input
                   ref={cmdRef}
                   readOnly
@@ -890,9 +940,17 @@ export function FirstRunStep({
 
   if (!workspace) {
     return (
-      <section aria-label="First run" className="space-y-3">
-        <h2 className="text-sm font-medium">Launch your first run</h2>
-        <p className="text-sm text-muted-foreground">
+      <section
+        aria-label="First run"
+        className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+      >
+        <div className="space-y-1">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            Step 6
+          </p>
+          <h2 className="text-xl font-semibold tracking-tight">Launch your first run</h2>
+        </div>
+        <p className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
           Choose a workspace before launching a run.
         </p>
         <div className={actionRow}>
@@ -906,12 +964,22 @@ export function FirstRunStep({
 
   if (agents !== null && agents.length === 0) {
     return (
-      <section aria-label="First run" className="space-y-3">
-        <h2 className="text-sm font-medium">Launch your first run</h2>
+      <section
+        aria-label="First run"
+        className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+      >
+        <div className="space-y-1">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            Step 6
+          </p>
+          <h2 className="text-xl font-semibold tracking-tight">Launch your first run</h2>
+        </div>
         {agentsError ? (
-          <p className="text-xs text-state-failed">{agentsError}</p>
+          <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+            {agentsError}
+          </p>
         ) : (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm leading-6 text-muted-foreground">
             A run launches an agent in a container, and no agent is installed
             in your environment yet.
           </p>
@@ -939,15 +1007,23 @@ export function FirstRunStep({
   }
 
   return (
-    <section aria-label="First run" className="space-y-3">
-      <h2 className="text-sm font-medium">Launch your first run</h2>
-      <p className="text-sm text-muted-foreground">
-        The run forks from <span className="font-mono">{workspace.base_branch}</span>{' '}
-        in {workspace.name}.
-      </p>
-      {loading && <Skeleton className="h-16 w-full" />}
+    <section
+      aria-label="First run"
+      className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+    >
+      <div className="space-y-1">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Step 6
+        </p>
+        <h2 className="text-xl font-semibold tracking-tight">Launch your first run</h2>
+        <p className="text-sm leading-6 text-muted-foreground">
+          The run forks from <span className="font-mono">{workspace.base_branch}</span>{' '}
+          in {workspace.name}.
+        </p>
+      </div>
+      {loading && <Skeleton className="h-20 w-full rounded-md" />}
       {agents && (
-        <Label className="block space-y-1">
+        <Label className="block max-w-sm space-y-1.5">
           Agent
           <select
             className={field}
@@ -963,16 +1039,20 @@ export function FirstRunStep({
           </select>
         </Label>
       )}
-      <Label className="block space-y-1">
+      <Label className="block max-w-2xl space-y-1.5">
         Task
         <Textarea
-          className="min-h-20"
+          className="min-h-28"
           value={task}
           placeholder="add a health check endpoint"
           onChange={(e) => setDraft({ ...draft, task: e.target.value })}
         />
       </Label>
-      {error && <p className="text-xs text-state-failed">{error}</p>}
+      {error && (
+        <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+          {error}
+        </p>
+      )}
       {withoutASubscription}
       <div className={actionRow}>
         <Button size="sm" disabled={busy || !ready} onClick={() => void launch()}>

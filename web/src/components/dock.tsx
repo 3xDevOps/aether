@@ -114,7 +114,7 @@ export function Dock({
   return (
     <section
       id={dockID}
-      className="relative flex shrink-0 flex-col border-t bg-background"
+      className="relative flex shrink-0 flex-col border-t border-border/90 bg-card/35"
       style={collapsed ? undefined : { height: clampDockHeight(height, viewport) }}
       aria-label="Terminal dock"
     >
@@ -132,14 +132,14 @@ export function Dock({
           onKeyDown={resizeKey}
           className={cn(
             focusRing,
-            'absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize hover:bg-accent',
+            'absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize rounded-sm bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20',
           )}
         />
       )}
-      <div className="flex h-9 min-h-9 items-center gap-1 border-b px-2">
+      <div className="flex h-10 min-h-10 items-center gap-1 border-b border-border/75 bg-background/65 px-2">
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <div
-            className="flex min-w-0 items-center gap-1"
+            className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             role={tabs.length > 0 ? 'tablist' : undefined}
             aria-label={tabs.length > 0 ? 'Terminal tabs' : undefined}
           >
@@ -147,8 +147,9 @@ export function Dock({
               <div
                 key={tab.id}
                 className={cn(
-                  'flex min-w-0 items-center rounded-md',
-                  activeTab === tab.id && 'bg-accent',
+                  'flex min-w-0 shrink-0 items-center rounded-md border border-transparent',
+                  activeTab === tab.id &&
+                    'border-primary/20 bg-[var(--accent-soft)] text-[var(--accent-soft-foreground)]',
                 )}
               >
                 <button
@@ -160,7 +161,10 @@ export function Dock({
                     !collapsed && activeTab === tab.id ? panelID : undefined
                   }
                   tabIndex={i === stop ? 0 : -1}
-                  className={cn(focusRing, 'truncate px-2 py-1 text-xs font-medium')}
+                  className={cn(
+                    focusRing,
+                    'min-h-8 min-w-0 max-w-40 truncate rounded-sm px-2.5 py-1.5 text-[13px] font-medium',
+                  )}
                   onFocus={() => setFocused(i)}
                   onClick={() => onSelectTab(tab.id)}
                   onKeyDown={(event) =>
@@ -174,7 +178,7 @@ export function Dock({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="mr-0.5 size-5"
+                    className="mr-0.5 size-7 rounded-sm"
                     aria-label={`Close ${tab.label}`}
                     onClick={(event) => {
                       event.stopPropagation()

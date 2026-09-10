@@ -3,27 +3,24 @@
 Layers, per the design spec's testing strategy:
 
 - **Unit tests** live beside their packages and run with `make test`
-  (race detector on). Permission matrices, budget math, profile push
-  rules, tailnet auth edge cases, scheduler transitions, and the
-  local gateway's own behaviours are proven there, once, and the E2E
-  suite does not restate them. Role changes belong to the same layer:
-  `internal/sshd/role_test.go` and `internal/sshd/permissions_test.go`
-  own promotion, demotion, the last-admin guard and what each role may
-  do, and the SPA's half of it (admin affordances gated on role, the
-  read-only roster) is in `web/src/routes/members/members.test.tsx`,
-  `web/src/components/shell/sidebar.test.tsx` and
-  `web/src/components/palette/palette.test.tsx`. The multi-member E2E row
-  below joins members and administers them; it does not re-prove the
-  matrix.
-- **Integration/E2E tests** are behind the `integration` build tag and
-  run with `make test-integration` (real Docker, real git). CI runs them
-  on every PR in the `integration` job of `.github/workflows/ci.yml`;
-  that job is the merge gate the E2E suite owns.
+  (race detector on). Permission matrices, budget math, profile push rules,
+  tailnet auth edge cases, scheduler transitions, and the local gateway's own
+  behaviors are proven there, once, and the E2E suite does not restate them.
+  Role changes belong to the same layer: `internal/sshd/role_test.go` and
+  `internal/sshd/permissions_test.go` own promotion, demotion, the last-admin
+  guard and what each role may do, and the SPA's half of it is in its rendered
+  route tests. The multi-member E2E row below joins members and administers
+  them; it does not re-prove the matrix.
+- **Integration/E2E tests** are behind the `integration` build tag and run with
+  `make test-integration` (real Docker, real git). CI runs them on every PR in
+  the `integration` job of `.github/workflows/ci.yml`; that job is the merge
+  gate the E2E suite owns.
 - **Dashboard end-to-end tests** live in `web/e2e/` and run with
-  `make test-e2e`: a real browser driving the shipped SPA against a real
-  `aether gui` gateway and a real `aether-server`. They own the paths a
-  person walks in the dashboard, which no Go test and no jsdom test
-  reaches. CI runs them in the `dashboard-e2e` job.
+  `make test-e2e`: a real browser driving the static Next export embedded by
+  the shipped binary, through a real `aether gui` gateway and a real
+  `aether-server`. They own the paths a person walks in the dashboard, which
+  no Go test and no jsdom test reaches. CI runs them in the `dashboard-e2e`
+  job.
 
 ## Local configuration in tests
 
@@ -172,21 +169,25 @@ template. Adding it is one more install line and one more map entry.
 ## The dashboard end-to-end suite
 
 `web/e2e/` drives the dashboard the way a person does: a Chromium browser on
-the SPA the CLI embeds, talking to a real `aether gui` gateway, which proxies
-every call over a real SSH connection to a real `aether-server`. Playwright
-is the runner, pinned to an exact version in `web/package.json`.
+the static Next export the CLI embeds, talking to a real `aether gui` gateway,
+which proxies every call over a real SSH connection to a real
+`aether-server`. Playwright is the runner, pinned to an exact version in
+`web/package.json`.
 
 ```sh
 (cd web && bunx playwright install chromium)   # once, from the repo root
 make test-e2e
 ```
 
-`make test-e2e` builds the dashboard and both binaries first. The CLI serves
-the SPA out of its own embedded `web/dist`, so a stale binary would test a
-stale dashboard.
+`make test-e2e` builds the static dashboard export and both binaries first. The
+CLI serves the SPA out of its own embedded `web/dist`, so a stale binary would
+test a stale dashboard. The dashboard itself has no production Next server.
 
-### What each test gets
-
+The browser suite owns behavior that jsdom cannot observe: actual hit testing,
+computed layout, responsive overflow, painted focus outlines and event ordering
+across document listeners. Component tests remain responsible for rendered
+roles, labels, state transitions, navigation and real gateway error text; a
+CSS class or source-pattern assertion is not a substitute for either layer.
 The `aether` fixture (`web/e2e/fixtures.ts`) builds one stack per test and
 tears it down with everything it created:
 
@@ -234,10 +235,11 @@ attaches the server's output to the report.
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
 | `run-provisioning` | Opening a run while its container is still being built: the terminal tab waits behind "Starting the run's container" instead of showing the gateway's refusal as a dead terminal, and attaches by itself once the run turns running |
 | `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
-| `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, and `Ctrl+Shift+F` finding what the shell printed and saying "No matches" when it did not |
-| `window-sizing` | The update prompts at the smallest window `desktop/main.js` allows, and at one smaller than that: every control the prompt carries sits on its first row in each state that offers one, and neither the app nor the status bar leaves the window |
-| `status-bar-sizing` | The status bar carrying every readout the width allows, on a server that is then stopped so its longest notice appears: the palette, shortcuts and theme controls stay in the window and the readouts give way inside their own group |
-| `keyboard-focus` | The two accessibility claims a jsdom test cannot make: Escape on a dialog over a run closes the dialog without also leaving the run, which turns on an ordering only a real key press produces; and a focused control paints the app's own outline, measured as computed style against the `--ring` token rather than as a class name |
+| `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
+| `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
+| `status-bar-sizing` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport |
+| `files-browser` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree |
+| `keyboard-focus` | Real browser checks that Escape closes a dialog on a run without leaving the run, and that a focused control paints the app's outline with computed style and contrast against the actual background |
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,

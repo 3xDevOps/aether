@@ -70,4 +70,14 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, aethe
 
   await find.press('Escape')
   await expect(dock.getByLabel('Find in terminal')).toBeHidden()
+
+  await dock.getByRole('button', { name: 'Collapse terminal dock' }).click()
+  await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
+  await expect(dock.locator('.xterm-rows')).toBeVisible({ timeout: 60_000 })
+  await dock.locator('.xterm-screen').click()
+  // Require new shell output rather than matching the echoed command.
+  await page.keyboard.type('printf "\\141ether-dock-resumed\\n"\n')
+  await expect(dock.locator('.xterm-rows')).toContainText('aether-dock-resumed', {
+    timeout: 30_000,
+  })
 })

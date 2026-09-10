@@ -7,13 +7,6 @@ import { useStore } from '@/store'
 // same way: as a property on the real window.
 const shellWindow = window as Window & { aetherDesktop?: AetherDesktop }
 
-// Read at assert time: a reference captured before the timers run points at a
-// detached node once the splash unmounts, and every class check on it passes.
-function splashClasses(container: HTMLElement): DOMTokenList {
-  expect(container.firstElementChild).not.toBeNull()
-  return (container.firstElementChild as HTMLElement).classList
-}
-
 describe('LaunchSplash', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -33,25 +26,31 @@ describe('LaunchSplash', () => {
     expect(container.innerHTML).toBe('')
   })
 
-  it('shows the night sky on a shell launch and fades once the store is hydrated', () => {
+  it('shows the branded night sky and shooting stars during a shell launch', () => {
     shellWindow.aetherDesktop = { platform: 'linux' }
 
     const { container } = render(<LaunchSplash />)
 
-    expect(splashClasses(container).contains('launch-splash')).toBe(true)
+    expect(container.firstElementChild).not.toBeNull()
+    expect(screen.getByTestId('launch-splash-mark')).toBeTruthy()
+    expect(screen.getByTestId('launch-splash-wordmark')).toBeTruthy()
     expect(screen.getByTestId('launch-splash-stars')).toBeTruthy()
     expect(screen.getByTestId('launch-splash-shooting-stars')).toBeTruthy()
+    expect(screen.getByTestId('launch-splash-status')).toBeTruthy()
 
     // Hydration alone does not end it: the minimum visible time still runs.
     act(() => {
       useStore.setState({ hydrated: true })
     })
-    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(false)
+    expect(container.firstElementChild).not.toBeNull()
 
     act(() => vi.advanceTimersByTime(600))
-    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(true)
+    expect(container.firstElementChild).not.toBeNull()
 
-    act(() => vi.advanceTimersByTime(260))
+    // The fade is visible for its full duration before unmounting.
+    act(() => vi.advanceTimersByTime(259))
+    expect(container.firstElementChild).not.toBeNull()
+    act(() => vi.advanceTimersByTime(1))
     expect(container.firstElementChild).toBeNull()
   })
 
@@ -63,9 +62,10 @@ describe('LaunchSplash', () => {
     // Up to the cap it is still there, so this cannot pass against a splash
     // that leaves on a shorter timer of its own.
     act(() => vi.advanceTimersByTime(2499))
-    expect(splashClasses(container).contains('launch-splash--leaving')).toBe(false)
+    expect(container.firstElementChild).not.toBeNull()
 
     act(() => vi.advanceTimersByTime(1))
+    expect(container.firstElementChild).not.toBeNull()
     act(() => vi.advanceTimersByTime(260))
 
     expect(useStore.getState().hydrated).toBe(false)

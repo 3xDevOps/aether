@@ -45,6 +45,7 @@ export function App() {
 
   return (
     <>
+      <ThemeEffect />
       <LaunchSplash />
       {/* The desktop window is frameless, so the title bar has to outrank the
           branch below it: without it the error page would leave an offline user
@@ -61,7 +62,6 @@ export function App() {
             />
           ) : (
             <>
-              <ThemeEffect />
               <AppShell />
               <Toaster position="bottom-right" richColors theme={theme} />
             </>

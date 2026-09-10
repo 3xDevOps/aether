@@ -107,12 +107,12 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
   )
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <ViewHeader
         title="Activity"
         subtitle={`${feed.length} ${feed.length === 1 ? 'entry' : 'entries'}`}
       />
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs">
+      <div className="grid shrink-0 grid-cols-1 gap-2 border-b bg-muted/20 px-4 py-3 sm:grid-cols-2 xl:grid-cols-4">
         <Select
           label="Workspace"
           value={filters.workspaceID}
@@ -144,33 +144,53 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3">
-        {error && <p className="mb-2 text-xs text-state-failed">{error}</p>}
-        <ol className="space-y-1">
-          {[...feed].reverse().map((event) => (
-            <FeedEntry key={event.id} event={event} runLink />
-          ))}
-        </ol>
-        {feed.length === 0 && !loading && (
-          <p className="text-sm text-muted-foreground">Nothing here yet.</p>
-        )}
-        {truncated && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Stopped after {pageBudget} entries, so part of this stretch of
-            history is not shown. Narrow the filters to see it.
-          </p>
-        )}
-        {older && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2"
-            disabled={loading}
-            onClick={() => void olderFeed(useStore, client)}
-          >
-            Load older
-          </Button>
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="mx-auto w-full max-w-5xl">
+          {error && (
+            <p
+              role="alert"
+              className="mb-3 rounded-md border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-sm text-state-failed"
+            >
+              {error}
+            </p>
+          )}
+          {loading && feed.length === 0 && !error && (
+            <div aria-label="Loading activity" className="space-y-2">
+              <div className="h-12 animate-pulse rounded-md bg-muted/60" />
+              <div className="h-12 animate-pulse rounded-md bg-muted/45" />
+            </div>
+          )}
+          <ol className="space-y-1">
+            {[...feed].reverse().map((event) => (
+              <FeedEntry key={event.id} event={event} runLink />
+            ))}
+          </ol>
+          {feed.length === 0 && !loading && !error && (
+            <div className="rounded-md border border-dashed px-4 py-8 text-center">
+              <p className="text-sm font-medium">Nothing here yet.</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">
+                Activity appears here as your team works in this workspace.
+              </p>
+            </div>
+          )}
+          {truncated && (
+            <p className="mt-3 rounded-md bg-muted/35 px-3 py-2 text-[13px] text-muted-foreground">
+              Stopped after {pageBudget} entries, so part of this stretch of
+              history is not shown. Narrow the filters to see it.
+            </p>
+          )}
+          {older && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              disabled={loading}
+              onClick={() => void olderFeed(useStore, client)}
+            >
+              Load older
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -188,14 +208,14 @@ function Select({
   options: (string[] | [string, string])[]
 }) {
   return (
-    <Label className="flex items-center gap-2 text-xs text-muted-foreground">
-      {label}
+    <Label className="flex min-w-0 flex-col items-stretch gap-1 text-[13px] font-medium text-foreground">
+      <span className="text-muted-foreground">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={cn(
           focusRing,
-          'max-w-44 truncate rounded-md border border-input bg-background px-2 py-1 text-foreground',
+          'h-9 min-w-0 w-full truncate rounded-sm border border-input bg-background px-2.5 text-sm text-foreground',
         )}
       >
         {options.map(([id, name]) => (

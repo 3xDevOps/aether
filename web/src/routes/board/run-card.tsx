@@ -2,10 +2,11 @@ import { Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
 import { useRef, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { StateIndicator } from '@/components/state-dot'
+import { Chip } from '@/components/ui/heroui'
 import { Button } from '@/components/ui/button'
 import { copyText } from '@/lib/clipboard'
 import { timeAgo } from '@/lib/format'
-import { runLabel, stateLabel } from '@/lib/status'
+import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
 import { MemberAvatar } from '@/routes/board/member-avatar'
@@ -37,7 +38,7 @@ export function RunCard({ card }: { card: BoardCard }) {
     <article
       style={{ borderLeftColor: owner?.color }}
       className={cn(
-        'relative rounded-md border border-l-3 bg-card shadow-xs transition-colors hover:bg-accent/50',
+        'relative overflow-hidden rounded-lg border border-l-3 bg-card shadow-xs transition-[border-color,background-color,box-shadow] duration-150 hover:border-foreground/20 hover:bg-accent/40 hover:shadow-sm',
         unseen ? 'border-foreground/25' : 'opacity-90',
       )}
     >
@@ -50,60 +51,71 @@ export function RunCard({ card }: { card: BoardCard }) {
         className={cn(
           focusRing,
           'focus-visible:-outline-offset-2',
-          'absolute inset-0 z-10 rounded-md',
+          'absolute inset-0 z-10 rounded-lg',
         )}
       />
 
-      <div className="space-y-3 p-3">
-        <div className="flex items-start gap-2">
-          <StateIndicator state={state} className="mt-1" />
-          <span
-            className={cn('min-w-0 flex-1 text-sm break-words', unseen && 'font-medium')}
-          >
-            <span className="line-clamp-2">{runLabel(run)}</span>
+      <div className="space-y-3.5 p-4">
+        <div className="flex items-start gap-2.5">
+          <StateIndicator state={state} decorative className="mt-1.5" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <StateChip state={state} />
+              {unseen && (
+                <Chip
+                  color="accent"
+                  variant="soft"
+                  size="sm"
+                  aria-label="Unseen"
+                >
+                  <Chip.Label>New</Chip.Label>
+                </Chip>
+              )}
+              {paused && (
+                <span title="Paused">
+                  <Chip color="warning" variant="soft" size="sm">
+                    <PauseCircle className="size-3" aria-hidden />
+                    <Chip.Label>Paused</Chip.Label>
+                  </Chip>
+                </span>
+              )}
+            </div>
+            <h3
+              className={cn(
+                'mt-2 line-clamp-2 break-words text-[15px] font-medium leading-5',
+                unseen && 'font-semibold',
+              )}
+            >
+              {runLabel(run)}
+            </h3>
             {run.title?.trim() && run.task.trim() && (
-              <span className="block truncate text-xs text-muted-foreground">
+              <p className="mt-1 line-clamp-2 break-words text-[13px] leading-5 text-muted-foreground">
                 {run.task.trim()}
+              </p>
+            )}
+          </div>
+          <div className="relative z-20 flex shrink-0 items-center gap-1">
+            {run.protected && (
+              <span
+                role="img"
+                aria-label="Protected: only the owner or an admin can steer or kill this run"
+                title="Protected: only the owner or an admin can steer or kill this run"
+                className="flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent"
+              >
+                <Shield className="size-3.5" aria-hidden />
               </span>
             )}
-          </span>
-          {paused && (
-            <span
-              title="Paused"
-              className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
-            >
-              <PauseCircle className="size-3.5" />
-              Paused
-            </span>
-          )}
-          {unseen && (
-            <span
-              role="img"
-              aria-label="Unseen"
-              title="Changed since you last looked"
-              className="mt-1.5 size-1.5 shrink-0 rounded-full bg-foreground"
-            />
-          )}
-          {run.protected && (
-            <span
-              role="img"
-              aria-label="Protected: only the owner or an admin can steer or kill this run"
-              title="Protected: only the owner or an admin can steer or kill this run"
-              className="relative z-20 flex shrink-0 items-center text-muted-foreground"
-            >
-              <Shield className="size-3.5" aria-hidden />
-            </span>
-          )}
-          <CardSlot name="card:badges" run={run} />
+            <CardSlot name="card:badges" run={run} />
+          </div>
         </div>
 
         {state === 'needs-attention' && summary && (
-          <p className="rounded-sm bg-state-needs-attention/10 px-1.5 py-1 text-xs text-foreground/80">
-            {summary}
-          </p>
+          <div className="relative z-20 rounded-md border border-state-needs-attention/25 bg-state-needs-attention/10 px-3 py-2">
+            <p className="text-[13px] leading-5 text-foreground/85">{summary}</p>
+          </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <div className="relative z-20 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t pt-3 text-[13px] text-muted-foreground">
           <HarnessGlyph harness={run.harness} mode={run.mode} />
           {/* A run whose checkout failed carries no branch, so the chip and
               its copy button would name and copy nothing. Raised above the
@@ -112,9 +124,9 @@ export function RunCard({ card }: { card: BoardCard }) {
               unreachable. The trade is that a click landing on the chip
               itself no longer opens the run. */}
           {run.branch && (
-            <span className="relative z-20 flex min-w-0 items-center gap-1">
-              <GitBranch className="size-3 shrink-0" aria-hidden />
-              <span ref={branchRef} className="truncate" title={run.branch}>
+            <span className="relative z-20 flex min-w-0 max-w-full items-center gap-1">
+              <GitBranch className="size-3.5 shrink-0" aria-hidden />
+              <span ref={branchRef} className="max-w-48 truncate select-text font-mono text-xs" title={run.branch}>
                 {run.branch}
               </span>
               <Button
@@ -122,7 +134,7 @@ export function RunCard({ card }: { card: BoardCard }) {
                 variant="ghost"
                 size="icon"
                 aria-label={`Copy branch ${run.branch}`}
-                className="size-5 shrink-0"
+                className="size-6 shrink-0"
                 onClick={() => void copyText(run.branch, branchRef.current)}
               >
                 <Copy className="size-3" aria-hidden />
@@ -134,23 +146,48 @@ export function RunCard({ card }: { card: BoardCard }) {
               className="flex items-center gap-1"
               title={run.last_commit}
             >
-              <GitCommit className="size-3 shrink-0" aria-hidden />
+              <GitCommit className="size-3.5 shrink-0" aria-hidden />
               committed {timeAgo(run.last_commit_at ?? run.created_at)}
             </span>
           )}
           <CardSlot name="card:chips" run={run} />
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <MemberAvatar member={owner} fallback={run.member_id} />
-          <span className="truncate">{owner?.display_name ?? run.member_id}</span>
-          <time className="ml-auto shrink-0" title={timestamps(card)}>
+        <div className="relative z-20 flex min-w-0 items-center gap-2 border-t pt-3 text-[13px] text-muted-foreground">
+          <MemberAvatar member={owner} fallback={run.member_id} className="size-6 text-[10px]" />
+          <span className="min-w-0 truncate">{owner?.display_name ?? run.member_id}</span>
+          <time className="ml-auto shrink-0 text-xs" title={timestamps(card)}>
             {timeAgo(run.stateChangedAt)}
           </time>
           <CardSlot name="card:footer" run={run} />
         </div>
       </div>
     </article>
+  )
+}
+
+const stateChipColor: Record<
+  PresentationState,
+  'accent' | 'danger' | 'default' | 'success' | 'warning'
+> = {
+  'needs-attention': 'warning',
+  failed: 'danger',
+  working: 'accent',
+  waiting: 'default',
+  done: 'success',
+  idle: 'default',
+}
+
+function StateChip({ state }: { state: PresentationState }) {
+  return (
+    <Chip
+      color={stateChipColor[state]}
+      variant="soft"
+      size="sm"
+      aria-label={stateLabel[state]}
+    >
+      <Chip.Label>{stateLabel[state]}</Chip.Label>
+    </Chip>
   )
 }
 

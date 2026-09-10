@@ -82,8 +82,10 @@ export function start(
   command: string,
   args: string[],
   env: NodeJS.ProcessEnv,
+  cwd?: string,
 ): Child {
   const child = spawn(command, args, {
+    cwd,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   })

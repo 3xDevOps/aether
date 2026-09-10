@@ -8,6 +8,7 @@
 // commands to run on its host rather than a button that could not work.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { CircleAlert, MonitorCog, ServerCog } from 'lucide-react'
 import { CliBanner } from '@/components/cli-update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { desktopBridge } from '@/components/shell/title-bar'
@@ -20,7 +21,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { banner, Dismiss, verbatim } from '@/components/update-banner-shared'
+import {
+  banner,
+  bannerActions,
+  bannerContent,
+  bannerIcon,
+  Dismiss,
+  verbatim,
+} from '@/components/update-banner-shared'
 import { api, type Api } from '@/lib/api'
 import { bareVersion, message } from '@/lib/format'
 import type {
@@ -29,7 +37,7 @@ import type {
   ServerUpdateWaiting,
   ServerUpdateWhen,
 } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -181,35 +189,47 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
 function ShellBanner() {
   const cliVersion = useStore((s) => s.capabilities?.version)
   const dismissed = useStore((s) => s.dismissedUpdates.shell)
-  // Not the check this banner is keyed on - shellIsStale only needs the
-  // shell and CLI versions - but the last in-app rebuild may have failed,
-  // which is worth saying here since it is why the shell is still old.
+  // A failed in-app rebuild explains why the shell is still on the old
+  // version, so keep its exact output in the notice.
   const buildError = useStore((s) => s.update?.shell_build_error)
-
   if (!shellIsStale(cliVersion) || !cliVersion) return null
   if (dismissed === cliVersion) return null
-
   return (
     <div role="status" className={banner}>
-      <div className="min-w-0 flex-1 space-y-1">
-        <p>
-          <span className="font-medium">The desktop app is out of date.</span>{' '}
-          It was built by aether {desktopBridge()?.shellVersion}, and {cliVersion}{' '}
-          is serving it now.
-        </p>
-        <p className="text-muted-foreground">
+      <div aria-hidden className={bannerIcon}>
+        <MonitorCog className="size-4" />
+      </div>
+      <div className={bannerContent}>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <p className="font-medium">The desktop app is out of date.</p>
+          <p className="text-xs text-muted-foreground">
+            Built by aether {desktopBridge()?.shellVersion}; serving {cliVersion}.
+          </p>
+        </div>
+        <p className="text-xs text-muted-foreground">
           The dashboard itself is current - it ships inside the CLI. Only the
           window around it is old.
         </p>
         {buildError && (
-          <>
-            <p className="text-muted-foreground">The last rebuild failed:</p>
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-state-failed">The last rebuild failed:</p>
             {/* This prompt renders above the CLI and server ones. */}
             <p className={cn(verbatim, 'text-state-failed')}>{buildError}</p>
-          </>
+          </div>
         )}
-        <p className="text-muted-foreground">Rebuild it in a terminal:</p>
-        <CopyableCommand command="aether gui build" />
+        <details className="text-xs text-muted-foreground">
+          <summary
+            className={cn(
+              focusRing,
+              'cursor-pointer select-none font-medium hover:text-foreground',
+            )}
+          >
+            Rebuild instructions
+          </summary>
+          <div className="mt-1.5">
+            <CopyableCommand command="aether gui build" />
+          </div>
+        </details>
       </div>
       <Dismiss kind="shell" version={cliVersion} />
     </div>
@@ -406,19 +426,36 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
   const scheduledBy =
     flow.name === 'scheduled' ? (members[flow.by]?.display_name ?? flow.by) : ''
 
+  const NoticeIcon = flow.name === 'failed' || error ? CircleAlert : ServerCog
+
   return (
     <div role="status" className={banner}>
-      <div className="min-w-0 flex-1 space-y-1">
-        <p>
-          <span className="font-medium">The server is behind.</span> Server{' '}
-          {running}, latest {latest}.
-        </p>
-        {flow.name === 'available' && capable && (
-          <p className="text-muted-foreground">
-            Updating replaces the server binaries and restarts the server. Runs
-            keep going - the server reattaches to their containers when it comes
-            back - and attached terminals reconnect on their own.
+      <div aria-hidden className={bannerIcon}>
+        <NoticeIcon className="size-4" />
+      </div>
+      <div className={bannerContent}>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <p className="font-medium">The server is behind.</p>
+          <p className="text-xs text-muted-foreground">
+            Server {running}, latest {latest}.
           </p>
+        </div>
+        {flow.name === 'available' && capable && (
+          <details className="text-xs text-muted-foreground">
+            <summary
+              className={cn(
+                focusRing,
+                'cursor-pointer select-none font-medium hover:text-foreground',
+              )}
+            >
+              What a server restart affects
+            </summary>
+            <p className="mt-1.5 leading-5">
+              Updating replaces the server binaries and restarts the server. Runs
+              keep going - the server reattaches to their containers when it comes
+              back - and attached terminals reconnect on their own.
+            </p>
+          </details>
         )}
         {flow.name === 'scheduled' && (
           <>
@@ -456,7 +493,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
                 ? 'Run these on the server host instead:'
                 : noButtonsLine(status, statusError)}
             </p>
-            <div className="space-y-1">
+            <div className="space-y-1 rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
               {manualCommands(status).map((command) => (
                 <CopyableCommand key={command} command={command} />
               ))}
@@ -465,14 +502,14 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
         )}
       </div>
       {!status && statusError && (
-        <div className="flex shrink-0 items-center gap-2">
+        <div className={bannerActions}>
           <Button size="sm" variant="outline" onClick={onRetry}>
             Retry
           </Button>
         </div>
       )}
       {canUpdate && capable && (
-        <div className="flex shrink-0 items-center gap-2">
+        <div className={bannerActions}>
           {flow.name === 'scheduled' ? (
             <Button
               size="sm"

@@ -93,11 +93,11 @@ export function RunActions({ run }: { run: RunRecord }) {
       {commands.map((command) => (
         <Button
           key={command.id}
-          variant="ghost"
+          variant={primaryCommands[command.id] ? 'secondary' : 'ghost'}
           size="sm"
           className={cn(
-            'h-6 px-2',
-            !primaryCommands[command.id] && 'hidden @4xl/header:inline-flex',
+            'h-8 px-2.5 text-[13px]',
+            !primaryCommands[command.id] && 'hidden @4xl/run-header:inline-flex',
           )}
           title={command.label}
           disabled={running !== null || command.disabled}
@@ -119,7 +119,7 @@ export function RunActions({ run }: { run: RunRecord }) {
         <Button
           variant="ghost"
           size="sm"
-          className="hidden h-6 px-2 @4xl/header:inline-flex"
+          className="hidden h-8 px-2.5 text-[13px] @4xl/run-header:inline-flex"
           title="Hand off to another member"
           disabled={running !== null}
           onClick={() => setHandoff(true)}
@@ -136,7 +136,7 @@ export function RunActions({ run }: { run: RunRecord }) {
               ref={moreTrigger}
               variant="ghost"
               size="sm"
-              className="h-6 px-2 @4xl/header:hidden"
+              className="h-8 px-2.5 text-[13px] @4xl/run-header:hidden"
               title="More actions"
               disabled={running !== null}
             >

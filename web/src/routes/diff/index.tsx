@@ -58,66 +58,97 @@ function DiffView({ params }: RouteProps) {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <RunHeader run={run} subtitle={run.branch} />
       <RunTabs runID={runID} active="diff" />
       <div {...runTabPanel('diff', 'flex min-h-0 flex-1 flex-col')}>
-        <div className="px-4 pt-3">
+        <div className="shrink-0 px-4 pt-3">
           <Land run={run} />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground">
-          {snapshot ? (
-            <span>What changed {timeAgo(snapshot.time)}</span>
-          ) : (
-            <span>
-              Current diff against{' '}
-              <code title={state.base}>{state.base.slice(0, 8) || 'the fork point'}</code>
+        <div className="shrink-0 border-b bg-muted/10 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-foreground">
+                {snapshot ? 'Interval review' : 'Current diff'}
+              </p>
+              <p className="mt-0.5 truncate">
+                {snapshot ? (
+                  <>What changed {timeAgo(snapshot.time)}</>
+                ) : (
+                  <>
+                    Against{' '}
+                    <code title={state.base} className="font-mono">
+                      {state.base.slice(0, 8) || 'the fork point'}
+                    </code>
+                  </>
+                )}
+              </p>
+            </div>
+            <span className="font-mono">
+              {shown.length} file{shown.length === 1 ? '' : 's'}
             </span>
-          )}
-          <span>
-            {shown.length} file{shown.length === 1 ? '' : 's'}
-          </span>
-          <span className="text-state-done">+{total(shown, 'additions')}</span>
-          <span className="text-destructive">-{total(shown, 'deletions')}</span>
-          <ConflictChips run={run} />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-auto h-6 px-2"
-            onClick={() => useStore.getState().refreshDiff(runID)}
-          >
-            <RefreshCw className={cn('size-3', state.status === 'loading' && 'animate-spin')} />
-            Refresh
-          </Button>
-          <ReviewCommands run={run} />
+            <span className="font-mono text-state-done">+{total(shown, 'additions')}</span>
+            <span className="font-mono text-destructive">-{total(shown, 'deletions')}</span>
+            <ConflictChips run={run} />
+            {snapshot && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                aria-label="Show current diff"
+                onClick={() => setSelected(null)}
+              >
+                Current diff
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2"
+              onClick={() => useStore.getState().refreshDiff(runID)}
+            >
+              <RefreshCw
+                className={cn('size-3.5', state.status === 'loading' && 'animate-spin')}
+                aria-hidden
+              />
+              Refresh
+            </Button>
+          </div>
+          <div className="mt-3">
+            <ReviewCommands run={run} />
+          </div>
         </div>
 
         {failed && (
-          <p className="border-b bg-destructive/10 px-4 py-1.5 text-xs">
+          <p role="alert" className="shrink-0 border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">
             {error ?? 'The diff could not be loaded.'}
           </p>
         )}
         {truncated && (
-          <p className="border-b bg-state-waiting/10 px-4 py-1.5 text-xs">
+          <p className="shrink-0 border-b bg-state-waiting/10 px-4 py-2 text-sm text-muted-foreground">
             This diff is too large to render in full; everything below the cut is
             missing. Fetch the run branch to read it whole.
           </p>
         )}
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[13rem_1fr]">
           <Timeline
             snapshots={state.snapshots}
             selected={selected}
             onSelect={(time) => setSelected(time === selected ? null : time)}
           />
-          <div className="min-w-0 space-y-3 overflow-auto p-3">
-            {shown.map((file) => (
-              <FilePatch key={file.path} file={file} />
-            ))}
-            {shown.length === 0 && note && (
-              <p className="text-sm text-muted-foreground">{note}</p>
-            )}
+          <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-3">
+            <div className="space-y-3">
+              {shown.map((file) => (
+                <FilePatch key={file.path} file={file} />
+              ))}
+              {shown.length === 0 && note && (
+                <p className="rounded-lg border border-dashed bg-card p-6 text-sm text-muted-foreground">
+                  {note}
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -167,16 +198,16 @@ function Timeline({
   onSelect: (time: string) => void
 }) {
   return (
-    <aside className="overflow-auto border-b md:border-r md:border-b-0">
-      <h2 className="px-3 pt-2 text-xs font-medium text-muted-foreground">
-        When files changed
-      </h2>
-      <p className="px-3 py-1 text-xs text-muted-foreground">
-        {snapshots.length === 0
-          ? 'Nothing since you opened the dashboard.'
-          : 'Selecting one shows what that interval changed.'}
-      </p>
-      <ul>
+    <aside className="min-h-0 max-h-56 overflow-y-auto border-b bg-muted/10 md:max-h-none md:border-b-0 md:border-r">
+      <div className="sticky top-0 z-10 border-b bg-muted/90 px-3 py-2 backdrop-blur">
+        <h2 className="text-xs font-medium text-foreground">Change intervals</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {snapshots.length === 0
+            ? 'Nothing since you opened the dashboard.'
+            : 'Select an interval to review what changed.'}
+        </p>
+      </div>
+      <ul className="p-1.5">
         {snapshots.map((snap, i) => {
           const shownable = range(snap) !== null
           return (
@@ -189,18 +220,21 @@ function Timeline({
                 aria-pressed={selected === snap.time}
                 className={cn(
                   focusRing,
-                  'focus-visible:-outline-offset-2',
-                  'w-full px-3 py-1.5 text-left text-xs hover:bg-accent/50',
-                  selected === snap.time && 'bg-accent',
+                  'w-full rounded-md px-2.5 py-2 text-left text-xs hover:bg-accent/60',
+                  selected === snap.time && 'bg-accent text-accent-foreground',
                   !shownable && 'cursor-not-allowed opacity-60 hover:bg-transparent',
                 )}
               >
-                <span className="block">{timeAgo(snap.time)}</span>
-                <span className="block text-muted-foreground">
+                <span className="block font-medium">{timeAgo(snap.time)}</span>
+                <span className="mt-0.5 block text-muted-foreground">
                   {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
                   {' · '}
-                  <span className="text-state-done">+{total(snap.files, 'additions')}</span>{' '}
-                  <span className="text-destructive">-{total(snap.files, 'deletions')}</span>
+                  <span className="font-mono text-state-done">
+                    +{total(snap.files, 'additions')}
+                  </span>{' '}
+                  <span className="font-mono text-destructive">
+                    -{total(snap.files, 'deletions')}
+                  </span>
                 </span>
               </button>
             </li>

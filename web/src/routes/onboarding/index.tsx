@@ -32,7 +32,7 @@ import { useCapability } from '@/store/hooks'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
 /** One step's marker in the header: reached, current, or still ahead. */
-const chip = 'rounded-sm border px-1.5 py-0.5'
+const chip = 'rounded-md border px-2.5 py-1.5'
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
@@ -85,12 +85,15 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
     return (
       <div className="flex h-full flex-col">
         <ViewHeader title="Onboarding" />
-        <div className="flex flex-1 items-center justify-center p-4">
-          <p className="max-w-md text-center text-sm text-muted-foreground">
-            Onboarding runs in the desktop app or `aether gui`, where the
-            gateway holds your SSH identity and can reach your local
-            repositories. This gateway is a remote monitor.
-          </p>
+        <div className="flex flex-1 items-center justify-center p-6">
+          <div className="w-full max-w-lg rounded-lg border bg-card p-6 text-center shadow-sm">
+            <p className="text-base font-medium">Onboarding needs a local gateway</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Onboarding runs in the desktop app or `aether gui`, where the
+              gateway holds your SSH identity and can reach your local
+              repositories. This gateway is a remote monitor.
+            </p>
+          </div>
         </div>
       </div>
     )
@@ -99,96 +102,138 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   return (
     <div className="flex h-full flex-col">
       <ViewHeader title="Onboarding" subtitle={current} />
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        <ol
-          aria-label="Steps"
-          className="sticky top-0 z-10 -mx-4 -mt-4 flex flex-wrap gap-2 bg-background px-4 pb-2 pt-4 text-xs"
-        >
-          {onboardingSteps.map((label, i) => (
-            <li key={label} aria-current={i === step ? 'step' : undefined}>
-              {i !== step && i <= furthest ? (
-                <button
-                  type="button"
-                  aria-label={`${i + 1}. ${label}, done - go to this step`}
-                  className={cn(focusRing, chip, 'flex items-center gap-1 hover:bg-accent')}
-                  onClick={() => setStep(i)}
-                >
-                  <Check className="size-3" aria-hidden />
-                  {i + 1}. {label}
-                </button>
-              ) : (
-                <span
-                  className={`${chip} block ${
-                    i === step ? 'font-medium' : 'text-muted-foreground'
-                  }`}
-                >
-                  {i + 1}. {label}
-                </span>
-              )}
-            </li>
-          ))}
-        </ol>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                Setup path
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Step {step + 1} of {onboardingSteps.length}
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Your progress is saved as you move through the wizard.
+            </p>
+          </div>
+          <ol
+            aria-label="Steps"
+            className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+          >
+            {onboardingSteps.map((label, i) => (
+              <li key={label} aria-current={i === step ? 'step' : undefined}>
+                {i !== step && i <= furthest ? (
+                  <button
+                    type="button"
+                    aria-label={`${i + 1}. ${label}, done - go to this step`}
+                    className={cn(
+                      focusRing,
+                      chip,
+                      'flex w-full items-center gap-2 text-left text-sm transition-colors hover:border-primary/50 hover:bg-accent',
+                    )}
+                    onClick={() => setStep(i)}
+                  >
+                    <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <Check className="size-3" aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      <span aria-hidden="true" className="mr-1 text-xs text-muted-foreground">{i + 1}</span>
+                      {label}
+                    </span>
+                  </button>
+                ) : (
+                  <span
+                    className={cn(
+                      chip,
+                      'flex w-full items-center gap-2 text-sm',
+                      i === step
+                        ? 'border-primary/50 bg-primary/10 text-foreground'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'flex size-5 items-center justify-center rounded-full text-xs',
+                        i === step
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted',
+                      )}
+                    >
+                      <span aria-hidden="true">{i + 1}</span>
+                    </span>
+                    <span className="min-w-0 truncate">{label}</span>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
 
-        {current === 'Link' && (
-          <LinkStep
-            client={client}
-            onNext={(nextStep) => setStep(nextStep)}
-          />
-        )}
-        {current === 'Git identity' && (
-          <GitIdentityStep
-            client={client}
-            caps={caps}
-            back={back}
-            onNext={() => setStep(onboardingStepIndex('Workspace'))}
-          />
-        )}
-        {current === 'Workspace' && (
-          <WorkspaceStep
-            client={client}
-            caps={caps}
-            back={back}
-            onNext={(w) => {
-              upsertWorkspace(w)
-              setOnboardingWorkspace(w.id)
-              setActiveWorkspace(w.id)
-              setStep(onboardingStepIndex('Repository'))
-            }}
-          />
-        )}
-        {current === 'Repository' && (
-          <RepoStep
-            client={client}
-            caps={caps}
-            workspace={workspace}
-            back={back}
-            onNext={() => setStep(onboardingStepIndex('Agents'))}
-          />
-        )}
-        {current === 'Agents' && (
-          <AgentsStep
-            client={client}
-            caps={caps}
-            workspace={workspace}
-            back={back}
-            setup={subStep}
-            onSetup={setSubStep}
-            onReady={setSetUpHarness}
-            onNext={() => setStep(onboardingStepIndex('First run'))}
-          />
-        )}
-        {current === 'First run' && (
-          <FirstRunStep
-            client={client}
-            workspace={workspace}
-            back={back}
-            defaultHarness={setUpHarness}
-            onBackToWorkspace={() => setStep(onboardingStepIndex('Workspace'))}
-            onBackToAgents={() => setStep(onboardingStepIndex('Agents'))}
-          />
-        )}
+          <div className="min-w-0">
+            {current === 'Link' && (
+              <LinkStep
+                client={client}
+                onNext={(nextStep) => setStep(nextStep)}
+              />
+            )}
+            {current === 'Git identity' && (
+              <GitIdentityStep
+                client={client}
+                caps={caps}
+                back={back}
+                onNext={() => setStep(onboardingStepIndex('Workspace'))}
+              />
+            )}
+            {current === 'Workspace' && (
+              <WorkspaceStep
+                client={client}
+                caps={caps}
+                back={back}
+                onNext={(w) => {
+                  upsertWorkspace(w)
+                  setOnboardingWorkspace(w.id)
+                  setActiveWorkspace(w.id)
+                  setStep(onboardingStepIndex('Repository'))
+                }}
+              />
+            )}
+            {current === 'Repository' && (
+              <RepoStep
+                client={client}
+                caps={caps}
+                workspace={workspace}
+                back={back}
+                onNext={() => setStep(onboardingStepIndex('Agents'))}
+              />
+            )}
+            {current === 'Agents' && (
+              <AgentsStep
+                client={client}
+                caps={caps}
+                workspace={workspace}
+                back={back}
+                setup={subStep}
+                onSetup={setSubStep}
+                onReady={setSetUpHarness}
+                onNext={() => setStep(onboardingStepIndex('First run'))}
+              />
+            )}
+            {current === 'First run' && (
+              <FirstRunStep
+                client={client}
+                workspace={workspace}
+                back={back}
+                defaultHarness={setUpHarness}
+                onBackToWorkspace={() => setStep(onboardingStepIndex('Workspace'))}
+                onBackToAgents={() => setStep(onboardingStepIndex('Agents'))}
+              />
+            )}
+          </div>
+        </main>
       </div>
     </div>
+
+
   )
 }
 

@@ -28,13 +28,13 @@ export function ConflictChips({ run }: CardSlotProps) {
         aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their run`}
         className={cn(
           focusRing,
-          'flex min-w-0 items-center gap-1 rounded-full border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 py-0.5 text-[11px] hover:bg-state-needs-attention/20',
+          'inline-flex min-w-0 items-center gap-1.5 rounded-md border border-state-needs-attention/40 bg-state-needs-attention/10 px-2 py-1 text-xs hover:bg-state-needs-attention/20',
         )}
       >
-        <TriangleAlert className="size-3 shrink-0" aria-hidden />
-        <span className="max-w-32 truncate">{basename(first)}</span>
-        {rest.length > 0 && <span className="shrink-0">+{rest.length}</span>}
-        <span className="shrink-0 truncate" style={{ color: member?.color }}>
+        <TriangleAlert className="size-3.5 shrink-0 text-state-needs-attention" aria-hidden />
+        <span className="max-w-32 truncate font-mono">{basename(first)}</span>
+        {rest.length > 0 && <span className="shrink-0 text-muted-foreground">+{rest.length}</span>}
+        <span className="max-w-28 shrink-0 truncate" style={{ color: member?.color }}>
           {who}
         </span>
       </button>

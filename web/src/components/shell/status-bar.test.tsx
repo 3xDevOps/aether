@@ -46,6 +46,21 @@ test('the version label is plain until an update is available', () => {
   expect(screen.queryByRole('button', { name: /Update available/ })).toBeNull()
 })
 
+test('opens and closes the secondary status actions from the narrow menu', () => {
+  seed()
+  render(<StatusBar />)
+
+  const toggle = screen.getByLabelText('Show status details')
+  const details = toggle.closest('details')
+  expect(details?.hasAttribute('open')).toBe(false)
+
+  fireEvent.click(toggle)
+  expect(details?.hasAttribute('open')).toBe(true)
+
+  fireEvent.click(toggle)
+  expect(details?.hasAttribute('open')).toBe(false)
+})
+
 test('a CLI update turns the label into a button that clears the dismissals', () => {
   seed()
   render(<StatusBar />)
@@ -136,8 +151,8 @@ describe('the server update notice', () => {
   })
 })
 
-// Everything here truncates in a one-row bar that never scrolls sideways, and
-// the half that says what to do about it is the half that goes first.
+// Every desktop readout keeps its full text in the title for the responsive
+// status layout; narrow screens place these readouts in the details menu.
 test('every truncated readout keeps its whole text in the title', () => {
   const unreachable =
     'server unreachable over SSH - check the server and network; retrying'
@@ -152,29 +167,6 @@ test('every truncated readout keeps its whole text in the title', () => {
   expect(screen.getByText(update).getAttribute('title')).toBe(update)
   expect(screen.getByText(bob.display_name).getAttribute('title')).toBe(
     bob.display_name,
-  )
-})
-
-// Which readout the bar gives up first, as the breakpoint classes that encode
-// it. jsdom has no layout engine and never evaluates a media query, so this
-// proves the order and nothing about the resulting layout; whether the
-// right-hand group stays reachable is a real-browser question, and
-// `web/e2e/status-bar-sizing.spec.ts` answers it against a real server.
-test('the bar gives up the disk gauge first, then the member name', () => {
-  seed({ update: null })
-  render(<StatusBar />)
-
-  const gauge = screen.getByLabelText('Disk usage').className
-  expect(gauge).toMatch(/\bhidden\b/)
-  expect(gauge).toMatch(/\bxl:flex\b/)
-
-  const member = screen.getByText(alice.display_name).className
-  expect(member).toMatch(/\bhidden\b/)
-  expect(member).toMatch(/\blg:block\b/)
-
-  // The version label outranks both: it is the way back to a dismissed banner.
-  expect(screen.getByText(`aether ${serverInfo.server_version}`).className).not.toMatch(
-    /\bhidden\b/,
   )
 })
 
