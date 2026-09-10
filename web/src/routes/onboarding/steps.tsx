@@ -36,12 +36,12 @@ import type { Capability } from '@/store/hooks'
  * of reach is the reason Back moved here.
  */
 export const actionRow =
-  'sticky bottom-0 z-10 -mx-5 -mb-5 mt-6 flex flex-wrap items-center gap-2 border-t bg-card/95 px-5 pb-5 pt-4 backdrop-blur-sm'
+  'sticky bottom-0 z-10 mt-4 flex flex-wrap items-center gap-2 border-t bg-card pb-3 pt-3'
 
 // Raw command output - git's, and gh's on the Connect GitHub screen:
 // scrollable, wrapped, never truncated.
 export const pane =
-  'max-h-64 overflow-x-auto overflow-y-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
+  'max-h-64 min-w-0 overflow-x-auto overflow-y-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
 
 /**
  * The Link step: link this machine to a server. The gateway's local link
@@ -108,17 +108,17 @@ export function LinkStep({
   return (
     <section
       aria-label="Link"
-      className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+      className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
           Step 1
         </p>
-        <h2 className="text-xl font-semibold tracking-tight">Link to your server</h2>
+        <h2 className="text-base font-semibold">Link to your server</h2>
       </div>
       {loading && <Skeleton className="h-20 w-full rounded-md" />}
       {statusError && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-state-failed/30 bg-state-failed/5 p-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
           <p className="text-sm text-state-failed">{statusError}</p>
           <Button size="sm" variant="outline" onClick={() => void check()}>
             Retry
@@ -126,7 +126,7 @@ export function LinkStep({
         </div>
       )}
       {success && (
-        <div className="space-y-3 rounded-md border border-state-done/30 bg-state-done/5 p-4 text-sm">
+        <div className="space-y-3 border-t border-state-done/30 bg-state-done/5 py-3 text-sm">
           <p className="font-medium text-state-done">Server linked</p>
           <p>
             Linked to <span className="font-mono">{success.addr}</span> as{' '}
@@ -148,17 +148,18 @@ export function LinkStep({
       )}
       {status && !serverConfigured && !success && (
         <form
-          className="max-w-2xl space-y-4 text-sm"
+          className="min-w-0 max-w-2xl space-y-4 text-sm"
           aria-label="Link server"
           onSubmit={(e) => {
             e.preventDefault()
             void link()
           }}
         >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Label className="block space-y-1.5">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+            <Label className="block min-w-0 space-y-1">
               Server address
               <Input
+                className="min-w-0"
                 required
                 placeholder="server-host:2222"
                 value={address}
@@ -166,9 +167,10 @@ export function LinkStep({
                 onChange={(e) => setAddress(e.target.value)}
               />
             </Label>
-            <Label className="block space-y-1.5">
+            <Label className="block min-w-0 space-y-1">
               Invite code
               <Input
+                className="min-w-0"
                 value={invite}
                 disabled={linking}
                 onChange={(e) => setInvite(e.target.value)}
@@ -179,9 +181,9 @@ export function LinkStep({
             Leave empty on a fresh server, where the first identity to link
             becomes the admin, or on a tailnet server.
           </p>
-          <Label className="block max-w-sm space-y-1.5">
+          <Label className="block min-w-0 max-w-sm space-y-1">
             Your name
-            <Input
+            <Input className="min-w-0"
               value={name}
               disabled={linking}
               onChange={(e) => setName(e.target.value)}
@@ -196,7 +198,7 @@ export function LinkStep({
         </form>
       )}
       {status && serverConfigured && !status.linked && !success && (
-        <div className="space-y-3 rounded-md border bg-muted/30 p-4 text-sm">
+        <div className="space-y-3 border-t border-border/70 bg-muted/30 px-3 py-3 text-sm">
           <p className="font-medium">Server is ready</p>
           <p>
             Connected to <span className="font-mono">{status.addr}</span> as{' '}
@@ -214,7 +216,7 @@ export function LinkStep({
         </div>
       )}
       {status && serverConfigured && status.linked && !success && (
-        <div className="space-y-3 rounded-md border border-state-done/30 bg-state-done/5 p-4">
+        <div className="space-y-3 border-t border-state-done/30 bg-state-done/5 py-3">
           <p className="text-sm font-medium text-state-done">Already linked</p>
           <p className="text-sm">
             Linked to <span className="font-mono">{status.addr}</span> as{' '}
@@ -288,29 +290,29 @@ export function WorkspaceStep({
   return (
     <section
       aria-label="Workspace"
-      className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+      className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
           Step 3
         </p>
-        <h2 className="text-xl font-semibold tracking-tight">Choose a workspace</h2>
+        <h2 className="text-base font-semibold">Choose a workspace</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           Runs share a repository and base branch inside one workspace.
         </p>
       </div>
       {loading && <Skeleton className="h-20 w-full rounded-md" />}
       {error && (
-        <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+        <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
           {error}
         </p>
       )}
       {workspaces && workspaces.length > 0 && (
-        <ul className="overflow-hidden rounded-lg border bg-background">
+        <ul className="min-w-0 border-y border-border/70 bg-background">
           {workspaces.map((w) => (
             <li
               key={w.id}
-              className="flex flex-wrap items-center gap-3 border-b px-4 py-3 last:border-b-0 sm:px-5"
+              className="flex min-w-0 flex-wrap items-center gap-3 border-b border-border/70 px-0 py-2.5 last:border-b-0"
             >
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{w.name}</span>
               <span className="rounded-sm bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
@@ -331,29 +333,29 @@ export function WorkspaceStep({
       {workspaces?.length === 0 &&
         (creating ? (
           <form
-            className="max-w-2xl space-y-4"
+            className="min-w-0 max-w-2xl space-y-3"
             aria-label="Create workspace"
             onSubmit={(e) => {
               e.preventDefault()
               void create()
             }}
           >
-            <p className="rounded-md bg-muted/50 p-3 text-sm leading-6 text-muted-foreground">
+            <p className="border-y border-border/70 bg-muted/30 px-3 py-2.5 text-sm leading-5 text-muted-foreground">
               No workspaces yet. Create the first one so the server has a
               repository and container setup to use for every run.
             </p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Label className="block space-y-1.5">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+              <Label className="block min-w-0 space-y-1">
                 Name
-                <Input
+                <Input className="min-w-0"
                   value={name}
                   placeholder="myproject"
                   onChange={(e) => setName(e.target.value)}
                 />
               </Label>
-              <Label className="block space-y-1.5">
+              <Label className="block min-w-0 space-y-1">
                 Base branch
-                <Input
+                <Input className="min-w-0"
                   value={baseBranch}
                   onChange={(e) => setBaseBranch(e.target.value)}
                 />
@@ -499,7 +501,7 @@ export function FirstRunStep({
   // flow: `fake` is a scheduler registration, so it is never installed in an
   // account and never appears in the picker above.
   const withoutASubscription = (
-    <div className="space-y-1 rounded-md border bg-card p-3 text-xs text-muted-foreground">
+    <div className="border-t border-border/70 py-3 text-xs text-muted-foreground">
       <p className="font-medium text-foreground">No agent subscription yet?</p>
       <p>
         Aether ships a deterministic fake agent that runs a script from your
@@ -517,15 +519,15 @@ export function FirstRunStep({
     return (
       <section
         aria-label="First run"
-        className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+        className="min-w-0 space-y-4 border-b border-border/70 py-4"
       >
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
             Step 6
           </p>
-          <h2 className="text-xl font-semibold tracking-tight">Launch your first run</h2>
+          <h2 className="text-base font-semibold">Launch your first run</h2>
         </div>
-        <p className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+        <p className="border-t border-border/70 bg-muted/30 py-3 text-sm text-muted-foreground">
           Choose a workspace before launching a run.
         </p>
         <div className={actionRow}>
@@ -541,16 +543,16 @@ export function FirstRunStep({
     return (
       <section
         aria-label="First run"
-        className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+        className="min-w-0 space-y-4 border-b border-border/70 py-4"
       >
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
             Step 6
           </p>
-          <h2 className="text-xl font-semibold tracking-tight">Launch your first run</h2>
+          <h2 className="text-base font-semibold">Launch your first run</h2>
         </div>
         {agentsError ? (
-          <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+          <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
             {agentsError}
           </p>
         ) : (
@@ -584,13 +586,13 @@ export function FirstRunStep({
   return (
     <section
       aria-label="First run"
-      className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+      className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
           Step 6
         </p>
-        <h2 className="text-xl font-semibold tracking-tight">Launch your first run</h2>
+        <h2 className="text-base font-semibold">Launch your first run</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           The run forks from <span className="font-mono">{workspace.base_branch}</span>{' '}
           in {workspace.name}.
@@ -598,13 +600,13 @@ export function FirstRunStep({
       </div>
       {loading && <Skeleton className="h-20 w-full rounded-md" />}
       {agents && (
-        <div className="max-w-sm space-y-1.5 text-sm">
+        <div className="min-w-0 max-w-sm space-y-1.5 text-sm">
           <Label htmlFor="first-run-agent">Agent</Label>
           <Select
             value={harness}
             onValueChange={(value) => setDraft({ ...draft, harness: value })}
           >
-            <SelectTrigger id="first-run-agent">
+            <SelectTrigger className="min-w-0 w-full" id="first-run-agent">
               <SelectValue placeholder="Choose an agent" />
             </SelectTrigger>
             <SelectContent>
@@ -617,17 +619,17 @@ export function FirstRunStep({
           </Select>
         </div>
       )}
-      <Label className="block max-w-2xl space-y-1.5">
+      <Label className="block min-w-0 max-w-2xl space-y-1">
         Task
         <Textarea
-          className="min-h-28"
+          className="min-h-28 min-w-0"
           value={task}
           placeholder="add a health check endpoint"
           onChange={(e) => setDraft({ ...draft, task: e.target.value })}
         />
       </Label>
       {error && (
-        <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+        <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
           {error}
         </p>
       )}

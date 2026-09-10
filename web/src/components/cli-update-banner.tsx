@@ -104,9 +104,7 @@ function Applied({ result, note }: { result: UpdateApplyResult; note?: string })
       {result.restart_command && (
         <div className="space-y-1">
           <p className="text-xs">The server binary beside it was replaced too. Restart the unit:</p>
-          <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
-            <CopyableCommand command={result.restart_command} />
-          </div>
+          <CopyableCommand command={result.restart_command} />
         </div>
       )}
     </div>
@@ -134,9 +132,7 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
         <p className="text-xs leading-5 text-muted-foreground">
           {path} is not writable by this account. Update it from a terminal:
         </p>
-        <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
-          <CopyableCommand command="sudo aether update" />
-        </div>
+        <CopyableCommand command="sudo aether update" />
       </div>
     )
   }
@@ -371,9 +367,7 @@ export function CliBanner({
           <div className="space-y-1.5">
             <p className={cn(verbatim, 'text-state-failed')}>{flow.error}</p>
             <p className="text-muted-foreground">Rebuild it yourself:</p>
-            <div className="rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
-              <CopyableCommand command="aether gui build" />
-            </div>
+            <CopyableCommand command="aether gui build" />
           </div>
         )}
       </div>
@@ -391,7 +385,7 @@ export function CliBanner({
               rel="noreferrer"
               className={cn(
                 focusRing,
-                'inline-flex min-h-8 items-center whitespace-nowrap text-xs underline underline-offset-2 hover:text-foreground',
+                'inline-flex min-h-[22px] items-center whitespace-nowrap px-1 text-xs underline underline-offset-2 hover:text-foreground',
               )}
             >
               Release notes

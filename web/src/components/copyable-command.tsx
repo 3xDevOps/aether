@@ -9,11 +9,11 @@ export function CopyableCommand({ command }: { command: string }) {
   const codeRef = useRef<HTMLElement>(null)
 
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
+    <div className="flex min-w-0 items-center gap-1 border border-border bg-background px-1.5 py-1 rounded-sm">
       <code
         ref={codeRef}
         title={command}
-        className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded-sm px-1 font-mono text-[12px] leading-5 text-foreground"
+        className="min-w-0 flex-1 overflow-x-auto whitespace-pre px-1 font-mono text-[12px] leading-5 text-foreground select-text"
       >
         {command}
       </code>
@@ -24,7 +24,7 @@ export function CopyableCommand({ command }: { command: string }) {
               {...triggerProps}
               variant="ghost"
               size="icon"
-              className="size-8 shrink-0"
+              className="size-[22px] shrink-0"
               aria-label={`Copy ${command}`}
               onClick={() => {
                 void copyText(command, codeRef.current)

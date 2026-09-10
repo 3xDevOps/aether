@@ -186,19 +186,19 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
         subtitle={isAdmin ? count : `${count} - roles read only`}
         actions={
           canInvite ? (
-            <Button size="sm" onClick={() => setInviting(true)}>
+            <Button size="default" onClick={() => setInviting(true)}>
               <UserPlus />
               Invite
             </Button>
           ) : undefined
         }
       />
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
           {error && (
             <p
               role="alert"
-              className="rounded-md border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-sm text-state-failed"
+              className="border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed"
             >
               {error}
             </p>
@@ -206,10 +206,10 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
 
           {pending.length > 0 && (
             <section aria-label="Pending members" className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-sm font-semibold">Waiting on approval</h2>
-                  <p className="text-[13px] text-muted-foreground">
+              <div className="flex min-h-[22px] items-center justify-between gap-2 border-b pb-1">
+                <div className="min-w-0">
+                  <h2 className="text-[13px] font-semibold">Waiting on approval</h2>
+                  <p className="text-xs text-muted-foreground">
                     New members stay here until an admin approves them.
                   </p>
                 </div>
@@ -217,24 +217,26 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                   <Chip.Label>{pending.length}</Chip.Label>
                 </Chip>
               </div>
-              <ul className="grid gap-2 sm:grid-cols-2">
+              <ul className="overflow-hidden border-y border-border">
                 {pending.map((member) => (
                   <li
                     key={member.id}
-                    className="flex min-w-0 items-center gap-3 rounded-lg border bg-card px-3 py-2.5 shadow-xs"
+                    className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border px-3 py-2 last:border-b-0"
                   >
                     <MemberAvatar member={member} fallback={member.display_name} className="size-7" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    <span className="min-w-0 break-words text-[13px] font-medium">
                       {member.display_name}
                     </span>
-                    <Chip color="warning" variant="tertiary" size="sm">
-                      <Chip.Label>Pending</Chip.Label>
-                    </Chip>
-                    {caps.hasMethod('member.approve') && isAdmin && (
-                      <Button size="sm" onClick={() => void approve(member)}>
-                        Approve
-                      </Button>
-                    )}
+                    <span className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+                      <Chip color="warning" variant="tertiary" size="sm">
+                        <Chip.Label>Pending</Chip.Label>
+                      </Chip>
+                      {caps.hasMethod('member.approve') && isAdmin && (
+                        <Button size="default" onClick={() => void approve(member)}>
+                          Approve
+                        </Button>
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -242,35 +244,31 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
           )}
 
           <section aria-label="Roster" className="space-y-2">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold">Roster</h2>
-              </div>
-              <span className="hidden text-[13px] text-muted-foreground sm:block">
-                {roster.length} active
-              </span>
+            <div className="flex min-h-[22px] items-center justify-between gap-3 border-b pb-1">
+              <h2 className="text-[13px] font-semibold">Roster</h2>
+              <span className="text-xs text-muted-foreground">{roster.length} active</span>
             </div>
-            <div className="overflow-hidden rounded-lg border bg-card shadow-xs">
-              <table className="w-full text-sm">
-                <thead className="hidden bg-muted/30 md:table-header-group">
+            <div className="overflow-hidden border-y border-border">
+              <table className="w-full table-fixed text-sm">
+                <thead className="hidden bg-sidebar md:table-header-group">
                   <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                     <th className="w-[35%] px-3 py-2 font-medium">Member</th>
                     <th className="w-[22%] px-3 py-2 font-medium">Role</th>
                     <th className="w-[28%] px-3 py-2 font-medium">Presence</th>
-                    <th className="px-3 py-2 text-right font-medium">Actions</th>
+                    <th className="w-[15%] px-3 py-2 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {roster.map((member) => (
                     <tr key={member.id} className="block md:table-row">
-                      <td className="block px-3 py-2.5 md:table-cell md:py-3">
+                      <td className="block px-3 py-2.5 md:table-cell md:py-2">
                         <div className="flex min-w-0 items-center gap-3">
                           <MemberAvatar
                             member={member}
                             fallback={member.display_name}
                             className="size-7"
                           />
-                          <span className="min-w-0 truncate font-medium">{member.display_name}</span>
+                          <span className="min-w-0 break-words font-medium">{member.display_name}</span>
                           {member.id === self?.id && (
                             <Chip color="accent" variant="tertiary" size="sm">
                               <Chip.Label>(you)</Chip.Label>
@@ -278,8 +276,8 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                           )}
                         </div>
                       </td>
-                      <td className="block px-3 py-2 md:table-cell md:py-3">
-                        <div className="flex items-center justify-between gap-3 md:justify-start">
+                      <td className="block px-3 py-2 md:table-cell md:py-2">
+                        <div className="flex min-w-0 items-center justify-between gap-3 md:justify-start">
                           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
                             Role
                           </span>
@@ -296,7 +294,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                               <SelectTrigger
                                 id={`member-role-${member.id}`}
                                 aria-label={`Role for ${member.display_name}`}
-                                className={cn(field, 'max-w-48 text-sm md:w-44')}
+                                className={cn(field, 'w-full max-w-[12rem] md:w-44')}
                               >
                                 <SelectValue />
                               </SelectTrigger>
@@ -315,8 +313,8 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                           )}
                         </div>
                       </td>
-                      <td className="block px-3 py-2 md:table-cell md:py-3">
-                        <div className="flex items-center justify-between gap-3 md:justify-start">
+                      <td className="block px-3 py-2 md:table-cell md:py-2">
+                        <div className="flex min-w-0 items-center justify-between gap-3 md:justify-start">
                           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
                             Presence
                           </span>
@@ -325,8 +323,8 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                               <Chip.Label>online</Chip.Label>
                             </Chip>
                           ) : (
-                            <Chip color="default" variant="tertiary" size="sm">
-                              <Chip.Label>
+                            <Chip color="default" variant="tertiary" size="sm" className="max-w-full">
+                              <Chip.Label className="break-words">
                                 {lastSeen.has(member.id)
                                   ? `offline - last seen ${timeAgo(lastSeen.get(member.id) ?? '')}`
                                   : 'offline'}
@@ -335,23 +333,30 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                           )}
                         </div>
                       </td>
-                      <td className="block px-3 py-2.5 md:table-cell md:py-3 md:text-right">
-                        <div className="flex items-center justify-between gap-3 md:justify-end">
-                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
-                            Actions
-                          </span>
-                          {caps.hasMethod('member.remove') &&
+                      <td
+                        className={cn(
+                          'block px-3 py-2.5 md:table-cell md:py-2 md:text-right',
+                          !(caps.hasMethod('member.remove') &&
                             isAdmin &&
-                            member.id !== self?.id && (
+                            member.id !== self?.id) && 'hidden',
+                        )}
+                      >
+                        {caps.hasMethod('member.remove') &&
+                          isAdmin &&
+                          member.id !== self?.id && (
+                            <div className="flex min-w-0 items-center justify-between gap-3 md:justify-end">
+                              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
+                                Actions
+                              </span>
                               <Button
-                                size="sm"
+                                size="default"
                                 variant="ghost"
                                 onClick={() => setRemoving(member)}
                               >
                                 Remove
                               </Button>
-                            )}
-                        </div>
+                            </div>
+                          )}
                       </td>
                     </tr>
                   ))}
@@ -363,39 +368,43 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
           {self &&
             caps.hasMethod('account.share') &&
             caps.hasMethod('account.revoke') && (
-              <section aria-label="Account sharing" className="space-y-3">
-                <div>
-                  <h2 className="text-sm font-semibold">Your agent account</h2>
-                  <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
+              <section aria-label="Account sharing" className="space-y-2">
+                <div className="min-w-0 border-b pb-1">
+                  <h2 className="text-[13px] font-semibold">Your agent account</h2>
+                  <p className="mt-1 max-w-2xl text-xs leading-4 text-muted-foreground">
                     Choose teammates who may launch runs with your account. This is
                     separate from roster roles and can be changed at any time.
                   </p>
                 </div>
-                <div className="rounded-lg border bg-card p-3 shadow-xs">
-                  <ul className="mb-3 grid gap-1 text-[13px] text-muted-foreground sm:grid-cols-2">
-                    <li>Saved environment, agent login, profile, and vendor quota are shared.</li>
-                    <li>Their runs remain attributed to them; running agents are not stopped.</li>
-                  </ul>
-                  <ul className="divide-y">
-                    {roster
-                      .filter((member) => member.id !== self.id)
-                      .map((member) => {
-                        const shared = sharedWith.some(
-                          (entry) => entry.id === member.id,
-                        )
-                        return (
-                          <li
-                            key={member.id}
-                            className="flex min-w-0 items-center gap-3 py-2.5 first:pt-0 last:pb-0"
-                          >
-                            <MemberAvatar
-                              member={member}
-                              fallback={member.display_name}
-                              className="size-6"
-                            />
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                              {member.display_name}
-                            </span>
+                <ul className="border-y border-border text-xs text-muted-foreground">
+                  <li className="border-b border-border px-3 py-1.5">
+                    Saved environment, agent login, profile, and vendor quota are shared.
+                  </li>
+                  <li className="px-3 py-1.5">
+                    Their runs remain attributed to them; running agents are not stopped.
+                  </li>
+                </ul>
+                <ul className="divide-y border-b border-border">
+                  {roster
+                    .filter((member) => member.id !== self.id)
+                    .map((member) => {
+                      const shared = sharedWith.some(
+                        (entry) => entry.id === member.id,
+                      )
+                      return (
+                        <li
+                          key={member.id}
+                          className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2"
+                        >
+                          <MemberAvatar
+                            member={member}
+                            fallback={member.display_name}
+                            className="size-6"
+                          />
+                          <span className="min-w-0 break-words text-[13px] font-medium">
+                            {member.display_name}
+                          </span>
+                          <span className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
                             <Chip
                               color={shared ? 'success' : 'default'}
                               variant="tertiary"
@@ -405,7 +414,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                               <Chip.Label>{shared ? 'Shared' : 'Not shared'}</Chip.Label>
                             </Chip>
                             <Button
-                              size="sm"
+                              size="default"
                               variant={shared ? 'outline' : 'default'}
                               disabled={sharing !== null}
                               onClick={() => void toggleAccountShare(member)}
@@ -416,23 +425,23 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                                   ? 'Revoke access'
                                   : 'Share account'}
                             </Button>
-                          </li>
-                        )
-                      })}
-                  </ul>
-                </div>
+                          </span>
+                        </li>
+                      )
+                    })}
+                </ul>
               </section>
-            )}
 
+            )}
           {self && caps.hasMethod('member.color') && (
-            <section aria-label="Your color" className="space-y-3">
-              <div>
-                <h2 className="text-sm font-semibold">Your color</h2>
-                <p className="mt-1 text-[13px] text-muted-foreground">
+            <section aria-label="Your color" className="space-y-2">
+              <div className="border-b pb-1">
+                <h2 className="text-[13px] font-semibold">Your color</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
                   Used for your presence and activity attribution.
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3 shadow-xs">
+              <div className="flex flex-wrap items-center gap-2 border-y border-border py-2">
                 {presetColors.map((color) => (
                   <Tooltip key={color}>
                     <Tooltip.Trigger<'button'>
@@ -444,7 +453,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                           aria-pressed={self.color === color}
                           className={cn(
                             focusRing,
-                            'size-8 rounded-full border-2 border-background shadow-xs ring-1 ring-border/70 transition-transform hover:scale-105 hover:ring-2 aria-pressed:ring-2',
+                            'size-8 rounded-full border-2 border-background ring-1 ring-border/70 transition-[box-shadow,transform] hover:scale-105 hover:ring-2 aria-pressed:ring-2 motion-reduce:transition-none',
                           )}
                           style={{ backgroundColor: color }}
                           onClick={() => {
@@ -526,7 +535,7 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[calc(100dvh-1rem)] sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Invite a member</DialogTitle>
           <DialogDescription>
@@ -534,8 +543,8 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
           </DialogDescription>
         </DialogHeader>
         {result ? (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 rounded-md bg-muted/35 p-2">
+          <div className="space-y-2">
+            <div className="flex min-w-0 items-center gap-2 border-y border-border py-2">
               <Input
                 ref={codeRef}
                 readOnly
@@ -544,33 +553,33 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
                 value={result.code}
                 onFocus={(e) => e.target.select()}
               />
-              <Button variant="outline" size="sm" onClick={() => void copy()}>
+              <Button variant="outline" size="default" onClick={() => void copy()}>
                 <Copy />
                 {copied ? 'Copied' : 'Copy'}
               </Button>
             </div>
-            <p className="text-[13px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               This code expires {timeAgo(result.expires_at)}. It can be used once.
             </p>
           </div>
         ) : (
-          <div className="rounded-md border border-dashed px-3 py-4">
-            <p className="text-sm text-muted-foreground">
+          <div className="border-y border-dashed px-3 py-3">
+            <p className="text-[13px] text-muted-foreground">
               Generate a code and hand it to the new member out of band.
             </p>
           </div>
         )}
         {error && (
-          <p role="alert" className="rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
+          <p role="alert" className="border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed">
             {error}
           </p>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" size="default" onClick={onClose}>
             {result ? 'Done' : 'Cancel'}
           </Button>
           {!result && (
-            <Button disabled={busy} onClick={() => void generate()}>
+            <Button size="default" disabled={busy} onClick={() => void generate()}>
               Generate code
             </Button>
           )}
@@ -615,7 +624,7 @@ function RemoveDialog({
         if (!busy) onClose()
       }}
     >
-      <AlertDialogContent className="sm:max-w-md">
+      <AlertDialogContent className="max-h-[calc(100dvh-1rem)] sm:max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle>Remove {member.display_name}?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -623,7 +632,7 @@ function RemoveDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && (
-          <p role="alert" className="rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
+          <p role="alert" className="border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed">
             {error}
           </p>
         )}
@@ -686,7 +695,7 @@ function DemoteSelfDialog({
         if (!busy) onClose()
       }}
     >
-      <AlertDialogContent className="sm:max-w-md">
+      <AlertDialogContent className="max-h-[calc(100dvh-1rem)] sm:max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle>Give up your admin role?</AlertDialogTitle>
           <AlertDialogDescription>
@@ -695,7 +704,7 @@ function DemoteSelfDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && (
-          <p role="alert" className="rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
+          <p role="alert" className="border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed">
             {error}
           </p>
         )}

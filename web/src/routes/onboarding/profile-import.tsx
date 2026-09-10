@@ -35,7 +35,7 @@ import type {
 } from '@/lib/types'
 
 const pane =
-  'max-h-64 overflow-x-auto overflow-y-auto border-t px-3 py-2 font-mono text-xs whitespace-pre-wrap'
+  'max-h-64 min-w-0 overflow-x-auto overflow-y-auto border-t px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
 
 /** One plain sentence per coarse scan status, in this step's terms. */
 const statusLine: Record<EnvScanStatus, string> = {
@@ -310,7 +310,7 @@ export function ProfileImport({
   return (
     <section
       aria-label="Bring your configuration"
-      className="space-y-4 rounded-md border bg-background p-4 sm:p-5"
+      className="min-w-0 space-y-4 border-t border-border/70 py-3"
     >
       <div className="space-y-1">
         <h3 className="text-base font-semibold">Bring your configuration</h3>
@@ -324,7 +324,7 @@ export function ProfileImport({
         </p>
       </div>
       {served && looking === '' && !looked && (
-        <div className="rounded-md border bg-card p-3">
+        <div className="border-y border-border/70 bg-card px-3 py-2.5">
           <Button size="sm" onClick={() => void runPreviews()}>
             {previewed.length > 0 ? 'Look again' : 'Look at what is here'}
           </Button>
@@ -337,7 +337,7 @@ export function ProfileImport({
         </div>
       )}
       {looking !== '' && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-state-working/30 bg-state-working/5 p-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2">
           <p className="text-sm" role="status">
             Reading {friendly[looking] ?? looking}...
           </p>
@@ -347,7 +347,7 @@ export function ProfileImport({
         </div>
       )}
       {Object.entries(previewErrors).map(([name, detail]) => (
-        <div key={name} className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3">
+        <div key={name} className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
           <p className="text-sm text-state-failed">
             Reading the {friendly[name] ?? name} configuration failed:{' '}
             {detail}
@@ -356,7 +356,7 @@ export function ProfileImport({
       ))}
 
       {served && looked && scanHarness && phase.name === 'idle' && (
-        <div className="rounded-md border bg-card p-3">
+        <div className="border-y border-border/70 bg-card px-3 py-2.5">
           <Button size="sm" variant="outline" onClick={startScan}>
             Ask an agent which configuration to bring
           </Button>
@@ -368,11 +368,11 @@ export function ProfileImport({
         </div>
       )}
       {phase.name === 'scanning' && (
-        <div className="space-y-3 rounded-md border border-state-working/30 bg-state-working/5 p-3">
+        <div className="min-w-0 space-y-3 border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2">
           <p className="text-sm" role="status">
             {statusLine[phase.status]}
           </p>
-          <Collapsible className="overflow-hidden rounded-md border bg-card">
+          <Collapsible className="min-w-0 border-t border-border/70">
             <CollapsibleTrigger className="px-3 py-2 text-sm">
               View process
             </CollapsibleTrigger>
@@ -386,11 +386,11 @@ export function ProfileImport({
         </div>
       )}
       {phase.name === 'failed' && (
-        <div className="space-y-3 rounded-md border border-state-failed/30 bg-state-failed/5 p-3">
+        <div className="min-w-0 space-y-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
           <p className="text-sm font-medium">The agent did not finish.</p>
           <p className="text-sm text-state-failed">{phase.detail}</p>
           {phase.outputTail && (
-            <Collapsible className="overflow-hidden rounded-md border bg-card">
+            <Collapsible className="min-w-0 border-t border-border/70">
               <CollapsibleTrigger className="px-3 py-2 text-sm">
                 Last output
               </CollapsibleTrigger>
@@ -409,7 +409,7 @@ export function ProfileImport({
       )}
 
       {!served && (
-        <p className="rounded-md border bg-card p-3 text-sm text-muted-foreground">
+        <p className="border-t border-border/70 bg-card py-3 text-sm text-muted-foreground">
           This gateway does not serve the profile verbs, so the import runs
           from a terminal with{' '}
           <span className="font-mono">aether profile push --agent claude</span>
@@ -422,7 +422,7 @@ export function ProfileImport({
         looked &&
         Object.keys(previewErrors).length === 0 &&
         present.length === 0 && (
-          <p className="rounded-md border bg-card p-3 text-sm text-muted-foreground">
+          <p className="border-t border-border/70 py-3 text-sm text-muted-foreground">
             No agent configuration was found on this machine, so there is
             nothing to bring.
           </p>
@@ -430,7 +430,7 @@ export function ProfileImport({
 
       {present.length > 0 && (
         <>
-          <ul className="overflow-hidden rounded-lg border bg-card">
+          <ul className="min-w-0 border-y border-border/70 bg-card">
             {present.map((preview) => (
               <ProfileRow
                 key={preview.harness}
@@ -498,7 +498,7 @@ function ProfileRow({
     .join(' ')
 
   return (
-    <li className="space-y-3 border-b p-4 last:border-b-0 sm:p-5 text-sm">
+    <li className="min-w-0 space-y-3 border-b border-border/70 py-3 text-sm last:border-b-0">
       <div className="flex items-start gap-3">
         <Checkbox
           className="mt-1"
@@ -528,7 +528,7 @@ function ProfileRow({
           )}
           {reason && <p className="text-[13px] leading-5">{reason}</p>}
           {own.entries.length > 0 && (
-            <div className="space-y-2 rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-xs">
+            <div className="space-y-2 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-xs">
               <p className="text-state-failed">
                 {own.atLeast ? 'At least ' : ''}
                 {own.entries.length}{' '}
@@ -555,13 +555,13 @@ function ProfileRow({
                 To send one anyway, push that agent from a terminal, where
                 the override is attributable:
               </p>
-              <pre className="overflow-x-auto rounded-md border bg-background px-2 py-1 font-mono">
+              <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap border border-border/70 bg-background px-2 py-1 font-mono">
                 {`aether profile push --agent ${preview.harness} ${allowSecret} --workspace ${workspace?.id ?? '<workspace-id>'}`}
               </pre>
             </div>
           )}
           {vendored.count > 0 && (
-            <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-xs text-state-failed">
+            <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-xs text-state-failed">
               {vendored.atLeast ? 'At least ' : ''}
               {vendored.count} {vendored.count === 1 ? 'file' : 'files'} under{' '}
               <span className="font-mono">plugins/cache</span> and{' '}
@@ -580,7 +580,7 @@ function ProfileRow({
         </div>
       </div>
       {excludedTotal > 0 && (
-        <Collapsible className="overflow-hidden rounded-md border bg-background">
+        <Collapsible className="min-w-0 border-t border-border/70">
           <CollapsibleTrigger className="px-3 py-2 text-[13px]">
             {`Left out of ${label}: ${excludedTotal} ${
               excludedTotal === 1 ? 'entry' : 'entries'
@@ -608,14 +608,14 @@ function ProfileRow({
       )}
       {result && (
         <>
-          <p className="rounded-md border border-state-done/30 bg-state-done/5 p-3 text-sm text-state-done">
+          <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done">
             Imported {result.files} files, {formatBytes(result.bytes)}, as
             snapshot <span className="font-mono">{result.snapshot_id}</span>.
           </p>
           {/* The push succeeded without these, so this is the only place
               the user learns they are not on the server. */}
           {result.skipped && result.skipped.length > 0 && (
-            <ul className="space-y-1 rounded-md border bg-background p-3 text-xs text-muted-foreground">
+            <ul className="space-y-1 border-t border-border/70 py-2 text-xs text-muted-foreground">
               {result.skipped.map((e) => (
                 <li key={e.path}>
                   <span className="font-mono">{e.path}</span> was not sent -{' '}
@@ -627,7 +627,7 @@ function ProfileRow({
         </>
       )}
       {failure && (
-        <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+        <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
           {failure}
         </p>
       )}

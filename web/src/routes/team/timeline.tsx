@@ -60,7 +60,7 @@ export function TimelineStatus() {
             }}
             className={cn(
               focusRing,
-              'flex h-[22px] items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
+              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
             )}
           >
             <History className="size-3.5" aria-hidden />
@@ -132,7 +132,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
         title="Activity"
         subtitle={`${feed.length} ${feed.length === 1 ? 'entry' : 'entries'}`}
       />
-      <div className="grid shrink-0 grid-cols-1 gap-2 border-b bg-muted/20 px-4 py-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid shrink-0 grid-cols-1 gap-x-3 gap-y-2 border-b bg-sidebar px-3 py-2 sm:grid-cols-2 sm:px-4 xl:grid-cols-4">
         <FilterSelect
           label="Workspace"
           value={filters.workspaceID}
@@ -164,29 +164,29 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
         <div className="mx-auto w-full max-w-5xl">
           {error && (
             <p
               role="alert"
-              className="mb-3 rounded-md border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-sm text-state-failed"
+              className="mb-3 border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed"
             >
               {error}
             </p>
           )}
           {loading && feed.length === 0 && !error && (
-            <div aria-label="Loading activity" className="space-y-2">
-              <div className="h-12 animate-pulse rounded-md bg-muted/60" />
-              <div className="h-12 animate-pulse rounded-md bg-muted/45" />
+            <div aria-label="Loading activity" className="divide-y border-y border-border">
+              <div className="h-12 animate-pulse bg-muted/35" />
+              <div className="h-12 animate-pulse bg-muted/20" />
             </div>
           )}
-          <ol className="space-y-1">
+          <ol className="border-y border-border">
             {[...feed].reverse().map((event) => (
               <FeedEntry key={event.id} event={event} runLink />
             ))}
           </ol>
           {feed.length === 0 && !loading && !error && (
-            <div className="rounded-md border border-dashed px-4 py-8 text-center">
+            <div className="border-y border-dashed px-4 py-8 text-center">
               <p className="text-sm font-medium">Nothing here yet.</p>
               <p className="mt-1 text-[13px] text-muted-foreground">
                 Activity appears here as your team works in this workspace.
@@ -194,7 +194,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
             </div>
           )}
           {truncated && (
-            <p className="mt-3 rounded-md bg-muted/35 px-3 py-2 text-[13px] text-muted-foreground">
+            <p className="mt-3 border-l-2 border-border bg-muted/20 px-3 py-2 text-[13px] text-muted-foreground">
               Stopped after {pageBudget} entries, so part of this stretch of
               history is not shown. Narrow the filters to see it.
             </p>
@@ -202,7 +202,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
           {older && (
             <Button
               variant="outline"
-              size="sm"
+              size="default"
               className="mt-3"
               disabled={loading}
               onClick={() => void olderFeed(useStore, client)}
@@ -242,7 +242,7 @@ function FilterSelect({
       >
         <SelectTrigger
           id={control}
-          className="h-9 w-full min-w-0 truncate text-sm text-foreground"
+          className="h-[26px] min-h-[26px] w-full min-w-0 truncate text-[13px] text-foreground"
         >
           <SelectValue />
         </SelectTrigger>

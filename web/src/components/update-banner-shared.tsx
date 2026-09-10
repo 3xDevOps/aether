@@ -7,25 +7,24 @@ import { Button } from '@/components/ui/button'
 import { useStore } from '@/store'
 import type { UpdateKind } from '@/store/ui'
 
-// Notices keep the icon, summary, actions, and dismiss control in four
-// explicit columns. This leaves the action cluster beside the summary on
-// desktop instead of letting a long explanation force it onto a later row.
+// Notices keep the icon, summary, action cluster, and dismiss control in
+// explicit columns from the existing md workbench breakpoint. At narrow
+// widths actions take their own row so long diagnostics never hide them.
 export const banner =
-  'grid grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] items-start gap-x-3 gap-y-2 border-b border-border/80 bg-card px-4 py-2.5 text-sm shadow-surface'
+  'grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 border-b border-border bg-card px-3 py-2 text-[13px] md:grid-cols-[auto_minmax(0,1fr)_auto_auto]'
 
-export const bannerContent = 'min-w-0 flex-1 space-y-1.5'
+export const bannerContent = 'col-start-2 row-start-1 min-w-0 space-y-1'
 
 export const bannerIcon =
-  'mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary'
+  'mt-px grid size-[22px] shrink-0 place-items-center rounded-sm bg-primary/10 text-primary'
 
 export const bannerActions =
-  'col-start-3 row-start-1 flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-end gap-2'
+  'col-start-2 row-start-2 flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1 md:col-start-3 md:row-start-1 md:justify-end'
 
-// Output a prompt shows verbatim, at whatever length it arrives. The
-// bounded block keeps a failed rebuild from pushing every other prompt out of
-// view while preserving the complete message in its own scroll area.
+// Technical output is bounded so a failed rebuild cannot push the workbench
+// or its actions out of reach. It remains selectable and scrollable in place.
 export const verbatim =
-  'max-h-24 overflow-y-auto break-words rounded-sm border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-mono text-xs leading-5'
+  'max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-sm border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-mono text-xs leading-5 select-text'
 
 /** The dismiss control every banner carries. */
 export function Dismiss({ kind, version }: { kind: UpdateKind; version: string }) {
@@ -34,7 +33,7 @@ export function Dismiss({ kind, version }: { kind: UpdateKind; version: string }
     <Button
       variant="ghost"
       size="icon"
-      className="col-start-4 row-start-1 size-8 shrink-0"
+      className="col-start-3 row-start-1 size-6 shrink-0 md:col-start-4"
       aria-label="Dismiss"
       onClick={() => dismiss(kind, version)}
     >

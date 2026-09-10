@@ -50,9 +50,9 @@ export function App() {
       {/* The desktop window is frameless, so the title bar has to outrank the
           branch below it: without it the error page would leave an offline user
           no way to move or close the window. */}
-      <div className="flex h-full flex-col">
+      <div className="flex min-w-0 h-full flex-col">
         <TitleBar commandPaletteDisabled={blocked} />
-        <div className="min-h-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1">
           {blocked ? (
             <ConnectionError
               kind={unreachable}
@@ -63,7 +63,22 @@ export function App() {
           ) : (
             <>
               <AppShell />
-              <Toaster position="bottom-right" richColors theme={theme} />
+              <Toaster
+                position="bottom-right"
+                theme={theme}
+                expand={false}
+                visibleToasts={4}
+                gap={4}
+                offset={{ bottom: 30, right: 8 }}
+                toastOptions={{
+                  className:
+                    'rounded-[4px] border border-border bg-popover px-3 py-2 text-[13px] text-popover-foreground shadow-overlay',
+                  classNames: {
+                    title: 'font-medium',
+                    description: 'text-muted-foreground',
+                  },
+                }}
+              />
             </>
           )}
         </div>

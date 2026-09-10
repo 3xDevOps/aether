@@ -110,15 +110,15 @@ function commandGroups(): { name: string; entries: [string, string][] }[] {
 function ShortcutKeys({ value }: { value: string }) {
   const parts = value.split(/\+|\s+then\s+/)
   return (
-    <span className="flex max-w-full shrink-0 flex-wrap items-center gap-1" aria-label={value}>
+    <span className="flex min-w-0 max-w-full flex-wrap items-center gap-1 break-words" aria-label={value}>
       {parts.map((part, index) => (
-        <span key={`${part}-${index}`} className="flex max-w-full items-center gap-1">
+        <span key={`${part}-${index}`} className="flex min-w-0 max-w-full flex-wrap items-center gap-1 break-words">
           {index > 0 && (
             <span aria-hidden className="text-[11px] text-muted-foreground">
               {value.includes('then') ? 'then' : '+'}
             </span>
           )}
-          <kbd className="inline-flex min-h-[22px] max-w-full items-center justify-center rounded-sm border border-border bg-muted px-1 font-mono text-[11px] font-medium leading-4 text-foreground">
+          <kbd className="inline-flex min-h-[22px] min-w-0 max-w-full items-center justify-center break-words rounded-sm border border-border bg-muted px-1 font-mono text-[11px] font-medium leading-4 text-foreground">
             {part}
           </kbd>
         </span>
@@ -131,7 +131,7 @@ function ShortcutRow({ value, description }: { value: string; description: strin
   return (
     <div
       role="listitem"
-      className="grid min-w-0 grid-cols-[minmax(7rem,auto)_minmax(0,1fr)] items-start gap-x-3 gap-y-0.5 rounded-sm px-2 py-1 odd:bg-muted/30 max-[479px]:grid-cols-1"
+      className="grid min-w-0 grid-cols-[minmax(0,14rem)_minmax(0,1fr)] items-start gap-x-3 gap-y-0.5 rounded-sm px-2 py-1 odd:bg-muted/30 max-[479px]:grid-cols-1"
     >
       <ShortcutKeys value={value} />
       <span className="min-w-0 text-[13px] leading-5 text-muted-foreground">

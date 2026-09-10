@@ -65,9 +65,9 @@ export function ScheduleEditor({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       <form
-        className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end"
+        className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-end"
         aria-label={`Schedule for ${template}`}
         onSubmit={(e) => {
           e.preventDefault()
@@ -78,7 +78,7 @@ export function ScheduleEditor({
           <span>Schedule (UTC)</span>
           <Input
             aria-label="Cron schedule"
-            placeholder="cron, e.g. 0 3 * * * (UTC)"
+            placeholder="0 3 * * * (UTC)"
             value={cron}
             onChange={(e) => setCron(e.target.value)}
           />

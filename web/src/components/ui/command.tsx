@@ -147,6 +147,7 @@ function CommandSeparator({
       data-slot="command-separator"
       className={cn('-mx-1 h-px bg-border', className)}
       {...props}
+      aria-hidden="true"
     />
   )
 }

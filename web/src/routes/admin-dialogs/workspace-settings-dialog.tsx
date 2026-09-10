@@ -72,24 +72,22 @@ export function WorkspaceSettingsDialog({
         </DialogHeader>
         <form
           id="workspace-settings"
-          className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1"
+          className="min-h-0 space-y-3 overflow-y-auto -mx-1 px-1"
           onSubmit={(e) => {
             e.preventDefault()
             void save()
           }}
         >
-          <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-2.5">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Base branch
-            </p>
-            <p className="mt-1 font-mono text-sm" aria-label="Base branch">
+          <div className="border-y bg-sidebar px-3 py-2.5">
+            <p className="text-xs font-medium text-muted-foreground">Base branch</p>
+            <p className="mt-1 break-all font-mono text-[13px]" aria-label="Base branch">
               {workspace?.base_branch || 'unknown'}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               New runs fork from this branch.
             </p>
           </div>
-          <div className="space-y-1.5 text-sm">
+          <div className="min-w-0 space-y-1 text-[13px]">
             <Label htmlFor="workspace-steer">Who may steer others&apos; runs</Label>
             <Select
               value={steerOthers || everyone}
@@ -113,7 +111,7 @@ export function WorkspaceSettingsDialog({
             </p>
           )}
         </form>
-        <DialogFooter className="border-t pt-4">
+        <DialogFooter className="border-t pt-3">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>

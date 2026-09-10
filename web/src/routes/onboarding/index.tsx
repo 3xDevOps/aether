@@ -32,7 +32,7 @@ import { useCapability } from '@/store/hooks'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
 /** One step's marker in the header: reached, current, or still ahead. */
-const chip = 'rounded-md border px-2.5 py-1.5'
+const chip = 'rounded-sm border px-2 py-1.5'
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
@@ -83,10 +83,10 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
 
   if (!caps.hasLocal('link.status')) {
     return (
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-w-0 flex-col">
         <ViewHeader title="Onboarding" />
-        <div className="flex flex-1 items-center justify-center p-6">
-          <div className="w-full max-w-lg rounded-lg border bg-card p-6 text-center shadow-sm">
+        <div className="flex flex-1 items-center justify-center p-4">
+          <div className="w-full max-w-lg border border-border/70 bg-card px-4 py-4 text-left">
             <p className="text-base font-medium">Onboarding needs a local gateway</p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               Onboarding runs in the desktop app or `aether gui`, where the
@@ -100,10 +100,10 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col">
       <ViewHeader title="Onboarding" subtitle={current} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
+        <main className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-4 px-4 py-4 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
@@ -119,10 +119,10 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           </div>
           <ol
             aria-label="Steps"
-            className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+            className="grid grid-cols-2 gap-px border-y border-border/70 bg-border/70 sm:grid-cols-2 lg:grid-cols-3"
           >
             {onboardingSteps.map((label, i) => (
-              <li key={label} aria-current={i === step ? 'step' : undefined}>
+              <li key={label} className="min-w-0" aria-current={i === step ? 'step' : undefined}>
                 {i !== step && i <= furthest ? (
                   <button
                     type="button"
@@ -130,7 +130,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
                     className={cn(
                       focusRing,
                       chip,
-                      'flex w-full items-center gap-2 text-left text-sm transition-colors hover:border-primary/50 hover:bg-accent',
+                      'flex min-w-0 w-full items-center gap-2 border-0 bg-card px-2 py-1.5 text-left text-xs transition-colors hover:bg-toolbar-hover',
                     )}
                     onClick={() => setStep(i)}
                   >
@@ -145,8 +145,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
                 ) : (
                   <span
                     className={cn(
-                      chip,
-                      'flex w-full items-center gap-2 text-sm',
+                      'flex min-w-0 w-full items-center gap-2 border-l-2 bg-card px-2 py-1.5 text-xs',
                       i === step
                         ? 'border-primary/50 bg-primary/10 text-foreground'
                         : 'text-muted-foreground',

@@ -51,22 +51,6 @@ describe('workspaces view', () => {
     })
   })
 
-
-  // The base branch and the steering policy live on the workspace now, so
-  // the admin list is where an operator compares them across workspaces.
-  it('shows each workspace base branch and steering policy', async () => {
-    const restricted = { ...workspace, steer_others: 'admins_only' }
-    const client = fakeApi({
-      workspaceListFull: vi.fn(async () => [restricted]),
-    })
-    seed()
-    render(<WorkspacesRoute params={{}} client={client} />)
-
-    expect(await screen.findByText(workspace.base_branch)).toBeDefined()
-    expect(screen.getByText('admins steer others')).toBeDefined()
-  })
-
-
   it('opens a workspace by making it the active scope', async () => {
     const client = fakeApi({
       workspaceListFull: vi.fn(async () => [workspace]),

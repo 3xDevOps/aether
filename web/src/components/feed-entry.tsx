@@ -17,7 +17,7 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
   const navigate = useStore((s) => s.navigate)
 
   return (
-    <li className="group grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2.5 border-b border-border/70 px-3 py-2 text-[13px] transition-colors hover:bg-toolbar-hover">
+    <li className="group grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 border-b border-border px-3 py-2 text-[13px] transition-colors last:border-b-0 hover:bg-toolbar-hover">
       <span
         role="img"
         aria-label={actor?.display_name ?? 'system'}
@@ -50,12 +50,14 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
             <button
               type="button"
               onClick={() => navigate('terminal', { runId: run.id })}
+              aria-label={runLabel(run)}
+              title={runLabel(run)}
               className={cn(
                 focusRing,
-                'col-start-2 row-start-3 min-w-0 max-w-full justify-self-start break-words text-left text-xs text-muted-foreground hover:text-foreground hover:underline @md/feed-entry:col-start-3 @md/feed-entry:row-start-1 @md/feed-entry:row-span-2 @md/feed-entry:justify-self-end',
+                'col-start-2 row-start-3 min-h-[26px] min-w-0 max-w-full justify-self-start break-words text-left text-xs text-muted-foreground hover:text-foreground hover:underline @md/feed-entry:col-start-3 @md/feed-entry:row-start-1 @md/feed-entry:row-span-2 @md/feed-entry:justify-self-end',
               )}
             >
-              {runLabel(run)}
+              <span className="line-clamp-2">{runLabel(run)}</span>
             </button>
           )}
         </div>
