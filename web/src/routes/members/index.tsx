@@ -333,14 +333,21 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                           )}
                         </div>
                       </td>
-                      <td className="block px-3 py-2.5 md:table-cell md:py-2 md:text-right">
-                        <div className="flex min-w-0 items-center justify-between gap-3 md:justify-end">
-                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
-                            Actions
-                          </span>
-                          {caps.hasMethod('member.remove') &&
+                      <td
+                        className={cn(
+                          'block px-3 py-2.5 md:table-cell md:py-2 md:text-right',
+                          !(caps.hasMethod('member.remove') &&
                             isAdmin &&
-                            member.id !== self?.id && (
+                            member.id !== self?.id) && 'hidden',
+                        )}
+                      >
+                        {caps.hasMethod('member.remove') &&
+                          isAdmin &&
+                          member.id !== self?.id && (
+                            <div className="flex min-w-0 items-center justify-between gap-3 md:justify-end">
+                              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
+                                Actions
+                              </span>
                               <Button
                                 size="default"
                                 variant="ghost"
@@ -348,8 +355,8 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                               >
                                 Remove
                               </Button>
-                            )}
-                        </div>
+                            </div>
+                          )}
                       </td>
                     </tr>
                   ))}

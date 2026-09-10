@@ -198,7 +198,7 @@ export function LinkStep({
         </form>
       )}
       {status && serverConfigured && !status.linked && !success && (
-        <div className="space-y-3 border-t border-border/70 bg-muted/30 py-3 text-sm">
+        <div className="space-y-3 border-t border-border/70 bg-muted/30 px-3 py-3 text-sm">
           <p className="font-medium">Server is ready</p>
           <p>
             Connected to <span className="font-mono">{status.addr}</span> as{' '}

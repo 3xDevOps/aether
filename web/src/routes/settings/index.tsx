@@ -116,7 +116,7 @@ function LinkCard({ client }: { client: Api }) {
         </p>
       )}
       {serverConfigured && (
-        <dl className="grid min-w-0 gap-3 border-y border-border/70 py-3 text-sm sm:grid-cols-3">
+        <dl className="grid min-w-0 grid-cols-1 gap-3 border-y border-border/70 py-3 text-sm sm:grid-cols-3">
           <div className="space-y-1">
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Server
