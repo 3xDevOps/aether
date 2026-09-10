@@ -1,5 +1,9 @@
 import { CopyableCommand } from '@/components/copyable-command'
-import { cn, focusRing } from '@/lib/utils'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 
@@ -30,14 +34,16 @@ export function ReviewCommands({ run }: { run: RunRecord }) {
           </p>
         </div>
         {pulled && (
-          <details className="min-w-0">
-            <summary className={cn(focusRing, 'cursor-pointer select-none text-xs')}>
+          <Collapsible className="min-w-0">
+            <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground">
               fetched {pulled.ref}
-            </summary>
-            <pre className="mt-2 max-h-48 max-w-full overflow-auto rounded-md border bg-muted/50 p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
-              {pulled.output}
-            </pre>
-          </details>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <pre className="mt-2 max-h-48 max-w-full overflow-auto rounded-md border bg-muted/50 p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
+                {pulled.output}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
         )}
       </div>
       {run.branch && (

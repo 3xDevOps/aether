@@ -16,14 +16,6 @@ vi.mock('@/lib/api', async () => {
   return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
 
-// jsdom has no layout engine, so the terminal's fit addon has nothing to
-// observe; the header is what these tests are about, not the grid.
-class NoResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 const tabs = runTabs.map((tab) => tab.route)
 
 function seed(over: Partial<Run> = {}) {
@@ -49,7 +41,6 @@ function header(name: string) {
 
 beforeEach(() => {
   StubSocket.install()
-  vi.stubGlobal('ResizeObserver', NoResizeObserver)
 })
 
 afterEach(() => vi.unstubAllGlobals())

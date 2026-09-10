@@ -1,7 +1,11 @@
 import { CircleAlert, KeyRound, RefreshCw, ServerOff, Unplug, WifiOff } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
-import { cn, focusRing } from '@/lib/utils'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import type { UnreachableKind } from '@/store/server'
 type ConnectionErrorProps = {
   kind: UnreachableKind | null
@@ -148,17 +152,17 @@ export function ConnectionError({ kind, dead, error, onRetry }: ConnectionErrorP
               exact message someone needs to relay or act on. It can still be
               collapsed once it has been read. */}
           {error && (
-            <details open className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs">
-              <summary
-                className={cn(
-                  focusRing,
-                  'cursor-pointer select-none font-medium text-muted-foreground hover:text-foreground',
-                )}
-              >
+            <Collapsible
+              defaultOpen
+              className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs"
+            >
+              <CollapsibleTrigger className="font-medium text-muted-foreground hover:text-foreground">
                 Technical details
-              </summary>
-              <p className="mt-2 break-words font-mono leading-5 text-foreground">{error}</p>
-            </details>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <p className="mt-2 break-words font-mono leading-5 text-foreground">{error}</p>
+              </CollapsibleContent>
+            </Collapsible>
           )}
         </div>
       </section>

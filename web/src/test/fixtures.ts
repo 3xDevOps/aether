@@ -304,6 +304,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       signing_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI aether mbr_1',
       fingerprint: 'SHA256:9wPnHRtG0DPQNo8VYbC2mSczRRRUYY7NoLgTHTAlYFA',
     })),
+    githubProbe: vi.fn(async () => ({
+      status: 'ok' as const,
+      version: '2.100.0',
+      minimum: '2.81.0',
+      detail: 'gh version 2.100.0 (2026-09-03)',
+      image: 'ghcr.io/3xdevops/aether-standard:latest',
+    })),
     terminalSocket: vi.fn(
       (tab: string) => `ws://localhost/ws/terminal?tab=${encodeURIComponent(tab)}`,
     ),

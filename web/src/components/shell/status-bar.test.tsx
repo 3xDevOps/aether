@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { StatusBar } from '@/components/shell/status-bar'
 import type { GatewayCapabilities, Member } from '@/lib/types'
 import { useStore } from '@/store'
@@ -36,8 +37,7 @@ function seed(over: { self?: Member; update?: ReturnType<typeof updateStatus> | 
   })
 }
 
-// The label is the only always-visible surface, so it is the way back to a
-// banner someone closed by reflex. Without an update it stays plain text.
+// The version label restores a dismissed update banner.
 test('the version label is plain until an update is available', () => {
   seed({ update: null })
   render(<StatusBar />)
@@ -46,19 +46,19 @@ test('the version label is plain until an update is available', () => {
   expect(screen.queryByRole('button', { name: /Update available/ })).toBeNull()
 })
 
-test('opens and closes the secondary status actions from the narrow menu', () => {
+test('opens and closes the secondary status actions from the narrow menu', async () => {
   seed()
   render(<StatusBar />)
 
-  const toggle = screen.getByLabelText('Show status details')
-  const details = toggle.closest('details')
-  expect(details?.hasAttribute('open')).toBe(false)
+  const toggle = screen.getByRole('button', { name: 'Show status details' })
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
 
-  fireEvent.click(toggle)
-  expect(details?.hasAttribute('open')).toBe(true)
+  toggle.focus()
+  await userEvent.keyboard('{Enter}')
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
 
-  fireEvent.click(toggle)
-  expect(details?.hasAttribute('open')).toBe(false)
+  await userEvent.keyboard('{Enter}')
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
 })
 
 test('a CLI update turns the label into a button that clears the dismissals', () => {
@@ -152,7 +152,7 @@ describe('the server update notice', () => {
 })
 
 // Every desktop readout keeps its full text in the title for the responsive
-// status layout; narrow screens place these readouts in the details menu.
+// status layout; narrow screens place these readouts in the collapsible menu.
 test('every truncated readout keeps its whole text in the title', () => {
   const unreachable =
     'server unreachable over SSH - check the server and network; retrying'

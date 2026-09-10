@@ -11,9 +11,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { api } from '@/lib/api'
 import type { Template } from '@/lib/types'
-import { field } from '@/lib/utils'
 import { useStore } from '@/store'
 
 /** Launches a saved task template into the active workspace. */
@@ -101,21 +107,20 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
               )}
             </p>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="template-launch-name">Template</Label>
-            <select
-              id="template-launch-name"
-              className={field}
-              value={name}
-              disabled={!templates?.length}
-              onChange={(e) => setName(e.target.value)}
-            >
-              {templates?.map((t) => (
-                <option key={t.id} value={t.name}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
+          <div className="space-y-1.5 text-sm">
+            <Label htmlFor="template-name">Template</Label>
+            <Select value={name} onValueChange={setName}>
+              <SelectTrigger id="template-name" disabled={!templates?.length}>
+                <SelectValue placeholder="Choose a template" />
+              </SelectTrigger>
+              <SelectContent>
+                {templates?.map((t) => (
+                  <SelectItem key={t.id} value={t.name}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <p className="text-xs text-muted-foreground">
               Choose a saved task from this workspace.
             </p>

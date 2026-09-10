@@ -9,12 +9,6 @@ import { connectAttach } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
 
-class NoResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function Probe({ onReady }: { onReady: (terminal: Terminal) => void }) {
   const { hostRef, terminal } = useXterm()
   useEffect(() => {
@@ -40,7 +34,6 @@ function LateHostProbe({ onReady }: { onReady: (terminal: Terminal) => void }) {
 
 beforeEach(() => {
   StubSocket.install()
-  vi.stubGlobal('ResizeObserver', NoResizeObserver)
 })
 
 afterEach(() => {

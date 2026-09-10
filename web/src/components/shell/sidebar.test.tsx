@@ -14,6 +14,7 @@ import {
   vera,
   workspace,
 } from '@/test/fixtures'
+import { pickOption } from '@/test/select'
 
 beforeEach(async () => {
   useStore.setState({
@@ -147,7 +148,7 @@ describe('Sidebar', () => {
     expect(row('rewrite the checkout flow').getAttribute('aria-current')).toBeNull()
   })
 
-  it('switches workspace, rescoping the run list', () => {
+  it('switches workspace, rescoping the run list', async () => {
     // Two workspaces means a picker; one run apiece, so the list is proof
     // that the switch is what scopes the tree.
     const elsewhere = run({
@@ -165,8 +166,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
     expect(screen.queryByText('refresh the install guide')).toBeNull()
 
-    const picker = screen.getByLabelText('Workspace')
-    fireEvent.change(picker, { target: { value: otherWorkspace.id } })
+    await pickOption(screen.getByLabelText('Workspace'), otherWorkspace.name)
 
     expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
     expect(screen.getByText('refresh the install guide')).toBeDefined()

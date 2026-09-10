@@ -46,6 +46,10 @@ git -c gpg.ssh.allowedSignersFile=/tmp/allowed-signers log -1 --format='%G?' HEA
 // have left in the home.
 const ghStub = `#!/bin/sh
 echo "$*" >> "$HOME/gh-calls.log"
+if [ "$1" = "--version" ]; then
+	echo "gh version 2.100.0 (2026-09-03)"
+	exit 0
+fi
 case "$1 $2" in
 "auth status")
 	printf '%s\n' '{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com","login":"octocat","tokenSource":"oauth_token","scopes":"admin:ssh_signing_key, repo","gitProtocol":"https"}]}}'
@@ -72,7 +76,38 @@ esac
 // refuse the connection.
 const ghStubExpired = `#!/bin/sh
 echo "$*" >> "$HOME/gh-calls.log"
+if [ "$1" = "--version" ]; then
+	echo "gh version 2.100.0 (2026-09-03)"
+	exit 0
+fi
 printf '%s\n' '{"hosts":{"github.com":[{"state":"error","active":true,"host":"github.com","login":"octocat"}]}}'
+`
+
+// ghStubOld is Ubuntu 24.04's packaged gh: 2.45.0, with a login that
+// works. It answers auth status in the human form 2.45 has and rejects
+// only --json, which is the argv the login check sends - so this stub is
+// the member whose login is fine and was told it was not.
+const ghStubOld = `#!/bin/sh
+echo "$*" >> "$HOME/gh-calls.log"
+if [ "$1" = "--version" ]; then
+	echo "gh version 2.45.0 (2025-07-18 Ubuntu 2.45.0-1ubuntu0.3)"
+	exit 0
+fi
+case "$*" in
+*--json*)
+	echo "unknown flag: --json" >&2
+	exit 1
+	;;
+"auth status"*)
+	echo "github.com"
+	echo "  X Logged in to github.com account octocat (/root/.config/gh/hosts.yml)"
+	echo "  - Active account: true"
+	echo "  - Token scopes: 'admin:ssh_signing_key', 'repo'"
+	exit 0
+	;;
+esac
+echo "stub gh: unsupported command: $*" >&2
+exit 1
 `
 
 // TestIntegrationGitHubConnect drives the GitHub connection end to end
@@ -159,7 +194,9 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 	// The stub gh and the upstream the run pushes to both live in the
 	// member home, which is bind-mounted as the container's $HOME.
 	home := filepath.Join(dataDir, "homes", string(member.ID))
-	installStubGh(t, home, ghStub)
+	if err = os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("create the member home: %v", err)
+	}
 	upstream := filepath.Join(home, "upstream.git")
 	runGit(t, home, gitEnv, "init", "--bare", "-q", upstream)
 	origin := containerHome + "/upstream.git"
@@ -190,6 +227,74 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 	term := openTerminal(t, client, "main")
 	term.stdin.Write([]byte("echo terminal-ready\n"))
 	term.waitOutput(t, "terminal-ready")
+
+	// An environment from before the standard image shipped gh. The step
+	// used to print a login command that container cannot run, and the
+	// connect answered with a login failure; both now name the remedy.
+	var pe *protocol.Error
+	var missing protocol.GitHubProbeResult
+	if err = ctrl.Call(protocol.MethodGitHubProbe, struct{}{}, &missing); err != nil {
+		t.Fatalf("github.probe without gh: %v", err)
+	}
+	if missing.Status != string(domain.GitHubCLIMissing) || missing.Image != image {
+		t.Errorf("probe without gh = %+v, want it missing and on %q", missing, image)
+	}
+	// No gh anywhere means the image is what has to change, and the
+	// member still has to reopen the container it starts.
+	if missing.Remedy != "aether terminal stop" || missing.AdminRemedy == "" {
+		t.Errorf("remedy = (%q, %q), want the reopen and an admin command", missing.Remedy, missing.AdminRemedy)
+	}
+	err = ctrl.Call(protocol.MethodGitHubConnect, struct{}{}, nil)
+	if !errors.As(err, &pe) || !strings.Contains(err.Error(), "gh is not on PATH") {
+		t.Fatalf("github.connect without gh = %v, want the missing-gh refusal", err)
+	}
+
+	// The gh a member installs by hand after that: Ubuntu 24.04 ships
+	// 2.45, which cannot answer the login check at all. That used to be
+	// reported as a login failure, which sent the member back to a login
+	// that was already good.
+	installStubGh(t, home, ghStubOld)
+	var outdated protocol.GitHubProbeResult
+	if err = ctrl.Call(protocol.MethodGitHubProbe, struct{}{}, &outdated); err != nil {
+		t.Fatalf("github.probe with gh 2.45: %v", err)
+	}
+	if outdated.Status != string(domain.GitHubCLIOutdated) || outdated.Version != "2.45.0" {
+		t.Errorf("probe with gh 2.45 = %+v, want it outdated and named", outdated)
+	}
+	// This stub lives in the member home, first on the container's PATH,
+	// where no image the server can hand them reaches it. That is what the
+	// answer has to say, rather than sending an admin to refresh an image.
+	if want := filepath.Join(containerHome, ".local", "bin", "gh"); outdated.Path != want {
+		t.Errorf("probe path = %q, want the gh in the member home %q", outdated.Path, want)
+	}
+	if want := "rm " + filepath.Join(containerHome, ".local", "bin", "gh"); outdated.Remedy != want {
+		t.Errorf("remedy = %q, want %q", outdated.Remedy, want)
+	}
+	if outdated.AdminRemedy != "" {
+		t.Errorf("admin remedy = %q, want none for a gh in the member's own home", outdated.AdminRemedy)
+	}
+	err = ctrl.Call(protocol.MethodGitHubConnect, struct{}{}, nil)
+	if !errors.As(err, &pe) || !strings.Contains(err.Error(), "2.81.0") {
+		t.Fatalf("github.connect with gh 2.45 = %v, want the version refusal naming the minimum", err)
+	}
+	if strings.Contains(err.Error(), "not logged in") {
+		t.Errorf("refusal = %q, still reads as a failed login", err)
+	}
+	// This stub answers auth status in the human form 2.45 has, so its
+	// login is good; the refusal has to come without ever asking it.
+	if calls := readHomeFile(t, home, "gh-calls.log"); strings.Contains(calls, "auth status") {
+		t.Errorf("gh calls = %q, want the refusal before the login was asked about", calls)
+	}
+
+	// The gh the current standard image ships.
+	installStubGh(t, home, ghStub)
+	var current protocol.GitHubProbeResult
+	if err = ctrl.Call(protocol.MethodGitHubProbe, struct{}{}, &current); err != nil {
+		t.Fatalf("github.probe with a current gh: %v", err)
+	}
+	if current.Status != string(domain.GitHubCLIOK) || current.Remedy != "" {
+		t.Errorf("probe with gh 2.100 = %+v, want it usable with no remedy", current)
+	}
 
 	var conn protocol.GitHubConnectResult
 	if err = ctrl.Call(protocol.MethodGitHubConnect, struct{}{}, &conn); err != nil {
@@ -235,12 +340,20 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 		}
 	}
 	wantCalls := []string{
-		"auth status --hostname github.com --active --json hosts",
+		"auth status --hostname github.com --json hosts",
 		"auth setup-git --hostname github.com",
 		"ssh-key add .ssh/aether_signing.pub --type signing --title aether " + string(member.ID),
 		"ssh-key list",
 	}
-	if calls := strings.Split(strings.TrimSpace(readHomeFile(t, home, "gh-calls.log")), "\n"); !equalStrings(calls, wantCalls) {
+	// Every probe and every connect asks the version first; what this
+	// pins is the sequence the connect itself runs after that.
+	var calls []string
+	for _, line := range strings.Split(strings.TrimSpace(readHomeFile(t, home, "gh-calls.log")), "\n") {
+		if line != "--version" {
+			calls = append(calls, line)
+		}
+	}
+	if !equalStrings(calls, wantCalls) {
 		t.Errorf("gh calls = %q, want %q", calls, wantCalls)
 	}
 
@@ -280,7 +393,6 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 	if err = ctrl.Call(protocol.MethodTerminalStop, struct{}{}, nil); err != nil {
 		t.Fatalf("terminal.stop: %v", err)
 	}
-	var pe *protocol.Error
 	if err = ctrl.Call(protocol.MethodGitHubConnect, struct{}{}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState {
 		t.Fatalf("github.connect with the terminal stopped = %v, want CodeInvalidState", err)
 	}

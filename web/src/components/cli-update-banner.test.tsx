@@ -31,8 +31,12 @@ test('shows the CLI banner to a collaborator when the CLI is behind', async () =
   expect(await screen.findByText('Aether v1.3.0 is available.')).toBeTruthy()
   expect(screen.getByText(/You are running v1\.2\.3/)).toBeTruthy()
   // The copy names what the restart costs: the gateway holds the attach
-  // sockets and the sync sessions, and they go with it.
-  expect(screen.getByText(/Attached terminals and any running file sync stop/)).toBeTruthy()
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Install details: what updating changes' }),
+  )
+  expect(
+    await screen.findByText(/Attached terminals and any running file sync stop/),
+  ).toBeTruthy()
   const notes = screen.getByRole('link', { name: 'Release notes' })
   expect(notes.getAttribute('href')).toBe(
     'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
@@ -154,6 +158,9 @@ describe('a binary macOS installs through the administrator dialog', () => {
     seed()
     render(<UpdateBanners client={client} />)
 
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Install details: macOS administrator approval' }),
+    )
     expect(
       await screen.findByText(
         'macOS will ask for an administrator password: /usr/local/bin/aether is in a directory this account cannot write to. The dialog is labelled osascript, the tool Aether asks through. Aether never sees your password.',

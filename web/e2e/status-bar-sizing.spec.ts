@@ -1,7 +1,7 @@
 // The status bar at the smallest window the desktop shell allows, and below
 // that floor in a browser tab. At compact widths the connection, status-slot
-// actions and theme remain on screen while the secondary readouts use a native
-// details popup. The wide row expands those readouts in place.
+// actions and theme remain on screen while the secondary readouts use a
+// collapsible popup. The wide row expands those readouts in place.
 //
 // The state that makes the left group too wide is a server that has gone
 // away: the notice explaining it is the longest thing the bar ever carries,
@@ -9,7 +9,7 @@
 // links, the server is stopped, and the gateway reports what it finds.
 //
 // Keep the compact disclosure keyboard reachable: a mouse-only check would
-// miss the native details behavior that makes the offline notice available.
+// miss the disclosure behavior that makes the offline notice available.
 //
 // The mobile case also keeps the status-slot actions inside the bounded popup,
 // where they may wrap without widening the page.
@@ -54,17 +54,16 @@ test('the status bar keeps its controls on screen with every readout up', async 
     for (const name of controls) {
       await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 })
     }
-    const summary = footer.locator('summary[aria-label="Show status details"]')
-    const details = footer.locator('details')
+    const trigger = footer.getByRole('button', { name: 'Show status details' })
     const notice = footer.getByRole('status', { name: unreachableNotice })
-    await expect(summary).toBeVisible()
-    if (await details.evaluate((element) => (element as HTMLDetailsElement).open)) {
-      await summary.focus()
-      await summary.press('Enter')
+    await expect(trigger).toBeVisible()
+    if ((await trigger.getAttribute('aria-expanded')) === 'true') {
+      await trigger.focus()
+      await trigger.press('Enter')
       await expect(notice).toBeHidden()
     }
-    await summary.focus()
-    await summary.press('Enter')
+    await trigger.focus()
+    await trigger.press('Enter')
     await expect(notice).toBeVisible()
     await expect(notice).toHaveText(unreachableNotice)
 
@@ -78,24 +77,25 @@ test('the status bar keeps its controls on screen with every readout up', async 
   }
 
   await page.setViewportSize(wideSize)
-  await expect(footer.locator('summary[aria-label="Show status details"]')).toBeHidden()
+  await expect(
+    footer.getByRole('button', { name: 'Show status details' }),
+  ).toBeHidden()
   await expect(footer.getByRole('status', { name: unreachableNotice })).toBeVisible()
   for (const name of controls) {
     await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 })
   }
 
   await page.setViewportSize(mobileSize)
-  const mobileSummary = footer.locator('summary[aria-label="Show status details"]')
-  const mobileDetails = footer.locator('details')
+  const mobileTrigger = footer.getByRole('button', { name: 'Show status details' })
   const mobileNotice = footer.getByRole('status', { name: unreachableNotice })
-  await expect(mobileSummary).toBeVisible()
-  if (await mobileDetails.evaluate((element) => (element as HTMLDetailsElement).open)) {
-    await mobileSummary.focus()
-    await mobileSummary.press('Enter')
+  await expect(mobileTrigger).toBeVisible()
+  if ((await mobileTrigger.getAttribute('aria-expanded')) === 'true') {
+    await mobileTrigger.focus()
+    await mobileTrigger.press('Enter')
     await expect(mobileNotice).toBeHidden()
   }
-  await mobileSummary.focus()
-  await mobileSummary.press('Enter')
+  await mobileTrigger.focus()
+  await mobileTrigger.press('Enter')
   await expect(mobileNotice).toBeVisible()
   await expect(mobileNotice).toHaveText(unreachableNotice)
   for (const name of controls) {

@@ -15,9 +15,19 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { api, type Api } from '@/lib/api'
-import { field } from '@/lib/utils'
 import { useStore } from '@/store'
+
+/** What the permissive default travels as; see the Styleguide in
+ * docs/dashboard-frontend.md. */
+const everyone = 'everyone'
 
 export function WorkspaceSettingsDialog({
   workspaceID,
@@ -79,18 +89,20 @@ export function WorkspaceSettingsDialog({
               New runs fork from this branch.
             </p>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="workspace-steer-others">Who may steer others&apos; runs</Label>
-            <select
-              id="workspace-steer-others"
-              className={field}
-              value={steerOthers}
-              onChange={(e) => setSteerOthers(e.target.value)}
-              aria-describedby="workspace-steer-help"
+          <div className="space-y-1.5 text-sm">
+            <Label htmlFor="workspace-steer">Who may steer others&apos; runs</Label>
+            <Select
+              value={steerOthers || everyone}
+              onValueChange={(value) => setSteerOthers(value === everyone ? '' : value)}
             >
-              <option value="">everyone with steer</option>
-              <option value="admins_only">admins only</option>
-            </select>
+              <SelectTrigger id="workspace-steer" aria-describedby="workspace-steer-help">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={everyone}>everyone with steer</SelectItem>
+                <SelectItem value="admins_only">admins only</SelectItem>
+              </SelectContent>
+            </Select>
             <p id="workspace-steer-help" className="text-xs text-muted-foreground">
               This policy controls steering for runs owned by another member.
             </p>

@@ -477,8 +477,8 @@ describe('the desktop app rebuild notice', () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
     seed()
     render(<UpdateBanners client={fakeApi()} />)
-
     expect(await screen.findByText(notice)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Rebuild instructions' }))
     expect(screen.getByText(/aether gui build/)).toBeTruthy()
   })
 

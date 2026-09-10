@@ -226,19 +226,30 @@ draws no native buttons - minimize, maximize/restore and close wired to
 every button `no-drag`; on macOS the native traffic lights are kept and the
 bar reserves 78px for them instead of drawing buttons.
 
-`App.tsx` mounts `TitleBar` above both the normal shell and the connection
-error page. The frameless Electron window therefore keeps a way to move and
-close itself even when the gateway is unavailable. In a browser,
-`window.aetherDesktop` is absent and the component renders nothing.
+The bridge carries one more thing the SPA cannot do for itself:
+`window.aetherDesktop.chooseFolder()` opens the shell's native directory
+dialog, parented to the asking window - a sheet on macOS, modal to the window
+on Windows; a Linux portal chooser runs out of process and is neither, which
+is why the caller disables its button while one is open - and resolves to the
+chosen absolute path, or `""` when it was cancelled. A window it cannot
+resolve rejects with `no window asked for the folder dialog` instead, so a
+caller can say what went wrong. It is optional on the type for the same
+reason `shellVersion` exists: a shell built by an older `aether gui build`
+does not have it.
 
-On the first desktop launch only, `App.tsx` also mounts a brief
-`LaunchSplash`. It uses the existing Aether mark and VT323 wordmark on a calm
-token-based surface below the title bar, is `aria-hidden` and
-`pointer-events: none`, and fades after hydration or failure. A 320ms minimum
-prevents a fast start from flickering and a 1.6s cap prevents a stalled
-connection from blocking the window. `sessionStorage` suppresses it on later
-launches in the same session. There is no sky, star, cloud or reveal-flash
-animation, and a browser tab does not show the desktop splash.
+`App.tsx` mounts it above the whole app, the `ConnectionError` page included:
+that page replaces the shell, and a frameless window without a title bar would
+leave an offline user unable to move or close the app. In a browser
+`window.aetherDesktop` is absent, the component renders nothing, and the tab
+keeps the browser's own chrome.
+
+On the first desktop launch, `LaunchSplash` covers the window with the
+original shooting-star scene, Aether mark and VT323 wordmark. It stays for at
+least 600ms, leaves after hydration or failure, and has a 2500ms cap followed
+by a 260ms fade. The cap prevents a failed connection from holding the window
+controls indefinitely. Browser tabs, reloads in the same window session and
+`prefers-reduced-motion: reduce` skip it. See [styles.md](styles.md) for the
+scene's motion details.
 
 ## Window size and overflow
 
@@ -257,10 +268,10 @@ degrade below it rather than break.
   keyboard reachable at 32px.
 - **The status bar** keeps connection state and the theme control visible at
   every width. From 768px through 1279px, registered status-slot actions stay
-  beside the theme while secondary readouts use a keyboard-reachable native
-  details menu. Below 768px those actions join the menu's bounded fixed popup;
-  from 1280px the details open automatically into the inline row. Readouts
-  wrap in the menu, so the full error and update text remains available.
+  beside the theme while secondary readouts use a keyboard-reachable
+  `Collapsible` popup. Below 768px those actions join the bounded fixed popup;
+  from 1280px the readouts expand automatically into the inline row.
+  Readouts wrap in the menu, so full error and update text remains available.
 - **The run header** keeps the title, task, branch and harness mode readable.
   Status is a semantic Chip, and the action group wraps rather than shrinking
   the labels into an unreachable strip. Terminal tabs remain one keyboard stop
@@ -330,8 +341,8 @@ run's wire `paused` field, skipping runs that do not carry it.
   this computer is offline (reconnect wifi or the VPN), `server` says the
   server did not answer over SSH, `gateway` says the local `aether gui`
   process stopped answering, and a dead token says to mint a new link. The
-  gateway's own message is kept behind a collapsed "Technical details", and
-  the page suppresses the toast that would otherwise repeat it. Its Retry
+  gateway's own message appears in an initially open "Technical details" disclosure,
+  and the page suppresses the toast that would otherwise repeat it. Its Retry
   button clears the connection state and remounts the subscribe-and-hydrate
   cycle, rather than reloading the page and dropping the in-memory token.
 - **A `1008` close naming a dead token stops the stream for good.** The
@@ -555,10 +566,11 @@ surface, so the form disables Launch and says why rather than sending a
 request the gateway will refuse (`runLaunch` in `internal/sshd/handlers.go` is
 the same rule). Only what was actually chosen goes on the wire: an empty task
 and the default `tui` mode are the server's own defaults. The **Agent** field
-is always there: a leading "Choose an agent" option, then the installed
-entries from `agent.list`, then `custom`, the escape hatch that `agent.list`
-never returns and that only launches where the deployment pinned a harness
-with `--harness-definitions`. `agent.list` reports installation from the
+is always there. It reads "Choose an agent" until one is picked, and there is
+no way back to that state once one is. Under it are the installed entries from
+`agent.list`, then `custom`, the escape hatch that `agent.list` never returns
+and that only launches where the deployment pinned a harness with
+`--harness-definitions`. `agent.list` reports installation from the
 selected account's persistent `~/.local/bin`; uninstalled shipped entries
 remain visible on the Agents page so setup can install them. The launch form
 also remembers the most recently used installed agent for each account and
@@ -587,14 +599,15 @@ Everything the dashboard can do is reachable without a mouse, and every control
 a keyboard reaches draws the same focus indicator.
 
 **One focus indicator.** `focusRing` in `src/lib/utils.ts` is the shared
-outline utility. The `Button`, `Input` and `Textarea` primitives compose it,
-as do the raw controls that need focus - buttons, selects, links, summaries,
-menu items, dialog close controls and resize handles. Controls that fill a
-scroll container use the inset variant so the outline is not clipped.
-Component tests exercise focusable behavior with real DOM nodes; the browser
-`keyboard-focus` scenario confirms keyboard ordering and that a focused
-control actually paints the outline. Source scans and literal class checks are
-not used as behavior coverage.
+outline utility. Every focusable primitive composes it, including
+`SelectTrigger`, `SelectItem`, `Checkbox` and `CollapsibleTrigger`. Raw
+buttons, links, menu items, dialog close controls and resize handles use it
+too. Controls that fill a scroll container use the inset variant so the
+outline is not clipped. Keyboard outlines appear immediately, without a
+colour transition. Component tests exercise focusable behavior with real DOM
+nodes; the browser `keyboard-focus` scenario confirms keyboard ordering and
+that a focused control actually paints the outline. Source scans and literal
+class checks are not used as behavior coverage.
 
 It is an outline rather than a ring, for two reasons. Windows High Contrast
 (`forced-colors: active`) discards box shadows, which is what Tailwind's
@@ -616,11 +629,14 @@ pseudo-class less specific and loses at the moment the outline is drawn.
 each takes focus programmatically when it opens and has nothing to show for
 it. Their contents are not the same case. A `DropdownMenuItem` takes real DOM
 focus under Radix's roving tabindex, so it wears the outline like any other
-control, keeping its `focus:` background as well. A `CommandItem` suppresses
-the outline too, and that one is deliberate: cmdk never moves focus to it at
-all, leaving it on the input and tracking the highlighted row with
-`aria-activedescendant`, so a background is all it has,
-and all it needs.
+control, keeping its `focus:` background as well. A `SelectItem` is that case
+again: Radix moves DOM focus onto the highlighted option, so it wears the
+outline inset like a menu item, and `SelectContent` suppresses its own for the
+reason the other two containers do. A `CommandItem` suppresses the outline
+too, and that one is deliberate: cmdk never moves focus to it at all, leaving
+it on the input and tracking the highlighted row with `aria-activedescendant`,
+so a background is all it has, and all it needs. It is the one row the focus
+sweep is told to skip.
 
 **The shell's own keys**, listed in the shortcuts dialog behind the `?`
 trigger in the status bar. `⌘K` lives with the palette in
@@ -640,10 +656,12 @@ trigger in the status bar. `⌘K` lives with the palette in
 `n` is offered, on both surfaces, only to a member who may launch. The
 single-key ones carry no modifier, so `keyboardBusy` in `src/lib/keys.ts`
 stands them down whenever something else has the keyboard: a text field or a
-native select, a terminal, an open menu or list box, or an open dialog. A
-stray `n` typed at an agent has to reach the agent, and `n` in a menu is that
-menu's own typeahead. The `g` prefix waits 1.5s for the key that completes it,
-and any key that goes somewhere else ends the wait.
+select, a terminal, an open menu or list box, or an open dialog. A stray `n`
+typed at an agent has to reach the agent, `n` in a menu is that menu's own
+typeahead, and `n` on a select jumps to the option that starts with it - the
+guard finds a select by its `combobox` role, since the control is a button.
+The `g` prefix waits 1.5s for the key that completes it, and any key that goes
+somewhere else ends the wait.
 
 `⌘K` is the exception, and has to be: it is modified, so nothing can mistake
 it for typing, and with the terminal holding the focus and swallowing Tab it
@@ -1103,10 +1121,10 @@ git's output verbatim; server refusals stay verbatim.
 identity, Workspace, Repository, Agents, First run. It renders only where the
 gateway serves the client-machine verbs (the capability descriptor lists
 `link.status`); a remote monitor gets an explanatory empty state instead of a
-broken wizard. Link, Workspace, Repository and First run live in `steps.tsx`;
-Git identity is `git-identity-step.tsx`, and Agents is `agents-step.tsx` with
-its GitHub part in `github-connect.tsx` and its configuration import in
-`profile-import.tsx`.
+broken wizard. Link, Workspace and First run live in `steps.tsx`; Repository
+is `repo-step.tsx`, Git identity is `git-identity-step.tsx`, and Agents is
+`agents-step.tsx` with its GitHub part in `github-connect.tsx` and its
+configuration import in `profile-import.tsx`.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
 whichever step has sub-screens. The Agents step owns both of today's - a
@@ -1137,12 +1155,29 @@ over both. **Skip** moves on and leaves the server's fallback in place, so the
 step never blocks the wizard. See [teams.md](teams.md) for what the identity
 does once it is set.
 
-The Repository step adds the `aether` remote (`link.repo`) and then seeds
-the workspace: where the gateway serves `repo.push` it shows a **Push now**
-button. The gateway compares the clone's base branch with the workspace's
-copy before pushing and answers with one of four states, so the second
-member to join a workspace reads what happened instead of git's
-`! [rejected] main -> main (fetch first)`.
+The Repository step asks for a clone on this machine, and the path must be
+absolute - a leading `/`, a drive letter, or a UNC prefix, all three accepted
+whatever the machine is, because the check only catches a plainly relative
+path and a Windows dialog answers `C:\...`. The field always offers the
+folders `link.status` already knows - the linked clone and every named
+profile's - as a `datalist`. In the desktop shell it also gets a **Choose
+folder** button, which opens the native directory dialog through
+`window.aetherDesktop.chooseFolder`, writes the answer into the field and
+clears any error the last attempt left; cancelling leaves both alone, a
+dialog that fails puts the shell's own error under the form, and the whole
+path form waits while a dialog is open, because a chooser that is not modal
+to the window leaves it live and a late answer would land on top of whatever
+was typed or submitted meanwhile. That wait is the step's own state, so
+leaving the step and coming back is the way out of a chooser that died
+without answering. Typing stays the fallback, because a browser tab has no
+dialog and a shell built by an older `aether gui build` has no method.
+
+The step adds the `aether` remote (`link.repo`) and then seeds the workspace:
+where the gateway serves `repo.push` it shows a **Push now** button. The
+gateway compares the clone's base branch with the workspace's copy before
+pushing and answers with one of four states, so the second member to join a
+workspace reads what happened instead of git's `! [rejected] main -> main
+(fetch first)`.
 
 When `link.repo` answers an `origin`, the connected line adds `Runs push to
 <origin>`: the upstream a run pushes to, the same one `aether link --repo`
@@ -1243,16 +1278,66 @@ Between the two, `github-connect.tsx` connects the member's GitHub account.
 The closed `<section aria-label="Connect GitHub">` says what a connection
 buys - runs push branches and open pull requests as the member, and commits
 are signed with a key kept in their environment home - and **Connect GitHub**
-opens the sub-screen. The sub-screen mounts the same `TerminalDock` the setup
-screen uses, with `initialLine` set to `gh auth login --hostname github.com
---git-protocol https --web --scopes admin:ssh_signing_key`, echoes that
-command in a code block for anyone who would rather type it, and says what
-that login looks like from inside a container: gh asks the member to press
-Enter to open a browser and then reports that it could not open one, so the
-member presses Enter, ignores the failure and opens the printed URL with the
-one-time code. **I've logged in** calls `github.connect`, which does the
-non-interactive rest on the server; success names the account and the
-signing key's fingerprint, and **Close** returns to the step, which then
+opens the sub-screen. The sub-screen mounts the same `TerminalDock` the
+setup screen uses and calls `github.probe` once that dock reports a running
+container: the probe runs `gh --version` inside it and refuses when there
+is nothing to run it in. Until then the screen says it is waiting for that
+terminal to start, and once it has one, that it is checking it for gh;
+through both it shows no login command and types nothing. **I've logged
+in** stays live there on purpose: `github.connect` makes the same check
+itself, so it is the way out of a probe that never settles.
+
+Once the probe answers with a gh that can do the login, `initialLine`
+becomes `typedLoginCommand` from `src/lib/github.ts`: `gh auth login
+--hostname github.com --git-protocol https --web --scopes
+admin:ssh_signing_key`, prefixed with Ctrl-U. The member can have typed at
+the prompt while the check was out, so the line clears it rather than
+landing on top of it. Ctrl-U kills backward from the cursor, so anything to
+its right survives and is appended to the login command; Ctrl-K would cover
+that, but the terminal falls back to `/bin/sh` on an image without bash and
+dash passes Ctrl-K through as input, which breaks the command. The byte is
+raw input either way, so a member sitting in an editor or a pager gets it as
+one. The screen echoes the command itself, without the prefix, in a code
+block for anyone who would rather type it, and says what that login looks
+like from inside a container: gh asks the member to press Enter to open a
+browser and then reports that it could not open one, so the member presses
+Enter, ignores the failure and opens the printed URL with the one-time code.
+
+
+
+A probe reporting no gh, a gh that would not run, or one too old for the
+login check replaces the login command and its explanation - not the dock,
+which is where the remedy is carried out. In their place comes the screen's
+own sentence about the gh the probe found, then the server's commands as
+`CopyableCommand`s - the admin one when there is one, then the member's -
+and gh's own answer in the same monospace pane refusals use; no login
+command is offered at all, and **I've logged in** is disabled, because
+connecting would only collect the matching refusal.
+
+There are three shapes. A gh the member installed into their own
+environment home - which the probe reports as `path`, and which comes first
+on PATH and survives every image - is named as the file it is, with no
+image command at all. A member on their own saved image is
+offered the install-and-save that keeps it first, and told that `aether env
+reset` removes it. A member on the server's standard image is told an admin
+runs the command, or just to reopen the terminal when the image has already
+moved without them. Every remedy the copy names is a button on the dock
+right below: **Save environment**, **Reset to standard**, **Stop
+environment**. **Check again** re-runs the probe, because none of those
+three restarts the container by itself.
+
+A probe that fails, or a dock that never got a terminal at all, puts the
+login command back - shown, not typed, and said to be untyped - because a
+member whose gh is fine must not be stopped by a check that could not run.
+A dock that has a terminal and merely refused a write is not that, and does
+not release it. A failed probe renders its own error above **Check again**;
+a dock that could not open reports in its own pane, and gets no button,
+because a second probe cannot run without a container and the attach is
+already retrying.
+
+**I've logged in** calls `github.connect`, which does the non-interactive
+rest on the server; success names the account and the signing key's
+fingerprint, and **Close** returns to the step, which then
 reads "Connected in this session as `<login>`" - the connection is React
 state that a reload loses, said the way the agent rows say "Set up in this
 session". A connection counts the way a set-up agent does for the step's
@@ -1487,20 +1572,32 @@ wherever the member is an admin.
   Sidebar rows keep one dot and pulse its opacity; palette rows stay static.
   The fixed dot box prevents a row shifting when a run starts or stops.
 - **Motion is optional.** The steering signal, working dots and sidebar pulse
-  answer `prefers-reduced-motion: reduce` in `index.css` by removing movement.
-  Launch loading stays functional and does not add decorative motion; there is
-  no reveal-flash animation. Spinner and skeleton feedback remains available.
-- **Primitives first.** `src/components/ui/` holds the shadcn/ui pieces such
-  as `Button`, `Input`, `Textarea`, `Label`, `Dialog`, `DropdownMenu`,
-  `Command` and `Skeleton`, retuned to the house scale and shared
-  `focusRing`. Use these wrappers instead of redrawing controls so labels,
-  disabled states, field tokens and keyboard behavior stay consistent.
+  answer `prefers-reduced-motion: reduce` by removing movement. The original
+  shooting-star scene appears only at desktop startup and is skipped under
+  reduced motion. There is no reveal-flash animation. Spinner and skeleton
+  feedback remains available.
+- **Primitives first.** `src/components/ui/` holds the shadcn/ui pieces:
+  `Button`, `Input`, `Textarea`, `Label`, `Select`, `Checkbox`, `Collapsible`,
+  `Dialog`, `DropdownMenu`, `Command` and `Skeleton`. These are house copies,
+  retuned to the shared scale and `focusRing`; do not overwrite them with
+  registry defaults. Use them instead of raw form elements. `Input`,
+  `Textarea` and `SelectTrigger` compose the shared `field` style, with
+  `--input` borders, muted placeholders and disabled states.
+- **The empty string belongs to the Select placeholder.** Use a named,
+  non-empty sentinel for an empty API or filter value, then map it back at
+  that boundary. The Select wrapper ignores the empty report Radix can send
+  through its hidden native select while options arrive.
+- **Name the Select trigger.** Pair the caption's `htmlFor` with the trigger's
+  `id`, so the control announces its purpose rather than only its current
+  option.
+- **Disclosures normally unmount closed content.** `CollapsibleTrigger`
+  supplies the marker. The status bar uses `forceMount` with closed-state
+  hiding to retain its live contributors while the popup is closed.
 - **HeroUI has a narrow role.** `src/components/ui/heroui.tsx` wraps HeroUI v3
-  `Tabs`, `Chip` and `Tooltip` and adds the `aether-*` classes that map them
-  back to the house tokens. Use `Tabs` for component-level tab panels, `Chip`
-  for status or metadata, and `Tooltip` for supplemental hover and keyboard
-  help. The run and dock tab strips intentionally retain their custom manual
-  tab semantics and are not replaced by HeroUI.
+  `Tabs`, `Chip` and `Tooltip` and maps them to the house tokens. Use `Tabs`
+  for component-level tab panels, `Chip` for status or metadata, and `Tooltip`
+  for supplemental hover and keyboard help. Run and dock tab strips retain
+  their custom manual tab semantics.
 - **One focus indicator, one source.** `focusRing` in `src/lib/utils.ts`; see
   [Keyboard and focus](#keyboard-and-focus). Browser checks verify the
   resulting focus outline; source scans and class-name assertions are not

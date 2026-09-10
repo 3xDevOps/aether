@@ -4,6 +4,7 @@ import type { Member } from '@/lib/types'
 import { MembersRoute } from '@/routes/members'
 import { useStore, type RootState } from '@/store'
 import { alice, bob, fakeApi, serverInfo, vera, workspace } from '@/test/fixtures'
+import { pickOption } from '@/test/select'
 
 const pendingCara: Member = {
   id: 'mem_cara',
@@ -150,12 +151,12 @@ describe('members view', () => {
     render(<MembersRoute params={{}} client={client} />)
 
     const roster = within(await screen.findByRole('region', { name: 'Roster' }))
-    const select = await roster.findByRole<HTMLSelectElement>('combobox', {
+    const select = await roster.findByRole('combobox', {
       name: 'Role for Bob',
     })
-    expect(select.value).toBe('collaborator')
+    expect(select.textContent).toBe('collaborator')
 
-    fireEvent.change(select, { target: { value: 'admin' } })
+    await pickOption(select, 'admin')
 
     await waitFor(() =>
       expect(client.memberRole).toHaveBeenCalledWith(bob.id, 'admin'),
@@ -217,9 +218,9 @@ describe('members view', () => {
     render(<MembersRoute params={{}} client={client} />)
 
     const roster = within(await screen.findByRole('region', { name: 'Roster' }))
-    fireEvent.change(
+    await pickOption(
       await roster.findByRole('combobox', { name: 'Role for Bob' }),
-      { target: { value: 'viewer' } },
+      'viewer',
     )
 
     expect(await screen.findByText('refusing to demote the last admin')).toBeDefined()
@@ -234,9 +235,9 @@ describe('members view', () => {
     render(<MembersRoute params={{}} client={client} />)
 
     const roster = within(await screen.findByRole('region', { name: 'Roster' }))
-    fireEvent.change(
+    await pickOption(
       await roster.findByRole('combobox', { name: 'Role for Alice' }),
-      { target: { value: 'collaborator' } },
+      'collaborator',
     )
 
     // Nothing happens until the self-lockout is confirmed.

@@ -20,10 +20,10 @@ import { api, type Api } from '@/lib/api'
 import { cn, focusRing } from '@/lib/utils'
 import { AgentsStep } from '@/routes/onboarding/agents-step'
 import { GitIdentityStep } from '@/routes/onboarding/git-identity-step'
+import { RepoStep } from '@/routes/onboarding/repo-step'
 import {
   FirstRunStep,
   LinkStep,
-  RepoStep,
   WorkspaceStep,
 } from '@/routes/onboarding/steps'
 import { registerRoute, type RouteProps } from '@/routes/registry'

@@ -14,6 +14,11 @@ import { CopyableCommand } from '@/components/copyable-command'
 import { desktopBridge } from '@/components/shell/title-bar'
 import { Button } from '@/components/ui/button'
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -37,7 +42,7 @@ import type {
   ServerUpdateWaiting,
   ServerUpdateWhen,
 } from '@/lib/types'
-import { cn, focusRing } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -217,19 +222,16 @@ function ShellBanner() {
             <p className={cn(verbatim, 'text-state-failed')}>{buildError}</p>
           </div>
         )}
-        <details className="text-xs text-muted-foreground">
-          <summary
-            className={cn(
-              focusRing,
-              'cursor-pointer select-none font-medium hover:text-foreground',
-            )}
-          >
+        <Collapsible className="text-xs text-muted-foreground">
+          <CollapsibleTrigger className="font-medium hover:text-foreground">
             Rebuild instructions
-          </summary>
-          <div className="mt-1.5">
-            <CopyableCommand command="aether gui build" />
-          </div>
-        </details>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="mt-1.5">
+              <CopyableCommand command="aether gui build" />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
       <Dismiss kind="shell" version={cliVersion} />
     </div>
@@ -441,21 +443,18 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
           </p>
         </div>
         {flow.name === 'available' && capable && (
-          <details className="text-xs text-muted-foreground">
-            <summary
-              className={cn(
-                focusRing,
-                'cursor-pointer select-none font-medium hover:text-foreground',
-              )}
-            >
+          <Collapsible className="text-xs text-muted-foreground">
+            <CollapsibleTrigger className="font-medium hover:text-foreground">
               What a server restart affects
-            </summary>
-            <p className="mt-1.5 leading-5">
-              Updating replaces the server binaries and restarts the server. Runs
-              keep going - the server reattaches to their containers when it comes
-              back - and attached terminals reconnect on their own.
-            </p>
-          </details>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <p className="mt-1.5 leading-5">
+                Updating replaces the server binaries and restarts the server. Runs
+                keep going - the server reattaches to their containers when it comes
+                back - and attached terminals reconnect on their own.
+              </p>
+            </CollapsibleContent>
+          </Collapsible>
         )}
         {flow.name === 'scheduled' && (
           <>

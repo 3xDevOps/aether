@@ -45,13 +45,7 @@ const (
 // DefaultStandardImage is the published image matching this build.
 var DefaultStandardImage = standardImageRepo + ":" + releaseImageTag(version.Version)
 
-var (
-	describeSuffixPattern = regexp.MustCompile(`-\d+-g[0-9a-f]+(?:-dirty)?$`)
-	// releaseTagPattern matches the release workflow's accepted refs
-	// (push tags v*) that are also valid Docker tags; the prerelease part
-	// may contain hyphens (v1.2.3-rc-1).
-	releaseTagPattern = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
-)
+var describeSuffixPattern = regexp.MustCompile(`-\d+-g[0-9a-f]+(?:-dirty)?$`)
 
 // releaseImageTag reduces a build version to a published image tag. The
 // release workflow tags every published image with the release ref name, so
@@ -59,7 +53,7 @@ var (
 func releaseImageTag(buildVersion string) string {
 	tag := describeSuffixPattern.ReplaceAllString(buildVersion, "")
 	tag = strings.TrimSuffix(tag, "-dirty")
-	if releaseTagPattern.MatchString(tag) {
+	if scheduler.ReleaseTag(tag) {
 		return tag
 	}
 	return "latest"
@@ -274,22 +268,25 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
 	if s.sched, err = scheduler.New(scheduler.Config{
-		Store:          s.db,
-		Runtime:        s.rt,
-		Bus:            s.bus,
-		Git:            lazyGit{s.git},
-		PTY:            s.pty,
-		StateDir:       filepath.Join(cfg.DataDir, "scheduler"),
-		Homes:          homes,
-		ReposDir:       filepath.Join(cfg.DataDir, "repos"),
-		Profiles:       prof,
-		StandardImage:  cfg.StandardImage,
-		Harnesses:      cfg.Harnesses,
-		StallThreshold: cfg.StallThreshold,
-		PollInterval:   cfg.PollInterval,
-		CheckoutTTL:    cfg.CheckoutTTL,
-		MinFreeBytes:   cfg.MinFreeDiskBytes,
-		ServerBinary:   cfg.ServerBinary,
+		Store:         s.db,
+		Runtime:       s.rt,
+		Bus:           s.bus,
+		Git:           lazyGit{s.git},
+		PTY:           s.pty,
+		StateDir:      filepath.Join(cfg.DataDir, "scheduler"),
+		Homes:         homes,
+		ReposDir:      filepath.Join(cfg.DataDir, "repos"),
+		Profiles:      prof,
+		StandardImage: cfg.StandardImage,
+		// What this build ships with, so the scheduler can tell a member
+		// whether a server update would move their environment image.
+		DefaultStandardImage: DefaultStandardImage,
+		Harnesses:            cfg.Harnesses,
+		StallThreshold:       cfg.StallThreshold,
+		PollInterval:         cfg.PollInterval,
+		CheckoutTTL:          cfg.CheckoutTTL,
+		MinFreeBytes:         cfg.MinFreeDiskBytes,
+		ServerBinary:         cfg.ServerBinary,
 	}); err != nil {
 		return nil, err
 	}

@@ -3,6 +3,13 @@ import { useEffect } from 'react'
 import { FeedEntry } from '@/components/feed-entry'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { eventLabel, type EventType } from '@/lib/events'
@@ -113,7 +120,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
         subtitle={`${feed.length} ${feed.length === 1 ? 'entry' : 'entries'}`}
       />
       <div className="grid shrink-0 grid-cols-1 gap-2 border-b bg-muted/20 px-4 py-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Select
+        <FilterSelect
           label="Workspace"
           value={filters.workspaceID}
           // A run belongs to one workspace, so a kept run filter would query
@@ -121,13 +128,13 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
           onChange={(workspaceID) => setFilters({ workspaceID, runID: '' })}
           options={Object.values(workspaces).map((w) => [w.id, w.name])}
         />
-        <Select
+        <FilterSelect
           label="Run"
           value={filters.runID}
           onChange={(runID) => setFilters({ runID })}
           options={[['', 'Every run'], ...workspaceRuns.map((r) => [r.id, runLabel(r)])]}
         />
-        <Select
+        <FilterSelect
           label="Member"
           value={filters.memberID}
           onChange={(memberID) => setFilters({ memberID })}
@@ -136,7 +143,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
             ...Object.values(members).map((m) => [m.id, m.display_name]),
           ]}
         />
-        <Select
+        <FilterSelect
           label="Type"
           value={filters.type}
           onChange={(type) => setFilters({ type })}
@@ -196,7 +203,10 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
   )
 }
 
-function Select({
+/** What every filter's "no filter" row travels as. */
+const everything = 'all'
+
+function FilterSelect({
   label,
   value,
   onChange,
@@ -207,23 +217,30 @@ function Select({
   onChange: (value: string) => void
   options: (string[] | [string, string])[]
 }) {
+  const control = `filter-${label.toLowerCase()}`
   return (
-    <Label className="flex min-w-0 flex-col items-stretch gap-1 text-[13px] font-medium text-foreground">
-      <span className="text-muted-foreground">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={cn(
-          focusRing,
-          'h-9 min-w-0 w-full truncate rounded-sm border border-input bg-background px-2.5 text-sm text-foreground',
-        )}
+    <div className="flex min-w-0 flex-col items-stretch gap-1 text-[13px] font-medium text-foreground">
+      <Label htmlFor={control} className="text-muted-foreground">
+        {label}
+      </Label>
+      <Select
+        value={value || everything}
+        onValueChange={(next) => onChange(next === everything ? '' : next)}
       >
-        {options.map(([id, name]) => (
-          <option key={id} value={id}>
-            {name}
-          </option>
-        ))}
-      </select>
-    </Label>
+        <SelectTrigger
+          id={control}
+          className="h-9 w-full min-w-0 truncate text-sm text-foreground"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map(([id, name]) => (
+            <SelectItem key={id} value={id || everything}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   )
 }

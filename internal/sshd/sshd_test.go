@@ -380,6 +380,26 @@ func (f *fakeRuns) ConnectGitHub(_ context.Context, member domain.MemberID) (dom
 	}, nil
 }
 
+// The answer is deliberately over-populated - a real one never carries
+// both SavedImage and AdminRemedy - so every field of the wire mapping has
+// a distinct value to be pinned against.
+func (f *fakeRuns) ProbeGitHubCLI(_ context.Context, member domain.MemberID) (domain.GitHubCLI, error) {
+	if err := f.record(fmt.Sprintf("github-probe:%s", member)); err != nil {
+		return domain.GitHubCLI{}, err
+	}
+	return domain.GitHubCLI{
+		Status:      domain.GitHubCLIOutdated,
+		Version:     "2.45.0",
+		Minimum:     "2.81.0",
+		Detail:      "gh version 2.45.0",
+		Image:       "ghcr.io/3xdevops/aether-standard:latest",
+		SavedImage:  "aether/member-" + string(member) + ":1",
+		Path:        "/root/.local/bin/gh",
+		Remedy:      "aether env reset",
+		AdminRemedy: "docker pull ghcr.io/3xdevops/aether-standard:latest",
+	}, nil
+}
+
 func (f *fakeRuns) HoldShell() func() { return func() {} }
 
 type testEnv struct {

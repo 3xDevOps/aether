@@ -1,6 +1,10 @@
-import { Ellipsis } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Slot } from '@/components/slots'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { ThemeToggle } from '@/components/theme'
 import { formatBytes } from '@/lib/format'
 import type { ConnectionState } from '@/lib/stream'
@@ -171,7 +175,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
 }
 
 // Keep the connection and theme controls present at every width. Readouts use
-// a native details menu until the wide layout has room for the full row, while
+// a collapsible menu until the wide layout has room for the full row, while
 // registered status actions stay beside the theme from the desktop breakpoint.
 export function StatusBar() {
   const connection = useStore((s) => s.connection)
@@ -213,26 +217,24 @@ export function StatusBar() {
           />
           {connectionLabel[connection]}
         </span>
-        <details
-          className="group relative min-w-0 xl:flex-1"
+        <Collapsible
+          className="relative block min-w-0 xl:flex-1"
           open={detailsOpen}
-          onToggle={(event) => {
-            if (!wide) setMobileDetailsOpen(event.currentTarget.open)
+          onOpenChange={(open) => {
+            if (!wide) setMobileDetailsOpen(open)
           }}
         >
-          <summary
-            className={cn(
-              focusRing,
-              'flex size-7 list-none cursor-pointer items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground xl:hidden',
-            )}
+          <CollapsibleTrigger
+            className="h-7 w-7 justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground xl:hidden"
             aria-label="Show status details"
             aria-controls="status-details"
-            aria-expanded={detailsOpen}
             title="Show status details"
+          />
+          <CollapsibleContent
+            id="status-details"
+            forceMount
+            className="block min-w-0 data-[state=closed]:hidden xl:flex-1"
           >
-            <Ellipsis className="size-4" aria-hidden />
-          </summary>
-          <div id="status-details" className="block min-w-0 xl:flex-1">
             <div className="fixed inset-x-3 bottom-10 z-50 mb-1 flex max-h-[70vh] min-w-0 max-w-md flex-col items-stretch gap-2 overflow-y-auto rounded-md border bg-popover p-3 text-popover-foreground shadow-lg xl:static xl:flex xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-3 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:shadow-none">
               {unreachable !== null && (
                 <span
@@ -284,8 +286,8 @@ export function StatusBar() {
                 </span>
               )}
             </div>
-          </div>
-        </details>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
       <span className="flex min-w-0 shrink-0 items-center gap-2">
         {desktop && (

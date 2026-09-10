@@ -9,6 +9,13 @@ import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
@@ -17,7 +24,6 @@ import type {
   DaemonStatusResult,
   RepoSyncResult,
 } from '@/lib/types'
-import { field } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { SyncPanel } from '@/routes/run-sync'
 import { useStore } from '@/store'
@@ -381,6 +387,10 @@ function RepoSyncCard({ client }: { client: Api }) {
 }
 
 
+/** Picking no run is what shuts the panel below again, so it is a row rather
+ * than a placeholder. */
+const noRun = 'none'
+
 const terminal: Record<string, true> = {
   merged: true,
   abandoned: true,
@@ -414,21 +424,27 @@ function OverlayCard({ client }: { client: Api }) {
         </p>
       )}
       {live.length > 0 && (
-        <Label className="block max-w-md space-y-1 text-xs text-muted-foreground">
-          Run
-          <select
-            className={field}
-            value={runID}
-            onChange={(e) => setRunID(e.target.value)}
+        <div className="max-w-md space-y-1 text-xs text-muted-foreground">
+          <Label htmlFor="settings-overlay-run" className="text-xs">
+            Run
+          </Label>
+          <Select
+            value={runID || noRun}
+            onValueChange={(value) => setRunID(value === noRun ? '' : value)}
           >
-            <option value="">Pick a run</option>
-            {live.map((r) => (
-              <option key={r.id} value={r.id}>
-                {runLabel(r)}
-              </option>
-            ))}
-          </select>
-        </Label>
+            <SelectTrigger id="settings-overlay-run">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={noRun}>Pick a run</SelectItem>
+              {live.map((r) => (
+                <SelectItem key={r.id} value={r.id}>
+                  {runLabel(r)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
       {runID && <SyncPanel runID={runID} client={client} />}
     </section>

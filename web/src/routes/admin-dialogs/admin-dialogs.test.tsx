@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { BudgetDialog, WorkspaceSettingsDialog } from '@/routes/admin-dialogs'
 import { useStore } from '@/store'
 import { budget, fakeApi, workspace } from '@/test/fixtures'
+import { pickOption } from '@/test/select'
 
 function seed() {
   useStore.setState({
@@ -28,9 +29,7 @@ describe('workspace settings dialog', () => {
     )
 
     const dialog = within(await screen.findByRole('dialog'))
-    fireEvent.change(dialog.getByLabelText(/Who may steer/), {
-      target: { value: 'admins_only' },
-    })
+    await pickOption(dialog.getByLabelText(/Who may steer/), 'admins only')
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(client.workspaceSettings).toHaveBeenCalledWith({

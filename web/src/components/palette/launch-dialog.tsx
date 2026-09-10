@@ -11,10 +11,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import type { AgentInfo, Member } from '@/lib/types'
-import { field } from '@/lib/utils'
 import { useStore } from '@/store'
 
 /** The two launch modes the server accepts; `tui` is its default. */
@@ -198,49 +204,50 @@ export function LaunchDialog() {
             </span>
           </Label>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Label className="block space-y-1.5">
-              <span>Account</span>
-              <select
-                className={field}
-                value={account}
-                onChange={(e) => setAccount(e.target.value)}
-              >
-                {accounts.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.display_name}
-                    {member.id === ownAccountID ? ' (you)' : ' (shared)'}
-                  </option>
-                ))}
-              </select>
-            </Label>
-            <Label className="block space-y-1.5">
-              <span>Agent</span>
-              <select
-                className={field}
-                value={harness}
-                disabled={harnessLoading || launching}
-                onChange={(e) => setHarness(e.target.value)}
-              >
-                <option value="">Choose an agent</option>
-                {installedAgents.map((agent) => (
-                  <option key={agent.name} value={agent.name}>
-                    {agent.name}
-                  </option>
-                ))}
-                <option value="custom">custom</option>
-              </select>
-            </Label>
-            <Label className="block space-y-1.5">
-              <span>Mode</span>
-              <select
-                className={field}
-                value={mode}
-                onChange={(e) => setMode(e.target.value as LaunchMode)}
-              >
-                <option value="tui">Interactive (tui)</option>
-                <option value="headless">Headless</option>
-              </select>
-            </Label>
+            <div className="space-y-1.5 text-sm">
+              <Label htmlFor="launch-account">Account</Label>
+              <Select value={account} onValueChange={setAccount}>
+                <SelectTrigger id="launch-account">
+                  <SelectValue placeholder="Choose an account" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.map((member) => (
+                    <SelectItem key={member.id} value={member.id}>
+                      {member.display_name}
+                      {member.id === ownAccountID ? ' (you)' : ' (shared)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5 text-sm">
+              <Label htmlFor="launch-agent">Agent</Label>
+              <Select value={harness} onValueChange={setHarness}>
+                <SelectTrigger id="launch-agent" disabled={harnessLoading || launching}>
+                  <SelectValue placeholder="Choose an agent" />
+                </SelectTrigger>
+                <SelectContent>
+                  {installedAgents.map((agent) => (
+                    <SelectItem key={agent.name} value={agent.name}>
+                      {agent.name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="custom">custom</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5 text-sm">
+              <Label htmlFor="launch-mode">Mode</Label>
+              <Select value={mode} onValueChange={(value) => setMode(value as LaunchMode)}>
+                <SelectTrigger id="launch-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tui">Interactive (tui)</SelectItem>
+                  <SelectItem value="headless">Headless</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           {agentError && (
             <p role="alert" className="rounded-md border border-state-failed/30 bg-state-failed/5 px-3 py-2 text-[13px] text-state-failed">

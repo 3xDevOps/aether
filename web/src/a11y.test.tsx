@@ -3,11 +3,12 @@ import { fireEvent, render, screen } from '@testing-library/react'
 // timers to this file would hang the tests that use it.
 import userEvent from '@testing-library/user-event'
 import { Dock } from '@/components/dock'
+
 import { AppShell } from '@/components/shell/app-shell'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { hydrate } from '@/store/sync'
-import { alice, approval, fakeApi, run, workspace } from '@/test/fixtures'
+import { fakeApi, run } from '@/test/fixtures'
 import { toRecord } from '@/store/runs'
 
 // jsdom has neither of the two browser APIs xterm and the dialogs reach for.
@@ -46,23 +47,6 @@ beforeEach(async () => {
       ws: ['events', 'attach', 'terminal'],
       local: ['link.status', 'daemon.status', 'repo.sync', 'pull', 'update.check'],
     },
-    inbox: { [workspace.id]: [approval()] },
-    // Part way through the wizard, so its step chips are the buttons they
-    // become once a step has been reached.
-    onboardingStep: 'Workspace',
-    onboardingFurthest: 'Workspace',
-    feed: [
-      {
-        id: 'evt_1',
-        seq: 1,
-        time: '2026-08-14T10:03:00Z',
-        workspace_id: workspace.id,
-        run_id: active.id,
-        actor_id: alice.id,
-        type: 'workspace.timeline',
-        payload: { kind: 'pause' },
-      },
-    ],
   })
 })
 

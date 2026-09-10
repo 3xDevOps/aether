@@ -79,6 +79,10 @@ export interface Aether {
  */
 const stubGh = `#!/bin/sh
 echo "$*" >> "$HOME/gh-calls.log"
+if [ "$1" = "--version" ]; then
+	echo "gh version 2.100.0 (2026-09-03)"
+	exit 0
+fi
 case "$1 $2" in
 "auth login")
 	echo "! First copy your one-time code: ABCD-1234"

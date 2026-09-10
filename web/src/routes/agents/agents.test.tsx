@@ -29,18 +29,11 @@ async function flush() {
   await act(async () => {})
 }
 
-class NoResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 beforeEach(() => {
   vi.mocked(api.agentList).mockResolvedValue([
     agentInfo(), agentInfo({ name: 'myagent', source: 'member', installed: false }),
   ])
   StubSocket.install()
-  vi.stubGlobal('ResizeObserver', NoResizeObserver)
   useStore.setState({
     capabilities: { gateway: 'local', methods: ['*'], ws: ['events', 'attach', 'terminal'] },
   })

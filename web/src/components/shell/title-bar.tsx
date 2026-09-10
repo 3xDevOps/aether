@@ -31,6 +31,13 @@ export type AetherDesktop = {
    * gateway, because a newer CLI needs `aether gui build` run again.
    */
   shellVersion?: string
+  /**
+   * Opens the shell's native directory dialog and resolves to the chosen
+   * folder's absolute path, or "" when it was cancelled. Absent in a browser
+   * tab with the rest of the bridge, and in a shell built before the method
+   * existed, so every caller keeps a typed fallback.
+   */
+  chooseFolder?: () => Promise<string>
 }
 
 /** The desktop bridge, or undefined in a browser tab. */

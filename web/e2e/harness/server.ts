@@ -15,7 +15,7 @@ import { type Child, portOpen, reservePort, start, waitFor } from './process'
  * suite warms the other's pull. The published standard image is a large
  * download that proves nothing the scheduler path does not.
  */
-const standardImage = 'busybox:1.36'
+export const standardImage = 'busybox:1.36'
 
 /**
  * The argv the `fake` harness runs, read from the server's environment at

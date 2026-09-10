@@ -491,8 +491,11 @@ export interface LinkStatus {
   addr: string
   user: string
   repo: string
-  /** Named server profiles from `aether link --name`; absent when none. */
-  links?: { name: string; addr: string }[]
+  /**
+   * Named server profiles from `aether link --name`; absent when none.
+   * `repo` is the profile's own clone, absent when it has none.
+   */
+  links?: { name: string; addr: string; repo?: string }[]
   /** The profile this gateway runs on; absent on the top-level link. */
   active?: string
 }
@@ -521,6 +524,32 @@ export interface GitHubConnectResult {
   login: string
   signing_key: string
   fingerprint: string
+}
+
+/** github.probe status: gh is usable, absent, present but unrunnable, or
+ * older than the login check can read. */
+export type GitHubCLIStatus = 'ok' | 'missing' | 'broken' | 'outdated'
+
+/** github.probe: the gh in the member's environment terminal, before they
+ * are told to log in with it. The two remedies are empty while gh is
+ * usable; `admin_remedy` is set only when the server's own standard image
+ * is the one without a usable gh. */
+export interface GitHubProbeResult {
+  status: GitHubCLIStatus
+  version?: string
+  minimum: string
+  /** What gh, or the container that could not run it, printed. */
+  detail?: string
+  /** The image the terminal container runs, and the member's own saved
+   * one when they have it. They differ while a container outlives the
+   * image it should be on. */
+  image: string
+  saved_image?: string
+  /** Where gh resolved, present only when that is a file inside the
+   * member's own environment home and therefore outlives every image. */
+  path?: string
+  remedy?: string
+  admin_remedy?: string
 }
 
 /** pull: the run branch fetched into the linked repository. */

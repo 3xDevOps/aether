@@ -1,26 +1,17 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { CommandPalette } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { agentInfo, alice, bob, otherWorkspace, run, vera, workspace } from '@/test/fixtures'
+import { openSelect, pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
   return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
-
-// jsdom has neither of the two browser APIs the dialog and cmdk reach for.
-Element.prototype.scrollIntoView = vi.fn()
-vi.stubGlobal(
-  'ResizeObserver',
-  class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  },
-)
 
 const active = run({ id: 'run_1', task: 'rewrite the checkout flow' })
 
@@ -61,6 +52,14 @@ function open() {
   fireEvent.keyDown(window, { key: 'k', metaKey: true })
 }
 
+/** The agent field, once its roster has landed: until then it is disabled and
+ * still reads its placeholder, so no list can be dropped from it. */
+async function agentField(): Promise<HTMLElement> {
+  const agent = await screen.findByLabelText('Agent')
+  await waitFor(() => expect(agent.textContent).not.toBe('Choose an agent'))
+  return agent
+}
+
 /** Appends markup the guard has to notice, removed however the test ends. */
 function overlay(markup: string): void {
   const host = document.createElement('div')
@@ -78,6 +77,14 @@ describe('command palette', () => {
     ['a terminal', '<div class="xterm"><span></span></div>', true],
     ['a dialog', '<div role="dialog"><button type="button">ok</button></div>', false],
     ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>', false],
+    // A select list is portalled out of the dialog that hosts it, so there is
+    // no dialog above it to stand the chord down. It says it is open, which is
+    // what tells it apart from cmdk's own list inside the palette.
+    [
+      'an open list',
+      '<div role="listbox" data-state="open"><div role="option">claude</div></div>',
+      false,
+    ],
   ])('opens from inside %s: %s', (_, markup, opens) => {
     render(<CommandPalette />)
     overlay(markup)
@@ -232,6 +239,8 @@ describe('command palette', () => {
     expect(target.textContent).toContain(workspace.name)
     expect(target.textContent).toContain(workspace.base_branch)
 
+    // Nothing is launchable until the roster names the harness it will send.
+    await agentField()
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
@@ -251,6 +260,7 @@ describe('command palette', () => {
     // agent.list is the source of truth for who this server can run, so a
     // member's registered harness must be selectable here, not just the
     // shipped names.
+    await openSelect(await agentField())
     await screen.findByRole('option', { name: 'myagent' })
     expect(api.agentList).toHaveBeenCalled()
     // The deployment escape hatch stays reachable alongside the roster.
@@ -270,10 +280,13 @@ describe('command palette', () => {
     open()
 
     fireEvent.click(await screen.findByText('Launch a run...'))
-    fireEvent.change(await screen.findByLabelText('Account'), {
-      target: { value: bob.id },
-    })
+    await pickOption(await screen.findByLabelText('Account'), 'Bob (shared)')
+    const agent = await agentField()
+    await openSelect(agent)
     await screen.findByRole('option', { name: 'bob-agent' })
+    // Radix hides the rest of the document while a list is open.
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(agent.textContent).toBe('bob-agent'))
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
@@ -291,7 +304,8 @@ describe('command palette', () => {
 
     fireEvent.click(await screen.findByText('Launch from a template...'))
     // The workspace's templates arrive from template.list.
-    await screen.findByRole('option', { name: 'nightly triage' })
+    const template = await screen.findByLabelText('Template')
+    await waitFor(() => expect(template.textContent).toBe('nightly triage'))
     expect(api.templateList).toHaveBeenCalledWith(workspace.id)
 
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))

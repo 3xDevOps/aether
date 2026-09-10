@@ -24,12 +24,6 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-class NoResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function mount({
   dock = {},
   status = 'running',
@@ -48,7 +42,6 @@ function mount({
 beforeEach(() => {
   for (const tab of ['t1', 't2', 't3', 't4']) unregisterShellSocket('run_1', tab)
   StubSocket.install()
-  vi.stubGlobal('ResizeObserver', NoResizeObserver)
 })
 
 afterEach(() => {

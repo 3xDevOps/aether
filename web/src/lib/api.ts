@@ -17,6 +17,7 @@ import type {
   EnvSaveResult,
   GatewayCapabilities,
   GitHubConnectResult,
+  GitHubProbeResult,
   GitIdentity,
   LinkApplyResult,
   LinkRepoResult,
@@ -545,6 +546,11 @@ export const api = {
    * in their environment terminal: git credentials there, a signing key in
    * their environment home, and that key registered on the account. */
   githubConnect: () => call<GitHubConnectResult>('github.connect', {}),
+  /** Reports the gh in the member's environment terminal, so the screen can
+   * say what is wrong before it types a login command that container
+   * cannot run. Answers only for a terminal that is already running; the
+   * screen waits for the dock to report one. */
+  githubProbe: () => call<GitHubProbeResult>('github.probe', {}),
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),

@@ -7,7 +7,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/heroui'
 import {
   Dialog,
   DialogContent,
@@ -18,11 +17,17 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Schedule, Template } from '@/lib/types'
-import { field } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { ScheduleEditor } from '@/routes/templates/schedule-editor'
 import { useStore } from '@/store'
@@ -124,12 +129,12 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
                     <div className="min-w-0 flex-1 space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <h2 className="min-w-0 truncate text-base font-semibold">{template.name}</h2>
-                        <Chip color="default" variant="tertiary" size="sm">
-                          <Chip.Label>{template.harness}</Chip.Label>
-                        </Chip>
-                        <Chip color="default" variant="tertiary" size="sm">
-                          <Chip.Label>{template.mode}</Chip.Label>
-                        </Chip>
+                        <span className="rounded-md border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                          {template.harness}
+                        </span>
+                        <span className="rounded-md border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                          {template.mode}
+                        </span>
                       </div>
                       <div>
                         <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
@@ -312,30 +317,30 @@ function TemplateForm({
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="template-harness">Agent</Label>
-              <select
-                id="template-harness"
-                className={field}
-                value={harness}
-                onChange={(e) => setHarness(e.target.value)}
-              >
-                {harnesses.map((h) => (
-                  <option key={h} value={h}>
-                    {h}
-                  </option>
-                ))}
-              </select>
+              <Select value={harness} onValueChange={setHarness}>
+                <SelectTrigger id="template-harness">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {harnesses.map((h) => (
+                    <SelectItem key={h} value={h}>
+                      {h}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="template-mode">Mode</Label>
-              <select
-                id="template-mode"
-                className={field}
-                value={mode}
-                onChange={(e) => setMode(e.target.value)}
-              >
-                <option value="tui">tui</option>
-                <option value="headless">headless</option>
-              </select>
+              <Select value={mode} onValueChange={setMode}>
+                <SelectTrigger id="template-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tui">tui</SelectItem>
+                  <SelectItem value="headless">headless</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           {error && (

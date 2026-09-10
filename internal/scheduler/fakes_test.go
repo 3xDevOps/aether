@@ -45,7 +45,10 @@ type fakeRuntime struct {
 	execCalls   []fakeExecTTYCall
 	// execHandler answers Exec with an exit code and stdout; the default
 	// is exit 0 with no output, and nothing ever writes stderr.
-	execHandler  func(id runtime.ID, argv []string) (int, string, error)
+	execHandler func(id runtime.ID, argv []string) (int, string, error)
+	// execStderr is what every exec writes to stderr, so a test can see
+	// what an answer built from both streams looks like.
+	execStderr   string
 	execRunCalls []fakeExecCall
 	attaches     int
 	// images is the fake daemon's local image registry.
@@ -307,9 +310,10 @@ func (r *fakeRuntime) Exec(ctx context.Context, id runtime.ID, argv []string, wo
 	r.mu.Lock()
 	r.execRunCalls = append(r.execRunCalls, fakeExecCall{id: id, argv: slices.Clone(argv), workDir: workDir})
 	handler := r.execHandler
+	stderr := r.execStderr
 	r.mu.Unlock()
 	if handler == nil {
-		return 0, "", "", nil
+		return 0, "", stderr, nil
 	}
 	// Docker's Exec answers ctx.Err() when the deadline passes under a
 	// running command, so a handler that never returns must not outlive
@@ -328,7 +332,7 @@ func (r *fakeRuntime) Exec(ctx context.Context, id runtime.ID, argv []string, wo
 	case <-ctx.Done():
 		return 0, "", "", ctx.Err()
 	case got := <-done:
-		return got.code, got.stdout, "", got.err
+		return got.code, got.stdout, stderr, got.err
 	}
 }
 

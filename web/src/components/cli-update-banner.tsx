@@ -9,6 +9,11 @@ import { AlertTriangle, CheckCircle2, Download, LoaderCircle } from 'lucide-reac
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
   banner,
   bannerActions,
   bannerContent,
@@ -136,35 +141,32 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
     )
   }
   return (
-    <details className="text-xs text-muted-foreground">
-      <summary
-        className={cn(
-          focusRing,
-          'cursor-pointer select-none font-medium hover:text-foreground',
-        )}
-      >
+    <Collapsible className="text-xs text-muted-foreground">
+      <CollapsibleTrigger className="font-medium hover:text-foreground">
         {method === 'admin-prompt'
           ? 'Install details: macOS administrator approval'
           : 'Install details: what updating changes'}
-      </summary>
-      <div className="mt-1.5 space-y-1.5 leading-5">
-        <p>
-          Updating replaces the aether binary on this machine and restarts the
-          dashboard. Attached terminals and any running file sync stop with it;
-          the runs themselves keep going on the server.
-        </p>
-        {method === 'admin-prompt' && (
-          // The dialog carries osascript's name, not Aether's, and a member
-          // who has never heard of osascript would rightly refuse it.
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-1.5 space-y-1.5 leading-5">
           <p>
-            macOS will ask for an administrator password: {path} is in a
-            directory this account cannot write to. The dialog is labelled
-            osascript, the tool Aether asks through. Aether never sees your
-            password.
+            Updating replaces the aether binary on this machine and restarts the
+            dashboard. Attached terminals and any running file sync stop with it;
+            the runs themselves keep going on the server.
           </p>
-        )}
-      </div>
-    </details>
+          {method === 'admin-prompt' && (
+            // The dialog carries osascript's name, not Aether's, and a member
+            // who has never heard of osascript would rightly refuse it.
+            <p>
+              macOS will ask for an administrator password: {path} is in a
+              directory this account cannot write to. The dialog is labelled
+              osascript, the tool Aether asks through. Aether never sees your
+              password.
+            </p>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
