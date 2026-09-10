@@ -39,7 +39,7 @@ export function BudgetStatus() {
 
   return (
     <span
-      className={`flex items-center gap-1.5 ${stateStyle[totals.state]}`}
+      className={`inline-flex h-[22px] min-h-[22px] min-w-0 max-w-full items-center gap-1.5 px-1.5 text-xs ${stateStyle[totals.state]}`}
       title={lines.join('\n')}
       aria-label={`Budget ${money.format(totals.costUSD)}${totals.advisory ? '+' : ''}`}
     >

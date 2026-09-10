@@ -33,7 +33,7 @@ export function ApprovalStatus() {
             }}
             className={cn(
               focusRing,
-              'flex h-[22px] items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
+              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
             )}
           >
             <ShieldQuestion
@@ -80,7 +80,7 @@ export function ApprovalBadge({ run }: CardSlotProps) {
             }}
             className={cn(
               focusRing,
-              'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-state-needs-attention/20',
+              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 px-1.5 py-0.5 hover:bg-state-needs-attention/20',
             )}
           >
             <ShieldQuestion className="size-3.5 text-state-needs-attention" aria-hidden />
@@ -131,33 +131,33 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
         title="Approvals"
         subtitle={waiting === 1 ? '1 request waiting' : `${waiting} requests waiting`}
       />
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-muted/20 px-4 py-2">
-        <div>
-          <p className="text-sm font-medium">Decision queue</p>
-          <p className="text-[13px] text-muted-foreground">
+      <div className="flex min-h-[35px] shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-sidebar px-3 py-1.5 sm:px-4">
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium">Decision queue</p>
+          <p className="text-xs text-muted-foreground">
             Review requests before an agent continues.
           </p>
         </div>
         <Button
           variant="outline"
-          size="sm"
+          size="default"
           aria-pressed={showDecided}
           onClick={() => setShowDecided(!showDecided)}
         >
           {showDecided ? 'Hide decided' : 'Show decided'}
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div className="mx-auto w-full max-w-4xl">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+        <div className="mx-auto w-full max-w-5xl">
           {error && (
             <p
               role="alert"
-              className="mb-3 rounded-md border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-sm text-state-failed"
+              className="mb-3 border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed"
             >
               {error}
             </p>
           )}
-          <ul className="space-y-2">
+          <ul className="overflow-hidden border-y border-border">
             {rows.map((approval) => (
               <Row
                 key={approval.id}
@@ -170,7 +170,7 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
             ))}
           </ul>
           {rows.length === 0 && !error && (
-            <div className="rounded-md border border-dashed px-4 py-10 text-center">
+            <div className="border-y border-dashed px-4 py-8 text-center">
               <ShieldQuestion className="mx-auto mb-2 size-5 text-muted-foreground" aria-hidden />
               <p className="text-sm font-medium">Nothing is waiting on a decision.</p>
               <p className="mt-1 text-[13px] text-muted-foreground">
@@ -218,13 +218,13 @@ function Row({
   return (
     <li
       className={cn(
-        'rounded-lg border bg-card p-4 shadow-xs',
-        !open && 'opacity-80',
+        'border-b border-border px-3 py-3 last:border-b-0',
+        !open && 'bg-muted/10',
       )}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Chip
               color={open ? 'warning' : approval.decision === 'approved' ? 'success' : 'danger'}
               variant="soft"
@@ -238,27 +238,29 @@ function Row({
                     : 'Denied'}
               </Chip.Label>
             </Chip>
-            <span className="text-sm font-medium break-words">{approval.action}</span>
+            <span className="min-w-0 break-words text-[13px] font-medium">{approval.action}</span>
           </div>
           {approval.detail ? (
-            <div className="mt-3 rounded-md bg-muted/35 px-3 py-2">
+            <div className="mt-2 border-l-2 border-border pl-2">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 Reason
               </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-5">{approval.detail}</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 select-text">
+                {approval.detail}
+              </p>
             </div>
           ) : (
             <p className="mt-2 text-[13px] text-muted-foreground">No additional reason provided.</p>
           )}
         </div>
         {open && (
-          <span className="flex shrink-0 gap-2 sm:pt-0.5">
-            <Button size="sm" disabled={busy} onClick={() => void decide(true)}>
+          <span className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+            <Button size="default" disabled={busy} onClick={() => void decide(true)}>
               <Check />
               Approve
             </Button>
             <Button
-              size="sm"
+              size="default"
               variant="outline"
               disabled={busy}
               onClick={() => void decide(false)}
@@ -270,17 +272,18 @@ function Row({
         )}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-2 text-[13px] text-muted-foreground">
-        <span className="font-medium text-foreground/80">
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
+        <span className="min-w-0 break-words font-medium text-foreground/80">
           {workspace?.name ?? approval.workspace_id}
         </span>
         {run && (
           <button
             type="button"
             onClick={() => navigate('terminal', { runId: run.id })}
+            title={runLabel(run)}
             className={cn(
               focusRing,
-              'max-w-full truncate hover:text-foreground hover:underline sm:max-w-60',
+              'inline-flex min-h-[26px] min-w-0 max-w-full items-center truncate text-left hover:text-foreground hover:underline sm:max-w-60',
             )}
           >
             {runLabel(run)}
@@ -290,19 +293,19 @@ function Row({
       </div>
 
       {!open && (
-        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[13px]">
+        <p className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[13px]">
           <span
             aria-hidden
             className="size-2 shrink-0 rounded-full"
             style={{ backgroundColor: decider?.color }}
           />
           {approval.decision === 'approved' ? 'Approved' : 'Denied'} by{' '}
-          {decider?.display_name ?? approval.decided_by ?? 'someone'}
+          <span className="break-words">{decider?.display_name ?? approval.decided_by ?? 'someone'}</span>
           {approval.decided_at && ` ${timeAgo(approval.decided_at)}`}
         </p>
       )}
       {error && (
-        <p role="alert" className="mt-2 rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
+        <p role="alert" className="mt-2 border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-[13px] text-state-failed">
           {error}
         </p>
       )}

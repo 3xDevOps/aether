@@ -110,57 +110,48 @@ export function ConnectionError({ kind, dead, error, onRetry }: ConnectionErrorP
   const Icon = content.icon
 
   return (
-    <main className="flex h-full min-h-[24rem] items-center justify-center bg-background px-4 py-8 sm:px-6">
+    <main className="flex h-full min-h-0 min-w-0 overflow-y-auto bg-background p-3 sm:p-4">
       <section
         role="alert"
         aria-labelledby="connection-error-title"
         aria-describedby="connection-error-description"
-        className="w-full max-w-2xl overflow-hidden rounded-lg border border-border/80 bg-card shadow-sm"
+        className="m-auto grid min-w-0 w-full max-w-[720px] overflow-hidden border border-border bg-card"
       >
-        <header className="flex items-start gap-4 border-b border-border/70 px-5 py-5 sm:px-7 sm:py-6">
-          <div className="grid size-10 shrink-0 place-items-center rounded-md bg-state-needs-attention/15 text-state-needs-attention">
-            <Icon className="size-5" aria-hidden />
+        <header className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 border-b border-border bg-sidebar px-3 py-3 sm:px-4">
+          <div className="grid size-7 shrink-0 place-items-center rounded-sm bg-state-needs-attention/15 text-state-needs-attention">
+            <Icon className="size-4" aria-hidden />
           </div>
           <div className="min-w-0">
-            <p className="mb-1 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-              {content.eyebrow}
-            </p>
-            <h1 id="connection-error-title" className="text-xl font-semibold tracking-tight sm:text-2xl">
+            <p className="mb-0.5 text-xs font-medium text-muted-foreground">{content.eyebrow}</p>
+            <h1 id="connection-error-title" className="text-base font-semibold leading-5">
               {content.title}
             </h1>
           </div>
         </header>
 
-        <div className="space-y-5 px-5 py-5 sm:px-7 sm:py-6">
-          <p
-            id="connection-error-description"
-            className="max-w-xl text-sm leading-6 text-muted-foreground"
-          >
+        <div className="min-w-0 space-y-3 px-3 py-3 sm:px-4">
+          <p id="connection-error-description" className="max-w-[68ch] text-[13px] leading-5 text-muted-foreground">
             {content.description}
           </p>
 
           {content.action && (
             <div>
-              <Button type="button" className="h-9" onClick={onRetry}>
+              <Button type="button" size="sm" onClick={onRetry}>
                 <RefreshCw aria-hidden />
                 {content.action}
               </Button>
             </div>
           )}
 
-          {/* The raw failure remains open so a fatal screen never hides the
-              exact message someone needs to relay or act on. It can still be
-              collapsed once it has been read. */}
+          {/* Keep the exact raw failure visible and selectable. The bounded
+              block owns its scroll so it cannot push retry out of reach. */}
           {error && (
-            <Collapsible
-              defaultOpen
-              className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs"
-            >
-              <CollapsibleTrigger className="font-medium text-muted-foreground hover:text-foreground">
+            <Collapsible defaultOpen className="min-w-0 border border-border bg-background text-xs">
+              <CollapsibleTrigger className="px-2 text-muted-foreground hover:text-foreground">
                 Technical details
               </CollapsibleTrigger>
-              <CollapsibleContent>
-                <p className="mt-2 break-words font-mono leading-5 text-foreground">{error}</p>
+              <CollapsibleContent className="min-w-0 border-t border-border px-2 py-2">
+                <pre className="max-h-[min(14rem,35vh)] overflow-auto whitespace-pre-wrap break-words font-mono leading-5 text-foreground select-text">{error}</pre>
               </CollapsibleContent>
             </Collapsible>
           )}

@@ -90,13 +90,13 @@ export function GitIdentityStep({
   return (
     <section
       aria-label="Git identity"
-      className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+      className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
           Step 2
         </p>
-        <h2 className="text-xl font-semibold tracking-tight">Set your git identity</h2>
+        <h2 className="text-base font-semibold">Set your git identity</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           Every commit an agent makes in your runs is authored as this name and
           address, so the work you merge upstream credits you.
@@ -104,17 +104,18 @@ export function GitIdentityStep({
       </div>
       {loading && <Skeleton className="h-20 w-full rounded-md" />}
       <form
-        className="max-w-2xl space-y-4"
+        className="min-w-0 max-w-2xl space-y-4"
         aria-label="Set git identity"
         onSubmit={(e) => {
           e.preventDefault()
           void save()
         }}
       >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Label className="block space-y-1.5">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+          <Label className="block min-w-0 space-y-1">
             Name
             <Input
+              className="min-w-0"
               value={name}
               placeholder="Ada Lovelace"
               disabled={busy}
@@ -124,10 +125,11 @@ export function GitIdentityStep({
               }}
             />
           </Label>
-          <Label className="block space-y-1.5">
+          <Label className="block min-w-0 space-y-1">
             Email
             <Input
               type="email"
+              className="min-w-0"
               value={email}
               placeholder="ada@example.com"
               disabled={busy}
@@ -139,7 +141,7 @@ export function GitIdentityStep({
           </Label>
         </div>
         {error && (
-          <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+          <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
             {error}
           </p>
         )}

@@ -245,13 +245,13 @@ export function RepoStep({
   return (
     <section
       aria-label="Repository"
-      className="mx-auto w-full max-w-4xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+      className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
           Step 4
         </p>
-        <h2 className="text-xl font-semibold tracking-tight">Connect your repository</h2>
+        <h2 className="text-base font-semibold">Connect your repository</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           The gateway adds an <span className="font-mono">aether</span> git
           remote to a clone on this machine.{' '}
@@ -263,7 +263,7 @@ export function RepoStep({
       {!connected && (
         <>
           <form
-            className="max-w-2xl space-y-4"
+            className="min-w-0 max-w-3xl space-y-4"
             aria-label="Link repository"
             onSubmit={(e) => {
               e.preventDefault()
@@ -274,9 +274,10 @@ export function RepoStep({
               <Label className="block" htmlFor={fieldId}>
                 Repository path
               </Label>
-              <div className="flex items-center gap-2">
+              <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <Input
                   id={fieldId}
+                  className="min-w-0"
                   value={repo}
                   list={listId}
                   disabled={picking}
@@ -318,14 +319,14 @@ export function RepoStep({
             </p>
           )}
           {error && (
-            <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed" aria-live="polite">
+            <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" aria-live="polite">
               {error}
             </p>
           )}
         </>
       )}
       {connected && (
-        <div className="space-y-4 rounded-md border bg-background p-4 sm:p-5">
+        <div className="min-w-0 space-y-4 border-t border-border/70 py-3">
           <p className="text-sm">
             Connected <span className="font-mono">{connected.path}</span>.
             Remote <span className="font-mono">{connected.remote.remote}</span>{' '}
@@ -361,7 +362,7 @@ export function RepoStep({
             )}
           </p>
           {pushed?.state === 'behind' && !forwarded && (
-            <div className="space-y-3 rounded-md border border-state-waiting/30 bg-state-waiting/5 p-4" aria-live="polite">
+            <div className="space-y-3 border-l-2 border-state-waiting/60 bg-state-waiting/5 px-3 py-2" aria-live="polite">
               <p className="text-sm">
                 The workspace is {commits(pushed.behind)} ahead of your clone.
               </p>
@@ -386,7 +387,7 @@ export function RepoStep({
                   <p className="text-xs text-state-failed">
                     The fast-forward failed:
                   </p>
-                  <pre className={`rounded-md border border-state-failed/30 bg-state-failed/5 ${pane}`}>
+                  <pre className={`border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 ${pane}`}>
                     {forwardError}
                   </pre>
                 </div>
@@ -397,7 +398,7 @@ export function RepoStep({
             </div>
           )}
           {pushed?.state === 'diverged' && (
-            <div className="space-y-3 rounded-md border border-state-needs-attention/30 bg-state-needs-attention/5 p-4" aria-live="polite">
+            <div className="space-y-3 border-l-2 border-state-needs-attention/60 bg-state-needs-attention/5 px-3 py-2" aria-live="polite">
               <p className="text-sm">
                 Your clone and the workspace have both moved on:{' '}
                 {commits(pushed.ahead)} here, {pushed.behind} there. Aether
@@ -413,8 +414,8 @@ export function RepoStep({
                 .
               </p>
               <p className="text-sm">Resolve it by hand, then push again:</p>
-              <div className="flex items-start gap-2">
-                <pre className={`flex-1 rounded-md border bg-background ${pane}`}>
+              <div className="flex min-w-0 items-start gap-2">
+                <pre className={`min-w-0 flex-1 border border-border/70 bg-background ${pane}`}>
                   {resolveCmds}
                 </pre>
                 <Button
@@ -429,7 +430,7 @@ export function RepoStep({
             </div>
           )}
           {forwarded && (
-            <p className="rounded-md border border-state-done/30 bg-state-done/5 p-3 text-sm text-state-done" aria-live="polite">
+            <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done" aria-live="polite">
               {forwarded.current ? (
                 <>
                   Fast-forwarded{' '}
@@ -454,7 +455,7 @@ export function RepoStep({
             // branch]" both mean success and say different things, and the
             // reader who needs that distinction is the one who would not
             // know to go looking for it.
-            <Collapsible defaultOpen className="overflow-hidden rounded-md border bg-card">
+            <Collapsible defaultOpen className="min-w-0 border-t border-border/70">
               <CollapsibleTrigger className="px-3 py-2 text-sm">
                 What git did
               </CollapsibleTrigger>
@@ -478,7 +479,7 @@ export function RepoStep({
                     <p className="text-xs text-state-failed">
                       The push failed. Git said:
                     </p>
-                    <pre className={`rounded-md border border-state-failed/30 bg-state-failed/5 ${pane}`}>
+                    <pre className={`border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 ${pane}`}>
                       {pushError}
                     </pre>
                   </div>
@@ -493,12 +494,12 @@ export function RepoStep({
                   {settled ? 'The same push, by hand:' : 'or run it yourself:'}
                 </p>
               )}
-              <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <Input
                   ref={cmdRef}
                   readOnly
                   aria-label="Push command"
-                  className="font-mono"
+                  className="min-w-0 font-mono"
                   value={pushCmd}
                   onFocus={(e) => e.target.select()}
                 />

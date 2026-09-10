@@ -65,14 +65,14 @@ export function BudgetDialog({
         </DialogHeader>
         <form
           id="budget-set"
-          className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1"
+          className="min-h-0 space-y-3 overflow-y-auto -mx-1 px-1"
           onSubmit={(e) => {
             e.preventDefault()
             void save(false)
           }}
         >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+            <div className="min-w-0 space-y-1">
               <Label htmlFor="budget-limit">Limit (USD)</Label>
               <Input
                 id="budget-limit"
@@ -88,7 +88,7 @@ export function BudgetDialog({
                 Maximum spend reported for this workspace.
               </p>
             </div>
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1">
               <Label htmlFor="budget-warn">Warn at (USD)</Label>
               <Input
                 id="budget-warn"
@@ -110,7 +110,7 @@ export function BudgetDialog({
             </p>
           )}
         </form>
-        <DialogFooter className="border-t pt-4">
+        <DialogFooter className="border-t pt-3">
           <Button variant="ghost" disabled={busy} onClick={() => void save(true)}>
             Clear budget
           </Button>

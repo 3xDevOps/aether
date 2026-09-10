@@ -130,15 +130,15 @@ export function SyncPanel({
   const active = session?.state === 'running' || session?.state === 'conflict'
 
   return (
-    <section aria-label="Sync" className="space-y-3 rounded-lg border bg-card p-4">
+    <section aria-label="Sync" className="min-w-0 space-y-3 border-t border-border/70 pt-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium">Local sync overlay</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Mirror this run's worktree into the linked repository.
           </p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs font-medium">
+        <span className="inline-flex max-w-full min-w-0 items-center gap-1.5 border border-border/70 bg-muted px-2 py-1 text-xs font-medium">
           {active ? (
             <RefreshCw className="size-3.5 text-state-working" aria-hidden />
           ) : (
@@ -148,7 +148,7 @@ export function SyncPanel({
         </span>
       </div>
       {session?.state === 'conflict' && session.conflict && (
-        <div className="rounded-md border border-state-needs-attention/40 bg-state-needs-attention/10 p-3">
+        <div className="border-l-2 border-state-needs-attention/60 bg-state-needs-attention/10 px-3 py-2">
           <p className="flex items-start gap-2 text-xs font-medium text-state-needs-attention">
             <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
             <span>{session.conflict}</span>
@@ -171,7 +171,7 @@ export function SyncPanel({
         )}
       </div>
       {error && (
-        <div role="alert" className="rounded-md border border-state-failed/40 bg-state-failed/10 p-3">
+        <div role="alert" className="border-l-2 border-state-failed/60 bg-state-failed/10 px-3 py-2">
           <p className="text-xs text-state-failed">{error.text}</p>
           {error.verb === 'start' && (
             <Button

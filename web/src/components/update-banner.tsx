@@ -227,9 +227,7 @@ function ShellBanner() {
             Rebuild instructions
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="mt-1.5">
-              <CopyableCommand command="aether gui build" />
-            </div>
+            <CopyableCommand command="aether gui build" />
           </CollapsibleContent>
         </Collapsible>
       </div>
@@ -492,7 +490,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
                 ? 'Run these on the server host instead:'
                 : noButtonsLine(status, statusError)}
             </p>
-            <div className="space-y-1 rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
+            <div className="space-y-1">
               {manualCommands(status).map((command) => (
                 <CopyableCommand key={command} command={command} />
               ))}

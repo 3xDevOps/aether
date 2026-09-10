@@ -114,9 +114,9 @@ export function AgentWizard({
 
   if (step === 'done') {
     return (
-      <div className="space-y-4 rounded-lg border border-state-done/30 bg-card p-4 shadow-sm sm:p-5">
+      <div className="min-w-0 space-y-4 border-y border-state-done/30 bg-state-done/5 px-4 py-4 sm:px-5">
         <div className="flex items-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded-full bg-state-done/10 text-xs font-semibold text-state-done">
+          <span className="text-xs font-semibold text-state-done" aria-hidden="true">
             3
           </span>
           <p className="text-base font-semibold">
@@ -126,7 +126,7 @@ export function AgentWizard({
         <p className="text-sm leading-6 text-muted-foreground">
           {trimmed} is available in the run launcher. Its executable and user-local files
           persist in your member home, and your environment is saved as{' '}
-          <span className="font-mono">{saved}</span>, so new runs start from it.
+          <span className="break-all font-mono">{saved}</span>, so new runs start from it.
           Vendor login is checked by the agent when it starts, not here.
         </p>
         <Button size="sm" onClick={onCancel}>
@@ -141,12 +141,12 @@ export function AgentWizard({
       <div
         className={
           hasTerminal
-            ? 'space-y-4 rounded-lg border bg-card p-4 shadow-sm sm:p-5'
-            : 'max-w-2xl space-y-4 rounded-lg border bg-card p-4 shadow-sm sm:p-5'
+            ? 'min-w-0 space-y-4 border-y bg-sidebar px-4 py-4 sm:px-5'
+            : 'min-w-0 max-w-2xl space-y-4 border-y bg-sidebar px-4 py-4 sm:px-5'
         }
       >
         <div className="flex items-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+          <span className="text-xs font-semibold text-primary" aria-hidden="true">
             2
           </span>
           <p className="text-base font-semibold">Set up {trimmed}</p>
@@ -160,7 +160,7 @@ export function AgentWizard({
             <p className="text-sm leading-6 text-muted-foreground">
               Complete the vendor login in that terminal, then return here.
             </p>
-            <code className="block overflow-x-auto rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+            <code className="block min-w-0 overflow-x-auto rounded-[2px] border bg-muted px-3 py-2 font-mono text-xs">
               {installScript}
             </code>
           </>
@@ -169,10 +169,10 @@ export function AgentWizard({
             <p className="text-sm leading-6 text-muted-foreground">
               Open your environment terminal and run the install command there:
             </p>
-            <code className="block rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+            <code className="block min-w-0 overflow-x-auto rounded-[2px] border bg-muted px-3 py-2 font-mono text-xs">
               aether terminal
             </code>
-            <pre className="overflow-x-auto rounded-md border bg-muted p-3 font-mono text-xs">
+            <pre className="min-w-0 overflow-x-auto rounded-[2px] border bg-muted p-3 font-mono text-xs">
               {installScript}
             </pre>
             <p className="text-sm leading-6 text-muted-foreground">
@@ -181,7 +181,7 @@ export function AgentWizard({
           </>
         )}
         {error && (
-          <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+          <p className="border-y border-state-failed/30 bg-state-failed/5 px-3 py-2 text-[13px] text-state-failed">
             {error}
           </p>
         )}
@@ -211,19 +211,19 @@ export function AgentWizard({
 
   return (
     <form
-      className="max-w-2xl space-y-4 rounded-lg border bg-card p-4 shadow-sm sm:p-5"
+      className="min-w-0 max-w-2xl space-y-4 border-y bg-sidebar px-4 py-4 sm:px-5"
       onSubmit={(e) => {
         e.preventDefault()
         start()
       }}
     >
       <div className="flex items-center gap-2">
-        <span className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+        <span className="text-xs font-semibold text-primary" aria-hidden="true">
           1
         </span>
         <p className="text-base font-semibold">Add an agent</p>
       </div>
-      <Label className="block max-w-md space-y-1.5">
+      <Label className="block min-w-0 max-w-md space-y-1">
         Name
         <Input
           autoFocus
@@ -234,14 +234,14 @@ export function AgentWizard({
       </Label>
       {!shipped && (
         <div className="space-y-4">
-          <Label className="block space-y-1.5">
+          <Label className="block min-w-0 space-y-1">
             TUI command
             <Input
               value={tuiValue}
               onChange={(e) => setTui(e.target.value)}
             />
           </Label>
-          <Label className="block space-y-1.5">
+          <Label className="block min-w-0 space-y-1">
             Headless command
             <Input
               value={headlessValue}

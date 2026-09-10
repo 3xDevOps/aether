@@ -36,17 +36,17 @@ function AgentsView() {
   const loading = useDelayed(agents === null && error === null)
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader title="Agents" subtitle="the agents this server can launch" />
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-base font-semibold">Registered agents</h2>
+        <div className="mx-auto flex w-full max-w-[1000px] min-w-0 flex-col gap-4 p-4 sm:p-6">
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b bg-sidebar px-3 py-2">
+            <div className="min-w-0">
+              <h2 className="text-[13px] font-semibold">Registered agents</h2>
               {agents && (
-                <span className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {agents.length} {agents.length === 1 ? 'agent' : 'agents'}
-                </span>
+                </p>
               )}
             </div>
             <Button size="sm" variant="outline" onClick={refetch}>
@@ -54,32 +54,38 @@ function AgentsView() {
             </Button>
           </div>
           {error && (
-            <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
-              {error}
-            </p>
+            <div
+              role="alert"
+              className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-y border-state-failed/30 bg-state-failed/5 px-3 py-2 text-[13px] text-state-failed"
+            >
+              <span className="min-w-0 break-words">{error}</span>
+              <Button size="sm" variant="outline" onClick={refetch}>
+                Retry
+              </Button>
+            </div>
           )}
           {loading && (
-            <div className="space-y-2 rounded-lg border bg-card p-4">
-              <Skeleton className="h-10 w-full rounded-md" />
-              <Skeleton className="h-10 w-full rounded-md" />
+            <div className="space-y-1 border-y py-2">
+              <Skeleton className="h-8 w-full rounded-[2px]" />
+              <Skeleton className="h-8 w-full rounded-[2px]" />
             </div>
           )}
           {agents && (
-            <section aria-label="Registered agents" className="space-y-3">
-              <ul className="overflow-hidden rounded-lg border bg-card">
+            <section aria-label="Registered agents" className="min-w-0">
+              <ul className="border-y" aria-label="Agent inventory">
                 {agents.map((a) => (
                   <li
                     key={a.name}
-                    className="flex flex-wrap items-center gap-3 border-b px-4 py-3 last:border-b-0 sm:px-5"
+                    className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2.5 last:border-b-0 sm:px-4"
                   >
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    <span className="min-w-0 flex-1 break-all text-[13px] font-medium">
                       {a.name}
                     </span>
                     <span
                       className={
                         a.installed === true
-                          ? 'rounded-sm bg-state-done/10 px-2 py-1 text-xs text-state-done'
-                          : 'rounded-sm bg-muted px-2 py-1 text-xs text-muted-foreground'
+                          ? 'shrink-0 bg-state-done/10 px-1.5 py-0.5 text-xs text-state-done'
+                          : 'shrink-0 bg-muted px-1.5 py-0.5 text-xs text-muted-foreground'
                       }
                     >
                       {a.installed === true
@@ -88,13 +94,13 @@ function AgentsView() {
                           ? 'Not installed'
                           : 'Installation status unavailable'}
                     </span>
-                    <span className="rounded-sm border px-2 py-1 text-xs text-muted-foreground">
+                    <span className="shrink-0 border-l pl-3 text-xs text-muted-foreground">
                       {a.source === 'shipped' ? 'shipped' : 'member'}
                     </span>
                   </li>
                 ))}
                 {agents.length === 0 && (
-                  <li className="px-4 py-4 text-sm text-muted-foreground sm:px-5">
+                  <li className="px-3 py-4 text-[13px] text-muted-foreground sm:px-4">
                     No agents registered yet.
                   </li>
                 )}
@@ -109,11 +115,11 @@ function AgentsView() {
             />
           ) : (
             caps.hasMethod('agent.register') && (
-              <div className="rounded-lg border bg-card p-4 sm:p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold">Add an agent</h2>
-                    <p className="text-sm text-muted-foreground">
+              <section className="border-y bg-sidebar px-3 py-3 sm:px-4">
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 className="text-[13px] font-semibold">Add an agent</h2>
+                    <p className="text-xs text-muted-foreground">
                       Register a member-managed executable and verify its setup.
                     </p>
                   </div>
@@ -121,7 +127,7 @@ function AgentsView() {
                     Add agent
                   </Button>
                 </div>
-              </div>
+              </section>
             )
           )}
         </div>

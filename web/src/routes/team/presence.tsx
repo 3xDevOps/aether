@@ -17,7 +17,7 @@ export function PresenceStatus() {
   const names = online.map((id) => members[id]?.display_name ?? id)
   return (
     <span
-      className="flex h-[22px] items-center gap-1.5 px-1.5 text-xs"
+      className="flex h-[22px] min-h-[22px] min-w-0 shrink-0 items-center gap-1.5 px-1.5 text-xs"
       title={`Online: ${names.join(', ')}`}
       aria-label={`${online.length} online`}
     >
@@ -52,7 +52,7 @@ export function Watchers({ run }: CardSlotProps) {
 
   const names = watchers.map((id) => members[id]?.display_name ?? id)
   return (
-    <span className="flex items-center gap-1.5" title={`Watching: ${names.join(', ')}`}>
+    <span className="flex min-w-0 shrink-0 items-center gap-1.5" title={`Watching: ${names.join(', ')}`}>
       <span className="flex items-center -space-x-1">
         {watchers.slice(0, shown).map((id) => (
           <MemberAvatar

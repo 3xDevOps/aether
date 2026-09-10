@@ -304,7 +304,10 @@ describe('approval inbox', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
 
-    expect(await screen.findByText(/Approved by Alice/, { selector: 'p' })).toBeDefined()
+    await screen.findByText('Alice')
+    expect(
+      screen.getByRole('listitem').textContent?.replace(/\s+/g, ' '),
+    ).toContain('Approved by Alice')
     expect(client.approvalDecide).toHaveBeenCalledWith('run_1', 'apr_1', true)
   })
 

@@ -116,7 +116,7 @@ export function AgentsStep({
   // has been set up, the primary Continue joins it rather than replacing
   // it, so "skip" never reads as "undo what I just did".
   const onward = (
-    <div className="sticky bottom-0 z-10 -mx-5 mt-1 flex flex-wrap items-center gap-2 border-t bg-background/95 px-5 pb-5 pt-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
+    <div className="sticky bottom-0 z-10 mt-1 flex flex-wrap items-center gap-2 border-t bg-card pb-3 pt-3">
       {(done.length > 0 || github !== null) && (
         <Button size="sm" onClick={onNext}>
           Continue
@@ -133,7 +133,7 @@ export function AgentsStep({
     return (
       <section
         aria-label="Agents"
-        className="mx-auto w-full max-w-5xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+        className="min-w-0 space-y-4 border-b border-border/70 py-4"
       >
         {setup === githubSubStep ? (
           <GitHubConnect
@@ -165,13 +165,13 @@ export function AgentsStep({
   return (
     <section
       aria-label="Agents"
-      className="mx-auto w-full max-w-5xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+      className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
           Step 5
         </p>
-        <h2 className="text-xl font-semibold tracking-tight">Prepare your agents</h2>
+        <h2 className="text-base font-semibold">Prepare your agents</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           These optional setup paths make runs useful without blocking the
           rest of onboarding.
@@ -179,7 +179,7 @@ export function AgentsStep({
       </div>
       <section
         aria-label="Set up an agent"
-        className="space-y-4 rounded-md border bg-background p-4 sm:p-5"
+        className="min-w-0 space-y-4 border-t border-border/70 py-3"
       >
         <div className="space-y-1">
           <h3 className="text-base font-semibold">Set up an agent on the server</h3>
@@ -195,7 +195,7 @@ export function AgentsStep({
 
         {loading && <Skeleton className="h-20 w-full rounded-md" />}
         {listError && (
-          <div className="flex flex-wrap items-center gap-3 rounded-md border border-state-failed/30 bg-state-failed/5 p-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
             <p className="text-sm text-state-failed">{listError}</p>
             <Button size="sm" variant="outline" onClick={loadHarnesses}>
               Retry
@@ -203,19 +203,19 @@ export function AgentsStep({
           </div>
         )}
         {agentsError && (
-          <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+          <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
             {agentsError}
           </p>
         )}
         {harnesses && harnesses.length > 0 && (
-          <ul className="overflow-hidden rounded-lg border bg-card">
+          <ul className="min-w-0 border-y border-border/70 bg-card">
             {harnesses.map((h) => {
               const label = friendly[h.name] ?? h.name
               const listed = (agents ?? []).some((a) => a.name === h.name)
               return (
                 <li
                   key={h.name}
-                  className="flex flex-wrap items-start gap-4 border-b px-4 py-3 last:border-b-0 sm:px-5"
+                  className="flex min-w-0 flex-wrap items-start gap-3 border-b border-border/70 px-0 py-2.5 last:border-b-0"
                 >
                   <span className="min-w-0 flex-1 space-y-1 text-sm">
                     <span className="block font-medium">{label}</span>

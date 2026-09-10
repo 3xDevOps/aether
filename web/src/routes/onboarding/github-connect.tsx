@@ -36,7 +36,7 @@ export function GitHubSection({
   return (
     <section
       aria-label="Connect GitHub"
-      className="space-y-4 rounded-md border bg-background p-4 sm:p-5"
+      className="min-w-0 space-y-3 border-t border-border/70 py-3"
     >
       <div className="space-y-1">
         <h3 className="text-base font-semibold">Connect GitHub</h3>
@@ -47,7 +47,7 @@ export function GitHubSection({
         </p>
       </div>
       {connection && (
-        <p className="rounded-md border border-state-done/30 bg-state-done/5 p-3 text-sm text-state-done">
+        <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done">
           Connected in this session as {connection.login}
         </p>
       )}
@@ -136,7 +136,7 @@ export function GitHubConnect({
     return (
       <section
         aria-label="Connect GitHub"
-        className="space-y-4 rounded-md border border-state-done/30 bg-state-done/5 p-4 sm:p-5"
+        className="min-w-0 space-y-4 border-l-2 border-state-done/60 bg-state-done/5 px-3 py-3"
       >
         <div className="space-y-1">
           <p className="text-base font-semibold text-state-done">GitHub connected</p>
@@ -159,7 +159,7 @@ export function GitHubConnect({
     return (
       <section
         aria-label="Connect GitHub"
-        className="max-w-2xl space-y-4 rounded-md border bg-background p-4 sm:p-5"
+        className="min-w-0 max-w-2xl space-y-4 border-t border-border/70 py-3"
       >
         <div className="space-y-1">
           <p className="text-base font-semibold">Connect GitHub</p>
@@ -167,17 +167,17 @@ export function GitHubConnect({
             Open your environment terminal and log in to GitHub there:
           </p>
         </div>
-        <code className="block overflow-x-auto rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+        <code className="block min-w-0 overflow-x-auto border border-border/70 bg-muted px-3 py-2 font-mono text-xs">
           aether terminal
         </code>
-        <pre className="overflow-x-auto rounded-md border bg-muted p-3 font-mono text-xs">
+        <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap border border-border/70 bg-muted p-3 font-mono text-xs">
           {githubLoginCommand}
         </pre>
         <p className="text-sm leading-6 text-muted-foreground">
           Finish the device login in your browser, then finish the
           connection from a terminal:
         </p>
-        <code className="block overflow-x-auto rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+        <code className="block min-w-0 overflow-x-auto border border-border/70 bg-muted px-3 py-2 font-mono text-xs">
           aether github connect
         </code>
       </section>
@@ -187,7 +187,7 @@ export function GitHubConnect({
   return (
     <section
       aria-label="Connect GitHub"
-      className="space-y-4 rounded-md border bg-background p-4 sm:p-5"
+      className="min-w-0 space-y-4 border-t border-border/70 py-3"
     >
       <div className="space-y-1">
         <p className="text-base font-semibold">Connect GitHub</p>
@@ -197,7 +197,7 @@ export function GitHubConnect({
       </div>
       {ghUnusable && <GitHubCliRemedy probe={probe} />}
       {probeError && (
-        <pre className={`rounded-md border border-state-failed/30 bg-state-failed/5 text-state-failed ${pane}`}>
+        <pre className={`border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-state-failed ${pane}`}>
           {probeError}
         </pre>
       )}
@@ -218,13 +218,13 @@ export function GitHubConnect({
               ? 'This is the login the check would have made sure your terminal could run; nothing has been typed into it.'
               : 'gh asks you to press Enter to open the browser, then reports that it could not open one; that is expected inside a container: press Enter, ignore the failure, and open the printed URL yourself with the one-time code. Then return here.'}
           </p>
-          <code className="block overflow-x-auto rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+          <code className="block min-w-0 overflow-x-auto whitespace-pre-wrap border border-border/70 bg-muted px-3 py-2 font-mono text-xs">
             {githubLoginCommand}
           </code>
         </>
       )}
       {error && (
-        <pre className={`rounded-md border border-state-failed/30 bg-state-failed/5 text-state-failed ${pane}`}>
+        <pre className={`border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-state-failed ${pane}`}>
           {error}
         </pre>
       )}
@@ -316,7 +316,7 @@ function GitHubCliRemedy({ probe }: { probe: GitHubProbeResult }) {
       )}
       {probe.remedy && <CopyableCommand command={probe.remedy} />}
       {probe.detail && (
-        <pre className={`rounded-md border bg-card ${pane}`}>{probe.detail}</pre>
+        <pre className={`border-l-2 border-state-failed/60 bg-state-failed/5 ${pane}`}>{probe.detail}</pre>
       )}
     </>
   )

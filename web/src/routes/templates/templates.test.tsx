@@ -81,7 +81,7 @@ describe('templates view', () => {
     const editor = within(
       await screen.findByRole('form', { name: `Schedule for ${template.name}` }),
     )
-    fireEvent.change(editor.getByPlaceholderText(/cron/), {
+    fireEvent.change(editor.getByLabelText('Cron schedule'), {
       target: { value: '0 3 * * *' },
     })
     fireEvent.click(editor.getByRole('button', { name: 'Schedule' }))
