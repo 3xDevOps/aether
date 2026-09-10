@@ -93,10 +93,10 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
                       }}
                       className={cn(
                         focusRing,
-                        'block max-w-full rounded-[2px] text-left',
+                        'block min-h-[22px] max-w-full rounded-[2px] text-left',
                       )}
                     >
-                      <span className="block break-words text-[13px] font-medium leading-5">
+                      <span className="block line-clamp-2 break-words text-[13px] font-medium leading-5">
                         {runLabel(run)}
                       </span>
                     </button>

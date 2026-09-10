@@ -61,7 +61,7 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
               </p>
             </div>
             <span className="shrink-0 text-[11px] text-muted-foreground">
-              {Object.keys(workspaces).length} {Object.keys(workspaces).length === 1 ? 'source' : 'sources'}
+              {Object.keys(workspaces).length} {Object.keys(workspaces).length === 1 ? 'workspace' : 'workspaces'}
             </span>
           </div>
           <div className="space-y-1 p-2">

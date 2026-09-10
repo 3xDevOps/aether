@@ -98,7 +98,7 @@ export function RunCard({ card }: { card: BoardCard }) {
             </span>
             <span
               className={cn(
-                'mt-1 block break-words text-[14px] font-medium leading-5',
+                'mt-1 block line-clamp-3 break-words text-[14px] font-medium leading-5',
                 unseen && 'font-semibold',
               )}
             >
