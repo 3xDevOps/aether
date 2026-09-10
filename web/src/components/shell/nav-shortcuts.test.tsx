@@ -190,7 +190,7 @@ describe('navigation shortcuts', () => {
     expect(useStore.getState().route.name).toBe('run')
   })
 
-  it('stands down while a native select has the keyboard', () => {
+  it('stands down while a select has the keyboard', () => {
     render(<AppShell />)
     press('n')
     expect(useStore.getState().paletteDialog).toBe('launch')

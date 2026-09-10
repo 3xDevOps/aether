@@ -8,6 +8,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 // timers to this file would hang the tests that use it.
 import userEvent from '@testing-library/user-event'
 import { Dock } from '@/components/dock'
+import { Checkbox } from '@/components/ui/checkbox'
 import { CommandPalette } from '@/components/palette'
 import {
   DropdownMenu,
@@ -16,6 +17,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { PaletteDialogs } from '@/components/palette/dialogs'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { AppShell } from '@/components/shell/app-shell'
 import { RunTabs } from '@/routes/terminal/tabs'
 import '@/routes'
@@ -33,8 +41,8 @@ const ring = ['focus-visible:outline-2', 'focus-visible:outline-ring']
 const offsets = ['focus-visible:outline-offset-2', 'focus-visible:-outline-offset-2']
 
 /** Every role a keyboard can land on and this app actually renders. `option`
- * is not one: a native `<option>` is not tabbable, and cmdk keeps focus on its
- * input rather than moving it to the item. */
+ * is one: a select item takes real DOM focus while its list is open, the way
+ * a menu item does. */
 const controlRoles = [
   'button',
   'tab',
@@ -46,20 +54,10 @@ const controlRoles = [
   'switch',
   'menuitem',
   'menuitemcheckbox',
+  'option',
   'link',
   'tabpanel',
 ]
-
-// jsdom has neither of the two browser APIs xterm and the dialogs reach for.
-Element.prototype.scrollIntoView = vi.fn()
-vi.stubGlobal(
-  'ResizeObserver',
-  class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  },
-)
 
 function expectFocusRing(root: HTMLElement) {
   // xterm's own hidden input is not ours to style: the terminal draws its
@@ -67,6 +65,13 @@ function expectFocusRing(root: HTMLElement) {
   const found = controlRoles
     .flatMap((role) => within(root).queryAllByRole(role))
     .filter((el) => !el.closest('.xterm'))
+    // cmdk never moves focus to a row, tracking the highlighted one with
+    // `aria-activedescendant` instead, so its options have nothing to outline;
+    // see docs/dashboard-frontend.md. Only the row itself is excused: a
+    // control cmdk renders inside one is a control like any other.
+    .filter(
+      (el) => el.getAttribute('role') !== 'option' || !el.closest('[cmdk-item]'),
+    )
     // A panel is only a control where it was given a tab stop; the ones whose
     // content is focusable are not something a keyboard lands on.
     .filter((el) => el.getAttribute('role') !== 'tabpanel' || el.hasAttribute('tabindex'))
@@ -105,6 +110,18 @@ beforeEach(async () => {
       local: ['link.status', 'daemon.status', 'repo.sync', 'pull', 'update.check'],
     },
     inbox: { [workspace.id]: [approval()] },
+    // A fetched branch, so the diff view draws the one disclosure a swept
+    // route holds: a primitive is only really covered where a call site can
+    // still merge the outline away.
+    pulls: {
+      [active.id]: {
+        branch: active.branch,
+        ref: `aether/${active.branch}`,
+        output: 'Everything up-to-date',
+        current: true,
+        dirty: false,
+      },
+    },
     // Part way through the wizard, so its step chips are the buttons they
     // become once a step has been reached.
     onboardingStep: 'Workspace',
@@ -170,6 +187,30 @@ describe('focus ring', () => {
       </DropdownMenu>,
     )
     expect(expectFocusRing(screen.getByRole('menu'))).toBeGreaterThan(0)
+  })
+
+  // A select item takes real DOM focus while the list is open, so it is a
+  // control the sweep has to see, and no route renders one open.
+  it('is on every item of an open select', () => {
+    render(
+      <Select defaultValue="tui" open>
+        <SelectTrigger aria-label="Mode">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="tui">Interactive</SelectItem>
+          <SelectItem value="headless">Headless</SelectItem>
+        </SelectContent>
+      </Select>,
+    )
+    expect(expectFocusRing(screen.getByRole('listbox'))).toBeGreaterThan(0)
+  })
+
+  // The checkbox lives behind a profile preview no fixture reaches, so it is
+  // rendered on its own rather than left unswept.
+  it('is on a checkbox', () => {
+    const { container } = render(<Checkbox aria-label="Bring configuration" />)
+    expect(expectFocusRing(container)).toBe(1)
   })
 
   it('is on the run tab strip', () => {

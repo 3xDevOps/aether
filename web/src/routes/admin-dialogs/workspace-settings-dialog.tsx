@@ -15,9 +15,19 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { api, type Api } from '@/lib/api'
-import { field } from '@/lib/utils'
 import { useStore } from '@/store'
+
+/** What the permissive default travels as; see the Styleguide in
+ * docs/dashboard-frontend.md. */
+const everyone = 'everyone'
 
 export function WorkspaceSettingsDialog({
   workspaceID,
@@ -77,17 +87,21 @@ export function WorkspaceSettingsDialog({
               {workspace?.base_branch || 'unknown'}
             </span>
           </p>
-          <Label className="block space-y-1">
-            Who may steer others' runs
-            <select
-              className={field}
-              value={steerOthers}
-              onChange={(e) => setSteerOthers(e.target.value)}
+          <div className="space-y-1 text-sm">
+            <Label htmlFor="workspace-steer">Who may steer others' runs</Label>
+            <Select
+              value={steerOthers || everyone}
+              onValueChange={(value) => setSteerOthers(value === everyone ? '' : value)}
             >
-              <option value="">everyone with steer</option>
-              <option value="admins_only">admins only</option>
-            </select>
-          </Label>
+              <SelectTrigger id="workspace-steer">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={everyone}>everyone with steer</SelectItem>
+                <SelectItem value="admins_only">admins only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </form>
         {error && <p className="text-xs text-state-failed">{error}</p>}
         <DialogFooter>

@@ -4,12 +4,16 @@
 import { type ReactNode, useId, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { desktopBridge } from '@/components/shell/title-bar'
 import type { Api } from '@/lib/api'
 import type { LinkStatus, Workspace } from '@/lib/types'
-import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import type { OnboardingRepo } from '@/store/ui'
@@ -440,17 +444,19 @@ export function RepoStep({
             // branch]" both mean success and say different things, and the
             // reader who needs that distinction is the one who would not
             // know to go looking for it.
-            <details open className="rounded-md border bg-card">
-              <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-sm')}>
+            <Collapsible defaultOpen className="rounded-md border bg-card">
+              <CollapsibleTrigger className="px-3 py-2 text-sm">
                 What git did
-              </summary>
-              <pre className={pane}>
-                {[pushed?.output, forwarded?.output]
-                  .map((out) => out?.trim())
-                  .filter(Boolean)
-                  .join('\n\n') || 'git printed nothing.'}
-              </pre>
-            </details>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className={pane}>
+                  {[pushed?.output, forwarded?.output]
+                    .map((out) => out?.trim())
+                    .filter(Boolean)
+                    .join('\n\n') || 'git printed nothing.'}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
           ) : (
             canPush && (
               <>

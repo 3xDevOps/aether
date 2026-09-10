@@ -30,14 +30,6 @@ const localCaps: GatewayCapabilities = {
   ],
 }
 
-// jsdom has no layout engine, so the terminal's fit addon has nothing to
-// observe.
-class NoResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function seed(caps: GatewayCapabilities = localCaps) {
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
@@ -117,7 +109,6 @@ async function toAgentsStep() {
 
 beforeEach(() => {
   StubSocket.install()
-  vi.stubGlobal('ResizeObserver', NoResizeObserver)
 })
 
 afterEach(() => {

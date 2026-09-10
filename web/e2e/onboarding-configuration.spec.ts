@@ -32,6 +32,9 @@ test('a flagged file is left out and the rest of the profile imports', async ({
   await expect(row).toContainText(
     '1 file you wrote tripped the secret scanner. It is left out and the rest of this profile still imports.',
   )
+  // The callout on the row, not the expander beside it: a shut disclosure
+  // holds nothing, so these two would be unreachable if the callout stopped
+  // naming the file it caught.
   await expect(row).toContainText('skills/deploy/README.md')
   await expect(row).toContainText('secret detected (curl-auth-header)')
 

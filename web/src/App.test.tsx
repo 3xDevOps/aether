@@ -8,18 +8,9 @@ vi.mock('@/lib/api', async () => {
   return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
 
-// jsdom has no layout engine, so the terminal's fit addon has nothing to
-// observe; without a stub its constructor throws and takes the shell down.
-class NoResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 // The shell opens the event stream on mount; keep it off the network.
 beforeAll(() => {
   StubSocket.install()
-  vi.stubGlobal('ResizeObserver', NoResizeObserver)
 })
 
 afterAll(() => vi.unstubAllGlobals())
@@ -52,9 +43,7 @@ describe('App', () => {
     await vi.waitFor(() =>
       expect(sidebar().getByText('rewrite the checkout flow')).toBeDefined(),
     )
-    expect(
-      (screen.getByLabelText('Workspace') as HTMLSelectElement).value,
-    ).toBe('wsp_1')
+    expect(screen.getByLabelText('Workspace').textContent).toBe('main-repo')
     // Center view, from the default route in the registry. By role: the
     // sidebar nav entry carries the same words.
     expect(screen.getByRole('heading', { level: 1, name: 'Board' })).toBeDefined()

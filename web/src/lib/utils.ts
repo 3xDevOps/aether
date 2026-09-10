@@ -11,11 +11,14 @@ export function cn(...inputs: ClassValue[]) {
 export const focusRing =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
-/** The house field style. Only the native `<select>` wears it directly; text
- * fields come from `Input` and `Textarea`, which compose it. `border-input`
- * rather than the base layer's `border-border`: the two part in dark, and a
- * generated shadcn control hardcodes `border-input`. */
+/** The box a control you can type into draws: one border, padding and type
+ * scale across a text field and a select, so a form reads as one row rather
+ * than three. `Input`, `Textarea` and `SelectTrigger` compose it; nothing
+ * wears it by hand. `border-input` rather than the base layer's
+ * `border-border`: the two part in dark, and a generated shadcn control
+ * hardcodes `border-input`. */
 export const field = cn(
   focusRing,
   'w-full rounded-md border border-input bg-background px-2 py-1 text-sm',
+  'disabled:cursor-not-allowed disabled:opacity-50',
 )

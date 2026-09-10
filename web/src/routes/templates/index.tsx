@@ -17,11 +17,17 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Schedule, Template } from '@/lib/types'
-import { field } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { ScheduleEditor } from '@/routes/templates/schedule-editor'
 import { useStore } from '@/store'
@@ -252,31 +258,33 @@ function TemplateForm({
             />
           </Label>
           <div className="flex gap-3">
-            <Label className="flex-1 space-y-1">
-              Agent
-              <select
-                className={field}
-                value={harness}
-                onChange={(e) => setHarness(e.target.value)}
-              >
-                {harnesses.map((h) => (
-                  <option key={h} value={h}>
-                    {h}
-                  </option>
-                ))}
-              </select>
-            </Label>
-            <Label className="flex-1 space-y-1">
-              Mode
-              <select
-                className={field}
-                value={mode}
-                onChange={(e) => setMode(e.target.value)}
-              >
-                <option value="tui">tui</option>
-                <option value="headless">headless</option>
-              </select>
-            </Label>
+            <div className="flex-1 space-y-1 text-sm">
+              <Label htmlFor="template-agent">Agent</Label>
+              <Select value={harness} onValueChange={setHarness}>
+                <SelectTrigger id="template-agent">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {harnesses.map((h) => (
+                    <SelectItem key={h} value={h}>
+                      {h}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex-1 space-y-1 text-sm">
+              <Label htmlFor="template-mode">Mode</Label>
+              <Select value={mode} onValueChange={setMode}>
+                <SelectTrigger id="template-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tui">tui</SelectItem>
+                  <SelectItem value="headless">headless</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </form>
         {error && <p className="text-xs text-state-failed">{error}</p>}

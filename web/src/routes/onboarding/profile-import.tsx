@@ -15,9 +15,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { friendly, formatBytes, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { ApiError, type Api, type EnvScanSession } from '@/lib/api'
 import { shellPath } from '@/lib/shell'
-import { cn, focusRing } from '@/lib/utils'
 import type {
   EnvScanStatus,
   HarnessStatus,
@@ -363,12 +368,14 @@ export function ProfileImport({
           <p className="text-sm" role="status">
             {statusLine[phase.status]}
           </p>
-          <details className="rounded-md border bg-card">
-            <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-sm')}>
+          <Collapsible className="rounded-md border bg-card">
+            <CollapsibleTrigger className="px-3 py-2 text-sm">
               View process
-            </summary>
-            <pre className={pane}>{lines.join('\n')}</pre>
-          </details>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <pre className={pane}>{lines.join('\n')}</pre>
+            </CollapsibleContent>
+          </Collapsible>
           <Button size="sm" variant="outline" onClick={cancelScan}>
             Cancel
           </Button>
@@ -379,12 +386,14 @@ export function ProfileImport({
           <p className="text-sm">The agent did not finish.</p>
           <p className="text-xs text-state-failed">{phase.detail}</p>
           {phase.outputTail && (
-            <details className="rounded-md border bg-card">
-              <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-sm')}>
+            <Collapsible className="rounded-md border bg-card">
+              <CollapsibleTrigger className="px-3 py-2 text-sm">
                 Last output
-              </summary>
-              <pre className={pane}>{phase.outputTail}</pre>
-            </details>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className={pane}>{phase.outputTail}</pre>
+              </CollapsibleContent>
+            </Collapsible>
           )}
           <p className="text-xs text-muted-foreground">
             Choose what to bring below instead, or skip this step.
@@ -487,12 +496,11 @@ function ProfileRow({
   return (
     <li className="space-y-1 px-3 py-2 text-sm">
       <div className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          className={cn(focusRing, 'mt-1')}
+        <Checkbox
+          className="mt-1"
           aria-label={`Bring ${label} configuration`}
           checked={checked}
-          onChange={(e) => onToggle(e.target.checked)}
+          onCheckedChange={(state) => onToggle(state === true)}
         />
         <div className="min-w-0 flex-1 space-y-0.5">
           <p className="font-medium">{label}</p>
@@ -563,29 +571,31 @@ function ProfileRow({
         </div>
       </div>
       {excludedTotal > 0 && (
-        <details className="rounded-md border bg-card">
-          <summary className={cn(focusRing, 'cursor-pointer px-3 py-2 text-xs')}>
+        <Collapsible className="rounded-md border bg-card">
+          <CollapsibleTrigger className="px-3 py-2 text-xs">
             {`Left out of ${label}: ${excludedTotal} ${
               excludedTotal === 1 ? 'entry' : 'entries'
             }`}
-          </summary>
-          <ul className="space-y-1 border-t px-3 py-2 text-xs">
-            {excluded.map((e) => (
-              <li key={e.path}>
-                <span className="font-mono">{e.path}</span>
-                <span className="text-muted-foreground"> - {e.detail}</span>
-              </li>
-            ))}
-            {/* The gateway caps the list it sends; the count above is
-                exact, so say how many are not shown rather than implying
-                the list is all of them. */}
-            {excludedTotal > excluded.length && (
-              <li className="text-muted-foreground">
-                and {excludedTotal - excluded.length} more
-              </li>
-            )}
-          </ul>
-        </details>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul className="space-y-1 border-t px-3 py-2 text-xs">
+              {excluded.map((e) => (
+                <li key={e.path}>
+                  <span className="font-mono">{e.path}</span>
+                  <span className="text-muted-foreground"> - {e.detail}</span>
+                </li>
+              ))}
+              {/* The gateway caps the list it sends; the count above is
+                  exact, so say how many are not shown rather than implying
+                  the list is all of them. */}
+              {excludedTotal > excluded.length && (
+                <li className="text-muted-foreground">
+                  and {excludedTotal - excluded.length} more
+                </li>
+              )}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
       )}
       {result && (
         <>

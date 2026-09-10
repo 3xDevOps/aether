@@ -7,7 +7,7 @@ export function Input({ className, ...props }: React.ComponentProps<'input'>) {
       data-slot="input"
       className={cn(
         field,
-        'placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
+        'placeholder:text-muted-foreground',
         className,
       )}
       {...props}

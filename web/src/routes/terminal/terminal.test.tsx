@@ -14,13 +14,6 @@ vi.mock('@/lib/api', async () => {
   return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
 
-// jsdom has no layout engine, so the fit addon has nothing to observe.
-class NoResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function terminalRoute() {
   const View = lookupRoute('terminal')
   if (!View) throw new Error('terminal route not registered')
@@ -49,7 +42,6 @@ function attached() {
 
 beforeEach(() => {
   StubSocket.install()
-  vi.stubGlobal('ResizeObserver', NoResizeObserver)
   useStore.setState({ runs: {} })
 })
 

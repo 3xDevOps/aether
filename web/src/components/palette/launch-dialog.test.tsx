@@ -1,24 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { agentInfo, alice, run, workspace } from '@/test/fixtures'
+import { openSelect, pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
   return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
-
-// jsdom has neither browser API the dialog reaches for.
-Element.prototype.scrollIntoView = vi.fn()
-vi.stubGlobal(
-  'ResizeObserver',
-  class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  },
-)
 
 beforeEach(() => {
   vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
@@ -35,17 +26,23 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-/** The harness list arrives asynchronously; nothing is launchable before it. */
+/** The harness list arrives asynchronously; nothing is launchable before it,
+ * and until it lands the field still reads its placeholder. */
 async function open() {
   render(<LaunchDialog />)
-  await screen.findByRole('option', { name: 'claude' })
   await waitFor(() =>
-    expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).not.toBe(''),
+    expect(screen.getByLabelText('Agent').textContent).not.toBe('Choose an agent'),
   )
 }
 
-function setMode(mode: string) {
-  fireEvent.change(screen.getByLabelText('Mode'), { target: { value: mode } })
+async function setMode(mode: string) {
+  await pickOption(screen.getByLabelText('Mode'), mode)
+}
+
+/** Radix hides the rest of the document while a list is open, so a test that
+ * read one has to shut it before touching anything else. */
+async function closeList() {
+  await userEvent.keyboard('{Escape}')
 }
 
 function setTask(task: string) {
@@ -61,7 +58,9 @@ describe('launch dialog', () => {
 
     vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
     fireEvent.click(screen.getByRole('button', { name: 'Refresh agents' }))
-    await screen.findByRole('option', { name: 'claude' })
+    await waitFor(() =>
+      expect(screen.getByLabelText('Agent').textContent).toBe('claude'),
+    )
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
@@ -69,10 +68,14 @@ describe('launch dialog', () => {
     vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
     render(<LaunchDialog />)
     await screen.findByText(/No agent is installed/)
+    await openSelect(screen.getByLabelText('Agent'))
     expect(screen.queryByRole('option', { name: 'claude' })).toBeNull()
+    await closeList()
     vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
     fireEvent.click(screen.getByRole('button', { name: 'Refresh agents' }))
-    await screen.findByRole('option', { name: 'claude' })
+    await waitFor(() =>
+      expect(screen.getByLabelText('Agent').textContent).toBe('claude'),
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
     await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({
       workspace_id: workspace.id, harness: 'claude',
@@ -83,18 +86,21 @@ describe('launch dialog', () => {
     render(<LaunchDialog />)
 
     await screen.findByText('No agent is installed in this account.')
-    const agent = screen.getByLabelText('Agent') as HTMLSelectElement
+    const agent = screen.getByLabelText('Agent')
     // Nothing is picked for the member, so the launch stays blocked.
-    expect(agent.value).toBe('')
-    expect(screen.queryByRole('option', { name: 'claude' })).toBeNull()
+    expect(agent.textContent).toBe('Choose an agent')
     expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(
       true,
     )
     expect(screen.getByRole('button', { name: 'Set up an agent' })).toBeDefined()
 
+    await openSelect(agent)
+    expect(screen.queryByRole('option', { name: 'claude' })).toBeNull()
+    await closeList()
+
     // A deployment can pin "custom" with --harness-definitions, which no
     // account install can satisfy, so it stays launchable by hand.
-    fireEvent.change(agent, { target: { value: 'custom' } })
+    await pickOption(agent, 'custom')
     await waitFor(() =>
       expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(
         false,
@@ -122,7 +128,7 @@ describe('launch dialog', () => {
     expect((await screen.findByRole('alert')).textContent).toBe('agent.list: connection closed')
     // Setup cannot fix a gateway that did not answer.
     expect(screen.queryByRole('button', { name: 'Set up an agent' })).toBeNull()
-    expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).toBe('')
+    expect(screen.getByLabelText('Agent').textContent).toBe('Choose an agent')
     expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(
       true,
     )
@@ -155,10 +161,10 @@ describe('launch dialog', () => {
 
     await open()
 
+    const agent = screen.getByLabelText('Agent')
+    await waitFor(() => expect(agent.textContent).toBe('myagent'))
+    await openSelect(agent)
     expect(screen.queryByRole('option', { name: 'codex' })).toBeNull()
-    await waitFor(() =>
-      expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).toBe('myagent'),
-    )
   })
 
   it('prefers the remembered installed harness over run history', async () => {
@@ -172,14 +178,14 @@ describe('launch dialog', () => {
     await open()
 
     await waitFor(() =>
-      expect((screen.getByLabelText('Agent') as HTMLSelectElement).value).toBe('myagent'),
+      expect(screen.getByLabelText('Agent').textContent).toBe('myagent'),
     )
   })
 
   it('refuses a headless launch with no task, and says why', async () => {
     await open()
 
-    setMode('headless')
+    await setMode('Headless')
 
     // The server would refuse this launch; the form refuses it first, and a
     // headless task is required rather than optional.
@@ -195,7 +201,7 @@ describe('launch dialog', () => {
   it('launches headless once a task is written', async () => {
     await open()
 
-    setMode('headless')
+    await setMode('Headless')
     setTask('triage the flaky tests')
 
     expect(screen.queryByText(/needs a task/)).toBeNull()
