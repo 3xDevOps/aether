@@ -34,6 +34,9 @@ preference remains `system`, `light` or `dark`, with `system` following
 | `--border` | `#e5e5e5` | `#2b2b2b` | Pane seams and quiet separators |
 | `--input` | `#949494` | `#7a7a7a` | Contrast-tuned field boundary |
 | `--primary` | `#005fb8` | `#0078d4` | Interaction blue and focus |
+| `--accent-soft-foreground` | `#005fb8` | `#4daafc` | Text on soft accent surfaces; lighter dark-mode blue is separate from the `--primary` button fill |
+| `--success-soft-foreground` | `#1f521f` | `#89d185` | Text on success-soft surfaces; light uses the readable success foreground |
+| `--warning-soft-foreground` | `#5c4500` | `#cca700` | Text on warning-soft surfaces; light uses the readable warning foreground |
 | `--primary-hover` | `#0258a8` | `#026ec1` | Primary hover |
 | `--toolbar-hover` | `#f2f2f2` | `#2a2d2e` | Flat toolbar and row hover |
 | `--selection` | `#e8e8e8` | `#04395e` | Selected rows and text |
