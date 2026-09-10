@@ -726,6 +726,14 @@ func TestInjectIsNotAgentOutput(t *testing.T) {
 	}
 	a := startAttach(t, h, run, "m1", 120, 30, false)
 	waitAttached(t, h, run, 1)
+	// Wait for the attach repaint's suppression window to finish so it
+	// cannot mask the echo assertions below.
+	sess := h.lookup(RunSession(run))
+	waitFor(t, "attach repaint quiet window elapsed", func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return !sess.paintQuietUntil.IsZero() && time.Now().After(sess.paintQuietUntil)
+	})
 
 	att.writeOutput(t, "thinking...\r\n")
 	waitFor(t, "agent output before the steer", func() bool { return strings.HasSuffix(a.out.String(), "thinking...\r\n") })
