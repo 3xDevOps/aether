@@ -11,6 +11,7 @@ import {
   updateStatus,
   vera,
 } from '@/test/fixtures'
+import { hintOn } from '@/test/tooltip'
 
 /** The desktop gateway's descriptor, carrying the update verbs. */
 function caps(): GatewayCapabilities {
@@ -61,11 +62,15 @@ test('opens and closes the secondary status actions from the narrow menu', async
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
 })
 
-test('a CLI update turns the label into a button that clears the dismissals', () => {
+test('a CLI update turns the label into a button that clears the dismissals', async () => {
   seed()
   render(<StatusBar />)
 
   const badge = screen.getByRole('button', { name: 'Update available: v1.3.0' })
+  // The label says which version is installed; only the hint says which one
+  // pressing the badge would bring back.
+  expect(await hintOn(badge)).toBe('v1.3.0 is available - show the update banner')
+
   fireEvent.click(badge)
 
   expect(useStore.getState().dismissedUpdates).toEqual({
@@ -73,6 +78,25 @@ test('a CLI update turns the label into a button that clears the dismissals', ()
     server: '',
     shell: '',
   })
+})
+
+// The button reads "Linked"; which repository it is linked to is the hint's
+// alone, so a keyboard reader has to be able to reach it.
+test('the link button names the repository it is linked to', async () => {
+  seed()
+  useStore.setState({
+    linkStatus: {
+      server_configured: true,
+      linked: true,
+      addr: 'host:2222',
+      user: 'alice',
+      repo: '/src/repo',
+    },
+  })
+  render(<StatusBar />)
+
+  const link = screen.getByRole('button', { name: 'Linked' })
+  expect(await hintOn(link)).toBe('Linked to /src/repo')
 })
 
 // server_behind is an admin's business: a collaborator can do nothing about
@@ -163,9 +187,19 @@ test('every truncated readout keeps its whole text in the title', () => {
   useStore.getState().applyServerUpdate({ phase: 'scheduled', version: 'v1.3.0' })
   render(<StatusBar />)
 
-  expect(screen.getByText(unreachable).getAttribute('title')).toBe(unreachable)
-  expect(screen.getByText(update).getAttribute('title')).toBe(update)
-  expect(screen.getByText(bob.display_name).getAttribute('title')).toBe(
+  // A chip puts its text in a label span, so the title sits on the element
+  // that carries the readout rather than on the text node itself. It has to be
+  // that element and no ancestor of it: a title on the bar itself would cover
+  // the whole row and still satisfy a bare `closest`.
+  const readout = (text: string) => {
+    const carrier = screen.getByText(text).closest('[title]')
+    expect(carrier?.textContent?.trim()).toBe(text)
+    return carrier
+  }
+
+  expect(readout(unreachable)?.getAttribute('title')).toBe(unreachable)
+  expect(readout(update)?.getAttribute('title')).toBe(update)
+  expect(readout(bob.display_name)?.getAttribute('title')).toBe(
     bob.display_name,
   )
 })

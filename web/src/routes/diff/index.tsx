@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/heroui'
 import { api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
 import { cn, focusRing } from '@/lib/utils'
@@ -212,31 +213,44 @@ function Timeline({
           const shownable = range(snap) !== null
           return (
             <li key={snap.time + i}>
-              <button
-                type="button"
-                disabled={!shownable}
-                title={shownable ? undefined : noTree}
-                onClick={() => onSelect(snap.time)}
-                aria-pressed={selected === snap.time}
-                className={cn(
-                  focusRing,
-                  'w-full rounded-md px-2.5 py-2 text-left text-xs hover:bg-accent/60',
-                  selected === snap.time && 'bg-accent text-accent-foreground',
-                  !shownable && 'cursor-not-allowed opacity-60 hover:bg-transparent',
-                )}
-              >
-                <span className="block font-medium">{timeAgo(snap.time)}</span>
-                <span className="mt-0.5 block text-muted-foreground">
-                  {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
-                  {' · '}
-                  <span className="font-mono text-state-done">
-                    +{total(snap.files, 'additions')}
-                  </span>{' '}
-                  <span className="font-mono text-destructive">
-                    -{total(snap.files, 'deletions')}
-                  </span>
-                </span>
-              </button>
+              {/* Disabled rather than content-less on a row that opens: an
+                  open tooltip with nothing in it still points the button's
+                  `aria-describedby` at a missing element and still swallows
+                  the first Escape. */}
+              <Tooltip isDisabled={shownable}>
+                <Tooltip.Trigger<'button'>
+                  render={(triggerProps) => (
+                    <button
+                      {...triggerProps}
+                      type="button"
+                      aria-disabled={!shownable || undefined}
+                      onClick={() => {
+                        if (shownable) onSelect(snap.time)
+                      }}
+                      aria-pressed={selected === snap.time}
+                      className={cn(
+                        focusRing,
+                        'w-full rounded-md px-2.5 py-2 text-left text-xs hover:not-aria-disabled:bg-accent/60',
+                        'aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
+                        selected === snap.time && 'bg-accent text-accent-foreground',
+                      )}
+                    >
+                      <span className="block font-medium">{timeAgo(snap.time)}</span>
+                      <span className="mt-0.5 block text-muted-foreground">
+                        {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
+                        {' · '}
+                        <span className="font-mono text-state-done">
+                          +{total(snap.files, 'additions')}
+                        </span>{' '}
+                        <span className="font-mono text-destructive">
+                          -{total(snap.files, 'deletions')}
+                        </span>
+                      </span>
+                    </button>
+                  )}
+                />
+                <Tooltip.Content>{noTree}</Tooltip.Content>
+              </Tooltip>
             </li>
           )
         })}

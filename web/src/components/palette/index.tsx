@@ -9,6 +9,7 @@ import { PaletteBody } from '@/components/palette/palette'
 import { TemplateDialog } from '@/components/palette/template-dialog'
 import { registerSlot } from '@/components/slots'
 import { CommandDialog } from '@/components/ui/command'
+import { Tooltip } from '@/components/ui/heroui'
 import { inModal } from '@/lib/keys'
 import { shortcutLabel } from '@/lib/platform'
 import { cn, focusRing } from '@/lib/utils'
@@ -49,21 +50,30 @@ export function CommandPalette() {
       {/* The word drops out below lg, so the label rather than the button's
           content has to carry the accessible name, and it has to be that same
           word: voice control matches on what a member can read. */}
-      <button
-        type="button"
-        onClick={() => toggle(true)}
-        aria-label="Commands"
-        title="Command palette"
-        className={cn(
-          focusRing,
-          'flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-accent hover:text-foreground',
-        )}
-      >
-        <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-border bg-muted px-1 font-mono text-[10px] font-medium text-muted-foreground">
-          {shortcutLabel('K')}
-        </kbd>
-        <span className="hidden lg:inline">Commands</span>
-      </button>
+      <Tooltip>
+        <Tooltip.Trigger<'button'>
+          render={(triggerProps) => (
+            <button
+              {...triggerProps}
+              type="button"
+              onClick={() => {
+                toggle(true)
+              }}
+              aria-label="Commands"
+              className={cn(
+                focusRing,
+                'flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-accent hover:text-foreground',
+              )}
+            >
+              <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-border bg-muted px-1 font-mono text-[10px] font-medium text-muted-foreground">
+                {shortcutLabel('K')}
+              </kbd>
+              <span className="hidden lg:inline">Commands</span>
+            </button>
+          )}
+        />
+        <Tooltip.Content>Command palette</Tooltip.Content>
+      </Tooltip>
       <CommandDialog
         open={open}
         onOpenChange={(next: boolean) => toggle(next)}

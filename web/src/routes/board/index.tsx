@@ -1,6 +1,6 @@
 import { CheckCheck, Rocket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/heroui'
+import { Chip, Tooltip } from '@/components/ui/heroui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
 import { canLaunch } from '@/lib/commands'
@@ -46,15 +46,24 @@ export function Board() {
         actions={
           <>
             <NewRunButton />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={ackAll}
-              title="Mark every run seen"
-            >
-              <CheckCheck />
-              Mark all seen
-            </Button>
+            <Tooltip>
+              <Tooltip.Trigger<'button'>
+                render={(triggerProps) => (
+                  <Button
+                    {...triggerProps}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      ackAll()
+                    }}
+                  >
+                    <CheckCheck />
+                    Mark all seen
+                  </Button>
+                )}
+              />
+              <Tooltip.Content>Mark every run seen</Tooltip.Content>
+            </Tooltip>
           </>
         }
       />
@@ -98,15 +107,24 @@ function NewRunButton({
   const role = useSelfRole()
   if (!canLaunch({ cap, role })) return null
   return (
-    <Button
-      variant={variant}
-      size={size}
-      title="Launch a run"
-      onClick={() => openDialog('launch')}
-    >
-      <Rocket />
-      New run
-    </Button>
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <Button
+            {...triggerProps}
+            variant={variant}
+            size={size}
+            onClick={() => {
+              openDialog('launch')
+            }}
+          >
+            <Rocket />
+            New run
+          </Button>
+        )}
+      />
+      <Tooltip.Content>Launch a run</Tooltip.Content>
+    </Tooltip>
   )
 }
 

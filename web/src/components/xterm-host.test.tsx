@@ -8,6 +8,7 @@ import { defaultTerminalFontSize } from '@/lib/term-font'
 import { connectAttach } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
+import { hintOn } from '@/test/tooltip'
 
 function Probe({ onReady }: { onReady: (terminal: Terminal) => void }) {
   const { hostRef, terminal } = useXterm()
@@ -249,5 +250,33 @@ describe('terminal shortcuts', () => {
     fireEvent.keyDown(screen.getByLabelText('Find in terminal'), { key: 'Enter' })
 
     expect(screen.queryByText('No matches')).toBeNull()
+  })
+})
+
+// Before the socket opens there is no terminal, so every button that needs one
+// is blocked, and the chord is the only place the toolbar names it.
+describe('the terminal toolbar', () => {
+  it('keeps a blocked button reachable, and its click inert', async () => {
+    useStore.setState({ terminalFontSize: defaultTerminalFontSize })
+    render(
+      <TerminalPane
+        controller={{
+          hostRef: () => {},
+          terminal: null,
+          ready: false,
+          search: null,
+          findOpen: false,
+          setFindOpen: () => {},
+        }}
+      />,
+    )
+
+    const copy = screen.getByRole('button', { name: 'Copy terminal selection' })
+    expect(copy.getAttribute('aria-disabled')).toBe('true')
+    expect(await hintOn(copy)).toBe('Copy terminal selection (Ctrl+Shift+C)')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Decrease terminal text size' }))
+
+    expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize)
   })
 })

@@ -525,7 +525,8 @@ is one click. And the bar locks while a verb is in flight, showing a spinner
 on the one running, or on the **More** trigger while any verb is in flight: a pull shells out to `git fetch` over SSH and takes seconds, and a
 second click would race the first for the same ref. Buttons
 also take the command's `short` label and keep the full sentence as their
-tooltip, because the action bar is intentionally compact.
+tooltip, because the action bar is intentionally compact. The overflow menu
+has the room, so it prints the whole label instead.
 
 **Who may do what is asked twice.** `src/lib/permissions.ts` mirrors
 `internal/permissions`: the role table, plus the two restrictions on top of it
@@ -686,6 +687,21 @@ not ask about terminals: focus on `body` with a terminal on screen is
 ordinary, and the run dock hands the keyboard to whichever body replaces its
 terminal - the refusal, the "Open shell" button, the unavailable notice -
 rather than orphaning it.
+
+An open tooltip is the one overlay that neither guard names, and it does not
+need to: a tooltip owns no keys, and its trigger is an ordinary control.
+Escape is the exception. React Aria dismisses a tooltip from a capturing
+document listener that stops the event rather than marking it, so the shell
+never hears that press at all: on a run, the first Escape closes the tooltip
+and the second leaves. Every other key reaches the shell as usual, and a
+tooltip closes on the first of them whatever it is, so a pending `g` is
+untouched. `nav-shortcuts.test.tsx` pins both halves.
+
+Blocking a control with `aria-disabled` rather than `disabled` keeps it in the
+tab order, which is the point; the Styleguide rule below says why. The run
+action bar, its overflow trigger, the terminal toolbar and the diff snapshot
+list all keep their tab stops while their verbs are unavailable, and each
+guards its own handler rather than relying on the browser.
 
 **The modifier is named after the reader's keyboard.** The palette and the
 terminal zoom keys accept Ctrl and Meta alike, because one keyboard sends one
@@ -1578,9 +1594,9 @@ wherever the member is an admin.
   feedback remains available.
 - **Primitives first.** `src/components/ui/` holds the shadcn/ui pieces:
   `Button`, `Input`, `Textarea`, `Label`, `Select`, `Checkbox`, `Collapsible`,
-  `Dialog`, `DropdownMenu`, `Command` and `Skeleton`. These are house copies,
-  retuned to the shared scale and `focusRing`; do not overwrite them with
-  registry defaults. Use them instead of raw form elements. `Input`,
+  `Dialog`, `AlertDialog`, `DropdownMenu`, `Command` and `Skeleton`. These are
+  house copies, retuned to the shared scale and `focusRing`; do not overwrite
+  them with registry defaults. Use them instead of raw form elements. `Input`,
   `Textarea` and `SelectTrigger` compose the shared `field` style, with
   `--input` borders, muted placeholders and disabled states.
 - **The empty string belongs to the Select placeholder.** Use a named,
@@ -1597,7 +1613,34 @@ wherever the member is an admin.
   `Tabs`, `Chip` and `Tooltip` and maps them to the house tokens. Use `Tabs`
   for component-level tab panels, `Chip` for status or metadata, and `Tooltip`
   for supplemental hover and keyboard help. Run and dock tab strips retain
-  their custom manual tab semantics.
+  their custom manual tab semantics. A `Chip` takes no `title` of its own, so
+  a pill whose text can be clipped wears one on the span around it.
+- **A hint a reader needs is a `Tooltip`, not a `title`.** A `title` is drawn
+  by the pointer and by nothing else, so on a control a keyboard can land on
+  it is information that reader can never get at. A tooltip opens on focus as
+  well as hover and points the control's `aria-describedby` at itself. It is a
+  description rather than the name, so an icon-only control keeps its
+  `aria-label`. A `title` stays only on what a keyboard cannot land on - a
+  truncated path, a timestamp, a breakdown - since
+  React Aria makes a tooltip trigger focusable, and a hint on a mark would buy
+  a tab stop per feed row or per card. A mark that names itself needs
+  `role="img"` first: a bare `<span>` is `generic`, and ARIA gives `generic`
+  no name. `primitives.test.tsx` checks every surviving `title` against a
+  written list.
+- **A yes-or-no confirm is an `AlertDialog`, not a `Dialog`.** The role
+  interrupts rather than announcing a form, it takes the close X away, and an
+  outside click no longer dismisses it. A dialog that asks which of several
+  outcomes to record - closing a run as merged or abandoned - is a choice
+  rather than a confirm, and stays a `Dialog`. `AlertDialogAction` is
+  destructive unless the caller says otherwise. A confirm that reports its own
+  failure prevents the default on that click and closes on the answer instead,
+  or the refusal would be unmounted with the dialog. `primitives.test.tsx`
+  fails on a destructive action left inside a `Dialog`.
+- **A control a reader still needs is `aria-disabled`, not `disabled`.** A
+  `disabled` button takes neither focus nor a pointer, so anything it had to
+  say - the full verb behind a shortened label, why a row cannot be opened -
+  goes with it. Those keep their place in the tab order, guard their own
+  handler, and drop the hover the enabled state paints.
 - **One focus indicator, one source.** `focusRing` in `src/lib/utils.ts`; see
   [Keyboard and focus](#keyboard-and-focus). Browser checks verify the
   resulting focus outline; source scans and class-name assertions are not
@@ -1628,7 +1671,15 @@ selects. `src/components/ui/fields.test.tsx` checks that a wrapped Label names
 its actual input and that an Input ref reaches the field DOM node. These are
 behavior assertions against rendered controls; source scans, literal class
 assertions and CSS text checks are not behavior coverage and are not listed as
-tests.
+tests. `components/ui/primitives.test.tsx` is the exception, and it is named
+here so the rule and the tree agree. It holds three regression guards that
+read the source tree rather than render anything: a `title` left on a control,
+a destructive action left inside a `Dialog`, and a blocked control whose look
+is hand-rolled instead of taken from `buttonVariants`. Each is inventory - a
+rule about what may exist anywhere cannot be observed by rendering one
+component - and each is kept honest by being mutated rather than by being
+believed. What a reader actually sees is the browser suite's job: computed
+layout, real focus outlines and hover are checked there.
 
 Route tests cover the board, run detail, terminal, diff, files, workspace,
 onboarding, team, members, settings, agents, templates, palette and update
@@ -1654,4 +1705,5 @@ observe it. Use a component test for state, text, role, focus and navigation
 behavior. Use Playwright for computed layout, actual browser focus outlines,
 responsive overflow, Escape ordering and gateway-backed flows. Do not add a
 test that only proves a class name, selector, source pattern, token string or
-implementation detail.
+implementation detail. The inventory guards in
+`components/ui/primitives.test.tsx`, named above, are the only exception.

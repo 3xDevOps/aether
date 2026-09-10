@@ -250,4 +250,32 @@ describe('members view', () => {
       expect(client.memberRole).toHaveBeenCalledWith(alice.id, 'collaborator'),
     )
   })
+
+  // The confirm is where the refusal is reported, so it has to outlive the
+  // request: an Escape mid-flight would take the answer off screen with it.
+  it('holds the confirm open until the server answers', async () => {
+    let refuse: (reason: Error) => void = () => {}
+    const client = fakeApi({
+      memberRole: vi.fn(
+        () => new Promise<never>((_, reject) => { refuse = reject }),
+      ),
+    })
+    seed()
+    render(<MembersRoute params={{}} client={client} />)
+
+    await pickOption(
+      await screen.findByRole('combobox', { name: `Role for ${alice.display_name}` }),
+      'collaborator',
+    )
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Become collaborator' }),
+    )
+
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
+    expect(screen.getByRole('alertdialog')).toBeDefined()
+
+    refuse(new Error('member.role: last admin'))
+
+    expect(await screen.findByText(/last admin/)).toBeDefined()
+  })
 })

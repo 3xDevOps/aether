@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Tooltip } from '@/components/ui/heroui'
 import { canLaunch } from '@/lib/commands'
 import { keyboardBusy } from '@/lib/keys'
 import { shortcutLabel } from '@/lib/platform'
@@ -181,19 +182,28 @@ export function ShortcutsButton() {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Keyboard shortcuts"
-        title="Keyboard shortcuts"
-        className={cn(
-          focusRing,
-          'flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-accent hover:text-foreground',
-        )}
-      >
-        <CircleHelp className="size-3.5" aria-hidden />
-        <span className="hidden lg:inline">Shortcuts</span>
-      </button>
+      <Tooltip>
+        <Tooltip.Trigger<'button'>
+          render={(triggerProps) => (
+            <button
+              {...triggerProps}
+              type="button"
+              onClick={() => {
+                setOpen(true)
+              }}
+              aria-label="Keyboard shortcuts"
+              className={cn(
+                focusRing,
+                'flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-accent hover:text-foreground',
+              )}
+            >
+              <CircleHelp className="size-3.5" aria-hidden />
+              <span className="hidden lg:inline">Shortcuts</span>
+            </button>
+          )}
+        />
+        <Tooltip.Content>Keyboard shortcuts</Tooltip.Content>
+      </Tooltip>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(640px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
           <DialogHeader>

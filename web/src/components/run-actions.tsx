@@ -3,12 +3,21 @@
 
 import { Ellipsis, Loader2, UserPlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -18,6 +27,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Tooltip } from '@/components/ui/heroui'
 import {
   handoffCommands,
   runCommands,
@@ -90,64 +100,100 @@ export function RunActions({ run }: { run: RunRecord }) {
 
   return (
     <>
-      {commands.map((command) => (
-        <Button
-          key={command.id}
-          variant={primaryCommands[command.id] ? 'secondary' : 'ghost'}
-          size="sm"
-          className={cn(
-            'h-8 px-2.5 text-[13px]',
-            !primaryCommands[command.id] && 'hidden @4xl/run-header:inline-flex',
-          )}
-          title={command.label}
-          disabled={running !== null || command.disabled}
-          onClick={() => (command.confirm ? setAsking(command) : start(command))}
-        >
-          {running === command.id ? (
-            <Loader2 className="size-3 animate-spin" aria-hidden />
-          ) : (
-            <command.Icon className="size-3" aria-hidden />
-          )}
-          {command.short ?? command.label}
-        </Button>
-      ))}
+      {commands.map((command) => {
+        const blocked = running !== null || command.disabled === true
+        return (
+          <Tooltip key={command.id}>
+            <Tooltip.Trigger<'button'>
+              render={(triggerProps) => (
+                <Button
+                  {...triggerProps}
+                  variant={primaryCommands[command.id] ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className={cn(
+                    'h-8 px-2.5 text-[13px]',
+                    !primaryCommands[command.id] &&
+                      'hidden @4xl/run-header:inline-flex',
+                  )}
+                  aria-disabled={blocked || undefined}
+                  onClick={() => {
+                    if (blocked) return
+                    if (command.confirm) setAsking(command)
+                    else start(command)
+                  }}
+                >
+                  {running === command.id ? (
+                    <Loader2 className="size-3 animate-spin" aria-hidden />
+                  ) : (
+                    <command.Icon className="size-3" aria-hidden />
+                  )}
+                  {command.short ?? command.label}
+                </Button>
+              )}
+            />
+            <Tooltip.Content>{command.label}</Tooltip.Content>
+          </Tooltip>
+        )
+      })}
 
       {/* Every eligible member behind one button: a viewer cannot own a run
           and the current owner is not a target, so a run with nobody to hand
           to shows nothing at all. */}
       {handoffs.length > 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="hidden h-8 px-2.5 text-[13px] @4xl/run-header:inline-flex"
-          title="Hand off to another member"
-          disabled={running !== null}
-          onClick={() => setHandoff(true)}
-        >
-          <UserPlus className="size-3" aria-hidden />
-          Hand off
-        </Button>
+        <Tooltip>
+          <Tooltip.Trigger<'button'>
+            render={(triggerProps) => (
+              <Button
+                {...triggerProps}
+                variant="ghost"
+                size="sm"
+                className="hidden h-8 px-2.5 text-[13px] @4xl/run-header:inline-flex"
+                aria-disabled={running !== null || undefined}
+                onClick={() => {
+                  if (running !== null) return
+                  setHandoff(true)
+                }}
+              >
+                <UserPlus className="size-3" aria-hidden />
+                Hand off
+              </Button>
+            )}
+          />
+          <Tooltip.Content>Hand off to another member</Tooltip.Content>
+        </Tooltip>
       )}
 
       {(overflow.length > 0 || handoffs.length > 0) && (
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              ref={moreTrigger}
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2.5 text-[13px] @4xl/run-header:hidden"
-              title="More actions"
-              disabled={running !== null}
-            >
-              {running !== null ? (
-                <Loader2 className="size-3 animate-spin" aria-hidden />
-              ) : (
-                <Ellipsis className="size-3" aria-hidden />
+        <DropdownMenu
+          open={menuOpen}
+          onOpenChange={(open) => {
+            if (open && running !== null) return
+            setMenuOpen(open)
+          }}
+        >
+          <Tooltip>
+            <Tooltip.Trigger<'button'>
+              render={(triggerProps) => (
+                <DropdownMenuTrigger asChild {...triggerProps}>
+                  <Button
+                    ref={moreTrigger}
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2.5 text-[13px] @4xl/run-header:hidden"
+                    aria-disabled={running !== null || undefined}
+                  >
+                    {running !== null ? (
+                      <Loader2 className="size-3 animate-spin" aria-hidden />
+                    ) : (
+                      <Ellipsis className="size-3" aria-hidden />
+                    )}
+                    More
+                  </Button>
+                </DropdownMenuTrigger>
               )}
-              More
-            </Button>
-          </DropdownMenuTrigger>
+            />
+            <Tooltip.Content>More actions</Tooltip.Content>
+          </Tooltip>
           {/* Radix hands focus back to the trigger, which the container query
               has just hidden, and focusing a hidden element drops focus to
               the body. Only the forced close needs the substitute. */}
@@ -167,14 +213,13 @@ export function RunActions({ run }: { run: RunRecord }) {
             {overflow.map((command) => (
               <DropdownMenuItem
                 key={command.id}
-                title={command.label}
                 disabled={command.disabled}
                 onSelect={() =>
                   command.confirm ? setAsking(command) : start(command)
                 }
               >
                 <command.Icon className="size-3" aria-hidden />
-                {command.short ?? command.label}
+                {command.label}
               </DropdownMenuItem>
             ))}
             {handoffs.length > 0 && (
@@ -188,30 +233,24 @@ export function RunActions({ run }: { run: RunRecord }) {
       )}
 
       {asking && confirm && (
-        <Dialog open onOpenChange={() => setAsking(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{confirm.title}</DialogTitle>
-              <DialogDescription>
+        <AlertDialog open onOpenChange={() => setAsking(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{confirm.title}</AlertDialogTitle>
+              <AlertDialogDescription>
                 "{runLabel(run)}" - {confirm.body}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setAsking(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  setAsking(null)
-                  start(asking)
-                }}
-              >
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              {/* A refusal here lands in a toast, not in the dialog, so
+                  closing on the click is what the member wants. */}
+              <AlertDialogAction onClick={() => start(asking)}>
                 {confirm.action}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
 
       {handoff && (

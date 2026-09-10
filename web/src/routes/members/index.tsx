@@ -7,8 +7,18 @@ import { Copy, UserPlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/lib/format'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/heroui'
+import { Chip, Tooltip } from '@/components/ui/heroui'
 import {
   Dialog,
   DialogContent,
@@ -424,19 +434,29 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
               </div>
               <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3 shadow-xs">
                 {presetColors.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    aria-label={`Set color ${color}`}
-                    aria-pressed={self.color === color}
-                    title={self.color === color ? `Current color ${color}` : `Set color ${color}`}
-                    className={cn(
-                      focusRing,
-                      'size-8 rounded-full border-2 border-background shadow-xs ring-1 ring-border/70 transition-transform hover:scale-105 hover:ring-2 aria-pressed:ring-2',
-                    )}
-                    style={{ backgroundColor: color }}
-                    onClick={() => void recolor(color)}
-                  />
+                  <Tooltip key={color}>
+                    <Tooltip.Trigger<'button'>
+                      render={(triggerProps) => (
+                        <button
+                          {...triggerProps}
+                          type="button"
+                          aria-label={`Set color ${color}`}
+                          aria-pressed={self.color === color}
+                          className={cn(
+                            focusRing,
+                            'size-8 rounded-full border-2 border-background shadow-xs ring-1 ring-border/70 transition-transform hover:scale-105 hover:ring-2 aria-pressed:ring-2',
+                          )}
+                          style={{ backgroundColor: color }}
+                          onClick={() => {
+                            void recolor(color)
+                          }}
+                        />
+                      )}
+                    />
+                    <Tooltip.Content>
+                      {self.color === color ? `Current color ${color}` : `Set color ${color}`}
+                    </Tooltip.Content>
+                  </Tooltip>
                 ))}
                 <Chip color="default" variant="tertiary" size="sm" className="ml-1">
                   <Chip.Label>{self.color}</Chip.Label>
@@ -589,29 +609,38 @@ function RemoveDialog({
   }
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Remove {member.display_name}?</DialogTitle>
-          <DialogDescription>
+    <AlertDialog
+      open
+      onOpenChange={() => {
+        if (!busy) onClose()
+      }}
+    >
+      <AlertDialogContent className="sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove {member.display_name}?</AlertDialogTitle>
+          <AlertDialogDescription>
             Their runs and history stay; their access ends now.
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
         {error && (
           <p role="alert" className="rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
             {error}
           </p>
         )}
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="destructive" disabled={busy} onClick={() => void remove()}>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={(event) => {
+              event.preventDefault()
+              void remove()
+            }}
+          >
             Remove
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -651,30 +680,39 @@ function DemoteSelfDialog({
   }
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Give up your admin role?</DialogTitle>
-          <DialogDescription>
+    <AlertDialog
+      open
+      onOpenChange={() => {
+        if (!busy) onClose()
+      }}
+    >
+      <AlertDialogContent className="sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Give up your admin role?</AlertDialogTitle>
+          <AlertDialogDescription>
             You will become {role}. You will lose admin access immediately, and
             another admin has to hand it back.
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
         {error && (
           <p role="alert" className="rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
             {error}
           </p>
         )}
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="destructive" disabled={busy} onClick={() => void demote()}>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={(event) => {
+              event.preventDefault()
+              void demote()
+            }}
+          >
             Become {role}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 

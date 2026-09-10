@@ -6,6 +6,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { ThemeToggle } from '@/components/theme'
+import { Chip, Tooltip } from '@/components/ui/heroui'
 import { formatBytes } from '@/lib/format'
 import type { ConnectionState } from '@/lib/stream'
 import type { DiskUsage } from '@/lib/types'
@@ -86,12 +87,21 @@ function ServerUpdateNotice() {
         : null
   if (!notice) return null
   return (
-    <span
-      role="status"
-      title={notice}
-      className="flex min-h-7 min-w-0 items-center rounded-full bg-state-waiting/15 px-2 py-1 text-[11px] font-medium break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap"
-    >
-      {notice}
+    // `truncate` can clip this, and the chip takes no `title` of its own, so
+    // the span around it carries the whole sentence for a pointer.
+    <span role="status" title={notice} className="flex min-w-0 shrink">
+      <Chip
+        color="warning"
+        variant="soft"
+        // The state token by hand, the way its neighbour carries
+        // needs-attention: HeroUI's warning foreground is amber, and this
+        // readout has always been the neutral the rest of the bar uses.
+        className="flex min-h-7 min-w-0 shrink items-center bg-state-waiting/15 text-muted-foreground xl:h-7"
+      >
+        <Chip.Label className="min-w-0 break-words whitespace-normal xl:truncate xl:whitespace-nowrap">
+          {notice}
+        </Chip.Label>
+      </Chip>
     </span>
   )
 }
@@ -109,24 +119,35 @@ function LocalStatus() {
   if (!cap.hasLocal('link.status')) return null
   const linked = link?.linked === true
   return (
-    <button
-      type="button"
-      onClick={() => navigate(linked ? 'settings' : 'onboarding')}
-      title={linked ? `Linked to ${link?.repo}` : 'Link a repository'}
-      className={cn(
-        focusRing,
-        'flex h-7 shrink-0 items-center gap-1.5 rounded px-1 hover:text-foreground',
-      )}
-    >
-      <span
-        className={cn(
-          'size-2 rounded-full',
-          linked ? 'bg-state-done' : 'bg-state-waiting',
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <button
+            {...triggerProps}
+            type="button"
+            onClick={() => {
+              navigate(linked ? 'settings' : 'onboarding')
+            }}
+            className={cn(
+              focusRing,
+              'flex h-7 shrink-0 items-center gap-1.5 rounded px-1 hover:text-foreground',
+            )}
+          >
+            <span
+              className={cn(
+                'size-2 rounded-full',
+                linked ? 'bg-state-done' : 'bg-state-waiting',
+              )}
+              aria-hidden
+            />
+            {linked ? 'Linked' : 'Not linked'}
+          </button>
         )}
-        aria-hidden
       />
-      {linked ? 'Linked' : 'Not linked'}
-    </button>
+      <Tooltip.Content>
+        {linked ? `Linked to ${link?.repo}` : 'Link a repository'}
+      </Tooltip.Content>
+    </Tooltip>
   )
 }
 
@@ -158,19 +179,30 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
 
   const latest = update.cli.latest ?? ''
   return (
-    <button
-      type="button"
-      onClick={clearDismissedUpdates}
-      aria-label={`Update available: ${latest}`}
-      title={`${latest} is available - show the update banner`}
-      className={cn(
-        focusRing,
-        'flex min-h-7 min-w-0 shrink items-center gap-1.5 rounded px-1 break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap hover:text-foreground',
-      )}
-    >
-      {label}
-      <span className="size-2 rounded-full bg-state-waiting" aria-hidden />
-    </button>
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <button
+            {...triggerProps}
+            type="button"
+            onClick={() => {
+              clearDismissedUpdates()
+            }}
+            aria-label={`Update available: ${latest}`}
+            className={cn(
+              focusRing,
+              'flex min-h-7 min-w-0 shrink items-center gap-1.5 rounded px-1 break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap hover:text-foreground',
+            )}
+          >
+            {label}
+            <span className="size-2 rounded-full bg-state-waiting" aria-hidden />
+          </button>
+        )}
+      />
+      <Tooltip.Content>
+        {latest} is available - show the update banner
+      </Tooltip.Content>
+    </Tooltip>
   )
 }
 
@@ -224,12 +256,19 @@ export function StatusBar() {
             if (!wide) setMobileDetailsOpen(open)
           }}
         >
-          <CollapsibleTrigger
-            className="h-7 w-7 justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground xl:hidden"
-            aria-label="Show status details"
-            aria-controls="status-details"
-            title="Show status details"
-          />
+          <Tooltip>
+            <Tooltip.Trigger<'button'>
+              render={(triggerProps) => (
+                <CollapsibleTrigger
+                  {...triggerProps}
+                  className="h-7 w-7 justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground xl:hidden"
+                  aria-label="Show status details"
+                  aria-controls="status-details"
+                />
+              )}
+            />
+            <Tooltip.Content>Show status details</Tooltip.Content>
+          </Tooltip>
           <CollapsibleContent
             id="status-details"
             forceMount
@@ -237,12 +276,23 @@ export function StatusBar() {
           >
             <div className="fixed inset-x-3 bottom-10 z-50 mb-1 flex max-h-[70vh] min-w-0 max-w-md flex-col items-stretch gap-2 overflow-y-auto rounded-md border bg-popover p-3 text-popover-foreground shadow-lg xl:static xl:flex xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-3 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:shadow-none">
               {unreachable !== null && (
+                // needs-attention has no HeroUI colour of its own, so the
+                // chip carries the state token rather than the nearest
+                // stand-in.
                 <span
                   role="status"
                   title={unreachableLabel[unreachable]}
-                  className="flex min-h-7 min-w-0 items-center rounded-full bg-state-needs-attention/15 px-2 py-1 text-[11px] font-medium text-state-needs-attention break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap"
+                  className="flex min-w-0 shrink"
                 >
-                  {unreachableLabel[unreachable]}
+                  <Chip
+                    color="warning"
+                    variant="soft"
+                    className="flex min-h-7 min-w-0 shrink items-center bg-state-needs-attention/15 text-state-needs-attention xl:h-7"
+                  >
+                    <Chip.Label className="min-w-0 break-words whitespace-normal xl:truncate xl:whitespace-nowrap">
+                      {unreachableLabel[unreachable]}
+                    </Chip.Label>
+                  </Chip>
                 </span>
               )}
               <ServerUpdateNotice />

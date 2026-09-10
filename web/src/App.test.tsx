@@ -73,11 +73,10 @@ describe('App', () => {
   // even if nothing were mounted to answer it.
   it('opens the launch form from the sidebar, with no palette involved', async () => {
     await mount()
-    await vi.waitFor(() =>
-      expect(sidebar().getByTitle('Launch a run')).toBeDefined(),
-    )
+    const launch = () => sidebar().getByRole('button', { name: 'New run' })
+    await vi.waitFor(() => expect(launch()).toBeDefined())
 
-    fireEvent.click(sidebar().getByTitle('Launch a run'))
+    fireEvent.click(launch())
 
     expect(await screen.findByText('Launch a run')).toBeDefined()
     expect(await screen.findByLabelText('Target workspace')).toBeDefined()

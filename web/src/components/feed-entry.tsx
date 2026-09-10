@@ -19,6 +19,7 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
   return (
     <li className="group grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 rounded-md border border-transparent px-3 py-2.5 text-sm transition-colors hover:border-border/60 hover:bg-accent/35">
       <span
+        role="img"
         aria-label={actor?.display_name ?? 'system'}
         title={actor?.display_name ?? 'system'}
         className="mt-1 size-2 shrink-0 rounded-full bg-muted-foreground/45"

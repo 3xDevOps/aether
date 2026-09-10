@@ -52,8 +52,7 @@ export function ThemeToggle() {
             variant="ghost"
             size="icon"
             aria-label={`Theme: ${theme}`}
-            onClick={(event) => {
-              triggerProps.onClick?.(event)
+            onClick={() => {
               setTheme(order[(order.indexOf(theme) + 1) % order.length])
             }}
           >

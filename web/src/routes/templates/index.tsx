@@ -6,6 +6,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/lib/format'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -397,14 +407,19 @@ function DeleteDialog({
   }
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>Delete {template.name}?</DialogTitle>
-          <DialogDescription>
+    <AlertDialog
+      open
+      onOpenChange={() => {
+        if (!busy) onClose()
+      }}
+    >
+      <AlertDialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {template.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
             The template and its schedule are removed together.
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
         <div className="min-h-0 overflow-y-auto -mx-1 px-1">
           <p className="text-sm text-muted-foreground">
             This cannot be undone. Existing runs are not changed.
@@ -415,16 +430,20 @@ function DeleteDialog({
             </p>
           )}
         </div>
-        <DialogFooter className="border-t pt-4">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="destructive" disabled={busy} onClick={() => void remove()}>
+        <AlertDialogFooter className="border-t pt-4">
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={(event) => {
+              event.preventDefault()
+              void remove()
+            }}
+          >
             {busy ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
