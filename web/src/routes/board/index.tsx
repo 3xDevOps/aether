@@ -69,7 +69,7 @@ export function Board() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <div className="min-h-24 min-w-0 flex-1 overflow-y-auto">
+        <div className="flex min-h-24 min-w-0 flex-1 flex-col overflow-y-auto">
           {unreachable && total === 0 ? (
             <div
               role="alert"
