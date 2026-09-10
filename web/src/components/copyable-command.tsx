@@ -1,6 +1,7 @@
 import { Copy } from 'lucide-react'
 import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/heroui'
 import { copyText } from '@/lib/clipboard'
 
 /** One exact command, shown as it must be typed, with a button that copies it. */
@@ -16,16 +17,25 @@ export function CopyableCommand({ command }: { command: string }) {
       >
         {command}
       </code>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-8 shrink-0"
-        aria-label={`Copy ${command}`}
-        title="Copy command"
-        onClick={() => void copyText(command, codeRef.current)}
-      >
-        <Copy className="size-3.5" aria-hidden />
-      </Button>
+      <Tooltip>
+        <Tooltip.Trigger<'button'>
+          render={(triggerProps) => (
+            <Button
+              {...triggerProps}
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0"
+              aria-label={`Copy ${command}`}
+              onClick={() => {
+                void copyText(command, codeRef.current)
+              }}
+            >
+              <Copy className="size-3.5" aria-hidden />
+            </Button>
+          )}
+        />
+        <Tooltip.Content>Copy command</Tooltip.Content>
+      </Tooltip>
     </div>
   )
 }

@@ -20,6 +20,7 @@ import type * as React from 'react'
 import type { SearchAddon } from '@xterm/addon-search'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/heroui'
 import { Input } from '@/components/ui/input'
 import { copySelection, pasteClipboard } from '@/lib/term-clipboard'
 import {
@@ -29,6 +30,33 @@ import {
 } from '@/lib/term-font'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
+
+/** A terminal toolbar button and the shortcut its tooltip names. */
+function ToolButton({
+  hint,
+  onClick,
+  disabled,
+  ...props
+}: { hint: string } & React.ComponentProps<typeof Button>) {
+  return (
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <Button
+            {...triggerProps}
+            {...props}
+            aria-disabled={disabled || undefined}
+            onClick={(event) => {
+              if (disabled) return
+              onClick?.(event)
+            }}
+          />
+        )}
+      />
+      <Tooltip.Content>{hint}</Tooltip.Content>
+    </Tooltip>
+  )
+}
 
 function TerminalTools({ controller }: { controller: XtermController }) {
   const terminal = controller.terminal
@@ -41,83 +69,83 @@ function TerminalTools({ controller }: { controller: XtermController }) {
       aria-label="Terminal controls"
       className="flex min-w-0 max-w-full flex-1 items-center gap-0.5 overflow-x-auto"
     >
-      <Button
+      <ToolButton
         type="button"
         variant="ghost"
         size="icon"
         aria-label="Open terminal search"
-        title="Find in terminal (Ctrl+Shift+F)"
+        hint="Find in terminal (Ctrl+Shift+F)"
         onClick={() => controller.setFindOpen(true)}
       >
         <Search />
-      </Button>
+      </ToolButton>
       <span className="mx-0.5 hidden h-5 w-px bg-border sm:block" aria-hidden />
-      <Button
+      <ToolButton
         type="button"
         variant="ghost"
         size="icon"
         aria-label="Decrease terminal text size"
-        title="Decrease terminal text size (Ctrl+-)"
+        hint="Decrease terminal text size (Ctrl+-)"
         disabled={!terminal || fontSize <= minTerminalFontSize}
         onClick={() => setFontSize(fontSize - 1)}
       >
         <Minus />
-      </Button>
+      </ToolButton>
       <span
         className="hidden min-w-8 text-center text-xs tabular-nums text-muted-foreground sm:inline"
         aria-label={`Terminal text size ${fontSize}px`}
       >
         {fontSize}
       </span>
-      <Button
+      <ToolButton
         type="button"
         variant="ghost"
         size="icon"
         aria-label="Increase terminal text size"
-        title="Increase terminal text size (Ctrl+=)"
+        hint="Increase terminal text size (Ctrl+=)"
         disabled={!terminal || fontSize >= maxTerminalFontSize}
         onClick={() => setFontSize(fontSize + 1)}
       >
         <Plus />
-      </Button>
-      <Button
+      </ToolButton>
+      <ToolButton
         type="button"
         variant="ghost"
         size="icon"
         aria-label="Reset terminal text size"
-        title={`Reset terminal text size to ${defaultTerminalFontSize}px (Ctrl+0)`}
+        hint={`Reset terminal text size to ${defaultTerminalFontSize}px (Ctrl+0)`}
         disabled={!terminal || fontSize === defaultTerminalFontSize}
         onClick={() => setFontSize(defaultTerminalFontSize)}
       >
         <RotateCcw />
-      </Button>
+      </ToolButton>
       <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
-      <Button
+      <ToolButton
         type="button"
         variant="ghost"
         size="icon"
         aria-label="Copy terminal selection"
-        title="Copy terminal selection (Ctrl+Shift+C)"
+        hint="Copy terminal selection (Ctrl+Shift+C)"
         disabled={!terminal}
         onClick={() => {
           if (terminal) void copySelection(terminal)
         }}
       >
         <ClipboardCopy />
-      </Button>
-      <Button
+      </ToolButton>
+      <ToolButton
         type="button"
         variant="ghost"
         size="icon"
         aria-label="Paste into terminal"
-        title="Paste into terminal (Ctrl+Shift+V)"
+        hint="Paste into terminal (Ctrl+Shift+V)"
         disabled={!terminal}
         onClick={() => {
           if (terminal) void pasteClipboard(terminal)
         }}
       >
         <ClipboardPaste />
-      </Button>
+      </ToolButton>
     </div>
   )
 }

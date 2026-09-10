@@ -1,12 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import '@/components/shortcuts'
 import { Slot } from '@/components/slots'
+import { hintOn } from '@/test/tooltip'
 
 describe('shortcut reference', () => {
-  it('rides the status bar slot', () => {
+  it('rides the status bar slot, and says so on focus', async () => {
     render(<Slot name="statusbar" />)
 
-    expect(screen.getByTitle('Keyboard shortcuts')).toBeDefined()
+    const trigger = screen.getByRole('button', { name: 'Keyboard shortcuts' })
+
+    expect(await hintOn(trigger)).toBe('Keyboard shortcuts')
   })
 
   it('opens on Shift+/ and from the trigger', async () => {

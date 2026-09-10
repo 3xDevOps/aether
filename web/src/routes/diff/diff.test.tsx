@@ -9,6 +9,7 @@ import { initialDiff, intervalKey, type DiffSnapshot, type RunDiffState } from '
 import { toRecord } from '@/store/runs'
 import type { RunPatch } from '@/lib/types'
 import { alice, bob, run, workspace } from '@/test/fixtures'
+import { hintOn } from '@/test/tooltip'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -341,12 +342,36 @@ test('a snapshot without a tree is not selectable', async () => {
   renderDiff()
 
   const row = within(screen.getByRole('complementary')).getByRole('button')
-  expect(row.hasAttribute('disabled')).toBe(true)
-  expect(row.getAttribute('title')).toContain('did not record a tree')
+  expect(row.getAttribute('aria-disabled')).toBe('true')
+  expect(await hintOn(row)).toContain('did not record a tree')
 
   fireEvent.click(row)
   expect(screen.getByText('cmd/main.go')).toBeTruthy()
   expect(api.runPatch).not.toHaveBeenCalled()
+})
+
+// The row that does open has nothing to explain, so it must not open a
+// tooltip at all: an empty one still aims the button's `aria-describedby` at
+// an element that is not there, and still eats the first Escape.
+test('a snapshot that opens carries no hint and no dangling reference', async () => {
+  seed({
+    status: 'ready',
+    base: 'abcdef12',
+    patch,
+    revision: 0,
+    fetched: 0,
+    snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
+  })
+  renderDiff()
+
+  const row = within(screen.getByRole('complementary')).getByRole('button')
+  expect(row.getAttribute('aria-disabled')).toBeNull()
+
+  fireEvent.keyDown(document.body, { key: 'Tab' })
+  act(() => row.focus())
+
+  expect(screen.queryByRole('tooltip')).toBeNull()
+  expect(row.getAttribute('aria-describedby')).toBeNull()
 })
 
 // A slow request must not swallow the snapshot that lands while it is in
@@ -398,7 +423,7 @@ test('a snapshot arriving mid-fetch is answered by a second fetch', async () => 
   expect(useStore.getState().diffs[active.id].fetched).toBe(2)
 })
 
-test('a conflict chip names the file and the member and opens their run', () => {
+test('a conflict chip names the file and the member and opens their run', async () => {
   seed({ status: 'ready', patch })
   useStore.setState({
     overlaps: {
@@ -410,6 +435,9 @@ test('a conflict chip names the file and the member and opens their run', () => 
   const chip = screen.getByRole('button', { name: /2 overlapping files with Bob/ })
   expect(chip.textContent).toContain('main.go')
   expect(chip.textContent).toContain('Bob')
+
+  // The chip only has room for one basename; the hint lists every file.
+  expect(await hintOn(chip)).toBe('cmd/main.go\ngo.mod\n\nalso being changed by Bob')
 
   fireEvent.click(chip)
   expect(useStore.getState().route).toEqual({

@@ -3,15 +3,17 @@ import { toast } from 'sonner'
 import { Dock } from '@/components/dock'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
-import { Button } from '@/components/ui/button'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { openOAuthLink } from '@/lib/oauth-forward'
@@ -412,81 +414,79 @@ export function TerminalDock({
         </div>
       </Dock>
       {confirmingStop && (
-        <Dialog
+        <AlertDialog
           open
           onOpenChange={(open) => {
-            // The dialog is where a failed stop is reported, so Escape and an
-            // outside click stay shut off until the call settles.
+            // A failed stop is reported in here, so Escape stays off until
+            // the call settles.
             if (!stopping) setConfirmingStop(open)
           }}
         >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Stop your environment?</DialogTitle>
-              <DialogDescription>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Stop your environment?</AlertDialogTitle>
+              <AlertDialogDescription>
                 The environment container stops now. Your home files and your
                 saved image remain, and a later open starts it again.
-              </DialogDescription>
-            </DialogHeader>
-            {stopError && <p className="text-sm text-state-failed">{stopError}</p>}
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setConfirmingStop(false)}
-                disabled={stopping}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void stop()}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {stopError && (
+              <p role="alert" className="text-sm text-state-failed">
+                {stopError}
+              </p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={stopping}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="default"
+                onClick={(event) => {
+                  event.preventDefault()
+                  void stop()
+                }}
                 disabled={stopping}
               >
                 {stopping ? 'Stopping...' : 'Stop environment'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
       {confirmingReset && (
-        <Dialog
+        <AlertDialog
           open
           onOpenChange={(open) => {
             if (!resetting) setConfirmingReset(open)
           }}
         >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Reset to the standard image?</DialogTitle>
-              <DialogDescription>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reset to the standard image?</AlertDialogTitle>
+              <AlertDialogDescription>
                 Your saved image {dock.status?.saved_image} is deleted
                 {dock.status?.running && ' and the environment container stops'}.
                 Your home files remain, and the next open starts from the
                 standard image.
-              </DialogDescription>
-            </DialogHeader>
-            {resetError && <p className="text-sm text-state-failed">{resetError}</p>}
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setConfirmingReset(false)}
-                disabled={resetting}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => void resetEnvironment()}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {resetError && (
+              <p role="alert" className="text-sm text-state-failed">
+                {resetError}
+              </p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={resetting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(event) => {
+                  event.preventDefault()
+                  void resetEnvironment()
+                }}
                 disabled={resetting}
               >
                 {resetting ? 'Resetting...' : 'Reset to standard'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </>
   )

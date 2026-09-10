@@ -47,7 +47,16 @@ export const Chip = Object.assign(ChipRoot, {
 
 type TooltipProps = React.ComponentProps<typeof HeroTooltip>
 
-const TooltipRoot = ({ ...props }: TooltipProps) => <HeroTooltip {...props} />
+/**
+ * `--tooltip-delay` lives in HeroUI's full theme stylesheet, which this app
+ * does not import, so without a delay here React Aria falls back to its own
+ * 1.5s - about three times what a native `title` took, on the controls this
+ * dashboard puts its hints on. Focus is unaffected either way; it opens at
+ * once.
+ */
+const TooltipRoot = ({ delay = 300, ...props }: TooltipProps) => (
+  <HeroTooltip delay={delay} {...props} />
+)
 
 const TooltipContent = ({ className, ...props }: React.ComponentProps<typeof HeroTooltip.Content>) => (
   <HeroTooltip.Content className={cn('aether-tooltip', className)} {...props} />

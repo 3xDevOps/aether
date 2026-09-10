@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { Copy, Minus, Square, X } from 'lucide-react'
 import { type CSSProperties, useEffect, useState } from 'react'
+import { Tooltip } from '@/components/ui/heroui'
 import { cn, focusRing } from '@/lib/utils'
 
 /** The window buttons, present only when the shell draws none of its own. */
@@ -63,20 +64,29 @@ function ControlButton({
   className?: string
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      style={NO_DRAG}
-      className={cn(
-        focusRing,
-        'grid h-full w-[46px] place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
-        className,
-      )}
-    >
-      <Icon size={14} aria-hidden />
-    </button>
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <button
+            {...triggerProps}
+            type="button"
+            aria-label={label}
+            onClick={() => {
+              onClick()
+            }}
+            style={NO_DRAG}
+            className={cn(
+              focusRing,
+              'grid h-full w-[46px] place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
+              className,
+            )}
+          >
+            <Icon size={14} aria-hidden />
+          </button>
+        )}
+      />
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip>
   )
 }
 

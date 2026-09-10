@@ -1,7 +1,9 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { FeedEntry } from '@/components/feed-entry'
 import { eventLabel, typeLabel, type EventType } from '@/lib/events'
 import type { Event } from '@/lib/types'
+import { useStore } from '@/store'
+import { alice } from '@/test/fixtures'
 
 /** One representative payload per named type. */
 const samples: Record<EventType, unknown> = {
@@ -63,6 +65,14 @@ describe('feed rows', () => {
     // By title, so deleting the tooltip fails here rather than passing on a
     // null the assertion never looked at.
     expect(screen.getByTitle('run.status').textContent).toBe('Run status')
+  })
+
+  // The dot's colour is the only other thing that says who acted.
+  it('names the actor behind the colour', () => {
+    useStore.setState({ members: { [alice.id]: alice } })
+    const row = within(renderRow('run.status', { to: 'merged' }))
+
+    expect(row.getByRole('img', { name: alice.display_name })).toBeDefined()
   })
 
   it('falls back to the wire string for a type it has never heard of', () => {

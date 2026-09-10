@@ -2,7 +2,7 @@ import { Check, ShieldQuestion, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { CardSlotProps } from '@/components/slots'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/heroui'
+import { Chip, Tooltip } from '@/components/ui/heroui'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
@@ -22,33 +22,42 @@ export function ApprovalStatus() {
   if (waiting === 0 && !error) return null
 
   return (
-    <button
-      type="button"
-      onClick={() => navigate('approvals')}
-      title={error ?? 'Open Approvals'}
-      className={cn(
-        focusRing,
-        'flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent hover:text-foreground',
-      )}
-    >
-      <ShieldQuestion
-        className={cn(
-          'size-3.5',
-          error ? 'text-state-failed' : 'text-state-needs-attention',
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <button
+            {...triggerProps}
+            type="button"
+            onClick={() => {
+              navigate('approvals')
+            }}
+            className={cn(
+              focusRing,
+              'flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent hover:text-foreground',
+            )}
+          >
+            <ShieldQuestion
+              className={cn(
+                'size-3.5',
+                error ? 'text-state-failed' : 'text-state-needs-attention',
+              )}
+              aria-hidden
+            />
+            <Chip
+              color={error ? 'danger' : 'warning'}
+              variant="soft"
+              size="sm"
+              className="max-w-44"
+            >
+              <Chip.Label className="truncate">
+                {error ? 'queue unreadable' : `${waiting} waiting`}
+              </Chip.Label>
+            </Chip>
+          </button>
         )}
-        aria-hidden
       />
-      <Chip
-        color={error ? 'danger' : 'warning'}
-        variant="soft"
-        size="sm"
-        className="max-w-44"
-      >
-        <Chip.Label className="truncate">
-          {error ? 'queue unreadable' : `${waiting} waiting`}
-        </Chip.Label>
-      </Chip>
-    </button>
+      <Tooltip.Content>{error ?? 'Open Approvals'}</Tooltip.Content>
+    </Tooltip>
   )
 }
 
@@ -60,20 +69,29 @@ export function ApprovalBadge({ run }: CardSlotProps) {
   if (waiting === 0) return null
 
   return (
-    <button
-      type="button"
-      onClick={() => navigate('approvals')}
-      title={`${waiting} waiting on a decision`}
-      className={cn(
-        focusRing,
-        'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-state-needs-attention/20',
-      )}
-    >
-      <ShieldQuestion className="size-3.5 text-state-needs-attention" aria-hidden />
-      <Chip color="warning" variant="soft" size="sm">
-        <Chip.Label>{waiting}</Chip.Label>
-      </Chip>
-    </button>
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <button
+            {...triggerProps}
+            type="button"
+            onClick={() => {
+              navigate('approvals')
+            }}
+            className={cn(
+              focusRing,
+              'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-state-needs-attention/20',
+            )}
+          >
+            <ShieldQuestion className="size-3.5 text-state-needs-attention" aria-hidden />
+            <Chip color="warning" variant="soft" size="sm">
+              <Chip.Label>{waiting}</Chip.Label>
+            </Chip>
+          </button>
+        )}
+      />
+      <Tooltip.Content>{`${waiting} waiting on a decision`}</Tooltip.Content>
+    </Tooltip>
   )
 }
 

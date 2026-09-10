@@ -113,7 +113,7 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
-    expect(screen.getByRole('dialog')).toBeDefined()
+    expect(screen.getByRole('alertdialog')).toBeDefined()
     const stopButtons = screen.getAllByRole('button', { name: 'Stop environment' })
     fireEvent.click(stopButtons[stopButtons.length - 1])
 
@@ -162,7 +162,7 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
-    const dialog = within(screen.getByRole('dialog'))
+    const dialog = within(screen.getByRole('alertdialog'))
     expect(dialog.queryByRole('button', { name: 'Reset to standard' })).toBeNull()
   })
 
@@ -193,7 +193,7 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
-    const dialog = within(screen.getByRole('dialog'))
+    const dialog = within(screen.getByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
     await waitFor(() => expect(api.terminalStop).toHaveBeenCalled())
     expect(useStore.getState().envTerminal.status?.saved_image).toBe('aether/member-1:123')
@@ -204,7 +204,7 @@ describe('environment terminal dock', () => {
 
     // The container is already stopped, so the confirmation must not promise
     // a stop that will not happen.
-    const resetDialog = within(screen.getByRole('dialog'))
+    const resetDialog = within(screen.getByRole('alertdialog'))
     expect(
       resetDialog.getByText(/aether\/member-1:123 is deleted\. Your home files remain/),
     ).toBeDefined()
@@ -218,12 +218,12 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
-    const dialog = within(screen.getByRole('dialog'))
+    const dialog = within(screen.getByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
     await screen.findByRole('button', { name: 'Stopping...' })
 
     fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.getByRole('dialog')).toBeDefined()
+    expect(screen.getByRole('alertdialog')).toBeDefined()
 
     stop.reject(new Error('stop container: daemon is down'))
     expect(await dialog.findByText('stop container: daemon is down')).toBeDefined()
@@ -255,7 +255,7 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
-    const dialog = within(screen.getByRole('dialog'))
+    const dialog = within(screen.getByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
 
     expect(await dialog.findByText('stop container: daemon is down')).toBeDefined()
@@ -272,7 +272,7 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Reset to standard' }))
-    const dialog = within(screen.getByRole('dialog'))
+    const dialog = within(screen.getByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Reset to standard' }))
 
     expect(await dialog.findByText('remove image: image is in use')).toBeDefined()
@@ -288,7 +288,7 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Reset to standard' }))
-    const dialog = within(screen.getByRole('dialog'))
+    const dialog = within(screen.getByRole('alertdialog'))
     expect(
       dialog.getByText(/aether\/member-1:123 is deleted and the environment container stops\./),
     ).toBeDefined()

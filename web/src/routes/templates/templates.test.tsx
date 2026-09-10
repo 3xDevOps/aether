@@ -115,6 +115,41 @@ describe('templates view', () => {
     expect(useStore.getState().runs.run_tpl).toBeDefined()
   })
 
+  // The confirm is where a refused delete is reported, so it has to outlive
+  // the request: an Escape mid-flight would take the answer off screen with it.
+  it('confirms a delete and keeps the refusal on screen', async () => {
+    let refuse: (reason: Error) => void = () => {}
+    const client = fakeApi({
+      scheduleList: vi.fn(async () => []),
+      templateDelete: vi.fn(
+        () =>
+          new Promise<never>((_, reject) => {
+            refuse = reject
+          }),
+      ),
+    })
+    seed()
+    render(<TemplatesRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    const confirm = await screen.findByRole('alertdialog')
+    expect(client.templateDelete).not.toHaveBeenCalled()
+    // A confirm has no close X: answering it is the only way past it.
+    expect(within(confirm).getAllByRole('button')).toHaveLength(2)
+
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }))
+    await waitFor(() =>
+      expect(client.templateDelete).toHaveBeenCalledWith(workspace.id, template.name),
+    )
+
+    fireEvent.keyDown(confirm, { key: 'Escape' })
+    expect(screen.getByRole('alertdialog')).toBeDefined()
+
+    refuse(new Error('template.delete: a schedule still fires it'))
+
+    expect(await screen.findByText(/a schedule still fires it/)).toBeDefined()
+  })
+
   // The route follows the sidebar switcher rather than carrying a picker of
   // its own, so changing the active workspace re-reads against the new one.
   it('reads the active workspace, not a picker of its own', async () => {

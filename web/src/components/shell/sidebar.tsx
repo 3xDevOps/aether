@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
 import { Button } from '@/components/ui/button'
+import { Chip, Tooltip } from '@/components/ui/heroui'
 import {
   Select,
   SelectContent,
@@ -262,15 +263,24 @@ function SidebarHeader() {
       <AttentionBadge />
       <div className="ml-auto flex items-center gap-1">
         {launchable && (
-          <Button
-            variant="ghost"
-            size="sm"
-            title="Launch a run"
-            onClick={() => openDialog('launch')}
-          >
-            <Rocket />
-            New run
-          </Button>
+          <Tooltip>
+            <Tooltip.Trigger<'button'>
+              render={(triggerProps) => (
+                <Button
+                  {...triggerProps}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    openDialog('launch')
+                  }}
+                >
+                  <Rocket />
+                  New run
+                </Button>
+              )}
+            />
+            <Tooltip.Content>Launch a run</Tooltip.Content>
+          </Tooltip>
         )}
         <GroupByControl />
       </div>
@@ -288,22 +298,30 @@ function GroupByControl() {
       className="flex items-center rounded-md border"
     >
       {([['status', 'Status'], ['member', 'Member']] as const).map(([mode, label]) => (
-        <Button
-          key={mode}
-          variant="ghost"
-          size="sm"
-          aria-pressed={groupBy === mode}
-          title={`Group runs by ${label.toLowerCase()}`}
-          onClick={() => setGroupBy(mode)}
-          className={cn(
-            'rounded-none first:rounded-l-md last:rounded-r-md',
-            groupBy === mode
-              ? 'bg-accent font-medium text-accent-foreground'
-              : 'text-muted-foreground',
-          )}
-        >
-          {label}
-        </Button>
+        <Tooltip key={mode}>
+          <Tooltip.Trigger<'button'>
+            render={(triggerProps) => (
+              <Button
+                {...triggerProps}
+                variant="ghost"
+                size="sm"
+                aria-pressed={groupBy === mode}
+                onClick={() => {
+                  setGroupBy(mode)
+                }}
+                className={cn(
+                  'rounded-none first:rounded-l-md last:rounded-r-md',
+                  groupBy === mode
+                    ? 'bg-accent font-medium text-accent-foreground'
+                    : 'text-muted-foreground',
+                )}
+              >
+                {label}
+              </Button>
+            )}
+          />
+          <Tooltip.Content>Group runs by {label.toLowerCase()}</Tooltip.Content>
+        </Tooltip>
       ))}
     </div>
   )
@@ -321,10 +339,17 @@ function AttentionBadge() {
   return (
     <span
       aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
+      role="img"
       title="Runs waiting on a human"
-      className="rounded-full bg-state-needs-attention/15 px-1.5 text-[11px] font-medium text-state-needs-attention"
     >
-      {count}
+      <Chip
+        color="warning"
+        variant="soft"
+        size="sm"
+        className="bg-state-needs-attention/15 text-state-needs-attention"
+      >
+        <Chip.Label>{count}</Chip.Label>
+      </Chip>
     </span>
   )
 }
@@ -413,12 +438,16 @@ function NavSection() {
             <span
               aria-hidden
               title={inboxError ?? 'Requests waiting on a decision'}
-              className={cn(
-                'ml-auto rounded-full bg-state-needs-attention/15 px-1.5',
-                'text-[11px] font-medium text-state-needs-attention',
-              )}
+              className="ml-auto"
             >
-              {inboxError ? '?' : waiting}
+              <Chip
+                color="warning"
+                variant="soft"
+                size="sm"
+                className="bg-state-needs-attention/15 text-state-needs-attention"
+              >
+                <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
+              </Chip>
             </span>
           )}
         </button>

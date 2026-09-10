@@ -77,6 +77,7 @@ describe('command palette', () => {
     ['a terminal', '<div class="xterm"><span></span></div>', true],
     ['a dialog', '<div role="dialog"><button type="button">ok</button></div>', false],
     ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>', false],
+    ['a confirm', '<div role="alertdialog"><button type="button">ok</button></div>', false],
     // A select list is portalled out of the dialog that hosts it, so there is
     // no dialog above it to stand the chord down. It says it is open, which is
     // what tells it apart from cmdk's own list inside the palette.

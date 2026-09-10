@@ -6,6 +6,7 @@ import type { GatewayCapabilities, Member, Run } from '@/lib/types'
 import { useStore } from '@/store'
 import { toRecord, type RunRecord } from '@/store/runs'
 import { alice, bob, run, serverInfo, vera, workspace } from '@/test/fixtures'
+import { hintOn } from '@/test/tooltip'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -108,7 +109,7 @@ test('kill asks first, then calls run.kill', async () => {
   expect(await screen.findByText('Kill this run?')).toBeTruthy()
   expect(api.runKill).not.toHaveBeenCalled()
 
-  const dialog = within(screen.getByRole('dialog'))
+  const dialog = within(screen.getByRole('alertdialog'))
   fireEvent.click(dialog.getByRole('button', { name: 'Kill run' }))
   await waitFor(() => expect(api.runKill).toHaveBeenCalledWith(record.id))
 
@@ -125,7 +126,7 @@ test('delete asks first, calls run.delete, and removes a live run', async () => 
   expect(await screen.findByText('Delete this run?')).toBeTruthy()
   expect(api.runDelete).not.toHaveBeenCalled()
 
-  const dialog = within(screen.getByRole('dialog'))
+  const dialog = within(screen.getByRole('alertdialog'))
   fireEvent.click(dialog.getByRole('button', { name: 'Delete run' }))
   await waitFor(() => expect(api.runDelete).toHaveBeenCalledWith(record.id))
   expect(useStore.getState().runs[record.id]).toBeUndefined()
@@ -191,7 +192,7 @@ test('a refused verb surfaces the server message verbatim', async () => {
   render(<RunActions run={seed({ paused: false })} />)
 
   fireEvent.click(screen.getByRole('button', { name: 'Kill' }))
-  const dialog = within(await screen.findByRole('dialog'))
+  const dialog = within(await screen.findByRole('alertdialog'))
   fireEvent.click(dialog.getByRole('button', { name: 'Kill run' }))
 
   await waitFor(() =>
@@ -226,15 +227,13 @@ test('the bar locks while a verb is in flight, and names what it fetched', async
 
   fireEvent.click(screen.getByRole('button', { name: 'Pull' }))
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Pull' })).toHaveProperty(
-      'disabled',
-      true,
-    ),
+    expect(
+      screen.getByRole('button', { name: 'Pull' }).getAttribute('aria-disabled'),
+    ).toBe('true'),
   )
-  expect(screen.getByRole('button', { name: 'Kill' })).toHaveProperty(
-    'disabled',
-    true,
-  )
+  expect(
+    screen.getByRole('button', { name: 'Kill' }).getAttribute('aria-disabled'),
+  ).toBe('true')
 
   finish({
     branch: record.branch,
@@ -251,10 +250,9 @@ test('the bar locks while a verb is in flight, and names what it fetched', async
   // And the git output waits on the store for the diff tab to show.
   expect(useStore.getState().pulls[record.id]?.output).toContain('new branch')
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Kill' })).toHaveProperty(
-      'disabled',
-      false,
-    ),
+    expect(
+      screen.getByRole('button', { name: 'Kill' }).getAttribute('aria-disabled'),
+    ).toBeNull(),
   )
 })
 
@@ -407,14 +405,14 @@ test('the More menu holds every verb the narrow row drops, and none of the rest'
   }
 
   const menu = within(await openMore())
-  for (const name of ['Forward', 'Protect', 'Pull', 'Hand off']) {
+  for (const name of ['Forward a port...', 'Protect run', 'Pull branch', 'Hand off']) {
     expect(menu.getByRole('menuitem', { name })).toBeTruthy()
   }
-  for (const name of ['Pause', 'Send', 'Close']) {
+  for (const name of ['Pause run', 'Send a message to the agent...', 'Close run...']) {
     expect(menu.queryByRole('menuitem', { name })).toBeNull()
   }
 
-  fireEvent.click(menu.getByRole('menuitem', { name: 'Protect' }))
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' }))
   await waitFor(() => expect(api.runProtect).toHaveBeenCalledWith(record.id, true))
 })
 
@@ -426,7 +424,7 @@ test('a verb picked from the More menu still asks first', async () => {
   render(<RunActions run={record} />)
 
   const menu = within(await openMore())
-  fireEvent.click(menu.getByRole('menuitem', { name: 'Protect' }))
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' }))
   await waitFor(() => expect(api.runProtect).toHaveBeenCalledWith(record.id, true))
 })
 
@@ -452,11 +450,43 @@ test('the More trigger spins while a verb fired from it runs', async () => {
   render(<RunActions run={seedWidest()} />)
 
   const menu = within(await openMore())
-  fireEvent.click(menu.getByRole('menuitem', { name: 'Pull' }))
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Pull branch' }))
 
   await waitFor(() => {
     const trigger = screen.getByRole('button', { name: 'More' })
-    expect(trigger).toHaveProperty('disabled', true)
+    expect(trigger.getAttribute('aria-disabled')).toBe('true')
     expect(trigger.querySelector('.animate-spin')).toBeTruthy()
   })
+})
+
+test('a gated verb still gives up its full label', async () => {
+  render(<RunActions run={seed({ paused: false, local: ['pull'] })} />)
+
+  const pull = screen.getByRole('button', { name: 'Pull' })
+  expect(pull.getAttribute('aria-disabled')).toBe('true')
+  expect(await hintOn(pull)).toBe('Pull branch')
+})
+
+// The lock is load-bearing: a second `git fetch` loses the ref-lock race.
+test('nothing else in the bar fires while a verb is in flight', async () => {
+  vi.mocked(api.localPull).mockReturnValue(new Promise(() => {}))
+  const record = seedWidest()
+  render(<RunActions run={record} />)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Pull' }))
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Hand off' }).getAttribute('aria-disabled'),
+    ).toBe('true'),
+  )
+
+  fireEvent.click(screen.getByRole('button', { name: 'Hand off' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+
+  fireEvent.keyDown(screen.getByRole('button', { name: 'More' }), { key: 'Enter' })
+  expect(screen.queryByRole('menu')).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+  expect(api.runPause).not.toHaveBeenCalled()
+  expect(api.localPull).toHaveBeenCalledTimes(1)
 })

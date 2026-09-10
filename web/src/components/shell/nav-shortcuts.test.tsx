@@ -3,10 +3,12 @@
 // does work first, so it cannot pass by the shortcut never having fired.
 
 import { act, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { AppShell } from '@/components/shell/app-shell'
 import { useStore } from '@/store'
 import { hydrate } from '@/store/sync'
 import { fakeApi, serverInfo, vera } from '@/test/fixtures'
+import { hintOn } from '@/test/tooltip'
 import '@/routes'
 
 beforeEach(async () => {
@@ -165,12 +167,45 @@ describe('navigation shortcuts', () => {
     expect(useStore.getState().route.name).toBe('board')
   })
 
+  // An open hint is not a mode: focus is still on the trigger, so a single-key
+  // shortcut has to fire while one is showing.
+  it('leaves the shortcuts alone while a tooltip is open', async () => {
+    render(<AppShell />)
+    const control = screen.getByRole('button', { name: 'Keyboard shortcuts' })
+    expect(await hintOn(control)).toBe('Keyboard shortcuts')
+
+    press('n', control)
+
+    expect(useStore.getState().paletteDialog).toBe('launch')
+  })
+
+  // A tooltip closes on the first key of any kind. Where that key is Escape,
+  // React Aria stops it rather than marking it handled, so the shell never
+  // hears that one and the run stays open - one press to dismiss the tooltip,
+  // and the next leaves, which is the whole cost of showing hints on focus.
+  it('lets a tooltip take the first Escape and no more than that', async () => {
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
+    render(<AppShell />)
+    const control = screen.getByRole('button', { name: 'Keyboard shortcuts' })
+    await hintOn(control)
+
+    await userEvent.keyboard('{Escape}')
+
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(useStore.getState().route.name).toBe('run')
+
+    await userEvent.keyboard('{Escape}')
+
+    expect(useStore.getState().route.name).toBe('board')
+  })
+
   it.each([
     ['field', '<input />'],
     ['terminal', '<div class="xterm"><span></span></div>'],
     ['dialog', '<div role="dialog"><button type="button">ok</button></div>'],
     ['menu', '<div role="menu"><div role="menuitem">Kill run</div></div>'],
     ['list box', '<div role="listbox"><div role="option">one</div></div>'],
+    ['confirm', '<div role="alertdialog"><button type="button">ok</button></div>'],
   ])('stands down while a %s has the keyboard', (_, markup) => {
     useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     render(<AppShell />)

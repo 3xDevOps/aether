@@ -2,6 +2,7 @@ import { History } from 'lucide-react'
 import { useEffect } from 'react'
 import { FeedEntry } from '@/components/feed-entry'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/heroui'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -48,15 +49,24 @@ export function TimelineStatus() {
   const navigate = useStore((s) => s.navigate)
   if (!useCapability().hasMethod('workspace.timeline')) return null
   return (
-    <button
-      type="button"
-      onClick={() => navigate('timeline')}
-      title="Open Activity"
-      className={cn(focusRing, 'flex items-center gap-1 rounded px-1 hover:text-foreground')}
-    >
-      <History className="size-3.5" aria-hidden />
-      Activity
-    </button>
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <button
+            {...triggerProps}
+            type="button"
+            onClick={() => {
+              navigate('timeline')
+            }}
+            className={cn(focusRing, 'flex items-center gap-1 rounded px-1 hover:text-foreground')}
+          >
+            <History className="size-3.5" aria-hidden />
+            Activity
+          </button>
+        )}
+      />
+      <Tooltip.Content>Open Activity</Tooltip.Content>
+    </Tooltip>
   )
 }
 

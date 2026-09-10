@@ -15,6 +15,7 @@ import {
   run,
   workspace,
 } from '@/test/fixtures'
+import { hintOn } from '@/test/tooltip'
 
 function seed(runs: Run[], active = workspace.id) {
   useStore.setState({
@@ -198,12 +199,17 @@ describe('board', () => {
     })
   })
 
-  it('marks every run seen at once', () => {
+  it('marks every run seen at once', async () => {
     seed([stalled, working])
     render(<Board />)
 
     expect(screen.getAllByLabelText('Unseen')).toHaveLength(2)
-    fireEvent.click(screen.getByTitle('Mark every run seen'))
+    const markAll = screen.getByRole('button', { name: 'Mark all seen' })
+    // The button says "seen"; only the hint says how many runs that is.
+    expect(await hintOn(markAll)).toBe('Mark every run seen')
+
+    fireEvent.click(markAll)
+
     expect(screen.queryByLabelText('Unseen')).toBeNull()
   })
 
@@ -297,7 +303,7 @@ describe('board', () => {
     seed([working])
     render(<Board />)
 
-    fireEvent.click(screen.getByTitle('Launch a run'))
+    fireEvent.click(screen.getByRole('button', { name: 'New run' }))
 
     // The form is hosted app-wide; the board only asks for it.
     expect(useStore.getState().paletteDialog).toBe('launch')
@@ -311,7 +317,7 @@ describe('board', () => {
     // empty buckets each saying "Nothing here." add nothing to the one notice
     // that says what a run is and offers the way to start one.
     const notice = screen.getByText(/No runs yet/).closest('div') as HTMLElement
-    expect(within(notice).getByTitle('Launch a run')).toBeDefined()
+    expect(within(notice).getByRole('button', { name: 'New run' })).toBeDefined()
     expect(screen.queryAllByText('Nothing here.')).toHaveLength(0)
     for (const bucket of ['Needs you', 'Working', 'Done']) {
       expect(screen.queryByRole('region', { name: bucket })).toBeNull()

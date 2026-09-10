@@ -4,7 +4,7 @@ import { ApiError } from '@/lib/api'
 import type { PresenceEntry } from '@/lib/types'
 import { Board } from '@/routes/board'
 import { TeamStatus } from '@/routes/team'
-import { ApprovalInbox } from '@/routes/team/approvals'
+import { ApprovalInbox, ApprovalStatus } from '@/routes/team/approvals'
 import { BudgetStatus } from '@/routes/team/budget'
 import { heartbeat, refreshInbox, refreshTeam } from '@/routes/team/sync'
 import { useStore, type RootState } from '@/store'
@@ -20,6 +20,7 @@ import {
   serverInfo,
   workspace,
 } from '@/test/fixtures'
+import { hintOn } from '@/test/tooltip'
 
 const watching: PresenceEntry = {
   member_id: bob.id,
@@ -260,15 +261,28 @@ describe('team status bar', () => {
       'Repos 512 MB',
     )
   })
+
+  // The readout itself can only fit "queue unreadable"; the server's own
+  // refusal is what an operator needs, so the hint carries it verbatim.
+  it('keeps the server refusal on the queue readout', async () => {
+    seed({ inboxError: 'approval.list: database is locked' })
+    render(<ApprovalStatus />)
+
+    expect(await hintOn(screen.getByRole('button', { name: 'queue unreadable' }))).toBe(
+      'approval.list: database is locked',
+    )
+  })
 })
 
 describe('run card contributions', () => {
-  it('carries the approval badge and the watcher avatars', () => {
+  it('carries the approval badge and the watcher avatars', async () => {
     seed({ inbox: { [workspace.id]: [approval()] }, presence: [watching] })
     render(<Board />)
 
     const card = screen.getByRole('article')
-    expect(within(card).getByTitle('1 waiting on a decision')).toBeDefined()
+    expect(await hintOn(within(card).getByRole('button', { name: '1' }))).toBe(
+      '1 waiting on a decision',
+    )
     expect(within(card).getByTitle('Watching: Bob')).toBeDefined()
   })
 })

@@ -853,4 +853,14 @@
     border: 1px solid var(--border);
     color: var(--popover-foreground);
   }
+
+  /* HeroUI zooms and slides the bubble in, and a tooltip now opens on plain
+     keyboard focus across the shell - so a reader who asked for less motion
+     would meet one on every Tab. The stylesheet's own reduced-motion rule
+     covers the trigger, not the bubble. */
+  @media (prefers-reduced-motion: reduce) {
+    .aether-tooltip {
+      animation: none;
+    }
+  }
 }
