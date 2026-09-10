@@ -285,8 +285,12 @@ export class OnboardingWizard {
   }
 
   async expectStep(name: StepName): Promise<void> {
-    const index = stepNames.indexOf(name)
-    await expect(this.currentStep()).toHaveText(`${index + 1}. ${name}`)
+    const current = this.currentStep()
+    await expect(current).toHaveCount(1)
+    await expect(current.getByText(name, { exact: true })).toBeVisible()
+    await expect(
+      this.page.getByRole('region', { name, exact: true }),
+    ).toBeVisible()
   }
 
   /** Closes an open sub-screen, and only then leaves the step. */

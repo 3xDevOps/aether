@@ -100,15 +100,21 @@ environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
 
 ## Building from source
 
-Requires Go 1.25+, GNU make, and Bun 1.3+ (the server embeds the dashboard SPA,
-so the web build runs first).
+Requires Go 1.25+, GNU make, Bun 1.3+, and Node.js 22+. Bun installs the web
+dependencies and drives the scripts; Node.js runs the Next build and
+development server.
 
 ```sh
-make build            # dashboard SPA, then both binaries into dist/
+make build            # static dashboard export, then both binaries into dist/
 make test             # unit tests, race detector on
 make test-integration # integration tests; needs real Docker and git
 make release          # cross-compile the full release matrix
 ```
+
+The production web build is a Next static export into `web/dist`, which Go
+embeds through `web/embed.go`. Running the installed server or CLI needs no
+Node.js and no Next server. For dashboard development, run
+`cd web && bun run dev` with Node.js 22+ available on `PATH`.
 
 The server targets Linux (amd64/arm64) and only Linux. The CLI is a supported
 client on Linux, macOS, and Windows (amd64/arm64 each), and CI builds, vets,

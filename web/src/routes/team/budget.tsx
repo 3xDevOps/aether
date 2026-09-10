@@ -1,4 +1,5 @@
 import { CircleAlert, TriangleAlert } from 'lucide-react'
+import { Chip } from '@/components/ui/heroui'
 import { budgetStateLabel, money } from '@/lib/format'
 import type { BudgetState } from '@/lib/types'
 import { useStore } from '@/store'
@@ -33,14 +34,26 @@ export function BudgetStatus() {
     lines.push('Some runs report no usage, so the total is a floor.')
   }
 
+  const stateColor =
+    totals.state === 'exceeded' ? 'danger' : totals.state === 'warn' ? 'warning' : 'success'
+
   return (
     <span
-      className={`flex items-center gap-1 ${stateStyle[totals.state]}`}
+      className={`flex items-center gap-1.5 ${stateStyle[totals.state]}`}
       title={lines.join('\n')}
+      aria-label={`Budget ${money.format(totals.costUSD)}${totals.advisory ? '+' : ''}`}
     >
       <StateIcon state={totals.state} />
-      <span>{money.format(totals.costUSD) + (totals.advisory ? '+' : '')}</span>
-      {totals.state !== 'ok' && <span>{budgetStateLabel[totals.state]}</span>}
+      <Chip color={stateColor} variant="soft" size="sm">
+        <Chip.Label>
+          {money.format(totals.costUSD) + (totals.advisory ? '+' : '')}
+        </Chip.Label>
+      </Chip>
+      {totals.state !== 'ok' && (
+        <Chip color={stateColor} variant="tertiary" size="sm">
+          <Chip.Label>{budgetStateLabel[totals.state]}</Chip.Label>
+        </Chip>
+      )}
     </span>
   )
 }

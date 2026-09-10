@@ -194,16 +194,17 @@ function TerminalView({ params }: RouteProps) {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden">
       <RunHeader run={run} subtitle={`${run.harness} · ${run.branch}`} />
       <RunTabs runID={runID} active="terminal" />
-      <div {...runTabPanel('terminal', 'flex min-h-0 flex-1 flex-col')}>
-        <div className="flex items-center gap-3 border-b px-4 py-1.5 text-xs">
+      <div {...runTabPanel('terminal', 'flex min-h-0 flex-1 flex-col overflow-hidden')}>
+        <div className="flex min-h-11 flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border/75 bg-muted/20 px-4 py-2 text-[13px]">
           {!starting && (
             <span
               className={cn(
-                'text-muted-foreground',
-                state.connection === 'offline' && 'text-state-failed',
+                'shrink-0 rounded-sm border border-border/70 bg-background/70 px-2 py-1 font-medium text-muted-foreground',
+                state.connection === 'offline' &&
+                  'border-state-failed/40 bg-state-failed/10 text-state-failed',
               )}
             >
               {connectionLabel[state.connection]}
@@ -224,36 +225,38 @@ function TerminalView({ params }: RouteProps) {
             )}
           </Button>
           {state.steerDenied && (
-            <span className="text-muted-foreground">
+            <span className="min-w-0 break-words text-muted-foreground">
               You cannot steer this run.
             </span>
           )}
           {/* A disabled control shows no tooltip, so the reason is written out
               beside it rather than hidden in a title attribute. */}
           {!steerable && !starting && !state.steerDenied && (
-            <span className="text-muted-foreground">This run is not running</span>
+            <span className="min-w-0 break-words text-muted-foreground">
+              This run is not running
+            </span>
           )}
           {/* Nothing else on screen separates watching from steering, so the
               attach says what it is until the member has taken control once. */}
           {!controlTaken && !state.write && !state.steerDenied && run.status === 'running' && (
-            <span className="text-muted-foreground">
+            <span className="min-w-0 break-words text-muted-foreground">
               Read-only mirror. Take control to type into the agent.
             </span>
           )}
           {state.message && (
-            <span className="truncate text-muted-foreground">
+            <span className="min-w-0 flex-1 break-words text-muted-foreground">
               {state.refused && sessionMissing && endedStatuses.includes(run.status)
                 ? endedMessage(run)
                 : state.message}
             </span>
           )}
           {state.refused && !endedStatuses.includes(run.status) && (
-            <Button size="sm" variant="ghost" onClick={retry}>
+            <Button size="sm" variant="ghost" className="shrink-0" onClick={retry}>
               Retry
             </Button>
           )}
         </div>
-        <div className="min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1 overflow-hidden">
           <TerminalPane key={runID} controller={controller}>
             {starting && <TerminalSpinner label="Starting the run's container" />}
           </TerminalPane>

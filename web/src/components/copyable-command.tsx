@@ -8,21 +8,23 @@ export function CopyableCommand({ command }: { command: string }) {
   const codeRef = useRef<HTMLElement>(null)
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex min-w-0 items-center gap-2 rounded-md border border-border/70 bg-muted/30 px-2 py-1.5">
       <code
         ref={codeRef}
-        className="min-w-0 truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px]"
+        title={command}
+        className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded-sm px-1 font-mono text-[12px] leading-5 text-foreground"
       >
         {command}
       </code>
       <Button
         variant="ghost"
         size="icon"
-        className="size-5"
+        className="size-8 shrink-0"
         aria-label={`Copy ${command}`}
+        title="Copy command"
         onClick={() => void copyText(command, codeRef.current)}
       >
-        <Copy className="size-3" aria-hidden />
+        <Copy className="size-3.5" aria-hidden />
       </Button>
     </div>
   )

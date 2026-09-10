@@ -9,7 +9,7 @@ export function cn(...inputs: ClassValue[]) {
  * forced-colors mode discards box shadows, and ring classes already mean
  * "selected" on some controls. */
 export const focusRing =
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring focus-visible:transition-none'
 
 /** The box a control you can type into draws: one border, padding and type
  * scale across a text field and a select, so a form reads as one row rather
@@ -19,6 +19,6 @@ export const focusRing =
  * hardcodes `border-input`. */
 export const field = cn(
   focusRing,
-  'w-full rounded-md border border-input bg-background px-2 py-1 text-sm',
+  'w-full h-9 min-h-9 rounded-sm border border-input bg-background px-3 py-2 text-sm leading-5',
   'disabled:cursor-not-allowed disabled:opacity-50',
 )

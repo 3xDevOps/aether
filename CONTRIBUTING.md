@@ -19,9 +19,15 @@ coding agents, built as a Go server, a Go CLI, and an embedded web dashboard.
 | Bun | 1.3+ | Dashboard build and tests |
 | Docker | recent | Integration tests and server runtime |
 | git | recent | Integration tests and workspace transport |
-| Node | 22+ | Building desktop installers from `desktop/` by hand (optional) |
+| Node | 22+ | Next dashboard build and dev server, plus desktop installers from `desktop/` |
 
 SQLite is pure Go and the project builds with `CGO_ENABLED=0`.
+
+Node.js 22+ must be on `PATH` for the Next build and development server:
+`make build` (or `make dashboard`) and `cd web && bun run dev`. It is a
+source-build prerequisite, not only an optional desktop-installer tool.
+Production uses a static Next export in `web/dist`, embedded into the Go
+server and CLI, so running those binaries needs no Node.js or Next server.
 
 ```sh
 git clone https://github.com/3xDevOps/Aether
@@ -72,10 +78,10 @@ bun run test
 ### Desktop shell
 
 The optional Electron shell in `desktop/` wraps `aether gui` in a window. The
-dashboard SPA itself is embedded in the `aether` CLI (`web/embed.go`), so this
-package is just a sidecar launcher. Users build and install it with
-`aether gui build`, which unpacks the sources embedded by `desktop/embed.go`
-and runs electron-builder's unpacked target; see
+production dashboard is a static Next export embedded in the `aether` CLI
+(`web/embed.go`), so this package is just a sidecar launcher. Users build and
+install it with `aether gui build`, which unpacks the sources embedded by
+`desktop/embed.go` and runs electron-builder's unpacked target; see
 [docs/install.md](docs/install.md#desktop-app). That command needs no Node.js
 on the user's machine - it downloads a pinned copy when there is none. A new
 file in `desktop/` that the shell needs at runtime must be added to both
@@ -180,6 +186,13 @@ including live credentials.
 
 ## Releases
 
+Release tags use `vX.Y.Z` with an optional prerelease suffix, for example
+`v0.3.0-alpha.1`. Publish alpha tags as ordinary, non-draft GitHub releases:
+do not mark them as GitHub prereleases. The installer and `aether update`
+resolve `/releases/latest`, which requires the alpha release to be published
+through the normal latest-release endpoint.
+
 Release tags are built by the repository workflow. Keep the installer,
 `aether update` (`internal/selfupdate`), release asset names, checksums, and
-documentation synchronized when changing packaging.
+documentation synchronized when changing packaging. See
+[docs/install.md](docs/install.md#releases) for the publish commands.

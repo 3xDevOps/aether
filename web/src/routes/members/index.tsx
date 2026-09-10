@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Chip } from '@/components/ui/heroui'
 import {
   Dialog,
   DialogContent,
@@ -28,8 +29,9 @@ import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
 import type { Member } from '@/lib/types'
-import { cn, focusRing } from '@/lib/utils'
+import { cn, field, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { MemberAvatar } from '@/routes/board/member-avatar'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import { onlineMembers } from '@/store/presence'
@@ -165,194 +167,284 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   const pending = all.filter((m) => m.pending)
 
   const count = roster.length === 1 ? '1 member' : `${roster.length} members`
+  const canInvite = caps.hasMethod('member.invite') && isAdmin
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <ViewHeader
         title="Members"
         // Account sharing is self-service; only roster roles are read-only.
         subtitle={isAdmin ? count : `${count} - roles read only`}
-      />
-      <div className="flex-1 space-y-6 overflow-y-auto p-4">
-        {caps.hasMethod('member.invite') && isAdmin && (
-          <div>
+        actions={
+          canInvite ? (
             <Button size="sm" onClick={() => setInviting(true)}>
               <UserPlus />
               Invite
             </Button>
-          </div>
-        )}
+          ) : undefined
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
+          {error && (
+            <p
+              role="alert"
+              className="rounded-md border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-sm text-state-failed"
+            >
+              {error}
+            </p>
+          )}
 
-        {pending.length > 0 && (
-          <section aria-label="Pending members" className="space-y-2">
-            <h2 className="text-xs font-medium text-muted-foreground">
-              Waiting on approval
-            </h2>
-            <ul className="space-y-2">
-              {pending.map((member) => (
-                <li
-                  key={member.id}
-                  className="flex items-center gap-2 rounded-md border bg-card p-2 text-sm"
-                >
-                  <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
-                  {caps.hasMethod('member.approve') && isAdmin && (
-                    <Button size="sm" onClick={() => void approve(member)}>
-                      Approve
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        <section aria-label="Roster">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
-                <th className="py-1 pr-2 font-normal">Member</th>
-                <th className="py-1 pr-2 font-normal">Role</th>
-                <th className="py-1 pr-2 font-normal">Presence</th>
-                <th className="py-1 font-normal" />
-              </tr>
-            </thead>
-            <tbody>
-              {roster.map((member) => (
-                <tr key={member.id} className="border-b last:border-b-0">
-                  <td className="py-1.5 pr-2">
-                    <span className="flex items-center gap-2">
-                      <span
-                        aria-hidden
-                        className="size-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: member.color }}
-                      />
-                      <span className="truncate">{member.display_name}</span>
-                      {member.id === self?.id && (
-                        <span className="text-xs text-muted-foreground">(you)</span>
-                      )}
+          {pending.length > 0 && (
+            <section aria-label="Pending members" className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold">Waiting on approval</h2>
+                  <p className="text-[13px] text-muted-foreground">
+                    New members stay here until an admin approves them.
+                  </p>
+                </div>
+                <Chip color="warning" variant="soft" size="sm">
+                  <Chip.Label>{pending.length}</Chip.Label>
+                </Chip>
+              </div>
+              <ul className="grid gap-2 sm:grid-cols-2">
+                {pending.map((member) => (
+                  <li
+                    key={member.id}
+                    className="flex min-w-0 items-center gap-3 rounded-lg border bg-card px-3 py-2.5 shadow-xs"
+                  >
+                    <MemberAvatar member={member} fallback={member.display_name} className="size-7" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {member.display_name}
                     </span>
-                  </td>
-                  <td className="py-1.5 pr-2 text-muted-foreground">
-                    {caps.hasMethod('member.role') && isAdmin ? (
-                      // No client-side prediction of who may be demoted: the
-                      // server refuses to demote the last admin and says so,
-                      // and that invariant is not recomputed here.
-                      <Select
-                        value={member.role}
-                        onValueChange={(role) =>
-                          changeRole(member, role as Member['role'])
-                        }
-                      >
-                        <SelectTrigger
-                          aria-label={`Role for ${member.display_name}`}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {roles.map((role) => (
-                            <SelectItem key={role} value={role}>
-                              {role}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      member.role
+                    <Chip color="warning" variant="tertiary" size="sm">
+                      <Chip.Label>Pending</Chip.Label>
+                    </Chip>
+                    {caps.hasMethod('member.approve') && isAdmin && (
+                      <Button size="sm" onClick={() => void approve(member)}>
+                        Approve
+                      </Button>
                     )}
-                  </td>
-                  <td className="py-1.5 pr-2 text-muted-foreground">
-                    {online.has(member.id)
-                      ? 'online'
-                      : lastSeen.has(member.id)
-                        ? `offline - last seen ${timeAgo(lastSeen.get(member.id) ?? '')}`
-                        : 'offline'}
-                  </td>
-                  <td className="py-1.5 text-right">
-                    {caps.hasMethod('member.remove') &&
-                      isAdmin &&
-                      member.id !== self?.id && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setRemoving(member)}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        {self &&
-          caps.hasMethod('account.share') &&
-          caps.hasMethod('account.revoke') && (
-            <section aria-label="Account sharing" className="space-y-2">
-              <h2 className="text-xs font-medium text-muted-foreground">
-                Your agent account
-              </h2>
-              <p className="max-w-2xl text-sm text-muted-foreground">
-                A member you grant access can launch runs with your saved
-                environment, agent login, profile, and vendor quota. Their
-                actions remain attributed to them. Revoke access at any time;
-                running agents are not stopped.
-              </p>
-              <ul className="space-y-2">
-                {roster
-                  .filter((member) => member.id !== self.id)
-                  .map((member) => {
-                    const shared = sharedWith.some(
-                      (entry) => entry.id === member.id,
-                    )
-                    return (
-                      <li
-                        key={member.id}
-                        className="flex items-center justify-between gap-3 rounded-md border bg-card p-2 text-sm"
-                      >
-                        <span>{member.display_name}</span>
-                        <Button
-                          size="sm"
-                          variant={shared ? 'outline' : 'default'}
-                          disabled={sharing !== null}
-                          onClick={() => void toggleAccountShare(member)}
-                        >
-                          {sharing === member.id
-                            ? 'Saving...'
-                            : shared
-                              ? 'Revoke access'
-                              : 'Share account'}
-                        </Button>
-                      </li>
-                    )
-                  })}
+                  </li>
+                ))}
               </ul>
             </section>
           )}
 
-        {self && caps.hasMethod('member.color') && (
-          <section aria-label="Your color" className="space-y-2">
-            <h2 className="text-xs font-medium text-muted-foreground">Your color</h2>
-            <div className="flex gap-2">
-              {presetColors.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  aria-label={`Set color ${color}`}
-                  aria-pressed={self.color === color}
-                  className={cn(
-                    focusRing,
-                    'size-6 rounded-full border ring-ring/50 hover:ring-[3px] aria-pressed:ring-[3px]',
-                  )}
-                  style={{ backgroundColor: color }}
-                  onClick={() => void recolor(color)}
-                />
-              ))}
+          <section aria-label="Roster" className="space-y-2">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">Roster</h2>
+              </div>
+              <span className="hidden text-[13px] text-muted-foreground sm:block">
+                {roster.length} active
+              </span>
+            </div>
+            <div className="overflow-hidden rounded-lg border bg-card shadow-xs">
+              <table className="w-full text-sm">
+                <thead className="hidden bg-muted/30 md:table-header-group">
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <th className="w-[35%] px-3 py-2 font-medium">Member</th>
+                    <th className="w-[22%] px-3 py-2 font-medium">Role</th>
+                    <th className="w-[28%] px-3 py-2 font-medium">Presence</th>
+                    <th className="px-3 py-2 text-right font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {roster.map((member) => (
+                    <tr key={member.id} className="block md:table-row">
+                      <td className="block px-3 py-2.5 md:table-cell md:py-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <MemberAvatar
+                            member={member}
+                            fallback={member.display_name}
+                            className="size-7"
+                          />
+                          <span className="min-w-0 truncate font-medium">{member.display_name}</span>
+                          {member.id === self?.id && (
+                            <Chip color="accent" variant="tertiary" size="sm">
+                              <Chip.Label>(you)</Chip.Label>
+                            </Chip>
+                          )}
+                        </div>
+                      </td>
+                      <td className="block px-3 py-2 md:table-cell md:py-3">
+                        <div className="flex items-center justify-between gap-3 md:justify-start">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
+                            Role
+                          </span>
+                          {caps.hasMethod('member.role') && isAdmin ? (
+                            // No client-side prediction of who may be demoted: the
+                            // server refuses to demote the last admin and says so,
+                            // and that invariant is not recomputed here.
+                            <Select
+                              value={member.role}
+                              onValueChange={(role) =>
+                                changeRole(member, role as Member['role'])
+                              }
+                            >
+                              <SelectTrigger
+                                id={`member-role-${member.id}`}
+                                aria-label={`Role for ${member.display_name}`}
+                                className={cn(field, 'max-w-48 text-sm md:w-44')}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {roles.map((role) => (
+                                  <SelectItem key={role} value={role}>
+                                    {role}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Chip color="default" variant="tertiary" size="sm">
+                              <Chip.Label>{member.role}</Chip.Label>
+                            </Chip>
+                          )}
+                        </div>
+                      </td>
+                      <td className="block px-3 py-2 md:table-cell md:py-3">
+                        <div className="flex items-center justify-between gap-3 md:justify-start">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
+                            Presence
+                          </span>
+                          {online.has(member.id) ? (
+                            <Chip color="success" variant="soft" size="sm">
+                              <Chip.Label>online</Chip.Label>
+                            </Chip>
+                          ) : (
+                            <Chip color="default" variant="tertiary" size="sm">
+                              <Chip.Label>
+                                {lastSeen.has(member.id)
+                                  ? `offline - last seen ${timeAgo(lastSeen.get(member.id) ?? '')}`
+                                  : 'offline'}
+                              </Chip.Label>
+                            </Chip>
+                          )}
+                        </div>
+                      </td>
+                      <td className="block px-3 py-2.5 md:table-cell md:py-3 md:text-right">
+                        <div className="flex items-center justify-between gap-3 md:justify-end">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">
+                            Actions
+                          </span>
+                          {caps.hasMethod('member.remove') &&
+                            isAdmin &&
+                            member.id !== self?.id && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setRemoving(member)}
+                              >
+                                Remove
+                              </Button>
+                            )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </section>
-        )}
 
-        {error && <p className="text-xs text-state-failed">{error}</p>}
+          {self &&
+            caps.hasMethod('account.share') &&
+            caps.hasMethod('account.revoke') && (
+              <section aria-label="Account sharing" className="space-y-3">
+                <div>
+                  <h2 className="text-sm font-semibold">Your agent account</h2>
+                  <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
+                    Choose teammates who may launch runs with your account. This is
+                    separate from roster roles and can be changed at any time.
+                  </p>
+                </div>
+                <div className="rounded-lg border bg-card p-3 shadow-xs">
+                  <ul className="mb-3 grid gap-1 text-[13px] text-muted-foreground sm:grid-cols-2">
+                    <li>Saved environment, agent login, profile, and vendor quota are shared.</li>
+                    <li>Their runs remain attributed to them; running agents are not stopped.</li>
+                  </ul>
+                  <ul className="divide-y">
+                    {roster
+                      .filter((member) => member.id !== self.id)
+                      .map((member) => {
+                        const shared = sharedWith.some(
+                          (entry) => entry.id === member.id,
+                        )
+                        return (
+                          <li
+                            key={member.id}
+                            className="flex min-w-0 items-center gap-3 py-2.5 first:pt-0 last:pb-0"
+                          >
+                            <MemberAvatar
+                              member={member}
+                              fallback={member.display_name}
+                              className="size-6"
+                            />
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                              {member.display_name}
+                            </span>
+                            <Chip
+                              color={shared ? 'success' : 'default'}
+                              variant="tertiary"
+                              size="sm"
+                              className="hidden sm:flex"
+                            >
+                              <Chip.Label>{shared ? 'Shared' : 'Not shared'}</Chip.Label>
+                            </Chip>
+                            <Button
+                              size="sm"
+                              variant={shared ? 'outline' : 'default'}
+                              disabled={sharing !== null}
+                              onClick={() => void toggleAccountShare(member)}
+                            >
+                              {sharing === member.id
+                                ? 'Saving...'
+                                : shared
+                                  ? 'Revoke access'
+                                  : 'Share account'}
+                            </Button>
+                          </li>
+                        )
+                      })}
+                  </ul>
+                </div>
+              </section>
+            )}
+
+          {self && caps.hasMethod('member.color') && (
+            <section aria-label="Your color" className="space-y-3">
+              <div>
+                <h2 className="text-sm font-semibold">Your color</h2>
+                <p className="mt-1 text-[13px] text-muted-foreground">
+                  Used for your presence and activity attribution.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3 shadow-xs">
+                {presetColors.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    aria-label={`Set color ${color}`}
+                    aria-pressed={self.color === color}
+                    title={self.color === color ? `Current color ${color}` : `Set color ${color}`}
+                    className={cn(
+                      focusRing,
+                      'size-8 rounded-full border-2 border-background shadow-xs ring-1 ring-border/70 transition-transform hover:scale-105 hover:ring-2 aria-pressed:ring-2',
+                    )}
+                    style={{ backgroundColor: color }}
+                    onClick={() => void recolor(color)}
+                  />
+                ))}
+                <Chip color="default" variant="tertiary" size="sm" className="ml-1">
+                  <Chip.Label>{self.color}</Chip.Label>
+                </Chip>
+              </div>
+            </section>
+          )}
+        </div>
       </div>
 
       {inviting && <InviteDialog client={client} onClose={() => setInviting(false)} />}
@@ -414,7 +506,7 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Invite a member</DialogTitle>
           <DialogDescription>
@@ -422,13 +514,13 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
           </DialogDescription>
         </DialogHeader>
         {result ? (
-          <div className="space-y-2">
-            <div className="flex gap-2">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 rounded-md bg-muted/35 p-2">
               <Input
                 ref={codeRef}
                 readOnly
                 aria-label="Invite code"
-                className="font-mono"
+                className="min-w-0 flex-1 font-mono"
                 value={result.code}
                 onFocus={(e) => e.target.select()}
               />
@@ -437,16 +529,22 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
                 {copied ? 'Copied' : 'Copy'}
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Expires {timeAgo(result.expires_at)}
+            <p className="text-[13px] text-muted-foreground">
+              This code expires {timeAgo(result.expires_at)}. It can be used once.
             </p>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            Generate a code and hand it to the new member out of band.
+          <div className="rounded-md border border-dashed px-3 py-4">
+            <p className="text-sm text-muted-foreground">
+              Generate a code and hand it to the new member out of band.
+            </p>
+          </div>
+        )}
+        {error && (
+          <p role="alert" className="rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
+            {error}
           </p>
         )}
-        {error && <p className="text-xs text-state-failed">{error}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             {result ? 'Done' : 'Cancel'}
@@ -492,14 +590,18 @@ function RemoveDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Remove {member.display_name}?</DialogTitle>
           <DialogDescription>
             Their runs and history stay; their access ends now.
           </DialogDescription>
         </DialogHeader>
-        {error && <p className="text-xs text-state-failed">{error}</p>}
+        {error && (
+          <p role="alert" className="rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
+            {error}
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Cancel
@@ -550,7 +652,7 @@ function DemoteSelfDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Give up your admin role?</DialogTitle>
           <DialogDescription>
@@ -558,7 +660,11 @@ function DemoteSelfDialog({
             another admin has to hand it back.
           </DialogDescription>
         </DialogHeader>
-        {error && <p className="text-xs text-state-failed">{error}</p>}
+        {error && (
+          <p role="alert" className="rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
+            {error}
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Cancel

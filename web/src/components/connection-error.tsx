@@ -7,7 +7,6 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import type { UnreachableKind } from '@/store/server'
-
 type ConnectionErrorProps = {
   kind: UnreachableKind | null
   dead: boolean
@@ -26,7 +25,7 @@ type ErrorCopy = {
 /** A command the user is told to run, styled so it reads as one. */
 function Cmd({ children }: { children: string }) {
   return (
-    <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">
+    <code className="inline-flex rounded-sm border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
       {children}
     </code>
   )
@@ -111,45 +110,61 @@ export function ConnectionError({ kind, dead, error, onRetry }: ConnectionErrorP
   const Icon = content.icon
 
   return (
-    <main className="flex h-full min-h-[24rem] items-center justify-center bg-muted/20 p-6">
+    <main className="flex h-full min-h-[24rem] items-center justify-center bg-background px-4 py-8 sm:px-6">
       <section
         role="alert"
         aria-labelledby="connection-error-title"
-        className="w-full max-w-lg rounded-xl border bg-card p-8 shadow-sm"
+        aria-describedby="connection-error-description"
+        className="w-full max-w-2xl overflow-hidden rounded-lg border border-border/80 bg-card shadow-sm"
       >
-        <div className="mb-5 grid size-12 place-items-center rounded-full bg-state-needs-attention/15 text-state-needs-attention">
-          <Icon className="size-6" aria-hidden />
+        <header className="flex items-start gap-4 border-b border-border/70 px-5 py-5 sm:px-7 sm:py-6">
+          <div className="grid size-10 shrink-0 place-items-center rounded-md bg-state-needs-attention/15 text-state-needs-attention">
+            <Icon className="size-5" aria-hidden />
+          </div>
+          <div className="min-w-0">
+            <p className="mb-1 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+              {content.eyebrow}
+            </p>
+            <h1 id="connection-error-title" className="text-xl font-semibold tracking-tight sm:text-2xl">
+              {content.title}
+            </h1>
+          </div>
+        </header>
+
+        <div className="space-y-5 px-5 py-5 sm:px-7 sm:py-6">
+          <p
+            id="connection-error-description"
+            className="max-w-xl text-sm leading-6 text-muted-foreground"
+          >
+            {content.description}
+          </p>
+
+          {content.action && (
+            <div>
+              <Button type="button" className="h-9" onClick={onRetry}>
+                <RefreshCw aria-hidden />
+                {content.action}
+              </Button>
+            </div>
+          )}
+
+          {/* The raw failure remains open so a fatal screen never hides the
+              exact message someone needs to relay or act on. It can still be
+              collapsed once it has been read. */}
+          {error && (
+            <Collapsible
+              defaultOpen
+              className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs"
+            >
+              <CollapsibleTrigger className="font-medium text-muted-foreground hover:text-foreground">
+                Technical details
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <p className="mt-2 break-words font-mono leading-5 text-foreground">{error}</p>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
         </div>
-
-        <p className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-          {content.eyebrow}
-        </p>
-        <h1 id="connection-error-title" className="text-2xl font-semibold tracking-tight">
-          {content.title}
-        </h1>
-        <p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">
-          {content.description}
-        </p>
-
-        {content.action && (
-          <Button type="button" className="mt-7 h-9" onClick={onRetry}>
-            <RefreshCw aria-hidden />
-            {content.action}
-          </Button>
-        )}
-
-        {/* The raw failure, for the person who can act on it. Collapsed so it
-            never competes with the instruction above. */}
-        {error && (
-          <Collapsible className="mt-6 text-xs text-muted-foreground">
-            <CollapsibleTrigger className="select-none hover:text-foreground">
-              Technical details
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <p className="mt-2 break-words font-mono leading-5">{error}</p>
-            </CollapsibleContent>
-          </Collapsible>
-        )}
       </section>
     </main>
   )

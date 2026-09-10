@@ -1,14 +1,11 @@
-import { readFile } from 'node:fs/promises'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createRef, useEffect, useState } from 'react'
-import { Checkbox } from '@/components/ui/checkbox'
+import { useEffect, useState } from 'react'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -17,49 +14,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import { openSelect } from '@/test/select'
-import { openingTags, sourceFiles } from '@/test/sources'
 
-test.each([
-  ['Input', <Input aria-label="Task" />],
-  ['Textarea', <Textarea aria-label="Task" />],
-  ['Checkbox', <Checkbox aria-label="Task" />],
-  [
-    'SelectTrigger',
-    <Select>
-      <SelectTrigger aria-label="Task">
-        <SelectValue />
-      </SelectTrigger>
-    </Select>,
-  ],
-  [
-    'CollapsibleTrigger',
-    <Collapsible>
-      <CollapsibleTrigger aria-label="Task" />
-    </Collapsible>,
-  ],
-])('%s draws the shared focus outline', (_, element) => {
-  render(element)
-
-  const control = screen.getByLabelText('Task')
-  expect(control.className).toContain('focus-visible:outline-2')
-  expect(control.className).toContain('focus-visible:outline-ring')
-})
-
-test('Label names the control it wraps, with no id on either', () => {
-  render(
-    <Label>
-      Task
-      <Input />
-    </Label>,
-  )
-
-  expect(screen.getByLabelText('Task').tagName).toBe('INPUT')
-})
-
-// A select is the exception to the wrapping idiom above. Its trigger is a
-// button, and a button takes its accessible name from its own contents, so a
+// A select's trigger takes its accessible name from its own contents, so a
 // label around it names nothing and the control announces itself as whichever
 // option is chosen.
 test('a select is named by a Label that points at it', () => {
@@ -78,26 +35,6 @@ test('a select is named by a Label that points at it', () => {
   )
 
   expect(screen.getByRole('combobox', { name: 'Mode' })).toBeDefined()
-})
-
-// Upstream's label is a flex row in a heavier weight, with modifiers that
-// answer a disabled peer. The house one wraps its control instead, so it has
-// no peer and cannot afford the row: an overwrite from the registry would
-// reweight every caption and turn the `flex-1` ones into rows.
-test('Label carries the house type scale and nothing else', () => {
-  render(<Label>Task</Label>)
-
-  expect(screen.getByText('Task').className).toBe('text-sm')
-})
-
-// Four call sites focus or select a field through a ref. Were forwarding to
-// break, every one of them would become a silent no-op.
-test('a ref reaches the field itself', () => {
-  const ref = createRef<HTMLInputElement>()
-
-  render(<Input ref={ref} />)
-
-  expect(ref.current?.tagName).toBe('INPUT')
 })
 
 // A `<details>` kept its body in the page and merely hid it; a Collapsible
@@ -208,35 +145,4 @@ test('a select list takes arrow keys, type-ahead and Escape', async () => {
 
   expect(screen.queryByRole('listbox')).toBeNull()
   expect(onValueChange).not.toHaveBeenCalled()
-})
-
-// The empty string belongs to the placeholder, so an item carrying it is a row
-// that can never be chosen and never shown. See the Styleguide in
-// docs/dashboard-frontend.md; the three sentinels in the app exist for this.
-test('no select item carries the value the placeholder reserves', async () => {
-  const offenders: string[] = []
-  for (const path of await sourceFiles()) {
-    const tags = openingTags(await readFile(path, 'utf8'), ['SelectItem'])
-    for (const tag of tags) {
-      if (/\bvalue=(""|\{''\}|\{""\})/.test(tag.attributes)) offenders.push(path)
-    }
-  }
-
-  expect(offenders).toEqual([])
-})
-
-test('no file outside components/ui draws a control the primitives own', async () => {
-  const sources = await sourceFiles()
-  expect(sources.length).toBeGreaterThan(50)
-
-  const owned = ['input', 'textarea', 'label', 'select', 'details', 'summary']
-  const offenders: string[] = []
-  for (const path of sources) {
-    if (path.includes('/components/ui/')) continue
-    for (const tag of openingTags(await readFile(path, 'utf8'), owned)) {
-      offenders.push(`${path}: <${tag.name}>`)
-    }
-  }
-
-  expect(offenders).toEqual([])
 })

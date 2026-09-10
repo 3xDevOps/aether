@@ -1,5 +1,6 @@
-// Two accessibility claims only a real browser can settle. Both tests end on
-// a control that proves the claim is not passing for the wrong reason.
+// Browser-only shell claims that need painted focus or rendered geometry. The
+// tests below end on a state that proves the claim is not passing for the
+// wrong reason.
 //
 // Escape: the shell leaves a run-detail route for the board from a `keydown`
 // on `window`, and Radix dismisses its dialogs from a capturing document
@@ -215,4 +216,22 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await board.click()
   await expect(board).toBeFocused()
   expect((await indicator(board)).outlineStyle).toBe('none')
+})
+
+test('resizing the sidebar changes its rendered width', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await openFirstRun(page, aether)
+
+  const sidebar = page.getByRole('complementary', { name: 'Runs' })
+  const separator = page.getByRole('separator', { name: 'Resize sidebar' })
+  const before = await sidebar.boundingBox()
+  if (!before) throw new Error('sidebar did not render')
+
+  await separator.focus()
+  await expect(separator).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+
+  await expect
+    .poll(async () => (await sidebar.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(before.width)
 })

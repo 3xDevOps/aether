@@ -34,15 +34,20 @@ export function GitHubSection({
   onOpen: () => void
 }) {
   return (
-    <section aria-label="Connect GitHub" className="space-y-3">
-      <h2 className="text-sm font-medium">Connect GitHub</h2>
-      <p className="text-sm text-muted-foreground">
-        Runs push branches and open pull requests from the server as you.
-        Commits are signed with a key kept in your environment home, which
-        never leaves the server.
-      </p>
+    <section
+      aria-label="Connect GitHub"
+      className="space-y-4 rounded-md border bg-background p-4 sm:p-5"
+    >
+      <div className="space-y-1">
+        <h3 className="text-base font-semibold">Connect GitHub</h3>
+        <p className="text-sm leading-6 text-muted-foreground">
+          Runs push branches and open pull requests from the server as you.
+          Commits are signed with a key kept in your environment home, which
+          never leaves the server.
+        </p>
+      </div>
       {connection && (
-        <p className="text-sm">
+        <p className="rounded-md border border-state-done/30 bg-state-done/5 p-3 text-sm text-state-done">
           Connected in this session as {connection.login}
         </p>
       )}
@@ -131,13 +136,15 @@ export function GitHubConnect({
     return (
       <section
         aria-label="Connect GitHub"
-        className="space-y-3 rounded-md border p-4"
+        className="space-y-4 rounded-md border border-state-done/30 bg-state-done/5 p-4 sm:p-5"
       >
-        <p className="text-sm font-medium">GitHub connected</p>
-        <p className="text-sm text-muted-foreground">
-          Connected to GitHub as {connection.login}. Signing key{' '}
-          {connection.fingerprint} is registered on your account.
-        </p>
+        <div className="space-y-1">
+          <p className="text-base font-semibold text-state-done">GitHub connected</p>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Connected to GitHub as {connection.login}. Signing key{' '}
+            {connection.fingerprint} is registered on your account.
+          </p>
+        </div>
         <Button size="sm" onClick={onClose}>
           Close
         </Button>
@@ -152,23 +159,25 @@ export function GitHubConnect({
     return (
       <section
         aria-label="Connect GitHub"
-        className="max-w-md space-y-3 rounded-md border p-4"
+        className="max-w-2xl space-y-4 rounded-md border bg-background p-4 sm:p-5"
       >
-        <p className="text-sm font-medium">Connect GitHub</p>
-        <p className="text-sm text-muted-foreground">
-          Open your environment terminal and log in to GitHub there:
-        </p>
-        <code className="block rounded-md bg-muted px-2 py-1 font-mono text-xs">
+        <div className="space-y-1">
+          <p className="text-base font-semibold">Connect GitHub</p>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Open your environment terminal and log in to GitHub there:
+          </p>
+        </div>
+        <code className="block overflow-x-auto rounded-md border bg-muted px-3 py-2 font-mono text-xs">
           aether terminal
         </code>
-        <pre className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs">
+        <pre className="overflow-x-auto rounded-md border bg-muted p-3 font-mono text-xs">
           {githubLoginCommand}
         </pre>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm leading-6 text-muted-foreground">
           Finish the device login in your browser, then finish the
           connection from a terminal:
         </p>
-        <code className="block rounded-md bg-muted px-2 py-1 font-mono text-xs">
+        <code className="block overflow-x-auto rounded-md border bg-muted px-3 py-2 font-mono text-xs">
           aether github connect
         </code>
       </section>
@@ -178,15 +187,17 @@ export function GitHubConnect({
   return (
     <section
       aria-label="Connect GitHub"
-      className="space-y-3 rounded-md border p-4"
+      className="space-y-4 rounded-md border bg-background p-4 sm:p-5"
     >
-      <p className="text-sm font-medium">Connect GitHub</p>
-      <p className="text-sm text-muted-foreground" role="status">
-        {screenLine({ ghUsable, ghUnusable, checkFailed, running })}
-      </p>
+      <div className="space-y-1">
+        <p className="text-base font-semibold">Connect GitHub</p>
+        <p className="text-sm leading-6 text-muted-foreground" role="status">
+          {screenLine({ ghUsable, ghUnusable, checkFailed, running })}
+        </p>
+      </div>
       {ghUnusable && <GitHubCliRemedy probe={probe} />}
       {probeError && (
-        <pre className={`rounded-md border bg-card text-state-failed ${pane}`}>
+        <pre className={`rounded-md border border-state-failed/30 bg-state-failed/5 text-state-failed ${pane}`}>
           {probeError}
         </pre>
       )}
@@ -202,18 +213,18 @@ export function GitHubConnect({
       />
       {(ghUsable || checkFailed) && (
         <>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm leading-6 text-muted-foreground">
             {checkFailed
               ? 'This is the login the check would have made sure your terminal could run; nothing has been typed into it.'
               : 'gh asks you to press Enter to open the browser, then reports that it could not open one; that is expected inside a container: press Enter, ignore the failure, and open the printed URL yourself with the one-time code. Then return here.'}
           </p>
-          <code className="block rounded-md bg-muted px-2 py-1 font-mono text-xs">
+          <code className="block overflow-x-auto rounded-md border bg-muted px-3 py-2 font-mono text-xs">
             {githubLoginCommand}
           </code>
         </>
       )}
       {error && (
-        <pre className={`rounded-md border bg-card text-state-failed ${pane}`}>
+        <pre className={`rounded-md border border-state-failed/30 bg-state-failed/5 text-state-failed ${pane}`}>
           {error}
         </pre>
       )}

@@ -1,6 +1,8 @@
 import { CheckCheck, Rocket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Chip } from '@/components/ui/heroui'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ViewHeader } from '@/components/view-header'
 import { canLaunch } from '@/lib/commands'
 import { useDelayed } from '@/lib/hooks'
 import { registerRoute } from '@/routes/registry'
@@ -15,6 +17,7 @@ import '@/components/palette'
 export function Board() {
   const { columns } = useBoard()
   const ackAll = useStore((s) => s.ackAll)
+  const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const caps = useCapability()
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
@@ -27,35 +30,46 @@ export function Board() {
   const placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex h-9 items-center gap-2 border-b px-4">
-        <h1 className="text-sm font-medium">Board</h1>
-        <span className="text-xs text-muted-foreground">
-          {total} {total === 1 ? 'run' : 'runs'}
-        </span>
-        <div className="ml-auto flex items-center gap-1">
-          <NewRunButton />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={ackAll}
-            title="Mark every run seen"
-          >
-            <CheckCheck />
-            Mark all seen
-          </Button>
-        </div>
-      </header>
+    <div className="flex h-full min-w-0 flex-col">
+      <ViewHeader
+        title="Board"
+        titleAdornment={
+          <Chip color="default" variant="soft" size="sm">
+            <Chip.Label>
+              {total} {total === 1 ? 'run' : 'runs'}
+            </Chip.Label>
+          </Chip>
+        }
+        subtitle={
+          workspace ? `${workspace.name} · base ${workspace.base_branch}` : 'All workspaces'
+        }
+        actions={
+          <>
+            <NewRunButton />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={ackAll}
+              title="Mark every run seen"
+            >
+              <CheckCheck />
+              Mark all seen
+            </Button>
+          </>
+        }
+      />
 
       <div className="flex min-h-0 flex-1 flex-col">
         {unreachable && total === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">
-            {dead ? error : 'Cannot reach the server. Retrying.'}
-          </p>
+          <div className="m-4 rounded-lg border border-state-failed/30 bg-state-failed/10 p-4 sm:m-6">
+            <p className="text-sm text-state-failed">
+              {dead ? error : 'Cannot reach the server. Retrying.'}
+            </p>
+          </div>
         ) : empty ? (
           <EmptyNotice />
         ) : (
-          <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-4 sm:p-6 md:grid-cols-3 md:overflow-hidden">
             {columns.map((column) => (
               <Column key={column.key} column={column} placeholder={placeholder} />
             ))}
@@ -99,12 +113,20 @@ function NewRunButton({
 /** What an empty workspace says, in place of the columns. */
 function EmptyNotice() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-start gap-3 p-6">
-      <p className="max-w-prose text-sm text-muted-foreground">
-        No runs yet. A run is one agent working on its own branch of this
-        workspace, in its own container.
-      </p>
-      <NewRunButton variant="default" size="default" />
+    <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
+      <div className="w-full max-w-xl rounded-lg border bg-card p-6 shadow-xs sm:p-8">
+        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Ready for a task
+        </p>
+        <h2 className="mt-2 text-xl font-semibold tracking-tight">No runs yet</h2>
+        <p className="mt-2 max-w-prose text-sm leading-6 text-muted-foreground">
+          A run is one agent working on its own branch of this workspace, in its
+          own container.
+        </p>
+        <div className="mt-5">
+          <NewRunButton variant="default" size="default" />
+        </div>
+      </div>
     </div>
   )
 }
@@ -117,20 +139,25 @@ function Column({
   placeholder: 'skeleton' | 'empty' | 'none'
 }) {
   return (
-    <section className="flex min-h-0 min-w-60 flex-1 flex-col" aria-label={column.label}>
+    <section
+      className="flex min-w-0 flex-col rounded-lg border bg-muted/30 p-3 md:min-h-0"
+      aria-label={column.label}
+    >
       <ColumnHeader label={column.label} count={column.cards.length} />
-      <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+      <div className="space-y-2 md:min-h-0 md:flex-1 md:overflow-y-auto md:pr-1">
         {column.cards.map((card) => (
           <RunCard key={card.run.id} card={card} />
         ))}
         {column.cards.length === 0 && placeholder === 'skeleton' && (
           <>
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-28 rounded-md" />
+            <Skeleton className="h-28 rounded-md" />
           </>
         )}
         {column.cards.length === 0 && placeholder === 'empty' && (
-          <p className="px-1 text-xs text-muted-foreground">Nothing here.</p>
+          <p className="rounded-md border border-dashed px-3 py-4 text-[13px] text-muted-foreground">
+            Nothing here.
+          </p>
         )}
       </div>
     </section>
@@ -139,12 +166,12 @@ function Column({
 
 function ColumnHeader({ label, count }: { label: string; count: number }) {
   return (
-    <h2 className="mb-2 flex items-center gap-2 px-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-      {label}
-      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] normal-case">
-        {count}
-      </span>
-    </h2>
+    <header className="mb-3 flex items-center justify-between gap-3 border-b pb-3">
+      <h2 className="text-sm font-semibold tracking-tight">{label}</h2>
+      <Chip color="default" variant="tertiary" size="sm" aria-label={`${count} runs`}>
+        <Chip.Label>{count}</Chip.Label>
+      </Chip>
+    </header>
   )
 }
 

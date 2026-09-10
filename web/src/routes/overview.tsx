@@ -1,16 +1,25 @@
+import { Chip } from '@/components/ui/heroui'
 import { RunList } from '@/components/run-list'
 import { ViewHeader } from '@/components/view-header'
 import { registerRoute } from '@/routes/registry'
 import { useAttentionRuns } from '@/store/hooks'
 
-// One flat attention-ordered list, next to the board's four buckets. The
+// One flat attention-ordered list, next to the board's three buckets. The
 // command palette is what points at it.
 function Overview() {
   const runs = useAttentionRuns()
   return (
-    <div className="flex h-full flex-col">
-      <ViewHeader title="All runs" subtitle={`${runs.length} total`} />
-      <div className="flex-1 overflow-y-auto">
+    <div className="flex h-full min-w-0 flex-col">
+      <ViewHeader
+        title="All runs"
+        titleAdornment={
+          <Chip color="default" variant="soft" size="sm">
+            <Chip.Label>{runs.length} total</Chip.Label>
+          </Chip>
+        }
+        subtitle="Current workspace, ordered by attention and recent change"
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <RunList runs={runs} empty="No runs yet." />
       </div>
     </div>

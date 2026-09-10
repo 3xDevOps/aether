@@ -118,8 +118,15 @@ export function LaunchSplash() {
       </div>
 
       <div className="launch-splash__logo">
-        <img src="/aether-mark.png" alt="" />
-        <span className="launch-splash__wordmark">aether</span>
+        <img src="/aether-mark.png" alt="" data-testid="launch-splash-mark" />
+        <span className="launch-splash__wordmark" data-testid="launch-splash-wordmark">
+          aether
+        </span>
+        <span
+          className="launch-splash__status state-pulse"
+          data-testid="launch-splash-status"
+          aria-label="Starting Aether"
+        />
       </div>
     </div>
   )

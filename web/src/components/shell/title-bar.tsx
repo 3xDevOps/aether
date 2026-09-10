@@ -117,11 +117,13 @@ export function TitleBar() {
         // rather than letting the lockup sit underneath.
         paddingInlineStart: controls ? undefined : '78px',
       }}
-      className="flex h-9 shrink-0 select-none items-center border-b bg-background"
+      className="relative z-50 flex h-9 shrink-0 select-none items-center border-b border-border/80 bg-background/95 text-foreground backdrop-blur"
     >
       <div className="flex items-center gap-2.5 px-3">
-        <img src="/aether-mark.png" alt="" aria-hidden className="h-[18px] w-auto" />
-        <span className="font-pixel text-[19px] leading-none text-foreground">aether</span>
+        <img src="/aether-mark.png" alt="" aria-hidden className="h-4 w-auto" />
+        <span className="font-pixel text-[19px] leading-none tracking-wide text-foreground">
+          aether
+        </span>
       </div>
 
       {controls && (

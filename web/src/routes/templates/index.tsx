@@ -99,10 +99,15 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <ViewHeader title="Templates" subtitle={workspace?.name} />
-      <div className="flex items-center gap-2 border-b px-4 py-2">
-        <span className="flex-1" />
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/10 px-4 py-3 sm:px-6">
+        <div>
+          <p className="text-sm font-medium">Saved tasks</p>
+          <p className="text-xs text-muted-foreground">
+            Reusable prompts for this workspace and their schedules.
+          </p>
+        </div>
         {caps.hasMethod('template.save') && workspaceID && (
           <Button size="sm" onClick={() => setCreating(true)}>
             New template
@@ -110,52 +115,94 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
-        <ul className="space-y-4">
-          {templates.map((template) => (
-            <li key={template.id} className="space-y-2 rounded-md border bg-card p-3">
-              <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                  {template.name}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {template.harness} / {template.mode}
-                </span>
-                <Button size="sm" onClick={() => void launch(template)}>
-                  Launch
-                </Button>
-                {caps.hasMethod('template.save') && (
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(template)}>
-                    Edit
-                  </Button>
-                )}
-                {caps.hasMethod('template.delete') && (
-                  <Button size="sm" variant="ghost" onClick={() => setDeleting(template)}>
-                    Delete
-                  </Button>
-                )}
-              </div>
-              <p className="text-xs whitespace-pre-wrap text-muted-foreground">
-                {template.task}
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-5xl space-y-4 p-4 sm:p-6">
+          {templates.length > 0 ? (
+            <ul className="space-y-4">
+              {templates.map((template) => (
+                <li
+                  key={template.id}
+                  className="rounded-lg border bg-card/50 p-4 shadow-sm"
+                  aria-label={`Template ${template.name}`}
+                >
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="min-w-0 truncate text-base font-semibold">{template.name}</h2>
+                        <span className="rounded-md border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                          {template.harness}
+                        </span>
+                        <span className="rounded-md border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                          {template.mode}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                          Task
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-foreground/90">
+                          {template.task}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto lg:shrink-0">
+                      <Button className="w-full sm:w-auto" size="sm" onClick={() => void launch(template)}>
+                        Launch
+                      </Button>
+                      {caps.hasMethod('template.save') && (
+                        <Button
+                          className="w-full sm:w-auto"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEditing(template)}
+                        >
+                          Edit
+                        </Button>
+                      )}
+                      {caps.hasMethod('template.delete') && (
+                        <Button
+                          className="w-full sm:w-auto"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setDeleting(template)}
+                        >
+                          Delete
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {caps.hasMethod('schedule.save') && (
+                    <div className="mt-4 rounded-md border border-border/70 bg-muted/20 p-3">
+                      <div className="mb-2">
+                        <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                          Schedule
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Runs in UTC. Leave blank to keep this template manual.
+                        </p>
+                      </div>
+                      <ScheduleEditor
+                        workspaceID={workspaceID}
+                        template={template.name}
+                        schedule={schedules.find((s) => s.template === template.name)}
+                        client={client}
+                        onChanged={() => void refetch()}
+                      />
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border/80 bg-muted/20 px-4 py-8 text-center">
+              <p className="text-sm font-medium">No templates in this workspace yet.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Save a reusable task to launch it again or put it on a schedule.
               </p>
-              {caps.hasMethod('schedule.save') && (
-                <ScheduleEditor
-                  workspaceID={workspaceID}
-                  template={template.name}
-                  schedule={schedules.find((s) => s.template === template.name)}
-                  client={client}
-                  onChanged={() => void refetch()}
-                />
-              )}
-            </li>
-          ))}
-        </ul>
-        {templates.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            No templates in this workspace yet.
-          </p>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      </main>
 
       {(creating || editing) && (
         <TemplateForm
@@ -224,7 +271,7 @@ function TemplateForm({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>{template ? 'Edit template' : 'New template'}</DialogTitle>
           <DialogDescription>
@@ -234,34 +281,44 @@ function TemplateForm({
         </DialogHeader>
         <form
           id="template-save"
-          className="space-y-3"
+          className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1"
           onSubmit={(e) => {
             e.preventDefault()
             void save()
           }}
         >
-          <Label className="block space-y-1">
-            Name
+          <div className="space-y-1.5">
+            <Label htmlFor="template-name">Name</Label>
             <Input
+              id="template-name"
               autoFocus
               value={name}
               readOnly={template !== undefined}
               onChange={(e) => setName(e.target.value)}
+              aria-describedby="template-name-help"
             />
-          </Label>
-          <Label className="block space-y-1">
-            Task
+            <p id="template-name-help" className="text-xs text-muted-foreground">
+              {template ? 'Template names stay fixed when editing.' : 'Use a short name people can scan.'}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="template-task">Task</Label>
             <Textarea
-              rows={4}
+              id="template-task"
+              rows={5}
               value={task}
               onChange={(e) => setTask(e.target.value)}
+              aria-describedby="template-task-help"
             />
-          </Label>
-          <div className="flex gap-3">
-            <div className="flex-1 space-y-1 text-sm">
-              <Label htmlFor="template-agent">Agent</Label>
+            <p id="template-task-help" className="text-xs text-muted-foreground">
+              This task is sent unchanged when the template launches.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="template-harness">Agent</Label>
               <Select value={harness} onValueChange={setHarness}>
-                <SelectTrigger id="template-agent">
+                <SelectTrigger id="template-harness">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -273,7 +330,7 @@ function TemplateForm({
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex-1 space-y-1 text-sm">
+            <div className="space-y-1.5">
               <Label htmlFor="template-mode">Mode</Label>
               <Select value={mode} onValueChange={setMode}>
                 <SelectTrigger id="template-mode">
@@ -286,9 +343,13 @@ function TemplateForm({
               </Select>
             </div>
           </div>
+          {error && (
+            <p role="alert" className="text-xs text-state-failed">
+              {error}
+            </p>
+          )}
         </form>
-        {error && <p className="text-xs text-state-failed">{error}</p>}
-        <DialogFooter>
+        <DialogFooter className="border-t pt-4">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
@@ -297,7 +358,7 @@ function TemplateForm({
             form="template-save"
             disabled={busy || !name.trim() || !task.trim()}
           >
-            Save
+            {busy ? 'Saving...' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -337,20 +398,29 @@ function DeleteDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Delete {template.name}?</DialogTitle>
           <DialogDescription>
             The template and its schedule are removed together.
           </DialogDescription>
         </DialogHeader>
-        {error && <p className="text-xs text-state-failed">{error}</p>}
-        <DialogFooter>
+        <div className="min-h-0 overflow-y-auto -mx-1 px-1">
+          <p className="text-sm text-muted-foreground">
+            This cannot be undone. Existing runs are not changed.
+          </p>
+          {error && (
+            <p role="alert" className="mt-3 text-xs text-state-failed">
+              {error}
+            </p>
+          )}
+        </div>
+        <DialogFooter className="border-t pt-4">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="destructive" disabled={busy} onClick={() => void remove()}>
-            Delete
+            {busy ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogFooter>
       </DialogContent>

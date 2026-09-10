@@ -58,21 +58,32 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden">
       <RunHeader run={run} subtitle={run.branch} />
       <RunTabs runID={runID} active="events" />
-      <div {...runTabPanel('events', 'flex-1 overflow-y-auto p-3', true)}>
-        {error && <p className="mb-2 text-xs text-state-failed">{error}</p>}
-        <ol className="space-y-1">
+      <div
+        {...runTabPanel('events', 'min-h-0 flex-1 overflow-y-auto bg-muted/10 p-4 sm:p-5', true)}
+      >
+        {error && (
+          <p
+            role="alert"
+            className="mb-4 rounded-md border border-state-failed/35 bg-state-failed/10 px-3 py-2 text-[13px] leading-5 text-state-failed"
+          >
+            {error}
+          </p>
+        )}
+        <ol className="space-y-2">
           {[...feed].reverse().map((event) => (
             <FeedEntry key={event.id} event={event} />
           ))}
         </ol>
         {feed.length === 0 && !loading && (
-          <p className="text-sm text-muted-foreground">Nothing here yet.</p>
+          <p className="rounded-md border border-dashed border-border/80 bg-background/45 px-4 py-8 text-center text-sm text-muted-foreground">
+            Nothing here yet.
+          </p>
         )}
         {truncated && (
-          <p className="mt-2 text-xs text-muted-foreground">
+          <p className="mt-3 rounded-sm border border-border/60 bg-background/35 px-3 py-2 text-[13px] leading-5 text-muted-foreground">
             Stopped after {pageBudget} entries, so part of this stretch of
             history is not shown.
           </p>
@@ -81,7 +92,7 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
           <Button
             variant="ghost"
             size="sm"
-            className="mt-2"
+            className="mt-3 shrink-0"
             disabled={loading}
             onClick={() => void olderFeed(useStore, client)}
           >

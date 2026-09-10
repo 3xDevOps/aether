@@ -1,4 +1,10 @@
+import { useEffect, useState } from 'react'
 import { Slot } from '@/components/slots'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { ThemeToggle } from '@/components/theme'
 import { formatBytes } from '@/lib/format'
 import type { ConnectionState } from '@/lib/stream'
@@ -8,6 +14,8 @@ import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { UnreachableKind } from '@/store/server'
 
+const desktopStatusQuery = '(min-width: 768px)'
+const wideStatusQuery = '(min-width: 1280px)'
 const connectionLabel: Record<ConnectionState, string> = {
   connecting: 'Connecting',
   live: 'Live',
@@ -81,7 +89,7 @@ function ServerUpdateNotice() {
     <span
       role="status"
       title={notice}
-      className="min-w-0 truncate rounded-full bg-state-waiting/15 px-2 py-0.5 text-[11px] font-medium"
+      className="flex min-h-7 min-w-0 items-center rounded-full bg-state-waiting/15 px-2 py-1 text-[11px] font-medium break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap"
     >
       {notice}
     </span>
@@ -107,7 +115,7 @@ function LocalStatus() {
       title={linked ? `Linked to ${link?.repo}` : 'Link a repository'}
       className={cn(
         focusRing,
-        'hidden shrink-0 items-center gap-1.5 rounded px-1 hover:text-foreground md:flex',
+        'flex h-7 shrink-0 items-center gap-1.5 rounded px-1 hover:text-foreground',
       )}
     >
       <span
@@ -139,7 +147,10 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
 
   if (!available) {
     return (
-      <span className="shrink-0 whitespace-nowrap" title={`protocol ${protocol}`}>
+      <span
+        className="flex min-h-7 min-w-0 items-center break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap"
+        title={`${label} · protocol ${protocol}`}
+      >
         {label}
       </span>
     )
@@ -154,7 +165,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
       title={`${latest} is available - show the update banner`}
       className={cn(
         focusRing,
-        'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1 hover:text-foreground',
+        'flex min-h-7 min-w-0 shrink items-center gap-1.5 rounded px-1 break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap hover:text-foreground',
       )}
     >
       {label}
@@ -163,69 +174,127 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
   )
 }
 
-// The bar is one row and nothing here scrolls sideways, so anything pushed
-// past the right edge is unreachable rather than merely off screen.
+// Keep the connection and theme controls present at every width. Readouts use
+// a collapsible menu until the wide layout has room for the full row, while
+// registered status actions stay beside the theme from the desktop breakpoint.
 export function StatusBar() {
   const connection = useStore((s) => s.connection)
   const unreachable = useStore((s) => s.unreachable)
   const info = useStore((s) => s.info)
   const disk = info?.disk
+  const [desktop, setDesktop] = useState(
+    () => window.matchMedia?.(desktopStatusQuery).matches ?? false,
+  )
+  const [wide, setWide] = useState(
+    () => window.matchMedia?.(wideStatusQuery).matches ?? false,
+  )
+  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false)
+
+  useEffect(() => {
+    const desktopMedia = window.matchMedia?.(desktopStatusQuery)
+    const wideMedia = window.matchMedia?.(wideStatusQuery)
+    if (!desktopMedia && !wideMedia) return
+    const applyDesktop = (event: MediaQueryListEvent) => setDesktop(event.matches)
+    const applyWide = (event: MediaQueryListEvent) => setWide(event.matches)
+    desktopMedia?.addEventListener('change', applyDesktop)
+    wideMedia?.addEventListener('change', applyWide)
+    return () => {
+      desktopMedia?.removeEventListener('change', applyDesktop)
+      wideMedia?.removeEventListener('change', applyWide)
+    }
+  }, [])
+
+  const detailsOpen = wide || mobileDetailsOpen
+  const statusActions = <Slot name="statusbar" />
 
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-3 border-t px-3 text-xs text-muted-foreground">
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <span className="flex shrink-0 items-center gap-1.5">
+    <footer className="relative flex min-h-9 shrink-0 items-center gap-2 border-t border-border/80 bg-background px-3 py-1 text-xs text-muted-foreground">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="flex h-7 shrink-0 items-center gap-1.5">
           <span
             className={cn('size-2 rounded-full', connectionDot[connection])}
             aria-hidden
           />
           {connectionLabel[connection]}
         </span>
-        {unreachable !== null && (
-          <span
-            role="status"
-            title={unreachableLabel[unreachable]}
-            className="min-w-0 truncate rounded-full bg-state-needs-attention/15 px-2 py-0.5 text-[11px] font-medium text-state-needs-attention"
-          >
-            {unreachableLabel[unreachable]}
-          </span>
-        )}
-        <ServerUpdateNotice />
-        {info && (
-          <VersionLabel
-            version={info.server_version}
-            protocol={info.protocol_version}
+        <Collapsible
+          className="relative block min-w-0 xl:flex-1"
+          open={detailsOpen}
+          onOpenChange={(open) => {
+            if (!wide) setMobileDetailsOpen(open)
+          }}
+        >
+          <CollapsibleTrigger
+            className="h-7 w-7 justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground xl:hidden"
+            aria-label="Show status details"
+            aria-controls="status-details"
+            title="Show status details"
           />
-        )}
-        <LocalStatus />
-        {info && (
-          <span
-            title={info.member.display_name}
-            className="hidden max-w-40 truncate lg:block"
+          <CollapsibleContent
+            id="status-details"
+            forceMount
+            className="block min-w-0 data-[state=closed]:hidden xl:flex-1"
           >
-            {info.member.display_name}
-          </span>
-        )}
-        {disk && disk.total_bytes > 0 && (
-          <span
-            className="hidden shrink-0 items-center gap-1.5 xl:flex"
-            aria-label="Disk usage"
-            title={diskBreakdown(disk)}
-          >
-            <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-              <span
-                className="block h-full bg-foreground/50"
-                style={{
-                  width: `${Math.min(100, (disk.used_bytes / disk.total_bytes) * 100)}%`,
-                }}
-              />
-            </span>
-            {formatBytes(disk.used_bytes)} / {formatBytes(disk.total_bytes)}
-          </span>
-        )}
+            <div className="fixed inset-x-3 bottom-10 z-50 mb-1 flex max-h-[70vh] min-w-0 max-w-md flex-col items-stretch gap-2 overflow-y-auto rounded-md border bg-popover p-3 text-popover-foreground shadow-lg xl:static xl:flex xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-3 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:shadow-none">
+              {unreachable !== null && (
+                <span
+                  role="status"
+                  title={unreachableLabel[unreachable]}
+                  className="flex min-h-7 min-w-0 items-center rounded-full bg-state-needs-attention/15 px-2 py-1 text-[11px] font-medium text-state-needs-attention break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap"
+                >
+                  {unreachableLabel[unreachable]}
+                </span>
+              )}
+              <ServerUpdateNotice />
+              {info && (
+                <VersionLabel
+                  version={info.server_version}
+                  protocol={info.protocol_version}
+                />
+              )}
+              <LocalStatus />
+              {info && (
+                <span
+                  title={info.member.display_name}
+                  className="flex min-h-7 max-w-40 shrink-0 items-center break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap"
+                >
+                  {info.member.display_name}
+                </span>
+              )}
+              {disk && disk.total_bytes > 0 && (
+                <span
+                  className="flex min-w-0 items-center gap-1.5 break-words whitespace-normal xl:h-7 xl:shrink xl:truncate xl:whitespace-nowrap"
+                  aria-label="Disk usage"
+                  title={diskBreakdown(disk)}
+                >
+                  <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
+                    <span
+                      className="block h-full bg-foreground/50"
+                      style={{
+                        width: `${Math.min(100, (disk.used_bytes / disk.total_bytes) * 100)}%`,
+                      }}
+                    />
+                  </span>
+                  <span className="min-w-0 break-words xl:truncate xl:whitespace-nowrap">
+                    {formatBytes(disk.used_bytes)} / {formatBytes(disk.total_bytes)}
+                  </span>
+                </span>
+              )}
+              {!desktop && (
+                <span className="flex min-w-0 flex-wrap items-center gap-2">
+                  {statusActions}
+                </span>
+              )}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
-      <span className="flex shrink-0 items-center gap-3">
-        <Slot name="statusbar" />
+      <span className="flex min-w-0 shrink-0 items-center gap-2">
+        {desktop && (
+          <span className="flex min-w-0 shrink-0 items-center gap-2">
+            {statusActions}
+          </span>
+        )}
         <ThemeToggle />
       </span>
     </footer>

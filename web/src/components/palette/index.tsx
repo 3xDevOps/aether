@@ -54,9 +54,12 @@ export function CommandPalette() {
         onClick={() => toggle(true)}
         aria-label="Commands"
         title="Command palette"
-        className={cn(focusRing, 'flex items-center gap-1 rounded px-1 hover:text-foreground')}
+        className={cn(
+          focusRing,
+          'flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-accent hover:text-foreground',
+        )}
       >
-        <kbd className="rounded border px-1 font-sans text-[10px]">
+        <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-border bg-muted px-1 font-mono text-[10px] font-medium text-muted-foreground">
           {shortcutLabel('K')}
         </kbd>
         <span className="hidden lg:inline">Commands</span>
@@ -66,6 +69,7 @@ export function CommandPalette() {
         onOpenChange={(next: boolean) => toggle(next)}
         title="Command palette"
         description="Jump to a run or workspace, steer a run, launch a new one."
+        className="max-h-[calc(100dvh-2rem)] max-w-[min(600px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)] rounded-lg"
       >
         <PaletteBody
           onDone={() => toggle(false)}

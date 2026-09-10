@@ -191,7 +191,7 @@ describe('launch dialog', () => {
     // headless task is required rather than optional.
     const launch = screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement
     expect(launch.disabled).toBe(true)
-    expect(screen.getByLabelText('Task (required)')).toBeDefined()
+    expect((screen.getByLabelText(/^Task/) as HTMLTextAreaElement).required).toBe(true)
     expect(screen.getByText(/needs a task/)).toBeDefined()
 
     fireEvent.click(launch)

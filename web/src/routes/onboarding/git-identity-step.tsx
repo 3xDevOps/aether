@@ -88,47 +88,61 @@ export function GitIdentityStep({
   const loading = useDelayed(probing)
 
   return (
-    <section aria-label="Git identity" className="space-y-3">
-      <h2 className="text-sm font-medium">Set your git identity</h2>
-      <p className="text-sm text-muted-foreground">
-        Every commit an agent makes in your runs is authored as this name and
-        address, so the work you merge upstream credits you.
-      </p>
-      {loading && <Skeleton className="h-16 w-full" />}
+    <section
+      aria-label="Git identity"
+      className="mx-auto w-full max-w-3xl space-y-5 rounded-lg border bg-card p-5 shadow-sm sm:p-6"
+    >
+      <div className="space-y-1">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          Step 2
+        </p>
+        <h2 className="text-xl font-semibold tracking-tight">Set your git identity</h2>
+        <p className="text-sm leading-6 text-muted-foreground">
+          Every commit an agent makes in your runs is authored as this name and
+          address, so the work you merge upstream credits you.
+        </p>
+      </div>
+      {loading && <Skeleton className="h-20 w-full rounded-md" />}
       <form
-        className="space-y-3"
+        className="max-w-2xl space-y-4"
         aria-label="Set git identity"
         onSubmit={(e) => {
           e.preventDefault()
           void save()
         }}
       >
-        <Label className="block space-y-1">
-          Name
-          <Input
-            value={name}
-            placeholder="Ada Lovelace"
-            disabled={busy}
-            onChange={(e) => {
-              typed.current.name = true
-              setName(e.target.value)
-            }}
-          />
-        </Label>
-        <Label className="block space-y-1">
-          Email
-          <Input
-            type="email"
-            value={email}
-            placeholder="ada@example.com"
-            disabled={busy}
-            onChange={(e) => {
-              typed.current.email = true
-              setEmail(e.target.value)
-            }}
-          />
-        </Label>
-        {error && <p className="text-xs text-state-failed">{error}</p>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Label className="block space-y-1.5">
+            Name
+            <Input
+              value={name}
+              placeholder="Ada Lovelace"
+              disabled={busy}
+              onChange={(e) => {
+                typed.current.name = true
+                setName(e.target.value)
+              }}
+            />
+          </Label>
+          <Label className="block space-y-1.5">
+            Email
+            <Input
+              type="email"
+              value={email}
+              placeholder="ada@example.com"
+              disabled={busy}
+              onChange={(e) => {
+                typed.current.email = true
+                setEmail(e.target.value)
+              }}
+            />
+          </Label>
+        </div>
+        {error && (
+          <p className="rounded-md border border-state-failed/30 bg-state-failed/5 p-3 text-sm text-state-failed">
+            {error}
+          </p>
+        )}
         <div className={actionRow}>
           <Button
             type="submit"

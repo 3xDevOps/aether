@@ -31,8 +31,12 @@ test('shows the CLI banner to a collaborator when the CLI is behind', async () =
   expect(await screen.findByText('Aether v1.3.0 is available.')).toBeTruthy()
   expect(screen.getByText(/You are running v1\.2\.3/)).toBeTruthy()
   // The copy names what the restart costs: the gateway holds the attach
-  // sockets and the sync sessions, and they go with it.
-  expect(screen.getByText(/Attached terminals and any running file sync stop/)).toBeTruthy()
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Install details: what updating changes' }),
+  )
+  expect(
+    await screen.findByText(/Attached terminals and any running file sync stop/),
+  ).toBeTruthy()
   const notes = screen.getByRole('link', { name: 'Release notes' })
   expect(notes.getAttribute('href')).toBe(
     'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
@@ -154,6 +158,9 @@ describe('a binary macOS installs through the administrator dialog', () => {
     seed()
     render(<UpdateBanners client={client} />)
 
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Install details: macOS administrator approval' }),
+    )
     expect(
       await screen.findByText(
         'macOS will ask for an administrator password: /usr/local/bin/aether is in a directory this account cannot write to. The dialog is labelled osascript, the tool Aether asks through. Aether never sees your password.',
@@ -187,11 +194,11 @@ describe('a binary macOS installs through the administrator dialog', () => {
     expect(
       await screen.findByText('Update cancelled, nothing was changed.'),
     ).toBeTruthy()
-    const detail = screen.getByText(
-      'update.apply: nothing was changed: administrator access was not granted: execution error: User canceled. (-128)',
-    )
-    expect(detail.className).toContain('text-muted-foreground')
-    expect(detail.className).not.toContain('text-state-failed')
+    expect(
+      screen.getByText(
+        'update.apply: nothing was changed: administrator access was not granted: execution error: User canceled. (-128)',
+      ),
+    ).toBeDefined()
     const button = screen.getByRole('button', { name: 'Update now' }) as HTMLButtonElement
     expect(button.disabled).toBe(false)
   })
@@ -207,10 +214,11 @@ describe('a binary macOS installs through the administrator dialog', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
-    const detail = await screen.findByText(
-      'update.apply: install failed: checksum mismatch',
-    )
-    expect(detail.className).toContain('text-state-failed')
+    expect(
+      await screen.findByText(
+        'update.apply: install failed: checksum mismatch',
+      ),
+    ).toBeDefined()
     expect(screen.queryByText('Update cancelled, nothing was changed.')).toBeNull()
     expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
   })

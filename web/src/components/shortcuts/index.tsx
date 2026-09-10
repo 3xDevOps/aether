@@ -104,6 +104,64 @@ function commandGroups(): { name: string; entries: [string, string][] }[] {
   ]
 }
 
+function ShortcutKeys({ value }: { value: string }) {
+  const parts = value.split(/\+|\s+then\s+/)
+  return (
+    <span className="flex max-w-full shrink-0 flex-wrap items-center gap-1" aria-label={value}>
+      {parts.map((part, index) => (
+        <span key={`${part}-${index}`} className="flex max-w-full items-center gap-1">
+          {index > 0 && (
+            <span aria-hidden className="text-[11px] text-muted-foreground">
+              {value.includes('then') ? 'then' : '+'}
+            </span>
+          )}
+          <kbd className="inline-flex min-h-6 max-w-full items-center justify-center rounded-sm border border-border bg-muted px-1.5 py-1 font-mono text-[11px] font-medium leading-4 text-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]">
+            {part}
+          </kbd>
+        </span>
+      ))}
+    </span>
+  )
+}
+
+function ShortcutRow({ value, description }: { value: string; description: string }) {
+  return (
+    <div
+      role="listitem"
+      className="flex flex-col items-start gap-2 rounded-md px-2 py-2.5 transition-colors odd:bg-muted/30 sm:flex-row sm:items-start sm:gap-4"
+    >
+      <ShortcutKeys value={value} />
+      <span className="min-w-0 flex-1 text-[13px] leading-5 text-muted-foreground">
+        {description}
+      </span>
+    </div>
+  )
+}
+
+function ShortcutGroup({
+  name,
+  entries,
+}: {
+  name: string
+  entries: [string, string][]
+}) {
+  return (
+    <section className="space-y-1" aria-labelledby={`shortcut-${name}`}>
+      <h3
+        id={`shortcut-${name}`}
+        className="px-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+      >
+        {name}
+      </h3>
+      <div role="list" className="space-y-0.5">
+        {entries.map(([value, description]) => (
+          <ShortcutRow key={value} value={value} description={description} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export function ShortcutsButton() {
   const [open, setOpen] = useState(false)
   // The same gate the handler answers to, so the reference never offers a key
@@ -128,50 +186,39 @@ export function ShortcutsButton() {
         onClick={() => setOpen(true)}
         aria-label="Keyboard shortcuts"
         title="Keyboard shortcuts"
-        className={cn(focusRing, 'flex items-center gap-1 rounded px-1 hover:text-foreground')}
+        className={cn(
+          focusRing,
+          'flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-accent hover:text-foreground',
+        )}
       >
-        <CircleHelp className="size-3.5" />
+        <CircleHelp className="size-3.5" aria-hidden />
+        <span className="hidden lg:inline">Shortcuts</span>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(640px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
           <DialogHeader>
             <DialogTitle>Keyboard shortcuts</DialogTitle>
             <DialogDescription>
-              Every verb below is also a button on the surface it acts on. The
-              palette is the fast path to all of them.
+              Keep your hands on the workbench. Shortcuts yield to focused
+              fields and open dialogs.
             </DialogDescription>
           </DialogHeader>
-          <table className="w-full text-sm">
-            <tbody>
-              {shellKeys(launchable).map(([key, what]) => (
-                <tr key={key}>
-                  <td className="py-1 pr-4">
-                    <kbd className="rounded border px-1 font-sans text-[10px] whitespace-nowrap">
-                      {key}
-                    </kbd>
-                  </td>
-                  <td className="py-1 text-muted-foreground">{what}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="max-h-80 space-y-3 overflow-y-auto">
-            {commandGroups().map((g) => (
-              <div key={g.name}>
-                <div className="mb-1 text-xs font-medium text-muted-foreground">
-                  {g.name}
-                </div>
-                <table className="w-full text-sm">
-                  <tbody>
-                    {g.entries.map(([verb, what]) => (
-                      <tr key={verb}>
-                        <td className="w-2/5 py-0.5 pr-4 align-top">{verb}</td>
-                        <td className="py-0.5 text-muted-foreground">{what}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <div className="min-h-0 space-y-6 overflow-y-auto -mx-1 px-1">
+            <section aria-labelledby="shortcut-shell" className="space-y-1">
+              <h3
+                id="shortcut-shell"
+                className="px-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+              >
+                Shell
+              </h3>
+              <div role="list" className="space-y-0.5">
+                {shellKeys(launchable).map(([key, what]) => (
+                  <ShortcutRow key={key} value={key} description={what} />
+                ))}
               </div>
+            </section>
+            {commandGroups().map((group) => (
+              <ShortcutGroup key={group.name} {...group} />
             ))}
           </div>
         </DialogContent>

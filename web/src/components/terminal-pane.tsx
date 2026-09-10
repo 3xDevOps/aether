@@ -3,14 +3,124 @@
 // terminal, the run-shell dock and the environment dock - renders this, so
 // find behaves the same in all three.
 
-import { ChevronDown, ChevronUp, Loader2, X } from 'lucide-react'
+import {
+  ClipboardCopy,
+  ClipboardPaste,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Minus,
+  Plus,
+  RotateCcw,
+  Search,
+  X,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import type { SearchAddon } from '@xterm/addon-search'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { copySelection, pasteClipboard } from '@/lib/term-clipboard'
+import {
+  defaultTerminalFontSize,
+  maxTerminalFontSize,
+  minTerminalFontSize,
+} from '@/lib/term-font'
 import { cn } from '@/lib/utils'
+import { useStore } from '@/store'
+
+function TerminalTools({ controller }: { controller: XtermController }) {
+  const terminal = controller.terminal
+  const fontSize = useStore((state) => state.terminalFontSize)
+  const setFontSize = useStore((state) => state.setTerminalFontSize)
+
+  return (
+    <div
+      role="toolbar"
+      aria-label="Terminal controls"
+      className="flex min-w-0 max-w-full flex-1 items-center gap-0.5 overflow-x-auto"
+    >
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Open terminal search"
+        title="Find in terminal (Ctrl+Shift+F)"
+        onClick={() => controller.setFindOpen(true)}
+      >
+        <Search />
+      </Button>
+      <span className="mx-0.5 hidden h-5 w-px bg-border sm:block" aria-hidden />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Decrease terminal text size"
+        title="Decrease terminal text size (Ctrl+-)"
+        disabled={!terminal || fontSize <= minTerminalFontSize}
+        onClick={() => setFontSize(fontSize - 1)}
+      >
+        <Minus />
+      </Button>
+      <span
+        className="hidden min-w-8 text-center text-xs tabular-nums text-muted-foreground sm:inline"
+        aria-label={`Terminal text size ${fontSize}px`}
+      >
+        {fontSize}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Increase terminal text size"
+        title="Increase terminal text size (Ctrl+=)"
+        disabled={!terminal || fontSize >= maxTerminalFontSize}
+        onClick={() => setFontSize(fontSize + 1)}
+      >
+        <Plus />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Reset terminal text size"
+        title={`Reset terminal text size to ${defaultTerminalFontSize}px (Ctrl+0)`}
+        disabled={!terminal || fontSize === defaultTerminalFontSize}
+        onClick={() => setFontSize(defaultTerminalFontSize)}
+      >
+        <RotateCcw />
+      </Button>
+      <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Copy terminal selection"
+        title="Copy terminal selection (Ctrl+Shift+C)"
+        disabled={!terminal}
+        onClick={() => {
+          if (terminal) void copySelection(terminal)
+        }}
+      >
+        <ClipboardCopy />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Paste into terminal"
+        title="Paste into terminal (Ctrl+Shift+V)"
+        disabled={!terminal}
+        onClick={() => {
+          if (terminal) void pasteClipboard(terminal)
+        }}
+      >
+        <ClipboardPaste />
+      </Button>
+    </div>
+  )
+}
 
 function FindBar({
   search,
@@ -38,13 +148,17 @@ function FindBar({
   }
 
   return (
-    <div className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded-md border bg-card p-1 shadow-md">
+    <div
+      role="search"
+      aria-label="Find terminal output"
+      className="flex min-h-8 min-w-0 w-full items-center gap-1 rounded-md border border-border/80 bg-card/95 p-1 shadow-md backdrop-blur-sm"
+    >
       <Input
         ref={input}
         aria-label="Find in terminal"
         placeholder="Find"
         value={term}
-        className="w-40"
+        className="h-8 min-w-0 flex-1 sm:w-40"
         onChange={(event) => {
           setTerm(event.target.value)
           setMissing(false)
@@ -61,7 +175,10 @@ function FindBar({
         }}
       />
       {missing && (
-        <span role="status" className="px-1 text-xs text-muted-foreground">
+        <span
+          role="status"
+          className="shrink-0 whitespace-nowrap px-1 text-[13px] text-muted-foreground"
+        >
           No matches
         </span>
       )}
@@ -98,18 +215,22 @@ export function TerminalPane({
   controller: XtermController
   /** Extra classes for the terminal element itself. */
   className?: string
-  /** Overlays drawn on top of the terminal, such as `TerminalSpinner`. */
+  /** Additional content drawn over the terminal, such as `TerminalSpinner`. */
   children?: React.ReactNode
 }) {
   return (
-    <div className="relative h-full min-h-0">
+    <div className="relative flex h-full min-h-0 flex-col">
+      <div className="flex h-10 shrink-0 items-center border-b bg-card/45 px-2">
+        {!controller.findOpen ? (
+          <TerminalTools controller={controller} />
+        ) : (
+          <FindBar search={controller.search} onClose={() => controller.setFindOpen(false)} />
+        )}
+      </div>
       <div
         ref={controller.hostRef}
-        className={cn('h-full min-h-0 bg-background p-2 text-foreground', className)}
+        className={cn('min-h-0 flex-1 bg-background p-2 text-foreground', className)}
       />
-      {controller.findOpen && (
-        <FindBar search={controller.search} onClose={() => controller.setFindOpen(false)} />
-      )}
       {children}
     </div>
   )

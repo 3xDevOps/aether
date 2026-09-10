@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { GitBranch, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -14,7 +15,7 @@ export function Land({ run }: { run: RunRecord }) {
   const [switching, setSwitching] = useState(false)
 
   if (!run.last_commit) {
-    return <p className="text-sm text-muted-foreground">Nothing committed yet</p>
+    return <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">Nothing committed yet</p>
   }
   if (!pull) return null
 
@@ -32,12 +33,19 @@ export function Land({ run }: { run: RunRecord }) {
   }
 
   return (
-    <section className="flex flex-wrap items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm">
-      <span>
-        Branch <code>{pull.branch}</code> is on your machine
+    <section
+      aria-label="Pulled branch"
+      className="flex flex-wrap items-center gap-2.5 rounded-lg border bg-card px-3 py-2.5 text-sm"
+    >
+      <GitBranch className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-1">
+        Branch <code className="font-mono text-[13px]">{pull.branch}</code> is on your machine
       </span>
       {pull.current ? (
-        <span className="text-muted-foreground">You're on it</span>
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <Check className="size-3.5 text-state-done" aria-hidden />
+          You're on it
+        </span>
       ) : (
         cap.hasLocal('pull.switch') && (
           <Button size="sm" variant="outline" disabled={switching} onClick={() => void switchBranch()}>

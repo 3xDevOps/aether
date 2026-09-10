@@ -1,4 +1,4 @@
-// Package web carries the built dashboard SPA as an embedded filesystem.
+// Package web carries the built static dashboard as an embedded filesystem.
 package web
 
 import "embed"

@@ -2,6 +2,7 @@ import { Check, ShieldQuestion, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { CardSlotProps } from '@/components/slots'
 import { Button } from '@/components/ui/button'
+import { Chip } from '@/components/ui/heroui'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
@@ -12,7 +13,6 @@ import type { RouteProps } from '@/routes/registry'
 import { refreshInbox } from '@/routes/team/sync'
 import { useStore } from '@/store'
 import { approvalsForRun, pendingApprovals, sortByCreated } from '@/store/approvals'
-
 /** The queue's size, in the status bar. Absent while nothing is waiting. */
 export function ApprovalStatus() {
   const inbox = useStore((s) => s.inbox)
@@ -28,11 +28,26 @@ export function ApprovalStatus() {
       title={error ?? 'Open Approvals'}
       className={cn(
         focusRing,
-        'flex items-center gap-1 rounded px-1 text-state-needs-attention hover:underline',
+        'flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-accent hover:text-foreground',
       )}
     >
-      <ShieldQuestion className="size-3.5" aria-hidden />
-      {error ? 'queue unreadable' : `${waiting} waiting`}
+      <ShieldQuestion
+        className={cn(
+          'size-3.5',
+          error ? 'text-state-failed' : 'text-state-needs-attention',
+        )}
+        aria-hidden
+      />
+      <Chip
+        color={error ? 'danger' : 'warning'}
+        variant="soft"
+        size="sm"
+        className="max-w-44"
+      >
+        <Chip.Label className="truncate">
+          {error ? 'queue unreadable' : `${waiting} waiting`}
+        </Chip.Label>
+      </Chip>
     </button>
   )
 }
@@ -51,14 +66,17 @@ export function ApprovalBadge({ run }: CardSlotProps) {
       title={`${waiting} waiting on a decision`}
       className={cn(
         focusRing,
-        'flex shrink-0 items-center gap-1 rounded-sm bg-state-needs-attention/15 px-1 text-[11px] text-state-needs-attention',
+        'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-state-needs-attention/20',
       )}
     >
-      <ShieldQuestion className="size-3.5" aria-hidden />
-      {waiting}
+      <ShieldQuestion className="size-3.5 text-state-needs-attention" aria-hidden />
+      <Chip color="warning" variant="soft" size="sm">
+        <Chip.Label>{waiting}</Chip.Label>
+      </Chip>
     </button>
   )
 }
+
 
 /**
  * The shared inbox: every workspace's pending permission requests and plan
@@ -90,14 +108,20 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
   )
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <ViewHeader
         title="Approvals"
         subtitle={waiting === 1 ? '1 request waiting' : `${waiting} requests waiting`}
       />
-      <div className="flex items-center border-b px-4 py-1">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-muted/20 px-4 py-2">
+        <div>
+          <p className="text-sm font-medium">Decision queue</p>
+          <p className="text-[13px] text-muted-foreground">
+            Review requests before an agent continues.
+          </p>
+        </div>
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           aria-pressed={showDecided}
           onClick={() => setShowDecided(!showDecided)}
@@ -105,25 +129,38 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
           {showDecided ? 'Hide decided' : 'Show decided'}
         </Button>
       </div>
-      <div className="flex-1 overflow-y-auto p-3">
-        {error && <p className="mb-2 text-xs text-state-failed">{error}</p>}
-        <ul className="space-y-2">
-          {rows.map((approval) => (
-            <Row
-              key={approval.id}
-              approval={approval}
-              client={client}
-              onDecided={(done) =>
-                setDecisions((prev) => ({ ...prev, [done.id]: done }))
-              }
-            />
-          ))}
-        </ul>
-        {rows.length === 0 && !error && (
-          <p className="text-sm text-muted-foreground">
-            Nothing is waiting on a decision.
-          </p>
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="mx-auto w-full max-w-4xl">
+          {error && (
+            <p
+              role="alert"
+              className="mb-3 rounded-md border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-sm text-state-failed"
+            >
+              {error}
+            </p>
+          )}
+          <ul className="space-y-2">
+            {rows.map((approval) => (
+              <Row
+                key={approval.id}
+                approval={approval}
+                client={client}
+                onDecided={(done) =>
+                  setDecisions((prev) => ({ ...prev, [done.id]: done }))
+                }
+              />
+            ))}
+          </ul>
+          {rows.length === 0 && !error && (
+            <div className="rounded-md border border-dashed px-4 py-10 text-center">
+              <ShieldQuestion className="mx-auto mb-2 size-5 text-muted-foreground" aria-hidden />
+              <p className="text-sm font-medium">Nothing is waiting on a decision.</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">
+                Requests will appear here when an agent needs your approval.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -161,18 +198,43 @@ function Row({
   }
 
   return (
-    <li className={cn('rounded-md border bg-card p-2', !open && 'opacity-80')}>
-      <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1">
-          <span className="text-sm font-medium break-words">{approval.action}</span>
-          {approval.detail && (
-            <span className="mt-1 block text-xs whitespace-pre-wrap text-muted-foreground">
-              {approval.detail}
-            </span>
+    <li
+      className={cn(
+        'rounded-lg border bg-card p-4 shadow-xs',
+        !open && 'opacity-80',
+      )}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Chip
+              color={open ? 'warning' : approval.decision === 'approved' ? 'success' : 'danger'}
+              variant="soft"
+              size="sm"
+            >
+              <Chip.Label>
+                {open
+                  ? 'Needs decision'
+                  : approval.decision === 'approved'
+                    ? 'Approved'
+                    : 'Denied'}
+              </Chip.Label>
+            </Chip>
+            <span className="text-sm font-medium break-words">{approval.action}</span>
+          </div>
+          {approval.detail ? (
+            <div className="mt-3 rounded-md bg-muted/35 px-3 py-2">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Reason
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-5">{approval.detail}</p>
+            </div>
+          ) : (
+            <p className="mt-2 text-[13px] text-muted-foreground">No additional reason provided.</p>
           )}
-        </span>
+        </div>
         {open && (
-          <span className="flex shrink-0 gap-1">
+          <span className="flex shrink-0 gap-2 sm:pt-0.5">
             <Button size="sm" disabled={busy} onClick={() => void decide(true)}>
               <Check />
               Approve
@@ -190,22 +252,27 @@ function Row({
         )}
       </div>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <span>{workspace?.name ?? approval.workspace_id}</span>
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-2 text-[13px] text-muted-foreground">
+        <span className="font-medium text-foreground/80">
+          {workspace?.name ?? approval.workspace_id}
+        </span>
         {run && (
           <button
             type="button"
             onClick={() => navigate('terminal', { runId: run.id })}
-            className={cn(focusRing, 'max-w-60 truncate hover:text-foreground hover:underline')}
+            className={cn(
+              focusRing,
+              'max-w-full truncate hover:text-foreground hover:underline sm:max-w-60',
+            )}
           >
             {runLabel(run)}
           </button>
         )}
-        <time className="ml-auto">{timeAgo(approval.created_at)}</time>
+        <time className="sm:ml-auto">{timeAgo(approval.created_at)}</time>
       </div>
 
       {!open && (
-        <p className="mt-1 flex items-center gap-1.5 text-xs">
+        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[13px]">
           <span
             aria-hidden
             className="size-2 shrink-0 rounded-full"
@@ -216,7 +283,11 @@ function Row({
           {approval.decided_at && ` ${timeAgo(approval.decided_at)}`}
         </p>
       )}
-      {error && <p className="mt-1 text-xs text-state-failed">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-2 rounded-md bg-state-failed/10 px-3 py-2 text-sm text-state-failed">
+          {error}
+        </p>
+      )}
     </li>
   )
 }

@@ -73,7 +73,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Launch from a template</DialogTitle>
           <DialogDescription>
@@ -82,31 +82,36 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
         </DialogHeader>
         <form
           id="launch-template"
-          className="space-y-3"
+          className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1"
           onSubmit={(e) => {
             e.preventDefault()
             void launch()
           }}
         >
-          {/* Where the run lands, stated rather than asked: the sidebar's
-              switcher is the one place scope changes. */}
-          <p className="text-sm" aria-label="Target workspace">
-            {workspace ? (
-              <>
-                Launching into <span className="font-medium">{workspace.name}</span>{' '}
-                <span className="text-muted-foreground">({workspace.base_branch})</span>
-              </>
-            ) : (
-              <span className="text-muted-foreground">
-                Pick a workspace in the sidebar first.
-              </span>
-            )}
-          </p>
-          <div className="space-y-1 text-sm">
+          <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-2.5">
+            <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Target workspace
+            </p>
+            <p className="mt-1 text-sm" aria-label="Target workspace">
+              {workspace ? (
+                <>
+                  <span className="font-medium">{workspace.name}</span>{' '}
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {workspace.base_branch}
+                  </span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">
+                  Pick a workspace in the sidebar first.
+                </span>
+              )}
+            </p>
+          </div>
+          <div className="space-y-1.5 text-sm">
             <Label htmlFor="template-name">Template</Label>
             <Select value={name} onValueChange={setName}>
               <SelectTrigger id="template-name" disabled={!templates?.length}>
-                <SelectValue />
+                <SelectValue placeholder="Choose a template" />
               </SelectTrigger>
               <SelectContent>
                 {templates?.map((t) => (
@@ -116,19 +121,30 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          {templates?.length === 0 && (
             <p className="text-xs text-muted-foreground">
+              Choose a saved task from this workspace.
+            </p>
+          </div>
+          {templates === null && (
+            <p className="text-sm text-muted-foreground">Loading templates...</p>
+          )}
+          {templates?.length === 0 && (
+            <p className="text-sm text-muted-foreground">
               This workspace has no saved templates.
             </p>
           )}
           {selected && (
-            <p className="line-clamp-3 text-xs text-muted-foreground">
-              {selected.harness} ({selected.mode}) - {selected.task}
-            </p>
+            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2.5">
+              <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                Saved task
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {selected.harness} ({selected.mode}) - {selected.task}
+              </p>
+            </div>
           )}
         </form>
-        <DialogFooter>
+        <DialogFooter className="border-t pt-4">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
@@ -137,7 +153,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
             form="launch-template"
             disabled={launching || !name || !workspaceID}
           >
-            Launch
+            {launching ? 'Launching...' : 'Launch'}
           </Button>
         </DialogFooter>
       </DialogContent>

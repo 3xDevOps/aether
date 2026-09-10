@@ -8,15 +8,15 @@ import { UpdateBanners } from '@/components/update-banner'
 export function AppShell() {
   useNavShortcuts()
   return (
-    <div className="flex h-full flex-col">
-      {/* Above everything: an out-of-date binary is about the whole app, not
-          about whichever view happens to be open. */}
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      {/* The update surface stays above the workbench without stealing its
+          vertical space when it has nothing to say. */}
       <div className="min-h-0 overflow-y-auto">
         <UpdateBanners />
       </div>
-      <div className="flex min-h-40 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <Sidebar />
-        <main className="min-w-0 flex-1 overflow-hidden">
+        <main className="min-w-0 flex-1 overflow-hidden bg-background">
           <CenterView />
         </main>
       </div>

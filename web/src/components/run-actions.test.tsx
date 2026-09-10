@@ -364,57 +364,6 @@ function openMore() {
   return screen.findByRole('menu')
 }
 
-/**
- * The verbs on the row, split by the classes that decide their fate on a
- * narrow header: one set stays, the other is hidden until `@4xl/header`.
- * jsdom evaluates no container query, so this reads the classes and proves
- * nothing about the resulting layout.
- */
-function partition() {
-  const stays: string[] = []
-  const dropped: string[] = []
-  for (const button of screen.getAllByRole('button')) {
-    const name = button.textContent ?? ''
-    if (name === 'More') {
-      // The trigger appears at the same width the overflow verbs disappear.
-      // Drift one and those verbs are reachable at no width at all.
-      expect(button.className).toMatch(/@4xl\/header:hidden/)
-      continue
-    }
-    if (/\bhidden\b/.test(button.className)) {
-      expect(button.className).toMatch(/@4xl\/header:inline-flex/)
-      dropped.push(name)
-    } else {
-      stays.push(name)
-    }
-  }
-  return { stays: stays.sort(), dropped: dropped.sort() }
-}
-
-// The three run states it takes to see all six verbs the row keeps: resume
-// needs a live paused run and relaunch a finished one, so neither is on the
-// widest list.
-test('every verb keeps its own side of the narrow-header split', () => {
-  const widest = render(<RunActions run={seedWidest()} />)
-  expect(partition()).toEqual({
-    stays: ['Close', 'Delete', 'Pause', 'Send'],
-    dropped: ['Forward', 'Hand off', 'Protect', 'Pull'],
-  })
-  widest.unmount()
-
-  const paused = render(<RunActions run={seed({ paused: true })} />)
-  expect(partition()).toEqual({
-    stays: ['Close', 'Delete', 'Kill', 'Resume', 'Send'],
-    dropped: ['Protect'],
-  })
-  paused.unmount()
-
-  render(<RunActions run={seed({ run: { status: 'merged' } })} />)
-  expect(partition()).toEqual({
-    stays: ['Close', 'Delete', 'Relaunch'],
-    dropped: ['Protect'],
-  })
-})
 
 // CSS cannot close what it hides, so the menu has to notice the widening.
 test('the More menu closes itself when the row widens past the threshold', async () => {

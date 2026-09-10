@@ -107,7 +107,7 @@ export function ForwardDialog() {
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>
             {target?.startsWith('run:')
@@ -115,66 +115,78 @@ export function ForwardDialog() {
               : 'Forward a port from your environment'}
           </DialogTitle>
           <DialogDescription>
-            Makes a port inside the agent's machine reachable at localhost on this computer - needed for browser logins like codex login (port 1455).
+            Makes a port inside the agent's machine reachable at localhost on this computer. This
+            is needed for browser logins like codex login (port 1455).
           </DialogDescription>
         </DialogHeader>
         <form
           id="forward-port"
-          className="space-y-3"
+          className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1"
           onSubmit={(event) => {
             event.preventDefault()
             void start()
           }}
         >
-          <Label className="block space-y-1">
-            Port
+          <div className="space-y-1.5">
+            <Label htmlFor="forward-port-number">Port</Label>
             <Input
+              id="forward-port-number"
               autoFocus
               type="number"
               min={1}
               max={65535}
               step={1}
               inputMode="numeric"
+              aria-describedby="forward-port-help"
               value={port}
               onChange={(event) => setPort(event.target.value)}
             />
-          </Label>
+            <p id="forward-port-help" className="text-xs text-muted-foreground">
+              Choose the port exposed by the agent. Localhost uses the same port.
+            </p>
+          </div>
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
           )}
           <div className="space-y-2" aria-label="Active forwards">
+            <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Active forwards
+            </p>
             {loading ? (
               <p className="text-sm text-muted-foreground">Loading forwards...</p>
             ) : forwards.length === 0 ? (
               <p className="text-sm text-muted-foreground">No active forwards</p>
             ) : (
-              forwards.map((forward) => (
-                <div
-                  key={`${forward.target}:${forward.port}`}
-                  className="flex items-center justify-between gap-3 text-sm"
-                >
-                  <span>
-                    <span className="font-medium">Port {forward.port}</span>{' '}
-                    <span className="text-muted-foreground">
-                      localhost:{forward.local_port} ({forward.conns} connections)
-                    </span>
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void stop(forward.port)}
-                    disabled={stopping !== null}
+              <div className="space-y-2">
+                {forwards.map((forward) => (
+                  <div
+                    key={`${forward.target}:${forward.port}`}
+                    className="flex flex-col gap-2 rounded-md border border-border/70 bg-muted/20 p-2.5 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    {stopping === forward.port ? 'Stopping...' : 'Stop'}
-                  </Button>
-                </div>
-              ))
+                    <span className="min-w-0 text-sm">
+                      <span className="font-medium">Port {forward.port}</span>{' '}
+                      <span className="text-muted-foreground">
+                        localhost:{forward.local_port} ({forward.conns} connections)
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void stop(forward.port)}
+                      disabled={stopping !== null}
+                      className="w-full sm:w-auto"
+                    >
+                      {stopping === forward.port ? 'Stopping...' : 'Stop'}
+                    </Button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </form>
-        <DialogFooter>
+        <DialogFooter className="border-t pt-4">
           <Button variant="outline" onClick={close}>
             Cancel
           </Button>

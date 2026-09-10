@@ -238,7 +238,7 @@ describe('onboarding wizard', () => {
     expect(useStore.getState().connectionEpoch).toBe(1)
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
-      '2. Git identity',
+      'Git identity',
     )
   })
   it('shows a configured server without a repository and opens the workspace picker', async () => {
@@ -267,7 +267,7 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
     expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
-      '3. Workspace',
+      'Workspace',
     )
     expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
   })
@@ -295,7 +295,7 @@ describe('onboarding wizard', () => {
       await screen.findByRole('region', { name: 'Git identity' }),
     ).toBeDefined()
     expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
-      '2. Git identity',
+      'Git identity',
     )
   })
   it('rechecks link status when the window regains focus', async () => {
@@ -1436,7 +1436,7 @@ describe('onboarding wizard', () => {
     ).toBeDefined()
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('5. Agents')
+    ).toContain('Agents')
   })
 
   it('keeps a failed agent.list on screen rather than calling it empty', async () => {

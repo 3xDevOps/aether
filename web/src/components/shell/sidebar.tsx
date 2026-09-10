@@ -43,6 +43,7 @@ import { maxSidebarWidth, minSidebarWidth } from '@/store/ui'
  * readable.
  */
 const narrowQuery = '(max-width: 1000px)'
+const mobileQuery = '(max-width: 640px)'
 
 export function Sidebar() {
   const collapsed = useStore((s) => s.sidebarCollapsed)
@@ -51,6 +52,9 @@ export function Sidebar() {
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
   const [autoCollapsed, setAutoCollapsed] = useState(
     () => window.matchMedia?.(narrowQuery).matches ?? false,
+  )
+  const [mobile, setMobile] = useState(
+    () => window.matchMedia?.(mobileQuery).matches ?? false,
   )
   // Shadows sidebarCollapsed while the window is narrow, so the toggle answers
   // the viewport without writing the preference the member stored.
@@ -67,7 +71,16 @@ export function Sidebar() {
     return () => media.removeEventListener('change', apply)
   }, [])
 
+  useEffect(() => {
+    const media = window.matchMedia?.(mobileQuery)
+    if (!media) return
+    const apply = (e: MediaQueryListEvent) => setMobile(e.matches)
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [])
+
   const rail = autoCollapsed ? !expandedNarrow : collapsed
+
   const toggle = useCallback(() => {
     if (autoCollapsed) setExpandedNarrow((v) => !v)
     else toggleSidebar()
@@ -126,7 +139,7 @@ export function Sidebar() {
 
   if (rail) {
     return (
-      <aside className="flex w-10 shrink-0 flex-col items-center border-r bg-sidebar py-2">
+      <aside className="flex w-10 shrink-0 flex-col items-center border-r bg-sidebar/90 py-2">
         <Button
           ref={toggleControl}
           variant="ghost"
@@ -143,8 +156,14 @@ export function Sidebar() {
   return (
     <aside
       id="sidebar"
-      className="relative flex shrink-0 flex-col border-r bg-sidebar"
-      style={{ width }}
+      style={{
+        width,
+        maxWidth: mobile ? 'calc(100vw - 2.5rem)' : undefined,
+      }}
+      className={cn(
+        'relative flex min-w-0 shrink-0 flex-col border-r bg-sidebar/95',
+        mobile && 'absolute inset-y-0 left-0 z-40 shadow-xl',
+      )}
       aria-label="Runs"
     >
       <WorkspaceSwitcher onCollapse={toggleAndFollow} controlRef={toggleControl} />
@@ -190,7 +209,7 @@ function WorkspaceSwitcher({
   const current = workspaces[active]
 
   return (
-    <div className="flex h-9 items-center gap-2 border-b px-2">
+    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
       <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
       {list.length > 1 ? (
         <Select value={active} onValueChange={setActiveWorkspace}>
@@ -207,7 +226,7 @@ function WorkspaceSwitcher({
         </Select>
       ) : (
         <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
-          <span className="truncate text-sm font-medium">
+          <span className="truncate text-sm font-semibold">
             {current?.name ?? 'No workspace'}
           </span>
           {current && (
@@ -236,8 +255,8 @@ function SidebarHeader() {
   // it. A member who cannot start a run is not offered the way in.
   const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
   return (
-    <div className="flex flex-wrap items-center gap-1 border-b px-2 py-1.5">
-      <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+    <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5">
+      <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         Runs
       </span>
       <AttentionBadge />
@@ -370,7 +389,7 @@ function NavSection() {
     ...surfaces(cap),
   ]
   return (
-    <nav aria-label="Surfaces" className="shrink-0 border-t py-1">
+    <nav aria-label="Surfaces" className="shrink-0 border-t py-1.5">
       {links.map(({ name, label, Icon }) => (
         <button
           key={name}
@@ -384,8 +403,8 @@ function NavSection() {
           onClick={() => navigate(name)}
           className={cn(
             focusRing,
-            'flex w-full items-center gap-2 border-l-2 border-transparent px-2 py-1 text-left text-sm hover:bg-accent/60',
-            route.name === name && 'bg-accent border-primary',
+            'flex min-h-9 w-full items-center gap-2 border-l-2 border-transparent px-3 text-left text-sm transition-colors hover:bg-accent/60',
+            route.name === name && 'border-primary bg-accent/80 font-medium text-foreground',
           )}
         >
           <Icon className="size-3.5 text-muted-foreground" />
@@ -411,7 +430,7 @@ function NavSection() {
 function Group({ group }: { group: SidebarGroup }) {
   return (
     <section className="mb-1">
-      <h2 className="px-2 py-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+      <h2 className="px-3 py-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
         {group.label}
       </h2>
       {group.runs.map((run) => (
@@ -438,9 +457,12 @@ function RunRow({ entry }: { entry: SidebarRun }) {
         // Full bleed inside a scroll container: an outline drawn outside the
         // row would be clipped at both edges.
         'focus-visible:-outline-offset-2',
-        'flex w-full items-center gap-2 border-l-2 py-1 pr-2 pl-4 text-left text-xs hover:bg-accent/60',
-        selected ? 'bg-accent' : 'border-l-transparent',
-        unseen ? 'font-medium' : 'text-muted-foreground',
+        'flex min-h-8 w-full items-center gap-2 border-l-2 py-1 pr-3 pl-5 text-left text-[13px] hover:bg-accent/60',
+        selected
+          ? 'bg-accent font-medium text-foreground'
+          : unseen
+            ? 'font-medium'
+            : 'text-muted-foreground',
       )}
     >
       <StateDot

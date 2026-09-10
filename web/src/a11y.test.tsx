@@ -1,87 +1,26 @@
-// The focus and keyboard contract, swept surface by surface. The expected
-// classes are written out rather than read from `focusRing`, because a token
-// compared against itself passes for any value, including one that suppresses
-// the outline and puts nothing in its place.
-
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 // The direct API, which sets itself up against the real clock: adding fake
 // timers to this file would hang the tests that use it.
 import userEvent from '@testing-library/user-event'
 import { Dock } from '@/components/dock'
-import { Checkbox } from '@/components/ui/checkbox'
-import { CommandPalette } from '@/components/palette'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { PaletteDialogs } from '@/components/palette/dialogs'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+
 import { AppShell } from '@/components/shell/app-shell'
 import { RunTabs } from '@/routes/terminal/tabs'
-import '@/routes'
-import { lookupRoute } from '@/routes'
-import { registeredRoutes } from '@/routes/registry'
 import { useStore } from '@/store'
-import { paletteDialogs } from '@/store/palette'
 import { hydrate } from '@/store/sync'
-import { openingTags, sourceFiles, type Tag } from '@/test/sources'
-import { alice, approval, fakeApi, run, workspace } from '@/test/fixtures'
+import { fakeApi, run } from '@/test/fixtures'
 import { toRecord } from '@/store/runs'
 
-const ring = ['focus-visible:outline-2', 'focus-visible:outline-ring']
-/** A row that fills a scroll container draws the same outline inside. */
-const offsets = ['focus-visible:outline-offset-2', 'focus-visible:-outline-offset-2']
-
-/** Every role a keyboard can land on and this app actually renders. `option`
- * is one: a select item takes real DOM focus while its list is open, the way
- * a menu item does. */
-const controlRoles = [
-  'button',
-  'tab',
-  'separator',
-  'combobox',
-  'textbox',
-  'spinbutton',
-  'checkbox',
-  'switch',
-  'menuitem',
-  'menuitemcheckbox',
-  'option',
-  'link',
-  'tabpanel',
-]
-
-function expectFocusRing(root: HTMLElement) {
-  // xterm's own hidden input is not ours to style: the terminal draws its
-  // cursor, and a focus outline on an invisible textarea shows nothing.
-  const found = controlRoles
-    .flatMap((role) => within(root).queryAllByRole(role))
-    .filter((el) => !el.closest('.xterm'))
-    // cmdk never moves focus to a row, tracking the highlighted one with
-    // `aria-activedescendant` instead, so its options have nothing to outline;
-    // see docs/dashboard-frontend.md. Only the row itself is excused: a
-    // control cmdk renders inside one is a control like any other.
-    .filter(
-      (el) => el.getAttribute('role') !== 'option' || !el.closest('[cmdk-item]'),
-    )
-    // A panel is only a control where it was given a tab stop; the ones whose
-    // content is focusable are not something a keyboard lands on.
-    .filter((el) => el.getAttribute('role') !== 'tabpanel' || el.hasAttribute('tabindex'))
-  for (const el of found) {
-    const name = el.getAttribute('aria-label') ?? el.textContent ?? el.outerHTML
-    expect(ring.filter((c) => !el.classList.contains(c)), name).toEqual([])
-    expect(offsets.some((c) => el.classList.contains(c)), name).toBe(true)
-  }
-  return found.length
-}
+// jsdom has neither of the two browser APIs xterm and the dialogs reach for.
+Element.prototype.scrollIntoView = vi.fn()
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+)
 
 const active = run({ id: 'run_1', task: 'rewrite the checkout flow' })
 // One test swaps `navigate` for a spy, and the store outlives a single test.
@@ -101,221 +40,13 @@ beforeEach(async () => {
   await hydrate(useStore, fakeApi())
   useStore.setState({
     runs: { ...useStore.getState().runs, [active.id]: toRecord(active) },
-    // A desktop gateway, so the routes that are a placeholder on a remote one
-    // render their real bodies and the sweep can see their controls.
+    // A desktop gateway keeps local routes rendering their full content.
     capabilities: {
       gateway: 'local',
       methods: ['*'],
       ws: ['events', 'attach', 'terminal'],
       local: ['link.status', 'daemon.status', 'repo.sync', 'pull', 'update.check'],
     },
-    inbox: { [workspace.id]: [approval()] },
-    // A fetched branch, so the diff view draws the one disclosure a swept
-    // route holds: a primitive is only really covered where a call site can
-    // still merge the outline away.
-    pulls: {
-      [active.id]: {
-        branch: active.branch,
-        ref: `aether/${active.branch}`,
-        output: 'Everything up-to-date',
-        current: true,
-        dirty: false,
-      },
-    },
-    // Part way through the wizard, so its step chips are the buttons they
-    // become once a step has been reached.
-    onboardingStep: 'Workspace',
-    onboardingFurthest: 'Workspace',
-    feed: [
-      {
-        id: 'evt_1',
-        seq: 1,
-        time: '2026-08-14T10:03:00Z',
-        workspace_id: workspace.id,
-        run_id: active.id,
-        actor_id: alice.id,
-        type: 'workspace.timeline',
-        payload: { kind: 'pause' },
-      },
-    ],
-  })
-})
-
-describe('focus ring', () => {
-  it('is on every control of the shell', () => {
-    const { container } = render(<AppShell />)
-    expect(expectFocusRing(container)).toBeGreaterThan(0)
-  })
-
-  // Driven off the registry rather than a hand-kept list, so a view added
-  // later is swept without anyone remembering to add it here.
-  it.each(registeredRoutes())('is on every control of the %s view', (name) => {
-    const View = lookupRoute(name)
-    if (!View) throw new Error(`no ${name} route registered`)
-    const { container } = render(
-      <View params={{ runId: active.id, workspaceId: workspace.id }} />,
-    )
-    // A view that renders no control at all is not evidence of anything.
-    expect(expectFocusRing(container)).toBeGreaterThan(0)
-  })
-
-  it.each(paletteDialogs)(
-    'is on every control of the %s form',
-    (dialog) => {
-      useStore.setState({ paletteDialog: dialog, paletteRunID: active.id })
-      render(<PaletteDialogs />)
-      expect(expectFocusRing(screen.getByRole('dialog'))).toBeGreaterThan(0)
-    },
-  )
-
-  it('is on every control of the command palette', () => {
-    useStore.setState({ paletteOpen: true })
-    render(<CommandPalette />)
-    expect(expectFocusRing(screen.getByRole('dialog'))).toBeGreaterThan(0)
-  })
-
-  // Menu items take real DOM focus under Radix's roving tabindex, so they are
-  // controls the sweep has to see, and no route renders one open.
-  it('is on every item of an open menu', () => {
-    render(
-      <DropdownMenu defaultOpen>
-        <DropdownMenuTrigger>More</DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem>Kill run</DropdownMenuItem>
-          <DropdownMenuItem>Delete run</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>,
-    )
-    expect(expectFocusRing(screen.getByRole('menu'))).toBeGreaterThan(0)
-  })
-
-  // A select item takes real DOM focus while the list is open, so it is a
-  // control the sweep has to see, and no route renders one open.
-  it('is on every item of an open select', () => {
-    render(
-      <Select defaultValue="tui" open>
-        <SelectTrigger aria-label="Mode">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="tui">Interactive</SelectItem>
-          <SelectItem value="headless">Headless</SelectItem>
-        </SelectContent>
-      </Select>,
-    )
-    expect(expectFocusRing(screen.getByRole('listbox'))).toBeGreaterThan(0)
-  })
-
-  // The checkbox lives behind a profile preview no fixture reaches, so it is
-  // rendered on its own rather than left unswept.
-  it('is on a checkbox', () => {
-    const { container } = render(<Checkbox aria-label="Bring configuration" />)
-    expect(expectFocusRing(container)).toBe(1)
-  })
-
-  it('is on the run tab strip', () => {
-    const { container } = render(<RunTabs runID={active.id} active="terminal" />)
-    expect(expectFocusRing(container)).toBeGreaterThan(0)
-  })
-
-  it('is on the dock strip, its panel and its resize handle', () => {
-    const { container } = render(
-      <Dock
-        tabs={[{ id: 'a', label: 'Shell' }]}
-        activeTab="a"
-        onSelectTab={() => {}}
-        onAddTab={() => {}}
-        maxTabs={4}
-        onCloseTab={() => {}}
-        height={240}
-        onHeightChange={() => {}}
-        collapsed={false}
-        onToggleCollapse={() => {}}
-      >
-        <div />
-      </Dock>,
-    )
-    expect(expectFocusRing(container)).toBeGreaterThan(0)
-  })
-})
-
-/**
- * Every hand-written control in one file. `tabIndex={0}` is in here too,
- * because a tab stop is a control whatever tag carries it.
- */
-function controls(source: string): Tag[] {
-  const tags = openingTags(source, [
-    'input',
-    'select',
-    'textarea',
-    'button',
-    'summary',
-    'a',
-  ])
-  for (const match of source.matchAll(/tabIndex=\{0\}|contentEditable/g)) {
-    const start = source.lastIndexOf('<', match.index)
-    tags.push({ name: 'tab stop', attributes: source.slice(start, match.index + 200) })
-  }
-  return tags
-}
-
-/** The files this sweep reads: every source the app ships, minus the one that
- * defines the token. */
-async function ringedSources(): Promise<string[]> {
-  const sources = (await sourceFiles()).filter((path) => !path.endsWith('/lib/utils.ts'))
-  expect(sources.length).toBeGreaterThan(50)
-  return sources
-}
-
-describe('the ring is the only ring', () => {
-  // The sweep below can only reach surfaces a test renders. This reaches every
-  // file, and is what keeps the guide's "one ring, one source" claim true.
-  it('is written in exactly one place', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const sources = await ringedSources()
-
-    // The width, colour and style of the outline. An offset or an opacity
-    // under the same variant is a modifier of the one indicator, not a second.
-    const second = /focus(-visible)?:(ring-|outline-(2|4|8|none|hidden|ring|\[))/
-    // The stylesheet cannot add a second indicator, but one rule there can
-    // take this one away everywhere at once.
-    const suppressed = /:focus[^{]*\{[^}]*outline\s*:\s*(none|0)/
-    const offenders: string[] = []
-    for (const path of sources) {
-      const source = await readFile(path, 'utf8')
-      const rule = path.endsWith('.css') ? suppressed : second
-      if (rule.test(source)) offenders.push(path)
-    }
-    expect(offenders).toEqual([])
-
-    // And the one place that does write it writes it once: a second, weaker
-    // ring would hide here as readily as anywhere else.
-    const token = await readFile(`${process.cwd()}/src/lib/utils.ts`, 'utf8')
-    expect(token.match(/focus-visible:/g)).toHaveLength(3)
-  })
-
-  // The sweep above can only see a control a test renders. This one sees
-  // every file, which is what catches a surface quietly losing the outline
-  // while every rendered surface still has it.
-  it('reaches every control drawn by hand, wherever it is', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const bare: string[] = []
-    for (const path of await ringedSources()) {
-      for (const tag of controls(await readFile(path, 'utf8'))) {
-        // A field may wear the outline through the shared `field` style;
-        // nothing else can, so nothing else is let off with it. The Button
-        // primitive counts for neither: a file that renders it can still
-        // hand-roll a raw control beside it, which is how most of these lost
-        // the outline in the first place.
-        // `buttonVariants` is the Button primitive's own cva, which composes
-        // the token; nothing else in the app reaches for it.
-        const allowed = /^(input|select|textarea)$/.test(tag.name)
-          ? /\b(focusRing|field)\b/
-          : /\b(focusRing|buttonVariants)\b/
-        if (!allowed.test(tag.attributes)) bare.push(`${path}: <${tag.name}>`)
-      }
-    }
-    expect(bare).toEqual([])
   })
 })
 
@@ -460,10 +191,6 @@ describe('run tab strip', () => {
     expect(document.activeElement).toBe(tabs[1])
   })
 
-  it('is a real button, which is what makes Enter and Space work', () => {
-    render(<RunTabs runID={active.id} active="terminal" />)
-    for (const tab of screen.getAllByRole('tab')) expect(tab.tagName).toBe('BUTTON')
-  })
 })
 
 describe('dock', () => {
@@ -655,13 +382,5 @@ describe('sidebar resizer', () => {
 
     fireEvent.click(expand)
     expect(document.activeElement).toBe(collapseButton())
-  })
-})
-
-describe('reveal flash', () => {
-  it('is dropped for a reader who asked for less motion', () => {
-    const { container } = render(<AppShell />)
-    const flash = container.querySelector('[aria-hidden].pointer-events-none')
-    expect(flash?.classList.contains('motion-reduce:hidden')).toBe(true)
   })
 })

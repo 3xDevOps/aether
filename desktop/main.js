@@ -286,7 +286,7 @@ function main() {
         : { frame: false }),
       // Matches the dashboard's --background token, so a frameless window
       // does not flash white before the SPA paints.
-      backgroundColor: '#05070f',
+      backgroundColor: '#050a0e',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,

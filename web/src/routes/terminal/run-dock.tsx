@@ -168,17 +168,26 @@ export function RunDock({ runID }: { runID: string }) {
       onToggleCollapse={() => setDockCollapsed(runID, !dock.collapsed)}
     >
       {showing === 'unavailable' ? (
-        <div {...takesFocus} className={cn(focusRing, 'p-3 text-sm text-muted-foreground')}>
+        <div
+          {...takesFocus}
+          className={cn(focusRing, 'bg-muted/10 p-4 text-[13px] leading-5 text-muted-foreground')}
+        >
           {pauseKnown
             ? 'Run shell unavailable: this run has no live container. The Terminal tab replays its recorded output.'
             : 'Run shell unavailable: waiting for the run pause state.'}
         </div>
       ) : showing === 'refused' ? (
-        <div {...takesFocus} className={cn(focusRing, 'p-3 text-sm text-muted-foreground')}>
+        <div
+          {...takesFocus}
+          className={cn(
+            focusRing,
+            'bg-state-failed/10 p-4 text-[13px] leading-5 text-state-failed',
+          )}
+        >
           {dock.refusedMessage}
         </div>
       ) : showing === 'closed' ? (
-        <div {...takesFocus} className={cn(focusRing, 'p-3')}>
+        <div {...takesFocus} className={cn(focusRing, 'flex items-center bg-muted/10 p-4')}>
           <Button type="button" size="sm" onClick={open}>
             Open shell
           </Button>
