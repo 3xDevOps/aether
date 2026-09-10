@@ -263,6 +263,80 @@ describe('dock', () => {
     }
   })
 
+  it('closes removable tabs by pointer or key and repairs focus', () => {
+    const onSelectTab = vi.fn()
+    const onCloseTab = vi.fn()
+    const props = {
+      tabs: [
+        { id: 'main', label: 'Main', permanent: true },
+        { id: 'logs', label: 'Logs' },
+        { id: 'build', label: 'Build' },
+      ],
+      activeTab: 'main',
+      onSelectTab,
+      onCloseTab,
+      maxTabs: 4,
+      height: 240,
+      onHeightChange: vi.fn(),
+      collapsed: false,
+      onToggleCollapse: vi.fn(),
+      children: <div>terminal</div>,
+    }
+    const { rerender } = render(<Dock {...props} />)
+    const main = screen.getByRole('tab', { name: 'Main' })
+    main.focus()
+    const logs = screen.getByRole('tab', { name: 'Logs' })
+    const closeLogs = logs.querySelector('[data-tab-close]')
+    expect(closeLogs).not.toBeNull()
+    fireEvent.pointerDown(closeLogs!)
+    expect(onCloseTab).not.toHaveBeenCalled()
+    fireEvent.click(closeLogs!)
+
+    expect(onCloseTab).toHaveBeenCalledWith('logs')
+    expect(onSelectTab).not.toHaveBeenCalled()
+    expect(logs.getAttribute('aria-keyshortcuts')).toBe('Delete Backspace')
+    expect(main.querySelector('[data-tab-close]')).toBeNull()
+
+    rerender(<Dock {...props} tabs={[props.tabs[0], props.tabs[2]]} />)
+    const build = screen.getByRole('tab', { name: 'Build' })
+    expect(document.activeElement).toBe(build)
+
+    fireEvent.keyDown(build, { key: 'Delete' })
+    expect(onCloseTab).toHaveBeenLastCalledWith('build')
+    rerender(<Dock {...props} tabs={[props.tabs[0]]} />)
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Main' }))
+
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Main' }), { key: 'Backspace' })
+    expect(onCloseTab).toHaveBeenCalledTimes(2)
+  })
+
+  it('moves focus to Add terminal tab after the last tab closes', () => {
+    const onCloseTab = vi.fn()
+    const props = {
+      tabs: [{ id: 'shell', label: 'Shell' }],
+      activeTab: 'shell',
+      onSelectTab: vi.fn(),
+      onAddTab: vi.fn(),
+      onCloseTab,
+      maxTabs: 4,
+      height: 240,
+      onHeightChange: vi.fn(),
+      collapsed: false,
+      onToggleCollapse: vi.fn(),
+      children: <div>terminal</div>,
+    }
+    const { rerender } = render(<Dock {...props} />)
+    const shell = screen.getByRole('tab', { name: 'Shell' })
+    shell.focus()
+    fireEvent.keyDown(shell, { key: 'Backspace' })
+    expect(onCloseTab).toHaveBeenCalledWith('shell')
+
+    rerender(<Dock {...props} tabs={[]} activeTab="" />)
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Add terminal tab' }),
+    )
+  })
+
   it('keeps the tab stop on the selected tab when another closes', () => {
     const { rerender } = render(
       <Dock

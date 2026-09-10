@@ -121,7 +121,50 @@ export function Dock({
     tabs.findIndex((tab) => tab.id === activeTab),
   )
   const [focused, setFocused] = useState(index)
-  useEffect(() => setFocused(index), [index, tabs.length])
+  // A consumer may remove the requested tab after an async store update. Keep
+  // its position until it is actually gone, then focus the surviving DOM tab.
+  const pendingClose = useRef<{
+    id: string
+    index: number
+    focus: Element | null
+  } | null>(null)
+  const focusRepairLength = useRef<number | null>(null)
+  const addTab = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (focusRepairLength.current === tabs.length) {
+      focusRepairLength.current = null
+      return
+    }
+    setFocused(index)
+  }, [index, tabs.length])
+  useLayoutEffect(() => {
+    const close = pendingClose.current
+    if (!close || tabs.some((tab) => tab.id === close.id)) return
+    const focusWasLostWithClosedTab =
+      document.activeElement === close.focus ||
+      (document.activeElement === document.body &&
+        close.focus !== null &&
+        !close.focus.isConnected)
+    pendingClose.current = null
+    if (!focusWasLostWithClosedTab) return
+    focusRepairLength.current = tabs.length
+    const next = tabs.length === 0 ? -1 : Math.min(close.index, tabs.length - 1)
+    if (next < 0) {
+      setFocused(0)
+      addTab.current?.focus()
+      return
+    }
+    setFocused(next)
+    headerRef.current?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus()
+  }, [tabs])
+  const requestClose = useCallback(
+    (tab: DockTab, tabIndex: number) => {
+      if (!onCloseTab || tab.permanent) return
+      pendingClose.current = { id: tab.id, index: tabIndex, focus: document.activeElement }
+      onCloseTab(tab.id)
+    },
+    [onCloseTab],
+  )
   const stop = Math.min(focused, tabs.length - 1)
   // Enter collapses, which unmounts this handle, so focus moves to the toggle
   // before the pane goes: that button is in the header either way.
@@ -212,6 +255,8 @@ export function Dock({
                   activeTab === tab.id && 'border-b-primary text-foreground',
                 )}
               >
+                {/* Prevent the native tab button from taking focus or activating
+                    before the close has completed. */}
                 <button
                   type="button"
                   role="tab"
@@ -220,39 +265,73 @@ export function Dock({
                   aria-controls={
                     !collapsed && activeTab === tab.id ? panelID : undefined
                   }
+                  aria-keyshortcuts={
+                    onCloseTab && !tab.permanent ? 'Delete Backspace' : undefined
+                  }
                   tabIndex={i === stop ? 0 : -1}
                   className={cn(
                     focusRing,
-                    'min-h-9 min-w-0 max-w-40 truncate rounded-none border-0 px-2.5 py-0 text-[13px] font-medium',
+                    'inline-flex min-h-9 min-w-0 max-w-40 items-center gap-0 truncate rounded-none border-0 px-2.5 py-0 text-[13px] font-medium',
                   )}
                   onFocus={() => setFocused(i)}
-                  onClick={() => onSelectTab(tab.id)}
-                  onKeyDown={(event) =>
-                    onTabListKeyDown(event, tabs.length, stop, setFocused)
-                  }
-                >
-                  {tab.label}
-                </button>
-                {onCloseTab && !tab.permanent && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="mr-0.5 size-[22px] rounded-none"
-                    aria-label={`Close ${tab.label}`}
-                    onClick={(event) => {
+                  onPointerDown={(event) => {
+                    if (
+                      event.button !== 0 ||
+                      !(event.target instanceof Element) ||
+                      !event.target.closest('[data-tab-close]')
+                    ) {
+                      return
+                    }
+                    event.preventDefault()
+                    event.stopPropagation()
+                  }}
+                  onClick={(event) => {
+                    if (
+                      event.button === 0 &&
+                      event.target instanceof Element &&
+                      event.target.closest('[data-tab-close]')
+                    ) {
+                      event.preventDefault()
                       event.stopPropagation()
-                      onCloseTab(tab.id)
-                    }}
-                  >
-                    <X />
-                  </Button>
-                )}
+                      requestClose(tab, i)
+                      return
+                    }
+                    onSelectTab(tab.id)
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      onCloseTab &&
+                      !tab.permanent &&
+                      !event.altKey &&
+                      !event.ctrlKey &&
+                      !event.metaKey &&
+                      !event.shiftKey &&
+                      (event.key === 'Delete' || event.key === 'Backspace')
+                    ) {
+                      event.preventDefault()
+                      requestClose(tab, i)
+                      return
+                    }
+                    onTabListKeyDown(event, tabs.length, stop, setFocused)
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate">{tab.label}</span>
+                  {onCloseTab && !tab.permanent && (
+                    <span
+                      data-tab-close
+                      aria-hidden="true"
+                      className="mr-0.5 inline-flex size-[22px] shrink-0 items-center justify-center rounded-none text-muted-foreground transition-[background-color,color] duration-100 hover:bg-toolbar-hover hover:text-foreground active:bg-toolbar-hover motion-reduce:transition-none"
+                    >
+                      <X className="pointer-events-none size-4" />
+                    </span>
+                  )}
+                </button>
               </div>
             ))}
           </div>
           {onAddTab && (
             <Button
+              ref={addTab}
               type="button"
               variant="ghost"
               size="icon"
