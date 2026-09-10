@@ -328,14 +328,14 @@ export function RepoStep({
       {connected && (
         <div className="min-w-0 space-y-4 border-t border-border/70 py-3">
           <p className="text-sm">
-            Connected <span className="font-mono">{connected.path}</span>.
-            Remote <span className="font-mono">{connected.remote.remote}</span>{' '}
+            Connected <span className="break-all font-mono">{connected.path}</span>.
+            Remote <span className="break-all font-mono">{connected.remote.remote}</span>{' '}
             points at{' '}
-            <span className="font-mono">{connected.remote.url}</span>.{' '}
+            <span className="break-all font-mono">{connected.remote.url}</span>.{' '}
             {connected.remote.origin && (
               <>
                 Runs push to{' '}
-                <span className="font-mono">{connected.remote.origin}</span>.{' '}
+                <span className="break-all font-mono">{connected.remote.origin}</span>.{' '}
               </>
             )}
             {pushed?.state === 'pushed' && (
