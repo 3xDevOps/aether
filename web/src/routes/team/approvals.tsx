@@ -300,7 +300,7 @@ function Row({
             style={{ backgroundColor: decider?.color }}
           />
           {approval.decision === 'approved' ? 'Approved' : 'Denied'} by{' '}
-          <span className="break-words">{decider?.display_name ?? approval.decided_by ?? 'someone'}</span>
+          <span className="min-w-0 break-words">{decider?.display_name ?? approval.decided_by ?? 'someone'}</span>
           {approval.decided_at && ` ${timeAgo(approval.decided_at)}`}
         </p>
       )}
