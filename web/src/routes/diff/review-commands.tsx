@@ -24,22 +24,22 @@ export function ReviewCommands({ run }: { run: RunRecord }) {
   return (
     <section
       aria-label="Review locally"
-      className="basis-full rounded-md border bg-card p-2.5"
+      className="min-w-0 border-b px-3 py-2"
     >
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <div>
-          <h2 className="text-xs font-medium text-foreground">Review locally</h2>
-          <p className="text-xs text-muted-foreground">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="min-w-0">
+          <h2 className="text-[12px] font-medium text-foreground">Review locally</h2>
+          <p className="text-[12px] text-muted-foreground">
             Copy a command to inspect this branch in your repository.
           </p>
         </div>
         {pulled && (
-          <Collapsible className="min-w-0">
-            <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground">
+          <Collapsible className="min-w-0 max-w-full">
+            <CollapsibleTrigger className="max-w-full truncate text-[12px] text-muted-foreground hover:text-foreground">
               fetched {pulled.ref}
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <pre className="mt-2 max-h-48 max-w-full overflow-auto rounded-md border bg-muted/50 p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
+              <pre className="mt-2 max-h-48 max-w-full overflow-auto border bg-sidebar p-2 font-mono text-[12px] leading-5 whitespace-pre-wrap">
                 {pulled.output}
               </pre>
             </CollapsibleContent>

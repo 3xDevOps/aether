@@ -24,7 +24,7 @@ export function MemberAvatar({
       title={name}
       style={member ? { borderColor: member.color } : undefined}
       className={cn(
-        'flex size-5 shrink-0 items-center justify-center rounded-full border-2 text-[9px] font-medium',
+        'flex size-5 shrink-0 items-center justify-center rounded-full border-2 bg-sidebar text-[9px] font-medium',
         className,
       )}
     >

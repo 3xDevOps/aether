@@ -101,6 +101,7 @@ export function CommandPalette() {
     <>
       <CommandDialog
         open={open}
+        showCloseButton={false}
         onOpenChange={(next: boolean) => {
           if (!next) restoreFocus.current = true
           toggle(next)

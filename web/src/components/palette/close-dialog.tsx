@@ -44,22 +44,22 @@ export function CloseDialog() {
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
-        <DialogHeader>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(480px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+        <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Close this run?</DialogTitle>
           <DialogDescription>
             {run ? `"${runLabel(run)}" - ` : ''}The outcome is recorded and the run leaves the
             board. Its branch stays.
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 overflow-y-auto -mx-1 px-1">
+        <div className="min-h-0 min-w-0 overflow-y-auto px-3 py-3 sm:px-4">
           {error && (
-            <p role="alert" className="text-xs text-state-failed">
+            <p role="alert" className="break-words text-xs text-state-failed">
               {error}
             </p>
           )}
         </div>
-        <DialogFooter className="border-t pt-4">
+        <DialogFooter className="border-t px-3 py-3 sm:px-4">
           <Button variant="outline" onClick={close}>
             Cancel
           </Button>

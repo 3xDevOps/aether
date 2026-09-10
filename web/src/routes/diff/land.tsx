@@ -15,7 +15,7 @@ export function Land({ run }: { run: RunRecord }) {
   const [switching, setSwitching] = useState(false)
 
   if (!run.last_commit) {
-    return <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">Nothing committed yet</p>
+    return <p className="border-b border-dashed px-3 py-2 text-[12px] text-muted-foreground">Nothing committed yet</p>
   }
   if (!pull) return null
 
@@ -35,14 +35,14 @@ export function Land({ run }: { run: RunRecord }) {
   return (
     <section
       aria-label="Pulled branch"
-      className="flex flex-wrap items-center gap-2.5 rounded-lg border bg-card px-3 py-2.5 text-sm"
+      className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2 text-[12px]"
     >
-      <GitBranch className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="min-w-0 flex-1">
-        Branch <code className="font-mono text-[13px]">{pull.branch}</code> is on your machine
+      <GitBranch className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-[1_1_16rem]">
+        Branch <code className="break-all font-mono text-[12px]">{pull.branch}</code> is on your machine
       </span>
       {pull.current ? (
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <span className="inline-flex shrink-0 items-center gap-1 text-[12px] text-muted-foreground">
           <Check className="size-3.5 text-state-done" aria-hidden />
           You're on it
         </span>

@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react'
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { useDrag, useWindowHeight } from '@/lib/hooks'
@@ -11,6 +11,8 @@ export interface DockTab {
   label: string
   permanent?: boolean
 }
+
+export type DockContainment = 'viewport' | 'parent'
 
 export interface DockProps {
   tabs: DockTab[]
@@ -24,11 +26,19 @@ export interface DockProps {
   onHeightChange: (height: number) => void
   collapsed: boolean
   onToggleCollapse: () => void
+  /**
+   * Use the immediate parent as a fixed-size boundary, or keep the dock
+   * independent of intrinsic parent sizing and use the viewport cap.
+   */
+  containment?: DockContainment
   actions?: React.ReactNode
   children: React.ReactNode
 }
 
 const minDockHeight = 120
+// The panel needs its guidance, 36px terminal toolbar, and one terminal row.
+const minDockBodyHeight = 96
+const defaultDockHeaderHeight = 36
 
 /** What is left of the window once the shell's own chrome has its share. */
 function maxDockHeight(viewport: number): number {
@@ -50,6 +60,7 @@ export function Dock({
   onHeightChange,
   collapsed,
   onToggleCollapse,
+  containment = 'viewport',
   actions,
   children,
 }: DockProps) {
@@ -60,7 +71,51 @@ export function Dock({
   const dockID = `${id}-dock`
   const viewport = useWindowHeight()
   const beginDrag = useDrag()
-  const max = maxDockHeight(viewport)
+  const dockRef = useRef<HTMLElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
+  const [headerHeight, setHeaderHeight] = useState(defaultDockHeaderHeight)
+  const [parentHeight, setParentHeight] = useState<number | null>(null)
+  // Parent-contained callers give the primary sibling a CSS minimum. Reserve
+  // that declared constraint, rather than its changing flex height.
+  const [primaryMinHeight, setPrimaryMinHeight] = useState(0)
+  useLayoutEffect(() => {
+    const dockElement = dockRef.current
+    if (!dockElement) return
+    const parent = containment === 'parent' ? dockElement.parentElement : null
+    const primary = parent?.firstElementChild
+
+    const measure = () => {
+      const measuredHeader = headerRef.current?.getBoundingClientRect().height ?? 0
+      const measuredPrimary =
+        primary ? Number.parseFloat(getComputedStyle(primary).minHeight) : 0
+      if (measuredHeader > 0) setHeaderHeight(Math.ceil(measuredHeader))
+      setPrimaryMinHeight(
+        Number.isFinite(measuredPrimary) ? Math.max(0, Math.ceil(measuredPrimary)) : 0,
+      )
+      setParentHeight(
+        parent ? Math.max(0, Math.floor(parent.getBoundingClientRect().height)) : null,
+      )
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    if (headerRef.current) observer.observe(headerRef.current)
+    if (primary) observer.observe(primary)
+    if (parent) observer.observe(parent)
+    return () => observer.disconnect()
+  }, [containment])
+  const viewportMax = maxDockHeight(viewport)
+  const requiredMinimum = Math.max(minDockHeight, Math.ceil(headerHeight) + minDockBodyHeight)
+  const max =
+    parentHeight === null
+      ? viewportMax
+      : parentHeight === 0
+        ? 0
+        : Math.max(
+            requiredMinimum,
+            Math.min(viewportMax, Math.max(0, parentHeight - primaryMinHeight)),
+          )
+  const min = Math.min(requiredMinimum, max)
+  const currentHeight = Math.min(max, Math.max(min, height))
   const index = Math.max(
     0,
     tabs.findIndex((tab) => tab.id === activeTab),
@@ -76,17 +131,19 @@ export function Dock({
     (event: React.PointerEvent<HTMLDivElement>) => {
       event.preventDefault()
       const startY = event.clientY
-      const startHeight = height
+      const startHeight = currentHeight
       const drag = beginDrag()
       const move = (ev: PointerEvent) => {
-        onHeightChange(clampDockHeight(startHeight + startY - ev.clientY, viewport))
+        onHeightChange(
+          Math.min(max, Math.max(min, startHeight + startY - ev.clientY)),
+        )
       }
       window.addEventListener('pointermove', move, { signal: drag.signal })
       for (const end of ['pointerup', 'pointercancel']) {
         window.addEventListener(end, () => drag.abort(), { signal: drag.signal })
       }
     },
-    [beginDrag, height, onHeightChange, viewport],
+    [beginDrag, currentHeight, max, min, onHeightChange],
   )
 
   const resizeKey = useCallback(
@@ -98,24 +155,25 @@ export function Dock({
         return
       }
       const next = splitterTarget(event.key, {
-        value: height,
-        min: minDockHeight,
+        value: currentHeight,
+        min,
         max,
         grow: 'ArrowUp',
         shrink: 'ArrowDown',
       })
       if (next === null) return
       event.preventDefault()
-      onHeightChange(clampDockHeight(next, viewport))
+      onHeightChange(Math.min(max, Math.max(min, next)))
     },
-    [height, max, onHeightChange, onToggleCollapse, viewport],
+    [currentHeight, max, min, onHeightChange, onToggleCollapse],
   )
 
   return (
     <section
+      ref={dockRef}
       id={dockID}
-      className="relative flex shrink-0 flex-col border-t border-border/90 bg-card/35"
-      style={collapsed ? undefined : { height: clampDockHeight(height, viewport) }}
+      className="relative flex min-h-0 shrink-0 flex-col border-t border-border bg-sidebar"
+      style={collapsed ? undefined : { height: currentHeight }}
       aria-label="Terminal dock"
     >
       {!collapsed && (
@@ -124,22 +182,25 @@ export function Dock({
           aria-orientation="horizontal"
           aria-label="Resize terminal dock"
           aria-controls={dockID}
-          aria-valuenow={Math.round(clampDockHeight(height, viewport))}
-          aria-valuemin={minDockHeight}
+          aria-valuenow={Math.round(currentHeight)}
+          aria-valuemin={Math.round(min)}
           aria-valuemax={Math.round(max)}
           tabIndex={0}
           onPointerDown={startResize}
           onKeyDown={resizeKey}
           className={cn(
             focusRing,
-            'absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize rounded-sm bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20',
+            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20',
           )}
         />
       )}
-      <div className="flex h-10 min-h-10 items-center gap-1 border-b border-border/75 bg-background/65 px-2">
+      <div
+        ref={headerRef}
+        className="flex min-h-9 flex-wrap items-center gap-x-1 border-b border-border bg-sidebar px-2"
+      >
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <div
-            className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex min-w-0 max-w-full items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             role={tabs.length > 0 ? 'tablist' : undefined}
             aria-label={tabs.length > 0 ? 'Terminal tabs' : undefined}
           >
@@ -147,9 +208,8 @@ export function Dock({
               <div
                 key={tab.id}
                 className={cn(
-                  'flex min-w-0 shrink-0 items-center rounded-md border border-transparent',
-                  activeTab === tab.id &&
-                    'border-primary/20 bg-[var(--accent-soft)] text-[var(--accent-soft-foreground)]',
+                  'flex min-w-0 shrink-0 items-center border-b-2 border-transparent text-muted-foreground',
+                  activeTab === tab.id && 'border-b-primary text-foreground',
                 )}
               >
                 <button
@@ -163,7 +223,7 @@ export function Dock({
                   tabIndex={i === stop ? 0 : -1}
                   className={cn(
                     focusRing,
-                    'min-h-8 min-w-0 max-w-40 truncate rounded-sm px-2.5 py-1.5 text-[13px] font-medium',
+                    'min-h-9 min-w-0 max-w-40 truncate rounded-none border-0 px-2.5 py-0 text-[13px] font-medium',
                   )}
                   onFocus={() => setFocused(i)}
                   onClick={() => onSelectTab(tab.id)}
@@ -178,7 +238,7 @@ export function Dock({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="mr-0.5 size-7 rounded-sm"
+                    className="mr-0.5 size-[22px] rounded-none"
                     aria-label={`Close ${tab.label}`}
                     onClick={(event) => {
                       event.stopPropagation()
@@ -206,14 +266,19 @@ export function Dock({
           {atLimit && (
             // A disabled control shows no tooltip, so the ceiling is written
             // out instead of hidden in a title attribute.
-            <span role="status" className="px-1 text-xs text-muted-foreground">
+            <span role="status" className="px-1 text-[12px] text-muted-foreground">
               At most {maxTabs} tabs
             </span>
           )}
         </div>
-        {actions}
+        {!collapsed && actions && (
+          <div className="flex min-w-0 max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[640px]:order-3 max-[640px]:max-w-full max-[640px]:basis-full max-[640px]:justify-end max-[640px]:border-t max-[640px]:border-border max-[640px]:py-1">
+            {actions}
+          </div>
+        )}
         <Button
           ref={collapse}
+          className="max-[640px]:order-2"
           type="button"
           variant="ghost"
           size="icon"
@@ -230,7 +295,7 @@ export function Dock({
           id={panelID}
           aria-labelledby={tabs[index] ? tabID(tabs[index].id) : undefined}
           tabIndex={tabs.length > 0 ? 0 : undefined}
-          className={cn(focusRing, 'min-h-0 flex-1')}
+          className={cn(focusRing, 'min-h-0 min-w-0 flex-1 overflow-hidden')}
         >
           {children}
         </div>

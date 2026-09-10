@@ -152,27 +152,25 @@ export function LaunchDialog() {
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
-        <DialogHeader>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+        <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Launch a run</DialogTitle>
           <DialogDescription>
-            Start an agent in a container on the workspace&apos;s base branch.
-            Interactive runs open a terminal; headless runs need a task.
+            Start an agent in a container on the workspace&apos;s base branch. Interactive runs open
+            a terminal; headless runs need a task.
           </DialogDescription>
         </DialogHeader>
         <form
           id="launch-run"
-          className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1"
+          className="min-h-0 min-w-0 space-y-3 overflow-y-auto px-3 py-3 sm:px-4"
           onSubmit={(e) => {
             e.preventDefault()
             void launch()
           }}
         >
-          <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-2.5">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Target workspace
-            </p>
-            <p className="mt-1 text-sm" aria-label="Target workspace">
+          <div className="border-y border-border/70 px-2 py-2">
+            <p className="text-xs font-medium text-muted-foreground">Target workspace</p>
+            <p className="mt-0.5 break-words text-[13px]" aria-label="Target workspace">
               {workspace ? (
                 <>
                   <span className="font-medium">{workspace.name}</span>{' '}
@@ -181,9 +179,7 @@ export function LaunchDialog() {
                   </span>
                 </>
               ) : (
-                <span className="text-muted-foreground">
-                  Pick a workspace in the sidebar first.
-                </span>
+                <span className="text-muted-foreground">Pick a workspace in the sidebar first.</span>
               )}
             </p>
           </div>
@@ -197,14 +193,14 @@ export function LaunchDialog() {
               value={task}
               onChange={(e) => setTask(e.target.value)}
             />
-            <span className="block text-xs font-normal text-muted-foreground">
+            <span className="block text-xs leading-4 font-normal text-muted-foreground">
               {mode === 'headless'
                 ? 'Headless runs start with this task and have no terminal.'
                 : 'Leave blank to open an interactive terminal without a seeded task.'}
             </span>
           </Label>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="space-y-1.5 text-sm">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="min-w-0 space-y-1.5 text-sm">
               <Label htmlFor="launch-account">Account</Label>
               <Select value={account} onValueChange={setAccount}>
                 <SelectTrigger id="launch-account">
@@ -220,7 +216,7 @@ export function LaunchDialog() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5 text-sm">
+            <div className="min-w-0 space-y-1.5 text-sm">
               <Label htmlFor="launch-agent">Agent</Label>
               <Select value={harness} onValueChange={setHarness}>
                 <SelectTrigger id="launch-agent" disabled={harnessLoading || launching}>
@@ -236,7 +232,7 @@ export function LaunchDialog() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5 text-sm">
+            <div className="min-w-0 space-y-1.5 text-sm">
               <Label htmlFor="launch-mode">Mode</Label>
               <Select value={mode} onValueChange={(value) => setMode(value as LaunchMode)}>
                 <SelectTrigger id="launch-mode">
@@ -250,17 +246,17 @@ export function LaunchDialog() {
             </div>
           </div>
           {agentError && (
-            <p role="alert" className="rounded-md border border-state-failed/30 bg-state-failed/5 px-3 py-2 text-[13px] text-state-failed">
+            <p role="alert" className="break-words border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-xs text-state-failed">
               {agentError}
             </p>
           )}
           {noAgents && !agentError && (
-            <div className="rounded-md border border-border/70 bg-muted/30 px-3 py-3">
-              <p className="text-sm font-medium">No agent is installed in this account.</p>
-              <p className="mt-1 text-xs text-muted-foreground">
+            <div className="border-y border-border/70 px-2 py-2">
+              <p className="text-[13px] font-medium">No agent is installed in this account.</p>
+              <p className="mt-0.5 text-xs leading-4 text-muted-foreground">
                 Set one up before launching work for this account.
               </p>
-              <Button type="button" size="sm" className="mt-3" onClick={setUpAgent}>
+              <Button type="button" size="sm" className="mt-2" onClick={setUpAgent}>
                 Set up an agent
               </Button>
             </div>
@@ -276,19 +272,19 @@ export function LaunchDialog() {
               Refresh agents
             </Button>
             {account && account !== ownAccountID && (
-              <p className="max-w-[34ch] text-right text-xs text-muted-foreground">
+              <p className="max-w-[34ch] text-right text-xs leading-4 text-muted-foreground">
                 Uses the selected member&apos;s environment, agent login, profile,
                 and vendor quota. You remain its owner and actor.
               </p>
             )}
           </div>
           {needsTask && (
-            <p id="launch-needs-task" className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+            <p id="launch-needs-task" className="border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs text-muted-foreground">
               A headless run has no terminal to type into, so it needs a task.
             </p>
           )}
         </form>
-        <DialogFooter className="border-t pt-4">
+        <DialogFooter className="border-t px-3 py-3 sm:px-4">
           <Button variant="outline" onClick={close}>
             Cancel
           </Button>

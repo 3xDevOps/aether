@@ -21,7 +21,6 @@ import { RunDock } from '@/routes/terminal/run-dock'
 import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
-import type { RunRecord } from '@/store/runs'
 import { initialTerminal } from '@/store/terminal'
 
 const connectionLabel: Record<string, string> = {
@@ -29,17 +28,6 @@ const connectionLabel: Record<string, string> = {
   live: 'Attached',
   reconnecting: 'Reconnecting',
   offline: 'Offline',
-}
-
-/**
- * What a missing session on a finished run says. A run that never started has
- * no transcript because it never got a terminal, and `reason` carries the
- * provisioning failure that explains it - the reader is standing on the
- * Terminal tab, not the Overview tab that renders the reason otherwise.
- */
-function endedMessage(run: RunRecord): string {
-  if (!run.started_at && run.reason) return run.reason
-  return 'This run has ended and left no recorded terminal to replay.'
 }
 
 /**
@@ -195,14 +183,14 @@ function TerminalView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden">
-      <RunHeader run={run} subtitle={`${run.harness} · ${run.branch}`} />
+      <RunHeader run={run} subtitle={run.branch} />
       <RunTabs runID={runID} active="terminal" />
-      <div {...runTabPanel('terminal', 'flex min-h-0 flex-1 flex-col overflow-hidden')}>
-        <div className="flex min-h-11 flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border/75 bg-muted/20 px-4 py-2 text-[13px]">
+      <div {...runTabPanel('terminal', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden')}>
+        <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-sidebar px-3 py-1 text-[13px]">
           {!starting && (
             <span
               className={cn(
-                'shrink-0 rounded-sm border border-border/70 bg-background/70 px-2 py-1 font-medium text-muted-foreground',
+                'shrink-0 rounded-[2px] border border-border bg-background px-2 py-0.5 text-[12px] font-medium text-muted-foreground',
                 state.connection === 'offline' &&
                   'border-state-failed/40 bg-state-failed/10 text-state-failed',
               )}
@@ -244,9 +232,9 @@ function TerminalView({ params }: RouteProps) {
             </span>
           )}
           {state.message && (
-            <span className="min-w-0 flex-1 break-words text-muted-foreground">
+            <span className="min-w-0 flex-1 break-words whitespace-pre-wrap text-muted-foreground">
               {state.refused && sessionMissing && endedStatuses.includes(run.status)
-                ? endedMessage(run)
+                ? 'This run has ended and left no recorded terminal to replay.'
                 : state.message}
             </span>
           )}
@@ -256,12 +244,14 @@ function TerminalView({ params }: RouteProps) {
             </Button>
           )}
         </div>
-        <div className="relative min-h-0 flex-1 overflow-hidden">
-          <TerminalPane key={runID} controller={controller}>
-            {starting && <TerminalSpinner label="Starting the run's container" />}
-          </TerminalPane>
+        <div className="relative min-h-0 flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
+          <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
+            <TerminalPane key={runID} controller={controller}>
+              {starting && <TerminalSpinner label="Starting the run's container" />}
+            </TerminalPane>
+          </div>
+          <RunDock runID={runID} />
         </div>
-        <RunDock runID={runID} />
       </div>
     </div>
   )

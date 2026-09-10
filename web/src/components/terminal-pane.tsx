@@ -79,7 +79,7 @@ function TerminalTools({ controller }: { controller: XtermController }) {
       >
         <Search />
       </ToolButton>
-      <span className="mx-0.5 hidden h-5 w-px bg-border sm:block" aria-hidden />
+      <span className="mx-0.5 hidden h-4 w-px bg-border sm:block" aria-hidden />
       <ToolButton
         type="button"
         variant="ghost"
@@ -119,7 +119,7 @@ function TerminalTools({ controller }: { controller: XtermController }) {
       >
         <RotateCcw />
       </ToolButton>
-      <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+      <span className="mx-0.5 h-4 w-px bg-border" aria-hidden />
       <ToolButton
         type="button"
         variant="ghost"
@@ -179,14 +179,14 @@ function FindBar({
     <div
       role="search"
       aria-label="Find terminal output"
-      className="flex min-h-8 min-w-0 w-full items-center gap-1 rounded-md border border-border/80 bg-card/95 p-1 shadow-md backdrop-blur-sm"
+      className="flex h-8 min-h-8 min-w-0 w-full items-center gap-1 border border-input bg-background px-1"
     >
       <Input
         ref={input}
         aria-label="Find in terminal"
         placeholder="Find"
         value={term}
-        className="h-8 min-w-0 flex-1 sm:w-40"
+        className="h-[26px] min-w-0 flex-1 sm:w-40"
         onChange={(event) => {
           setTerm(event.target.value)
           setMissing(false)
@@ -247,8 +247,8 @@ export function TerminalPane({
   children?: React.ReactNode
 }) {
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <div className="flex h-10 shrink-0 items-center border-b bg-card/45 px-2">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex h-9 min-h-9 shrink-0 items-center border-b border-border bg-sidebar px-2">
         {!controller.findOpen ? (
           <TerminalTools controller={controller} />
         ) : (
@@ -257,7 +257,7 @@ export function TerminalPane({
       </div>
       <div
         ref={controller.hostRef}
-        className={cn('min-h-0 flex-1 bg-background p-2 text-foreground', className)}
+        className={cn('min-h-0 flex-1 overflow-hidden bg-background p-2 text-foreground', className)}
       />
       {children}
     </div>
@@ -273,7 +273,7 @@ export function TerminalSpinner({ label }: { label: string }) {
   return (
     <div
       role="status"
-      className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
+      className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background text-[13px] text-muted-foreground"
     >
       <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
       {label}

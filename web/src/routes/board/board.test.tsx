@@ -157,6 +157,35 @@ describe('board', () => {
     expect(card.querySelector('.lucide-git-branch')).toBeNull()
   })
 
+  it('does not open a card when selecting its attention explanation', () => {
+    const attention = run({
+      id: 'run_attention',
+      task: 'waiting on a question',
+      status: 'needs-attention',
+      reason: 'stalled: no output or fi',
+    })
+    seed([attention])
+    render(<Board />)
+
+    const card = screen.getByRole('article')
+    const explanation = within(card).getByText(attention.reason!)
+    const range = document.createRange()
+    range.selectNodeContents(explanation)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    fireEvent.click(card)
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+
+    selection?.removeAllRanges()
+    fireEvent.click(card)
+    expect(useStore.getState().route).toEqual({
+      name: 'terminal',
+      params: { runId: attention.id },
+    })
+  })
+
   it('shows only the active workspace, and follows a switch', () => {
     seed([working, elsewhere])
     render(<Board />)

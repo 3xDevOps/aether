@@ -475,13 +475,13 @@ export function ActivityRail({
                   <span
                     aria-hidden
                     title={inboxError ?? 'Requests waiting on a decision'}
-                    className="absolute right-1 top-1 min-w-3 rounded-sm bg-state-needs-attention/15 px-0.5 text-[10px] font-medium leading-3 text-state-needs-attention"
+                    className="absolute bottom-1 right-1 flex"
                   >
                     <Chip
                       color="warning"
                       variant="soft"
                       size="sm"
-                      className="bg-state-needs-attention/15 text-state-needs-attention"
+                      className="!h-4 !min-h-4 !min-w-4 !rounded-sm !px-0.5 !text-[10px] font-medium !leading-3 bg-state-needs-attention/15 text-state-needs-attention"
                     >
                       <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
                     </Chip>
@@ -579,7 +579,7 @@ function RunRow({ entry }: { entry: SidebarRun }) {
         className={cn(entry.state === 'working' && 'state-pulse')}
       />
       <span className="truncate">{runLabel(entry.run)}</span>
-      <span className="ml-auto shrink-0 text-muted-foreground">
+      <span className={cn('ml-auto shrink-0', !selected && 'text-muted-foreground')}>
         {entry.run.harness}
       </span>
     </button>

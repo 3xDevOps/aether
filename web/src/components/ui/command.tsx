@@ -21,7 +21,7 @@ function Command({
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        'flex h-full w-full flex-col overflow-hidden rounded-[4px] bg-popover text-popover-foreground',
+        'flex min-h-0 h-auto w-full flex-col overflow-hidden rounded-[4px] bg-popover text-popover-foreground',
         className,
       )}
       {...props}
@@ -49,11 +49,11 @@ function CommandDialog({
   return (
     <Dialog {...props}>
       <DialogContent
-        overlayClassName="bg-scrim/20"
+        overlayClassName="!bg-transparent"
         onOpenAutoFocus={onOpenAutoFocus}
         onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
-          "top-[43px] max-h-[calc(100dvh-51px)] max-w-[min(600px,calc(100%-2rem))] translate-y-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0 shadow-none sm:max-w-[min(600px,calc(100%-2rem))]",
+          'top-[43px] min-h-0 max-h-[calc(100dvh-51px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-border/90 bg-popover p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:max-w-[min(600px,calc(100%-1rem))]',
           className,
         )}
         showCloseButton={showCloseButton}
@@ -102,7 +102,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        'max-h-[min(520px,calc(100dvh-90px))] scroll-py-1 overflow-x-hidden overflow-y-auto',
+        'max-h-[min(520px,calc(100dvh-78px))] scroll-py-1 overflow-x-hidden overflow-y-auto',
         className,
       )}
       {...props}
