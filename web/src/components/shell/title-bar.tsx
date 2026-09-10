@@ -2,8 +2,8 @@ import type { LucideIcon } from 'lucide-react'
 import { Copy, Minus, Square, X } from 'lucide-react'
 import { type CSSProperties, useEffect, useState } from 'react'
 import { Tooltip } from '@/components/ui/heroui'
+import { CommandPaletteTrigger } from '@/components/palette'
 import { cn, focusRing } from '@/lib/utils'
-
 /** The window buttons, present only when the shell draws none of its own. */
 export type DesktopControls = {
   minimize: () => void
@@ -77,7 +77,7 @@ function ControlButton({
             style={NO_DRAG}
             className={cn(
               focusRing,
-              'grid h-full w-[46px] place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
+              'grid h-full w-[46px] place-items-center text-muted-foreground transition-colors hover:bg-toolbar-hover hover:text-foreground',
               className,
             )}
           >
@@ -89,14 +89,16 @@ function ControlButton({
     </Tooltip>
   )
 }
-
 /**
- * The desktop shell's title bar. That window is frameless, so this bar is the
- * only way to move or close the app, and it renders above the whole SPA -
- * error page included. A browser tab has no bridge and gets no bar: it
- * already has the browser's own chrome.
+ * The workbench title/command bar. Electron supplies a frameless window, so
+ * its drag region and native controls are drawn here. Browsers receive the
+ * same compact command bar, but never fake window controls.
  */
-export function TitleBar() {
+export function TitleBar({
+  commandPaletteDisabled = false,
+}: {
+  commandPaletteDisabled?: boolean
+} = {}) {
   const desktop = desktopBridge()
   const controls = desktop?.controls
   const [maximized, setMaximized] = useState(false)
@@ -105,8 +107,6 @@ export function TitleBar() {
     if (!controls) return
     let live = true
     controls.isMaximized().then((value) => {
-      // The query can resolve after the bar is gone; a set then is a warning
-      // at best and a write into a dead tree at worst.
       if (live) setMaximized(value)
     })
     const stop = controls.onMaximizedChange(setMaximized)
@@ -116,28 +116,37 @@ export function TitleBar() {
     }
   }, [controls])
 
-  if (!desktop) return null
-
   return (
     <header
       aria-label="Aether"
       style={{
-        ...DRAG,
-        // macOS keeps its native traffic lights; the bar leaves room for them
-        // rather than letting the lockup sit underneath.
-        paddingInlineStart: controls ? undefined : '78px',
+        ...(desktop ? DRAG : {}),
+        // macOS keeps its native traffic lights; reserve their inset only for
+        // the Electron bar, never for a browser viewport.
+        ...(desktop && !controls
+          ? { paddingInlineStart: '78px', paddingInlineEnd: '78px' }
+          : {}),
       }}
-      className="relative z-50 flex h-9 shrink-0 select-none items-center border-b border-border/80 bg-background/95 text-foreground backdrop-blur"
+      className={cn(
+        'relative z-50 grid h-[35px] shrink-0 select-none grid-cols-[minmax(36px,1fr)_minmax(0,600px)_minmax(36px,1fr)] items-center border-b border-border bg-sidebar text-foreground max-[767px]:grid-cols-[36px_minmax(0,1fr)_36px]',
+        desktop && 'backdrop-blur',
+      )}
     >
-      <div className="flex items-center gap-2.5 px-3">
-        <img src="/aether-mark.png" alt="" aria-hidden className="h-4 w-auto" />
-        <span className="font-pixel text-[19px] leading-none tracking-wide text-foreground">
+      <div className="flex min-w-0 shrink items-center gap-2 px-3 max-[767px]:justify-center max-[767px]:px-0">
+        <img src="/aether-mark.png" alt="" aria-hidden className="h-4 w-auto shrink-0" />
+        <span className="font-pixel text-[18px] leading-none tracking-wide text-foreground max-[767px]:hidden">
           aether
         </span>
       </div>
 
+      <div className="flex min-w-0 w-full items-center justify-center">
+        <div style={NO_DRAG} className="flex min-w-0 w-full max-w-[600px]">
+          <CommandPaletteTrigger disabled={commandPaletteDisabled} />
+        </div>
+      </div>
+
       {controls && (
-        <div className="ml-auto flex h-full items-center">
+        <div className="flex h-full shrink-0 items-center justify-self-end">
           <ControlButton label="Minimize" icon={Minus} onClick={controls.minimize} />
           <ControlButton
             label={maximized ? 'Restore' : 'Maximize'}

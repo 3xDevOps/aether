@@ -21,12 +21,12 @@ export function CollapsibleTrigger({
       data-slot="collapsible-trigger"
       className={cn(
         focusRing,
-        'flex w-full cursor-pointer items-center gap-1.5 text-left [&[data-state=open]>svg]:rotate-90',
+        'flex min-h-[22px] w-full cursor-pointer items-center gap-1 px-1 text-left text-[13px] leading-5 hover:bg-toolbar-hover [&[data-state=open]>svg]:rotate-90',
         className,
       )}
       {...props}
     >
-      <ChevronRightIcon className="size-3.5 shrink-0" />
+      <ChevronRightIcon className="size-3 shrink-0" />
       {children}
     </CollapsiblePrimitive.Trigger>
   )

@@ -5,7 +5,6 @@
    stylesheet also installs a second base/theme and changes shadcn's
    --accent/--muted meanings, so only the components used by the workbench
    are included here. */
-@import '@heroui/styles/components/tabs.css' layer(components);
 @import '@heroui/styles/components/chip.css' layer(components);
 @import '@heroui/styles/components/tooltip.css' layer(components);
 
@@ -50,47 +49,52 @@
   text-spacing-trim: space-all;
 }
 
-/* Design tokens. The dashboard uses one cool neutral palette in both modes;
-   HeroUI's private aliases below point at these values without redefining the
-   shadcn --accent or --muted semantics. */
+/* Design tokens. These values follow VS Code Dark Modern and Light Modern.
+   Surface roles stay neutral so adjoining workbench panes read as one
+   workspace; state colors remain separate from interaction blue. */
 :root {
   color-scheme: light;
-  --radius: 0.5rem;
+  --radius: 2px;
   --font-pixel: 'VT323', monospace;
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: system-ui, Ubuntu, 'Droid Sans', sans-serif;
   --font-mono: 'JetBrainsMono NFM', ui-monospace, SFMono-Regular, monospace;
 
-  --background: oklch(0.985 0.004 240);
-  --foreground: oklch(0.2 0.015 240);
-  --card: oklch(0.998 0.002 240);
+  --background: #ffffff;
+  --foreground: #3b3b3b;
+  --card: #ffffff;
   --card-foreground: var(--foreground);
-  --popover: oklch(0.998 0.002 240);
+  --popover: var(--widget);
   --popover-foreground: var(--foreground);
-  /* Dark enough for white text to clear AA at the normal button size. */
-  --primary: oklch(0.49 0.105 174);
-  --primary-foreground: oklch(0.99 0 0);
-  --sidebar: oklch(0.965 0.008 240);
-  --secondary: oklch(0.948 0.01 240);
+  --primary: #005fb8;
+  --primary-hover: #0258a8;
+  --primary-foreground: #ffffff;
+  --sidebar: #f8f8f8;
+  --secondary: #f8f8f8;
   --secondary-foreground: var(--foreground);
-  --muted: oklch(0.948 0.01 240);
-  --muted-foreground: oklch(0.43 0.02 240);
-  --accent: oklch(0.925 0.014 240);
+  --muted: #f8f8f8;
+  --muted-foreground: #616161;
+  --accent: #f2f2f2;
   --accent-foreground: var(--foreground);
-  --destructive: oklch(0.56 0.19 26);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.87 0.015 240);
-  --input: oklch(0.63 0.02 240);
-  --ring: oklch(0.49 0.105 174);
-  --scrollbar-thumb: oklch(0.62 0.03 240 / 0.48);
-  --scrollbar-thumb-hover: oklch(0.52 0.04 240 / 0.7);
-  --scrollbar-track: oklch(0.92 0.01 240 / 0.42);
+  --destructive: #c72e0f;
+  --destructive-foreground: #ffffff;
+  --border: #e5e5e5;
+  /* Modern's #cecece is too faint for a control boundary on white. */
+  --input: #949494;
+  --ring: #005fb8;
+  --selection: #e8e8e8;
+  --selection-foreground: #000000;
+  --toolbar-hover: #f2f2f2;
+  --widget: #ffffff;
+  --scrollbar-thumb: #c1c1c1;
+  --scrollbar-thumb-hover: #a6a6a6;
+  --scrollbar-track: transparent;
 
-  --state-working: oklch(0.62 0.15 250);
-  --state-waiting: oklch(0.72 0.13 85);
-  --state-needs-attention: oklch(0.65 0.19 35);
-  --state-failed: oklch(0.58 0.22 27);
-  --state-done: oklch(0.62 0.13 155);
-  --state-idle: oklch(0.62 0 0);
+  --state-working: #2b6cb0;
+  --state-waiting: #8b6c00;
+  --state-needs-attention: #bc4b00;
+  --state-failed: #c72e0f;
+  --state-done: #2ea043;
+  --state-idle: #6e7681;
 
   /* HeroUI component aliases. These are intentionally separate names because
      HeroUI's `muted` is a foreground color while shadcn's `muted` is a
@@ -103,28 +107,27 @@
   --segment-foreground: var(--card-foreground);
   --focus: var(--ring);
   --separator: var(--border);
-  --backdrop: rgb(15 23 42 / 0.28);
+  --backdrop: rgb(0 0 0 / 0.28);
   --scrim: rgb(0 0 0 / 0.56);
-  --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
-  --overlay-shadow:
-    0 10px 24px rgb(15 23 42 / 0.12), 0 2px 6px rgb(15 23 42 / 0.08);
-  --accent-soft: color-mix(in oklab, var(--primary) 14%, transparent);
+  --surface-shadow: none;
+  --overlay-shadow: 0 4px 12px rgb(0 0 0 / 0.16);
+  --accent-soft: color-mix(in srgb, var(--primary) 14%, transparent);
   --accent-soft-foreground: var(--primary);
   --success: var(--state-done);
-  --success-foreground: oklch(0.18 0.02 155);
-  --success-soft: color-mix(in oklab, var(--state-done) 14%, transparent);
+  --success-foreground: #1f521f;
+  --success-soft: color-mix(in srgb, var(--state-done) 14%, transparent);
   --success-soft-foreground: var(--state-done);
   --warning: var(--state-waiting);
-  --warning-foreground: oklch(0.2 0.02 85);
-  --warning-soft: color-mix(in oklab, var(--state-waiting) 16%, transparent);
-  --warning-soft-foreground: oklch(0.42 0.1 75);
+  --warning-foreground: #5c4500;
+  --warning-soft: color-mix(in srgb, var(--state-waiting) 16%, transparent);
+  --warning-soft-foreground: var(--state-waiting);
   --danger: var(--destructive);
   --danger-foreground: var(--destructive-foreground);
-  --danger-soft: color-mix(in oklab, var(--destructive) 14%, transparent);
+  --danger-soft: color-mix(in srgb, var(--destructive) 14%, transparent);
   --danger-soft-foreground: var(--destructive);
-  --field-background: var(--background);
+  --field-background: #ffffff;
   --field-foreground: var(--foreground);
-  --field-placeholder: var(--muted-foreground);
+  --field-placeholder: #767676;
   --ease-smooth: ease;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-out-fluid: cubic-bezier(0.32, 0.72, 0, 1);
@@ -136,79 +139,85 @@
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.14 0.012 240);
-  --foreground: oklch(0.93 0.012 240);
-  --card: oklch(0.175 0.014 240);
+  --background: #1f1f1f;
+  --foreground: #cccccc;
+  --card: #1f1f1f;
   --card-foreground: var(--foreground);
-  --popover: oklch(0.19 0.014 240);
+  --popover: var(--widget);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.78 0.12 174);
-  --primary-foreground: oklch(0.16 0.018 174);
-  --sidebar: oklch(0.155 0.013 240);
-  --secondary: oklch(0.205 0.015 240);
+  --primary: #0078d4;
+  --primary-hover: #026ec1;
+  --primary-foreground: #ffffff;
+  --sidebar: #181818;
+  --secondary: #2b2b2b;
   --secondary-foreground: var(--foreground);
-  --muted: oklch(0.205 0.015 240);
-  --muted-foreground: oklch(0.74 0.015 240);
-  --accent: oklch(0.25 0.018 240);
-  --accent-foreground: var(--foreground);
-  --destructive: oklch(0.66 0.19 27);
-  --destructive-foreground: oklch(0.14 0.012 240);
-  --border: oklch(0.31 0.018 240);
-  --input: oklch(0.51 0.018 240);
-  --ring: oklch(0.78 0.12 174);
-  --scrollbar-thumb: oklch(0.74 0.02 240 / 0.42);
-  --scrollbar-thumb-hover: oklch(0.82 0.03 240 / 0.65);
-  --scrollbar-track: oklch(0.22 0.012 240 / 0.55);
-  --state-working: oklch(0.7 0.14 250);
-  --state-waiting: oklch(0.8 0.12 85);
-  --state-needs-attention: oklch(0.72 0.17 35);
-  --state-failed: oklch(0.68 0.2 25);
-  --state-done: oklch(0.72 0.12 155);
-  --state-idle: oklch(0.58 0 0);
+  --muted: #181818;
+  --muted-foreground: #9d9d9d;
+  --accent: #2a2d2e;
+  --accent-foreground: #ffffff;
+  --destructive: #f85149;
+  --destructive-foreground: #181818;
+  --border: #2b2b2b;
+  /* Modern's #3c3c3c is too faint for a control boundary on #313131. */
+  --input: #7a7a7a;
+  --ring: #0078d4;
+  --selection: #04395e;
+  --selection-foreground: #ffffff;
+  --toolbar-hover: #2a2d2e;
+  --widget: #202020;
+  --scrollbar-thumb: #424242;
+  --scrollbar-thumb-hover: #4f4f4f;
+  --scrollbar-track: transparent;
+
+  --state-working: #3794ff;
+  --state-waiting: #cca700;
+  --state-needs-attention: #e2c08d;
+  --state-failed: #f85149;
+  --state-done: #89d185;
+  --state-idle: #858585;
 
   --default: var(--muted);
   --default-foreground: var(--foreground);
   --overlay: var(--popover);
   --overlay-foreground: var(--popover-foreground);
-  --segment: oklch(0.255 0.018 240);
+  --segment: var(--card);
   --segment-foreground: var(--foreground);
   --focus: var(--ring);
   --separator: var(--border);
   --backdrop: rgb(0 0 0 / 0.56);
   --scrim: rgb(0 0 0 / 0.56);
-  --surface-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
-  --overlay-shadow:
-    0 12px 28px rgb(0 0 0 / 0.32), 0 2px 8px rgb(0 0 0 / 0.24);
-  --accent-soft: color-mix(in oklab, var(--primary) 16%, transparent);
+  --surface-shadow: none;
+  --overlay-shadow: 0 4px 12px rgb(0 0 0 / 0.36);
+  --accent-soft: color-mix(in srgb, var(--primary) 16%, transparent);
   --accent-soft-foreground: var(--primary);
   --success: var(--state-done);
-  --success-foreground: oklch(0.15 0.02 155);
-  --success-soft: color-mix(in oklab, var(--state-done) 16%, transparent);
+  --success-foreground: #d7f7d2;
+  --success-soft: color-mix(in srgb, var(--state-done) 16%, transparent);
   --success-soft-foreground: var(--state-done);
   --warning: var(--state-waiting);
-  --warning-foreground: oklch(0.16 0.02 85);
-  --warning-soft: color-mix(in oklab, var(--state-waiting) 18%, transparent);
+  --warning-foreground: #f5d08a;
+  --warning-soft: color-mix(in srgb, var(--state-waiting) 18%, transparent);
   --warning-soft-foreground: var(--state-waiting);
   --danger: var(--destructive);
   --danger-foreground: var(--destructive-foreground);
-  --danger-soft: color-mix(in oklab, var(--destructive) 18%, transparent);
+  --danger-soft: color-mix(in srgb, var(--destructive) 18%, transparent);
   --danger-soft-foreground: var(--destructive);
-  --field-background: var(--background);
+  --field-background: #313131;
   --field-foreground: var(--foreground);
-  --field-placeholder: var(--muted-foreground);
+  --field-placeholder: #989898;
 }
 
 @theme inline {
-  --radius-xs: 0.25rem;
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
-  --radius-2xl: 1.25rem;
-  --radius-3xl: 1.5rem;
-  --radius-4xl: 2rem;
+  --radius-xs: 0;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+  --radius-3xl: 4px;
+  --radius-4xl: 4px;
 
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: system-ui, Ubuntu, 'Droid Sans', sans-serif;
   --font-mono: 'JetBrainsMono NFM', ui-monospace, SFMono-Regular, monospace;
   --font-pixel: 'VT323', monospace;
 
@@ -220,6 +229,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-sidebar: var(--sidebar);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -231,7 +241,11 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-field: var(--field-background);
   --color-ring: var(--ring);
+  --color-selection: var(--selection);
+  --color-selection-foreground: var(--selection-foreground);
+  --color-toolbar-hover: var(--toolbar-hover);
   --color-state-working: var(--state-working);
   --color-state-waiting: var(--state-waiting);
   --color-state-needs-attention: var(--state-needs-attention);
@@ -286,36 +300,34 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
-    font-feature-settings: 'cv02', 'cv03', 'cv04';
-    font-size: 14px;
+    font-feature-settings: normal;
+    font-size: 13px;
     line-height: 1.4;
   }
 }
 
-/* Chromium uses the pseudo-elements for the rounded treatment. Firefox does
-   not implement them, so it gets the standard scrollbar properties instead. */
+/* VS Code keeps scrollbars rectangular and available in the workbench. */
 @supports not selector(::-webkit-scrollbar) {
   * {
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
+    scrollbar-width: auto;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   }
 }
 
 @supports selector(::-webkit-scrollbar) {
   *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 14px;
+    height: 14px;
   }
 
   *::-webkit-scrollbar-track {
     background: var(--scrollbar-track);
-    border-radius: 999px;
   }
 
   *::-webkit-scrollbar-thumb {
     min-height: 36px;
     border: 3px solid transparent;
-    border-radius: 999px;
+    border-radius: 0;
     background: var(--scrollbar-thumb);
     background-clip: padding-box;
   }
@@ -326,78 +338,28 @@
   }
 
   *::-webkit-scrollbar-corner {
-    background: transparent;
+    background: var(--scrollbar-track);
   }
 }
 @layer components {
+  /* A compact static marker keeps the write-in-progress state visible
+     without adding a decorative glow to the workbench. */
   .steering-signal {
     position: absolute;
     top: 50%;
     left: calc(100% + 0.35rem);
     display: block;
-    width: 3.25rem;
-    height: 1.25rem;
-    color: var(--primary);
+    width: 3px;
+    height: 12px;
+    border-radius: 1px;
+    background: var(--primary);
+    opacity: 0.9;
     pointer-events: none;
     transform: translateY(-50%);
   }
 
-  .steering-signal > span,
-  .steering-signal::before,
-  .steering-signal::after {
-    position: absolute;
-    top: 50%;
-    left: 0;
-    width: 0.85rem;
-    height: 1px;
-    content: '';
-    background: linear-gradient(
-      to right,
-      transparent,
-      currentColor 18%,
-      currentColor 82%,
-      transparent
-    );
-    box-shadow: 0 0 0.35rem currentColor;
-    opacity: 0;
-    transform: translateX(-100%);
-    animation: steering-stream 1.35s linear infinite;
-  }
-
-  .steering-signal::before {
-    top: calc(50% - 0.4rem);
-    animation-delay: 0s;
-  }
-
-  .steering-signal::after {
-    top: calc(50% + 0.4rem);
-    animation-delay: -0.9s;
-  }
-
-  @keyframes steering-stream {
-    0% {
-      opacity: 0;
-      transform: translateX(-100%);
-    }
-    15%,
-    70% {
-      opacity: 0.9;
-    }
-    100% {
-      opacity: 0;
-      transform: translateX(3.25rem);
-    }
-  }
-
-
-  @media (prefers-reduced-motion: reduce) {
-    .steering-signal > span,
-    .steering-signal::before,
-    .steering-signal::after {
-      animation: none;
-      opacity: 0.35;
-      transform: translateX(0);
-    }
+  .steering-signal > span {
+    display: none;
   }
 
   /* The box is the state dot's 0.5rem and the three dots overflow it, so a
@@ -808,42 +770,10 @@
     }
   }
 }
-/* Keep the selected HeroUI surfaces in the same neutral language as shadcn.
-   These rules are component-layer overrides, not a second token palette. */
+
+/* Shared HeroUI refinements stay in the component layer; only
+   content-specific styling lives here. */
 @layer components {
-  .aether-tabs {
-    gap: 0;
-  }
-
-  .aether-tabs .tabs__list-container {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: color-mix(in oklab, var(--muted) 72%, transparent);
-  }
-
-  .aether-tabs .tabs__tab {
-    color: var(--muted-foreground);
-    border-radius: var(--radius-sm);
-  }
-
-  .aether-tabs .tabs__tab[data-selected='true'] {
-    color: var(--foreground);
-  }
-
-  .aether-tabs .tabs__separator {
-    background: var(--border);
-  }
-
-  .aether-tabs .tabs__indicator {
-    border-radius: var(--radius-sm);
-    background: var(--card);
-    box-shadow: none;
-  }
-
-  .aether-tabs .tabs__panel {
-    margin-top: 0.75rem;
-    padding: 0;
-  }
 
   .aether-chip {
     border-radius: var(--radius-sm);

@@ -52,11 +52,13 @@ export function ThemeToggle() {
             variant="ghost"
             size="icon"
             aria-label={`Theme: ${theme}`}
-            onClick={() => {
+            onClick={(event) => {
+              triggerProps.onClick?.(event)
               setTheme(order[(order.indexOf(theme) + 1) % order.length])
             }}
+            className="size-[22px] min-h-[22px] min-w-[22px] rounded-sm"
           >
-            <Icon className="size-4" />
+            <Icon className="size-3.5" />
           </Button>
         )}
       />

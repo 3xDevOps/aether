@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import '@/components/shortcuts'
 import { Slot } from '@/components/slots'
 import { hintOn } from '@/test/tooltip'
@@ -12,6 +13,17 @@ describe('shortcut reference', () => {
     expect(await hintOn(trigger)).toBe('Keyboard shortcuts')
   })
 
+  it('lets Escape dismiss its tooltip before the reference opens', async () => {
+    render(<Slot name="statusbar" />)
+    const trigger = screen.getByRole('button', { name: 'Keyboard shortcuts' })
+
+    expect(await hintOn(trigger)).toBe('Keyboard shortcuts')
+    await userEvent.keyboard('{Escape}')
+
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
+  })
+
   it('opens on Shift+/ and from the trigger', async () => {
     render(<Slot name="statusbar" />)
 
@@ -20,8 +32,6 @@ describe('shortcut reference', () => {
     expect(
       await screen.findByRole('heading', { name: 'Keyboard shortcuts' }),
     ).toBeDefined()
-    // The table names the other global key.
-    expect(screen.getByText('Open the command palette')).toBeDefined()
   })
 
   it('ignores a "?" typed into a field', () => {

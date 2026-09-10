@@ -14,11 +14,12 @@ export const focusRing =
 /** The box a control you can type into draws: one border, padding and type
  * scale across a text field and a select, so a form reads as one row rather
  * than three. `Input`, `Textarea` and `SelectTrigger` compose it; nothing
- * wears it by hand. `border-input` rather than the base layer's
- * `border-border`: the two part in dark, and a generated shadcn control
- * hardcodes `border-input`. */
+ * wears it by hand. The control border intentionally uses `border-input`
+ * instead of the pane-level `border-border`, while `bg-field` keeps the
+ * field surface explicit in both themes. */
 export const field = cn(
   focusRing,
-  'w-full h-9 min-h-9 rounded-sm border border-input bg-background px-3 py-2 text-sm leading-5',
-  'disabled:cursor-not-allowed disabled:opacity-50',
+  'h-[26px] min-h-[26px] w-full rounded-sm border border-input bg-field px-2 py-0 text-[13px] leading-6',
+  'disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-50 disabled:bg-field',
+  'read-only:cursor-default read-only:bg-field read-only:opacity-100',
 )

@@ -1,13 +1,12 @@
-// The command palette. It has no home of its own in the shell, so it rides
-// the status bar's extension slot: the trigger sits in the status bar and the
-// palette itself is a dialog portalled to the document. The launch, inject and
-// forward forms are not here - they are the shell's, in `dialogs.tsx`, so a
-// button on any surface can open one.
+// The command center is mounted once by AppShell. Its trigger is intentionally
+// separate so the title bar can stay the single visible command entry point
+// without creating a second dialog host. Launch, inject, forward and close
+// forms remain in `dialogs.tsx`, hosted beside this component.
 
-import { useEffect, useState } from 'react'
+import { SearchIcon } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { PaletteBody } from '@/components/palette/palette'
 import { TemplateDialog } from '@/components/palette/template-dialog'
-import { registerSlot } from '@/components/slots'
 import { CommandDialog } from '@/components/ui/command'
 import { Tooltip } from '@/components/ui/heroui'
 import { inModal } from '@/lib/keys'
@@ -16,73 +15,125 @@ import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
 const shortcut = 'k'
+const alternateShortcut = 'p'
+
+/** The compact no-drag title-bar entry point for the command center. */
+export function CommandPaletteTrigger({ disabled = false }: { disabled?: boolean } = {}) {
+  const toggle = useStore((s) => s.togglePalette)
+  const activeWorkspace = useStore((s) => s.activeWorkspace)
+  const workspaces = useStore((s) => s.workspaces)
+  const current = activeWorkspace ? workspaces[activeWorkspace]?.name : undefined
+  const context = current ?? (activeWorkspace ? 'Workspace' : 'All workspaces')
+
+  return (
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <button
+            {...triggerProps}
+            type="button"
+            disabled={disabled}
+            onClick={() => toggle(true)}
+            aria-label="Commands"
+            className={cn(
+              focusRing,
+              'flex h-[26px] min-w-0 w-full max-w-[600px] items-center justify-start gap-2 rounded-sm border border-border/70 bg-background/50 px-2 text-[12px] text-muted-foreground transition-colors hover:border-border hover:bg-toolbar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60',
+            )}
+          >
+            <SearchIcon aria-hidden className="size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-left">{context}</span>
+            <span className="hidden shrink-0 font-mono text-[11px] sm:inline">
+              {shortcutLabel('Shift+P')}
+            </span>
+          </button>
+        )}
+      />
+      <Tooltip.Content>Command palette</Tooltip.Content>
+    </Tooltip>
+  )
+}
 
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
   const toggle = useStore((s) => s.togglePalette)
+  const activeWorkspace = useStore((s) => s.activeWorkspace)
+  const workspaces = useStore((s) => s.workspaces)
+  const context = activeWorkspace
+    ? workspaces[activeWorkspace]?.name ?? 'Workspace'
+    : 'All workspaces'
   // The template form is not one of the store's palette dialogs; its open
   // state lives here with the other dialog hosts.
   const [templates, setTemplates] = useState(false)
+  const restoreFocus = useRef(true)
+  const invoker = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== shortcut || !(e.metaKey || e.ctrlKey)) return
+      if (
+        !(
+          e.key.toLowerCase() === shortcut ||
+          (e.key.toLowerCase() === alternateShortcut && e.shiftKey)
+        ) ||
+        !(e.metaKey || e.ctrlKey)
+      )
+        return
       // The app owns this chord whether or not it acts on it: left to the
       // browser, it opens the address bar over whatever is on screen.
       e.preventDefault()
       // A form is a modal step out of the palette; do not stack one on top.
-      // The forms this one hosts are store state, and every other modal is
-      // asked of the event. The palette itself is the exception, because this
-      // is also what closes it. Deliberately not `keyboardBusy`: a terminal
-      // is not a modal, and on a run screen its hidden textarea holds the
-      // focus, so this is the way out of one.
+      // The palette itself is the exception, because this is also what
+      // closes it. A terminal is not a modal, so its hidden textarea can
+      // invoke the palette and receive focus back when it is dismissed.
       const s = useStore.getState()
       if (s.paletteDialog || templates) return
       if (!s.paletteOpen && inModal(e.target)) return
+      // Capture the chord before xterm's target handler and keep it from
+      // becoming terminal input. Guarded modal events deliberately continue
+      // through their normal target path.
+      e.stopPropagation()
       toggle()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
   }, [toggle, templates])
 
   return (
     <>
-      {/* The word drops out below lg, so the label rather than the button's
-          content has to carry the accessible name, and it has to be that same
-          word: voice control matches on what a member can read. */}
-      <Tooltip>
-        <Tooltip.Trigger<'button'>
-          render={(triggerProps) => (
-            <button
-              {...triggerProps}
-              type="button"
-              onClick={() => {
-                toggle(true)
-              }}
-              aria-label="Commands"
-              className={cn(
-                focusRing,
-                'flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-accent hover:text-foreground',
-              )}
-            >
-              <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-border bg-muted px-1 font-mono text-[10px] font-medium text-muted-foreground">
-                {shortcutLabel('K')}
-              </kbd>
-              <span className="hidden lg:inline">Commands</span>
-            </button>
-          )}
-        />
-        <Tooltip.Content>Command palette</Tooltip.Content>
-      </Tooltip>
       <CommandDialog
         open={open}
-        onOpenChange={(next: boolean) => toggle(next)}
+        onOpenChange={(next: boolean) => {
+          if (!next) restoreFocus.current = true
+          toggle(next)
+        }}
+        onOpenAutoFocus={() => {
+          const target = document.activeElement
+          invoker.current =
+            target instanceof HTMLElement && target !== document.body ? target : null
+        }}
+        onCloseAutoFocus={(event) => {
+          const destinationOpen = useStore.getState().paletteDialog !== null || templates
+          if (!restoreFocus.current || destinationOpen) {
+            event.preventDefault()
+            restoreFocus.current = true
+            invoker.current = null
+            return
+          }
+
+          const target = invoker.current
+          restoreFocus.current = true
+          invoker.current = null
+          if (!target?.isConnected || target === document.body) return
+          event.preventDefault()
+          target.focus()
+        }}
         title="Command palette"
-        description="Jump to a run or workspace, steer a run, launch a new one."
-        className="max-h-[calc(100dvh-2rem)] max-w-[min(600px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)] rounded-lg"
+        description={`Jump to a run or workspace, steer a run. Active workspace: ${context}.`}
       >
         <PaletteBody
-          onDone={() => toggle(false)}
+          onDone={(restore = true) => {
+            restoreFocus.current = restore
+            toggle(false)
+          }}
           onTemplates={() => setTemplates(true)}
         />
       </CommandDialog>
@@ -90,5 +141,3 @@ export function CommandPalette() {
     </>
   )
 }
-
-registerSlot('statusbar', 'palette', CommandPalette)

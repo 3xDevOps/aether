@@ -58,7 +58,10 @@ export function TimelineStatus() {
             onClick={() => {
               navigate('timeline')
             }}
-            className={cn(focusRing, 'flex items-center gap-1 rounded px-1 hover:text-foreground')}
+            className={cn(
+              focusRing,
+              'flex h-[22px] items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
+            )}
           >
             <History className="size-3.5" aria-hidden />
             Activity

@@ -67,6 +67,25 @@ describe('Sidebar', () => {
     expect(useStore.getState().sidebarCollapsed).toBe(false)
   })
 
+  it('toggles the sidebar from Ctrl+B without involving terminal input', () => {
+    render(<Sidebar />)
+    const terminal = document.createElement('div')
+    terminal.className = 'xterm'
+    document.body.append(terminal)
+    onTestFinished(() => terminal.remove())
+
+    fireEvent.keyDown(terminal, { key: 'b', ctrlKey: true })
+    expect(useStore.getState().sidebarCollapsed).toBe(false)
+
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
+    expect(useStore.getState().sidebarCollapsed).toBe(true)
+    expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
+
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
+    expect(useStore.getState().sidebarCollapsed).toBe(false)
+    expect(screen.getByRole('complementary', { name: 'Runs' })).toBeDefined()
+  })
+
   it('toggles at a narrow width without writing the stored preference', () => {
     // A member who stored a collapsed sidebar, then narrows the window and
     // glances at the run list, must not have that glance stored.

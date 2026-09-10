@@ -40,16 +40,15 @@ export function SelectTrigger({
       data-slot="select-trigger"
       className={cn(
         field,
-        'flex items-center justify-between gap-2 text-left',
-        'data-[placeholder]:text-muted-foreground',
-        '[&>span]:truncate [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4',
+        'h-[26px] min-h-[26px] rounded-[2px] px-2 py-0 text-[13px] leading-6 flex items-center justify-between gap-2 text-left',
+        '[&>span]:min-w-0 [&>span]:flex-1 [&>span]:truncate data-[placeholder]:text-muted-foreground aria-[invalid=true]:border-destructive',
         className,
       )}
       {...props}
     >
       {children}
       <SelectPrimitive.Icon asChild>
-        <ChevronDownIcon className="opacity-50" />
+        <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   )
@@ -70,8 +69,8 @@ function SelectScrollButton({
       : SelectPrimitive.ScrollDownButton
   const Icon = direction === 'up' ? ChevronUpIcon : ChevronDownIcon
   return (
-    <Button className="flex cursor-default items-center justify-center py-1" {...props}>
-      <Icon className="size-4" />
+    <Button className="flex h-[22px] min-h-[22px] cursor-default items-center justify-center py-0" {...props}>
+      <Icon className="size-3.5" />
     </Button>
   )
 }
@@ -87,7 +86,7 @@ export function SelectContent({
         data-slot="select-content"
         position="popper"
         className={cn(
-          'relative z-50 max-h-64 min-w-32 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg outline-none',
+          'relative z-50 max-h-[min(320px,calc(var(--radix-select-content-available-height,100dvh)-4px),calc(100dvh-16px))] min-w-32 overflow-hidden rounded-[4px] border bg-popover text-popover-foreground shadow-overlay outline-none',
           'data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1',
           className,
         )}
@@ -116,14 +115,14 @@ export function SelectItem({
         // The item sits flush against its neighbours, so the outline is drawn
         // inside it, as a menu item's is.
         'focus-visible:-outline-offset-2',
-        'relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex min-h-[22px] cursor-default items-center gap-2 rounded-[2px] py-0 pr-8 pl-2 text-[13px] leading-5 select-none data-[highlighted]:bg-selection data-[highlighted]:text-selection-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
       {...props}
     >
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
       <SelectPrimitive.ItemIndicator className="absolute right-2 flex items-center">
-        <CheckIcon className="size-4" />
+        <CheckIcon className="size-3.5" />
       </SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>
   )

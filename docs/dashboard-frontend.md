@@ -2,9 +2,14 @@
 
 The browser client the server embeds and serves. Next.js 16.3.4 produces the
 static export, while React 19 + TypeScript render the client runtime, Tailwind
-v4 and shadcn/ui (new-york, neutral, CSS variables) provide the base style,
-selected HeroUI v3 wrappers provide Tabs, Chip and Tooltip, and Zustand holds
+v4 and shadcn/ui primitives with CSS variables provide the base style,
+selected HeroUI v3 wrappers provide Chip and Tooltip, and Zustand holds
 the state.
+
+The visual contract is a VS Code-inspired developer workbench, not an official
+reusable VS Code component package. It follows VS Code Dark Modern and Light
+Modern semantics, dense flat panes and compact controls while preserving
+Aether's routes, capabilities, run states and startup behavior.
 
 The gateway it talks to is documented in `docs/local-gateway.md`; this guide
 describes the dashboard's public route, store, and component structure.
@@ -140,7 +145,11 @@ The slots that exist:
 | `card:badges` | `{ run }` | the run card's title row, after the paused and unseen markers |
 | `card:chips` | `{ run }` | the wrapping row under the task, beside harness and branch |
 | `card:footer` | `{ run }` | the card's bottom row, right of the owner and timestamp |
-| `statusbar` | none | the status bar, left of the theme toggle |
+| `statusbar` | none | the status bar, for refresh, shortcuts and other live contributors |
+
+The `statusbar` Slot is mounted once, even when narrow layouts collapse its
+details. The command palette is not a status contributor; it has one
+independent host in `AppShell`.
 
 Card slot content sits above the card's click overlay, so a contributor may
 render its own links and buttons; everything else on the card is one target
@@ -149,16 +158,20 @@ badges () belong in these slots, not in `run-card.tsx`.
 
 ## Sidebar
 
-`src/components/shell/sidebar.tsx` is a workspace switcher over a flat list of
-that workspace's runs, with the nav for every other view under it. Its
-workspace band is 48px tall; the runs header and navigation use compact rows
-with a 36px minimum height. There is no run tree: one workspace is in view at a
-time, so the runs group instead by state or by owning member (the `groupBy`
-preference, persisted). The only stored collapse state is the whole sidebar's.
-At 1000px and narrower it auto-collapses to a 40px rail without changing that
-preference; at 640px and narrower an expanded sidebar overlays the center
-content and remains keyboard reachable through **Expand sidebar**.
-The width handle remains a keyboard and pointer window splitter (see
+`src/components/shell/sidebar.tsx` owns the resizable workspace/run sidebar
+beside a persistent 48px activity rail. The rail carries existing navigation,
+capability gates, accessible labels and tooltips, a 2px active indicator and
+overflow when all destinations do not fit. The adjacent sidebar is a preferred
+260px wide and remains constrained to 200-520px.
+
+The sidebar is a workspace switcher over a flat list of that workspace's runs.
+There is no run tree: one workspace is in view at a time, so the runs group
+instead by state or by owning member (`groupBy`, persisted). Rows and headers
+are compact rather than a lower navigation card. At 1000px and narrower the
+adjacent workspace/run pane collapses into the persistent activity rail, which
+exposes **Expand sidebar** without changing the stored preference. At 640px and
+narrower an expanded pane overlays the center from the rail's right edge. The
+width handle remains a keyboard and pointer window splitter (see
 [Keyboard and focus](#keyboard-and-focus)).
 
 - **The switcher sits above everything it scopes**, and appears only when there
@@ -174,31 +187,18 @@ The width handle remains a keyboard and pointer window splitter (see
   stall that landed while the member was elsewhere in the app.
 - **The header carries New run and the grouping.** New run opens the launch
   form (gated on `canLaunch`). Grouping is a two-segment control, Status and
-  Member, with `aria-pressed` on the current one, so the pressed segment is the
-  state and the other one is the action.
-- **Below the runs, one nav list reaches every other view**, the active entry
-  marked with `aria-current`. Board and All runs lead it, the two
-  whole-workspace views, and neither is gated: both are views of the runs the
-  sidebar already has.
-- **The scope-wide surfaces under them come from `src/lib/surfaces.ts`**, which
-  the palette's "Go to" group renders too, so a surface cannot be named one
-  thing in the sidebar and another in the palette, and neither can forget its
-  gate. Each is gated on the method or local verb that powers its view, so a
-  gateway that cannot serve a surface never shows the way in. Approvals and
-  Activity lead that list: the inbox is where an agent's permission request
-  waits for a human, and they and Members are the only three of these surfaces
-  whose method is on the legacy remote allowlist in `src/store/hooks.ts`.
-  Approvals carries the pending count
-  in its accessible name; the status bar keeps its own copy of that count for
-  when the member is looking elsewhere.
-- **The width handle is a window splitter**, keyboard included: see
-  [Keyboard and focus](#keyboard-and-focus).
-- **A nav entry is named what the view it opens is titled**, as are the
-  Approvals and Activity tooltips in the status bar: a member who arrived from
-  one is looking for that word again to come back. This is why the entry for
-  `routes/workspaces/` is "Manage workspaces" everywhere rather than
-  "Workspaces" - the palette already heads its jump-to-a-workspace group with
-  that word, and those items open a single workspace instead.
+  Member, with `aria-pressed` on the current one, so the pressed segment is
+  the state and the other one is the action.
+- **The activity rail reaches every other view**, with the active route marked
+  by `aria-current`. Board and All runs lead it, and scope-wide entries keep
+  the method or local-verb capability gates that power their views.
+- **The rail and palette share the scope-wide surface list** from
+  `src/lib/surfaces.ts`, so a surface cannot be named one thing in navigation
+  and another in the palette, and neither can forget its gate. Approvals
+  carries the pending count in its accessible name; the status bar keeps its
+  own copy for when the member is looking elsewhere.
+- **A nav entry is named what the view it opens is titled**, including
+  `routes/workspaces/` as "Manage workspaces" rather than "Workspaces".
 
 ## Files view
 
@@ -217,14 +217,15 @@ their exact server details and use bounded panels.
 
 ## Title bar
 
-`src/components/shell/title-bar.tsx` is the desktop shell's window chrome.
-The Electron window is frameless, so the SPA draws the bar itself: 36px tall,
-the Aether mark and the `aether` wordmark in VT323 (the display face
-[styles.md](styles.md) describes), and - on Windows and Linux, where the shell
-draws no native buttons - minimize, maximize/restore and close wired to
-`window.aetherDesktop.controls`. The bar is `-webkit-app-region: drag` and
-every button `no-drag`; on macOS the native traffic lights are kept and the
-bar reserves 78px for them instead of drawing buttons.
+`src/components/shell/title-bar.tsx` renders the browser and Electron
+title/command bar at 35px. The command center names the active workspace and
+opens the existing command palette through `togglePalette(true)`.
+
+In Electron the window is frameless, so the SPA draws the bar and its native
+controls: on Windows and Linux, minimize, maximize/restore and close are wired
+to `window.aetherDesktop.controls`; macOS keeps its native traffic lights and
+the bar reserves 78px for them. The bar is `-webkit-app-region: drag` and
+every button is `no-drag`.
 
 The bridge carries one more thing the SPA cannot do for itself:
 `window.aetherDesktop.chooseFolder()` opens the shell's native directory
@@ -238,10 +239,9 @@ reason `shellVersion` exists: a shell built by an older `aether gui build`
 does not have it.
 
 `App.tsx` mounts it above the whole app, the `ConnectionError` page included:
-that page replaces the shell, and a frameless window without a title bar would
-leave an offline user unable to move or close the app. In a browser
-`window.aetherDesktop` is absent, the component renders nothing, and the tab
-keeps the browser's own chrome.
+that page replaces the workbench, while the titlebar and native controls
+remain available in a total failure state. Browser tabs have no Electron
+bridge but still show the command center.
 
 On the first desktop launch, `LaunchSplash` covers the window with the
 original shooting-star scene, Aether mark and VT323 wordmark. It stays for at
@@ -253,52 +253,37 @@ scene's motion details.
 
 ## Window size and overflow
 
-The shell is a fixed column - title bar, update prompts, sidebar and view,
-status bar - and nothing in its own chrome scrolls sideways. A control pushed
-past an edge is unreachable, not merely off screen, so every row states what
-gives way first.
+The shell is a fixed column - 35px title and command bar, update prompts,
+activity rail with its adjacent workspace/run sidebar and center view, and a
+22px status bar - and nothing in its own chrome scrolls sideways. A control
+pushed past an edge is unreachable, not merely off screen, so every row states
+what gives way first.
 
 `desktop/main.js` sets `minWidth: 960` and `minHeight: 600`. That is the size
-the rules below are designed against; a browser tab has no such floor, so they
-degrade below it rather than break.
+the desktop rules are designed against; a browser tab has no such floor, so
+the same rules degrade below it rather than break.
 
 - **Update notices** keep the message, status icon and action hierarchy visible.
   Their actions become a narrow-screen grid and return to a desktop flex row;
   technical output is bounded and expandable, and the dismiss control remains
-  keyboard reachable at 32px.
-- **The status bar** keeps connection state and the theme control visible at
-  every width. From 768px through 1279px, registered status-slot actions stay
-  beside the theme while secondary readouts use a keyboard-reachable
-  `Collapsible` popup. Below 768px those actions join the bounded fixed popup;
-  from 1280px the readouts expand automatically into the inline row.
-  Readouts wrap in the menu, so full error and update text remains available.
-- **The run header** keeps the title, task, branch and harness mode readable.
-  Status is a semantic Chip, and the action group wraps rather than shrinking
-  the labels into an unreachable strip. Terminal tabs remain one keyboard stop
-  with horizontal overflow for the tab list.
+  keyboard reachable.
+- **The status bar** keeps connection state, the theme control and the
+  status-slot contributors reachable at every width. Narrow layouts put
+  secondary readouts in a bounded, keyboard-reachable popup; wide layouts
+  expand them inline. The single status Slot remains mounted while details are
+  collapsed.
+- **The run header** keeps the title, task, branch and harness mode readable
+  with compact 35px headers, 22-28px rows and a wrapping action group.
+  Terminal tabs remain one keyboard stop with internal horizontal overflow.
 - **The board** uses one column on narrow screens and three columns from the
-  medium breakpoint, with compact token cards and vertical scrolling on small
-  screens. Column and run-card state labels remain visible; empty, loading and
-  error panels use the same bounded surface hierarchy.
-- **The sidebar** drops to its rail on its own at 1000px and narrower. That
-  answers the viewport, not the stored preference: expanding it there lasts
-  until the window widens again, and widening restores exactly what the
-  member had stored. At 640px and narrower an expanded sidebar overlays the
-  main view instead of pushing it off screen.
-
-Two end-to-end specs hold these rules. `web/e2e/window-sizing.spec.ts` drives
-the update prompts at the shell's own minimum - it reads `minWidth` and
-`minHeight` out of `desktop/main.js`, so the test and the shell cannot drift
-apart - through the states that carry a button: offered, applying, rebuilding,
-failed and cancelled. It holds every prompt's controls to that prompt's first
-row and the app to the window, and repeats both at a size the shell now
-refuses but a browser tab can still reach.
-`web/e2e/status-bar-sizing.spec.ts` fills the bar from a real server and then
-stops that server, which is how its longest notice comes up without seeding
-the store behind the app's back. It checks keyboard access to the details
-menu, keeps the palette, shortcuts and theme controls in view at 960px and
-800px, checks the full fixed popup at 390px, and preserves the expanded row
-at 1280px without horizontal overflow.
+  medium breakpoint, with compact square run items and vertical scrolling on
+  small screens. State labels remain visible; empty, loading and error panels
+  use the same bounded surface hierarchy.
+- **The workspace/run sidebar** collapses at 1000px and narrower into the
+  persistent 48px activity rail, which exposes **Expand sidebar** without
+  changing the stored preference. At 640px and narrower its expanded pane
+  overlays the main view from the rail's right edge instead of pushing it off
+  screen.
 
 ## Data flow
 
@@ -500,16 +485,17 @@ past-tense name or the server's refusal verbatim. Deleting a run also removes
 it from the local run map after the server confirms deletion.
 - **The command palette** (`src/components/palette/`) is the cmdk palette:
   `⌘K` on macOS and `Ctrl+K` elsewhere, anywhere in the app (see [Keyboard and
-  focus](#keyboard-and-focus)), or the button it registers into the `statusbar`
-  slot (it has no home of its own in the shell, and the dialog portals out of
-  the status bar anyway). It jumps to runs and workspaces - opening a
-  workspace also makes it the active scope, so the sidebar and the board
-  follow - and steers **the run the center view is showing**, any run-detail
-  tab, since it keys on `route.params.runId` rather than on a route name.
-  From the board there is none, so reveal a run first. Its "Go to" group is
-  `src/lib/surfaces.ts` - the gated list the sidebar nav renders below Board
-  and All runs - so a scope-wide surface cannot be reachable from one and not
-  the other.
+  focus](#keyboard-and-focus)), or the command center in the titlebar. Both
+  entry points use the existing toggle action. The palette is mounted exactly
+  once by `AppShell`, independently of the status Slot, and its quick input is
+  top-centered directly under the 35px titlebar, max 600px, with compact
+  bounded rows before the dialog portals to the document.
+  It jumps to runs and workspaces - opening a workspace also makes it the
+  active scope, so the sidebar and the board follow - and steers **the run the
+  center view is showing**, any run-detail tab, since it keys on
+  `route.params.runId` rather than on a route name. From the board there is
+  none, so reveal a run first. Its "Go to" group is `src/lib/surfaces.ts`, the
+  same gated list the activity rail renders.
 - **Visible buttons**, so nothing important is reachable only by a shortcut:
   New run in the sidebar header, in the board header and in the notice an
   empty board shows in place of its columns; every view in the sidebar nav;
@@ -605,10 +591,9 @@ outline utility. Every focusable primitive composes it, including
 buttons, links, menu items, dialog close controls and resize handles use it
 too. Controls that fill a scroll container use the inset variant so the
 outline is not clipped. Keyboard outlines appear immediately, without a
-colour transition. Component tests exercise focusable behavior with real DOM
-nodes; the browser `keyboard-focus` scenario confirms keyboard ordering and
-that a focused control actually paints the outline. Source scans and literal
-class checks are not used as behavior coverage.
+colour transition, and focus remains on a real control when a row or pane
+changes. Verify focus, keyboard and accessibility as observable behavior, not
+CSS class or source-string contracts.
 
 It is an outline rather than a ring, for two reasons. Windows High Contrast
 (`forced-colors: active`) discards box shadows, which is what Tailwind's
@@ -648,7 +633,7 @@ trigger in the status bar. `⌘K` lives with the palette in
 | Key | What it does |
 | --- | --- |
 | `⌘K` / `Ctrl+K` | Open the command palette |
-| `Shift+/` | Open this reference |
+| `⌘Shift+P` / `Ctrl+Shift+P` | Open the command palette |
 | `n` | Launch a run |
 | `g` then `b` | Go to the board |
 | `g` then `l` | Go to all runs |
@@ -664,12 +649,12 @@ guard finds a select by its `combobox` role, since the control is a button.
 The `g` prefix waits 1.5s for the key that completes it, and any key that goes
 somewhere else ends the wait.
 
-`⌘K` is the exception, and has to be: it is modified, so nothing can mistake
-it for typing, and with the terminal holding the focus and swallowing Tab it
-is the way out of a run. It stands down for a modal rather than for anything
-that has the keyboard, through `inModal` and the store flag that names the
-form the shell is hosting. It takes the key from the browser either way, so a
-stand-down cannot land the reader in the address bar.
+The modified palette shortcuts are the exception, and have to be: they cannot
+be mistaken for typing, and with the terminal holding the focus and swallowing
+Tab they are the way out of a run. They stand down for a modal rather than for
+anything that has the keyboard, through `inModal` and the store flag that names
+the form the shell is hosting. They take the key from the browser either way,
+so a stand-down cannot land the reader in the address bar.
 
 That guard reads the event target rather than the document. Radix dismisses an
 overlay from a capturing document listener without stopping the event, and
@@ -695,7 +680,7 @@ document listener that stops the event rather than marking it, so the shell
 never hears that press at all: on a run, the first Escape closes the tooltip
 and the second leaves. Every other key reaches the shell as usual, and a
 tooltip closes on the first of them whatever it is, so a pending `g` is
-untouched. `nav-shortcuts.test.tsx` pins both halves.
+untouched.
 
 Blocking a control with `aria-disabled` rather than `disabled` keeps it in the
 tab order, which is the point; the Styleguide rule below says why. The run
@@ -703,14 +688,13 @@ action bar, its overflow trigger, the terminal toolbar and the diff snapshot
 list all keep their tab stops while their verbs are unavailable, and each
 guards its own handler rather than relying on the browser.
 
-**The modifier is named after the reader's keyboard.** The palette and the
-terminal zoom keys accept Ctrl and Meta alike, because one keyboard sends one
-and the other sends the other; only the printed label has to pick a side, and
-`shortcutLabel` in `src/lib/platform.ts` picks it from the platform. The
-palette badge reads `⌘K` on macOS and `Ctrl+K` everywhere else, and the
-shortcuts dialog says the same thing the badge does. Terminal copy, paste and
-find are Ctrl on every platform, because that is what xterm binds; see
-[terminal.md](terminal.md).
+**The modifier is named after the reader's keyboard.** The palette shortcuts
+and terminal zoom keys accept Ctrl and Meta alike, because one keyboard sends
+one and the other sends the other; only the printed label has to pick a side,
+and `shortcutLabel` in `src/lib/platform.ts` picks it from the platform. The
+palette badges read `⌘K` and `⌘Shift+P` on macOS, or `Ctrl+K` and
+`Ctrl+Shift+P` elsewhere. Terminal copy, paste and find are Ctrl on every
+platform, because that is what xterm binds; see [terminal.md](terminal.md).
 
 **Tab strips behave as tab lists.** The run-detail strip (`tabs.tsx`) and both
 docks (`components/dock.tsx`) carry `role="tablist"`, `aria-selected`, a
@@ -802,8 +786,7 @@ status toolbar also wraps without truncating real gateway errors.
 The dock header is 40px tall and its tab strip scrolls horizontally. Add,
 close and collapse controls stay keyboard and pointer reachable, as does the
 splitter. The shell tab strip is a custom manual tab list with one keyboard stop
-and overflow scrolling; it remains separate from the HeroUI Tabs wrapper used
-for component-level tab surfaces.
+and overflow scrolling; it does not use a component-level tab primitive.
 
 `TerminalPane` keeps xterm's host geometry intact while layering Find, shared
 zoom/reset, and copy/paste controls over it through the existing controller,
@@ -1568,16 +1551,22 @@ wherever the member is an admin.
 
 ## Styleguide
 
-- **Tokens only.** See [styles.md](styles.md) for the cool-neutral palette,
-  mint primary, dark/light values, `--state-*` tokens, radii, fonts and the
-  one inline-colour exception for member attributes. Components use semantic
-  token classes rather than route-specific colour literals.
+- **Tokens only.** See [styles.md](styles.md) for the VS Code-inspired
+  Light Modern and Dark Modern semantics, interaction tokens,
+  `--state-*` tokens, geometry, radii, fonts and the one inline-colour
+  exception for member attributes. Components use semantic token classes rather
+  than route-specific colour literals.
 - **Dark, light, system.** The preference is stored, and `system` follows
   `prefers-color-scheme` live. There is no additional theme mode.
-- **Typography and density.** Geist is the body and UI face from
-  `next/font/local`; JetBrainsMono NFM is terminal and code; VT323 is only the
-  Aether wordmark. The base is 14px with 13px supporting copy, 20-24px titles,
-  and a 4px spacing unit. Controls and cards use the shared radius scale.
+- **Typography and density.** The system UI stack is 13px with 12px
+  supporting copy and 1.4 line height. JetBrainsMono NFM remains terminal and
+  code; VT323 remains only the Aether wordmark and original startup. Use the
+  35/48/35/22/26/22px workbench geometry and avoid promotional titles or
+  oversized cards.
+- **Flat shell and palette host.** Use a 35px title/command bar, persistent
+  48px activity rail and adjacent 200-520px workspace/run sidebar. Mount the
+  command palette once in `AppShell`; keep one status Slot for other live
+  contributors.
 - **Two glyphs, two layers.** The harness glyph says who is running, the state
   dot says what state - never merged into one mark. Presentation states
   (`working`, `waiting`, `needs-attention`, `failed`, `done`, `idle`) are
@@ -1595,10 +1584,13 @@ wherever the member is an admin.
 - **Primitives first.** `src/components/ui/` holds the shadcn/ui pieces:
   `Button`, `Input`, `Textarea`, `Label`, `Select`, `Checkbox`, `Collapsible`,
   `Dialog`, `AlertDialog`, `DropdownMenu`, `Command` and `Skeleton`. These are
-  house copies, retuned to the shared scale and `focusRing`; do not overwrite
-  them with registry defaults. Use them instead of raw form elements. `Input`,
-  `Textarea` and `SelectTrigger` compose the shared `field` style, with
-  `--input` borders, muted placeholders and disabled states.
+  house copies, retuned to the shared scale and `focusRing`, and preserve props,
+  events, refs and accessibility contracts; do not overwrite them with registry
+  defaults. Use them instead of raw form elements. Shared fields and buttons are
+  26px; compact tools are 22px; adjoining panes and rows are square, and
+  controls use bounded 2-4px radii. `Input`, `Textarea` and `SelectTrigger`
+  compose the shared `field` style with contrast-tuned `--input` borders,
+  readable placeholders and explicit disabled/read-only states.
 - **The empty string belongs to the Select placeholder.** Use a named,
   non-empty sentinel for an empty API or filter value, then map it back at
   that boundary. The Select wrapper ignores the empty report Radix can send
@@ -1610,23 +1602,22 @@ wherever the member is an admin.
   supplies the marker. The status bar uses `forceMount` with closed-state
   hiding to retain its live contributors while the popup is closed.
 - **HeroUI has a narrow role.** `src/components/ui/heroui.tsx` wraps HeroUI v3
-  `Tabs`, `Chip` and `Tooltip` and maps them to the house tokens. Use `Tabs`
-  for component-level tab panels, `Chip` for status or metadata, and `Tooltip`
-  for supplemental hover and keyboard help. Run and dock tab strips retain
-  their custom manual tab semantics. A `Chip` takes no `title` of its own, so
-  a pill whose text can be clipped wears one on the span around it.
+  `Chip` and `Tooltip` and maps them to the house tokens. Use `Chip` for status
+  or metadata, and `Tooltip` for supplemental hover and keyboard help. Run and
+  dock tab strips retain their custom manual tab semantics. A `Chip` takes no
+  `title` of its own, so a pill whose text can be clipped wears one on the
+  span around it.
 - **A hint a reader needs is a `Tooltip`, not a `title`.** A `title` is drawn
   by the pointer and by nothing else, so on a control a keyboard can land on
-  it is information that reader can never get at. A tooltip opens on focus as
-  well as hover and points the control's `aria-describedby` at itself. It is a
-  description rather than the name, so an icon-only control keeps its
-  `aria-label`. A `title` stays only on what a keyboard cannot land on - a
-  truncated path, a timestamp, a breakdown - since
-  React Aria makes a tooltip trigger focusable, and a hint on a mark would buy
-  a tab stop per feed row or per card. A mark that names itself needs
-  `role="img"` first: a bare `<span>` is `generic`, and ARIA gives `generic`
-  no name. `primitives.test.tsx` checks every surviving `title` against a
-  written list.
+  it is information that reader can never get at. A Tooltip opens on focus and
+  hover, with the shared wrapper's 300ms hover delay, and points the control's
+  `aria-describedby` at itself. It is a description rather than the name, so
+  an icon-only control keeps its `aria-label`. A `title` stays only on what a
+  keyboard cannot land on - a truncated path, a timestamp, a breakdown -
+  since React Aria makes a tooltip trigger focusable, and a hint on a mark
+  would buy a tab stop per feed row or per card. A mark that names itself
+  needs `role="img"` first: a bare `<span>` is `generic`, and ARIA gives
+  `generic` no name.
 - **A yes-or-no confirm is an `AlertDialog`, not a `Dialog`.** The role
   interrupts rather than announcing a form, it takes the close X away, and an
   outside click no longer dismisses it. A dialog that asks which of several
@@ -1634,15 +1625,16 @@ wherever the member is an admin.
   rather than a confirm, and stays a `Dialog`. `AlertDialogAction` is
   destructive unless the caller says otherwise. A confirm that reports its own
   failure prevents the default on that click and closes on the answer instead,
-  or the refusal would be unmounted with the dialog. `primitives.test.tsx`
-  fails on a destructive action left inside a `Dialog`.
+  or the refusal would be unmounted with the dialog.
 - **A control a reader still needs is `aria-disabled`, not `disabled`.** A
   `disabled` button takes neither focus nor a pointer, so anything it had to
   say - the full verb behind a shortened label, why a row cannot be opened -
   goes with it. Those keep their place in the tab order, guard their own
   handler, and drop the hover the enabled state paints.
-- **One focus indicator, one source.** `focusRing` in `src/lib/utils.ts`; see
-  [Keyboard and focus](#keyboard-and-focus). Browser checks verify the
+- **One focus indicator, one source.** `focusRing` in `src/lib/utils.ts` is the
+  shared outline utility. Preserve its 2px outside outline, inset behavior for
+  full-bleed rows and forced-colour visibility. Menus retain roving focus,
+  typeahead, portalling and viewport flipping. Browser checks verify the
   resulting focus outline; source scans and class-name assertions are not
   behavior coverage.
 - **Member colour attributes, it does not fill.** The avatar rings itself in
@@ -1654,14 +1646,13 @@ wherever the member is an admin.
 
 ## Tests
 
-The dashboard test suite uses Vitest, jsdom and Testing Library for client
-behavior, with fixtures and stub API/WebSocket transports where a server is
-not required. Store slices, selectors, API token bootstrap, stream lifecycle,
-terminal attach/reconnect behavior, permissions and error paths are tested as
-observable state transitions. Component tests render real DOM controls and
-assert labels, accessible names, focus handoff, keyboard actions, navigation,
-loading and empty states, server errors, capability gates and mutation
-results.
+The dashboard tests use Vitest, jsdom and Testing Library for observable
+client behavior, with fixtures and stub API/WebSocket transports where a
+server is not required. Store slices, selectors, token bootstrap, stream
+lifecycle, terminal attach/reconnect behavior, permissions and error paths
+remain covered as state transitions. Component tests should assert labels,
+accessible names, focus handoff, keyboard actions, navigation, loading and
+empty states, server errors, capability gates and mutation results.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar splitter
 with keyboard events: arrow navigation, Enter and Space activation, focus
@@ -1670,16 +1661,7 @@ covers the shell shortcut precedence across fields, dialogs, menus, lists and
 selects. `src/components/ui/fields.test.tsx` checks that a wrapped Label names
 its actual input and that an Input ref reaches the field DOM node. These are
 behavior assertions against rendered controls; source scans, literal class
-assertions and CSS text checks are not behavior coverage and are not listed as
-tests. `components/ui/primitives.test.tsx` is the exception, and it is named
-here so the rule and the tree agree. It holds three regression guards that
-read the source tree rather than render anything: a `title` left on a control,
-a destructive action left inside a `Dialog`, and a blocked control whose look
-is hand-rolled instead of taken from `buttonVariants`. Each is inventory - a
-rule about what may exist anywhere cannot be observed by rendering one
-component - and each is kept honest by being mutated rather than by being
-believed. What a reader actually sees is the browser suite's job: computed
-layout, real focus outlines and hover are checked there.
+assertions and CSS text checks are not behavior coverage.
 
 Route tests cover the board, run detail, terminal, diff, files, workspace,
 onboarding, team, members, settings, agents, templates, palette and update
@@ -1700,10 +1682,11 @@ corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and
 setup details live in [testing.md](testing.md).
 
-When changing a visible contract, update the assertion at the layer that can
-observe it. Use a component test for state, text, role, focus and navigation
-behavior. Use Playwright for computed layout, actual browser focus outlines,
-responsive overflow, Escape ordering and gateway-backed flows. Do not add a
-test that only proves a class name, selector, source pattern, token string or
-implementation detail. The inventory guards in
-`components/ui/primitives.test.tsx`, named above, are the only exception.
+Use the browser workflow for real computed geometry, titlebar and activity-rail
+behavior, responsive overflow, keyboard focus and gateway-backed transitions.
+Exercise both themes and narrow and desktop widths against the actual surface;
+do not pin CSS classes, source strings, token declarations or component
+plumbing. When changing a visible contract, update the assertion at the layer
+that can observe it. Use a component test for state, text, role, focus and
+navigation behavior, and Playwright for computed layout, actual browser focus
+outlines, responsive overflow, Escape ordering and gateway-backed flows.

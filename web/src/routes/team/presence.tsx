@@ -17,7 +17,7 @@ export function PresenceStatus() {
   const names = online.map((id) => members[id]?.display_name ?? id)
   return (
     <span
-      className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5"
+      className="flex h-[22px] items-center gap-1.5 px-1.5 text-xs"
       title={`Online: ${names.join(', ')}`}
       aria-label={`${online.length} online`}
     >
@@ -27,7 +27,7 @@ export function PresenceStatus() {
             key={id}
             member={members[id]}
             fallback={id}
-            className="size-5 bg-background text-[9px]"
+            className="size-4 bg-background text-[9px]"
           />
         ))}
       </span>

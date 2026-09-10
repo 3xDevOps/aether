@@ -1,42 +1,20 @@
 import {
   Chip as HeroChip,
-  Tabs as HeroTabs,
   Tooltip as HeroTooltip,
 } from '@heroui/react'
 import type * as React from 'react'
 import { cn } from '@/lib/utils'
 
-type TabsProps = React.ComponentProps<typeof HeroTabs>
-
-const TabsRoot = ({ className, ...props }: TabsProps) => (
-  <HeroTabs className={cn('aether-tabs', className)} {...props} />
-)
-
-/**
- * HeroUI v3 tabs, tuned to the workbench's compact neutral treatment.
- *
- * Usage:
- * <Tabs selectedKey={active} onSelectionChange={setActive}>
- *   <Tabs.List aria-label="Run views">
- *     <Tabs.Tab id="overview">Overview</Tabs.Tab>
- *   </Tabs.List>
- *   <Tabs.Panel id="overview">...</Tabs.Panel>
- * </Tabs>
- */
-export const Tabs = Object.assign(TabsRoot, {
-  Root: TabsRoot,
-  ListContainer: HeroTabs.ListContainer,
-  List: HeroTabs.List,
-  Tab: HeroTabs.Tab,
-  Indicator: HeroTabs.Indicator,
-  Separator: HeroTabs.Separator,
-  Panel: HeroTabs.Panel,
-})
-
 type ChipProps = React.ComponentProps<typeof HeroChip>
 
 const ChipRoot = ({ className, ...props }: ChipProps) => (
-  <HeroChip className={cn('aether-chip', className)} {...props} />
+  <HeroChip
+    className={cn(
+      'aether-chip !h-[20px] !min-h-[20px] !rounded-[2px] !px-1.5 text-[12px] leading-4',
+      className,
+    )}
+    {...props}
+  />
 )
 
 /** HeroUI v3 status or metadata chip using the shared token palette. */
@@ -58,8 +36,17 @@ const TooltipRoot = ({ delay = 300, ...props }: TooltipProps) => (
   <HeroTooltip delay={delay} {...props} />
 )
 
-const TooltipContent = ({ className, ...props }: React.ComponentProps<typeof HeroTooltip.Content>) => (
-  <HeroTooltip.Content className={cn('aether-tooltip', className)} {...props} />
+const TooltipContent = ({
+  className,
+  ...props
+}: React.ComponentProps<typeof HeroTooltip.Content>) => (
+  <HeroTooltip.Content
+    className={cn(
+      'aether-tooltip max-w-xs rounded-[4px] border border-border bg-popover px-2 py-1 text-[12px] leading-4 text-popover-foreground shadow-overlay',
+      className,
+    )}
+    {...props}
+  />
 )
 
 /** HeroUI v3 accessible hover and keyboard tooltip using shared overlay tokens. */

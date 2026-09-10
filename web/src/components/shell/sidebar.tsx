@@ -20,7 +20,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { canLaunch } from '@/lib/commands'
 import { useDelayed, useDrag } from '@/lib/hooks'
-import { splitterTarget } from '@/lib/keys'
+import { inModal, keyboardBusy, splitterTarget } from '@/lib/keys'
 import { runLabel } from '@/lib/status'
 import { surfaces, type Surface } from '@/lib/surfaces'
 import { cn, focusRing } from '@/lib/utils'
@@ -101,20 +101,41 @@ export function Sidebar() {
     takeToggle.current = true
     toggle()
   }, [toggle])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        !(e.metaKey || e.ctrlKey) ||
+        e.altKey ||
+        e.shiftKey ||
+        e.key.toLowerCase() !== 'b' ||
+        e.defaultPrevented ||
+        keyboardBusy(e) ||
+        inModal(e.target)
+      )
+        return
+      e.preventDefault()
+      toggleAndFollow()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toggleAndFollow])
 
   const beginDrag = useDrag()
 
   const startResize = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault()
+      const startX = e.clientX
+      const startWidth = width
       const drag = beginDrag()
-      const move = (ev: PointerEvent) => setSidebarWidth(ev.clientX)
+      const move = (ev: PointerEvent) =>
+        setSidebarWidth(startWidth + ev.clientX - startX)
       window.addEventListener('pointermove', move, { signal: drag.signal })
       for (const end of ['pointerup', 'pointercancel']) {
         window.addEventListener(end, () => drag.abort(), { signal: drag.signal })
       }
     },
-    [beginDrag, setSidebarWidth],
+    [beginDrag, setSidebarWidth, width],
   )
 
   const resizeKey = useCallback(
@@ -138,39 +159,22 @@ export function Sidebar() {
     [setSidebarWidth, toggleAndFollow, width],
   )
 
-  if (rail) {
-    return (
-      <aside className="flex w-10 shrink-0 flex-col items-center border-r bg-sidebar/90 py-2">
-        <Button
-          ref={toggleControl}
-          variant="ghost"
-          size="icon"
-          aria-label="Expand sidebar"
-          onClick={toggleAndFollow}
-        >
-          <PanelLeftOpen />
-        </Button>
-      </aside>
-    )
-  }
-
-  return (
+  const sidebar = rail ? null : (
     <aside
       id="sidebar"
       style={{
         width,
-        maxWidth: mobile ? 'calc(100vw - 2.5rem)' : undefined,
+        maxWidth: mobile ? 'calc(100vw - 3rem)' : undefined,
       }}
       className={cn(
-        'relative flex min-w-0 shrink-0 flex-col border-r bg-sidebar/95',
-        mobile && 'absolute inset-y-0 left-0 z-40 shadow-xl',
+        'relative flex min-w-0 shrink-0 flex-col border-r border-border bg-sidebar',
+        mobile && 'absolute inset-y-0 left-12 z-40 shadow-xl',
       )}
       aria-label="Runs"
     >
       <WorkspaceSwitcher onCollapse={toggleAndFollow} controlRef={toggleControl} />
       <SidebarHeader />
       <RunTree />
-      <NavSection />
       <div
         role="separator"
         aria-orientation="vertical"
@@ -184,12 +188,24 @@ export function Sidebar() {
         onKeyDown={resizeKey}
         className={cn(
           focusRing,
-          'absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-accent',
+          'absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-toolbar-hover',
         )}
       />
     </aside>
   )
+
+  return (
+    <div className="relative flex h-full min-h-0 shrink-0">
+      <ActivityRail
+        sidebarCollapsed={rail}
+        onToggleSidebar={toggleAndFollow}
+        toggleControl={toggleControl}
+      />
+      {sidebar}
+    </div>
+  )
 }
+
 
 /**
  * The scoping control, above everything it scopes. A single workspace needs
@@ -210,7 +226,7 @@ function WorkspaceSwitcher({
   const current = workspaces[active]
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+    <div className="flex h-[35px] shrink-0 items-center gap-1 border-b border-border px-2">
       <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
       {list.length > 1 ? (
         <Select value={active} onValueChange={setActiveWorkspace}>
@@ -227,7 +243,7 @@ function WorkspaceSwitcher({
         </Select>
       ) : (
         <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
-          <span className="truncate text-sm font-semibold">
+          <span className="truncate text-[13px] font-semibold">
             {current?.name ?? 'No workspace'}
           </span>
           {current && (
@@ -243,8 +259,9 @@ function WorkspaceSwitcher({
         size="icon"
         aria-label="Collapse sidebar"
         onClick={onCollapse}
+        className="size-[26px] min-h-[26px] min-w-[26px] rounded-sm"
       >
-        <PanelLeftClose />
+        <PanelLeftClose className="size-4" />
       </Button>
     </div>
   )
@@ -256,12 +273,12 @@ function SidebarHeader() {
   // it. A member who cannot start a run is not offered the way in.
   const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
   return (
-    <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5">
-      <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+    <div className="flex min-h-[35px] shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-0.5">
+      <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
         Runs
       </span>
       <AttentionBadge />
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1">
         {launchable && (
           <Tooltip>
             <Tooltip.Trigger<'button'>
@@ -273,8 +290,9 @@ function SidebarHeader() {
                   onClick={() => {
                     openDialog('launch')
                   }}
+                  className="h-[26px] rounded-sm px-2 text-[12px]"
                 >
-                  <Rocket />
+                  <Rocket className="size-3.5" />
                   New run
                 </Button>
               )}
@@ -295,7 +313,7 @@ function GroupByControl() {
     <div
       role="group"
       aria-label="Group runs by"
-      className="flex items-center rounded-md border"
+      className="flex shrink-0 items-center rounded-sm border border-border"
     >
       {([['status', 'Status'], ['member', 'Member']] as const).map(([mode, label]) => (
         <Tooltip key={mode}>
@@ -306,13 +324,11 @@ function GroupByControl() {
                 variant="ghost"
                 size="sm"
                 aria-pressed={groupBy === mode}
-                onClick={() => {
-                  setGroupBy(mode)
-                }}
+                onClick={() => setGroupBy(mode)}
                 className={cn(
-                  'rounded-none first:rounded-l-md last:rounded-r-md',
+                  'h-[26px] rounded-none px-2 text-[12px] first:rounded-l-sm last:rounded-r-sm',
                   groupBy === mode
-                    ? 'bg-accent font-medium text-accent-foreground'
+                    ? 'bg-selection font-medium text-selection-foreground'
                     : 'text-muted-foreground',
                 )}
               >
@@ -341,6 +357,7 @@ function AttentionBadge() {
       aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
       role="img"
       title="Runs waiting on a human"
+      className="rounded-sm bg-state-needs-attention/15 px-1.5 text-[11px] font-medium text-state-needs-attention"
     >
       <Chip
         color="warning"
@@ -400,58 +417,121 @@ function approvalsLabel(label: string, waiting: number, error: string | null): s
   return waiting > 0 ? `${label}, ${waiting} waiting on a decision` : label
 }
 
-/** Board and All runs need no gate: both are views of the runs above them. */
-function NavSection() {
+/** Existing routes live in a persistent 48px activity rail. */
+export function ActivityRail({
+  sidebarCollapsed,
+  onToggleSidebar,
+  toggleControl,
+}: {
+  sidebarCollapsed: boolean
+  onToggleSidebar: () => void
+  toggleControl: React.RefObject<HTMLButtonElement | null>
+}) {
   const cap = useCapability()
   const navigate = useStore((s) => s.navigate)
   const route = useStore((s) => s.route)
   const inbox = useStore((s) => s.inbox)
   const inboxError = useStore((s) => s.inboxError)
   const waiting = pendingApprovals(inbox).length
-  const links: Surface[] = [
+  const surfaceLinks = surfaces(cap)
+  const primaryLinks: Surface[] = [
     { name: 'board', label: 'Board', Icon: LayoutGrid },
     { name: 'overview', label: 'All runs', Icon: List },
-    ...surfaces(cap),
+    ...surfaceLinks.filter(
+      ({ name }) => name !== 'onboarding' && name !== 'settings',
+    ),
   ]
-  return (
-    <nav aria-label="Surfaces" className="shrink-0 border-t py-1.5">
-      {links.map(({ name, label, Icon }) => (
-        <button
-          key={name}
-          type="button"
-          aria-label={
-            name === 'approvals'
-              ? approvalsLabel(label, waiting, inboxError)
-              : undefined
-          }
-          aria-current={route.name === name ? 'page' : undefined}
-          onClick={() => navigate(name)}
-          className={cn(
-            focusRing,
-            'flex min-h-9 w-full items-center gap-2 border-l-2 border-transparent px-3 text-left text-sm transition-colors hover:bg-accent/60',
-            route.name === name && 'border-primary bg-accent/80 font-medium text-foreground',
-          )}
-        >
-          <Icon className="size-3.5 text-muted-foreground" />
-          {label}
-          {name === 'approvals' && (waiting > 0 || inboxError !== null) && (
-            <span
-              aria-hidden
-              title={inboxError ?? 'Requests waiting on a decision'}
-              className="ml-auto"
-            >
-              <Chip
-                color="warning"
-                variant="soft"
-                size="sm"
-                className="bg-state-needs-attention/15 text-state-needs-attention"
+  const utilityLinks = surfaceLinks.filter(
+    ({ name }) => name === 'onboarding' || name === 'settings',
+  )
+
+  const renderLinks = (links: Surface[]) =>
+    links.map(({ name, label, Icon }) => {
+      const current = route.name === name
+      const accessibleLabel =
+        name === 'approvals'
+          ? approvalsLabel(label, waiting, inboxError)
+          : label
+      return (
+        <Tooltip key={name}>
+          <Tooltip.Trigger<'button'>
+            render={(triggerProps) => (
+              <button
+                {...triggerProps}
+                type="button"
+                aria-label={accessibleLabel}
+                aria-current={current ? 'page' : undefined}
+                onClick={() => navigate(name)}
+                className={cn(
+                  focusRing,
+                  'focus-visible:-outline-offset-2',
+                  'relative flex h-12 min-h-12 w-12 shrink-0 items-center justify-center border-l-2 border-transparent text-muted-foreground transition-colors hover:bg-toolbar-hover hover:text-foreground',
+                  current && 'border-primary text-foreground',
+                )}
               >
-                <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
-              </Chip>
-            </span>
-          )}
-        </button>
-      ))}
+                <Icon className="size-6" aria-hidden />
+                <span className="sr-only">{label}</span>
+                {name === 'approvals' && (waiting > 0 || inboxError !== null) && (
+                  <span
+                    aria-hidden
+                    title={inboxError ?? 'Requests waiting on a decision'}
+                    className="absolute right-1 top-1 min-w-3 rounded-sm bg-state-needs-attention/15 px-0.5 text-[10px] font-medium leading-3 text-state-needs-attention"
+                  >
+                    <Chip
+                      color="warning"
+                      variant="soft"
+                      size="sm"
+                      className="bg-state-needs-attention/15 text-state-needs-attention"
+                    >
+                      <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
+                    </Chip>
+                  </span>
+                )}
+              </button>
+            )}
+          />
+          <Tooltip.Content>{accessibleLabel}</Tooltip.Content>
+        </Tooltip>
+      )
+    })
+
+  return (
+    <nav
+      aria-label="Surfaces"
+      className="flex h-full w-12 shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar"
+    >
+      {sidebarCollapsed && (
+        <Tooltip>
+          <Tooltip.Trigger<'button'>
+            render={(triggerProps) => (
+              <button
+                {...triggerProps}
+                ref={toggleControl}
+                type="button"
+                aria-label="Expand sidebar"
+                onClick={onToggleSidebar}
+                className={cn(
+                  focusRing,
+                  'focus-visible:-outline-offset-2',
+                  'relative flex h-12 min-h-12 w-12 shrink-0 items-center justify-center border-l-2 border-transparent text-muted-foreground transition-colors hover:bg-toolbar-hover hover:text-foreground',
+                )}
+              >
+                <PanelLeftOpen className="size-5" aria-hidden />
+                <span className="sr-only">Expand sidebar</span>
+              </button>
+            )}
+          />
+          <Tooltip.Content>Expand sidebar</Tooltip.Content>
+        </Tooltip>
+      )}
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex min-h-max flex-col py-1">{renderLinks(primaryLinks)}</div>
+      </div>
+      {utilityLinks.length > 0 && (
+        <div className="flex shrink-0 flex-col py-1">
+          {renderLinks(utilityLinks)}
+        </div>
+      )}
     </nav>
   )
 }
@@ -459,7 +539,7 @@ function NavSection() {
 function Group({ group }: { group: SidebarGroup }) {
   return (
     <section className="mb-1">
-      <h2 className="px-3 py-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+      <h2 className="px-3 py-0.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
         {group.label}
       </h2>
       {group.runs.map((run) => (
@@ -486,9 +566,9 @@ function RunRow({ entry }: { entry: SidebarRun }) {
         // Full bleed inside a scroll container: an outline drawn outside the
         // row would be clipped at both edges.
         'focus-visible:-outline-offset-2',
-        'flex min-h-8 w-full items-center gap-2 border-l-2 py-1 pr-3 pl-5 text-left text-[13px] hover:bg-accent/60',
+        'flex h-7 min-h-7 w-full items-center gap-2 border-l-2 py-0.5 pr-3 pl-5 text-left text-[13px] hover:bg-toolbar-hover',
         selected
-          ? 'bg-accent font-medium text-foreground'
+          ? 'bg-selection font-medium text-selection-foreground'
           : unseen
             ? 'font-medium'
             : 'text-muted-foreground',

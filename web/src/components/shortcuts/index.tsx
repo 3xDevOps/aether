@@ -22,12 +22,14 @@ import { useCapability, useSelfRole } from '@/store/hooks'
 
 /**
  * The keys the shell itself listens for, as the reader has to press them.
- * `nav-shortcuts.ts` implements every row below the first two; a key added
- * there earns a row here.
+ * `nav-shortcuts.ts` implements every row below the shell's own key set; a key
+ * added there earns a row here.
  */
 function shellKeys(launchable: boolean): [string, string][] {
   return [
     [shortcutLabel('K'), 'Open the command palette'],
+    [shortcutLabel('Shift+P'), 'Open the command palette'],
+    [shortcutLabel('B'), 'Toggle the workspace sidebar'],
     ['Shift+/', 'Open this reference'],
     ...(launchable ? ([['n', 'Launch a run']] as [string, string][]) : []),
     ['g then b', 'Go to the board'],
@@ -116,7 +118,7 @@ function ShortcutKeys({ value }: { value: string }) {
               {value.includes('then') ? 'then' : '+'}
             </span>
           )}
-          <kbd className="inline-flex min-h-6 max-w-full items-center justify-center rounded-sm border border-border bg-muted px-1.5 py-1 font-mono text-[11px] font-medium leading-4 text-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]">
+          <kbd className="inline-flex min-h-[22px] max-w-full items-center justify-center rounded-sm border border-border bg-muted px-1 font-mono text-[11px] font-medium leading-4 text-foreground">
             {part}
           </kbd>
         </span>
@@ -129,7 +131,7 @@ function ShortcutRow({ value, description }: { value: string; description: strin
   return (
     <div
       role="listitem"
-      className="flex flex-col items-start gap-2 rounded-md px-2 py-2.5 transition-colors odd:bg-muted/30 sm:flex-row sm:items-start sm:gap-4"
+      className="flex flex-col items-start gap-1 rounded-sm px-2 py-1 transition-colors odd:bg-muted/30 sm:flex-row sm:items-start sm:gap-3"
     >
       <ShortcutKeys value={value} />
       <span className="min-w-0 flex-1 text-[13px] leading-5 text-muted-foreground">
@@ -188,13 +190,11 @@ export function ShortcutsButton() {
             <button
               {...triggerProps}
               type="button"
-              onClick={() => {
-                setOpen(true)
-              }}
+              onClick={() => setOpen(true)}
               aria-label="Keyboard shortcuts"
               className={cn(
                 focusRing,
-                'flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-accent hover:text-foreground',
+                'flex h-[22px] min-h-[22px] items-center gap-1 rounded-sm px-1.5 text-[12px] transition-colors hover:bg-toolbar-hover hover:text-foreground',
               )}
             >
               <CircleHelp className="size-3.5" aria-hidden />
@@ -213,7 +213,7 @@ export function ShortcutsButton() {
               fields and open dialogs.
             </DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 space-y-6 overflow-y-auto -mx-1 px-1">
+          <div className="min-h-0 space-y-3 overflow-y-auto -mx-1 px-1">
             <section aria-labelledby="shortcut-shell" className="space-y-1">
               <h3
                 id="shortcut-shell"

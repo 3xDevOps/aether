@@ -29,10 +29,21 @@ afterEach(() => {
 })
 
 describe('TitleBar', () => {
-  it('renders nothing in a browser tab, where there is no shell bridge', () => {
-    const { container } = render(<TitleBar />)
+  it('renders the command bar in a browser without window controls', () => {
+    render(<TitleBar />)
 
-    expect(container.innerHTML).toBe('')
+    expect(screen.getByLabelText('Aether')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Commands' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Minimize' })).toBeNull()
+  })
+
+  it('disables the command opener while the app shell is blocked', () => {
+    render(<TitleBar commandPaletteDisabled />)
+
+    expect(screen.getByRole('button', { name: 'Commands' })).toHaveProperty(
+      'disabled',
+      true,
+    )
   })
 
   it('renders the Aether lockup when the shell bridge is present', () => {
@@ -86,12 +97,13 @@ describe('TitleBar', () => {
     expect(await screen.findByRole('button', { name: 'Restore' })).toBeDefined()
   })
 
-  it('draws no window buttons on darwin and reserves the traffic lights', () => {
+  it('draws the command bar without native controls on darwin', () => {
     shellWindow.aetherDesktop = { platform: 'darwin' }
 
     render(<TitleBar />)
 
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Commands' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Minimize' })).toBeNull()
     expect(screen.getByLabelText('Aether').style.paddingInlineStart).toBe('78px')
   })
 

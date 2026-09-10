@@ -51,7 +51,7 @@ export function App() {
           branch below it: without it the error page would leave an offline user
           no way to move or close the window. */}
       <div className="flex h-full flex-col">
-        <TitleBar />
+        <TitleBar commandPaletteDisabled={blocked} />
         <div className="min-h-0 flex-1">
           {blocked ? (
             <ConnectionError

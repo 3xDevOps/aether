@@ -89,14 +89,18 @@ function ServerUpdateNotice() {
   return (
     // `truncate` can clip this, and the chip takes no `title` of its own, so
     // the span around it carries the whole sentence for a pointer.
-    <span role="status" title={notice} className="flex min-w-0 shrink">
+    <span
+      role="status"
+      title={notice}
+      className="flex min-h-[22px] min-w-0 shrink items-center break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap"
+    >
       <Chip
         color="warning"
         variant="soft"
         // The state token by hand, the way its neighbour carries
         // needs-attention: HeroUI's warning foreground is amber, and this
         // readout has always been the neutral the rest of the bar uses.
-        className="flex min-h-7 min-w-0 shrink items-center bg-state-waiting/15 text-muted-foreground xl:h-7"
+        className="flex min-w-0 shrink items-center bg-state-waiting/15 text-muted-foreground"
       >
         <Chip.Label className="min-w-0 break-words whitespace-normal xl:truncate xl:whitespace-nowrap">
           {notice}
@@ -130,7 +134,7 @@ function LocalStatus() {
             }}
             className={cn(
               focusRing,
-              'flex h-7 shrink-0 items-center gap-1.5 rounded px-1 hover:text-foreground',
+              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 rounded-sm px-1 hover:text-foreground',
             )}
           >
             <span
@@ -169,7 +173,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
   if (!available) {
     return (
       <span
-        className="flex min-h-7 min-w-0 items-center break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap"
+        className="flex min-h-[22px] min-w-0 items-center break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap"
         title={`${label} · protocol ${protocol}`}
       >
         {label}
@@ -191,7 +195,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
             aria-label={`Update available: ${latest}`}
             className={cn(
               focusRing,
-              'flex min-h-7 min-w-0 shrink items-center gap-1.5 rounded px-1 break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap hover:text-foreground',
+              'flex min-h-[22px] min-w-0 shrink items-center gap-1 rounded-sm px-1 break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap hover:text-foreground',
             )}
           >
             {label}
@@ -240,17 +244,17 @@ export function StatusBar() {
   const statusActions = <Slot name="statusbar" />
 
   return (
-    <footer className="relative flex min-h-9 shrink-0 items-center gap-2 border-t border-border/80 bg-background px-3 py-1 text-xs text-muted-foreground">
+    <footer className="relative flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 border-0 bg-sidebar px-2 py-0 text-[12px] leading-none text-muted-foreground before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border before:content-['']">
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="flex h-7 shrink-0 items-center gap-1.5">
+        <span className="flex h-[22px] shrink-0 items-center gap-1">
           <span
-            className={cn('size-2 rounded-full', connectionDot[connection])}
+            className={cn('size-1.5 rounded-full', connectionDot[connection])}
             aria-hidden
           />
           {connectionLabel[connection]}
         </span>
         <Collapsible
-          className="relative block min-w-0 xl:flex-1"
+          className="relative block h-[22px] min-w-0 leading-none xl:flex-1"
           open={detailsOpen}
           onOpenChange={(open) => {
             if (!wide) setMobileDetailsOpen(open)
@@ -261,7 +265,7 @@ export function StatusBar() {
               render={(triggerProps) => (
                 <CollapsibleTrigger
                   {...triggerProps}
-                  className="h-7 w-7 justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground xl:hidden"
+                  className="h-[22px] w-[22px] justify-center rounded-sm border border-transparent text-muted-foreground hover:border-border hover:bg-toolbar-hover hover:text-foreground xl:hidden"
                   aria-label="Show status details"
                   aria-controls="status-details"
                 />
@@ -272,9 +276,9 @@ export function StatusBar() {
           <CollapsibleContent
             id="status-details"
             forceMount
-            className="block min-w-0 data-[state=closed]:hidden xl:flex-1"
+            className="block min-w-0 data-[state=closed]:hidden xl:h-[22px] xl:flex-1"
           >
-            <div className="fixed inset-x-3 bottom-10 z-50 mb-1 flex max-h-[70vh] min-w-0 max-w-md flex-col items-stretch gap-2 overflow-y-auto rounded-md border bg-popover p-3 text-popover-foreground shadow-lg xl:static xl:flex xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-3 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:shadow-none">
+            <div className="fixed inset-x-2 bottom-7 z-50 mb-1 flex max-h-[70vh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-4 shadow-lg xl:static xl:flex xl:h-[22px] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none">
               {unreachable !== null && (
                 // needs-attention has no HeroUI colour of its own, so the
                 // chip carries the state token rather than the nearest
@@ -282,12 +286,12 @@ export function StatusBar() {
                 <span
                   role="status"
                   title={unreachableLabel[unreachable]}
-                  className="flex min-w-0 shrink"
+                  className="flex min-h-[22px] min-w-0 items-center break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap"
                 >
                   <Chip
                     color="warning"
                     variant="soft"
-                    className="flex min-h-7 min-w-0 shrink items-center bg-state-needs-attention/15 text-state-needs-attention xl:h-7"
+                    className="flex min-w-0 shrink items-center bg-state-needs-attention/15 text-state-needs-attention"
                   >
                     <Chip.Label className="min-w-0 break-words whitespace-normal xl:truncate xl:whitespace-nowrap">
                       {unreachableLabel[unreachable]}
@@ -306,18 +310,18 @@ export function StatusBar() {
               {info && (
                 <span
                   title={info.member.display_name}
-                  className="flex min-h-7 max-w-40 shrink-0 items-center break-words whitespace-normal xl:h-7 xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[22px] min-w-0 items-center break-words whitespace-normal xl:h-[22px] xl:max-w-40 xl:shrink-0 xl:truncate xl:whitespace-nowrap"
                 >
                   {info.member.display_name}
                 </span>
               )}
               {disk && disk.total_bytes > 0 && (
                 <span
-                  className="flex min-w-0 items-center gap-1.5 break-words whitespace-normal xl:h-7 xl:shrink xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[22px] min-w-0 items-center gap-1 break-words whitespace-normal xl:h-[22px] xl:shrink xl:truncate xl:whitespace-nowrap"
                   aria-label="Disk usage"
                   title={diskBreakdown(disk)}
                 >
-                  <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
+                  <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-sm bg-muted">
                     <span
                       className="block h-full bg-foreground/50"
                       style={{
@@ -331,7 +335,7 @@ export function StatusBar() {
                 </span>
               )}
               {!desktop && (
-                <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="flex min-w-0 flex-wrap items-center gap-1">
                   {statusActions}
                 </span>
               )}

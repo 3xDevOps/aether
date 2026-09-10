@@ -12,10 +12,10 @@ export function ViewHeader({
   actions?: ReactNode
 }) {
   return (
-    <header className="@container/header flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-1.5 sm:px-6">
-      <div className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 @sm/header:w-auto @sm/header:flex-1">
+    <header className="@container/header flex min-h-[35px] flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1 sm:px-4">
+      <div className="flex min-w-0 flex-[1_1_20rem] flex-wrap items-center gap-x-2 gap-y-0.5">
         <h1
-          className="max-w-64 min-w-0 truncate text-xl font-semibold leading-6 tracking-tight"
+          className="min-w-0 break-words text-[15px] font-semibold leading-5"
           title={title}
         >
           {title}
@@ -23,7 +23,7 @@ export function ViewHeader({
         {titleAdornment}
         {subtitle && (
           <span
-            className="min-w-0 basis-full truncate text-[13px] leading-5 text-muted-foreground @sm/header:basis-auto @sm/header:flex-1"
+            className="min-w-0 basis-full break-words text-xs leading-4 text-muted-foreground @sm/header:basis-auto @sm/header:flex-1"
             title={subtitle}
           >
             {subtitle}
@@ -34,7 +34,7 @@ export function ViewHeader({
         <div
           role="toolbar"
           aria-label={`${title} actions`}
-          className="flex shrink-0 items-center gap-1"
+          className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1"
         >
           {actions}
         </div>
