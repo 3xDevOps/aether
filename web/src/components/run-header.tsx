@@ -11,7 +11,7 @@ function stateTone(state: PresentationState) {
     case 'failed':
       return 'border-state-failed/50 text-state-failed'
     case 'done':
-      return 'border-state-done/50 text-state-done'
+      return 'border-state-done/50 text-success-foreground'
     case 'waiting':
       return 'border-state-waiting/50 text-state-waiting'
     case 'needs-attention':
@@ -101,7 +101,10 @@ export function RunHeader({ run, subtitle }: { run: RunRecord; subtitle?: string
                     View full task
                   </span>
                 </summary>
-                <div className="mt-1 max-h-40 min-w-0 max-w-full overflow-y-auto border border-border/70 bg-muted/20 px-2 py-1.5">
+                <div
+                  tabIndex={0}
+                  className={`${focusRing} mt-1 max-h-40 min-w-0 max-w-full overflow-y-auto border border-border/70 bg-muted/20 px-2 py-1.5`}
+                >
                   <p className="whitespace-pre-wrap break-words select-text text-[13px] leading-5 text-foreground/90">
                     {run.task}
                   </p>

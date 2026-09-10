@@ -2,6 +2,7 @@ import { Copy } from 'lucide-react'
 import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/heroui'
+import { cn, focusRing } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
 
 /** One exact command, shown as it must be typed, with a button that copies it. */
@@ -12,8 +13,12 @@ export function CopyableCommand({ command }: { command: string }) {
     <div className="flex min-w-0 items-center gap-1 border border-border bg-background px-1.5 py-1 rounded-sm">
       <code
         ref={codeRef}
+        tabIndex={0}
         title={command}
-        className="min-w-0 flex-1 overflow-x-auto whitespace-pre px-1 font-mono text-[12px] leading-5 text-foreground select-text"
+        className={cn(
+          focusRing,
+          'min-w-0 flex-1 overflow-x-auto whitespace-pre px-1 font-mono text-[12px] leading-5 text-foreground select-text',
+        )}
       >
         {command}
       </code>

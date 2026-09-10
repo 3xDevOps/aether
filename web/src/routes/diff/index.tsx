@@ -247,7 +247,7 @@ function Timeline({
                       >
                         {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
                         {' · '}
-                        <span className="font-mono text-state-done">
+                        <span className="font-mono text-success-foreground">
                           +{total(snap.files, 'additions')}
                         </span>{' '}
                         <span className="font-mono text-destructive">
