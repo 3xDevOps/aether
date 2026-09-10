@@ -101,9 +101,11 @@ its files are owned by the container user, so an agent can swap the signing
 key for one of its own, and Aether then signs its own end-of-run commits
 with the replacement; rewrite `.gitconfig`, which decides the credential
 helper and the identity commits are made under; and plant `~/.local/bin/gh`,
-first on the container's `PATH`, so the next `aether github connect` runs
-the agent's program instead of gh. Account sharing hands the recipient's
-runs the same reach, exactly as it does every other credential in the home.
+first on the container's `PATH`, so the next `aether github connect` - or
+the `gh --version` the dashboard's GitHub step runs on its own to check
+that environment - runs the agent's program instead of gh. Account sharing
+hands the recipient's runs the same reach, exactly as it does every other
+credential in the home.
 
 Aether signs its own end-of-run commits with that key while still treating
 the home as hostile. It opens the key through a root-confined open on the

@@ -239,6 +239,31 @@ type GitHubConnectResult struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
+// GitHubProbeResult is the result of github.probe: the gh the caller's
+// environment terminal has, and what has to happen when it cannot do the
+// login. Status is "ok", "missing" (nothing named gh on PATH), "broken"
+// (gh is there but would not run) or "outdated".
+type GitHubProbeResult struct {
+	Status string `json:"status"`
+	// Version is empty unless gh ran and printed a version line this could
+	// read; Minimum is the oldest gh the login check can read.
+	Version string `json:"version,omitempty"`
+	Minimum string `json:"minimum"`
+	// Detail is what gh, or the container that could not run it, printed.
+	Detail string `json:"detail,omitempty"`
+	// Image is the image the terminal container is running; SavedImage is
+	// the caller's own saved one, omitted when they have none.
+	Image      string `json:"image"`
+	SavedImage string `json:"saved_image,omitempty"`
+	// Path is where gh resolved, present only when that is a file inside
+	// the caller's own environment home and therefore outlives every image.
+	Path string `json:"path,omitempty"`
+	// Remedy is the command the caller runs and AdminRemedy what a server
+	// admin has to run first; both are omitted while gh is fine.
+	Remedy      string `json:"remedy,omitempty"`
+	AdminRemedy string `json:"admin_remedy,omitempty"`
+}
+
 // RunLaunchParams are the params of run.launch. Task is optional in the
 // default tui mode - an empty task drops the member into the agent's
 // interactive TUI with no seeded prompt - but required in headless mode,

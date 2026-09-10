@@ -10,7 +10,7 @@ import path from 'node:path'
 import { githubLoginCommand } from '@/lib/github'
 
 import { expect, test } from './fixtures'
-import { dockerReachable } from './harness/server'
+import { dockerReachable, standardImage } from './harness/server'
 import { memberID } from './harness/setup'
 import { OnboardingWizard } from './pages/wizard'
 
@@ -36,22 +36,40 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
 
   const id = await memberID(alice)
   const home = aether.server.memberHome(id)
-  aether.installStubGh(id)
 
+  // This environment has no gh, which is the state every environment from
+  // before the standard image shipped one is in. The screen probes the
+  // running container and names both halves of the remedy rather than
+  // showing a login that container cannot run. Opening the dock starts a
+  // real container, so the first answer is what to wait on: the button is
+  // clickable long before the container exists.
   const github = wizard.agents.github
   await wizard.agents.connectGitHub().click()
-  await expect(github.section).toContainText(githubLoginCommand)
+  await expect(github.section).toContainText(
+    'There is no gh in your environment terminal',
+    { timeout: 3 * 60 * 1000 },
+  )
 
-  // Opening the dock starts a real environment container, and the connect
-  // runs inside it. The server's own view of it is what to wait on: the
-  // button is clickable long before the container exists.
-  await expect
-    .poll(
-      async () =>
-        (await alice.api.rpc<{ running: boolean }>('terminal.status')).running,
-      { timeout: 3 * 60 * 1000 },
-    )
-    .toBe(true)
+  await expect(github.commands).toContainText([
+    `docker pull ${standardImage}`,
+    'aether terminal stop',
+  ])
+  await expect(github.section).not.toContainText(githubLoginCommand)
+  await wizard.back().click()
+  await wizard.expectStep('Agents')
+
+  // The container is the same one; the stub reaches it through the bind
+  // mounted home, so reopening the screen is enough to probe again. The
+  // server bounds the probe at twenty seconds, well inside this.
+  aether.installStubGh(id)
+  await wizard.agents.connectGitHub().click()
+  // The state, not the command block: a probe that threw would put the
+  // same block back, so only this sentence proves the check passed.
+  await expect(github.section).toContainText(
+    'The login command is ready in your environment terminal:',
+    { timeout: 30_000 },
+  )
+  await expect(github.commands).toContainText([githubLoginCommand])
 
   await github.confirmLoggedIn().click()
   await expect(github.section).toContainText('Connected to GitHub as octocat', {
@@ -73,6 +91,11 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   expect(gitconfig).toContain('signingkey = ~/.ssh/aether_signing')
   expect(gitconfig).toContain('gpgsign = true')
   const calls = readFileSync(path.join(home, 'gh-calls.log'), 'utf8')
+  // The dock typed the login into the container, which is the half of
+  // this flow no server call can stand in for.
+  expect(calls).toContain(
+    'auth login --hostname github.com --git-protocol https --web --scopes admin:ssh_signing_key',
+  )
   expect(calls).toContain('auth setup-git --hostname github.com')
   // The server reads the account's keys back after registering, so the
   // fingerprint it shows is the one GitHub holds.

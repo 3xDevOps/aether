@@ -172,6 +172,15 @@ export class GitHubConnect {
   confirmLoggedIn(): Locator {
     return this.section.getByRole('button', { name: "I've logged in", exact: true })
   }
+
+  /**
+   * The screen's own copy of a command, in its code block. The section
+   * also holds the terminal, which echoes whatever was typed into it, so
+   * asserting on the section cannot tell the two apart.
+   */
+  get commands(): Locator {
+    return this.section.locator('code')
+  }
 }
 
 /**

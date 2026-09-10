@@ -1232,16 +1232,66 @@ Between the two, `github-connect.tsx` connects the member's GitHub account.
 The closed `<section aria-label="Connect GitHub">` says what a connection
 buys - runs push branches and open pull requests as the member, and commits
 are signed with a key kept in their environment home - and **Connect GitHub**
-opens the sub-screen. The sub-screen mounts the same `TerminalDock` the setup
-screen uses, with `initialLine` set to `gh auth login --hostname github.com
---git-protocol https --web --scopes admin:ssh_signing_key`, echoes that
-command in a code block for anyone who would rather type it, and says what
-that login looks like from inside a container: gh asks the member to press
-Enter to open a browser and then reports that it could not open one, so the
-member presses Enter, ignores the failure and opens the printed URL with the
-one-time code. **I've logged in** calls `github.connect`, which does the
-non-interactive rest on the server; success names the account and the
-signing key's fingerprint, and **Close** returns to the step, which then
+opens the sub-screen. The sub-screen mounts the same `TerminalDock` the
+setup screen uses and calls `github.probe` once that dock reports a running
+container: the probe runs `gh --version` inside it and refuses when there
+is nothing to run it in. Until then the screen says it is waiting for that
+terminal to start, and once it has one, that it is checking it for gh;
+through both it shows no login command and types nothing. **I've logged
+in** stays live there on purpose: `github.connect` makes the same check
+itself, so it is the way out of a probe that never settles.
+
+Once the probe answers with a gh that can do the login, `initialLine`
+becomes `typedLoginCommand` from `src/lib/github.ts`: `gh auth login
+--hostname github.com --git-protocol https --web --scopes
+admin:ssh_signing_key`, prefixed with Ctrl-U. The member can have typed at
+the prompt while the check was out, so the line clears it rather than
+landing on top of it. Ctrl-U kills backward from the cursor, so anything to
+its right survives and is appended to the login command; Ctrl-K would cover
+that, but the terminal falls back to `/bin/sh` on an image without bash and
+dash passes Ctrl-K through as input, which breaks the command. The byte is
+raw input either way, so a member sitting in an editor or a pager gets it as
+one. The screen echoes the command itself, without the prefix, in a code
+block for anyone who would rather type it, and says what that login looks
+like from inside a container: gh asks the member to press Enter to open a
+browser and then reports that it could not open one, so the member presses
+Enter, ignores the failure and opens the printed URL with the one-time code.
+
+
+
+A probe reporting no gh, a gh that would not run, or one too old for the
+login check replaces the login command and its explanation - not the dock,
+which is where the remedy is carried out. In their place comes the screen's
+own sentence about the gh the probe found, then the server's commands as
+`CopyableCommand`s - the admin one when there is one, then the member's -
+and gh's own answer in the same monospace pane refusals use; no login
+command is offered at all, and **I've logged in** is disabled, because
+connecting would only collect the matching refusal.
+
+There are three shapes. A gh the member installed into their own
+environment home - which the probe reports as `path`, and which comes first
+on PATH and survives every image - is named as the file it is, with no
+image command at all. A member on their own saved image is
+offered the install-and-save that keeps it first, and told that `aether env
+reset` removes it. A member on the server's standard image is told an admin
+runs the command, or just to reopen the terminal when the image has already
+moved without them. Every remedy the copy names is a button on the dock
+right below: **Save environment**, **Reset to standard**, **Stop
+environment**. **Check again** re-runs the probe, because none of those
+three restarts the container by itself.
+
+A probe that fails, or a dock that never got a terminal at all, puts the
+login command back - shown, not typed, and said to be untyped - because a
+member whose gh is fine must not be stopped by a check that could not run.
+A dock that has a terminal and merely refused a write is not that, and does
+not release it. A failed probe renders its own error above **Check again**;
+a dock that could not open reports in its own pane, and gets no button,
+because a second probe cannot run without a container and the attach is
+already retrying.
+
+**I've logged in** calls `github.connect`, which does the non-interactive
+rest on the server; success names the account and the signing key's
+fingerprint, and **Close** returns to the step, which then
 reads "Connected in this session as `<login>`" - the connection is React
 state that a reload loses, said the way the agent rows say "Set up in this
 session". A connection counts the way a set-up agent does for the step's
@@ -1691,10 +1741,13 @@ Workspace and a walk forward past Git identity. The Agents step tests
 setup-capable harness detection, the live terminal dock, the environment save
 that follows a confirmed install, the GitHub connect screen - the login
 command reaching the dock, the account and fingerprint it reports, a refusal
-rendered verbatim, the CLI path without a terminal socket, and Back closing it
-without leaving the step - profile previews and exclusions, profile
-recommendations, cancellation, secret and plugin guards, push refusals, and
-the optional skip paths. The diff tab covers the parser on the shapes that
+rendered verbatim, an environment with no gh and one whose gh is too old
+getting the remedy instead of the login command, no command at all while
+the probe is out and the command released with a failed probe's error, the
+CLI path without a terminal socket, and Back closing it without leaving the
+step - profile previews and exclusions, profile recommendations,
+cancellation, secret and plugin guards, push refusals, and the optional
+skip paths. The diff tab covers the parser on the shapes that
 would break it - a deletion, a new file, a removed line that reads exactly
 like a file marker - then the fetch, the truncation notice, a snapshot
 rendering its own interval and only that change, deselecting returning to the

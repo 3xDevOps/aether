@@ -71,6 +71,9 @@ const (
 	// MethodGitHubConnect finishes the GitHub login the caller started
 	// with gh auth login in their environment terminal.
 	MethodGitHubConnect = "github.connect"
+	// MethodGitHubProbe reports the gh in the caller's environment
+	// terminal, before they are told to log in with it.
+	MethodGitHubProbe = "github.probe"
 )
 
 // Custom agent (harness) onboarding methods.

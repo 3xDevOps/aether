@@ -349,6 +349,49 @@ type GitHubConnection struct {
 	Fingerprint string
 }
 
+// GitHubCLIStatus is what the member's environment terminal answers about
+// its own gh.
+type GitHubCLIStatus string
+
+const (
+	// GitHubCLIOK: gh is there and can answer the login check.
+	GitHubCLIOK GitHubCLIStatus = "ok"
+	// GitHubCLIMissing: nothing named gh on PATH.
+	GitHubCLIMissing GitHubCLIStatus = "missing"
+	// GitHubCLIBroken: gh is on PATH but would not run.
+	GitHubCLIBroken GitHubCLIStatus = "broken"
+	// GitHubCLIOutdated: gh ran and is older than the login check needs.
+	GitHubCLIOutdated GitHubCLIStatus = "outdated"
+)
+
+// GitHubCLI is the gh in one member's environment terminal, and what has to
+// happen when it cannot do the login.
+type GitHubCLI struct {
+	Status GitHubCLIStatus
+	// Version is empty when gh did not run, or printed a version line this
+	// cannot read.
+	Version string
+	// Minimum is the oldest gh the login check can read.
+	Minimum string
+	// Detail is what gh, or the container that could not run it, printed.
+	Detail string
+	// Image is the image the terminal container is running and SavedImage
+	// the member's own saved one. They differ while a container outlives
+	// the image it should be on, which is the whole reason a member has to
+	// reopen the terminal after either one moves.
+	Image      string
+	SavedImage string
+	// Path is where gh resolved, filled only when that is a file inside the
+	// member's own environment home. Such a file comes first on PATH and
+	// outlives every image, so no image remedy can reach it.
+	Path string
+	// Remedy is the command this member runs; AdminRemedy is what a server
+	// admin has to run first when the server's standard image is the one
+	// without a usable gh. Both are empty while gh is fine.
+	Remedy      string
+	AdminRemedy string
+}
+
 // Terminal is the persistent per-member environment container.
 type Terminal struct {
 	Member      MemberID

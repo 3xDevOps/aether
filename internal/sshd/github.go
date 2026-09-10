@@ -10,6 +10,7 @@ import (
 
 func init() {
 	registerMethod(protocol.MethodGitHubConnect, (*Server).githubConnect)
+	registerMethod(protocol.MethodGitHubProbe, (*Server).githubProbe)
 }
 
 // githubConnect finishes the caller's own GitHub connection. It is member
@@ -24,5 +25,26 @@ func (s *Server) githubConnect(ctx context.Context, member domain.MemberID, _ js
 		Login:       conn.Login,
 		SigningKey:  conn.SigningKey,
 		Fingerprint: conn.Fingerprint,
+	}, nil
+}
+
+// githubProbe reports the gh in the caller's own environment terminal, so
+// the dashboard can say what is wrong before it prints a login command that
+// container cannot run.
+func (s *Server) githubProbe(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	cli, err := s.cfg.Runs.ProbeGitHubCLI(ctx, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.GitHubProbeResult{
+		Status:      string(cli.Status),
+		Version:     cli.Version,
+		Minimum:     cli.Minimum,
+		Detail:      cli.Detail,
+		Image:       cli.Image,
+		SavedImage:  cli.SavedImage,
+		Path:        cli.Path,
+		Remedy:      cli.Remedy,
+		AdminRemedy: cli.AdminRemedy,
 	}, nil
 }

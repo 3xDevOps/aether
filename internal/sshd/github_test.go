@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -29,11 +30,45 @@ func TestGitHubConnectIsMemberScoped(t *testing.T) {
 	}
 }
 
-// Both ways a connect can be refused for the state of the member's gh
-// login reach the client as CodeInvalidState, with gh's own remedy in the
-// message.
+// github.probe answers for the caller's own environment terminal and
+// nobody else's, the same way the connect does.
+func TestGitHubProbeIsMemberScoped(t *testing.T) {
+	e := newTestEnv(t, nil)
+	c := controlClient(t, e)
+
+	var res protocol.GitHubProbeResult
+	if err := c.Call(protocol.MethodGitHubProbe, struct{}{}, &res); err != nil {
+		t.Fatalf("github.probe: %v", err)
+	}
+	want := protocol.GitHubProbeResult{
+		Status:      string(domain.GitHubCLIOutdated),
+		Version:     "2.45.0",
+		Minimum:     "2.81.0",
+		Detail:      "gh version 2.45.0",
+		Image:       "ghcr.io/3xdevops/aether-standard:latest",
+		SavedImage:  "aether/member-" + string(e.member.ID) + ":1",
+		Path:        "/root/.local/bin/gh",
+		Remedy:      "aether env reset",
+		AdminRemedy: "docker pull ghcr.io/3xdevops/aether-standard:latest",
+	}
+	if res != want {
+		t.Fatalf("result = %+v, want %+v", res, want)
+	}
+	calls := e.runs.Calls()
+	if len(calls) != 1 || calls[0] != "github-probe:"+string(e.member.ID) {
+		t.Fatalf("RunController calls = %v, want one github-probe for the caller", calls)
+	}
+}
+
+// Every way a connect can be refused for the state of the member's gh or
+// their login reaches the client as CodeInvalidState, with the remedy in
+// the message.
 func TestGitHubLoginProblemsMapToInvalidState(t *testing.T) {
-	for _, seam := range []error{scheduler.ErrGitHubNotLoggedIn, scheduler.ErrGitHubScopeMissing} {
+	for _, seam := range []error{
+		scheduler.ErrGitHubNotLoggedIn, scheduler.ErrGitHubScopeMissing,
+		scheduler.ErrGitHubCLIMissing, scheduler.ErrGitHubCLIBroken,
+		scheduler.ErrGitHubCLIOutdated,
+	} {
 		t.Run(seam.Error(), func(t *testing.T) {
 			e := newTestEnv(t, nil)
 			e.runs.setErr(seam)

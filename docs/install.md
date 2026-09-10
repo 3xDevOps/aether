@@ -112,6 +112,11 @@ either way. `aether update` is not a Windows command; it refuses to run
 there. Upgrading a Windows client means downloading the new release binary
 over the old one, exactly as below.
 
+The server's default standard image follows the server build, so a server
+update brings that release's environment image with it - though not into a
+member environment that is already open
+([environments.md](environments.md#the-standard-image)).
+
 ### Environment image migration
 
 The member environment image change is one-way. Workspaces no longer carry an
