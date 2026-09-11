@@ -266,7 +266,7 @@ Both transports therefore expose the same API shape and authorization checks.
 | `config.tree` | `{"harness":"claude","path":"."}` (`path` may be omitted, empty, or `"."` for the root) | `{"entries":[{"name":"settings.json","kind":"file","size":1234},...]}` |
 | `config.read` | `{"harness":"claude","path":"settings.json"}` | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `config.write` | `{"harness":"claude","path":"settings.json","content":"...","revision":"<sha256>"}` (`revision` is empty only for a new file) | the same `FileRead` shape as `config.read`, for the saved bytes |
-| `config.import` | `{"harness":"claude","files":[{"path":"settings.json","content_base64":"...","mode":420}]}` | `{"harness":"claude","files":1,"bytes":12,"excluded":[{"path":"notes.md","reason":"secret","detail":"..."}]}` |
+| `config.import` | `{"harness":"claude","files":[{"path":"settings.json","content_base64":"...","mode":420}]}` | complete: `{"harness":"claude","files":1,"bytes":12,"excluded":[{"path":"notes.md","reason":"secret","detail":"..."}]}`; an incomplete write after at least one file is committed adds `"error":"...failed relative path...: ..."` and `"imported_paths":["settings.json"]` |
 | `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
 | `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
@@ -311,11 +311,28 @@ file, and 20 MiB decoded in aggregate. Empty and binary regular files are
 preserved; a browser import sends mode `0644` and cannot preserve executable
 mode or symlinks. Existing remote modes are preserved. The server rejects
 unsafe paths, symlink components, hardlinks, and non-regular destinations.
+
 The result's `files` and `bytes` count
 accepted files only; `excluded` reports server-side credential, ignore,
 secret, or safety exclusions. Explicit CLI profile `push`, `status`, and
 `rollback` remain separate manual operations; the dashboard does not invoke
 profile synchronization or watch a local directory.
+
+If an import fails after writing one or more files, the response is still a
+`config.import` result rather than a JSON-RPC failure. Its `files` and `bytes`
+are the exact committed counts, `imported_paths` lists the exact canonical
+paths that remain in the member's shared HOME, and `error` names the failed
+relative path and the underlying error. This is an incomplete import, not a
+successful one: the dashboard warns that copied files remain and lets the user
+inspect **Files** before retrying. The optional `error` and `imported_paths`
+fields are absent from complete results and from failures before any file is
+committed.
+
+If the SSH/RPC call fails without such a result, the outcome is unknown: the
+request may have copied some files before the response was lost, so the
+dashboard says that some files may remain and directs the user to inspect
+**Files** before retrying. Cancellation can prevent the response from being
+delivered; the protocol does not claim a stronger delivery guarantee.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 4 MiB, and `config.import` at 30 MiB.

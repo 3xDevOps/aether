@@ -3,8 +3,12 @@ package sshd
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -90,4 +94,81 @@ func TestConfigRPCAuthorizationAndOwnLifecycle(t *testing.T) {
 			t.Errorf("viewer %s = %v, want CodeDenied", call.method, err)
 		}
 	}
+}
+
+func TestConfigImportPartialResultSurvivesCancellation(t *testing.T) {
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEnv(t, func(c *Config) {
+		c.Homes = homes
+		c.Config = NewConfigBackend(homes, c.Store)
+	})
+	home, err := homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstPath := filepath.Join(home, ".claude", "first.json")
+	secondPath := filepath.Join(home, ".claude", "later.json")
+	ctx := &cancelWhenFileAppears{Context: context.Background(), path: firstPath, done: make(chan struct{})}
+	params := protocol.ConfigImportParams{
+		Harness: "claude",
+		Files: []protocol.ConfigImportFile{
+			{Path: "first.json", ContentBase64: base64.StdEncoding.EncodeToString([]byte("first")), Mode: 0o644},
+			{Path: "later.json", ContentBase64: base64.StdEncoding.EncodeToString([]byte("later")), Mode: 0o644},
+		},
+	}
+	payload, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, perr := e.srv.Local(e.member.ID).Call(ctx, protocol.MethodConfigImport, payload)
+	if perr != nil {
+		t.Fatalf("partial config.import RPC error = %v", perr)
+	}
+	var result protocol.ConfigImportResult
+	if err = json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Files != 1 || result.Bytes != int64(len("first")) {
+		t.Fatalf("partial result counts = %+v", result)
+	}
+	if len(result.ImportedPaths) != 1 || result.ImportedPaths[0] != "first.json" {
+		t.Fatalf("partial result paths = %v", result.ImportedPaths)
+	}
+	if !strings.Contains(result.Error, "later.json") || !strings.Contains(result.Error, "context canceled") {
+		t.Fatalf("partial result error = %q", result.Error)
+	}
+	content, err := os.ReadFile(firstPath)
+	if err != nil || string(content) != "first" {
+		t.Fatalf("first file = %q, err=%v", content, err)
+	}
+	if _, err = os.Stat(secondPath); !os.IsNotExist(err) {
+		t.Fatalf("later file stat = %v, want absent", err)
+	}
+}
+
+type cancelWhenFileAppears struct {
+	context.Context
+	path string
+	done chan struct{}
+	once sync.Once
+}
+
+func (c *cancelWhenFileAppears) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c *cancelWhenFileAppears) Err() error {
+	select {
+	case <-c.done:
+		return context.Canceled
+	default:
+	}
+	if _, err := os.Stat(c.path); err == nil {
+		c.once.Do(func() { close(c.done) })
+		return context.Canceled
+	}
+	return c.Context.Err()
 }

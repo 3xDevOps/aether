@@ -176,12 +176,16 @@ func (b *HomeConfigBackend) Import(ctx context.Context, member domain.MemberID, 
 		return protocol.ConfigImportResult{}, err
 	}
 	result, err := b.homes.ConfigImport(ctx, member, name, p.LocalRoot, files, p.DenyNames)
-	if err != nil {
-		return protocol.ConfigImportResult{}, err
-	}
 	out := protocol.ConfigImportResult{Harness: name, Files: result.Files, Bytes: result.Bytes, Excluded: make([]protocol.ConfigExcluded, 0, len(result.Excluded))}
 	for _, excluded := range result.Excluded {
 		out.Excluded = append(out.Excluded, protocol.ConfigExcluded{Path: excluded.Path, Reason: excluded.Reason, Detail: excluded.Detail})
+	}
+	if err != nil {
+		if result.Files == 0 {
+			return protocol.ConfigImportResult{}, err
+		}
+		out.Error = err.Error()
+		out.ImportedPaths = result.ImportedPaths
 	}
 	return out, nil
 }

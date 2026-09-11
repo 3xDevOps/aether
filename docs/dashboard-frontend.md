@@ -1700,10 +1700,16 @@ onboarding import action.
 Credential names found in any path component and runtime/history defaults are
 left out in the browser. Every other selected byte is uploaded and
 server-scanned; the result reports accepted file/byte counts and server
-exclusions. The import limits are 2,000 files, 1 MiB per file and 20 MiB
-decoded in aggregate, with a 30 MiB HTTP request cap. Empty and binary
-regular files are preserved, but browser imports send mode `0644` and cannot
-preserve executable mode or symlinks. The local directory is not watched.
+exclusions. A response with `error` is an incomplete import: the UI reports
+the committed counts, exact canonical `imported_paths`, and the real error
+instead of showing success, and warns that copied files remain. If the RPC
+fails without a response, the outcome is unknown (some files may have been
+copied); inspect **Files** before retrying. There is no watcher or automatic
+retry - choosing a directory and importing again is always explicit. The
+import limits are 2,000 files, 1 MiB per file and 20 MiB decoded in aggregate,
+with a 30 MiB HTTP request cap. Empty and binary regular files are preserved,
+but browser imports send mode `0644` and cannot preserve executable mode or
+symlinks.
 Accepted files change the calling member's persistent home immediately,
 including for already-running agents that share that home; an agent may need
 to reload. Auth/vendor login is separate.

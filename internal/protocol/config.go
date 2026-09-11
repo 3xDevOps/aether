@@ -76,8 +76,10 @@ type ConfigExcluded struct {
 }
 
 type ConfigImportResult struct {
-	Harness  string           `json:"harness"`
-	Files    int              `json:"files"`
-	Bytes    int64            `json:"bytes"`
-	Excluded []ConfigExcluded `json:"excluded"`
+	Harness       string           `json:"harness"`
+	Files         int              `json:"files"`
+	Bytes         int64            `json:"bytes"`
+	Excluded      []ConfigExcluded `json:"excluded"`
+	Error         string           `json:"error,omitempty"`
+	ImportedPaths []string         `json:"imported_paths,omitempty"`
 }

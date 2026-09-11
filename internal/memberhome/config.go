@@ -58,9 +58,10 @@ type ConfigExcluded struct {
 
 // ConfigImportResult reports files installed in a member's persistent home.
 type ConfigImportResult struct {
-	Files    int
-	Bytes    int64
-	Excluded []ConfigExcluded
+	Files         int
+	Bytes         int64
+	Excluded      []ConfigExcluded
+	ImportedPaths []string
 }
 
 // ConfigTreeEntry is one immediate child of a profile directory.
@@ -515,15 +516,25 @@ func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harn
 			return ConfigImportResult{}, openErr
 		}
 		defer func() { _ = profileRoot.Close() }()
-		for _, file := range candidates {
+		importFailure := func(index int, cause error) (ConfigImportResult, error) {
+			if index > 0 {
+				result.ImportedPaths = make([]string, index)
+				for i := range result.ImportedPaths {
+					result.ImportedPaths[i] = candidates[i].Path
+				}
+			}
+			sort.Slice(result.Excluded, func(i, j int) bool { return result.Excluded[i].Path < result.Excluded[j].Path })
+			return result, fmt.Errorf("config import %q: %w", candidates[index].Path, cause)
+		}
+		for i, file := range candidates {
 			if err = ctx.Err(); err != nil {
-				return ConfigImportResult{}, err
+				return importFailure(i, err)
 			}
 			if err := ensureDirPathOwned(home, profileRoot, path.Dir(file.Path), true); err != nil {
-				return ConfigImportResult{}, err
+				return importFailure(i, err)
 			}
 			if err := atomicConfigWrite(home, profileRoot, file.Path, file.Content, os.FileMode(file.Mode&0o777), "", false); err != nil {
-				return ConfigImportResult{}, err
+				return importFailure(i, err)
 			}
 			result.Files++
 			result.Bytes += int64(len(file.Content))

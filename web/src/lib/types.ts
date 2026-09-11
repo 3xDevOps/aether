@@ -394,6 +394,10 @@ export interface ConfigImportResult {
   files: number
   bytes: number
   excluded: ConfigExclusion[]
+  /** Set only when the import stopped after installing one or more files. */
+  error?: string
+  /** Canonical paths successfully installed before an incomplete import. */
+  imported_paths?: string[]
 }
 
 // The local gateway's client-machine verbs, POST /local/v1/<verb>

@@ -262,6 +262,7 @@ function ExclusionList({ entries, label }: { entries: ConfigExclusion[]; label: 
 }
 
 export function ProfileImport({ client }: { client: Api }) {
+  const navigate = useStore((state) => state.navigate)
   const [roots, setRoots] = useState<ConfigRoot[] | null>(null)
   const [rootsError, setRootsError] = useState<string | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
@@ -353,12 +354,16 @@ export function ProfileImport({ client }: { client: Api }) {
       const imported = await client.configImport({ harness, files })
       if (generation.current === version) setResult(imported)
     } catch (err) {
-      if (generation.current === version) setImportError(message(err))
+      if (generation.current === version) {
+        const detail = message(err)
+        setImportError(
+          `Import outcome is unknown: ${detail}. Some files may have been copied; inspect Files before retrying.`,
+        )
+      }
     } finally {
       useStore.setState({ onboardingImportPending: false })
     }
   }
-
   const rootLabel = selection?.basename || 'your agent configuration directory'
 
   return (
@@ -486,18 +491,61 @@ export function ProfileImport({ client }: { client: Api }) {
             this local directory will not be watched.
           </p>
           {importError && (
-            <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" role="alert">
-              {importError}
-            </p>
+            <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
+              <p className="text-sm text-state-failed" role="alert">
+                {importError}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => navigate('files')}
+              >
+                Inspect Files
+              </Button>
+            </div>
           )}
           {result ? (
-            <>
-              <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done">
-                Imported {result.files} files ({formatBytes(result.bytes)}) into{' '}
-                {friendly[result.harness] ?? result.harness}.
-              </p>
-              <ExclusionList entries={result.excluded} label="Server left out" />
-            </>
+            result.error ? (
+              <>
+                <div className="space-y-2 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" role="alert">
+                  <p>
+                    Import incomplete: {result.files} files ({formatBytes(result.bytes)}) imported into{' '}
+                    {friendly[result.harness] ?? result.harness}.
+                  </p>
+                  <p>{result.error}</p>
+                  <p>
+                    Copied files remain. Inspect Files before choosing the
+                    directory again to retry.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => navigate('files')}
+                  >
+                    Inspect Files
+                  </Button>
+                </div>
+                {result.imported_paths && (
+                  <div className="space-y-2 border-t border-border/70 pt-2">
+                    <p className="text-sm font-medium">Imported paths: {result.imported_paths.length}</p>
+                    <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
+                      {result.imported_paths.map((path) => (
+                        <li key={path} className="font-mono">{path}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <ExclusionList entries={result.excluded} label="Server left out" />
+              </>
+            ) : (
+              <>
+                <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done">
+                  Imported {result.files} files ({formatBytes(result.bytes)}) into{' '}
+                  {friendly[result.harness] ?? result.harness}.
+                </p>
+                <ExclusionList entries={result.excluded} label="Server left out" />
+              </>
+            )
           ) : (
             <Button
               size="sm"

@@ -377,11 +377,18 @@ If the basename is unknown or matches more than one destination, choose the
 destination explicitly. The browser skips known credential names (including
 credential names in nested paths) and runtime/history defaults before upload.
 Remaining bytes are uploaded and scanned by the server; do not assume all
-secret-looking content stays on the laptop. An import can include empty files
-and arbitrary binary bytes. It is limited to **1 MiB per file**, **20 MiB
-decoded total**, and **2,000 files**. Browser imports create new files with
-mode `0644`; the browser cannot preserve executable mode or symlinks, so a
-script may need `chmod` in the remote terminal.
+secret-looking content stays on the laptop. A complete response reports
+accepted counts and server exclusions. If the server stops after writing files,
+the dashboard reports an incomplete result with exact committed paths, counts
+and the real error, and warns that copied files remain. If the RPC response is
+lost, the outcome is unknown and some files may have been copied; inspect
+**Files** before retrying. There is no watcher or automatic retry: selecting
+the directory and importing again is explicit.
+An import can include empty files and arbitrary binary bytes. It is limited to
+**1 MiB per file**, **20 MiB decoded total**, and **2,000 files**. Browser
+imports create new files with mode `0644`; the browser cannot preserve
+executable mode or symlinks, so a script may need `chmod` in the remote
+terminal.
 
 The imported files are written into your authenticated member's persistent
 configuration home. That home is mounted read-write in your environment

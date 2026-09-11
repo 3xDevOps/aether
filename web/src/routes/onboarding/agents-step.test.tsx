@@ -120,6 +120,7 @@ describe('agents step', () => {
     })
     await waitFor(() => expect(screen.getByText('Preview')).toBeDefined())
     expect(screen.queryByText(/old.md/)).toBeNull()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import configuration' })).toHaveProperty('disabled', false))
     fireEvent.click(screen.getByRole('button', { name: 'Import configuration' }))
     await waitFor(() => expect(client.configImport).toHaveBeenCalledTimes(1))
     expect(client.configImport).toHaveBeenCalledWith({
@@ -182,6 +183,55 @@ describe('agents step', () => {
     expect(screen.queryByRole('button', { name: 'Import configuration' })).toBeNull()
     expect(client.configImport).toHaveBeenCalledTimes(1)
   })
+
+  it('shows a partial import as a warning with committed paths and a real error', async () => {
+    const error = 'config.import: write settings.json: permission denied'
+    const client = fakeApi({
+      configImport: vi.fn(async ({ harness }) => ({
+        harness,
+        files: 1,
+        bytes: 2,
+        excluded: [{ path: 'blocked.md', reason: 'secret' }],
+        error,
+        imported_paths: ['settings.json'],
+      })),
+    })
+    renderStep(client)
+    await choose([
+      directoryFile('settings.json', '{}'),
+      directoryFile('blocked.md', 'ok'),
+    ])
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import configuration' })).toHaveProperty('disabled', false))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import configuration' }))
+    const warning = await screen.findByRole('alert')
+    expect(warning.textContent).toContain(error)
+    expect(screen.getByText(/Import incomplete: 1 files \(2 B\) imported into/)).toBeDefined()
+    expect(screen.getByText('settings.json')).toBeDefined()
+    expect(screen.getByText(/Copied files remain\./)).toBeDefined()
+    expect(screen.queryByText(/Imported 1 files \(2 B\) into/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Files' }))
+    expect(useStore.getState().route.name).toBe('files')
+  })
+
+  it('marks a rejected import outcome unknown without hiding the error', async () => {
+    const error = 'config.import: connection reset by peer'
+    const client = fakeApi({
+      configImport: vi.fn(async () => {
+        throw new Error(error)
+      }),
+    })
+    renderStep(client)
+    await choose([directoryFile('settings.json', '{}')])
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import configuration' })).toHaveProperty('disabled', false))
+    fireEvent.click(screen.getByRole('button', { name: 'Import configuration' }))
+    const warning = await screen.findByRole('alert')
+    expect(warning.textContent).toContain(error)
+    expect(warning.textContent).toMatch(/unknown/i)
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Files' }))
+    expect(useStore.getState().route.name).toBe('files')
+  })
+
 
   it('keeps an outstanding import exclusive across remounts', async () => {
     const pending = Promise.withResolvers<ConfigImportResult>()
