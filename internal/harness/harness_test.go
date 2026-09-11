@@ -4,6 +4,7 @@ import (
 	"maps"
 	"os"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -525,7 +526,9 @@ func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
 // the glyph map that decides what a run card shows. A name missing from
 // either is a harness members cannot schedule, or one that renders as an
 // anonymous bot - and nothing else catches it, because both lists are valid
-// TypeScript whatever they hold.
+// TypeScript whatever they hold. The name has to be a quoted string or an
+// object key, so a harness that is only mentioned in a comment or a class
+// name still counts as missing.
 func TestDashboardListsEveryShippedHarness(t *testing.T) {
 	for _, file := range []string{
 		"../../web/src/routes/templates/index.tsx",
@@ -536,7 +539,9 @@ func TestDashboardListsEveryShippedHarness(t *testing.T) {
 			t.Fatalf("read %s: %v", file, err)
 		}
 		for _, p := range Profiles() {
-			if !strings.Contains(string(source), "'"+p.Name+"'") && !strings.Contains(string(source), p.Name+":") {
+			name := regexp.QuoteMeta(p.Name)
+			listed := regexp.MustCompile(`'` + name + `'|(?m)^\s*` + name + `\s*:`)
+			if !listed.MatchString(string(source)) {
 				t.Errorf("%s does not list the shipped harness %q", file, p.Name)
 			}
 		}
