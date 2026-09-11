@@ -845,8 +845,10 @@ describe('connect', () => {
 
       fire('visibilitychange')
 
+      // Comfortably inside the pending retry, which is at least two seconds
+      // out, and wide enough that a loaded CI runner cannot fail it.
       await vi.waitFor(() => expect(store.getState().hydrated).toBe(true), {
-        timeout: 300,
+        timeout: 1_000,
       })
       expect(serverInfo.mock.calls.length).toBeGreaterThan(before)
       stop()

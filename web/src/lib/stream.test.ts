@@ -131,24 +131,28 @@ describe('connectEvents', () => {
     StubSocket.last().onopen?.()
     StubSocket.last().onmessage?.({ data: JSON.stringify({ ok: true }) })
 
+    // The tab being hidden said nothing about the network, and resubscribing
+    // a working socket would replay the log for nothing.
     fire('visibilitychange')
-    fire('online')
 
     expect(StubSocket.opened).toHaveLength(1)
     stop()
   })
 
-  it('drops a socket that never subscribed when the network returns', () => {
+  it.each([
+    ['never subscribed', false],
+    ['already subscribed', true],
+  ])('replaces a socket that %s when the network returns', (_when, subscribed) => {
     const stop = open()
     StubSocket.last().onopen?.()
+    if (subscribed) StubSocket.last().onmessage?.({ data: JSON.stringify({ ok: true }) })
 
-    // A wifi-to-cellular switch leaves the socket half open: the browser
-    // still reports it as connected, and it will never be acknowledged.
-    // Coming back to the foreground says nothing about the network, so only
-    // `online` may throw it away.
     fire('visibilitychange')
     expect(StubSocket.opened).toHaveLength(1)
 
+    // A wifi-to-cellular switch leaves the socket half open whatever state
+    // it reached: the browser goes on reporting it as connected and no close
+    // ever arrives, so `online` is the only evidence it is dead.
     fire('online')
 
     expect(StubSocket.opened).toHaveLength(2)

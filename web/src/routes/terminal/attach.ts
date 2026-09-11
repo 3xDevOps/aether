@@ -325,10 +325,12 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     if (timer) clearTimeout(timer)
     timer = null
     attempt = 0
-    // A foreground return leaves any existing socket alone, but a new
-    // network invalidates one that is not attached, including one the
-    // browser still reports as open.
-    if (socket && (kind === 'visible' || attached)) return
+    // A foreground return leaves any existing socket alone; the tab being
+    // hidden said nothing about the network. `online` did: every socket the
+    // old network carried is suspect, attached ones most of all, because a
+    // switch leaves them half open with no close ever arriving. The event is
+    // rare enough that one re-attach and its replay is the cheaper mistake.
+    if (socket && kind === 'visible') return
     drop()
     open()
   })

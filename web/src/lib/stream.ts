@@ -67,15 +67,9 @@ export function connectEvents(h: StreamHandlers): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
   let closed = false
-  // Whether the server has acknowledged the subscription on the current
-  // socket. An open socket is not evidence of a working one: a network
-  // switch leaves it half open, and the browser goes on reporting it as
-  // connected until the OS times the TCP connection out.
-  let live = false
 
   const open = () => {
     if (closed) return
-    live = false
     h.onState(attempt === 0 ? 'connecting' : 'reconnecting')
     let ws: WebSocket
     try {
@@ -110,7 +104,6 @@ export function connectEvents(h: StreamHandlers): () => void {
           // and the close reason does not survive every proxy.
           if (parsed.ok) {
             attempt = 0
-            live = true
             h.onState('live')
           } else if (parsed.ok === false && parsed.code === codeUnavailable) {
             const detail = parsed.error ?? ''
@@ -161,11 +154,16 @@ export function connectEvents(h: StreamHandlers): () => void {
     if (timer) clearTimeout(timer)
     timer = null
     attempt = 0
-    // A foreground return leaves any existing socket alone - tearing a
-    // working subscription down would replay the log for nothing - but a new
-    // network invalidates a socket that is not live, including one the
-    // browser still reports as open.
-    if (socket && (kind === 'visible' || live)) return
+    // A foreground return leaves any existing socket alone: tearing a working
+    // subscription down would replay the log for nothing, and the tab being
+    // hidden never said anything about the network.
+    if (socket && kind === 'visible') return
+    // `online` did. Every socket the old network carried is suspect,
+    // acknowledged ones most of all: a switch leaves them half open, the
+    // browser goes on reporting them as connected, and no close ever
+    // arrives - the server's own end sees the FIN, the phone does not. The
+    // event is rare enough that one resubscribe from `lastSeq` is the
+    // cheaper mistake.
     drop()
     open()
   })

@@ -357,10 +357,15 @@ run's wire `paused` field, skipping runs that do not carry it.
   the backoff unconditionally - a tab that was away cannot know how long the
   failure lasted - and reopens when there is no socket. The two differ on a
   socket that is still there: a foreground return leaves it, since tearing a
-  working subscription down would replay the log for nothing, while `online`
-  discards one that is not subscribed or attached. That is the half-open
-  socket a wifi-to-cellular switch leaves behind, which the browser goes on
-  reporting as connected. The 30 second cap stays for genuine outages, and
+  working subscription down would replay the log for nothing and the tab
+  being hidden said nothing about the network. `online` did, so it replaces
+  the socket whatever state it reached, an acknowledged one included. A
+  wifi-to-cellular switch leaves exactly that socket half open: the browser
+  goes on reporting it as connected, the store goes on saying Live, and no
+  close ever arrives, because the server's end sees the FIN and the phone
+  does not. `online` is rare, so one resubscribe from `lastSeq` and one
+  re-attach with its replay are the cheaper mistake. The 30 second cap stays
+  for genuine outages, and
   an attach the gateway refused - or one parked on a `session ended` close,
   whose transcript cannot change again - is an answer rather than a failure,
   so neither event re-asks it.

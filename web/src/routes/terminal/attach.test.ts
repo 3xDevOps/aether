@@ -399,7 +399,6 @@ describe('connectAttach', () => {
     StubSocket.last().onopen?.()
     ack()
     fire('visibilitychange')
-    fire('online')
     expect(StubSocket.opened).toHaveLength(1)
     live.close()
 
@@ -474,16 +473,21 @@ describe('connectAttach', () => {
     a.close()
   })
 
-  it('drops a socket that never attached when the network returns', () => {
+  it.each([
+    ['never attached', false],
+    ['already attached', true],
+  ])('replaces a socket that %s when the network returns', (_when, attached) => {
     const a = attach()
     StubSocket.last().onopen?.()
+    if (attached) ack()
 
-    // A wifi-to-cellular switch leaves the socket half open: the browser
-    // still reports it as connected, and the ack will never arrive. Only
-    // `online` says the network under it is gone.
     fire('visibilitychange')
     expect(StubSocket.opened).toHaveLength(1)
 
+    // A wifi-to-cellular switch leaves the socket half open whatever state
+    // it reached: the browser goes on reporting it as connected and no close
+    // ever arrives, so `online` is the only evidence it is dead. An attached
+    // one costs a re-attach and its replay, which is the cheaper mistake.
     fire('online')
 
     expect(StubSocket.opened).toHaveLength(2)
