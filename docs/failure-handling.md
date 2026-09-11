@@ -13,7 +13,7 @@ means "use the default"; a negative value turns a guard off.
 
 | Flag | Default | What it controls |
 | --- | --- | --- |
-| `--stall-threshold` | `10m` | How long a run may go with no agent output and no file changes before it parks at needs-attention. Only for a run whose agent has not said what it is doing. |
+| `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
@@ -29,11 +29,13 @@ cannot report their own state.
 
 Where the agent reports (`claude` today - see
 [harnesses.md](harnesses.md)), a turn that ends parks the run immediately
-with a reason that says what it is waiting for, and the threshold never
-enters into it. Where it does not, silence is all the server has, and the
-threshold is a bet about the longest legitimate silence: an agent thinking,
-compiling, or waiting on a slow tool call produces no PTY output and touches
-no files, and there is no way to tell that apart from a hang.
+with a reason that says what it is waiting for, and the threshold is left
+to catch the case the agent cannot report: one that hangs mid-turn, which
+still parks with a `stalled:` reason. Where the agent does not report,
+silence is all the server has, and the threshold is a bet about the longest
+legitimate silence: an agent thinking, compiling, or waiting on a slow tool
+call produces no PTY output and touches no files, and there is no way to
+tell that apart from a hang.
 
 - **Too low** and long tool calls park healthy runs, which trains people to
   ignore the badge.
@@ -200,11 +202,13 @@ delay: the report arrives as the agent stops. The run returns to `running`
 with `agent resumed` when the agent starts its next turn - which is what
 steering it produces - and not on terminal output alone.
 
-**The run stalled.** No agent output and no file changes past
-`--stall-threshold` parks a live run at `needs-attention` with a reason that
-leads with `stalled:`. This is the hang detector, and it is the only signal
-for a harness that cannot report. Genuine agent output or a file change
-returns such a run to `running`; server-written steering echoes do not.
+**The run stalled.** No agent output, no file changes and nothing from the
+agent's reporter past `--stall-threshold` parks a live run at
+`needs-attention` with a reason that leads with `stalled:`. This is the hang
+detector: it catches an agent that said it was working and then wedged, and
+it is the only signal at all for a harness that cannot report. Genuine agent
+output or a file change returns such a run to `running`; server-written
+steering echoes do not.
 
 Either way the run remains supervised in its run container: while unpaused,
 members with the existing steer permission can attach, inject input, and
