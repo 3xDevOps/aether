@@ -75,17 +75,17 @@ var defaultIgnores = map[string][]string{
 	// real third-party content a user may want on the server.
 	// vendoredRoots below covers them instead.
 	"codex": {"tmp/", ".tmp/", "sessions/"},
-	// pi and its fork omp share the agent/ layout: sessions/ is the
-	// transcript archive, terminal-sessions/ the scratch trees behind it,
-	// and history.db the prompt history the CLI rewrites on every prompt.
-	// The rest of omp's list is what the fork adds around that - natives/
-	// alone is a per-version download that dwarfs everything a member
-	// configured, and collab/ is another transcript archive. Neither
-	// harness keeps configuration in any of them.
-	"pi": {
-		"agent/sessions/", "agent/terminal-sessions/", "agent/cache/",
-		"agent/history.db", "agent/history.db-shm", "agent/history.db-wal",
-	},
+	// pi keeps its transcript archive in agent/sessions/ and unpacks
+	// extension downloads under agent/tmp/. The rest of its agent
+	// directory is configuration, agent/npm/ included: that one holds the
+	// extension packages the member installed.
+	"pi": {"agent/sessions/", "agent/tmp/"},
+	// omp is a fork of pi with its own runtime output around that layout:
+	// terminal-sessions/ is the scratch tree behind its terminal tool,
+	// history.db the prompt history the CLI rewrites on every prompt,
+	// natives/ a per-version download that dwarfs everything a member
+	// configured, and collab/ another transcript archive. None of it is
+	// configuration.
 	"omp": {
 		"agent/sessions/", "agent/terminal-sessions/", "agent/cache/",
 		"agent/history.db", "agent/history.db-shm", "agent/history.db-wal",
