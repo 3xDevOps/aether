@@ -176,7 +176,8 @@ export async function copySelection(term: Terminal): Promise<boolean> {
 /**
  * Copy the rows on screen. A drag selection is what copy normally needs, and
  * touch has no drag over a terminal, so this is how a phone gets the output
- * it is looking at out of the terminal.
+ * it is looking at out of the terminal. An empty screen says so rather than
+ * leaving a tap with no answer at all.
  */
 export async function copyScreen(term: Terminal): Promise<boolean> {
   const buffer = term.buffer.active
@@ -185,7 +186,12 @@ export async function copyScreen(term: Terminal): Promise<boolean> {
     rows.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
   }
   while (rows.length > 0 && rows[rows.length - 1] === '') rows.pop()
-  return writeText(rows.join('\n'))
+  const text = rows.join('\n')
+  if (!text) {
+    toast.error('Nothing to copy: this screen is empty')
+    return false
+  }
+  return writeText(text)
 }
 
 async function writeText(text: string): Promise<boolean> {

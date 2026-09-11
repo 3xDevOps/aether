@@ -8,11 +8,11 @@ import {
   ClipboardPaste,
   ChevronDown,
   ChevronUp,
-  Copy,
   Loader2,
   Minus,
   Plus,
   RotateCcw,
+  ScanText,
   Search,
   X,
 } from 'lucide-react'
@@ -29,7 +29,7 @@ import {
   useTerminalImage,
 } from '@/components/terminal-image'
 import { TerminalKeys } from '@/components/terminal-keys'
-import { useCoarsePointer } from '@/lib/hooks'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { copyScreen, copySelection } from '@/lib/term-clipboard'
 import {
   defaultTerminalFontSize,
@@ -64,6 +64,16 @@ function ToolButton({
       <Tooltip.Content>{hint}</Tooltip.Content>
     </Tooltip>
   )
+}
+
+/**
+ * What a touch screen reads instead of a tooltip. A tooltip opens on hover,
+ * which a finger never produces, so two actions that differ only by icon -
+ * copying a selection and copying the screen - need the word beside them
+ * where there is no pointer to hover with.
+ */
+function ToolLabel({ children }: { children: React.ReactNode }) {
+  return <span className="hidden pr-1 text-[12px] text-muted-foreground coarse:inline">{children}</span>
 }
 
 function TerminalTools({
@@ -147,6 +157,7 @@ function TerminalTools({
       >
         <ClipboardCopy />
       </ToolButton>
+      <ToolLabel>Selection</ToolLabel>
       <ToolButton
         type="button"
         variant="ghost"
@@ -158,8 +169,9 @@ function TerminalTools({
           if (terminal) void copyScreen(terminal)
         }}
       >
-        <Copy />
+        <ScanText />
       </ToolButton>
+      <ToolLabel>Screen</ToolLabel>
       <ToolButton
         type="button"
         variant="ghost"
@@ -293,7 +305,7 @@ export function TerminalPane({
     imageUploadEnabled,
     focusTerminal: controller.focusTerminal,
   })
-  const coarse = useCoarsePointer()
+  const coarse = useMediaQuery(coarsePointer)
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex h-9 min-h-9 shrink-0 items-center border-b border-border bg-sidebar px-2 coarse:h-12 coarse:min-h-12">
