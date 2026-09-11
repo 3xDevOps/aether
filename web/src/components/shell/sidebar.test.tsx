@@ -352,6 +352,20 @@ describe('Sidebar', () => {
     expect(entry.textContent).toContain('1')
   })
 
+  // CLAUDE.md: show the real error, never a friendlier stand-in. The badge
+  // that marks the failure is decorative, so the entry's name is the only
+  // place a reader meets what the server actually said.
+  it('names the queue error the server reported on the Approvals entry', () => {
+    useStore.setState({ inboxError: 'approval.list: database is locked' })
+    render(<Sidebar />)
+
+    expect(
+      within(screen.getByLabelText('Surfaces')).getByRole('button', {
+        name: 'Approvals, approval.list: database is locked',
+      }),
+    ).toBeDefined()
+  })
+
   it('groups the runs by the pressed segment', () => {
     render(<Sidebar />)
     const control = within(screen.getByRole('group', { name: 'Group runs by' }))

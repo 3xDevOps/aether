@@ -483,7 +483,7 @@ function RunTree() {
 }
 
 function approvalsLabel(label: string, waiting: number, error: string | null): string {
-  if (error) return `${label}, queue could not be read`
+  if (error) return `${label}, ${error}`
   return waiting > 0 ? `${label}, ${waiting} waiting on a decision` : label
 }
 
