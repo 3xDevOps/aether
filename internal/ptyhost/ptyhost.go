@@ -311,6 +311,20 @@ type AttachClient struct {
 	// would cost the client the terminal state it built up, which a fresh
 	// replay has to reconstruct from a preamble.
 	Resume bool
+	// Cursor is how much of the session's output this client has already
+	// seen, as reported to it by the ack it is resuming from. It is what
+	// makes the reattach lossless: the session hands back exactly the
+	// bytes produced since, rather than everything or nothing.
+	Cursor uint64
+}
+
+// ResumeWriter is an attach conn that reports how a resume was answered:
+// the cursor this client now holds, and whether the session could still
+// serve the one it asked from. A client told it was not resumed has to
+// clear its screen before the replay that follows, because that replay is
+// the whole scrollback rather than the gap.
+type ResumeWriter interface {
+	SetResume(cursor uint64, resumed bool)
 }
 
 // GeometryWriter is an attach conn that wants the session's PTY size: once
@@ -353,6 +367,7 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	// reports it, so a follower draws what the writers see from its first
 	// frame rather than from the first change after it joined.
 	c.tellGeometry(s.geometry())
+	c.tellResume()
 
 	readDone := make(chan struct{})
 	go func() {

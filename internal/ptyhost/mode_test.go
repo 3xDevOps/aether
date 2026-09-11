@@ -175,8 +175,8 @@ func TestSoloMirrorImposesUntilCompany(t *testing.T) {
 }
 
 // Taking control is a change of state, not a redraw: the client keeps the
-// screen and the terminal state it already has.
-func TestResumeKeepsTheScreen(t *testing.T) {
+// screen it has and is handed only what arrived while it was reattaching.
+func TestResumeReplaysOnlyTheGap(t *testing.T) {
 	tr, err := newCastWriter(filepath.Join(t.TempDir(), "cast"), 80, 24)
 	if err != nil {
 		t.Fatalf("newCastWriter: %v", err)
@@ -184,24 +184,75 @@ func TestResumeKeepsTheScreen(t *testing.T) {
 	t.Cleanup(func() { _ = tr.close() })
 	s := &session{ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
 	s.deliver([]byte("\x1b[?2004h agent output\r\n"))
+	caughtUp := s.ring.written
 
-	resuming := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true})
-	if aerr := s.addClient(resuming); aerr != nil {
+	// Nothing happened while this client was away.
+	idle := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, Cursor: caughtUp})
+	if aerr := s.addClient(idle); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
-	if len(resuming.replay) != 0 {
-		t.Fatalf("resume replayed %q, want nothing", resuming.replay)
+	if !idle.resumed || len(idle.replay) != 0 {
+		t.Fatalf("resume replayed %q, want nothing", idle.replay)
 	}
 	if s.geoGen != 0 {
 		t.Fatalf("resume at an unchanged size scheduled a redraw (geoGen = %d)", s.geoGen)
 	}
 
+	// The agent kept talking during the reattach; that much and no more.
+	s.deliver([]byte("during the gap"))
+	behind := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, Cursor: caughtUp})
+	if aerr := s.addClient(behind); aerr != nil {
+		t.Fatalf("addClient: %v", aerr)
+	}
+	if !behind.resumed || string(behind.replay) != "during the gap" {
+		t.Fatalf("resume replayed %q, want the gap alone", behind.replay)
+	}
+}
+
+// A cursor the ring can no longer answer from is not a resume: the client
+// is told so, and gets the whole screen back rather than a hole in it.
+func TestResumeFallsBackWhenTheGapIsGone(t *testing.T) {
+	tr, err := newCastWriter(filepath.Join(t.TempDir(), "cast"), 80, 24)
+	if err != nil {
+		t.Fatalf("newCastWriter: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.close() })
+	s := &session{ring: newRing(64), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+	s.deliver([]byte("\x1b[?2004h"))
+	stale := s.ring.written
+	s.deliver(bytes.Repeat([]byte("x"), 512))
+
+	c := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, Cursor: stale})
+	if aerr := s.addClient(c); aerr != nil {
+		t.Fatalf("addClient: %v", aerr)
+	}
+	if c.resumed {
+		t.Fatal("a cursor the ring dropped must not report as resumed")
+	}
+	if !bytes.HasPrefix(c.replay, []byte("\x1b[?2004h")) {
+		t.Fatalf("fallback replay lost the mode preamble: %q", head(c.replay))
+	}
+}
+
+// A client that never attached before is not resuming, whatever it asks.
+func TestFreshClientStillGetsTheReplay(t *testing.T) {
+	tr, err := newCastWriter(filepath.Join(t.TempDir(), "cast"), 80, 24)
+	if err != nil {
+		t.Fatalf("newCastWriter: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.close() })
+	s := &session{ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+	s.deliver([]byte("agent output\r\n"))
+
 	fresh := newClient(nil, AttachClient{Cols: 80, Rows: 24})
 	if aerr := s.addClient(fresh); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
-	if len(fresh.replay) == 0 {
+	if fresh.resumed || len(fresh.replay) == 0 {
 		t.Fatal("a client that is not resuming must still get the replay")
+	}
+	if fresh.cursor != s.ring.written {
+		t.Fatalf("cursor = %d, want %d so a later resume starts from here", fresh.cursor, s.ring.written)
 	}
 }
 

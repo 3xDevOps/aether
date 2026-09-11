@@ -949,11 +949,13 @@ needs.
    `resume` asks to reattach without the scrollback replay: the client
    already holds this session's screen and is reattaching only to change
    what it may do, which is what the dashboard does when you take control
-   or hand it back. The ack reports `"replay":0` and the client keeps what
-   is on screen, along with the terminal state behind it. Output produced
-   between the two sockets is not resent, so a client asks for this only
-   while its current attach is live - after a drop, only a full replay can
-   say what it missed.
+   or hand it back. It carries `cursor`, the output count the last ack
+   reported plus every live byte received since, and the replay is exactly
+   what followed it - usually nothing, and never the whole scrollback. The
+   client keeps what is on screen along with the terminal state behind it.
+   The ack answers with `"resumed":true`; a session whose ring no longer
+   reaches back that far answers `"resumed":false` and replays everything
+   instead, which the client has to clear its screen for.
 
    `follow` says the client renders the session at the size it already is
    and imposes none of its own, so it is left out of the minimum the PTY is
@@ -972,7 +974,9 @@ needs.
    terminal-generated replies until those bytes have been parsed. It leads
    with the terminal modes the session is in - bracketed paste, cursor,
    autowrap, mouse reporting - rebuilt rather than recorded, since the
-   bytes that set them left the scrollback long ago.
+   bytes that set them left the scrollback long ago. `cursor` is how much
+   of the session's output the client holds once that replay is parsed;
+   it is what a later `resume` sends back.
    A write attach is refused with `-32001`
    unless the member holds the **steer** capability on that run; dropping
    `"write"` always works for a member who can see the run. An unknown run is

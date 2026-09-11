@@ -44,6 +44,7 @@ interface AttachHeader {
   write?: boolean
   follow?: boolean
   resume?: boolean
+  cursor?: number
   cols: number
   rows: number
 }
@@ -59,6 +60,8 @@ interface AttachFrame {
   error?: string
   cols?: number
   rows?: number
+  cursor?: number
+  resumed?: boolean
   replay?: number
 }
 
@@ -201,6 +204,10 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   // member cannot steer, every reconnect is a mirror.
   let writeDenied = false
   let replayRemaining = 0
+  // How much of the session's output this client holds. The ack sets it to
+  // where the replay leaves off and every live byte advances it, so a
+  // reattach can ask for exactly what it missed.
+  let cursor = 0
 
   const open = (resume = false) => {
     if (disposed) return
@@ -229,13 +236,17 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       const header: AttachHeader = { cols, rows }
       if (askedWrite) header.write = true
       if (follows) header.follow = true
-      if (resume) header.resume = true
+      if (resume) {
+        header.resume = true
+        header.cursor = cursor
+      }
       ws.send(JSON.stringify(header))
     }
     ws.onmessage = (msg) => {
       if (typeof msg.data !== 'string') {
         const chunk = new Uint8Array(msg.data as ArrayBuffer)
         if (replayRemaining <= 0) {
+          cursor += chunk.length
           handlers.onData?.(chunk, 'live')
           return
         }
@@ -246,6 +257,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           replayRemaining === 0 ? 'replay-end' : 'replay',
         )
         if (replayLength < chunk.length) {
+          cursor += chunk.length - replayLength
           handlers.onData?.(chunk.subarray(replayLength), 'live')
         }
         return
@@ -268,14 +280,18 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         attempt = 0
         unavailableTries = 0
         waitingForSession = false
+        cursor = ack.cursor ?? 0
         handlers.onState('live')
+        // The server decides whether a resume was possible: it answers one
+        // it could not serve with the whole scrollback instead, which the
+        // caller has to clear its screen for.
         handlers.onAttached(
           askedWrite,
           {
             cols: ack.cols ?? standardGeometry.cols,
             rows: ack.rows ?? standardGeometry.rows,
           },
-          resume,
+          resume && ack.resumed === true,
         )
         return
       }

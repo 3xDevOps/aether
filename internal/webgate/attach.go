@@ -45,6 +45,7 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		Shell:    shell,
 		Follow:   req.Follow,
 		Resume:   req.Resume,
+		Cursor:   req.Cursor,
 	})
 	if err != nil {
 		if !ack.OK && ack.Code == 0 {

@@ -100,6 +100,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			ReadOnly: readOnly,
 			Follow:   req.Follow,
 			Resume:   req.Resume,
+			Cursor:   req.Cursor,
 		}, conn, st.resize)
 	}()
 
@@ -272,6 +273,20 @@ func (c *attachConn) SetGeometry(cols, rows uint) {
 	}
 	c.mu.Unlock()
 	c.ch.geometry(cols, rows)
+}
+
+// SetResume records how the session answered a resume. It lands in the
+// ack, so it must arrive before WriteReplay sends it - Host.Attach calls
+// it straight after the client joins, which is where both are decided.
+func (c *attachConn) SetResume(cursor uint64, resumed bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sent {
+		return
+	}
+	if ack, ok := c.ack.(*protocol.AttachResponse); ok {
+		ack.Cursor, ack.Resumed = cursor, resumed
+	}
 }
 
 func (c *attachConn) sendOK() {

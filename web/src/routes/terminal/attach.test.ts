@@ -142,14 +142,40 @@ describe('connectAttach', () => {
     expect(nextOutput).toEqual(['new host'])
     a.close()
   })
-  it('resumes without a replay so taking control keeps the screen', () => {
+  it('resumes from where the live output left it, so the gap is asked for', () => {
     const a = attach()
+    StubSocket.last().onopen?.()
+    ack({ cursor: 100 })
+    StubSocket.last().onmessage?.({ data: new TextEncoder().encode('live!').buffer })
+
+    a.reopen({ resume: true })
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).toMatchObject({ resume: true, cursor: 105 })
+    a.close()
+  })
+
+  it('clears the screen when the server could not serve the resume', () => {
+    const resumedFlags: Array<boolean | undefined> = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: () => {},
+      onAttached: (_write, _size, resumed) => resumedFlags.push(resumed),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 120, rows: 40 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
     StubSocket.last().onopen?.()
     ack()
 
     a.reopen({ resume: true })
     StubSocket.last().onopen?.()
-    expect(StubSocket.last().frames()[0]).toMatchObject({ resume: true })
+    // The ring had dropped the bytes this client was missing.
+    StubSocket.last().onmessage?.({
+      data: JSON.stringify({ ok: true, cols: 120, rows: 40, resumed: false }),
+    })
+    expect(resumedFlags[resumedFlags.length - 1]).toBe(false)
     a.close()
   })
 

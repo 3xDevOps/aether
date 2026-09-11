@@ -476,6 +476,7 @@ describe('the terminal on a phone', () => {
       write: true,
       follow: true,
       resume: true,
+      cursor: 0,
       cols: 80,
       rows: 24,
     })

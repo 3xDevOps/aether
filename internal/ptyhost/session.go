@@ -211,18 +211,28 @@ func (s *session) addClient(c *client) error {
 		return ErrSessionEnded
 	}
 	// A resuming client still holds this session's screen and its terminal
-	// state, so it gets neither. Everyone else rebuilds from the ring,
-	// which is a byte tail: the modes the agent set at startup are long
-	// gone from it, and the preamble puts them back ahead of the replay.
-	if !c.resume {
+	// state, so it needs only the bytes that arrived while it was away.
+	if c.resume {
+		if missed, ok := s.ring.since(c.cursor); ok {
+			c.replay = missed
+			c.resumed = true
+		}
+	}
+	// Everyone else rebuilds from the ring, which is a byte tail: the
+	// modes the agent set at startup are long gone from it, and the
+	// preamble puts them back ahead of the replay.
+	if !c.resumed {
 		c.replay = append(s.modes.preamble(), s.ring.bytes()...)
 	}
+	// Where the replay leaves this client, so it can say where it got to
+	// if it comes back.
+	c.cursor = s.ring.written
 	s.clients[c] = struct{}{}
 	// Any join can change who imposes, not just this client: the mirror
 	// that was alone here a moment ago no longer is. A resume asks for no
 	// redraw - that is the point of it - so it nudges only if the size it
 	// brings actually differs from the one the session already has.
-	s.reconcileLocked(s.imposesNow(c) && !c.resume)
+	s.reconcileLocked(s.imposesNow(c) && !c.resumed)
 	return nil
 }
 
@@ -526,15 +536,19 @@ func bannerText(text string) string {
 }
 
 // ring keeps the last max bytes of raw PTY output for replay-on-attach.
+// written counts every byte the session has ever produced, so a client
+// that says how far it got can be handed exactly what it missed.
 type ring struct {
 	max     int
 	buf     []byte
 	dropped bool
+	written uint64
 }
 
 func newRing(max int) *ring { return &ring{max: max} }
 
 func (r *ring) write(p []byte) {
+	r.written += uint64(len(p))
 	if len(p) >= r.max {
 		if len(p) > r.max || len(r.buf) > 0 {
 			r.dropped = true
@@ -549,6 +563,22 @@ func (r *ring) write(p []byte) {
 	if n := len(r.buf) - r.max; n > 0 {
 		r.buf = append(r.buf[:0], r.buf[n:]...)
 	}
+}
+
+// since returns the bytes written after cursor, and whether the ring
+// still holds all of them. A cursor from further back than the ring
+// retains - or one ahead of what has been written, which no honest
+// client can hold - reports false, and the caller replays everything
+// instead.
+func (r *ring) since(cursor uint64) ([]byte, bool) {
+	if cursor > r.written {
+		return nil, false
+	}
+	behind := r.written - cursor
+	if behind > uint64(len(r.buf)) {
+		return nil, false
+	}
+	return append([]byte(nil), r.buf[uint64(len(r.buf))-behind:]...), true
 }
 
 func (r *ring) bytes() []byte {
@@ -571,11 +601,16 @@ type client struct {
 	// never reflow the agent's screen for anyone else.
 	follow bool
 	// resume means this client kept the screen from a previous attach, so
-	// it is sent no replay and provokes no redraw.
-	resume bool
-	cols   uint // guarded by session.mu
-	rows   uint // guarded by session.mu
-	replay []byte
+	// it is sent only what it missed and provokes no redraw. cursor is how
+	// far it got, and resumed records whether the ring could still answer
+	// from there - when it could not, the attach falls back to a full
+	// replay and the client has to clear its screen after all.
+	resume  bool
+	cursor  uint64
+	resumed bool
+	cols    uint // guarded by session.mu
+	rows    uint // guarded by session.mu
+	replay  []byte
 
 	mu     sync.Mutex
 	cond   *sync.Cond
@@ -591,6 +626,7 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 		readOnly: a.ReadOnly,
 		follow:   a.Follow,
 		resume:   a.Resume,
+		cursor:   a.Cursor,
 		cols:     a.Cols,
 		rows:     a.Rows,
 		done:     make(chan struct{}),
@@ -631,6 +667,12 @@ func (s *session) imposesNow(c *client) bool {
 // which is how an ack reports the live geometry and how a later change
 // reaches a follower. Never called with the session lock held: the conn
 // writes.
+func (c *client) tellResume() {
+	if w, ok := c.conn.(ResumeWriter); ok {
+		w.SetResume(c.cursor, c.resumed)
+	}
+}
+
 func (c *client) tellGeometry(cols, rows uint) {
 	if w, ok := c.conn.(GeometryWriter); ok {
 		w.SetGeometry(cols, rows)
