@@ -35,7 +35,7 @@ func requestBodyLimit(method string) int64 {
 // nothing else stands between it and the member's authority; a JSON
 // content type forces the preflight, which the gateway never answers.
 func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
-	backend, ok := g.authorize(w, r, false)
+	backend, ok := g.Authorize(w, r, false)
 	if !ok {
 		return
 	}
@@ -72,7 +72,7 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 // parameters name diff-snapshot trees and render that interval instead of
 // the run's whole diff.
 func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
-	backend, ok := g.authorize(w, r, false)
+	backend, ok := g.Authorize(w, r, false)
 	if !ok {
 		return
 	}
@@ -96,7 +96,7 @@ func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 
 // handleDisk serves GET /api/v1/disk by calling server.disk verbatim.
 func (g *Gateway) handleDisk(w http.ResponseWriter, r *http.Request) {
-	backend, ok := g.authorize(w, r, false)
+	backend, ok := g.Authorize(w, r, false)
 	if !ok {
 		return
 	}
@@ -111,7 +111,7 @@ func (g *Gateway) handleDisk(w http.ResponseWriter, r *http.Request) {
 // handleCapabilities serves GET /api/v1/capabilities: the composer's
 // descriptor, with the parts every gateway shares filled in.
 func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	if _, ok := g.authorize(w, r, false); !ok {
+	if _, ok := g.Authorize(w, r, false); !ok {
 		return
 	}
 	caps := g.cfg.Capabilities

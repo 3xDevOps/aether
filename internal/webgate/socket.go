@@ -48,7 +48,7 @@ type Socket struct {
 // end it, and start the keepalive pings. A false result means the
 // response has already been written. The caller must Close the socket.
 func (g *Gateway) Accept(w http.ResponseWriter, r *http.Request) (*Socket, bool) {
-	backend, ok := g.authorize(w, r, true)
+	backend, ok := g.Authorize(w, r, true)
 	if !ok {
 		return nil, false
 	}

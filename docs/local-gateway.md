@@ -171,9 +171,13 @@ framing can carry an image whose decoded bytes are capped separately at 8 MiB.
 
 The path segment after `/api/v1/` is the JSON-RPC method name, dots
 included: `POST /api/v1/run.list`. The request body is the method's
-`params` object (an empty body means no params). Success is `200` with the
-method's result object as the whole body; failure is a non-2xx status with
-the JSON-RPC error object wrapped:
+`params` object (an empty body means no params) and must be declared
+`Content-Type: application/json`; any other content type answers `415`
+before the body is read. A request carrying an `Origin` header that is not
+the gateway's own host answers `403` before anything else, on every route
+(the cross-site rule in [security.md](security.md#the-dashboard-gateways)).
+Success is `200` with the method's result object as the whole body;
+failure is a non-2xx status with the JSON-RPC error object wrapped:
 
 ```json
 {"error":{"code":-32001,"message":"run.kill: permission denied"}}
@@ -185,7 +189,8 @@ Status mapping (the code is the authority; the status is a convenience):
 | --- | --- |
 | `-32700` parse, `-32600` invalid request, `-32602` invalid params | 400 |
 | unauthenticated (no/expired token) | 401 |
-| `-32001` denied | 403 |
+| `-32001` denied, and a foreign `Origin` header | 403 |
+| `-32600` invalid request: body not `application/json` | 415 |
 | `-32000` not found | 404 |
 | `-32002` invalid state, `-32003` conflict | 409 |
 | `-32603` internal | 500 |

@@ -113,8 +113,10 @@ func New(cfg Config) (*Gateway, error) {
 	return g, nil
 }
 
-// authorize runs the same-origin rule and then the authorizer, writing
-// the refusal and reporting whether the request may proceed.
+// Authorize runs the same-origin rule and then the authorizer, writing
+// the refusal and reporting whether the request may proceed. The core's
+// routes call it, and so must every route a composer adds, so the rule
+// holds for the whole gateway.
 //
 // A browser sends Origin on every cross-site request and on every
 // WebSocket handshake. The server gateway has no bearer token - the
@@ -122,7 +124,7 @@ func New(cfg Config) (*Gateway, error) {
 // other origin could otherwise act as the member with a plain fetch: a
 // request an Origin names that is not this host is refused before any
 // identity is resolved.
-func (g *Gateway) authorize(w http.ResponseWriter, r *http.Request, handshake bool) (Backend, bool) {
+func (g *Gateway) Authorize(w http.ResponseWriter, r *http.Request, handshake bool) (Backend, bool) {
 	if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(origin, r.Host) {
 		(&Refusal{
 			Status: http.StatusForbidden,

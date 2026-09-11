@@ -376,3 +376,24 @@ func TestTerminalImageAPIRequiresGatewayToken(t *testing.T) {
 		t.Fatalf("backend calls without token = %d, want 0", len(backend.calls))
 	}
 }
+
+// The local verbs sit behind the core's same-origin rule like every other
+// route: a foreign page holding the token still cannot use them.
+func TestLocalVerbsRefuseAForeignOrigin(t *testing.T) {
+	g := newTestGateway(t, &apiStubBackend{})
+	req := httptest.NewRequest(http.MethodPost, "/local/v1/link.status", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+g.Token())
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	g.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("foreign Origin local verb = %d, want 403: %s", rec.Code, rec.Body)
+	}
+	if perr := decodeError(t, rec.Body.Bytes()); perr.Code != protocol.CodeDenied {
+		t.Fatalf("error code = %d, want CodeDenied", perr.Code)
+	}
+	if rec := do(g, http.MethodPost, "/local/v1/link.status", "{}", true); rec.Code != http.StatusOK {
+		t.Fatalf("same-origin local verb = %d, want 200: %s", rec.Code, rec.Body)
+	}
+}

@@ -206,15 +206,11 @@ func (g *Gateway) authorize(r *http.Request, handshake bool) (webgate.Backend, *
 	return g.cfg.Backend, nil
 }
 
-// authorized reports whether r carries the gateway token; the local
-// verbs and the environment scan share the core's rule.
+// authorized reports whether r may run a local verb: the core's
+// same-origin rule and then the token, exactly as for every other route.
 func (g *Gateway) authorized(w http.ResponseWriter, r *http.Request) bool {
-	_, refusal := g.authorize(r, false)
-	if refusal != nil {
-		refusal.Write(w)
-		return false
-	}
-	return true
+	_, ok := g.core.Authorize(w, r, false)
+	return ok
 }
 
 // Start binds 127.0.0.1 and serves in the background. The context bounds
