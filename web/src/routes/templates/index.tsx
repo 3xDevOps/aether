@@ -44,7 +44,7 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { soleWorkspace } from '@/store/workspaces'
 
-const harnesses = ['claude', 'codex', 'opencode', 'custom']
+const harnesses = ['claude', 'codex', 'pi', 'omp', 'opencode', 'custom']
 
 export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) {
   const workspaces = useStore((s) => s.workspaces)

@@ -2,6 +2,7 @@ package harness
 
 import (
 	"maps"
+	"os"
 	"path"
 	"slices"
 	"strings"
@@ -516,5 +517,28 @@ func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
 	// An unshipped name has no registry entry to inherit from.
 	if unknown := (Definition{Name: "aider", Executable: "aider"}).Profile(); len(unknown.Env) != 0 || len(unknown.EnvPassthrough) != 0 {
 		t.Fatalf("unshipped definition inherited environment: %+v", unknown)
+	}
+}
+
+// The dashboard cannot import this registry, so it repeats the shipped
+// names in two places: the picker a template's harness is chosen from, and
+// the glyph map that decides what a run card shows. A name missing from
+// either is a harness members cannot schedule, or one that renders as an
+// anonymous bot - and nothing else catches it, because both lists are valid
+// TypeScript whatever they hold.
+func TestDashboardListsEveryShippedHarness(t *testing.T) {
+	for _, file := range []string{
+		"../../web/src/routes/templates/index.tsx",
+		"../../web/src/routes/board/harness-glyph.tsx",
+	} {
+		source, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		for _, p := range Profiles() {
+			if !strings.Contains(string(source), "'"+p.Name+"'") && !strings.Contains(string(source), p.Name+":") {
+				t.Errorf("%s does not list the shipped harness %q", file, p.Name)
+			}
+		}
 	}
 }
