@@ -315,6 +315,13 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   // session, are answers rather than failures: neither event re-asks them.
   const stopWake = onWake((kind) => {
     if (disposed || refused || ended) return
+    // A tolerated missing-session refusal is a deliberate wait, and its
+    // budget is four `backoff()` waits because that is what outlives
+    // recovery starting the PTY. A wake reopens for free, so without this a
+    // burst of app switches would spend all four in a second and report the
+    // wait as a failure. The freeze only delays that reconnect; a run with
+    // no session has nothing to show sooner anyway.
+    if (waitingForSession) return
     if (timer) clearTimeout(timer)
     timer = null
     attempt = 0

@@ -176,6 +176,6 @@ export function connectEvents(h: StreamHandlers): () => void {
     closed = true
     stopWake()
     if (timer) clearTimeout(timer)
-    socket?.close()
+    drop()
   }
 }

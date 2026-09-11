@@ -63,6 +63,19 @@ function refuseMissingSession() {
   vi.advanceTimersByTime(60_000)
 }
 
+/**
+ * The gateway's missing-session refusal and the 1008 close behind it, on
+ * whichever socket is open now. No timers advance, so the reconnect it
+ * schedules is still pending when this returns.
+ */
+function refuseSession() {
+  StubSocket.last().onopen?.()
+  StubSocket.last().onmessage?.({
+    data: JSON.stringify({ ok: false, code: -32004, error: 'ptyhost: no session for run' }),
+  })
+  StubSocket.last().onclose?.({ code: 1008 })
+}
+
 function ack(over: Record<string, unknown> = {}) {
   StubSocket.last().onmessage?.({
     data: JSON.stringify({ ok: true, cols: 120, rows: 40, ...over }),
@@ -404,6 +417,36 @@ describe('connectAttach', () => {
     // A refusal is the server's answer, not a dropped socket: coming back to
     // the foreground must not re-ask a question already answered.
     expect(StubSocket.opened).toHaveLength(before)
+    a.close()
+  })
+
+  it('keeps the missing-session budget for the waits it was sized for', () => {
+    sessionPending = true
+    const a = attach()
+    refuseSession()
+
+    // Four app switches while the run is still provisioning. A wake reopens
+    // for free, so without a guard each one would spend a try of a budget
+    // sized for four backoff waits, and the deliberate wait would report
+    // itself as a failure inside a second.
+    for (let n = 0; n < 4; n++) {
+      fire('visibilitychange')
+      fire('online')
+      expect(StubSocket.opened).toHaveLength(1)
+    }
+    expect(refusal).toBeNull()
+
+    // The wait is delayed by the freeze, never cancelled: its own reconnect
+    // still runs and the budget is whole.
+    for (let n = 0; n < 3; n++) {
+      vi.advanceTimersByTime(60_000)
+      refuseSession()
+    }
+    expect(refusal).toBeNull()
+
+    vi.advanceTimersByTime(60_000)
+    refuseSession()
+    expect(refusal).toBe('ptyhost: no session for run')
     a.close()
   })
 
