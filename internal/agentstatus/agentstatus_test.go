@@ -210,7 +210,10 @@ func TestOpenCodePluginReportsTheRunsOwnTurn(t *testing.T) {
 const openCodeDriver = `
 import { AetherStatus } from "./plugin.mjs"
 
-const hooks = await AetherStatus({})
+// opencode's client, of which the plugin uses one call: what it logs is
+// this driver's stdout.
+const client = { app: { log: async ({ body }) => console.log(JSON.stringify(body)) } }
+const hooks = await AetherStatus({ client })
 const status = (sessionID, type) => ({ type: "session.status", properties: { sessionID, status: { type } } })
 const events = [
   status("root", "busy"),
@@ -241,8 +244,8 @@ while (Date.now() < deadline) {
 // TestOpenCodePluginWarnsWhatTheReporterSaid drives the failure path: the
 // reporter exits 0 and puts one line on stderr whatever goes wrong, so that
 // line is the only trace a member has of a reporter that ran and could not
-// reach the server. The plugin has to carry it to opencode's own log, once
-// however many turns fail.
+// reach the server. The plugin has to carry it verbatim into opencode's own
+// log - the TUI owns the terminal - once however many turns fail.
 func TestOpenCodePluginWarnsWhatTheReporterSaid(t *testing.T) {
 	node := requireNode(t)
 	dir := t.TempDir()
@@ -257,9 +260,10 @@ func TestOpenCodePluginWarnsWhatTheReporterSaid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("drive the plugin: %v (%s)", err, out)
 	}
-	const want = "aether: opencode status reporter: aether-server report opencode: dial /run/aether/coord.sock: connection refused"
+	const want = `{"service":"aether","level":"error","message":"status reporter: ` +
+		`aether-server report opencode: dial /run/aether/coord.sock: connection refused"}`
 	if got := strings.Count(string(out), want); got != 1 {
-		t.Fatalf("the plugin logged the reporter's failure %d times, want once:\n%s", got, out)
+		t.Fatalf("the plugin logged %s, want %s exactly once", out, want)
 	}
 }
 
@@ -270,7 +274,8 @@ func TestOpenCodePluginWarnsWhatTheReporterSaid(t *testing.T) {
 const openCodeFailureDriver = `
 import { AetherStatus } from "./plugin.mjs"
 
-const hooks = await AetherStatus({})
+const client = { app: { log: async ({ body }) => console.log(JSON.stringify(body)) } }
+const hooks = await AetherStatus({ client })
 for (const sessionID of ["first", "second"]) {
   await hooks.event({ event: { type: "session.idle", properties: { sessionID } } })
 }

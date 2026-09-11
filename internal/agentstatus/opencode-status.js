@@ -4,14 +4,13 @@
 // server binary, which reports them over the run's coordination socket.
 //
 // The command below is internal/mcpbridge.BinaryPath, the server binary the
-// scheduler mounts into every run container. The mapping itself lives in
-// Go (internal/agentstatus.FromOpenCodeEvent); this file decides only which
-// events are worth a report at all.
+// scheduler mounts into every run container. The mapping itself lives in Go
+// (internal/agentstatus.FromOpenCodeEvent).
 import { spawn } from "node:child_process"
 
 const reporter = "/opt/aether/aether-server"
 
-export const AetherStatus = async () => {
+export const AetherStatus = async ({ client }) => {
   // The sessions running a turn right now. opencode gives a subagent a
   // session of its own, and that session going idle is not the run's turn
   // ending, so the reporter speaks for the set rather than for one event.
@@ -23,10 +22,16 @@ export const AetherStatus = async () => {
   let queue = Promise.resolve()
   let warned = false
 
-  const warn = (message) => {
+  // opencode's own log is where the failure goes: the TUI owns stdout and
+  // stderr for the whole run, so writing there would corrupt the screen
+  // instead of telling anyone anything. This is already the failure path,
+  // so a log call that fails itself ends here.
+  const warn = async (message) => {
     if (warned || !message) return
     warned = true
-    console.error("aether: opencode status reporter:", message)
+    try {
+      await client.app.log({ body: { service: "aether", level: "error", message: "status reporter: " + message } })
+    } catch {}
   }
 
   const post = (...args) => {
@@ -56,8 +61,8 @@ export const AetherStatus = async () => {
       const session = event && event.properties ? event.properties.sessionID : undefined
       switch (event && event.type) {
         case "session.status": {
-          // An idle status and session.idle are published together, and the
-          // idle half is read below, where the subagent bookkeeping is.
+          // The idle half of a turn arrives as session.idle as well, which
+          // is the case below, where the subagent bookkeeping is.
           const status = event.properties && event.properties.status ? event.properties.status.type : ""
           if (status === "idle") return
           // opencode publishes busy several times in one turn - once when
@@ -72,7 +77,6 @@ export const AetherStatus = async () => {
         }
         case "session.idle":
           if (session) busy.delete(session)
-          // A subagent finished. The run's own turn has not.
           if (busy.size > 0) return
           post("--event", "session.idle")
           return
