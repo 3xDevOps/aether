@@ -567,6 +567,9 @@ func TestPiExtensionSubscribesToMappedEvents(t *testing.T) {
 // that silently never reports. bun is the runtime pi and omp are built on;
 // where it is installed, it is what says the file parses.
 func TestPiExtensionParses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the extension only ever runs inside a Linux run container")
+	}
 	bun, err := exec.LookPath("bun")
 	if err != nil {
 		t.Skipf("bun is not installed: %v", err)
@@ -590,7 +593,7 @@ func TestPiExtensionParses(t *testing.T) {
 func extensionDriver(t *testing.T, scenario string) (*exec.Cmd, string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("the recording reporter is a shell script, and the agent runs on Linux")
+		t.Skip("the extension only ever runs inside a Linux run container")
 	}
 	bun, err := exec.LookPath("bun")
 	if err != nil {
