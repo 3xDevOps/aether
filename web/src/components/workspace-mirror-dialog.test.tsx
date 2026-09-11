@@ -45,6 +45,24 @@ describe('workspace mirror dialog', () => {
     expect(dialog.getByLabelText<HTMLInputElement>('Source URL').value).toBe('https://github.com/acme/project.git')
     expect(dialog.getByLabelText<HTMLInputElement>('Source branch').value).toBe('main')
   })
+  it('prefills a supplied checkout Origin before the workspace origin', async () => {
+    seed({ origin: 'https://github.com/acme/legacy.git' })
+    const suggestedSource = 'https://github.com/acme/project.git'
+    const client = fakeApi({
+      workspaceMirrorStatus: vi.fn(async () => ({ enabled: false })),
+    })
+    render(
+      <WorkspaceMirrorDialog
+        workspaceID={workspace.id}
+        client={client}
+        suggestedSource={suggestedSource}
+        onClose={() => {}}
+      />,
+    )
+
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByLabelText<HTMLInputElement>('Source URL').value).toBe(suggestedSource)
+  })
 
   it('configures a public source without credentials', async () => {
     seed()
