@@ -10,6 +10,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
@@ -188,11 +189,18 @@ func (s *Scheduler) checkFreeSpace() error {
 		ErrDiskFull, free, s.cfg.MinFreeBytes)
 }
 
-// Launch creates a new run and provisions it synchronously: checkout and
-// branch via the git seam, container via the runtime, agent PTY via the
-// PTY seam. It returns the run in running state, or an error with the run
-// marked failed ("provisioning: <err>") once the row exists.
+// Launch creates a new run using a strict base capture. Strict mode refreshes
+// a configured mirror and reads the local base directly for local-only
+// workspaces; callers that explicitly accept a displayed cached base use
+// LaunchWithOptions.
 func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+	return s.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
+}
+
+// LaunchWithOptions creates a new run and provisions it synchronously. The
+// base is captured after launch inputs are validated and before the run row is
+// created, so a failed capture leaves no durable or in-memory run state.
+func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	if mode == "" {
 		mode = domain.LaunchTUI
 	}
@@ -216,6 +224,36 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	bases := s.cfg.Bases
+	s.mu.Unlock()
+	if bases == nil {
+		return nil, errors.New("scheduler: base capture is not configured")
+	}
+	base, err := bases.Capture(ctx, workspace, opts.CachedBase)
+	if err != nil {
+		return nil, &BaseCaptureError{Capture: base, Err: err}
+	}
+	if opts.CachedBase != "" && (!base.Cached || base.Commit != opts.CachedBase) {
+		return nil, &BaseCaptureError{
+			Capture: base,
+			Err: &gitengine.MirrorError{
+				Kind:        gitengine.MirrorErrorInvalidRequest,
+				WorkspaceID: workspace,
+				Base:        opts.CachedBase,
+				Observed:    base.Commit,
+			},
+		}
+	}
+	source := base.Source
+	switch {
+	case base.Cached && source != "":
+		source = "cached:" + source
+	case base.Cached:
+		source = "cached"
+	case !base.Configured:
+		source = "local"
+	}
 	run := &domain.Run{
 		WorkspaceID:      workspace,
 		MemberID:         member,
@@ -225,6 +263,10 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 		Mode:             mode,
 		Status:           domain.RunQueued,
 		HarnessSessionID: session,
+		BaseCommit:       base.Commit,
+		BaseBranch:       base.Branch,
+		BaseSource:       source,
+		BaseCheckedAt:    base.CheckedAt,
 	}
 	if err := s.cfg.Store.CreateRun(ctx, run); err != nil {
 		return nil, err
@@ -276,7 +318,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 
 func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
 	if !reuseCheckout {
-		checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, run.ID, ws.BaseBranch, run.Task, ws.Origin)
+		checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, run.ID, run.BaseCommit, run.BaseBranch, run.Task, ws.Origin)
 		if err != nil {
 			return fmt.Errorf("create checkout: %w", err)
 		}

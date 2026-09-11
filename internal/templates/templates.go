@@ -24,10 +24,12 @@
 //     be edited into a prompt it can no longer render. Otherwise a schedule
 //     reports a next fire time it can never honour.
 //
-// Cron-fired runs start from whatever base the server last saw: it never
-// fetches upstream on its own, it only learns about upstream from member
-// pushes. The base branch's age is therefore reported at every launch, in
-// the CLI's output and in the timeline entry each fire stamps.
+// Cron-fired runs start from a base captured by the scheduler at launch time.
+// The immutable provenance is stored on the run and reported in timeline
+// entries, rather than pre-reading mutable workspace state here.
+//
+// The scheduler owns base capture and checkout pinning; this package only
+// renders templates and delegates launches through that same seam.
 package templates
 
 import (
@@ -69,18 +71,11 @@ type Launcher interface {
 	Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
 }
 
-// BaseResolver reports when a workspace branch was last committed as the
-// server currently sees it. Satisfied by RepoBase.
-type BaseResolver interface {
-	BaseCommitTime(ctx context.Context, ws domain.WorkspaceID, branch string) (time.Time, error)
-}
-
-// Config wires the service. Store, Bus, Runs, and Base are required.
+// Config wires the service. Store, Bus, and Runs are required.
 type Config struct {
 	Store store.Store
 	Bus   events.Bus
 	Runs  Launcher
-	Base  BaseResolver
 	// Interval overrides DefaultInterval, the cron scan period.
 	Interval time.Duration
 	// Now overrides the clock; tests drive schedules through it.
@@ -93,7 +88,6 @@ type Service struct {
 	store    store.Store
 	bus      events.Bus
 	runs     Launcher
-	base     BaseResolver
 	interval time.Duration
 	now      func() time.Time
 
@@ -112,28 +106,10 @@ type timer struct {
 	next time.Time
 }
 
-// BaseInfo is the age of the base branch a run starts from, as the server
-// last saw it. Known is false when the branch has no commit the server has
-// seen - an unpushed repo, a branch that only exists on a laptop.
-type BaseInfo struct {
-	Branch string
-	Age    time.Duration
-	Known  bool
-}
-
-// String renders the base age the way both the CLI and the timeline
-// report it.
-func (b BaseInfo) String() string {
-	if !b.Known {
-		return "base " + b.Branch + " has no commit the server has seen"
-	}
-	return "base " + b.Branch + " is " + FormatAge(b.Age) + " old"
-}
-
-// Launched is a template launch: the run plus the base it started from.
+// Launched is a template launch and the run carrying its immutable base
+// provenance.
 type Launched struct {
-	Run  *domain.Run
-	Base BaseInfo
+	Run *domain.Run
 }
 
 // ScheduleInfo is a stored schedule plus the next instant it is due. Next
@@ -145,8 +121,8 @@ type ScheduleInfo struct {
 
 // New builds the service; call Start to begin firing schedules.
 func New(cfg Config) (*Service, error) {
-	if cfg.Store == nil || cfg.Bus == nil || cfg.Runs == nil || cfg.Base == nil {
-		return nil, errors.New("templates: Store, Bus, Runs, and Base are required")
+	if cfg.Store == nil || cfg.Bus == nil || cfg.Runs == nil {
+		return nil, errors.New("templates: Store, Bus, and Runs are required")
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = DefaultInterval
@@ -158,7 +134,6 @@ func New(cfg Config) (*Service, error) {
 		store:    cfg.Store,
 		bus:      cfg.Bus,
 		runs:     cfg.Runs,
-		base:     cfg.Base,
 		interval: cfg.Interval,
 		now:      cfg.Now,
 		timers:   make(map[string]*timer),
@@ -280,36 +255,11 @@ func (s *Service) launch(ctx context.Context, t *store.Template, member domain.M
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}
-	base := s.baseInfo(ctx, t.WorkspaceID)
 	run, err := s.runs.Launch(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode)
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}
-	return &Launched{Run: run, Base: base}, nil
-}
-
-// baseInfo reports the age of the workspace's base branch as the server
-// currently sees it. A lookup failure is reported as unknown age, never as
-// a failed launch: the run is still correct, only its freshness is
-// uncertain.
-func (s *Service) baseInfo(ctx context.Context, workspace domain.WorkspaceID) BaseInfo {
-	ws, err := s.store.GetWorkspace(ctx, workspace)
-	if err != nil {
-		return BaseInfo{}
-	}
-	info := BaseInfo{Branch: ws.BaseBranch}
-	committed, err := s.base.BaseCommitTime(ctx, ws.ID, ws.BaseBranch)
-	if err != nil {
-		slog.Debug("templates: base branch age unavailable",
-			"workspace", workspace, "branch", ws.BaseBranch, "error", err)
-		return info
-	}
-	info.Age = s.now().Sub(committed)
-	if info.Age < 0 {
-		info.Age = 0
-	}
-	info.Known = true
-	return info
+	return &Launched{Run: run}, nil
 }
 
 func (s *Service) publish(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, actor domain.MemberID, message string) {
@@ -320,20 +270,5 @@ func (s *Service) publish(ctx context.Context, workspace domain.WorkspaceID, run
 		Payload:     events.TimelinePayload{Kind: events.TimelineNote, Message: message},
 	}); err != nil {
 		slog.Warn("templates: publish timeline entry", "workspace", workspace, "error", err)
-	}
-}
-
-// FormatAge renders a duration the way run and base ages are reported:
-// the coarsest unit that is not zero.
-func FormatAge(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return "less than a minute"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
 }

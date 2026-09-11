@@ -137,21 +137,20 @@ aether workspace init myproject [--base <branch>]
 aether workspace add myproject [--base <branch>]
 ```
 
-Three settings belong to the workspace rather than to any run in it:
+Four settings belong to the workspace rather than to any run in it:
 
 - **The base branch** is what every new run's worktree is cut from. `--base`
   sets it at creation; it defaults to `main`.
-- **The upstream origin** is the git URL every new run checkout gets as its
-  `origin` remote - normally the GitHub repository your clones came from.
-  Nobody types it in the usual case: the first `aether link --repo` reads that
-  clone's own `origin` and records it. The local dashboard's onboarding wizard
-  does the same in its Repository step. Recording happens only when the caller
-  may push - a viewer may not - and the clone's origin is one the server accepts.
-  When either does not hold, the link still succeeds and nothing is recorded; set
-  it later with `aether workspace origin`. **First one wins.** A later link from
-  a teammate whose clone points somewhere else does not overwrite it, so one
-  member's fork cannot silently redirect everyone's runs. Change it
-  deliberately:
+- **The checkout Origin** is the git URL every new run checkout gets as its
+  `origin` remote - the place a run branch can be pushed for review. Normally
+  the first `aether link --repo` (or the Repository step in the local
+  dashboard's onboarding wizard) reads that clone's own `origin` and records it.
+  Recording happens only when the caller may push - a viewer may not - and the
+  clone's origin is one the server accepts. When either does not hold, the link
+  succeeds and nothing is recorded; set it later with `aether workspace origin`.
+  **First one wins.** A later link from a teammate whose clone points somewhere
+  else does not overwrite it, so one member's fork cannot silently redirect
+  everyone's runs. Change it deliberately:
 
   ```sh
   aether workspace origin                          # show
@@ -161,17 +160,51 @@ Three settings belong to the workspace rather than to any run in it:
 
   A `github.com` origin in scp-like or ssh form - `git@github.com:acme/app.git`
   or `ssh://git@github.com/acme/app.git` - is recorded as
-  `https://github.com/acme/app.git`, whether it came from a clone or from the
-  command above. gh's credential helper authenticates HTTPS only and nothing
-  in the member home authenticates SSH, so the https form is the one a run
-  can push to. Every other host is recorded verbatim, and an SSH origin on
-  another host cannot be pushed to from a run: give the workspace an https
-  URL with `aether workspace origin` if runs need to push there.
+  `https://github.com/acme/app.git`. gh's credential helper authenticates
+  HTTPS only and nothing in the member home authenticates SSH, so the HTTPS
+  form is the one a run can push to. Every other host is recorded verbatim,
+  and an SSH origin on another host cannot be pushed to from a run: give the
+  workspace an HTTPS URL if runs need to push there.
 
-  The remote is set when a run's checkout is created, so a change reaches
-  new runs only; runs already going keep the URL they were given. With no
-  origin recorded, run checkouts have no usable `origin` and pushing
-  upstream from inside a run fails.
+  The remote is set when a run's checkout is created, so a change reaches new
+  runs only; runs already going keep the URL they were given. With no checkout
+  Origin recorded, run checkouts have no usable `origin`, but `aether pull`
+  still brings their server branch into your clone.
+- **The source mirror** is optional and separate from checkout Origin. A
+  workspace with no mirror is **local-only**: collaborators and the daemon
+  may push its base branch in the normal way. An administrator can configure a
+  read-only upstream source:
+
+  ```sh
+  aether workspace mirror configure --workspace myproject \
+    --source https://github.com/acme/myproject.git --branch main --auth public
+  ```
+
+  `--branch` defaults to the workspace base branch. Public mode fetches
+  credential-free HTTPS. For a private GitHub repository use
+  `--auth deploy-key` with its HTTPS URL; Aether prints a public key and the
+  exact `https://github.com/<owner>/<repo>/settings/keys/new` URL. Add the key
+  as a read-only repository deploy key, then verify it. For generic SSH, use
+  `--auth deploy-key` with an `ssh://` source and
+  `--known-hosts-file <file>` containing the verified host key. The private
+  key is never printed or sent to a member.
+
+Configuration starts **pending**. In the dashboard's Workspace **Source
+control** panel, use **Verify** or **Refresh**; from the CLI:
+
+  ```sh
+  aether workspace mirror refresh --workspace myproject
+  aether workspace mirror status --workspace myproject
+  ```
+
+  The panel shows source, branch, accepted and observed candidate commits,
+  and check times. A forward-only source update becomes **ready** and moves
+  the mirrored base. A rewrite or local/server divergence retains the
+  candidate without moving the accepted base; an administrator must review
+  and explicitly **Adopt candidate** (`aether workspace mirror adopt
+  --workspace myproject --generation <n> --yes`). **Disable** requires
+  confirmation and returns the workspace to local-only; remove any GitHub
+  deploy key separately because disabling cannot revoke it remotely.
 - **The steering policy** decides whether collaborators may steer and kill
   each other's runs. It is permissive by default; an admin restricts it to
   owners and admins:
@@ -211,18 +244,19 @@ which adds the `aether` git remote. Run branches (`aether/run-*`) are
 server-owned - clients cannot force-push or delete them, because the branch is
 the artifact. Every other branch behaves like a normal git remote.
 
-The recorded origin does not change any of that. Aether still publishes each
-run's branch to the workspace repo and nowhere else, and `aether pull` still
-brings it into your clone. Pushing to the upstream repository is somebody's
-own act: the agent inside the run doing `git push origin <branch>`, or you
-doing it from your clone after a pull.
+The checkout Origin does not change workspace base ownership. Aether publishes
+each run's branch to the workspace repo and nowhere else, and `aether pull`
+still brings it into your clone. Pushing that run branch to checkout Origin
+is somebody's own act: the agent inside the run can `git push origin <branch>`,
+or you can push it from your clone after reviewing and merging.
 
-The workspace's base branch is usually already there by the time the second
-member links: whoever created the workspace pushed it. Nothing guarantees
-that, so the local dashboard wizard's **Push now** button (step 4 of
-[quickstart.md](quickstart.md)) compares your clone with the workspace's copy
-of the branch before it pushes, and reports what it found instead of failing
-with git's `! [rejected] main -> main (fetch first)`:
+In a **local-only** workspace, the base branch is client-writable. It is
+usually already there by the time the second member links: whoever created the
+workspace pushed it. Nothing guarantees that, so the local dashboard wizard's
+**Push now** button (step 4 of [quickstart.md](quickstart.md)) compares your
+clone with the workspace's copy of the branch before it pushes, and reports
+what it found instead of failing with git's
+`! [rejected] main -> main (fetch first)`:
 
 - **Not there yet** - nobody has pushed the branch. Your clone seeds it,
   exactly as the first member's would.
@@ -238,6 +272,19 @@ with git's `! [rejected] main -> main (fetch first)`:
 - **Diverged** - you both committed since. Aether does not force-push and
   does not merge for you; the wizard prints the `git fetch`, `git log`,
   `git rebase` and `git push` commands and you decide.
+
+In a **mirrored** workspace, the source mirror owns the base branch. `git push
+aether <base>` and the dashboard's **Push now**/`repo.push` are rejected by
+design, as are local-daemon base pushes:
+
+```
+aether: rejected write to protected ref refs/heads/<base>: this mirrored base is owned by the upstream; use the configured upstream to update it
+```
+
+Do not work around that rejection: an administrator refreshes the mirror,
+reviews a retained candidate, and uses **Adopt candidate** only when a rewrite
+or divergence is intentional. Runs always branch from the accepted mirror
+commit captured at launch.
 
 ## Working together
 
@@ -259,7 +306,8 @@ with git's `! [rejected] main -> main (fetch first)`:
 | `aether forward <run-id|terminal> <port> [--local <port>]` | Forward a run or environment terminal port to loopback for callbacks such as agent OAuth. The local port defaults to the forwarded port. |
 | `aether member git [--name <name>] [--email <email>] [member-id]` | Show or set the name and email every commit made for that member is authored as. Members set their own; an admin can set anyone's. |
 | `aether github connect` | Finish connecting GitHub after `gh auth login` in your environment terminal: sets up git credentials there, generates and registers a commit signing key. See [environment-home.md](environment-home.md#connect-github). |
-| `aether workspace origin [--workspace <name-or-id>] [<url>\|--clear]` | Show or set the upstream git URL run checkouts get as their `origin` remote. Needs the push capability. |
+| `aether workspace origin [--workspace <name-or-id>] [<url>\|--clear]` | Show or set the checkout Origin run checkouts use for pushing review branches. Needs the push capability. |
+| `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admin-only source-mirror lifecycle. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base, live-run files, and your own persistent member configuration. |
 
@@ -285,6 +333,13 @@ aether schedule delete nightly-triage
 Cron expressions are standard five-field syntax or an `@descriptor`, in UTC.
 A schedule that was due while the server was down does not catch up; it waits
 for the next occurrence.
+
+Scheduled runs use the same launch gate as manual runs. A mirrored workspace
+refreshes its source before each scheduled launch; an offline, authentication,
+missing-source, rewrite, divergence, or other failure means that occurrence
+does not create a run. Fix the mirror or use the explicit one-shot cached-base
+retry for a still-unchanged accepted commit; the next scheduled occurrence
+does not silently reuse a cache.
 
 ### Attribution
 

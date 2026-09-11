@@ -92,18 +92,35 @@ func (e *Engine) checkBranchName(ctx context.Context, branch string) error {
 	return nil
 }
 
-// CreateRunCheckout clones the workspace bare repo into the run's checkout
-// (git clone --local: hard-linked objects, fully self-contained .git that
-// works identically inside the run container) and creates the run branch
-// from baseBranch. Errors if baseBranch has no commits or the checkout
-// already exists.
-//
-// A non-empty origin repoints the clone's `origin` remote at the
-// workspace's upstream, so a push or a pull request from inside the run
-// reaches it. The clone leaves origin pointing at the server-side bare
-// repo path, which does not exist inside the run container; an empty
-// origin leaves that as git made it.
+// CreateRunCheckout resolves baseBranch in the workspace and delegates to
+// CreateRunCheckoutAt with the exact commit currently at that branch. The
+// exact method is what callers that already captured a base must use: a
+// branch can move between capture and checkout.
 func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, task, origin string) (checkoutPath, branch string, err error) {
+	repo, err := e.existingRepoPath(ws)
+	if err != nil {
+		return "", "", err
+	}
+	base, err := e.git(ctx, repo, "rev-parse", "--verify", "refs/heads/"+baseBranch)
+	if err != nil {
+		return "", "", fmt.Errorf("gitengine: base branch %q has no commits: %w", baseBranch, err)
+	}
+	return e.CreateRunCheckoutAt(ctx, ws, run, base, baseBranch, task, origin)
+}
+
+// CreateRunCheckoutAt clones the workspace bare repo into the run's
+// checkout (git clone --local: hard-linked objects, fully self-contained
+// .git that works identically inside the run container) and creates the run
+// branch from the exact baseCommit. Errors if baseCommit is not a full
+// commit id, if the commit is not present in the workspace repository, or if
+// the checkout already exists.
+//
+// A non-empty origin repoints the clone's `origin` remote at the workspace's
+// upstream, so a push or a pull request from inside the run reaches it. The
+// clone leaves origin pointing at the server-side bare repo path, which does
+// not exist inside the run container; an empty origin leaves that as git made
+// it.
+func (e *Engine) CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseCommit, baseBranch, task, origin string) (checkoutPath, branch string, err error) {
 	repo, err := e.existingRepoPath(ws)
 	if err != nil {
 		return "", "", err
@@ -115,9 +132,15 @@ func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 	if _, statErr := os.Stat(checkoutPath); statErr == nil {
 		return "", "", fmt.Errorf("gitengine: checkout for run %s already exists", run)
 	}
-	base, err := e.git(ctx, repo, "rev-parse", "--verify", "refs/heads/"+baseBranch)
+	if len(baseCommit) != 40 || !isSHA(baseCommit) {
+		return "", "", fmt.Errorf("gitengine: base commit %q for branch %q is not a full object id", baseCommit, baseBranch)
+	}
+	resolved, err := e.git(ctx, repo, "rev-parse", "--verify", "--quiet", baseCommit+"^{commit}")
 	if err != nil {
-		return "", "", fmt.Errorf("gitengine: base branch %q has no commits: %w", baseBranch, err)
+		return "", "", fmt.Errorf("gitengine: base commit %q for branch %q is unavailable: %w", baseCommit, baseBranch, err)
+	}
+	if resolved != baseCommit {
+		return "", "", fmt.Errorf("gitengine: base commit %q for branch %q is not a commit", baseCommit, baseBranch)
 	}
 
 	if _, cloneErr := e.git(ctx, "", "clone", "--local", "--no-checkout", repo, checkoutPath); cloneErr != nil {
@@ -125,7 +148,7 @@ func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 	}
 	cleanup := func() { _ = os.RemoveAll(checkoutPath) }
 
-	branch, err = e.uniqueRunBranch(ctx, repo, base, run, task)
+	branch, err = e.uniqueRunBranch(ctx, repo, baseCommit, run, task)
 	if err != nil {
 		cleanup()
 		return "", "", err
@@ -135,17 +158,17 @@ func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 	// run of the same task onto the full-ID form forever.
 	cleanup = func() {
 		_ = os.RemoveAll(checkoutPath)
-		if _, delErr := e.git(ctx, repo, "update-ref", "-d", "refs/heads/"+branch, base); delErr != nil {
+		if _, delErr := e.git(ctx, repo, "update-ref", "-d", "refs/heads/"+branch, baseCommit); delErr != nil {
 			slog.Warn("gitengine: release reserved run branch",
 				"run", run, "branch", branch, "error", delErr)
 		}
 	}
-	if _, err := e.git(ctx, checkoutPath, "checkout", "-b", branch, base); err != nil {
+	if _, err := e.git(ctx, checkoutPath, "checkout", "-b", branch, baseCommit); err != nil {
 		cleanup()
 		return "", "", err
 	}
 	for key, val := range map[string]string{
-		cfgBase:      base,
+		cfgBase:      baseCommit,
 		cfgBranch:    branch,
 		cfgWorkspace: string(ws),
 	} {
@@ -160,7 +183,7 @@ func (e *Engine) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 			return "", "", fmt.Errorf("gitengine: point run %s origin at %s: %w", run, origin, err)
 		}
 	}
-	if err := e.writeRunMeta(run, runMeta{Base: base, Branch: branch, Workspace: ws}); err != nil {
+	if err := e.writeRunMeta(run, runMeta{Base: baseCommit, Branch: branch, Workspace: ws}); err != nil {
 		cleanup()
 		return "", "", err
 	}

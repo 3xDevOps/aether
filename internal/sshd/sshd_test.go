@@ -238,6 +238,7 @@ type fakeRuns struct {
 	terminalAddr    string
 	terminalAddrErr error
 	calls           []string
+	launchOptions   []domain.LaunchOptions
 	paused          map[domain.RunID]bool
 }
 
@@ -259,8 +260,20 @@ func (f *fakeRuns) Calls() []string {
 	defer f.mu.Unlock()
 	return append([]string(nil), f.calls...)
 }
+func (f *fakeRuns) LaunchOptions() []domain.LaunchOptions {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.LaunchOptions(nil), f.launchOptions...)
+}
 
-func (f *fakeRuns) Launch(_ context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (f *fakeRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+	return f.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
+}
+
+func (f *fakeRuns) LaunchWithOptions(_ context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	f.mu.Lock()
+	f.launchOptions = append(f.launchOptions, opts)
+	f.mu.Unlock()
 	if err := f.record(fmt.Sprintf("launch:%s:%s:%s:%s:%s", workspace, member, task, harness, mode)); err != nil {
 		return nil, err
 	}

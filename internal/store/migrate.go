@@ -685,6 +685,36 @@ ALTER TABLE workspaces ADD COLUMN origin TEXT NOT NULL DEFAULT '';
 CREATE INDEX idx_run_costs_workspace_recorded
 	ON run_costs(workspace_id, recorded_at, run_id);
 `,
+	// v25: one optional upstream mirror configuration per workspace. Private
+	// key material is operator-managed and intentionally never persisted.
+	`
+CREATE TABLE workspace_mirrors (
+	workspace_id     TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+	source_url       TEXT NOT NULL,
+	source_identity  TEXT NOT NULL,
+	branch           TEXT NOT NULL,
+	auth             TEXT NOT NULL,
+	generation       INTEGER NOT NULL,
+	status           TEXT NOT NULL,
+	observed_commit  TEXT NOT NULL DEFAULT '',
+	accepted_commit  TEXT NOT NULL DEFAULT '',
+	key_fingerprint  TEXT NOT NULL DEFAULT '',
+	last_error       TEXT NOT NULL DEFAULT '',
+	created_at       INTEGER NOT NULL,
+	updated_at       INTEGER NOT NULL,
+	last_attempt_at  INTEGER,
+	last_success_at  INTEGER
+);
+`,
+	// v26: durable provenance for the base used by each run. Text fields are
+	// empty for rows created before provenance tracking; the nullable
+	// timestamp preserves the domain zero time for those rows.
+	`
+ALTER TABLE runs ADD COLUMN base_commit TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN base_branch TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN base_source TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN base_checked_at INTEGER;
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

@@ -48,9 +48,6 @@ func InstallDaemonUnit(cfg syncd.Config) (path, activate string, err error) {
 	if cfg.WorkspaceID != "" {
 		runArgs = append(runArgs, "--workspace", cfg.WorkspaceID)
 	}
-	if cfg.SyncOrigin {
-		runArgs = append(runArgs, "--sync-origin")
-	}
 
 	unit, err := syncd.ServiceUnit(runtime.GOOS, exe, runArgs)
 	if err != nil {

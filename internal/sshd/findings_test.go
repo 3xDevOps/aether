@@ -371,7 +371,7 @@ func TestRemovedMemberLosesAccess(t *testing.T) {
 	}
 }
 
-// blockingRuns parks Launch until released so a handler is provably
+// blockingRuns parks launch calls until released so a handler is provably
 // in-flight when the server shuts down.
 type blockingRuns struct {
 	*fakeRuns
@@ -380,9 +380,13 @@ type blockingRuns struct {
 }
 
 func (b *blockingRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+	return b.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
+}
+
+func (b *blockingRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	close(b.entered)
 	<-b.release
-	return b.fakeRuns.Launch(ctx, workspace, member, account, task, harness, mode)
+	return b.fakeRuns.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 }
 
 // TestCloseWaitsForInFlightHandlers pins the shutdown contract Close now

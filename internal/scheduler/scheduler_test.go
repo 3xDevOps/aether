@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +18,9 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/mirror"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -25,8 +28,8 @@ import (
 
 const waitTimeout = 10 * time.Second
 
-// testEnv wires a scheduler to the real store and real event bus with
-// fake git/pty seams and the in-memory runtime.
+// testEnv wires a scheduler to the real store, real event bus, fake git/pty,
+// and an in-memory immutable base-capture seam.
 type testEnv struct {
 	t      *testing.T
 	db     *store.DB
@@ -34,10 +37,31 @@ type testEnv struct {
 	rt     *fakeRuntime
 	git    *fakeGit
 	pty    *fakePTY
+	base   *fakeBaseCapture
 	sched  *Scheduler
 	cfg    Config
 	ws     *domain.Workspace
 	member *domain.Member
+}
+
+const testBaseCommit = "0123456789abcdef0123456789abcdef01234567"
+
+type fakeBaseCapture struct {
+	mu     sync.Mutex
+	result mirror.CaptureResult
+	err    error
+	calls  []string
+}
+
+func (b *fakeBaseCapture) Capture(_ context.Context, workspace domain.WorkspaceID, cachedCommit string) (mirror.CaptureResult, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.calls = append(b.calls, cachedCommit)
+	result := b.result
+	if result.WorkspaceID == "" {
+		result.WorkspaceID = workspace
+	}
+	return result, b.err
 }
 
 type scriptedWaitOutcome struct {
@@ -124,6 +148,11 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 	if cerr := db.CreateWorkspace(ctx, e.ws); cerr != nil {
 		t.Fatalf("create workspace: %v", cerr)
 	}
+	e.base = &fakeBaseCapture{result: mirror.CaptureResult{
+		Commit:    testBaseCommit,
+		Branch:    e.ws.BaseBranch,
+		CheckedAt: time.Unix(1, 0).UTC(),
+	}}
 	e.member = &domain.Member{DisplayName: "Ada", PublicKey: testPublicKey(t), Color: "#e6194b", Role: domain.RoleCollaborator}
 	if cerr := db.CreateMember(ctx, e.member); cerr != nil {
 		t.Fatalf("create member: %v", cerr)
@@ -138,6 +167,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		Runtime:       e.rt,
 		Bus:           bus,
 		Git:           e.git,
+		Bases:         e.base,
 		PTY:           e.pty,
 		StateDir:      filepath.Join(dir, "scheduler"),
 		Homes:         homes,
@@ -518,6 +548,160 @@ func TestLaunchValidation(t *testing.T) {
 	t.Setenv(fakeAgentEnv, "")
 	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "fake", domain.LaunchTUI); err == nil {
 		t.Fatal("fake harness with empty AETHER_FAKE_AGENT accepted")
+	}
+}
+
+func TestLaunchCapturesAndPinsBaseProvenance(t *testing.T) {
+	e := newTestEnv(t, nil)
+	t.Setenv(fakeAgentEnv, "fake-agent")
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "pinned base", "fake", domain.LaunchTUI)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	e.base.mu.Lock()
+	calls := slices.Clone(e.base.calls)
+	e.base.mu.Unlock()
+	if !slices.Equal(calls, []string{""}) {
+		t.Fatalf("base capture calls = %v, want strict empty cached commit", calls)
+	}
+	if run.BaseCommit != testBaseCommit || run.BaseBranch != e.ws.BaseBranch || run.BaseSource != "local" {
+		t.Fatalf("run base provenance = commit=%q branch=%q source=%q",
+			run.BaseCommit, run.BaseBranch, run.BaseSource)
+	}
+	if run.BaseCheckedAt.IsZero() {
+		t.Fatal("run base provenance has no checked-at timestamp")
+	}
+	if got := e.git.baseCommitFor(run.ID); got != testBaseCommit {
+		t.Fatalf("checkout base commit = %q, want %q", got, testBaseCommit)
+	}
+	if got := e.git.baseBranchFor(run.ID); got != e.ws.BaseBranch {
+		t.Fatalf("checkout base branch = %q, want %q", got, e.ws.BaseBranch)
+	}
+}
+
+func TestLaunchCachedBaseOptionPinsCachedSource(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.base.mu.Lock()
+	e.base.result.Configured = true
+	e.base.result.Cached = true
+	e.base.result.Source = "github.com/acme/project"
+	e.base.mu.Unlock()
+	t.Setenv(fakeAgentEnv, "fake-agent")
+	const cached = testBaseCommit
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID,
+		"cached base", "fake", domain.LaunchTUI, domain.LaunchOptions{CachedBase: cached})
+	if err != nil {
+		t.Fatalf("LaunchWithOptions: %v", err)
+	}
+	e.base.mu.Lock()
+	calls := slices.Clone(e.base.calls)
+	e.base.mu.Unlock()
+	if !slices.Equal(calls, []string{cached}) {
+		t.Fatalf("base capture calls = %v, want %q", calls, cached)
+	}
+	if run.BaseSource != "cached:github.com/acme/project" {
+		t.Fatalf("cached base source = %q", run.BaseSource)
+	}
+}
+
+func TestLaunchCachedBaseOptionRejectsFaultyCapture(t *testing.T) {
+	e := newTestEnv(t, nil)
+	const cached = testBaseCommit
+	different := strings.Repeat("f", 40)
+	e.base.mu.Lock()
+	e.base.result = mirror.CaptureResult{
+		WorkspaceID: e.ws.ID,
+		Commit:      different,
+		Branch:      e.ws.BaseBranch,
+		Source:      "github.com/acme/project",
+		Configured:  true,
+		Cached:      false,
+	}
+	e.base.mu.Unlock()
+	t.Setenv(fakeAgentEnv, "fake-agent")
+	_, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID,
+		"faulty cached capture", "fake", domain.LaunchTUI, domain.LaunchOptions{CachedBase: cached})
+	if err == nil {
+		t.Fatal("LaunchWithOptions succeeded with an uncached, different capture")
+	}
+	var captureErr *BaseCaptureError
+	if !errors.As(err, &captureErr) {
+		t.Fatalf("LaunchWithOptions error = %T %v, want BaseCaptureError", err, err)
+	}
+	var mirrorErr *gitengine.MirrorError
+	if !errors.As(err, &mirrorErr) || mirrorErr.Kind != gitengine.MirrorErrorInvalidRequest {
+		t.Fatalf("LaunchWithOptions error = %v, want invalid-request MirrorError", err)
+	}
+	if captureErr.Capture.Commit != different || captureErr.Capture.Cached {
+		t.Fatalf("capture result = %+v, want faulty uncached commit %q", captureErr.Capture, different)
+	}
+
+	runs, listErr := e.db.ListRunsByWorkspace(t.Context(), e.ws.ID)
+	if listErr != nil {
+		t.Fatalf("ListRunsByWorkspace: %v", listErr)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("run rows after cached capture mismatch = %d, want 0", len(runs))
+	}
+	e.sched.mu.Lock()
+	pendingCount, runCount := len(e.sched.pending), len(e.sched.runs)
+	e.sched.mu.Unlock()
+	if pendingCount != 0 || runCount != 0 {
+		t.Fatalf("scheduler state after cached capture mismatch: pending=%d runs=%d", pendingCount, runCount)
+	}
+	e.git.mu.Lock()
+	checkoutCount, checkoutRoot := len(e.git.baseCommits), e.git.root
+	e.git.mu.Unlock()
+	if checkoutCount != 0 {
+		t.Fatalf("checkout records after cached capture mismatch = %d, want 0", checkoutCount)
+	}
+	if _, statErr := os.Stat(checkoutRoot); statErr == nil || !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("checkout root after cached capture mismatch: stat error = %v", statErr)
+	}
+	e.rt.mu.Lock()
+	containerCount, createCount := len(e.rt.containers), e.rt.seq
+	e.rt.mu.Unlock()
+	if containerCount != 0 || createCount != 0 {
+		t.Fatalf("runtime provisioning after cached capture mismatch: containers=%d creates=%d", containerCount, createCount)
+	}
+}
+
+func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
+	e := newTestEnv(t, nil)
+	cause := errors.New("mirror refresh failed")
+	e.base.mu.Lock()
+	e.base.result = mirror.CaptureResult{
+		WorkspaceID: e.ws.ID,
+		Commit:      testBaseCommit,
+		Branch:      e.ws.BaseBranch,
+		Source:      "github.com/acme/project",
+		Configured:  true,
+	}
+	e.base.err = cause
+	e.base.mu.Unlock()
+	t.Setenv(fakeAgentEnv, "fake-agent")
+	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "failed capture", "fake", domain.LaunchTUI)
+	if err == nil {
+		t.Fatal("Launch succeeded despite base capture failure")
+	}
+	var captureErr *BaseCaptureError
+	if !errors.As(err, &captureErr) || !errors.Is(err, cause) {
+		t.Fatalf("Launch error = %v, want BaseCaptureError wrapping cause", err)
+	}
+	if captureErr.Capture.Commit != testBaseCommit || captureErr.Capture.Source != "github.com/acme/project" {
+		t.Fatalf("capture result = %+v", captureErr.Capture)
+	}
+	runs, listErr := e.db.ListRunsByWorkspace(t.Context(), e.ws.ID)
+	if listErr != nil {
+		t.Fatalf("ListRunsByWorkspace: %v", listErr)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("run rows after capture failure = %d, want 0", len(runs))
+	}
+	e.sched.mu.Lock()
+	defer e.sched.mu.Unlock()
+	if len(e.sched.pending) != 0 || len(e.sched.runs) != 0 {
+		t.Fatalf("scheduler state after capture failure: pending=%d runs=%d", len(e.sched.pending), len(e.sched.runs))
 	}
 }
 

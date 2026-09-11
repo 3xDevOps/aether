@@ -310,6 +310,144 @@ func (d *DB) SetWorkspaceOrigin(ctx context.Context, id domain.WorkspaceID, orig
 	return err
 }
 
+// Workspace mirrors
+
+const workspaceMirrorCols = `workspace_id, source_url, source_identity, branch,
+	auth, generation, status, observed_commit, accepted_commit, key_fingerprint,
+	last_error, created_at, updated_at, last_attempt_at, last_success_at`
+
+func validateWorkspaceMirror(m *domain.WorkspaceMirror, op string) error {
+	if m == nil {
+		return fmt.Errorf("store: %s workspace mirror: mirror is nil", op)
+	}
+	if !m.Valid() {
+		return fmt.Errorf("store: %s workspace mirror: invalid field value", op)
+	}
+	return nil
+}
+
+func scanWorkspaceMirror(row interface{ Scan(...any) error }) (*domain.WorkspaceMirror, error) {
+	var (
+		m                    domain.WorkspaceMirror
+		generation           int64
+		createdAt, updatedAt int64
+		lastAttemptAt        sql.NullInt64
+		lastSuccessAt        sql.NullInt64
+	)
+	if err := row.Scan(
+		&m.WorkspaceID, &m.SourceURL, &m.SourceIdentity, &m.Branch,
+		&m.Auth, &generation, &m.Status, &m.ObservedCommit, &m.AcceptedCommit,
+		&m.KeyFingerprint, &m.LastError, &createdAt, &updatedAt,
+		&lastAttemptAt, &lastSuccessAt,
+	); err != nil {
+		return nil, err
+	}
+	m.Generation = generation
+	m.CreatedAt = decodeTime(createdAt)
+	m.UpdatedAt = decodeTime(updatedAt)
+	if lastAttemptAt.Valid {
+		m.LastAttemptAt = decodeTime(lastAttemptAt.Int64)
+	}
+	if lastSuccessAt.Valid {
+		m.LastSuccessAt = decodeTime(lastSuccessAt.Int64)
+	}
+	return &m, nil
+}
+
+func (d *DB) GetWorkspaceMirror(ctx context.Context, id domain.WorkspaceID) (*domain.WorkspaceMirror, error) {
+	m, err := scanWorkspaceMirror(d.db.QueryRowContext(ctx,
+		`SELECT `+workspaceMirrorCols+` FROM workspace_mirrors WHERE workspace_id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get workspace mirror: %w", err)
+	}
+	return m, nil
+}
+func (d *DB) ListWorkspaceMirrors(ctx context.Context) ([]domain.WorkspaceMirror, error) {
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT `+workspaceMirrorCols+` FROM workspace_mirrors ORDER BY workspace_id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list workspace mirrors: %w", err)
+	}
+	mirrors, err := collect(rows, scanWorkspaceMirror)
+	if err != nil {
+		return nil, fmt.Errorf("store: list workspace mirrors: %w", err)
+	}
+	out := make([]domain.WorkspaceMirror, len(mirrors))
+	for i, mirror := range mirrors {
+		if err := validateWorkspaceMirror(mirror, "list"); err != nil {
+			return nil, err
+		}
+		out[i] = *mirror
+	}
+	return out, nil
+}
+
+func (d *DB) SetWorkspaceMirror(ctx context.Context, m *domain.WorkspaceMirror) error {
+	if err := validateWorkspaceMirror(m, "set"); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	created := m.CreatedAt
+	if created.IsZero() {
+		created = now
+	}
+	createdAt, err := encodeTime(created)
+	if err != nil {
+		return fmt.Errorf("store: set workspace mirror: %w", err)
+	}
+	updatedAt, err := encodeTime(now)
+	if err != nil {
+		return fmt.Errorf("store: set workspace mirror: %w", err)
+	}
+	lastAttemptAt, err := encodeOptionalTime(m.LastAttemptAt)
+	if err != nil {
+		return fmt.Errorf("store: set workspace mirror: %w", err)
+	}
+	lastSuccessAt, err := encodeOptionalTime(m.LastSuccessAt)
+	if err != nil {
+		return fmt.Errorf("store: set workspace mirror: %w", err)
+	}
+	var storedCreated int64
+	if err := d.db.QueryRowContext(ctx, `INSERT INTO workspace_mirrors
+		(workspace_id, source_url, source_identity, branch, auth, generation,
+		 status, observed_commit, accepted_commit, key_fingerprint, last_error,
+		 created_at, updated_at, last_attempt_at, last_success_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			source_url = excluded.source_url,
+			source_identity = excluded.source_identity,
+			branch = excluded.branch,
+			auth = excluded.auth,
+			generation = excluded.generation,
+			status = excluded.status,
+			observed_commit = excluded.observed_commit,
+			accepted_commit = excluded.accepted_commit,
+			key_fingerprint = excluded.key_fingerprint,
+			last_error = excluded.last_error,
+			updated_at = excluded.updated_at,
+			last_attempt_at = excluded.last_attempt_at,
+			last_success_at = excluded.last_success_at
+		RETURNING created_at`,
+		m.WorkspaceID, m.SourceURL, m.SourceIdentity, m.Branch, m.Auth,
+		m.Generation, m.Status, m.ObservedCommit, m.AcceptedCommit,
+		m.KeyFingerprint, m.LastError, createdAt, updatedAt, lastAttemptAt,
+		lastSuccessAt,
+	).Scan(&storedCreated); err != nil {
+		return fmt.Errorf("store: set workspace mirror: %w", mapConstraint(err, ErrNotFound))
+	}
+	m.CreatedAt = decodeTime(storedCreated)
+	m.UpdatedAt = now
+	return nil
+}
+
+func (d *DB) DeleteWorkspaceMirror(ctx context.Context, id domain.WorkspaceID) error {
+	return d.execDelete(ctx, "delete workspace mirror",
+		`DELETE FROM workspace_mirrors WHERE workspace_id = ?`, id)
+}
+
 // Harness definitions
 
 const harnessDefinitionCols = `member_id, name, definition, created_at, updated_at`

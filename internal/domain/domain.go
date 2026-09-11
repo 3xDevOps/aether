@@ -128,6 +128,13 @@ func (m LaunchMode) Valid() bool {
 	return m == LaunchTUI || m == LaunchHeadless
 }
 
+// LaunchOptions carries one-shot launch controls that are not part of the
+// strict Launch seam. CachedBase pins a retry to the exact accepted mirror
+// commit returned by a prior base-capture failure.
+type LaunchOptions struct {
+	CachedBase string
+}
+
 // Role is a member's role within the deployment.
 type Role string
 
@@ -161,6 +168,163 @@ type Workspace struct {
 	// clone made.
 	Origin    string
 	CreatedAt time.Time
+}
+
+// MirrorAuth identifies how an upstream workspace mirror authenticates.
+type MirrorAuth string
+
+const (
+	// MirrorAuthPublic fetches a public HTTPS source without credentials.
+	MirrorAuthPublic MirrorAuth = "public"
+	// MirrorAuthDeployKey fetches with an operator-provided deploy key.
+	MirrorAuthDeployKey MirrorAuth = "deploy-key"
+)
+
+// Valid reports whether a is a defined mirror authentication mode.
+func (a MirrorAuth) Valid() bool {
+	return a == MirrorAuthPublic || a == MirrorAuthDeployKey
+}
+
+// MirrorStatus is the persisted lifecycle state of a workspace mirror.
+type MirrorStatus string
+
+const (
+	MirrorStatusPending       MirrorStatus = "pending"
+	MirrorStatusRefreshing    MirrorStatus = "refreshing"
+	MirrorStatusDisabling     MirrorStatus = "disabling"
+	MirrorStatusReady         MirrorStatus = "ready"
+	MirrorStatusAuthFailed    MirrorStatus = "auth-failed"
+	MirrorStatusOffline       MirrorStatus = "offline"
+	MirrorStatusSourceMissing MirrorStatus = "source-missing"
+	MirrorStatusRewritten     MirrorStatus = "rewritten"
+	MirrorStatusDiverged      MirrorStatus = "diverged"
+	MirrorStatusError         MirrorStatus = "error"
+)
+
+// AllMirrorStatuses lists every defined mirror status.
+var AllMirrorStatuses = []MirrorStatus{
+	MirrorStatusPending,
+	MirrorStatusRefreshing,
+	MirrorStatusDisabling,
+	MirrorStatusReady,
+	MirrorStatusAuthFailed,
+	MirrorStatusOffline,
+	MirrorStatusSourceMissing,
+	MirrorStatusRewritten,
+	MirrorStatusDiverged,
+	MirrorStatusError,
+}
+
+// Valid reports whether s is a defined mirror status.
+func (s MirrorStatus) Valid() bool {
+	return slices.Contains(AllMirrorStatuses, s)
+}
+
+// WorkspaceMirror is the server-owned configuration and refresh state for a
+// workspace's upstream source. A missing row means the workspace is local-only.
+//
+// Private key bytes are deliberately not part of this model or its persisted
+// representation; Auth and KeyFingerprint identify the configured credential.
+type WorkspaceMirror struct {
+	WorkspaceID    WorkspaceID
+	SourceURL      string
+	SourceIdentity string
+	Branch         string
+	Auth           MirrorAuth
+	Generation     int64
+	Status         MirrorStatus
+	ObservedCommit string
+	AcceptedCommit string
+	KeyFingerprint string
+	LastError      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	LastAttemptAt  time.Time
+	LastSuccessAt  time.Time
+}
+
+// Valid reports whether the mirror contains values with safe, storage-level
+// shapes. Git-specific object and ref semantics are intentionally kept here
+// rather than importing the git engine package.
+func (m WorkspaceMirror) Valid() bool {
+	return m.WorkspaceID != "" &&
+		ValidMirrorSourceURL(m.SourceURL) &&
+		ValidMirrorSourceIdentity(m.SourceIdentity) &&
+		ValidMirrorBranch(m.Branch) &&
+		m.Auth.Valid() &&
+		m.Generation > 0 &&
+		m.Status.Valid() &&
+		ValidMirrorSHA(m.ObservedCommit) &&
+		ValidMirrorSHA(m.AcceptedCommit) &&
+		ValidMirrorFingerprint(m.KeyFingerprint)
+}
+
+// ValidMirrorSourceURL reports whether url is a non-empty, one-line source
+// URL suitable for a mirror fetch. Mirrors support HTTPS and SSH remotes,
+// including Git's scp-like form.
+func ValidMirrorSourceURL(url string) bool {
+	if url == "" || strings.TrimSpace(url) != url || strings.ContainsAny(url, "\x00\r\n\t ") || strings.HasPrefix(url, "-") {
+		return false
+	}
+	return strings.HasPrefix(url, "https://") ||
+		strings.HasPrefix(url, "ssh://") ||
+		scpLikeOrigin.MatchString(url)
+}
+
+// ValidMirrorSourceIdentity reports whether identity is a non-empty,
+// one-line source identity.
+func ValidMirrorSourceIdentity(identity string) bool {
+	return identity != "" && strings.TrimSpace(identity) == identity &&
+		!strings.ContainsAny(identity, "\x00\r\n\t ")
+}
+
+// ValidMirrorBranch reports whether branch is a valid Git ref component.
+func ValidMirrorBranch(branch string) bool {
+	if branch == "" || strings.TrimSpace(branch) != branch ||
+		strings.ContainsAny(branch, "\x00\r\n\t ~^:?*[\\") ||
+		strings.Contains(branch, "..") || strings.Contains(branch, "@{") ||
+		strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, "/") ||
+		strings.HasSuffix(branch, "/") || strings.HasPrefix(branch, ".") ||
+		strings.HasSuffix(branch, ".") {
+		return false
+	}
+	return true
+}
+
+// ValidMirrorSHA reports whether sha is empty or a complete hexadecimal
+// object ID. Both SHA-1 and SHA-256 repository object formats are accepted.
+func ValidMirrorSHA(sha string) bool {
+	if sha == "" {
+		return true
+	}
+	if len(sha) != 40 && len(sha) != 64 {
+		return false
+	}
+	for _, r := range sha {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') &&
+			(r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidMirrorFingerprint reports whether fingerprint is empty or an SSH
+// SHA-256 fingerprint.
+func ValidMirrorFingerprint(fingerprint string) bool {
+	if fingerprint == "" || !strings.HasPrefix(fingerprint, "SHA256:") {
+		return fingerprint == ""
+	}
+	if len(fingerprint) <= len("SHA256:") {
+		return false
+	}
+	for _, r := range fingerprint[len("SHA256:"):] {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') &&
+			(r < '0' || r > '9') && r != '+' && r != '/' && r != '=' {
+			return false
+		}
+	}
+	return true
 }
 
 // DefaultBaseBranch is the branch a workspace falls back to when none was
@@ -462,6 +626,16 @@ type Run struct {
 	// "continue the most recent conversation here" flag. See
 	// docs/failure-handling.md.
 	HarnessSessionID string
+	// BaseCommit is the commit SHA recorded for the workspace base at the
+	// last base check. Empty means no base commit has been observed.
+	BaseCommit string
+	// BaseBranch is the workspace branch used as the base for this run.
+	BaseBranch string
+	// BaseSource is the source identity used to obtain BaseCommit.
+	BaseSource string
+	// BaseCheckedAt is when the base provenance was checked. The zero value
+	// means that no base check has been recorded.
+	BaseCheckedAt time.Time
 }
 
 // AccountMember returns the member whose agent account backs the run.

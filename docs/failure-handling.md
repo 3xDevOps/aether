@@ -287,11 +287,57 @@ stays as audit history.
 
 Below `--min-free-disk`, `run.launch` and `run.relaunch` are refused with
 `-32004` (unavailable) and a message naming the numbers. Everything else -
-attaching, steering, pulling, closing, killing and deleting runs - keeps
-working, which is what you need to actually clear space.
+attaching, steering, pulling published run branches, closing, killing and
+deleting runs - keeps working, which is what you need to actually clear space.
 
 If the filesystem cannot be read at all, the floor allows the run: the guard
 exists to stop a disk from filling, not to stop the server.
+
+### Launch freshness and mirror failures
+
+Launch freshness is server-owned. Before a run row, checkout or container
+exists, the scheduler captures the workspace base. A configured workspace
+mirror is refreshed from its source at that point; a local-only workspace reads
+its local base directly. The client does not decide whether this base is fresh;
+freshness does not require a pre-launch local operation. If that pre-run capture
+fails - for example, because the source is offline, rewritten or diverged - the
+launch is refused and leaves no run row.
+
+When a strict mirror capture fails after a commit was already accepted, the
+error may include that exact accepted commit. The CLI can print the explicit
+retry:
+
+```text
+aether run --cached-base <40-character-commit>
+```
+
+The `--cached-base` override is request-scoped: it applies only to the launch
+request where it is supplied and is never inherited by later launches.
+Repeating the same override is accepted while the SHA still matches the
+accepted commit and the workspace base has not moved; a mismatched SHA or
+moved base is refused. It is not a general freshness bypass. A successful
+retry records the cached base as the run's immutable base provenance.
+
+Mirror state does not remove review flow. Published run branches remain
+fetchable and pullable even while a mirror is failing, and a local-only
+workspace keeps its normal direct base writes and repository setup flow.
+
+### Scheduled occurrences
+
+Each due schedule occurrence is consumed once. The server records the
+occurrence, re-checks the creating member's current launch permission, and
+then enters the same server-owned launch path as a manual run. An occurrence
+skipped by current permission or template checks, or refused by a pre-run
+guard (disk floor, budget or mirror/base capture), creates no run row; launch
+failures are reported as timeline failure notes when the schedule still has
+template context. It is never represented as a failed run. The next future
+occurrence is the next chance, rather than an immediate retry or a catch-up
+storm. Once the base is captured and the row exists, ordinary provisioning
+failures do produce the failed run row described below.
+
+Missed slots while the server is down are skipped; the scheduler resumes at
+the next occurrence. See [teams.md](teams.md#task-templates-and-schedules)
+for schedule administration.
 
 ### Agent stall or crash
 

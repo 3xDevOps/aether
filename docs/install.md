@@ -694,11 +694,12 @@ home, which `aether terminal` uses after `aether agent add`. See
 
 ## The client-side sync daemon
 
-Optional, on your machine, once per repo. It fetches run branches as agents
-commit and pushes your base branch up so new runs start from current reality.
+Optional, on your machine, once per repo. It fetches server-owned run branches
+as agents commit and can push your local base branch in **local-only**
+workspaces. Reconnect and live-overlay behavior continue as before.
 
 ```sh
-# Linux; the second line is whatever `daemon install` printed on your platform.
+# Linux; daemon install prints the activation command on other platforms.
 aether daemon install --server <server-host>:2222 --repo ~/code/myproject
 systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 ```
@@ -725,21 +726,55 @@ systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 ```
 
 On macOS or Windows, use the activation command printed by `daemon install`
-instead of the Linux `systemctl` command. Keep `--sync-origin` when the old
-unit used it:
+instead of the Linux `systemctl` command.
+
+The daemon no longer forwards a checkout's `origin` into the workspace base.
+It does not refresh a source mirror. In a mirrored workspace, its local base
+push attempt is rejected because the server-owned base is protected; use
+`aether workspace mirror refresh` and explicit candidate adoption instead.
+Local-only workspaces retain normal base pushes. There is no recurring
+dashboard **Sync from origin** action.
+
+Units installed by a release that accepted `--sync-origin` still contain that
+removed flag and fail after upgrade. Reinstall each unit, then activate the
+new definition:
 
 ```sh
-aether daemon install --sync-origin --server <server-host>:2222 --repo ~/code/myproject
+aether daemon install --server <server-host>:2222 --repo ~/code/myproject
+systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 ```
 
-`--sync-origin` extends the base-branch half: on every catch-up pass the
-daemon also fast-forwards the server's base branch to your repo's `origin`
-remote, so runs branch from upstream's current tip even when your local base
-branch is behind. It only moves refs - your local branch and working tree are
-never touched, and the server's base is never rewritten backwards or away
-from local work you have not pushed yet.
+## Workspace source mirrors
 
-The dashboard Settings page can run the same sync once, on demand.
+Workspaces are local-only unless an administrator configures a source mirror.
+The mirror source is the read-only repository and branch used to refresh the
+workspace base; it is deliberately different from checkout `Origin`, which
+is where run branches are pushed for review. Configure and inspect it with:
+
+```sh
+aether workspace mirror configure --workspace myproject \
+  --source https://github.com/acme/project.git --branch main --auth public
+aether workspace mirror refresh --workspace myproject
+aether workspace mirror status --workspace myproject
+```
+
+Use `--auth deploy-key` for a private GitHub HTTPS source; Aether generates a
+key and prints only its public half plus
+`https://github.com/<owner>/<repo>/settings/keys/new`. Install that key as a
+read-only repository deploy key before **Verify**/`refresh`. For generic SSH,
+use an `ssh://` source and `--known-hosts-file <file>` containing the verified
+host key. Never put a password, token, or private key in a source URL.
+
+Configuration starts pending. Each manual or run launch refresh fetches exactly
+the configured source branch. Forward-only changes advance the accepted base;
+rewrites and divergence retain a candidate for explicit
+`aether workspace mirror adopt --workspace myproject --generation <n> --yes`.
+`disable --yes` restores local-only writes but does not revoke a deploy key at
+GitHub; remove it there. Refresh failures are recorded as authentication,
+offline, missing-source, rewritten, diverged, or error states and a failed
+launch creates no run. A CLI launch may explicitly retry once from the
+unchanged accepted commit with `--cached-base <sha>`; no stale fallback is
+automatic.
 
 ## What lives in the data directory
 
@@ -748,6 +783,7 @@ The dashboard Settings page can run the same sync once, on demand.
 | `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
 | `ssh/` | The server's SSH host key. |
 | `repos/` | One bare git repo per workspace. |
+| `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
 | `transcripts/` | Per-run PTY recordings (asciicast v2). |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
@@ -756,11 +792,11 @@ The dashboard Settings page can run the same sync once, on demand.
 | `coord/` | Per-run conflict-coordination sockets, recreated each run. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. |
 
-Member homes are server-owned state. Back up the database, `homes/`, and
-`profiles/` when recovery of installed agents, login state, and profile
-snapshots matters. That backup carries credentials: every member's vendor
-logins, their GitHub token, and their commit signing key are files under
-`homes/`, so treat it as secret material and store it accordingly
+Member homes and mirror credentials are server-owned state. Back up the
+database, `homes/`, `profiles/`, and `mirrors/` when recovery matters. Those
+backups carry credentials: every member's vendor logins, GitHub tokens, signing
+keys, and mirror deploy private keys. Encrypt them, restrict access, and do not
+publish or paste them into issue reports.
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
 Each member home is mounted only in that member's environment terminal and
@@ -769,8 +805,9 @@ account share.
 
 Three consequences worth knowing:
 
-- **Back up `aether.db`, `repos/`, `homes/`, and `profiles/` to recover core
-  state, installed agents, login state, and profile snapshots.**
+- **Back up `aether.db`, `repos/`, `homes/`, `profiles/`, and `mirrors/` to
+  recover core state, installed agents, login state, profile snapshots, and
+  configured source mirrors.**
 - **Four of these grow without bound**: `checkouts/` (reclaimed by the TTL
   GC), `transcripts/`, `aether.db` (the event log), and `repos/` (every push,
   run branch and reflog entry stays). The dashboard's disk gauge reports those
@@ -874,7 +911,7 @@ The client never generates an SSH key of its own. It uses your existing
 `~/.ssh/id_ed25519` or whatever your ssh-agent holds, so leave your keys
 alone.
 
-If you installed the sync daemon, remove it before the binary:
+If you installed the client daemon, remove it before the binary:
 
 ```sh
 systemctl --user disable --now aether-daemon

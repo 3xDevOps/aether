@@ -130,9 +130,8 @@ func templateDelete(args []string) error {
 	})
 }
 
-// launchTemplate backs `aether run --template`. It reports the base
-// branch's age with the run: a template launch is often unattended work
-// on a base the server has not heard about since somebody last pushed.
+// launchTemplate backs `aether run --template`. It reports the immutable base
+// provenance captured for the launched run.
 func launchTemplate(workspace, name string, params kvFlag) error {
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, workspace)
@@ -146,13 +145,18 @@ func launchTemplate(workspace, name string, params kvFlag) error {
 			return err
 		}
 		fmt.Printf("run %s %s (template %s)\n", res.Run.ID, res.Run.Status, name)
-		if res.BaseAge == "" {
-			fmt.Printf("base %s: no commit the server has seen; push it to refresh\n", res.BaseBranch)
-		} else {
-			fmt.Printf("base %s is %s old (the server only sees what members push)\n", res.BaseBranch, res.BaseAge)
-		}
+		fmt.Print(formatTemplateBase(res))
 		return nil
 	})
+}
+
+func formatTemplateBase(res protocol.TemplateLaunchResult) string {
+	source := res.BaseSource
+	if source == "" {
+		source = "local"
+	}
+	return fmt.Sprintf("base %s %s from %s (checked %s)\n",
+		res.BaseBranch, res.BaseCommit, source, res.BaseCheckedAt)
 }
 
 func formatParams(params map[string]string) string {

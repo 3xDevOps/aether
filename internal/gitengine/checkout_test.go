@@ -271,6 +271,56 @@ func TestCreateRunCheckoutPointsOriginAtTheWorkspaceUpstream(t *testing.T) {
 	}
 }
 
+// CreateRunCheckoutAt pins the captured commit even if the workspace branch
+// moves before provisioning reaches the checkout.
+func TestCreateRunCheckoutAtPinsCapturedCommit(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := t.Context()
+	repo, err := e.InitWorkspaceRepo(ctx, "ws1")
+	if err != nil {
+		t.Fatalf("InitWorkspaceRepo: %v", err)
+	}
+	seedBareMain(t, e, "ws1")
+	first := runCheckoutGit(t, repo, "rev-parse", "--verify", "refs/heads/main")
+
+	source := filepath.Join(t.TempDir(), "source")
+	runCheckoutGit(t, t.TempDir(), "clone", repo, source)
+	if writeErr := os.WriteFile(filepath.Join(source, "second.txt"), []byte("two\n"), 0o644); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	runCheckoutGit(t, source, "add", "-A")
+	runCheckoutGit(t, source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "second")
+	runCheckoutGit(t, source, "push", "origin", "HEAD:refs/heads/main")
+	second := runCheckoutGit(t, repo, "rev-parse", "--verify", "refs/heads/main")
+	if second == first {
+		t.Fatal("workspace branch did not move")
+	}
+
+	checkout, _, err := e.CreateRunCheckoutAt(ctx, "ws1", "run-at", first, "main", "captured base", "")
+	if err != nil {
+		t.Fatalf("CreateRunCheckoutAt: %v", err)
+	}
+	if got := runCheckoutGit(t, checkout, "rev-parse", "--verify", "HEAD"); got != first {
+		t.Fatalf("checkout HEAD = %q, want captured commit %q", got, first)
+	}
+	if got, _ := e.git(ctx, checkout, "config", cfgBase); got != first {
+		t.Fatalf("aether.base = %q, want captured commit %q", got, first)
+	}
+	meta, err := e.readRunMeta("run-at")
+	if err != nil {
+		t.Fatalf("readRunMeta: %v", err)
+	}
+	if meta.Base != first {
+		t.Fatalf("run metadata base = %q, want captured commit %q", meta.Base, first)
+	}
+
+	for _, invalid := range []string{first[:7], strings.Repeat("a", 40)} {
+		if _, _, err := e.CreateRunCheckoutAt(ctx, "ws1", domain.RunID("invalid-"+invalid[:4]), invalid, "main", "invalid", ""); err == nil {
+			t.Errorf("CreateRunCheckoutAt(%q) succeeded, want invalid commit error", invalid)
+		}
+	}
+}
+
 // seedBareMain gives the workspace bare repo one commit on main, which is
 // the base branch CreateRunCheckout cuts from.
 func seedBareMain(t *testing.T, e *Engine, ws domain.WorkspaceID) {

@@ -54,7 +54,8 @@ while you sleep.**
 - **Agents run continuously in remote containers.** Agents run in containers on the server. Launch them once, close your laptop laptop and they still continue to work. 
 - **Results arrive as git branches.** Every run gets its own worktree and
   branch. You can pull, review, and merge - or set your agent up with Git & Github on Aether
-  to let them handle Git operations autonomously. 
+  to let them handle Git operations autonomously. Run-branch pulls remain
+  available whether a workspace is local-only or mirror-backed.
 - **Your agents, your setup.** Each member has a server-owned persistent home,
   mounted read-write in that member's environment terminal and runs. Import
   configuration once with the local dashboard's directory picker, or edit it
@@ -81,6 +82,12 @@ roster, and a disk gauge. Launch, inject, pause, kill, close, relaunch and
 handoff all call the same methods the CLI does, with the same permission checks
 and timeline attribution. The server-hosted dashboard also exposes the shared
 member-home **Files** editor through the same authenticated RPCs.
+Launch freshness is server-owned: before a run row exists, the server captures
+the workspace base. A configured mirror refreshes that base; a local-only
+workspace reads its local base. A failed pre-run check creates no run row.
+Workspace pages expose admin-only Source control for mirror status and
+controls; launch freshness is handled on the server rather than by a client
+pre-launch operation.
 
 ## Supported agents
 

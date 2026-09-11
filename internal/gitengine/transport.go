@@ -54,6 +54,12 @@ func (e *Engine) servePack(ctx context.Context, ws domain.WorkspaceID, service s
 	if err != nil {
 		return -1, err
 	}
+	// Transport touches are also convergence points for repository policy.
+	// This keeps repos created before a policy change safe without requiring
+	// a separate maintenance pass.
+	if configureErr := e.configureWorkspaceRepo(ctx, repo); configureErr != nil {
+		return -1, configureErr
+	}
 	args := []string{"-c", "safe.directory=*"}
 	if service == "receive-pack" {
 		// The branch is the artifact: no push may delete one. Forced ref

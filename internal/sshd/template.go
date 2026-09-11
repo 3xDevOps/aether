@@ -142,10 +142,12 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	}
 	out := protocol.TemplateLaunchResult{
 		Run:        protocol.RunFromDomain(launched.Run),
-		BaseBranch: launched.Base.Branch,
+		BaseCommit: launched.Run.BaseCommit,
+		BaseBranch: launched.Run.BaseBranch,
+		BaseSource: launched.Run.BaseSource,
 	}
-	if launched.Base.Known {
-		out.BaseAge = templates.FormatAge(launched.Base.Age)
+	if !launched.Run.BaseCheckedAt.IsZero() {
+		out.BaseCheckedAt = launched.Run.BaseCheckedAt.UTC().Format(time.RFC3339)
 	}
 	return out, nil
 }

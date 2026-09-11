@@ -2,9 +2,11 @@ package sshd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -61,29 +63,95 @@ func (s *Server) checkMember(ctx context.Context, member domain.MemberID) error 
 }
 
 // rpcError maps an error from the store or a seam call to the wire error
-// object per the contract's error-mapping table.
+// object per the contract's error-mapping table. Mirror failures retain only
+// the safe, actionable base metadata; git's raw transport output never
+// crosses this boundary.
 func rpcError(err error) *protocol.Error {
 	code := protocol.CodeInternal
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		code = protocol.CodeNotFound
-	case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrInUse),
-		errors.Is(err, scheduler.ErrRunShellTabLimit):
-		code = protocol.CodeConflict
-	case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab):
-		code = protocol.CodeInvalidParams
-	case errors.Is(err, errInvalidTransition), errors.Is(err, scheduler.ErrTerminalTabLimit),
-		errors.Is(err, scheduler.ErrTerminalNotRunning), errors.Is(err, scheduler.ErrGitHubNotLoggedIn),
-		errors.Is(err, scheduler.ErrGitHubScopeMissing), errors.Is(err, scheduler.ErrGitHubCLIMissing),
-		errors.Is(err, scheduler.ErrGitHubCLIBroken), errors.Is(err, scheduler.ErrGitHubCLIOutdated):
-		code = protocol.CodeInvalidState
-	case errors.Is(err, errWriteDenied), errors.Is(err, errMemberRemoved),
-		errors.Is(err, errMemberPending), errors.Is(err, permissions.ErrDenied):
+	switch mirrorKind(err) {
+	case gitengine.MirrorErrorAuthFailed:
 		code = protocol.CodeDenied
-	case errors.Is(err, errNoSession), errors.Is(err, errSessionEnded), errors.Is(err, errDiskFull):
-		// The free-space floor is a "not right now", not a bad request: the
-		// call is well-formed and becomes possible again once the disk does.
+	case gitengine.MirrorErrorOffline, gitengine.MirrorErrorUnsupported:
 		code = protocol.CodeUnavailable
+	case gitengine.MirrorErrorSourceMissing:
+		code = protocol.CodeNotFound
+	case gitengine.MirrorErrorRewritten, gitengine.MirrorErrorDiverged, gitengine.MirrorErrorCASConflict:
+		code = protocol.CodeConflict
+	case gitengine.MirrorErrorInvalidRequest:
+		code = protocol.CodeInvalidParams
+	case gitengine.MirrorErrorNotConfigured, gitengine.MirrorErrorNoCandidate:
+		code = protocol.CodeInvalidState
+	case gitengine.MirrorErrorFailed:
+		code = protocol.CodeInternal
+	default:
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			code = protocol.CodeNotFound
+		case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrInUse),
+			errors.Is(err, scheduler.ErrRunShellTabLimit):
+			code = protocol.CodeConflict
+		case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab):
+			code = protocol.CodeInvalidParams
+		case errors.Is(err, errInvalidTransition), errors.Is(err, scheduler.ErrTerminalTabLimit),
+			errors.Is(err, scheduler.ErrTerminalNotRunning), errors.Is(err, scheduler.ErrGitHubNotLoggedIn),
+			errors.Is(err, scheduler.ErrGitHubScopeMissing), errors.Is(err, scheduler.ErrGitHubCLIMissing),
+			errors.Is(err, scheduler.ErrGitHubCLIBroken), errors.Is(err, scheduler.ErrGitHubCLIOutdated):
+			code = protocol.CodeInvalidState
+		case errors.Is(err, errWriteDenied), errors.Is(err, errMemberRemoved),
+			errors.Is(err, errMemberPending), errors.Is(err, permissions.ErrDenied):
+			code = protocol.CodeDenied
+		case errors.Is(err, errNoSession), errors.Is(err, errSessionEnded), errors.Is(err, errDiskFull):
+			// The free-space floor is a "not right now", not a bad request:
+			// the call is well-formed and becomes possible again once the
+			// disk does.
+			code = protocol.CodeUnavailable
+		}
 	}
-	return &protocol.Error{Code: code, Message: err.Error()}
+	out := &protocol.Error{Code: code, Message: err.Error()}
+	if failure := mirrorFailure(err); failure != nil {
+		if data, marshalErr := json.Marshal(failure); marshalErr == nil {
+			out.Data = data
+		}
+	}
+	return out
+}
+
+func mirrorKind(err error) gitengine.MirrorErrorKind {
+	var mirrorErr *gitengine.MirrorError
+	if errors.As(err, &mirrorErr) && mirrorErr != nil && mirrorErr.Kind != "" {
+		return mirrorErr.Kind
+	}
+	return ""
+}
+
+func mirrorFailure(err error) *protocol.MirrorFailure {
+	var captureErr *scheduler.BaseCaptureError
+	if !errors.As(err, &captureErr) || captureErr == nil {
+		return nil
+	}
+	failure := &protocol.MirrorFailure{
+		AcceptedCommit: captureErr.Capture.Commit,
+		Source:         captureErr.Capture.Source,
+		Branch:         captureErr.Capture.Branch,
+	}
+	var mirrorErr *gitengine.MirrorError
+	if errors.As(captureErr.Err, &mirrorErr) && mirrorErr != nil {
+		failure.Kind = string(mirrorErr.Kind)
+		failure.BaseCommit = mirrorErr.Base
+		failure.ObservedCommit = mirrorErr.Observed
+		if failure.Source == "" {
+			failure.Source = mirrorErr.SourceURL
+		}
+		if failure.Branch == "" {
+			failure.Branch = mirrorErr.Branch
+		}
+	}
+	if failure.Kind == "" {
+		failure.Kind = string(gitengine.MirrorErrorFailed)
+	}
+	if failure.AcceptedCommit == "" && failure.BaseCommit == "" && failure.ObservedCommit == "" &&
+		failure.Source == "" && failure.Branch == "" {
+		return nil
+	}
+	return failure
 }

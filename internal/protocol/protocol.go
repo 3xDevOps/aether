@@ -109,6 +109,15 @@ const (
 	MethodSyncConflict = "sync.conflict"
 )
 
+// Workspace mirror administration methods (admin only).
+const (
+	MethodWorkspaceMirrorStatus    = "workspace.mirror.status"
+	MethodWorkspaceMirrorConfigure = "workspace.mirror.configure"
+	MethodWorkspaceMirrorRefresh   = "workspace.mirror.refresh"
+	MethodWorkspaceMirrorAdopt     = "workspace.mirror.adopt"
+	MethodWorkspaceMirrorDisable   = "workspace.mirror.disable"
+)
+
 // JSON-RPC 2.0 error codes.
 const (
 	CodeParse          = -32700
@@ -143,10 +152,12 @@ type Response struct {
 }
 
 // Error is the JSON-RPC error object. It implements error so clients can
-// surface it directly.
+// surface it directly. Data is optional structured detail for callers that
+// need to act on a refusal without parsing the human-readable message.
 type Error struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 func (e *Error) Error() string {

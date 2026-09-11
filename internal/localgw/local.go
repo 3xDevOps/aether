@@ -39,7 +39,6 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 	"pull.switch":       (*Gateway).localPullSwitch,
 	"repo.fast-forward": (*Gateway).localRepoFastForward,
 	"repo.push":         (*Gateway).localRepoPush,
-	"repo.sync":         (*Gateway).localRepoSync,
 	"sync.start":        (*Gateway).localSyncStart,
 	"sync.status":       (*Gateway).localSyncStatus,
 	"sync.stop":         (*Gateway).localSyncStop,
@@ -496,31 +495,13 @@ func (g *Gateway) localRepoFastForward(r *http.Request, body []byte) (any, *prot
 	}{Branch: result.Branch, Commit: result.Commit, Current: result.Current, Dirty: result.Dirty, Output: result.Output}, nil
 }
 
-// localRepoSync fetches the workspace base branch from the repository's
-// origin remote and advances the matching server branch without touching the
-// local branch or working tree.
-func (g *Gateway) localRepoSync(r *http.Request, body []byte) (any, *protocol.Error) {
-	cfg, ws, perr := g.repoWorkspace(r, body)
-	if perr != nil {
-		return nil, perr
-	}
-	output, err := localops.SyncBase(cfg.Repo, ws.BaseBranch)
-	if perr := repoGitError(err); perr != nil {
-		return nil, perr
-	}
-	return struct {
-		Branch string `json:"branch"`
-		Output string `json:"output"`
-	}{Branch: ws.BaseBranch, Output: output}, nil
-}
-
-// checkRemoteWorkspace refuses a push or sync whose branch was read from one
-// workspace while the `aether` remote points at another. The remote URL
-// carries the workspace ID, so the two can disagree whenever link.repo
-// last ran for a different workspace - and the answer would otherwise
-// report success for a workspace this repository never seeded. A repo
-// with no remote at all passes through to Push or SyncBase's own refusal,
-// which names the fix.
+// checkRemoteWorkspace refuses a repository operation whose branch was read
+// from one workspace while the `aether` remote points at another. The remote
+// URL carries the workspace ID, so the two can disagree whenever link.repo
+// last ran for a different workspace - and the answer would otherwise report
+// success for a workspace this repository never seeded. A repo with no
+// remote at all passes through to the operation's own refusal, which names
+// the fix.
 func checkRemoteWorkspace(cfg cli.Config, ws protocol.Workspace) *protocol.Error {
 	url, err := localops.AetherRemoteURL(cfg.Repo)
 	if err != nil {

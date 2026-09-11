@@ -53,6 +53,19 @@ type Store interface {
 	// leaving every other field untouched. "" clears it.
 	SetWorkspaceOrigin(ctx context.Context, id domain.WorkspaceID, origin string) error
 
+	// GetWorkspaceMirror returns the configured upstream mirror, or
+	// ErrNotFound when the workspace is local-only.
+	GetWorkspaceMirror(ctx context.Context, id domain.WorkspaceID) (*domain.WorkspaceMirror, error)
+	// ListWorkspaceMirrors returns every configured mirror ordered by
+	// workspace ID. A workspace mirror contains no secret or path material.
+	ListWorkspaceMirrors(ctx context.Context) ([]domain.WorkspaceMirror, error)
+	// SetWorkspaceMirror validates and creates or replaces the workspace's
+	// single mirror row. CreatedAt is preserved when replacing a row.
+	SetWorkspaceMirror(ctx context.Context, m *domain.WorkspaceMirror) error
+	// DeleteWorkspaceMirror removes the mirror configuration and returns
+	// ErrNotFound when the workspace has no mirror row.
+	DeleteWorkspaceMirror(ctx context.Context, id domain.WorkspaceID) error
+
 	CreateMember(ctx context.Context, m *domain.Member) error
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetMemberByPublicKey(ctx context.Context, publicKey string) (*domain.Member, error)

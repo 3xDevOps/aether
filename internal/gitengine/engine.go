@@ -48,6 +48,13 @@ type Config struct {
 	QuietPeriod       time.Duration // default 2s
 	MinInterval       time.Duration // default 10s
 	MaxInterval       time.Duration // default 60s
+	// MirrorFetch is an explicit test seam for local-file mirror remotes.
+	// Production leaves it nil; the built-in fetch accepts only HTTPS or SSH.
+	MirrorFetch MirrorFetchFunc
+	// MirrorResolve optionally replaces DNS resolution for public HTTPS
+	// mirrors. Production leaves it nil to use the system resolver; tests
+	// provide this narrow seam to avoid external DNS.
+	MirrorResolve MirrorResolveFunc
 }
 
 // runInfo is a watch-registry entry. Entries are created by StartDiffWatch
@@ -165,6 +172,17 @@ func (e *Engine) InitWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) (
 const updateHook = `#!/bin/sh
 # Installed by Aether; do not edit - rewritten when the workspace is touched.
 refname="$1" oldrev="$2" newrev="$3"
+case "$refname" in
+refs/aether/*)
+	echo "aether: rejected write to protected ref $refname: mirror refs are owned by the Aether server" >&2
+	exit 1
+	;;
+esac
+mirrorbase="$(git config --local --get aether.mirror.base 2>/dev/null || true)"
+if [ -n "$mirrorbase" ] && [ "$refname" = "$mirrorbase" ]; then
+	echo "aether: rejected write to protected ref $refname: this mirrored base is owned by the upstream; use the configured upstream to update it" >&2
+	exit 1
+fi
 case "$refname" in refs/heads/aether/run-*) ;; *) exit 0 ;; esac
 zero="0000000000000000000000000000000000000000"
 [ "$oldrev" = "$zero" ] && exit 0 # branch creation is allowed
@@ -176,13 +194,27 @@ exit 1
 
 // configureWorkspaceRepo idempotently applies required workspace-repo
 // settings: core.logAllRefUpdates=true (bare repos disable reflogs by
-// default, making forced ref rewrites unrecoverable) and the run-branch
-// protection update hook. Checks before writing so the steady state is
-// read-only: InitWorkspaceRepo runs on every transport touch and concurrent
-// pushes must not race a hook rewrite or a git-config lock.
+// default, making forced ref rewrites unrecoverable), transfer.hideRefs
+// for Aether-owned refs, and the run-branch protection update hook. Checks
+// before writing so the steady state is read-only: InitWorkspaceRepo runs on
+// every transport touch and concurrent pushes must not race a hook rewrite or
+// a git-config lock.
 func (e *Engine) configureWorkspaceRepo(ctx context.Context, repo string) error {
 	if v, _ := e.git(ctx, repo, "config", "--type=bool", "core.logAllRefUpdates"); v != "true" {
 		if _, err := e.git(ctx, repo, "config", "core.logAllRefUpdates", "true"); err != nil {
+			return err
+		}
+	}
+	hideRefs, _ := e.git(ctx, repo, "config", "--get-all", "transfer.hideRefs")
+	hasMirrorHide := false
+	for _, value := range strings.Split(hideRefs, "\n") {
+		if strings.TrimSpace(value) == "refs/aether" {
+			hasMirrorHide = true
+			break
+		}
+	}
+	if !hasMirrorHide {
+		if _, err := e.git(ctx, repo, "config", "--add", "transfer.hideRefs", "refs/aether"); err != nil {
 			return err
 		}
 	}

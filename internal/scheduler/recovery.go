@@ -25,9 +25,10 @@ const (
 )
 
 // Relaunch creates a new run from a terminal source: same workspace, task,
-// harness, and mode, owned by the actor. The new checkout is cloned from
-// refs/heads/<old.Branch> via Git.CreateRunCheckout and is named for the
-// new run ID. The old row and its checkout are left untouched.
+// harness, and mode, owned by the actor. The new checkout is cloned from the
+// exact commit currently published at refs/heads/<old.Branch> via
+// Git.CreateRunCheckoutAt and is named for the new run ID. The old row and
+// its checkout are left untouched.
 func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
 	if err := s.checkFreeSpace(); err != nil {
 		return nil, err
@@ -77,6 +78,10 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if !published {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidTransition, relaunchRequiresCheckout)
 	}
+	publishedCommit, err := s.cfg.Git.WorkspaceBranchCommit(ctx, ws.ID, old.Branch)
+	if err != nil {
+		return nil, err
+	}
 	next := &domain.Run{
 		WorkspaceID:      old.WorkspaceID,
 		MemberID:         actor,
@@ -86,6 +91,10 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		Mode:             old.Mode,
 		Status:           domain.RunQueued,
 		HarnessSessionID: session,
+		BaseCommit:       old.BaseCommit,
+		BaseBranch:       old.BaseBranch,
+		BaseSource:       old.BaseSource,
+		BaseCheckedAt:    old.BaseCheckedAt,
 	}
 	// Checking for an active run in the same checkout and creating the new
 	// row under one critical section serializes concurrent relaunches of
@@ -123,7 +132,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, err
 	}
 	defer s.finishPending(next.ID, pending)
-	checkout, branch, err := s.cfg.Git.CreateRunCheckout(ctx, ws.ID, next.ID, old.Branch, next.Task, ws.Origin)
+	checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, next.ID, publishedCommit, old.Branch, next.Task, ws.Origin)
 	if err != nil {
 		s.failRelaunch(next, actor, fmt.Errorf("create checkout: %w", err))
 		return nil, err

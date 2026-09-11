@@ -3,7 +3,6 @@ package templates
 import (
 	"context"
 	"errors"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,7 +23,18 @@ func (l *recordingLauncher) Launch(_ context.Context, workspace domain.Workspace
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.tasks = append(l.tasks, task)
-	return &domain.Run{ID: "run_1", WorkspaceID: workspace, MemberID: member, Task: task, Harness: harness, Mode: mode}, nil
+	return &domain.Run{
+		ID:            "run_1",
+		WorkspaceID:   workspace,
+		MemberID:      member,
+		Task:          task,
+		Harness:       harness,
+		Mode:          mode,
+		BaseCommit:    "0123456789abcdef0123456789abcdef01234567",
+		BaseBranch:    "main",
+		BaseSource:    "local",
+		BaseCheckedAt: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC),
+	}, nil
 }
 
 func (l *recordingLauncher) count() int {
@@ -49,12 +59,6 @@ func (c *fakeClock) set(t time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.t = t
-}
-
-type fixedBase struct{ at time.Time }
-
-func (b fixedBase) BaseCommitTime(context.Context, domain.WorkspaceID, string) (time.Time, error) {
-	return b.at, nil
 }
 
 // A schedule whose slots all passed while the server was down fires once
@@ -105,7 +109,6 @@ func TestScheduleMissedWhileDownIsSkippedNotCaughtUp(t *testing.T) {
 	runs := &recordingLauncher{}
 	svc, err := New(Config{
 		Store: db, Bus: bus, Runs: runs,
-		Base:     fixedBase{at: now.Add(-10 * 24 * time.Hour)},
 		Interval: 5 * time.Millisecond,
 		Now:      clock.now,
 	})
@@ -172,7 +175,6 @@ func TestImpossibleCronRuleIsRefusedAndNeverFires(t *testing.T) {
 	runs := &recordingLauncher{}
 	svc, err := New(Config{
 		Store: db, Bus: bus, Runs: runs,
-		Base:     fixedBase{at: now.Add(-time.Hour)},
 		Interval: 5 * time.Millisecond,
 		Now:      clock.now,
 	})
@@ -235,7 +237,6 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	runs := &recordingLauncher{}
 	svc, err := New(Config{
 		Store: db, Bus: bus, Runs: runs,
-		Base:     fixedBase{at: now.Add(-time.Hour)},
 		Interval: 5 * time.Millisecond,
 		Now:      clock.now,
 	})
@@ -300,47 +301,6 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ticket") {
 		t.Fatalf("Save error = %q, want it to name the missing parameter", err)
-	}
-}
-
-// RepoBase reads the base branch age out of the workspace bare repo,
-// which is the only upstream state the server ever has.
-func TestRepoBaseReportsBranchAge(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	dir := t.TempDir()
-	repo := filepath.Join(dir, "ws1.git")
-	committed := time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second)
-	git := func(args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Env = append(cmd.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_AUTHOR_DATE="+committed.Format(time.RFC3339),
-			"GIT_COMMITTER_DATE="+committed.Format(time.RFC3339))
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("git %s: %v", strings.Join(args, " "), err)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	git("init", "--bare", "--quiet", repo)
-	tree := git("-C", repo, "hash-object", "-w", "-t", "tree", "/dev/null")
-	commit := git("-C", repo, "commit-tree", tree, "-m", "init")
-	git("-C", repo, "update-ref", "refs/heads/main", commit)
-
-	base := RepoBase{Dir: dir}
-	got, err := base.BaseCommitTime(context.Background(), "ws1", "main")
-	if err != nil {
-		t.Fatalf("BaseCommitTime: %v", err)
-	}
-	if !got.Equal(committed) {
-		t.Fatalf("commit time = %v, want %v", got, committed)
-	}
-	if _, err := base.BaseCommitTime(context.Background(), "ws1", "never-pushed"); err == nil {
-		t.Fatal("unknown branch reported an age, want an error")
 	}
 }
 

@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -20,6 +21,25 @@ type PTYAttacher interface {
 	// Replay streams a run's recorded transcript as raw terminal bytes;
 	// os.ErrNotExist when the run never recorded one.
 	Replay(run domain.RunID) (io.ReadCloser, error)
+}
+
+// RunLauncherWithOptions is the optional extension implemented by schedulers
+// that can pin a launch to a caller-supplied base observation. Keeping it
+// separate preserves the strict Launch seam for older adapters and tests.
+type RunLauncherWithOptions interface {
+	LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error)
+}
+
+var errLaunchOptionsUnsupported = errors.New("sshd: cached base retry is not supported")
+
+func launchWithOptions(ctx context.Context, runs RunController, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	if launcher, ok := runs.(RunLauncherWithOptions); ok {
+		return launcher.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
+	}
+	if opts.CachedBase != "" {
+		return nil, errLaunchOptionsUnsupported
+	}
+	return runs.Launch(ctx, workspace, member, account, task, harness, mode)
 }
 
 // RunController is the SSH server's view of the scheduler (*scheduler.Scheduler).

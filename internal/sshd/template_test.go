@@ -33,12 +33,19 @@ func (c *testClock) set(t time.Time) {
 	c.now = t
 }
 
-// staleBase is a workspace whose base branch was last pushed ten days ago:
-// laptops closed, nobody pushing, exactly the overnight case.
-type staleBase struct{ committed time.Time }
+type capturedLauncher struct {
+	templates.Launcher
+}
 
-func (b staleBase) BaseCommitTime(context.Context, domain.WorkspaceID, string) (time.Time, error) {
-	return b.committed, nil
+func (l capturedLauncher) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+	run, err := l.Launcher.Launch(ctx, workspace, member, account, task, harness, mode)
+	if run != nil {
+		run.BaseCommit = "0123456789abcdef0123456789abcdef01234567"
+		run.BaseBranch = "main"
+		run.BaseSource = "local"
+		run.BaseCheckedAt = time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)
+	}
+	return run, err
 }
 
 func templateEnv(t *testing.T, clock *testClock) *testEnv {
@@ -47,8 +54,7 @@ func templateEnv(t *testing.T, clock *testClock) *testEnv {
 		svc, err := templates.New(templates.Config{
 			Store:    c.Store,
 			Bus:      c.Bus,
-			Runs:     c.Runs,
-			Base:     staleBase{committed: clock.Now().Add(-10 * 24 * time.Hour)},
+			Runs:     capturedLauncher{Launcher: c.Runs},
 			Interval: 10 * time.Millisecond,
 			Now:      clock.Now,
 		})
@@ -63,12 +69,11 @@ func templateEnv(t *testing.T, clock *testClock) *testEnv {
 	})
 }
 
-// The whole overnight workflow: an admin saves a template, a collaborator
-// launches it by hand and schedules it, the cron loop fires it, and the
-// fired run is byte-for-byte the run a hand launch produces - reported
-// with the age of the base it started from. Then the collaborator is
-// demoted and the schedule stops firing.
-func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
+// The whole workflow: an admin saves a template, a collaborator launches it
+// by hand and schedules it, the cron loop fires it, and both paths report the
+// immutable provenance carried by their captured runs. Then the collaborator
+// is demoted and the schedule stops firing.
+func TestTemplateLaunchedByHandAndByScheduleWithCapturedProvenance(t *testing.T) {
 	clock := &testClock{now: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)}
 	e := templateEnv(t, clock)
 	ctx := context.Background()
@@ -124,8 +129,11 @@ func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
 	}, &launched); err != nil {
 		t.Fatalf("template.launch: %v", err)
 	}
-	if launched.BaseBranch != "main" || launched.BaseAge != "10d" {
-		t.Fatalf("launch reported base %q age %q, want main 10d", launched.BaseBranch, launched.BaseAge)
+	if launched.BaseCommit != "0123456789abcdef0123456789abcdef01234567" ||
+		launched.BaseBranch != "main" || launched.BaseSource != "local" ||
+		launched.BaseCheckedAt != "2026-08-13T03:00:00Z" {
+		t.Fatalf("launch provenance = commit %q branch %q source %q checked %q",
+			launched.BaseCommit, launched.BaseBranch, launched.BaseSource, launched.BaseCheckedAt)
 	}
 	wantManual := "launch:" + string(e.ws.ID) + ":" + string(bob.ID) + ":upgrade npm deps:claude:headless"
 	if calls := e.runs.Calls(); len(calls) != 1 || calls[0] != wantManual {
@@ -159,8 +167,9 @@ func TestTemplateLaunchedByHandAndByScheduleFromAStaleBase(t *testing.T) {
 	})
 
 	entry := awaitTimeline(t, timeline, "scheduled run")
-	if !strings.Contains(entry, "base main is 10d old") || !strings.Contains(entry, "nightly-deps") {
-		t.Fatalf("timeline entry = %q, want the template and the base age", entry)
+	wantEntry := "scheduled run run_new from local main at 0123456789abcdef0123456789abcdef01234567 (nightly-deps)"
+	if !strings.Contains(entry, wantEntry) {
+		t.Fatalf("timeline entry = %q, want %q", entry, wantEntry)
 	}
 
 	// A hand-launched run of the same prompt is indistinguishable from the

@@ -151,18 +151,23 @@ sends the workspace's base branch; replace `main` if you created the
 workspace with `--base`.
 
 The first `link --repo` also reads your clone's own `origin` URL and records
-it on the workspace, printing `workspace origin -> <url>`. Every run
-checkout created afterwards gets an `origin` remote pointing there, so an
-agent in a run can `git push origin <branch>` and open a pull request once
-you have connected GitHub ([step 5](#5-set-up-your-agent)). The local dashboard
-wizard's Repository step does the same. Recording happens only when you may
-push - a viewer may not - and your clone's origin is one the server accepts;
-otherwise the link still succeeds, prints no `workspace origin ->` line, and
-records nothing. `aether workspace origin` shows what was recorded and takes
-a URL or `--clear` to change it. A `github.com` origin you cloned over SSH
-is recorded in its `https://github.com/...` form, because that is the form a
-run can push to; [teams.md](teams.md#workspaces) has the rule for other
+it as the workspace's **checkout Origin**, printing `workspace origin ->
+<url>`. Every run checkout created afterwards gets an `origin` remote pointing
+there, so an agent in a run can `git push origin <branch>` and open a pull
+request once you have connected GitHub ([step 5](#5-set-up-your-agent)). The
+local dashboard's Repository step does the same. Recording happens only when
+you may push - a viewer may not - and your clone's origin is one the server
+accepts; otherwise the link still succeeds, prints no `workspace origin ->`
+line, and records nothing. `aether workspace origin` shows what was recorded
+and takes a URL or `--clear` to change it. A `github.com` origin you cloned
+over SSH is recorded in its `https://github.com/...` form, because that is the
+form a run can push to; [teams.md](teams.md#workspaces) has the rule for other
 hosts.
+
+This checkout Origin is a push destination, not the source used to refresh a
+workspace base. A workspace is local-only by default. To have Aether fetch a
+protected base from an upstream repository, configure the optional source
+mirror below.
 
 In the local dashboard's onboarding wizard, the Repository step does both for
 you. Point it at your clone: type the absolute path, or, in the desktop app,
@@ -183,6 +188,75 @@ only; or the two diverged, where the wizard prints the git commands to resolve
 it by hand. A fast-forward writes no merge commit and never rewrites your own
 commits, and nothing here force-pushes. See
 [teams.md](teams.md#workspaces) for that case.
+
+### Optional: configure source control
+
+An administrator can make the workspace's base a read-only mirror of an
+upstream branch. Configure it after the initial workspace push, or after
+reconciling the two repositories:
+
+```sh
+# Public GitHub or any public HTTPS repository:
+aether workspace mirror configure --workspace myproject \
+  --source https://github.com/acme/myproject.git --branch main --auth public
+
+# Private GitHub: Aether generates a read-only deploy key.
+aether workspace mirror configure --workspace myproject \
+  --source https://github.com/acme/private.git --branch main --auth deploy-key
+
+# Generic SSH: provide a known_hosts file; do not use unverified TOFU.
+aether workspace mirror configure --workspace myproject \
+  --source ssh://git.example.com/acme/myproject.git \
+  --branch main --auth deploy-key --known-hosts-file ~/.ssh/known_hosts
+```
+
+`--branch` defaults to the workspace base branch. Public mode accepts
+credential-free HTTPS. Deploy-key mode accepts a GitHub HTTPS URL or a generic
+`ssh://` URL. For GitHub, configure prints the public key and:
+`GitHub deploy-key settings: https://github.com/<owner>/<repo>/settings/keys/new`
+and `Open Settings > Deploy keys > Add deploy key`. Follow that URL, paste the
+public key as a repository deploy key, leave **Allow write access** off, and
+then verify it. The private key never appears in CLI output or the dashboard.
+
+Configuration is initially **pending** and does not fetch. Verify it with:
+
+```sh
+aether workspace mirror refresh --workspace myproject
+aether workspace mirror status --workspace myproject
+```
+
+Forward-only upstream changes become **ready** and advance the mirrored base.
+Rewrites or a base that diverged locally retain an **observed candidate** and
+leave the accepted base alone; review the candidate and explicitly adopt it:
+
+```sh
+aether workspace mirror adopt --workspace myproject --generation <n> --yes
+aether workspace mirror disable --workspace myproject --yes
+```
+
+`Source control` on the dashboard's Workspace page is the equivalent
+admin-only flow: its one-time Configure form is prefilled from
+`Workspace.Origin`; choose public or deploy-key authentication, copy the public
+key and follow the GitHub link, then use **Verify** or **Refresh**. **Adopt
+candidate** and **Disable** both ask for explicit confirmation. Disable
+returns the workspace to local-only mode; it does not revoke a deploy key at
+GitHub, so remove that key there.
+
+Every launch refreshes a configured mirror before creating the run. An
+authentication, network, missing-source, rewrite, divergence, or other
+refresh failure creates no run and never silently uses a stale base. If the
+failure reports an accepted commit, the CLI offers an explicit retry:
+
+```sh
+aether run "add a health check endpoint" --agent claude \
+  --cached-base <accepted-commit>
+```
+
+The `--cached-base` override is request-scoped: it applies only to the launch
+request where it is supplied and is never inherited by later launches.
+Repeating the same override is accepted while the SHA still matches the
+accepted commit and the workspace base has not moved; a mismatched SHA or
+moved base is rejected.
 
 ## 5. Set up your agent
 
@@ -395,20 +469,46 @@ git diff main...aether/run-add-a-health-check-endpoint-mgcped
 
 If the local checkout has uncommitted changes, the pull still fetches the run
 branch and reports that the checkout is dirty. Commit or stash those changes
-before switching to the run branch.
+before switching to the run branch or merging it.
+
+When the review is complete, merge locally. In a local-only workspace, push
+the reviewed base back to Aether:
+
+```sh
+git switch main
+git merge aether/run-add-a-health-check-endpoint-mgcped
+git push aether main
+```
+
+In a mirrored workspace, the Aether base is protected. Push the reviewed
+result to the configured source branch using credentials for that upstream:
+
+```sh
+git push <source-remote> main:<configured-source-branch>
+```
+
+Here `<source-remote>` is a local remote (or URL) for the configured source;
+the mirror's server-side credentials are read-only. The checkout Origin is
+optional and independent of the source mirror. It may be a different
+repository, and is a review destination for publishing the run branch (for
+example, to open a pull request); it is not the destination for a mirrored
+base update.
 
 Then close the run out so it leaves the attention board:
 
 ```sh
-git switch aether/run-add-a-health-check-endpoint-mgcped
 aether close <run-id> --outcome merged      # or --outcome abandoned
 ```
 
-
-
-To stop pulling by hand, run the local sync daemon - it fetches run branches as
-they update and pushes your base branch up so new runs start from current
-reality:
+The local daemon is optional. It fetches server-owned run branches as agents
+commit and can push your local base branch in **local-only** workspaces. It
+does not watch agent configuration directories; configuration is imported
+explicitly in the local dashboard (`aether gui`) and edited in **Files**. It
+does not fetch a mirror source or forward a checkout's `origin` into the
+workspace. In a mirrored workspace, a base push attempt is rejected because
+the mirror owns that branch; use `aether workspace mirror refresh` and, when
+needed, explicit `aether workspace mirror adopt` instead. `aether pull` remains
+the review path in every mode.
 
 ```sh
 aether daemon install --server <server-host>:2222 --repo ~/code/myproject
@@ -417,18 +517,10 @@ systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 
 That second line is the Linux one. `daemon install` prints the activation
 command for whatever platform you are on: `launchctl load` on macOS,
-`schtasks /Create` on Windows.
-
-`--sync-origin` keeps runs current even when your local base branch is not.
-Pass it to `daemon install` and every catch-up pass fast-forwards the server's
-base branch to your repo's `origin` remote - the server's copy is updated
-without touching your local branch or working tree:
-
-```sh
-aether daemon install --sync-origin --server <server-host>:2222 --repo ~/code/myproject
-```
-
-The dashboard Settings page can run the same sync once, on demand.
+`schtasks /Create` on Windows. A unit installed by an older release that still
+contains `--sync-origin` will fail after upgrade; reinstall it with the
+command above and activate the newly written unit. There is no recurring
+dashboard **Sync from origin** action.
 
 ---
 

@@ -48,15 +48,20 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 	if err != nil {
 		return fmt.Errorf("store: create run: last commit at: %w", err)
 	}
+	baseCheckedAt, err := encodeOptionalTime(r.BaseCheckedAt)
+	if err != nil {
+		return fmt.Errorf("store: create run: base checked at: %w", err)
+	}
 	if _, err := d.db.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
-		                   harness_session_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
+		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -70,11 +75,13 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		createdAt             int64
 		startedAt, finishedAt *int64
 		lastCommitAt          *int64
+		baseCheckedAt         *int64
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.AccountMemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
-		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID); err != nil {
+		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
+		&r.BaseSource, &baseCheckedAt); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
@@ -83,12 +90,16 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	if lastCommitAt != nil {
 		r.LastCommitAt = decodeTime(*lastCommitAt)
 	}
+	if baseCheckedAt != nil {
+		r.BaseCheckedAt = decodeTime(*baseCheckedAt)
+	}
 	return &r, nil
 }
 
 const runCols = `id, workspace_id, member_id, account_member_id, task, harness, mode, status,
 	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id,
-	title, last_commit, last_commit_at, harness_session_id`
+	title, last_commit, last_commit_at, harness_session_id, base_commit, base_branch, base_source,
+	base_checked_at`
 
 func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 	r, err := scanRun(d.db.QueryRowContext(ctx,
@@ -160,16 +171,22 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err != nil {
 		return fmt.Errorf("store: update run: last commit at: %w", err)
 	}
+	baseCheckedAt, err := encodeOptionalTime(r.BaseCheckedAt)
+	if err != nil {
+		return fmt.Errorf("store: update run: base checked at: %w", err)
+	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET workspace_id = ?, member_id = ?, account_member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
 		     profile_snapshot_id = ?, title = ?, last_commit = ?, last_commit_at = ?,
-		     harness_session_id = ?
+		     harness_session_id = ?, base_commit = ?, base_branch = ?, base_source = ?,
+		     base_checked_at = ?
 		 WHERE id = ?`,
 		r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
-		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID, r.ID,
+		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
+		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ID,
 	))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
