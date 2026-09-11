@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -59,6 +60,13 @@ type Gateway struct {
 	mu      sync.Mutex
 	conns   map[*websocket.Conn]struct{}
 	closing bool
+	// serving counts listeners Serve is still running on; failed is the
+	// first error a listener died with, and done closes once every
+	// listener is gone because of one - the composer surfaces that into
+	// its own lifecycle rather than staying up and answering nothing.
+	serving int
+	failed  error
+	done    chan struct{}
 }
 
 // New builds the gateway. It binds nothing: the caller serves it.
@@ -80,6 +88,7 @@ func New(cfg Config) (*Gateway, error) {
 		ctx:      ctx,
 		cancel:   cancel,
 		conns:    make(map[*websocket.Conn]struct{}),
+		done:     make(chan struct{}),
 	}
 	g.HandleFunc("POST /api/v1/{method}", g.handleAPI)
 	g.HandleFunc("GET /api/v1/run/{run}/patch", g.handlePatch)
@@ -150,9 +159,41 @@ func sameOrigin(origin, host string) bool {
 	return strings.EqualFold(u.Host, host)
 }
 
-// Serve serves the gateway on ln in the background until Close.
+// Serve serves the gateway on ln in the background until Close. A
+// listener that stops serving for any other reason is logged, and once
+// the last one has, Done closes.
 func (g *Gateway) Serve(ln net.Listener) {
-	go func() { _ = g.srv.Serve(ln) }()
+	g.mu.Lock()
+	g.serving++
+	g.mu.Unlock()
+	go func() {
+		err := g.srv.Serve(ln)
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.serving--
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("webgate: listener stopped serving", "addr", ln.Addr(), "error", err)
+			if g.failed == nil {
+				g.failed = fmt.Errorf("webgate: listener %s stopped serving: %w", ln.Addr(), err)
+			}
+		}
+		if g.serving == 0 && g.failed != nil && !g.closing {
+			close(g.done)
+		}
+	}()
+}
+
+// Done is closed when every listener has stopped serving because of an
+// error, so the gateway is up but reachable on nothing. It stays open
+// through Close.
+func (g *Gateway) Done() <-chan struct{} { return g.done }
+
+// Err is the first error a listener died with, valid once Done is
+// closed.
+func (g *Gateway) Err() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.failed
 }
 
 // beginHandler registers a WebSocket handler with the shutdown WaitGroup

@@ -409,9 +409,21 @@ func (s *Server) Run(ctx context.Context) error {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errc := make(chan error, 2)
+	errc := make(chan error, 3)
 	var wg sync.WaitGroup
 	wg.Add(2)
+	if s.web != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-s.web.Done():
+				errc <- fmt.Errorf("server: web: %w", s.web.Err())
+				cancel()
+			case <-runCtx.Done():
+			}
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		if err := s.sched.Start(runCtx); err != nil {

@@ -104,6 +104,14 @@ func (g *Gateway) authorize(r *http.Request, _ bool) (webgate.Backend, *webgate.
 	return backend{local: g.ssh.Local(m.ID)}, nil
 }
 
+// Done is closed when every tailnet listener has stopped serving because
+// of an error; Err says why. The server's Run treats that as a failure
+// rather than staying up with a dashboard nobody can reach.
+func (g *Gateway) Done() <-chan struct{} { return g.core.Done() }
+
+// Err is the first error a listener died with, valid once Done is closed.
+func (g *Gateway) Err() error { return g.core.Err() }
+
 // Close stops serving, drains in-flight requests briefly, ends every
 // live WebSocket and stops the certificate refresh. Safe before Start,
 // and safe to call twice.

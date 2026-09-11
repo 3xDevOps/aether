@@ -222,6 +222,15 @@ func (g *Gateway) Start(_ context.Context) error {
 	}
 	g.ln = ln
 	g.core.Serve(ln)
+	// A listener that dies leaves a gateway the desktop shell believes is
+	// healthy; exiting nonzero is what makes the shell respawn it.
+	go func() {
+		select {
+		case <-g.core.Done():
+			g.requestExit(1)
+		case <-g.ctx.Done():
+		}
+	}()
 	return nil
 }
 
