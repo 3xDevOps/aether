@@ -111,6 +111,14 @@ upload is enabled, a native paste containing actual image file data is handled
 by the terminal's image paste listener; ordinary text remains native terminal
 input. On macOS, `Cmd+V` is the native paste shortcut.
 
+A paste reaches the agent as one block rather than as the Enter presses
+its newlines would otherwise be, because the terminal is told the session
+has bracketed paste on. An agent sets that mode once when it starts, long
+before you open the terminal, so the server tracks it - along with the
+cursor, autowrap, and mouse reporting - and restores it ahead of the
+replay. Without that, a terminal opened hours into a run would disagree
+with the agent about how a paste arrives, and only the agent could tell.
+
 The terminal toolbar has named **Copy terminal selection**, **Copy last
 screen**, **Paste into terminal**, and **Upload image to terminal** controls.
 **Copy last screen** copies the rows currently on screen, which is how to copy

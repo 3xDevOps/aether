@@ -5,30 +5,18 @@ import (
 	"strconv"
 )
 
-// A client that attaches mid-run rebuilds its screen from the replay ring,
-// which is a byte tail: whatever the agent set up before those bytes is
-// gone. Terminal modes are set once at startup and never repeated, so the
-// tail almost never carries them, and a dashboard terminal resets itself
-// before every replay - so without this the reattached terminal disagrees
-// with the PTY about how it behaves.
+// The modes a reattaching client is told about, and the state a fresh
+// terminal holds them in. docs/terminal.md explains why the replay
+// carries them at all.
 //
-// Bracketed paste is the mode that shows: with DECSET 2004 lost, a client
-// sends a pasted block as bare carriage returns, and an agent that reads
-// them as Enter submits the first line and treats the rest as more
-// answers. The others are tracked because the same reasoning applies -
-// a client that thinks the cursor is hidden, that autowrap is off, or
-// that mouse reporting is on is wrong in a way only the agent can fix,
-// and it cannot, because it has no idea anyone reattached.
+// The alternate screen buffer is deliberately absent: DECSET 1049 is not
+// a flag but a buffer switch that saves the cursor and clears what it
+// switches to, so asserting it around a tail captured inside it would
+// change what that tail draws. An agent on the alternate screen repaints
+// on the resize nudge instead.
 //
-// The alternate screen buffer is deliberately absent. Replaying DECSET
-// 1049 is not a flag but a buffer switch that saves the cursor and clears
-// what it switches to, so asserting it around a tail that was captured
-// inside it would change what the tail draws. An agent on the alternate
-// screen repaints on the resize nudge instead.
-//
-// Only the modes below are tracked. An unrecognised private mode passes
-// through to the client untouched, as every byte does; it is simply not
-// remembered for the next attach.
+// A private mode outside this set still reaches the client in the output
+// it was sent in; it is simply not remembered for the next attach.
 var trackedModes = map[int]bool{
 	2004: true, // bracketed paste
 	25:   true, // cursor visibility (DECTCEM)
