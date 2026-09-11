@@ -18,7 +18,7 @@ Two rules shape everything below:
 
 ## Shipped harnesses
 
-| `--agent` | CLI | Login state | Profile sync root | API key env | Launch env | MCP | Status | Resume | Steering | Env setup |
+| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | MCP | Status | Resume | Steering | Env setup |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | hooks (`--settings`) | by session ID (`--session-id`, `--resume`) | PTY | yes |
 | `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | notify (`-c notify=[...]`) | no | PTY | yes |
@@ -31,10 +31,19 @@ Two rules shape everything below:
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user).
 
-The **Env setup** column marks harnesses that can participate in onboarding:
-running the local `profile` scan and opening the agent setup shell. Exactly
-claude, codex, and pi qualify; everything else stays launchable for runs
-but is not offered in those onboarding flows.
+The `config.roots` response used by the dashboard carries a
+`runtime_ignores` list for each configuration root. These are root-relative
+paths, and the browser applies them before reading selected file bytes with
+case-sensitive exact or component-prefix matching; trailing slashes are
+presentation-only. This policy is destination-specific: a directory whose
+basename is renamed or ambiguous must be assigned to a destination before
+the import preview can be read. Credential names remain globally excluded,
+independent of this runtime list.
+
+The **Env setup** column marks harnesses that can participate in agent setup:
+the dashboard can open the member's environment terminal for installation and
+login. Exactly `claude`, `codex`, and `pi` qualify; everything else stays
+launchable for runs but is not offered in that setup flow.
 
 Only harnesses with an **MCP** column of `yes` can be pointed at the in-container
 coordination bridge, so conflict coordination between overlapping runs works for
@@ -281,8 +290,9 @@ Once per person, per agent:
 aether agent add <name>
 ```
 
-For a shipped name, the dashboard's Agents step opens the live environment
-terminal dock and types the vendor install script for you. In the CLI, run:
+For a shipped name, the local dashboard's Agents step opens the live
+environment terminal dock and types the vendor install script for you. In the
+CLI, run:
 
 ```sh
 aether terminal
@@ -293,7 +303,7 @@ terminal, and return to the dashboard. The login and executable are in your
 member home, so every container for that member sees them. A member-defined
 name also records a launch definition under that member.
 
-The dashboard's **I've installed and logged in** button checks `agent.list`
+The local dashboard's **I've installed and logged in** button checks `agent.list`
 before confirming installation. The Agents page shows **Installed** or
 **Not installed** for your account. These checks verify the executable;
 the agent verifies its vendor login when it starts. Shipped agents need no
@@ -335,8 +345,9 @@ Three things to know:
 
 Inside `aether terminal`, start the CLI and use its `/login` slash command,
 which prints a URL to open in your own browser and takes a code back. `/status`
-shows which credential is active. Credentials land in `~/.claude` and are
-excluded from profile sync.
+shows which credential is active. Credentials land in `~/.claude` and remain
+in the member's persistent home. The browser configuration import skips known
+credential names before upload.
 
 For an API key instead of a subscription, set `ANTHROPIC_API_KEY` in the
 server's environment (`/etc/aether/aether-server.env` with the shipped systemd
@@ -347,16 +358,17 @@ is not in the passthrough list, so use the terminal for subscription auth.
 ### Codex
 
 Inside `aether terminal`, run the CLI's login command and choose the
-device-code option. Codex writes `auth.json` under `~/.codex`, which is
-persisted in your member home and excluded from profile sync.
+device-code option. Codex writes `auth.json` under `~/.codex`, which remains
+in your member home. The browser configuration import skips known credential
+names before upload.
 
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
 ### pi
 
 Inside `aether terminal`, start the CLI and use its `/login` command to pick
-a provider. Tokens land in `~/.pi/agent/auth.json` under the member home, and
-the token files are excluded from profile sync. `ANTHROPIC_API_KEY` or
+a provider. Tokens land in `~/.pi/agent/auth.json` under the member's home.
+The browser configuration import skips known credential names before upload.
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
 ### omp
@@ -445,17 +457,83 @@ generic denylist knows about:
 The server validates that the executable is a name rather than a host path,
 that argv starts with that executable, and that profile, credential, and
 deny-name policies are safe. An invalid administrator definition rejects
-server startup; an invalid member registration is refused at the RPC. Agent
-installation, login state, profile sync, and launch definitions remain
-separate concerns: installation and login state live in the member home, while
-the definition resolves argv for that member. The terminal is the only setup
-transport.
+server startup; an invalid member registration is refused at the RPC.
+Agent installation, login state, configuration import, and launch definitions
+remain separate concerns: installation and login state live in the member home,
+the one-time browser import writes selected configuration there, and the
+definition resolves argv for that member. The terminal is the only setup
+transport for installation and login.
 
-## Agent configuration (profile sync)
+## Agent configuration: import and Files
 
-Separate from logins. Your skills, plugins, custom commands, and settings are
-mirrored **one way** from your laptop to the server, so agents on the server are
-*your* agents:
+The local dashboard (`aether gui`) does not watch a laptop directory or run an
+AI inventory. During the Agents step, choose one directory such as
+`~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp` with the browser directory picker.
+The browser waits for `config.roots` and a known destination before it reads
+any file bytes. A unique basename selects its destination automatically; an
+unknown or ambiguous basename must be assigned explicitly. The preview then
+shows the files that will be sent and the paths left out before upload. Import
+is explicit and one-time: after it succeeds, the import control is gone. The
+server-hosted dashboard has no onboarding picker; use local `aether gui` for
+this step.
+
+Credential names in any path component and `*.pem` files are always skipped
+before upload. Runtime/history exclusions come from the selected root's
+`runtime_ignores` metadata, which matches exact root-relative paths or
+component prefixes case-sensitively after trailing slashes are trimmed. This
+policy applies to renamed directories too. Changing an ambiguous destination
+clears the prior preview and re-reads the local file handles with the newly
+selected policy; a stale read cannot replace the current preview. These local
+exclusions are not overridden by `.aether-profile-ignore` in browser import.
+`agent/skills/`, `agent/extensions/`, and `agent/npm/` remain configuration and
+are imported.
+Remaining bytes are uploaded and scanned by the server; do not assume all
+secret-looking content stays on the laptop. A complete response reports
+accepted counts and server exclusions. If the server stops after writing files,
+the dashboard reports an incomplete result with exact committed paths, counts
+and the real error, and warns that copied files remain. If the RPC response is
+lost, the outcome is unknown and some files may have been copied; inspect
+**Files** before retrying. There is no watcher or automatic retry: selecting
+the directory and importing again is explicit.
+An import can include empty files and arbitrary binary bytes. It is limited to
+**1 MiB per file**, **20 MiB decoded total**, and **2,000 files**. Browser
+imports create new files with mode `0644`; the browser cannot preserve
+executable mode or symlinks, so a script may need `chmod` in the remote
+terminal.
+
+The imported files are written into your authenticated member's persistent
+configuration home. That home is mounted read-write in your environment
+terminal and in runs using your account, so the change is immediately visible
+to existing and future runs (an agent may need to reload its configuration).
+An account share gives another member's run the same home; it does not create
+an isolated per-run profile. A snapshot pin records launch provenance, not an
+isolated writable copy or a promise that home changes wait for later runs.
+Changing configuration does not rebuild the installed-agent image.
+
+After import, open **Files** to browse your own member configuration alongside
+workspace base and live-run files. The editor supports JSON, JavaScript,
+TypeScript, Markdown, Python, and TOML syntax highlighting, plus find/replace.
+Edits stay as in-memory dirty tabs while you navigate. Save explicitly with
+**Save**, **Commit to <branch>**, or Ctrl/Cmd-S; there is no autosave or
+force-save. Browser navigation warns before unloading dirty buffers.
+
+Configuration files are full UTF-8 text up to **512 KiB**. Binary or truncated
+files are read-only. New configuration files accept nested relative paths and
+never overwrite an existing file. A stale save keeps the draft; reload from the
+server only when you want to discard it and replace it with current content.
+Every `config.*` method requires `Launch` and addresses only the authenticated
+member's own home; an admin cannot select another member.
+
+For workspace files, **Commit to <branch>** makes a one-file commit on the
+workspace base branch and does not push upstream. Live-run writes change the
+run's uncommitted checkout. Workspace saves require **Push**; live-run saves
+require **Steer**. The [Files protocol](local-gateway.md#files-and-member-configuration)
+defines revision and concurrency rules.
+
+### Manual profile commands
+
+The explicit CLI profile surface remains available for operators who need
+content-addressed snapshots or rollback:
 
 ```sh
 aether profile push --agent claude
@@ -463,105 +541,20 @@ aether profile status --agent claude
 aether profile rollback --agent claude <snapshot-id>
 ```
 
-The local daemon (`aether daemon run`) does the push automatically on change;
-`--no-profile-sync` opts a machine out. It logs one line per file it left
-behind, so an unattended push never drops a file silently. Where
-`aether profile push` refuses over a finding in a file you wrote, the daemon
-logs that file and syncs the rest, because nobody is there to answer.
+`profile push` is manual; it is not run by a local watcher. Its exact optional
+flags are repeatable `--skip-secret <file>` and
+`--allow-secret <file>`. The latter requires an explicit
+`--workspace <workspace>` for audit attribution:
 
-The dashboard does the same push without a terminal. Its onboarding wizard has
-an **Agents** step, and it runs on the same two guards: for each harness
-configured on your machine it shows what a push would carry, grouped as
-memory, skills, commands, settings, MCP config, plugins, and other, plus every
-file the denylist or the scanner left behind and why. You check the harnesses
-you want and approve. Nothing is uploaded to produce that preview, and it
-reads nothing until you ask it to - walking a configuration directory that
-holds months of transcripts is not instant, so it is a button, and it can be
-stopped.
-
-- A push carries at most **1 MiB per file** and **20 MiB per snapshot**.
-  Files over either limit are left behind rather than failing the push, and
-  the preview, `aether profile push`, and the daemon's log name each one.
-  They are decided from the file size alone, so an oversized file is never
-  read. An empty file syncs as an empty file.
-- The snapshot budget is spent by category, in this order: memory, skills,
-  commands, settings, MCP config, plugins, then everything else. Directory
-  order would otherwise decide it, and a plugin cache that sorts early would
-  crowd out the skills and commands the sync exists to carry.
-- Only regular files sync. A socket, named pipe, or device node inside a
-  profile root is reported and skipped without being opened - a named pipe
-  would otherwise block the read until something wrote to it.
-- A **symlink pointing out of the profile root** is skipped and reported,
-  not followed. Symlinking `skills/` entries into a shared directory is an
-  ordinary setup; the link is left behind and everything else still syncs.
-  The target is never opened, so nothing outside the root is uploaded.
-- **Third-party plugin content.** `claude` keeps installed plugins in two
-  trees: `plugins/cache/<marketplace>/<plugin>/<version>/` is the installed
-  copy, and `plugins/marketplaces/<marketplace>/` is the clone of the
-  marketplace repository, which carries the plugin sources inline. A plugin
-  often ships its own test suite. A scanner finding in either tree is a
-  string in a package, not a secret you can edit out of your profile root,
-  so it drops that one file and reports it as `vendored-secret` - the rest
-  of the plugin, and the rest of your profile, still sync. Both are matched
-  on the directory prefix alone, so a plugin update that moves the version
-  segment changes nothing. Everywhere else a finding is reported as
-  `secret`, and drops that one file too.
-- **Default excludes.** Aether skips what a harness writes for itself as it
-  runs - transcripts, telemetry, scratch trees - rather than anything you
-  configured:
-
-  | Harness | Skipped by default |
-  | --- | --- |
-  | `claude` | `projects/`, `shell-snapshots/`, `statsig/`, `todos/`, `file-history/`, `history.jsonl`, `daemon/` |
-  | `codex` | `tmp/`, `.tmp/`, `sessions/` |
-  | `pi` | `agent/sessions/`, `agent/tmp/` |
-  | `omp` | `agent/sessions/`, `agent/terminal-sessions/`, `agent/cache/`, `agent/history.db`, `agent/history.db-shm`, `agent/history.db-wal`, `agent/models.db`, `natives/`, `cache/`, `logs/`, `run/`, `collab/` |
-
-  A skipped directory is reported once, as the directory. These are applied
-  before your `.aether-profile-ignore`, so that file has the last word: a
-  line `!projects/` in it syncs the directory anyway.
-
-A scanner finding never keeps the rest of a profile off the server. It drops
-the one file it named and reports it, so the dashboard lists that file on the
-harness row before the import button and you import the rest in one click.
-
-`aether profile push` has no screen to show a finding on before it uploads,
-so it refuses while a finding in a file you wrote is unacknowledged, and
-prints the path, what the scanner matched, and both ways forward:
-
-```
-profile push: the secret scanner flagged a file you wrote. Remove the secret, or say what to do with it:
-  skills/deploy/README.md: secret detected (curl-auth-header) at 12:2
-    leave it out:   aether profile push --agent claude --skip-secret skills/deploy/README.md
-    send it anyway: aether profile push --agent claude --allow-secret skills/deploy/README.md --workspace <workspace>
+```sh
+aether profile push --agent claude --skip-secret <file>
+aether profile push --agent claude --allow-secret <file> --workspace <workspace>
 ```
 
-Both flags are repeatable. `--skip-secret <file>` leaves that file out and
-pushes everything else. `--allow-secret <file>` carries it. A
-`vendored-secret` finding is never counted here - nobody can edit a
-secret-shaped string out of a package the harness installed - so it is
-reported and skipped with no flag needed. `--allow-secret` carries one of
-those too, if you want that file on the server; `aether profile push` prints
-the exact command next to each such file.
-
-`--allow-secret` has no dashboard equivalent, deliberately. Removing the
-secret happens on the machine the file lives on, and overriding a false
-positive stays a CLI act, where `--workspace` records who overrode what, and
-on which timeline.
-
-- The synced directory is the harness's profile root from the table above.
-- A run **pins** the latest snapshot when it is provisioned. Pushing mid-run
-  never mutates a running agent - the next run picks it up.
-- The snapshot is materialized in the container as a writable copy. Whatever
-  the agent writes there is discarded with the container. **Nothing ever syncs
-  back down.**
-- **Secrets never sync.** Two independent guards, both on by default: a
-  per-harness credential denylist (`.credentials.json`, `auth.json`,
-  `.claude.json`, ...) and a client-side content scan that names the file
-  and the match. A flagged file is never uploaded unless `--allow-secret
-  <file>` names it, which records the override on the workspace timeline.
-  It requires `--workspace` outright - no single-workspace default - so the
-  override always names the timeline it is attributable on.
+These commands read the local harness root named by the selected agent. They
+are separate from browser directory import and from editing the persistent
+member home in **Files**. Use the member-home editor when a change should be
+visible immediately to the shared home.
 
 ## Adding a harness
 

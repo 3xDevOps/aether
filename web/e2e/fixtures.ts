@@ -4,10 +4,8 @@
 // Every test gets its own server, its own loopback ports and its own scratch
 // directory, so the suite has no shared state to order tests around.
 
-import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
 import { test as base } from '@playwright/test'
 
 import { GatewayClient, type InviteResult } from './harness/client'
@@ -21,8 +19,6 @@ import { type Gateway, startGateway } from './harness/gateway'
 import { cloneRepo, seedRepo } from './harness/git'
 import { scratchDir } from './harness/paths'
 import { dockerReachable, type Server, startServer } from './harness/server'
-
-const testdata = path.resolve(fileURLToPath(new URL('./testdata', import.meta.url)))
 
 export interface Member {
   name: string
@@ -43,11 +39,6 @@ export interface Aether {
   cloneRepo: (source: string, name: string) => Promise<string>
   /** Mints an invite code, which only an admin may do. */
   invite: (admin: Member) => Promise<string>
-  /**
-   * Copies the fixture Claude Code configuration onto a member's machine,
-   * where profile.preview and profile.push read it.
-   */
-  giveClaudeProfile: (member: Member) => void
   /**
    * Puts an executable in a member's environment home on the server. That
    * directory is bind-mounted into their environment container, and it is
@@ -161,11 +152,6 @@ export const test = base.extend<{ aether: Aether }>({
       cloneRepo: (source, name) => cloneRepo(path.join(dir, 'repos'), source, name),
       invite: async (admin) =>
         (await admin.api.rpc<InviteResult>('member.invite')).code,
-      giveClaudeProfile: (m) => {
-        cpSync(path.join(testdata, 'claude-profile'), path.join(m.home, '.claude'), {
-          recursive: true,
-        })
-      },
       giveGitIdentity: (member, name, email) => {
         writeFileSync(
           path.join(member.home, '.gitconfig'),

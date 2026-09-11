@@ -21,14 +21,8 @@ import { StubSocket } from '@/test/stub-socket'
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
-  ws: ['events', 'attach', 'terminal', 'envscan'],
-  local: [
-    'link.status',
-    'link.repo',
-    'env.harnesses',
-    'profile.preview',
-    'profile.push',
-  ],
+  ws: ['events', 'attach', 'terminal'],
+  local: ['link.status', 'link.repo', 'env.harnesses'],
 }
 
 function seed(caps: GatewayCapabilities = localCaps) {
@@ -461,7 +455,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
   })
 
   it('gives the CLI path on a gateway without the terminal socket', async () => {
-    renderStep(runningApi(), { ...localCaps, ws: ['events', 'attach', 'envscan'] })
+    renderStep(runningApi(), { ...localCaps, ws: ['events', 'attach'] })
     await open()
 
     expect(screen.queryByRole('region', { name: 'Terminal dock' })).toBeNull()

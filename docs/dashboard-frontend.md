@@ -1,21 +1,26 @@
 # Dashboard SPA (`web/`)
 
-The browser client the server embeds and serves. Next.js 16.3.4 produces the
-static export, while React 19 + TypeScript render the client runtime, Tailwind
-v4 and shadcn/ui primitives with CSS variables provide the base style,
-selected HeroUI v3 wrappers provide Chip and Tooltip, and Zustand holds
-the state.
+The browser client is one static bundle served through either dashboard
+gateway: `aether gui` on the user's machine, or
+`aether-server --web-port` over HTTPS on the server's tailnet addresses.
+Next.js 16.3.4 produces the static export, while React 19 + TypeScript render
+the client runtime, Tailwind v4 and shadcn/ui primitives with CSS variables
+provide the base style, selected HeroUI v3 wrappers provide Chip and Tooltip,
+and Zustand holds the state. Both gateways use the shared `internal/webgate`
+API and WebSocket surfaces; the server gateway authenticates each request with
+Tailscale WhoIs and no browser token.
 
-The visual contract is a VS Code-inspired developer workbench, not an official
-reusable VS Code component package. It follows VS Code Dark Modern and Light
-Modern semantics, dense flat panes and compact controls while preserving
-Aether's routes, capabilities, run states and startup behavior.
+The visual contract is a VS Code-inspired developer workbench, not an
+official reusable VS Code component package. It follows VS Code Dark Modern
+and Light Modern semantics, dense flat panes and compact controls while
+preserving Aether's routes, capabilities, run states and startup behavior.
 
-The gateways it talks to are documented in `docs/local-gateway.md`: `aether
-gui` on the user's own machine, and `aether-server` itself on a tailnet when
-`web-port` is set. The same bundle serves both, gating the machine-local
-surfaces on the capabilities descriptor. This guide describes the dashboard's
-public route, store, and component structure.
+The gateways and their transport boundaries are documented in
+`docs/local-gateway.md`. The same bundle serves both, gating machine-local
+surfaces on the capabilities descriptor while keeping shared Files,
+configuration, runs and terminal surfaces available through either transport.
+This guide describes the dashboard's public route, store and component
+structure.
 
 ## Runtime boundary and commands
 
@@ -37,16 +42,17 @@ cd web && bun run typecheck  # tsc --noEmit
 
 `bun run dev` starts `dev-server.mjs`, the development-only Node loopback
 server. It defaults to `127.0.0.1:3000`, accepts `--port`/`-p` and
-`--hostname`/`-H`, and uses `AETHER_DASHBOARD` as its gateway target (the
-standard local gateway is `http://127.0.0.1:8080`). Requests under `/api` and
-`/local` are proxied over HTTP; `/ws` upgrades are proxied with WebSocket
-support. The proxy preserves the browser `Host` and `Origin` headers so the
-gateway remains the WebSocket origin boundary. Other requests and Next HMR
-upgrades go to Next's development handler. The Next Node inspector attach
-endpoint is unavailable through this server.
+`--hostname`/`-H`, and uses `AETHER_DASHBOARD` as its gateway target. The
+target may be a local `aether gui` URL or a server-hosted HTTPS dashboard;
+local targets also proxy `/local`, while both targets proxy `/api` and `/ws`
+with WebSocket support. The proxy preserves the browser `Host` and `Origin`
+headers so the shared gateway remains the WebSocket origin boundary. Other
+requests and Next HMR upgrades go to Next's development handler. The Next
+Node inspector attach endpoint is unavailable through this server.
 
-Run a local gateway and start the dev server in separate terminals. The gateway
-prints a tokened URL; copy its `token` query value onto the dev URL:
+For a local gateway, run it and start the dev server in separate terminals.
+The local gateway prints a tokened URL; copy its `token` query value onto the
+dev URL:
 
 ```sh
 # terminal 1
@@ -62,6 +68,9 @@ The client moves `?token=` into `sessionStorage` under `aether.token`, removes
 only that query parameter from the address bar, and sends the value as a
 Bearer token on HTTP or a `token` query parameter on WebSockets. The token is
 minted per `aether gui` process and stops working when that process exits.
+When `AETHER_DASHBOARD` points at the server gateway instead, the browser
+sends no token: Tailscale WhoIs identifies the phone or development browser
+on every request.
 
 Node 22+ is required for a hand-run dashboard build. The complete contributor
 toolchain and the optional desktop installer workflow are in
@@ -69,14 +78,16 @@ toolchain and the optional desktop installer workflow are in
 
 ## Testing on a phone
 
-The shipped way to a phone is the server-hosted gateway: set `web-port` and
-open the server's MagicDNS name on a phone joined to the tailnet
-([Testing on a real phone](#testing-on-a-real-phone)). For a contributor's
-loop against a dashboard build that is not embedded in a server yet, `aether
-gui` binds loopback and has no exposure flag - see [security.md](security.md)
-- so the development server is the way there: it binds whatever address you
-give it and proxies to the gateway without rewriting `Host` or `Origin`,
-which is exactly what the gateway's same-origin rule needs.
+The shipped phone path is the server-hosted gateway: set `web-port`, then open
+the server's MagicDNS name on a phone joined to the tailnet
+([Testing on a real phone](#testing-on-a-real-phone)). The connection is
+HTTPS and carries no browser token; Tailscale WhoIs identifies the phone's
+source address on every request. The server-hosted dashboard opens at the
+board and does not offer machine-local onboarding, linking or update actions.
+
+For a contributor's loop against a dashboard build that is not embedded in a
+server yet, use the development server as a LAN-facing proxy to a local
+`aether gui`:
 
 ```sh
 # terminal 1, on the computer the phone will reach
@@ -90,25 +101,24 @@ cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
 
 - **Binding the LAN address gives up the loopback boundary for as long as
   the dev server runs.** Every device on that network can reach a proxy in
-  front of a gateway that holds the member's full authority on the linked
-  server, and the bearer token is the whole authentication: it travels in
-  clear over HTTP, sits in the URL and stays in the phone's history. Use a
-  network you trust, and stop the dev server when the session ends. The
-  shipped boundary is the loopback rule in
-  [security.md](security.md#the-dashboard-gateways); this is a
-  development-time exception a contributor opts into by hand.
+  front of a gateway with the member's authority on the linked server, and
+  the local bearer token is the authentication: it travels in clear over
+  HTTP, sits in the URL and stays in the phone's history. Use a network you
+  trust, and stop the dev server when the session ends. The shipped boundary
+  is the loopback rule in [security.md](security.md#the-dashboard-gateways);
+  this is a development-time exception a contributor opts into by hand.
 - `--hostname` has to be the address typed on the phone. Next's development
   server permits only localhost and the hostname it was started on; any other
   origin needs `allowedDevOrigins` in `web/next.config.ts`.
 - The token is minted per `aether gui` process, and the phone needs that one.
-  Nothing else authenticates.
+  Nothing else authenticates the local development proxy.
 - A tunnel or proxy in front of this must preserve `Host` and `Origin`. One
   that rewrites `Host` breaks every WebSocket - the terminal, the event feed
   and the attach stream - while plain HTTP keeps working, which makes for a
   confusing half-broken dashboard.
 - This serves the Next development build over plain HTTP, not the static
   export the binary embeds, and it needs the computer awake and on the same
-  network. It is a contributor's loop, not a way to run Aether from a phone.
+  network. It is a contributor's loop, not the shipped phone path.
 
 Automated phone coverage is the `mobile` Playwright project, described in
 [testing.md](testing.md).
@@ -269,18 +279,42 @@ way.
 
 ## Files view
 
-`src/routes/files/` is the read-only repository browser. It groups each visible
-workspace's base branch and live run checkouts in a lazy tree, caches each
-directory request in `src/store/files.ts`, and reads file contents through
-`files.read`. Run files can switch to a one-file `files.diff` patch; editing
-stays in the existing local run-file mirror and the user's editor.
+`src/routes/files/` is the Files explorer and editor. It combines each visible
+workspace's base branch, live run checkouts, and the authenticated member's
+own persistent configuration roots from `config.roots`. `files.tree`,
+`files.read`, `files.write`, `files.diff`, and the `config.*` methods are
+available through both the local SSH-backed gateway and the server-hosted
+WhoIs gateway. Directory requests are lazy and cached in
+`src/store/files.ts`; file content comes from `files.read` or `config.read`.
+A live run can switch from **File** to **Diff vs base**.
 
-The tree is a browse pane beside the viewer at medium widths, with a compact
-source header and a bordered code surface. On narrow screens the tree is the
-first view; selecting a file moves to the viewer, whose **Browse files** action
-returns to the tree. Code scrolls horizontally inside the viewer rather than
-forcing the page wider. Loading, empty, binary, truncated and error states keep
-their exact server details and use bounded panels.
+The tree is a browse pane beside the editor at medium widths. On narrow
+screens it is the first view; selecting a file opens the editor and **Browse**
+returns to the tree. CodeMirror provides syntax highlighting for JSON/JSONC,
+JavaScript/TypeScript, Markdown, Python and TOML, plus find/replace. The
+editor is bounded to complete UTF-8 text without NUL bytes and 512 KiB;
+binary and truncated responses remain read-only.
+
+The action label states the write target: base files show **Commit to
+<branch>**, creating one file commit without pushing upstream; live-run files
+show **Save**, changing the run's uncommitted checkout; configuration files
+show **Save**, changing only the authenticated member's persistent home.
+Base writes require **Push**, run writes require **Steer**, and config reads or
+writes are always for the calling member and require **Launch**. A new
+configuration file accepts nested relative paths and refuses to overwrite an
+existing file.
+
+Saves are explicit (**Save**, **Commit to <branch>**, or Ctrl/Cmd-S); there is
+no autosave or force-save. Open tabs and dirty drafts live in memory and survive
+route changes and reconnects to the same identity. A different authenticated
+member or server clears them. The browser warns before unloading dirty buffers.
+The revision is the SHA-256 of the complete bytes read. A failed or stale save
+keeps the draft and its error. On a conflict, **Reload from server** replaces
+the document and discards that draft. **Discard edits** restores the last
+successfully loaded or saved content without fetching.
+All of the member's run containers and environment terminal mount one shared
+read-write persistent HOME, so accepted configuration imports and saves are
+visible to already-running processes immediately; a tool may need to reload.
 
 ## Title bar
 
@@ -473,37 +507,32 @@ run's wire `paused` field, skipping runs that do not carry it.
 - **A reconnect with no cursor cannot replay** - on a quiet server nothing has
   advanced `seq` - so the client re-fetches the snapshot instead of
   subscribing live and silently missing the outage.
+- **Server-gateway reconnects also refresh the snapshot** when replay is
+  possible: Tailscale may identify the new connection as a different member.
+  Only a local gateway's fixed identity can reuse replay without that refresh.
 - **A failed hydration retries** on the same backoff, and the affected panes
   say the server is unreachable rather than animating skeletons forever. That
   generic copy never overwrites a more precise error already recorded.
 - **A total failure replaces the shell with one error page.** When nothing has
   hydrated and an error is recorded, `ConnectionError` takes the window
   instead of an empty sidebar and an empty board behind a toast. Which hop
-  failed picks the copy, because each one has a different fix: `network` says
-  this computer is offline (reconnect wifi or the VPN), `server` says the
-  server did not answer over SSH, `gateway` says the local `aether gui`
-  process stopped answering, and a rejected credential says the link expired.
-  The gateway's own message appears in an initially open "Technical details"
-  disclosure, and the page suppresses the toast that would otherwise repeat
-  it. Its Retry button clears the connection state and remounts the
-  subscribe-and-hydrate cycle, rather than reloading the page and dropping
-  the in-memory token.
-- **A rejected credential is reported as one, not as an unreachable
+  failed picks the copy: `network` says this computer is offline, `server`
+  says the server did not answer through the selected transport, `gateway`
+  says the local `aether gui` process stopped answering, and an access refusal
+  preserves the gateway's own reason. The gateway's message appears in an
+  initially open "Technical details" disclosure, and the page suppresses the
+  toast that would otherwise repeat it. Retry clears connection state and
+  remounts the subscribe-and-hydrate cycle rather than reloading the page.
+- **A local token refusal is reported as access failure, not an unreachable
   server.** `connect` reads `GET /api/v1/capabilities` before it opens the
-  stream, and a `401` there means the gateway refused the token outright.
-  The store is marked `streamDead` with that refusal verbatim, which stops
-  the retry loop and gives the panes and the error page their expired-link
-  copy. Catching it on the probe is what makes it legible: the
-  same rejection on the WebSocket upgrade is a handshake failure with no
-  body and no close reason, so the socket would just retry forever while the
-  app blamed the network. The token is minted per `aether gui` process and
-  held in the tab's session storage, so a bookmarked URL, a second tab, or a
-  restarted `aether gui` all land here; opening the URL `aether gui` printed
-  is the whole fix. On the event stream every `1008` close is now retried:
-  the gateway sends it for a refused subscribe and for a transient
-  membership check, both of which a reconnect can outlive. The attach socket
-  still treats an unanswered `1008` as final, because there it names
-  withdrawn steer or withdrawn membership.
+  stream, and a `401` there means the local gateway refused its token. The
+  store records that refusal verbatim, stops retrying and tells the member to
+  open a fresh URL from `aether gui`. The token is minted per process and held
+  in the tab's session storage, so a bookmarked URL, a second tab or a
+  restarted `aether gui` needs a newly printed URL. On the server gateway
+  there is no token check: WhoIs identifies the source address on every
+  request, while a tagged node is denied and an unavailable identity service
+  reports its own `403` or `503` refusal.
 - **The sockets reopen on a foreground or network return.** Both
   `connectEvents` and `connectAttach` subscribe to `visibilitychange`
   (visible) and `online` through `onWake` in `src/lib/stream.ts`. A phone
@@ -563,29 +592,23 @@ render against a gateway with or without the local surfaces
 
 **Capability is half the gate; the caller's role is the other half.**
 Transport capability answers what the gateway can carry, not what this member
-may do, and the local gateway advertises `methods: ["*"]` - so gating on
-capability alone put Invite, Approve and Remove in front of a collaborator who
-then learned the truth from a `403`. `useSelfRole()` and `useIsAdmin()` in the
-same hooks file read the role off `server.info`'s member record, and every
-admin affordance now needs both predicates: the gateway can carry the method
-*and* the caller holds the admin role. Reads are gated on capability only, so
-the roster itself is reachable on the remote dashboard - `member.list` is
-allowlisted, `member.approve` is not, and both the sidebar link and the
-palette's Go-to entry gate on `member.list`. A non-admin cannot edit membership
+may do. `useSelfRole()` and `useIsAdmin()` in the same hooks file read the
+role off `server.info`'s member record, and every admin affordance needs both
+predicates: the gateway can carry the method *and* the caller holds the admin
+role. Reads are gated on capability only, so the roster is reachable on the
+server-hosted dashboard as well as through `aether gui`; the server remains
+the authority and checks every call again. A non-admin cannot edit membership
 or roles but can grant or revoke access to their own agent account.
 
 Every request goes through `src/lib/api.ts` - the only module that knows route
-shapes, the bearer token, and error decoding. It carries exactly the methods
-the views call; the team-feature methods arrive with the tickets that use them.
-Every call is a `POST /api/v1/<method>` bar three `GET`s - the diff tab's
-patch text, the status bar's disk number, and the capabilities probe -
+shapes, gateway authentication and error decoding. It carries exactly the
+methods the views call; the team-feature methods arrive with the tickets that
+use them. Every call is a `POST /api/v1/<method>` bar three `GET`s - the diff
+tab's patch text, the status bar's disk number, and the capabilities probe -
 because those read a working tree, a filesystem, and the gateway descriptor
-rather than RPC methods.
-The token arrives as `?token=` in the URL `aether gui` opens (or prints with
-`--url`), moves into session storage, and is sent as
-`Authorization: Bearer` on HTTP and as `?token=` on WebSockets. It is minted
-per `aether gui` process: no TTL, nothing to revoke, and it stops working
-the moment that process exits.
+rather than RPC methods. `aether gui` sends its per-process token as
+`Authorization: Bearer` on HTTP and as `?token=` on WebSockets. The
+server-hosted gateway sends no token; WhoIs authenticates each request.
 
 The status bar's disk gauge renders when `server.info` carries a `disk`
 object (`used_bytes`, `total_bytes`). That field does not arrive with
@@ -1467,24 +1490,30 @@ button.
 
 ## Settings
 
-`src/routes/settings/` shows the local link, the sync daemon and **Mirror run
-files to your repository** in flat bordered sections. That section starts and
-stops a live run's sync overlay. Workspace base freshness and Source control
-live on the workspace page; there is no recurring base-refresh button.
+`src/routes/settings/` is a local-gateway surface. It shows the local link,
+the sync daemon and **Mirror run files to your repository** in flat bordered
+sections. That section starts and stops a live run's sync overlay. The
+server-hosted dashboard omits these machine-local settings and controls.
+Workspace base freshness and Source control live on the workspace page. A
+configured mirror is refreshed there with **Verify/Refresh**; a local-only
+workspace uses its local base. There is no recurring base-refresh button.
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the guided first-run path, six steps: Link, Git
-identity, Workspace, Repository, Agents, First run. It renders only where the
-gateway serves the client-machine verbs (the capability descriptor lists
-`link.status`); a gateway without them gets an explanatory empty state
-instead of a broken wizard. That copy names the gateway and what it cannot
-reach - an SSH identity, a repository on the member's own computer - rather
-than guessing at the device in the member's hand, which the app has no way
-to know. Link, Workspace and First run live in `steps.tsx`; Repository
-is `repo-step.tsx`, Git identity is `git-identity-step.tsx`, and Agents is
-`agents-step.tsx` with its GitHub part in `github-connect.tsx` and its
-configuration import in `profile-import.tsx`.
+`src/routes/onboarding/` is the local-gateway guided first-run path, six
+steps: Link, Git identity, Workspace, Repository, Agents, First run. It
+renders only where the gateway serves the client-machine verbs (the capability
+descriptor lists `link.status`); a gateway without them gets an explanatory
+empty state instead of a broken wizard. That copy names the gateway and what it
+cannot reach - an SSH identity, a repository on the member's own computer -
+rather than guessing at the device in the member's hand, which the app has no
+way to know. The server-hosted dashboard has no machine-local onboarding
+wizard: it starts at the board, while shared runs, terminal, Files and
+configuration surfaces remain available through the server gateway. Link,
+Workspace and First run live in `steps.tsx`; Repository is `repo-step.tsx`, Git
+identity is `git-identity-step.tsx`, and Agents is `agents-step.tsx` with its
+GitHub part in `github-connect.tsx` and its configuration import in
+`profile-import.tsx`.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
 whichever step has sub-screens. The Agents step owns both of today's - a
@@ -1533,8 +1562,8 @@ without answering. Typing stays the fallback, because a browser tab has no
 dialog and a shell built by an older `aether gui build` has no method.
 
 The step adds the `aether` remote (`link.repo`) and then seeds the workspace:
-where the gateway serves `repo.push` it shows a **Push now** button. The
-gateway compares the clone's base branch with the workspace's copy before
+where the local gateway serves `repo.push` it shows a **Push now** button.
+The gateway compares the clone's base branch with the workspace's copy before
 pushing and answers with one of four states, so the second member to join a
 workspace reads what happened instead of git's `! [rejected] main -> main
 (fetch first)`.
@@ -1575,8 +1604,8 @@ diverged and the fast-forward result - are `aria-live="polite"`, because they
 appear without a page change.
 
 The branch is the workspace's base branch, so a workspace created with
-`--base` seeds the branch its runs fork from. A gateway that does not serve
-`repo.push` - the server-served dashboard - shows only the copyable command.
+`--base` seeds the branch its runs fork from. When `repo.push` is unavailable,
+the step shows only the copyable command.
 
 What the step settled - the clone path, the remote the gateway wrote,
 git's push answer, and the fast-forward once one has run - lives on the UI
@@ -1611,10 +1640,11 @@ place starts over. Repository is where the workspace first becomes
 load-bearing, so resuming onto it or any later step without one falls back to
 the workspace picker; the steps before it resume where they were.
 
-Hydration reads `link.status` first: a linked local gateway is marked
-onboarded before the redirect decision, so a linked machine never re-enters
+Hydration reads `link.status` first for a local gateway: a linked machine is
+marked onboarded before the redirect decision, so it never re-enters
 onboarding after a fresh GUI launch. An unlinked local gateway still routes
-here when `onboarded` is false. Completing the final step or navigating
+here when `onboarded` is false. The server-hosted gateway has no local link
+state and opens at the board. Completing the final step or navigating
 elsewhere marks the UI onboarded and clears that wizard state.
 
 The Link step distinguishes no configured server, a server with no repository,
@@ -1623,7 +1653,7 @@ focus, so a separate `aether link` command appears without restarting the GUI.
 
 The Agents step has three optional parts and never blocks: **Skip for now**
 is reachable from every state, including an open setup shell and a failed
-scan.
+configuration import.
 
 Part A lists the setup-capable harnesses from `env.harnesses` against
 `agent.list`, saying for each whether it is installed on this machine and
@@ -1720,34 +1750,40 @@ terminal to log in through, the whole flow is the CLI's. The login command
 itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
 assert one string.
 
-Part B (`ProfileImport`) previews each harness configuration on this machine
-with `profile.preview`, showing the category counts and, behind an expander,
-every exclusion with its reason. Previews never run on mount: a profile root
-can hold hundreds of megabytes, so the user presses **Look at what is here**,
-the harnesses are walked one at a time with the current one named, and
-**Stop** aborts the fetch - which cancels the request context and stops the
-walk on the gateway, not just the waiting. A preview that fails shows its
-error on that harness's row; only the `-32602` that means "this harness does
-not sync a profile" is silent, and the "nothing to bring" line renders only
-when every harness answered without one. Checkboxes start unchecked: approving calls
-`profile.push` once per checked harness, one at a time, and a refusal lands
-on its own row while the rest still run. No preview can refuse an import.
-A `secret` exclusion is a finding in a file the member wrote, so the row
-names each one on the harness's own line, above the **Left out of**
-expander, with what the scanner matched - five paths, then a count
-deferring to that expander - and the harness still imports without those
-files. A `vendored-secret` exclusion reads as the member's own secret in a
-flat list, so the row instead says how many files inside installed plugins
-tripped the scanner and that they are third-party. Sending a flagged file
-anyway is deliberately not in the dashboard: the row prints one
-`aether profile push` command that repeats `--allow-secret <path>` for
-every file it named, and it needs `--workspace` to be attributable.
-Where a setup-capable harness is installed locally,
-**Ask an agent** runs the `profile` scan over
-`/ws/envscan`, streams the agent's output, and pre-checks what it
-recommended with each one-sentence reason next to its row; the scan is a
-proposal the user edits, and a failure leaves the manual path and both
-buttons live.
+**Configuration import** is an explicit, one-time directory import in the
+local onboarding flow. `config.roots` supplies destinations such as
+`~/.claude`, together with the destination-specific runtime paths that can be
+left out locally. The browser waits for that response: a known unique basename
+selects its destination automatically, while an unknown or ambiguous basename
+requires a destination choice before previewing or reading any file bytes.
+The raw browser `File` handles stay local so changing the destination clears
+the old preview and re-reads with the new policy; a generation guard prevents
+a slower old read from replacing the current preview. This action is not
+available from the server-hosted dashboard, because that browser cannot read a
+machine-local directory; the server dashboard still exposes Files and
+configuration editing through `config.tree`, `config.read` and `config.write`.
+There is no local discovery scan or directory watcher; the picker is the only
+onboarding import action.
+
+Credential names found in any path component and `*.pem` files are always
+left out in the browser. Runtime/history paths come from the selected
+destination's `runtime_ignores` metadata and use exact, root-relative
+case-sensitive component-prefix matching. Every other selected byte is
+uploaded and server-scanned; the result reports accepted file/byte counts and
+server exclusions. A response with `error` is an incomplete import: the UI
+reports the committed counts, exact canonical `imported_paths`, and the real
+error instead of showing success, and warns that copied files remain. If the
+RPC fails without a response, the outcome is unknown (some files may have been
+copied); inspect **Files** before retrying. There is no watcher or automatic
+retry - choosing a directory and importing again is always explicit. The
+import limits are 2,000 files, 1 MiB per file and 20 MiB decoded in aggregate,
+with a 30 MiB HTTP request cap. Empty and binary regular files are preserved,
+but browser imports send mode `0644` and cannot preserve executable mode or
+symlinks.
+
+Accepted files change the calling member's persistent home immediately,
+including for already-running agents that share that home; an agent may need
+to reload. Auth/vendor login is separate.
 
 The First run step is the last one, and launches a run in the workspace the
 Workspace step settled on. Its **Agent** select offers only the entries
@@ -1773,10 +1809,10 @@ of date: it hosts the banners, with the CLI one in
 `src/components/cli-update-banner.tsx` and the pieces they share in
 `src/components/update-banner-shared.tsx`. It is mounted by `AppShell` above
 everything else, because an out-of-date binary is about the whole app rather
-than the view that happens to be open. The CLI and shell prompts need the
-gateway to serve `update.check` - a remote monitor cannot update anything on
-your machine - while the server prompt asks the server about itself and shows
-wherever the member is an admin.
+than the view that happens to be open. The CLI and shell prompts read
+`update.check` from the local gateway, because the dashboard can update only
+the machine running `aether gui`. The server prompt asks the linked server
+about itself and appears wherever the member is an admin.
 
 - **Two reads.** The host reads `update.check` on mount, again every half
   hour, and again whenever the window comes back to the front, on `focus` and
@@ -2040,25 +2076,25 @@ API receives the mutation only after the relevant confirmation. Preserve
 verbatim gateway errors in assertions when they are part of the contract.
 
 `web/e2e/` is the layout and browser-behavior layer. Playwright drives a real
-browser against a real `aether gui` gateway and server. `keyboard-focus`
-checks Escape ordering across an open dialog and run view and confirms that a
-focused control paints the app outline. `window-sizing` and
-`status-bar-sizing` exercise update notices and status controls at narrow and
-desktop dimensions.
+browser against the local `aether gui` gateway and the server it proxies, while
+the same static bundle is also usable through the server-hosted gateway.
+`keyboard-focus` checks Escape ordering across an open dialog and run view and
+confirms that a focused control paints the app outline. `window-sizing` and
+`status-bar-sizing.spec.ts` exercise update notices and status controls at
+narrow and desktop dimensions.
 
 The touch shell is driven by the `mobile` project, which
-[testing.md](testing.md) describes: `shell-drawer.mobile` opens the phone
-drawer, taps a run and finds the drawer gone with the run on screen, and
-`dialog-anchor.mobile` checks that a dialog short enough to tell the two
-apart sits at the top rather than the middle, and that the launch form keeps
-its footer on screen on a viewport as short as a keyboard leaves, and
-`toast-clearance.mobile` checks that a toast comes to rest above the status
-bar rather than on top of it, and `run-views.mobile` steers a real run from
-the header's Actions menu and then reads its diff. `sidebar-drawer` stays on
-the desktop project,
-because the keyboard contract it pins - `Mod+B` closing the drawer and the
-palette coming back once it is gone - needs a narrow window with a keyboard
-rather than a phone. `board-card`, `run-switch`, `run-attach-retry`,
+[testing.md](testing.md) describes: `shell-drawer.mobile.spec.ts` opens the
+phone drawer, taps a run and finds the drawer gone with the run on screen;
+`dialog-anchor.mobile.spec.ts` checks that a dialog short enough to tell the
+two apart sits at the top rather than the middle, and that the launch form
+keeps its footer on screen on a viewport as short as a keyboard leaves;
+and `toast-clearance.mobile.spec.ts` checks that a toast comes to rest above
+the status bar rather than on top of it. `run-views.mobile.spec.ts` steers a
+real run from the header's Actions menu and then reads its diff. `sidebar-drawer.spec.ts` stays on the desktop project because its keyboard contract -
+`Mod+B` closing the drawer and the palette coming back once it is gone - needs
+a narrow window with a keyboard rather than a phone. `board-card`, `run-switch`,
+`run-attach-retry`,
 `run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
 corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and
@@ -2074,10 +2110,9 @@ navigation behavior, and Playwright for computed layout, actual browser focus
 outlines, responsive overflow, Escape ordering and gateway-backed flows.
 
 ### Testing on a real phone
-
-The browser suite runs against `aether gui`, so the server-hosted gateway and
-a real touch device are checked by hand. Give the server a dashboard port and
-restart it:
+The browser suite exercises the local gateway path; the server-hosted gateway
+and a real touch device are checked by hand. Give the server a dashboard port
+and restart it:
 
 ```sh
 sudo aether-server config set web-port 443
@@ -2085,11 +2120,11 @@ sudo systemctl restart aether-server
 ```
 
 Then open `https://<the server's MagicDNS name>/` on a phone joined to the
-same tailnet. Expect the board as the first screen, already signed in: no
-onboarding wizard, no Settings, no link chip, no update banner, and no local
-pull, forward or run-file mirror controls, because the descriptor carries no
-`local` verbs.
-Watch what the server saw with:
+same tailnet. Expect the board as the first screen, already identified by
+WhoIs: no onboarding wizard, no Settings, no link chip, no update banner, and
+no pull, forward or sync controls, because the descriptor carries no `local`
+verbs. Files and configuration editing remain available through the
+server-hosted gateway. Watch what the server saw with:
 
 ```sh
 journalctl -u aether-server -f

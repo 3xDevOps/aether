@@ -12,12 +12,13 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
-	"syscall"
 
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/rootfs"
 )
 
 // Paths inside a member home. The container mounts the home as $HOME, so
@@ -97,8 +98,8 @@ func (m *Manager) EnsureSigningKey(member domain.MemberID) (string, error) {
 	if err := installPublicKey(root, line); err != nil {
 		return "", fmt.Errorf("memberhome: write signing public key for %q: %w", member, err)
 	}
-	if err := chownLikeHome(root, sshDirName, signingKeyName); err != nil {
-		return "", fmt.Errorf("memberhome: hand signing key to the home owner for %q: %w", member, err)
+	if err := chownLikeHome(root, sshDirName); err != nil {
+		return "", fmt.Errorf("memberhome: hand signing directory to the home owner for %q: %w", member, err)
 	}
 	return line, nil
 }
@@ -107,13 +108,25 @@ func (m *Manager) EnsureSigningKey(member domain.MemberID) (string, error) {
 // occupies that path. A .pub the container wrote describes nothing: only
 // the private key decides what the public half is.
 func installPublicKey(root *os.Root, line string) error {
-	if err := root.RemoveAll(signingPubName); err != nil {
+	sshRoot, err := rootfs.OpenRoot(root, sshDirName)
+	if err != nil {
 		return err
 	}
-	if err := writeNew(root, signingPubName, []byte(line+"\n"), 0o644); err != nil {
+	defer func() { _ = sshRoot.Close() }()
+	if err = sshRoot.RemoveAll("aether_signing.pub"); err != nil {
 		return err
 	}
-	return chownLikeHome(root, signingPubName)
+	pub, err := sshRoot.OpenFile("aether_signing.pub", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err = pub.Write([]byte(line + "\n")); err == nil {
+		err = chownFileLikeHome(root, pub)
+	}
+	if closeErr := pub.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // restrictKey puts the private key back to 0600. The mode is changed
@@ -138,14 +151,22 @@ func (m *Manager) HasSigningKey(member domain.MemberID) (bool, error) {
 		return false, err
 	}
 	defer func() { _ = root.Close() }()
-	info, err := root.Lstat(signingKeyName)
+	parent, err := rootfs.OpenRoot(root, path.Dir(signingKeyName))
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("memberhome: inspect signing key for %q: %w", member, err)
 	}
-	return info.Mode().IsRegular(), nil
+	defer func() { _ = parent.Close() }()
+	info, err := parent.Lstat(path.Base(signingKeyName))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("memberhome: inspect signing key for %q: %w", member, err)
+	}
+	return info.Mode().IsRegular() && !hasMultipleLinks(info), nil
 }
 
 // SigningKey returns the member's private signing key bytes, or nil when
@@ -239,9 +260,6 @@ func (m *Manager) ConfigureGit(ctx context.Context, member domain.MemberID, iden
 	if err != nil {
 		return fmt.Errorf("memberhome: write %s for %q: %w", gitConfigName, member, err)
 	}
-	if err := chownLikeHome(root, staged); err != nil {
-		return fmt.Errorf("memberhome: hand %s to the home owner for %q: %w", gitConfigName, member, err)
-	}
 	if err := root.Rename(staged, gitConfigName); err != nil {
 		return fmt.Errorf("memberhome: install %s for %q: %w", gitConfigName, member, err)
 	}
@@ -252,53 +270,65 @@ func (m *Manager) ConfigureGit(ctx context.Context, member domain.MemberID, iden
 // reached through it, so a symlink planted from inside the member's
 // container cannot lead a server-side read or write out of the home.
 func (m *Manager) openHome(member domain.MemberID) (*os.Root, error) {
-	home, err := m.Path(member)
-	if err != nil {
-		return nil, err
+	if err := validateMemberID(string(member)); err != nil {
+		return nil, fmt.Errorf("memberhome: member %q: %w", member, err)
 	}
-	root, err := os.OpenRoot(home)
+	if err := os.MkdirAll(m.root, 0o755); err != nil {
+		return nil, fmt.Errorf("memberhome: create root: %w", err)
+	}
+	roots, err := os.OpenRoot(m.root)
+	if err != nil {
+		return nil, fmt.Errorf("memberhome: open root: %w", err)
+	}
+	if _, err = roots.Lstat(string(member)); errors.Is(err, fs.ErrNotExist) {
+		if err = roots.Mkdir(string(member), 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			_ = roots.Close()
+			return nil, fmt.Errorf("memberhome: create home for %q: %w", member, err)
+		}
+	} else if err != nil {
+		_ = roots.Close()
+		return nil, fmt.Errorf("memberhome: stat home for %q: %w", member, err)
+	}
+	home, err := rootfs.OpenRoot(roots, string(member))
+	_ = roots.Close()
 	if err != nil {
 		return nil, fmt.Errorf("memberhome: open home for %q: %w", member, err)
 	}
-	return root, nil
+	return home, nil
 }
 
-// readRegularFile returns the contents of name, nil when it is absent,
-// and an error when it exists as anything but a regular file or holds
-// more than limit bytes. The Lstat refuses a symlink, which openRegular
-// would follow inside the home; the type and size checks are then made
-// on the open descriptor so the file that was read is the file that was
-// checked, and the LimitReader bounds a file that grows between the
-// fstat and the read.
+// readRegularFile returns the contents of name, nil when it is absent, and an
+// error when the pinned descriptor is anything but a regular file or holds
+// more than limit bytes. rootfs pins every directory component and opens the
+// leaf without following a symlink; the size check precedes the bounded read.
 func readRegularFile(root *os.Root, name string, limit int64) ([]byte, error) {
-	link, err := root.Lstat(name)
+	f, err := rootfs.Open(root, name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !link.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", name)
-	}
-	f, info, err := openRegular(root, name)
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", name)
+	}
+	if hasMultipleLinks(info) {
+		return nil, fmt.Errorf("%s has multiple links", name)
+	}
 	if info.Size() > limit {
 		return nil, fmt.Errorf("%s is %d bytes, over the %d byte limit", name, info.Size(), limit)
 	}
 	return io.ReadAll(io.LimitReader(f, limit))
 }
 
-// openRegular opens name for reading and refuses anything but a regular
-// file, judged on the descriptor. The open is non-blocking because a
-// container can swap the file for a FIFO between any path check and the
-// open, and a blocking open of a FIFO with no writer never returns; the
-// flag is harmless for the regular file this is meant to find.
+// openRegular opens name for reading and refuses anything but a regular file.
 func openRegular(root *os.Root, name string) (*os.File, fs.FileInfo, error) {
-	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := rootfs.Open(root, name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -307,7 +337,7 @@ func openRegular(root *os.Root, name string) (*os.File, fs.FileInfo, error) {
 		_ = f.Close()
 		return nil, nil, err
 	}
-	if !info.Mode().IsRegular() {
+	if !info.Mode().IsRegular() || hasMultipleLinks(info) {
 		_ = f.Close()
 		return nil, nil, fmt.Errorf("%s is not a regular file", name)
 	}
@@ -317,26 +347,82 @@ func openRegular(root *os.Root, name string) (*os.File, fs.FileInfo, error) {
 // ensureDir creates name unless it already exists as a directory;
 // anything else there - a symlink included - is refused, never replaced.
 func ensureDir(root *os.Root, name string) error {
-	info, err := root.Lstat(name)
-	switch {
-	case err == nil && info.IsDir():
+	clean := path.Clean(name)
+	if clean == "." {
 		return nil
-	case err == nil:
-		return fmt.Errorf("%s is not a directory", name)
-	case !errors.Is(err, fs.ErrNotExist):
-		return err
 	}
-	return root.Mkdir(name, 0o700)
+	current := root
+	var owned *os.Root
+	for _, seg := range strings.Split(clean, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			if owned != nil {
+				_ = owned.Close()
+			}
+			return fmt.Errorf("%s is not a directory", name)
+		}
+		child, err := rootfs.OpenRoot(current, seg)
+		created := false
+		if errors.Is(err, fs.ErrNotExist) {
+			if mkdirErr := current.Mkdir(seg, 0o700); mkdirErr != nil && !errors.Is(mkdirErr, fs.ErrExist) {
+				if owned != nil {
+					_ = owned.Close()
+				}
+				return mkdirErr
+			}
+			child, err = rootfs.OpenRoot(current, seg)
+			created = err == nil
+		}
+		if err != nil {
+			if owned != nil {
+				_ = owned.Close()
+			}
+			return err
+		}
+		if created {
+			if err := chownLikeHomeAt(root, current, seg); err != nil {
+				_ = child.Close()
+				if owned != nil {
+					_ = owned.Close()
+				}
+				return err
+			}
+		}
+		if owned != nil {
+			_ = owned.Close()
+		}
+		current, owned = child, child
+	}
+	if owned != nil {
+		_ = owned.Close()
+	}
+	return nil
 }
 
-// writeNew creates name and fails when anything already occupies it, so a
-// symlink planted in the home is never written through.
 func writeNew(root *os.Root, name string, data []byte, perm os.FileMode) error {
-	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	parent := root
+	var owned *os.Root
+	if dir := path.Dir(name); dir != "." {
+		var err error
+		owned, err = rootfs.OpenRoot(root, dir)
+		if err != nil {
+			return err
+		}
+		parent = owned
+	}
+	defer func() {
+		if owned != nil {
+			_ = owned.Close()
+		}
+	}()
+	f, err := parent.OpenFile(path.Base(name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 	if err != nil {
 		return err
 	}
 	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := chownFileLikeHome(root, f); err != nil {
 		_ = f.Close()
 		return err
 	}

@@ -9,48 +9,15 @@ import (
 	goruntime "runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/localops"
 )
 
-// writeScanStub writes an executable shell script and returns the argv
-// override that runs it with the rendered prompt as its first argument,
-// mirroring the localops envscan tests. The stubs are POSIX shell
-// scripts, so every test that runs one skips on Windows.
-func writeScanStub(t *testing.T, body string) []string {
-	t.Helper()
-	if goruntime.GOOS == "windows" {
-		t.Skip("stub harnesses are POSIX shell scripts")
-	}
-	script := filepath.Join(t.TempDir(), "stub.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return []string{"/bin/sh", script, harness.TaskPlaceholder}
-}
-
-func waitForFile(t *testing.T, path string) {
-	t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", path)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-// stubLoginShell replaces the login shell the harness verb and the scan
-// handler ask for PATH with a script running body, so no test runs the
-// developer's real shell or inherits its PATH; PATH is re-set so the
-// widening the handler writes is undone after the test. Windows
-// never asks a shell, so nothing is stubbed there.
+// stubLoginShell replaces the login shell the harness verb asks for PATH
+// with a script running body, so no test runs the developer's real shell
+// or inherits its PATH; PATH is re-set so the widening writes is undone
+// after the test. Windows never asks a shell, so nothing is stubbed there.
 func stubLoginShell(t *testing.T, body string) {
 	t.Helper()
 	if goruntime.GOOS == "windows" {

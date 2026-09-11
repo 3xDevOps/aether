@@ -293,6 +293,8 @@ export interface FileRead {
   truncated: boolean
   binary: boolean
   size: number
+  revision: string
+  writable: boolean
 }
 
 /** One files.diff response. */
@@ -371,118 +373,38 @@ export interface AgentDefinition {
   deny_names?: string[]
 }
 
-/** One immutable member+harness profile snapshot. */
-export interface ProfileSnapshot {
-  id: string
+export interface ConfigRoot {
   harness: string
-  digest: string
-  created_at: string
-}
-
-/** One path in a profile snapshot listing (no content). */
-export interface ProfileFileMeta {
   path: string
-  digest: string
-  mode?: number
+  runtime_ignores: string[]
 }
 
-/**
- * profile.status: the latest snapshot, its file list, and recent snapshots
- * for a rollback UI (internal/protocol ProfileStatusResult). `snapshot` is
- * absent when none exists.
- */
-export interface ProfileStatus {
-  snapshot?: ProfileSnapshot
-  files?: ProfileFileMeta[]
-  snapshots: ProfileSnapshot[]
-}
-
-/** The categories a profile preview groups files into, in report order. */
-export type ProfileCategory =
-  | 'memory'
-  | 'skills'
-  | 'commands'
-  | 'settings'
-  | 'mcp'
-  | 'plugins'
-  | 'other'
-
-/** One category of a profile preview. `paths` is capped server-side, with
- * `truncated` set when it was cut; `files` and `bytes` stay exact. */
-export interface ProfilePreviewCategory {
-  category: ProfileCategory
-  files: number
-  bytes: number
-  paths: string[]
-  truncated: boolean
-}
-
-/** Why a file was left out of a profile push. `too-large` and
- * `over-budget` are the server's size caps, applied before the file is
- * ever read. `secret` is a scanner finding in a file the user wrote;
- * `vendored-secret` is one inside third-party content the harness
- * installed. Both drop that one file and let the rest sync. */
-export type ProfileExcludeReason =
-  | 'credential'
-  | 'secret'
-  | 'vendored-secret'
-  | 'ignored'
-  | 'symlink'
-  | 'too-large'
-  | 'over-budget'
-  | 'not-regular'
-
-/** One file the guards left out of a profile push, and why. */
-export interface ProfileExclusion {
+export interface ConfigFile {
   path: string
-  reason: ProfileExcludeReason
-  detail: string
+  content_base64: string
+  mode: number
 }
 
-/**
- * profile.preview: the discovery a push would run, uploading nothing.
- * `present` is false when this machine has no profile root for the harness
- * - a normal answer, not an error. Nothing a preview reports refuses a
- * push: every guard drops the file it caught and carries the rest, so
- * `excluded` is the whole of what a surface has to explain.
- */
-export interface ProfilePreview {
+export interface ConfigImportParams {
   harness: string
-  root: string
-  present: boolean
-  files: number
-  bytes: number
-  categories?: ProfilePreviewCategory[]
-  /** Capped; `excluded_total` is how many there were. */
-  excluded?: ProfileExclusion[]
-  excluded_total?: number
+  files: ConfigFile[]
 }
 
-/** profile.push: the snapshot the push created, and the files a guard
- * left behind - a size cap, the secret scanner, or a symlink out of the
- * profile root. This is the only place the user learns they are not on
- * the server, since the push itself succeeded without them. */
-export interface ProfilePushResult {
-  harness: string
-  skipped?: ProfileExclusion[]
-  snapshot_id: string
-  digest: string
-  files: number
-  bytes: number
-}
-
-/** One harness in a profile scan's recommendation. A proposal, never an
- * action: the import is a separate profile.push the user approves. */
-export interface HarnessRecommendation {
-  harness: string
-  import: boolean
-  categories: ProfileCategory[]
+export interface ConfigExclusion {
+  path: string
   reason: string
+  detail?: string
 }
 
-/** What a `profile` scan answers instead of a Dockerfile and manifest. */
-export interface ProfileRecommendation {
-  harnesses: HarnessRecommendation[]
+export interface ConfigImportResult {
+  harness: string
+  files: number
+  bytes: number
+  excluded: ConfigExclusion[]
+  /** Set only when the import stopped after installing one or more files. */
+  error?: string
+  /** Canonical paths successfully installed before an incomplete import. */
+  imported_paths?: string[]
 }
 
 // The local gateway's client-machine verbs, POST /local/v1/<verb>
@@ -864,6 +786,3 @@ export interface EnvHarnessesResult {
   warning?: string
   repo_path?: string
 }
-
-/** Coarse progress reported by the local profile scan. */
-export type EnvScanStatus = 'detecting' | 'running' | 'validating' | 'retrying'

@@ -2,6 +2,7 @@ import { ApiError } from '@/lib/api'
 import type { Event, Run } from '@/lib/types'
 import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
+import { configKey } from '@/store/files'
 import { capability } from '@/store/hooks'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
@@ -70,6 +71,7 @@ describe('hydrate', () => {
     expect(Object.keys(s.members)).toHaveLength(2)
     expect(s.runs.run_1.status).toBe('running')
   })
+
 
   it('points the app at a workspace, keeping one the member already chose', async () => {
     // Nothing chosen: the lowest id wins, so two tabs hydrating off the same
@@ -786,6 +788,48 @@ describe('connect', () => {
 
     await vi.waitFor(() => expect(client.serverInfo).toHaveBeenCalledTimes(2))
     stop()
+  })
+
+  it('revalidates tailnet identity on replay reconnects without losing same-member drafts', async () => {
+    let member = alice
+    const client = fakeApi({
+      capabilities: vi.fn(async () => ({ gateway: 'server', methods: ['*'], ws: ['events'] })),
+      serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member })),
+    })
+    const store = createRootStore()
+    const stop = connect(store, client)
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      const key = configKey('claude', 'settings.json')
+      store.getState().setDocument(key, {
+        content: '{}', size: 2, revision: 'original', writable: true, binary: false, truncated: false,
+      })
+      store.getState().updateDraft(key, '{"private":"draft"}')
+      store.getState().openFileTab({
+        key, kind: 'config', harness: 'claude', rootPath: '~/.claude', path: 'settings.json', label: 'claude',
+      })
+      deliver(socket, statusEvent())
+      await vi.waitFor(() => expect(store.getState().lastSeq).toBe(5))
+
+      socket.onclose?.({ code: 1006 })
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2), { timeout: 2000 })
+      await subscribe()
+      await vi.waitFor(() => expect(client.serverInfo).toHaveBeenCalledTimes(2))
+      expect(store.getState().drafts[key]?.content).toBe('{"private":"draft"}')
+
+      member = bob
+      StubSocket.last().onclose?.({ code: 1006 })
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(3), { timeout: 2000 })
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().info?.member.id).toBe(bob.id))
+      expect(store.getState().documents[key]).toBeUndefined()
+      expect(store.getState().drafts[key]).toBeUndefined()
+      expect(store.getState().fileTabs).toEqual([])
+      expect(store.getState().activeFileKey).toBeNull()
+    } finally {
+      stop()
+    }
   })
 
   it('reports a rejected credential rather than an unreachable server', async () => {

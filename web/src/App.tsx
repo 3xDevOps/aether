@@ -22,6 +22,19 @@ export function App() {
   const gatewayRestarting = useStore((s) => s.gatewayRestarting)
   const epoch = useStore((s) => s.connectionEpoch)
   const resetConnection = useStore((s) => s.resetConnection)
+  const drafts = useStore((s) => s.drafts)
+  const importPending = useStore((s) => s.onboardingImportPending)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const dirty = Object.values(drafts).some((draft) => draft.content !== draft.baseContent || draft.saving)
+    if (!dirty && !importPending) return
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [drafts, importPending])
   const theme = useStore((s) => s.theme)
   // Bumping this remounts the connection effect, which is what a retry is:
   // a fresh subscribe and hydrate, not a page reload that would lose the

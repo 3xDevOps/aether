@@ -54,10 +54,6 @@ func (m *Manager) SaveImage(member domain.MemberID, extension string, data []byt
 			_ = root.RemoveAll(name)
 			return "", fmt.Errorf("memberhome: write image for %q: %w", member, err)
 		}
-		if err := chownLikeHome(root, ".aether", terminalImageDir, name); err != nil {
-			_ = root.RemoveAll(name)
-			return "", fmt.Errorf("memberhome: hand image to home owner for %q: %w", member, err)
-		}
 		return name, nil
 	}
 	return "", fmt.Errorf("memberhome: generate unique image name for %q", member)

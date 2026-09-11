@@ -25,10 +25,21 @@ func scanProfileSnapshot(row interface{ Scan(...any) error }) (*domain.ProfileSn
 
 const profileSnapshotCols = `id, member_id, harness, digest, created_at`
 
-// SaveProfileSnapshot persists a snapshot and its files. Identical
-// member+harness+digest reuses the existing row identity. Blobs are
-// content-addressed and shared across snapshots.
+// SaveProfileSnapshot persists a snapshot and its files, publishing it as the
+// member+harness head. Identical member+harness+digest reuses the existing
+// row identity.
 func (d *DB) SaveProfileSnapshot(ctx context.Context, s *domain.ProfileSnapshot, files []ProfileFile) error {
+	return d.saveProfileSnapshot(ctx, s, files, true)
+}
+
+// SaveProfileSnapshotStaged persists a snapshot without changing the current
+// member+harness head. The caller publishes it only after applying the
+// snapshot to the member's home.
+func (d *DB) SaveProfileSnapshotStaged(ctx context.Context, s *domain.ProfileSnapshot, files []ProfileFile) error {
+	return d.saveProfileSnapshot(ctx, s, files, false)
+}
+
+func (d *DB) saveProfileSnapshot(ctx context.Context, s *domain.ProfileSnapshot, files []ProfileFile, publish bool) error {
 	if s == nil {
 		return fmt.Errorf("store: save profile snapshot: nil snapshot")
 	}
@@ -38,8 +49,10 @@ func (d *DB) SaveProfileSnapshot(ctx context.Context, s *domain.ProfileSnapshot,
 	existing, err := d.GetProfileSnapshotByDigest(ctx, s.MemberID, s.Harness, s.Digest)
 	if err == nil {
 		*s = *existing
-		if herr := d.SetProfileHead(ctx, s.MemberID, s.Harness, s.ID); herr != nil {
-			return herr
+		if publish {
+			if herr := d.SetProfileHead(ctx, s.MemberID, s.Harness, s.ID); herr != nil {
+				return herr
+			}
 		}
 		return nil
 	}
@@ -72,8 +85,6 @@ func (d *DB) SaveProfileSnapshot(ctx context.Context, s *domain.ProfileSnapshot,
 	for _, f := range files {
 		blob := sha256.Sum256(f.Content)
 		digest := hex.EncodeToString(blob[:])
-		// The driver binds a nil slice as NULL, which profile_blobs.content
-		// rejects; an empty file has to reach it as an empty blob.
 		content := f.Content
 		if content == nil {
 			content = []byte{}
@@ -93,12 +104,14 @@ func (d *DB) SaveProfileSnapshot(ctx context.Context, s *domain.ProfileSnapshot,
 			return fmt.Errorf("store: save profile file: %w", err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO profile_heads (member_id, harness, snapshot_id) VALUES (?, ?, ?)
-		 ON CONFLICT (member_id, harness) DO UPDATE SET snapshot_id = excluded.snapshot_id`,
-		s.MemberID, s.Harness, id,
-	); err != nil {
-		return fmt.Errorf("store: set profile head: %w", mapConstraint(err, ErrNotFound))
+	if publish {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO profile_heads (member_id, harness, snapshot_id) VALUES (?, ?, ?)
+			 ON CONFLICT (member_id, harness) DO UPDATE SET snapshot_id = excluded.snapshot_id`,
+			s.MemberID, s.Harness, id,
+		); err != nil {
+			return fmt.Errorf("store: set profile head: %w", mapConstraint(err, ErrNotFound))
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: save profile snapshot: commit: %w", err)

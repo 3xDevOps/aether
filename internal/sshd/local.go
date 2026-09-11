@@ -32,8 +32,16 @@ func (s *Server) Local(member domain.MemberID) *Local {
 	return &Local{s: s, member: member}
 }
 
-// Call performs one control-channel method call.
+// Call performs one control-channel method call. The in-process path has no
+// framing reader, so apply the same request payload budget as the SSH
+// control channel before dispatching it.
 func (l *Local) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	if len(params) > protocol.MaxLineBytes {
+		return nil, &protocol.Error{
+			Code:    protocol.CodeParse,
+			Message: fmt.Sprintf("control request exceeds %d bytes", protocol.MaxLineBytes),
+		}
+	}
 	return l.s.dispatch(ctx, l.member, method, params)
 }
 

@@ -1,9 +1,8 @@
 // Package localgw is the client-side local gateway: it composes the
 // shared dashboard gateway (internal/webgate) on a tokened loopback port,
 // proxying the API shape over the linked server's SSH connection, and
-// adds the /local/v1 verbs and the environment scan only a machine with
-// the user's repository and SSH key can offer. Same SPA, same API shape,
-// full SSH authority.
+// adds the /local/v1 verbs only a machine with the user's repository and
+// SSH key can offer. Same SPA, same API shape, full SSH authority.
 package localgw
 
 import (
@@ -144,7 +143,7 @@ func New(cfg Config) (*Gateway, error) {
 		Authorize: g.authorize,
 		Capabilities: protocol.GatewayCapabilities{
 			Gateway: "local",
-			WS:      []string{"events", "attach", "terminal", "envscan"},
+			WS:      []string{"events", "attach", "terminal"},
 			Local:   localVerbs,
 		},
 		Static: cfg.Static,
@@ -154,7 +153,6 @@ func New(cfg Config) (*Gateway, error) {
 		return nil, err
 	}
 	g.core = core
-	core.HandleFunc("GET /ws/envscan", g.handleEnvScan)
 	core.HandleFunc("POST /local/v1/{verb}", g.handleLocal)
 	// A local path hit with the wrong method answers 405 like the core's
 	// own routes, rather than the core's 404 for a gateway without them.
@@ -168,7 +166,7 @@ func New(cfg Config) (*Gateway, error) {
 }
 
 // ServeHTTP serves the gateway's routes: the shared core's plus the local
-// verbs and the environment scan.
+// verbs.
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) { g.core.ServeHTTP(w, r) }
 
 // mintToken returns the per-process bearer token: 32 random bytes,

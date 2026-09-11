@@ -56,7 +56,10 @@ func runSync(args []string) error {
 	// connection drop.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stopSignals := cancelOnSignal(cancel)
+	stopSignals := cancelOnSignal(func() {
+		fmt.Fprintln(os.Stderr, "aether: stopping sync")
+		cancel()
+	})
 	defer stopSignals()
 
 	// Run-status watch: a terminal transition ends the overlay. A dead
@@ -107,27 +110,30 @@ func runSync(args []string) error {
 // left on disk.
 var terminationSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
 
-// cancelOnSignal cancels the sync context on the first termination
-// signal so the normal defers run. The returned function stops the
-// handler and releases its goroutine.
-func cancelOnSignal(cancel context.CancelFunc) func() {
+// Stopping drains any queued signal before the caller inspects the result.
+func cancelOnSignal(cancel context.CancelFunc) func() os.Signal {
 	ch := make(chan os.Signal, 1)
+	done := make(chan struct{})
 	signal.Notify(ch, terminationSignals...)
+	var received os.Signal
 	go func() {
-		if _, ok := <-ch; !ok {
-			return
+		sig, ok := <-ch
+		if ok {
+			received = sig
+			cancel()
 		}
-		fmt.Fprintln(os.Stderr, "aether: stopping sync")
-		cancel()
+		close(done)
 	}()
 	var once sync.Once
-	return func() {
+	return func() os.Signal {
 		once.Do(func() {
-			// Stop first: it guarantees no further sends on ch, so
-			// closing it to free the goroutine cannot panic.
+			// Stop first: it guarantees no further sends on ch. Closing
+			// it then releases the goroutine waiting for the first signal.
 			signal.Stop(ch)
 			close(ch)
 		})
+		<-done
+		return received
 	}
 }
 

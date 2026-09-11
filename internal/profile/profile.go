@@ -2,10 +2,12 @@ package profile
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/rootfs"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -78,24 +81,13 @@ func New(st store.Store) (*Service, error) {
 	return &Service{store: st}, nil
 }
 
-// Put validates, stores, and points the member+harness head at the
-// snapshot. Identical trees reuse digest and snapshot identity.
+// Put validates, stores, publishes, and prunes a snapshot. Identical trees
+// reuse digest and snapshot identity.
 func (s *Service) Put(ctx context.Context, member, harnessName string, files []File) (domain.ProfileSnapshot, error) {
-	prof, err := lookupProfile(harnessName)
+	snap, stored, err := s.prepareSnapshot(member, harnessName, files)
 	if err != nil {
 		return domain.ProfileSnapshot{}, err
 	}
-	normalized, err := validateFiles(prof, files)
-	if err != nil {
-		return domain.ProfileSnapshot{}, err
-	}
-	digest := canonicalDigest(normalized)
-	snap := domain.ProfileSnapshot{
-		MemberID: domain.MemberID(member),
-		Harness:  harnessName,
-		Digest:   digest,
-	}
-	stored := toStoreFiles(normalized)
 	if err := s.store.SaveProfileSnapshot(ctx, &snap, stored); err != nil {
 		return domain.ProfileSnapshot{}, err
 	}
@@ -103,6 +95,45 @@ func (s *Service) Put(ctx context.Context, member, harnessName string, files []F
 		return domain.ProfileSnapshot{}, err
 	}
 	return snap, nil
+}
+
+// Stage validates and stores a snapshot without publishing it as the
+// member+harness head. Publish must follow a successful materialization.
+func (s *Service) Stage(ctx context.Context, member, harnessName string, files []File) (domain.ProfileSnapshot, error) {
+	snap, stored, err := s.prepareSnapshot(member, harnessName, files)
+	if err != nil {
+		return domain.ProfileSnapshot{}, err
+	}
+	if err := s.store.SaveProfileSnapshotStaged(ctx, &snap, stored); err != nil {
+		return domain.ProfileSnapshot{}, err
+	}
+	return snap, nil
+}
+
+// Publish makes a staged snapshot the current head and then prunes old
+// snapshots while retaining rollback history.
+func (s *Service) Publish(ctx context.Context, snap domain.ProfileSnapshot) error {
+	if err := s.store.SetProfileHead(ctx, snap.MemberID, snap.Harness, snap.ID); err != nil {
+		return err
+	}
+	return s.store.PruneProfileSnapshots(ctx, snap.MemberID, snap.Harness, retainLatest)
+}
+
+func (s *Service) prepareSnapshot(member, harnessName string, files []File) (domain.ProfileSnapshot, []store.ProfileFile, error) {
+	prof, err := lookupProfile(harnessName)
+	if err != nil {
+		return domain.ProfileSnapshot{}, nil, err
+	}
+	normalized, err := validateFiles(prof, files)
+	if err != nil {
+		return domain.ProfileSnapshot{}, nil, err
+	}
+	snap := domain.ProfileSnapshot{
+		MemberID: domain.MemberID(member),
+		Harness:  harnessName,
+		Digest:   canonicalDigest(normalized),
+	}
+	return snap, toStoreFiles(normalized), nil
 }
 
 // Get returns a snapshot and a defensive copy of its files.
@@ -161,40 +192,273 @@ func (s *Service) PinRun(ctx context.Context, runID domain.RunID, id domain.Prof
 }
 
 // Materialize writes a writable copy of the snapshot into destDir.
-// Subsequent writes to destDir never mutate stored blobs.
 func (s *Service) Materialize(ctx context.Context, id domain.ProfileSnapshotID, destDir string) error {
 	if destDir == "" {
 		return errors.New("profile: materialize: dest dir is required")
+	}
+	root, err := openMaterializeRoot(destDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return s.MaterializeRoot(ctx, id, root)
+}
+
+// MaterializeRoot applies a snapshot through an already-open destination
+// descriptor. The descriptor must be rooted at the member's profile root.
+func (s *Service) MaterializeRoot(ctx context.Context, id domain.ProfileSnapshotID, root *os.Root) error {
+	if root == nil {
+		return errors.New("profile: materialize: destination root is required")
 	}
 	files, err := s.store.GetProfileFiles(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(destDir, 0o700); err != nil {
-		return fmt.Errorf("profile: materialize: %w", err)
-	}
+	paths := make([]string, 0, len(files))
+	seen := make(map[string]struct{}, len(files))
 	for _, f := range files {
 		rel, err := safeRelPath(f.Path)
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(destDir, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fmt.Errorf("profile: materialize %s: %w", f.Path, err)
+		if _, dup := seen[rel]; dup {
+			return fmt.Errorf("%w: duplicate materialized path %s", ErrDenied, rel)
+		}
+		seen[rel] = struct{}{}
+		paths = append(paths, rel)
+	}
+	for _, rel := range paths {
+		for parent := path.Dir(rel); parent != "."; parent = path.Dir(parent) {
+			if _, exists := seen[parent]; exists {
+				return fmt.Errorf("%w: file/directory path collision", ErrDenied)
+			}
+		}
+	}
+	for _, rel := range paths {
+		if err := materializeCheckParent(root, rel); err != nil {
+			return err
+		}
+		info, err := materializeTargetInfo(root, rel)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("%w: unsafe destination path", ErrDenied)
+		}
+	}
+	for i, f := range files {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		mode := os.FileMode(f.Mode & 0o777)
 		if mode == 0 {
 			mode = 0o644
 		}
-		content := append([]byte(nil), f.Content...)
-		if err := os.WriteFile(target, content, mode); err != nil {
-			return fmt.Errorf("profile: materialize %s: %w", f.Path, err)
+		if err := materializeEnsureParent(root, paths[i]); err != nil {
+			return err
 		}
-		if err := os.Chmod(target, mode); err != nil {
-			return fmt.Errorf("profile: materialize %s: chmod: %w", f.Path, err)
+		if err := materializeAtomicWrite(root, paths[i], f.Content, mode); err != nil {
+			return fmt.Errorf("profile: materialize %s: %w", f.Path, err)
 		}
 	}
 	return nil
+}
+
+func openMaterializeRoot(destDir string) (*os.Root, error) {
+	clean := filepath.Clean(destDir)
+	abs, err := filepath.Abs(clean)
+	if err != nil {
+		return nil, fmt.Errorf("profile: materialize destination: %w", err)
+	}
+	volume := filepath.VolumeName(abs)
+	rootName := volume + string(filepath.Separator)
+	relative := strings.TrimPrefix(abs, rootName)
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	base, err := os.OpenRoot(rootName)
+	if err != nil {
+		return nil, fmt.Errorf("profile: materialize: open destination parent: %w", err)
+	}
+	current := base
+	var owned *os.Root
+	for _, seg := range parts {
+		if seg == "" || seg == "." {
+			continue
+		}
+		child, openErr := rootfs.OpenRoot(current, seg)
+		if errors.Is(openErr, fs.ErrNotExist) {
+			if mkdirErr := current.Mkdir(seg, 0o700); mkdirErr != nil && !errors.Is(mkdirErr, fs.ErrExist) {
+				if owned != nil {
+					_ = owned.Close()
+				}
+				_ = base.Close()
+				return nil, fmt.Errorf("profile: materialize destination: %w", mkdirErr)
+			}
+			child, openErr = rootfs.OpenRoot(current, seg)
+		}
+		if openErr != nil {
+			if owned != nil {
+				_ = owned.Close()
+			}
+			_ = base.Close()
+			return nil, fmt.Errorf("profile: materialize destination: %w", materializePathError(openErr))
+		}
+		if owned != nil {
+			_ = owned.Close()
+		}
+		current, owned = child, child
+	}
+	if owned == nil {
+		_ = base.Close()
+		return nil, fmt.Errorf("%w: destination must not be the filesystem root", ErrDenied)
+	}
+	_ = base.Close()
+	return owned, nil
+}
+func materializePathError(err error) error {
+	if err == nil || errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return fmt.Errorf("%w: %v", ErrDenied, err)
+}
+
+func materializeTargetInfo(root *os.Root, rel string) (fs.FileInfo, error) {
+	parentName := path.Dir(rel)
+	parent, err := rootfs.OpenRoot(root, parentName)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fs.ErrNotExist
+		}
+		return nil, materializePathError(err)
+	}
+	defer func() { _ = parent.Close() }()
+	return parent.Lstat(path.Base(rel))
+}
+
+func materializeCheckParent(root *os.Root, rel string) error {
+	parent := path.Dir(rel)
+	if parent == "." {
+		return nil
+	}
+	current := root
+	var owned *os.Root
+	for _, seg := range strings.Split(parent, "/") {
+		child, err := rootfs.OpenRoot(current, seg)
+		if errors.Is(err, fs.ErrNotExist) {
+			if owned != nil {
+				_ = owned.Close()
+			}
+			return nil
+		}
+		if err != nil {
+			if owned != nil {
+				_ = owned.Close()
+			}
+			return materializePathError(err)
+		}
+		if owned != nil {
+			_ = owned.Close()
+		}
+		current, owned = child, child
+	}
+	if owned != nil {
+		_ = owned.Close()
+	}
+	return nil
+}
+
+func materializeEnsureParent(root *os.Root, rel string) error {
+	parent := path.Dir(rel)
+	if parent == "." {
+		return nil
+	}
+	current := root
+	var owned *os.Root
+	for _, seg := range strings.Split(parent, "/") {
+		child, err := rootfs.OpenRoot(current, seg)
+		if errors.Is(err, fs.ErrNotExist) {
+			if mkdirErr := current.Mkdir(seg, 0o755); mkdirErr != nil && !errors.Is(mkdirErr, fs.ErrExist) {
+				if owned != nil {
+					_ = owned.Close()
+				}
+				return mkdirErr
+			}
+			child, err = rootfs.OpenRoot(current, seg)
+		}
+		if err != nil {
+			if owned != nil {
+				_ = owned.Close()
+			}
+			return materializePathError(err)
+		}
+		if owned != nil {
+			_ = owned.Close()
+		}
+		current, owned = child, child
+	}
+	if owned != nil {
+		_ = owned.Close()
+	}
+	return nil
+}
+
+func materializeAtomicWrite(root *os.Root, rel string, content []byte, mode os.FileMode) error {
+	parentName := path.Dir(rel)
+	parent := root
+	var owned *os.Root
+	if parentName != "." {
+		var err error
+		owned, err = rootfs.OpenRoot(root, parentName)
+		if err != nil {
+			return materializePathError(err)
+		}
+		parent = owned
+	}
+	defer func() {
+		if owned != nil {
+			_ = owned.Close()
+		}
+	}()
+	target := path.Base(rel)
+	for range 10 {
+		tmp := ".aether-profile-" + rand.Text()
+		f, err := parent.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode.Perm())
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if _, err = f.Write(content); err == nil {
+			err = f.Sync()
+		}
+		targetInfo, statErr := parent.Lstat(target)
+		if errors.Is(statErr, fs.ErrNotExist) {
+			targetInfo = nil
+			statErr = nil
+		}
+		if err == nil {
+			err = statErr
+		}
+		if err == nil {
+			err = materializeOwner(f, parent, targetInfo)
+		}
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			_ = parent.Remove(tmp)
+			return err
+		}
+		if err := parent.Rename(tmp, target); err != nil {
+			_ = parent.Remove(tmp)
+			return err
+		}
+		return nil
+	}
+	return errors.New("profile: materialize: could not stage file")
 }
 
 func lookupProfile(name string) (harness.Profile, error) {

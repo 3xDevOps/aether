@@ -24,9 +24,9 @@ second sandbox inside it.
 Each member's persistent home is mounted only into that member's environment
 terminal and runs that use their agent account. Account sharing is the sole
 exception: `aether account share <member-id>` lets that member launch runs with
-the owner's home, saved image, profile, custom harness definitions, and vendor
-login. This is equivalent to handing them every credential and file in that
-home. The grant is directional, explicit, and never implied by the admin role.
+the owner's home, saved image, configuration, custom harness definitions, and
+vendor login. This is equivalent to handing them every credential and file in
+that home.
 The authenticated launcher remains the run owner, and the run's commits are
 authored as that member's git identity, not the account owner's; usage and
 cost are attributed to the selected account.
@@ -45,7 +45,7 @@ if it carries that account's address.
 
 Each member controls their own address, not the operator. `aether member
 git` sets your own identity with no admin check - only setting someone
-else's needs the admin role (`internal/sshd/gitidentity.go`) - and the
+else's needs the admin role (`internal/sshd/gitidentity.go`) - and the local
 dashboard's onboarding wizard asks every new member for one. Setting none
 withholds the address alone: the synthetic `<member-id>@aether.local`
 fallback credits nobody upstream, but `domain.Member.GitIdentity` still
@@ -281,7 +281,7 @@ identify its callers.
   capability checks, the steer check on a shell tab, and the same live
   revalidation. A request carries what that member's SSH session would
   carry, no more.
-- **No machine-local verbs.** `/local/v1` and `/ws/envscan` do not exist
+- **No machine-local verbs.** `/local/v1` does not exist
   here: nothing on the server is the caller's own machine, so there is no
   surface that would act as them on it.
 
@@ -308,6 +308,19 @@ identify its callers.
   ping it would keep holding a PTY client whose geometry clamps every other
   viewer.
 
+### Browser configuration imports
+
+The local onboarding importer reads a directory only after `config.roots`
+returns and a destination is known. Credential names and `*.pem` files are
+filtered before any browser read, while runtime/history paths use the selected
+root's `runtime_ignores`; the server remains authoritative and scans all bytes
+that survive those local exclusions. Unknown or ambiguous directory basenames
+must be assigned explicitly, and changing the destination re-reads the retained
+browser `File` handles. Generation guards discard stale reads and prevent a
+preview prepared for one destination from being submitted to another. The
+server-hosted dashboard cannot read a directory on the user's machine, so this
+surface exists only in `aether gui`.
+
 ### Terminal image uploads
 
 `terminal.image` accepts image bytes, not a client path. The dashboard sends
@@ -317,11 +330,12 @@ path remains text. There is no RPC that asks the server to read an arbitrary
 client path, and the upload action only inserts the returned shell-quoted path
 into the focused terminal - it does not press Enter or run the command.
 
-The server validates the decoded bytes as a non-empty PNG, JPEG, GIF, or WebP
-image no larger than 8 MiB, then writes a generated
-`.aether/terminal-images/image-<random>.<ext>` file with mode `0600` in the
-target account's persistent member home, not in a workspace checkout or source
-tree. The returned absolute path is the path visible inside the target
+The web gateway permits a 12 MiB request for `terminal.image` to leave room
+for base64 and JSON framing. The server validates the decoded bytes as a
+non-empty PNG, JPEG, GIF, or WebP image no larger than 8 MiB, then writes a
+generated `.aether/terminal-images/image-<random>.<ext>` file with mode `0600`
+in the target account's persistent member home, not in a workspace checkout or
+source tree. The returned absolute path is the path visible inside the target
 container at its `$HOME`; the client cannot choose the destination or filename.
 An upload with no `run_id` targets the authenticated member's running
 environment terminal. A run target requires `Steer` and writes into that run's
@@ -335,6 +349,49 @@ home or the member is deleted. A member-home bind mount is not part of
 environment image. Account sharing therefore has the same implication as for
 other home files and credentials: a recipient's run can read images in the
 shared account's home.
+
+## Browser configuration and Files
+
+The local dashboard's onboarding directory picker is an explicit, one-time
+browser import. A server-hosted dashboard has no laptop directory picker; use
+`aether gui` for this step. The browser waits for `config.roots` and a known
+destination before previewing or reading bytes. A known unique basename selects
+its destination automatically; an unknown or ambiguous basename requires an
+explicit choice. Credential names in any path component and `*.pem` files are
+always skipped before upload. Runtime/history paths come from the selected
+root's `runtime_ignores` metadata and match exact, root-relative paths or
+component prefixes case-sensitively after trailing slashes are trimmed.
+Changing the destination clears the old preview and re-reads retained browser
+`File` handles; generation guards discard stale reads. It reads remaining
+selected regular-file bytes and sends them to the server, where they are
+scanned before writing; a secret finding is therefore not proof that the
+content stayed local. Empty files and arbitrary binary regular bytes are
+preserved under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
+limits. The shared HTTP gateway permits a 30 MiB request for `config.import`,
+4 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods;
+these are framing limits, not larger decoded configuration allowances.
+
+Browser metadata is intentionally limited. New imported files are `0644`;
+existing modes are preserved even when the server uses a restrictive umask.
+The browser cannot preserve executable mode or symlinks. The server rejects
+unsafe paths, symlink components, hardlinks, and nonregular destinations,
+and retains directory and staged-file ownership. Every `config.*` method
+requires the `Launch` capability and targets only the authenticated member's
+own home; an admin cannot select another member or account.
+
+The imported and edited files are in the member's shared read-write home,
+mounted into that member's environment terminal and runs, including active
+runs. An account share grants another member's run that same home; it is not a
+per-run isolated configuration copy. A snapshot pin records launch provenance,
+not an isolation boundary or a promise that home edits wait for later runs.
+Files edits do not rebuild the installed-agent image.
+
+The Files editor accepts complete UTF-8 text without NUL bytes up to 512 KiB.
+Binary and truncated files are read-only. Run and configuration saves recheck
+SHA-256 revisions immediately before atomic rename under Aether's root lock;
+base-branch commits compare-and-swap the branch head. These locks do not
+exclude arbitrary live-agent filesystem writers. A stale or failed save leaves
+the browser draft available.
 
 ## SSH port forwarding
 
@@ -506,6 +563,11 @@ release, and govulncheck has no way to suppress an individual finding, so a hard
 gate would leave CI permanently red and train everyone to ignore it. Read the
 step output on each PR instead: anything beyond those two Docker findings is new
 and should be fixed or explicitly accepted here.
+
+The SSH dependency `golang.org/x/crypto` must be at least `v0.56.0` to fix
+`GO-2026-6303`, `GO-2026-6354`, and `GO-2026-6355`. These fixes require
+Go 1.26; the module and toolchain requirements in `go.mod` must not be
+downgraded independently of the dependency.
 
 The Go toolchain is part of the attack surface. `go.mod` carries a `toolchain`
 directive alongside the `go` directive so that CI, which selects its Go version

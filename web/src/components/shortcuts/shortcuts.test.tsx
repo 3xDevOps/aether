@@ -32,6 +32,13 @@ describe('shortcut reference', () => {
     expect(
       await screen.findByRole('heading', { name: 'Keyboard shortcuts' }),
     ).toBeDefined()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
+    expect(await screen.findByRole('heading', { name: 'Keyboard shortcuts' })).toBeDefined()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
   })
 
   it('ignores a "?" typed into a field', () => {

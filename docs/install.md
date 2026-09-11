@@ -9,7 +9,7 @@ does, how to run the server as a service, and what lives in the data directory.
 
 ## Building from source
 
-Source builds require Go 1.25+, GNU make, Bun 1.3+, and Node.js 22+. Bun
+Source builds require Go 1.26+, GNU make, Bun 1.3+, and Node.js 22+. Bun
 installs the web dependencies and drives the scripts; Node.js runs the Next
 build and development server.
 
@@ -81,8 +81,9 @@ itself, so the question and the command it launches read your terminal
 provisioning script - nothing is asked and nothing extra runs, the same as
 `--role none`. It never blocks waiting for an answer that cannot come.
 
-Either way the script ends by naming the next command for the role you picked
-and linking the quickstart.
+The script ends by naming the next command for the role you picked and linking
+the quickstart. Cancelling setup or the desktop build stops the installer
+instead, preserving the interrupted command's exit status.
 
 The script is POSIX-only: it covers Linux and macOS. There is no Windows
 installer and no PowerShell equivalent. Windows clients install by hand, which
@@ -411,7 +412,7 @@ Everything else is the same client: `link`, `run`, `attach`, `gui`,
 
 ## Building from source
 
-Needs Go 1.25+, GNU make, and Bun 1.3+ (the server embeds the dashboard SPA, so
+Needs Go 1.26+, GNU make, and Bun 1.3+ (the server embeds the dashboard SPA, so
 the web build runs first).
 
 ```sh
@@ -436,6 +437,9 @@ at 960 by 600, the smallest size the dashboard's own layout holds.
 ```sh
 aether gui build
 ```
+
+On Linux and macOS, cancelling the build with SIGINT exits 130; SIGTERM exits
+143. Ordinary build failures exit 1 and print the build's original error.
 
 The CLI carries the shell sources, unpacks them into your cache directory
 (`~/.cache/aether/desktop-build` on Linux,
@@ -644,7 +648,7 @@ Serve options, which are also the config-file keys:
 | `--web-port` | `0` (off) | Serve the dashboard over HTTPS on this host's tailnet addresses at this port; `443` makes it `https://<magicdns-name>/`. Needs tailscaled, MagicDNS and HTTPS certificates; see [networking.md](networking.md#the-dashboard). |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
-| `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key. |
+| `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
 | `--stall-threshold` | `10m` | Silence after which a run parks needs-attention; see [failure-handling.md](failure-handling.md). |
 | `--poll-interval` | `30s` | How often stalls are checked. |
@@ -688,13 +692,11 @@ Subscription logins do **not** go there. They live in the member's persistent
 home, which `aether terminal` uses after `aether agent add`. See
 [harnesses.md](harnesses.md).
 
-## The client-side daemon
+## The client-side sync daemon
 
 Optional, on your machine, once per repo. It fetches server-owned run branches
 as agents commit and can push your local base branch in **local-only**
-workspaces. It also watches local agent-profile directories and pushes changes
-up; `--no-profile-sync` turns that half off. Reconnect and live-overlay
-behavior continue as before.
+workspaces. Reconnect and live-overlay behavior continue as before.
 
 ```sh
 # Linux; daemon install prints the activation command on other platforms.
@@ -702,11 +704,29 @@ aether daemon install --server <server-host>:2222 --repo ~/code/myproject
 systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 ```
 
-`daemon install` writes a user-level service definition for your platform:
-`~/.config/systemd/user/aether-daemon.service` on Linux,
-`~/Library/LaunchAgents/com.aether.daemon.plist` on macOS, or a Scheduled Task
-XML (`%USERPROFILE%\aether-daemon.xml`) on Windows. `aether daemon run
---server ... --repo ...` does the same work in the foreground.
+`daemon install` writes a user-level service definition for your platform and
+prints the command that activates it: a systemd user unit
+(`~/.config/systemd/user/aether-daemon.service`) on Linux, a launchd agent
+(`~/Library/LaunchAgents/com.aether.daemon.plist`) on macOS, and a Scheduled
+Task XML (`%USERPROFILE%\aether-daemon.xml`, registered with
+`schtasks /Create`) on Windows. `aether daemon run --server ... --repo ...`
+does the same work in the foreground on any of them. The daemon syncs git
+branches only; it does not watch agent configuration directories. Configuration
+is imported explicitly in the local dashboard (`aether gui`) and edited in
+**Files**; the server-hosted dashboard has no laptop directory picker.
+
+If a service unit was generated by an older release, it may still contain the
+removed `--no-profile-sync` argument. Reinstall the unit with the current
+daemon command so that argument is removed, then reload and activate the
+service:
+
+```sh
+aether daemon install --server <server-host>:2222 --repo ~/code/myproject
+systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
+```
+
+On macOS or Windows, use the activation command printed by `daemon install`
+instead of the Linux `systemctl` command.
 
 The daemon no longer forwards a checkout's `origin` into the workspace base.
 It does not refresh a source mirror. In a mirrored workspace, its local base
@@ -766,7 +786,7 @@ automatic.
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
 | `transcripts/` | Per-run PTY recordings (asciicast v2). |
-| `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, synced profile files, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
+| `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run conflict-coordination sockets, recreated each run. |
@@ -774,9 +794,9 @@ automatic.
 
 Member homes and mirror credentials are server-owned state. Back up the
 database, `homes/`, `profiles/`, and `mirrors/` when recovery matters. Those
-backups carry credentials: member vendor logins, GitHub tokens, signing keys,
-and mirror deploy private keys. Encrypt them, restrict access, and do not
-publish or paste them into issue reports
+backups carry credentials: every member's vendor logins, GitHub tokens, signing
+keys, and mirror deploy private keys. Encrypt them, restrict access, and do not
+publish or paste them into issue reports.
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
 Each member home is mounted only in that member's environment terminal and

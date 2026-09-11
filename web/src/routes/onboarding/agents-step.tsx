@@ -3,9 +3,9 @@
 // environment-terminal instructions the Agents page shows, embedded
 // through AgentWizard), connecting GitHub, and bringing this machine's own
 // agent configuration across (ProfileImport). None is required - "Skip for
-// now" is reachable from every state, including a failed scan and open
+// now" is reachable from every state, including a failed import and open
 // setup instructions - and nothing here touches another member's setup:
-// an agent login, a GitHub account and a profile snapshot are all
+// an agent login, a GitHub account and a configuration import are all
 // per-member.
 
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
@@ -29,31 +29,11 @@ import {
 import { ProfileImport } from '@/routes/onboarding/profile-import'
 import type { Capability } from '@/store/hooks'
 
-/**
- * The harness names worth previewing for a configuration import. Profile
- * sync is wider than environment setup: opencode syncs
- * ~/.local/share/opencode but cannot run a scan, so env.harnesses alone
- * would never offer it. agent.list's shipped entries name every harness
- * the registry knows; a name with no profile sync refuses the preview and
- * drops out there.
- */
-export function profileCandidates(
-  harnesses: HarnessStatus[] | null,
-  agents: AgentInfo[] | null,
-): string[] {
-  const names = (harnesses ?? []).map((h) => h.name)
-  for (const agent of agents ?? []) {
-    if (agent.source === 'shipped' && !names.includes(agent.name)) {
-      names.push(agent.name)
-    }
-  }
-  return names
-}
 
 export function AgentsStep({
   client,
   caps,
-  workspace,
+  workspace: _workspace,
   back,
   setup,
   onSetup,
@@ -78,7 +58,6 @@ export function AgentsStep({
 }) {
   const [harnesses, setHarnesses] = useState<HarnessStatus[] | null>(null)
   const [listError, setListError] = useState<string | null>(null)
-  const [repoPath, setRepoPath] = useState<string | undefined>(undefined)
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [agentsError, setAgentsError] = useState<string | null>(null)
   const [done, setDone] = useState<string[]>([])
@@ -90,7 +69,6 @@ export function AgentsStep({
       .envHarnesses()
       .then((result) => {
         setHarnesses(result.harnesses)
-        setRepoPath(result.repo_path)
       })
       .catch((err) => setListError(message(err)))
   }, [client])
@@ -264,14 +242,7 @@ export function AgentsStep({
         onOpen={() => onSetup(githubSubStep)}
       />
 
-      <ProfileImport
-        client={client}
-        harnesses={harnesses ?? []}
-        candidates={profileCandidates(harnesses, agents)}
-        served={caps.hasLocal('profile.preview') && caps.hasLocal('profile.push')}
-        repoPath={repoPath}
-        workspace={workspace}
-      />
+      <ProfileImport client={client} />
 
       {onward}
     </section>

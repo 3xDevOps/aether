@@ -184,9 +184,9 @@ export class GitHubConnect {
 }
 
 /**
- * The Agents step's second half: bringing this machine's agent
- * configuration to the server. It has its own <section aria-label>, so it
- * gets its own object rather than crowding the step.
+ * The Agents step's second half: one explicit browser directory import. The
+ * input is scoped to its section so another file picker in the page cannot be
+ * mistaken for the configuration source.
  */
 export class ConfigurationImport {
   constructor(private readonly page: Page) {}
@@ -198,27 +198,27 @@ export class ConfigurationImport {
     })
   }
 
-  look(): Locator {
-    return this.section.getByRole('button', {
-      name: 'Look at what is here',
-      exact: true,
-    })
+  directoryInput(): Locator {
+    return this.section.getByLabel('Choose configuration directory')
   }
 
-  /** One harness's row, by the name the list shows. */
-  row(label: string): Locator {
-    return this.section.getByRole('listitem').filter({ hasText: label })
+  async chooseDirectory(path: string): Promise<void> {
+    await this.directoryInput().setInputFiles(path)
   }
 
-  select(label: string): Locator {
-    return this.section.getByRole('checkbox', {
-      name: `Bring ${label} configuration`,
-      exact: true,
-    })
+  preview(): Locator {
+    return this.section.getByText('Preview', { exact: true })
+  }
+
+  destination(): Locator {
+    return this.section.getByLabel('Configuration destination')
   }
 
   import(): Locator {
-    return this.section.getByRole('button', { name: 'Import selected', exact: true })
+    return this.section.getByRole('button', {
+      name: 'Import configuration',
+      exact: true,
+    })
   }
 }
 
