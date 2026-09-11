@@ -19,6 +19,14 @@ const unreachableNotice =
 // controls off the edge before the readouts learned to give way.
 const longName =
   'Alexandria Montgomery Workbench Collaboration and Infrastructure Verification Member'
+/**
+ * The same phone with almost no height left. Nothing a phone puts in the
+ * status bar makes the readouts taller than the popup's own 70vh ceiling,
+ * so a screen this short is the only way to reach that ceiling - and
+ * reaching it is the point: what the popup keeps past its edge has to stay
+ * scrollable rather than be cut off.
+ */
+const shortScreen = { width: 412, height: 200 }
 
 test('the phone status bar keeps every control inside the viewport', async ({
   page,
@@ -72,20 +80,9 @@ test('the phone status bar keeps every control inside the viewport', async ({
   expect(popupBox.x + popupBox.width).toBeLessThanOrEqual(viewport.width)
   expect(popupBox.y + popupBox.height).toBeLessThanOrEqual(viewport.height)
 
-  // Bounded means bounded, not clipped: whatever the popup keeps below its
-  // own edge has to be reachable by scrolling. This content fits today, so
-  // the scroll is the guard for the day it does not - and a clipped popup
-  // scrolls the same way a scrollable one does, which is why the rule that
-  // separates `hidden` from `auto` is asserted beside it.
+  // A clipped popup scrolls exactly like a scrollable one, so the rule that
+  // separates `hidden` from `auto` is worth asserting on its own.
   await expect(popup).toHaveCSS('overflow-y', 'auto')
-  const scrolled = await popup.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-    return {
-      reached: element.scrollTop,
-      below: element.scrollHeight - element.clientHeight,
-    }
-  })
-  expect(scrolled.reached).toBe(scrolled.below)
 
   // Nothing the popup carries may push the page sideways or downwards: the
   // shell owns the whole screen and the member has no window to widen.
@@ -101,8 +98,41 @@ test('the phone status bar keeps every control inside the viewport', async ({
   }))
   expect(overflow).toEqual({ horizontal: 0, vertical: 0 })
 
-  // The same tap closes it again, and the theme toggle beside it answers a
-  // finger on the bottom edge of the screen.
+  // On a short screen the readouts stop fitting, which is where a bounded
+  // popup has to prove itself: it stays inside the screen, and everything
+  // it pushes past its own edge is still reachable by scrolling to it.
+  await page.setViewportSize(shortScreen)
+  await expect(notice).toBeVisible()
+  const shortBox = await popup.boundingBox()
+  if (!shortBox) throw new Error('the status details popup did not render')
+  expect(shortBox.y).toBeGreaterThanOrEqual(0)
+  expect(shortBox.y + shortBox.height).toBeLessThanOrEqual(shortScreen.height)
+
+  const scrolled = await popup.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    return {
+      reached: element.scrollTop,
+      below: element.scrollHeight - element.clientHeight,
+    }
+  })
+  expect(scrolled.below).toBeGreaterThan(0)
+  expect(scrolled.reached).toBe(scrolled.below)
+  // The status actions are the popup's last row, so scrolling to the end is
+  // what puts them on screen at this height.
+  for (const name of controls) {
+    await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 })
+  }
+  const shortOverflow = await page.evaluate(() =>
+    Math.max(
+      document.documentElement.scrollHeight - document.documentElement.clientHeight,
+      document.body.scrollHeight - document.body.clientHeight,
+    ),
+  )
+  expect(shortOverflow).toBe(0)
+
+  // Back on the whole screen: the same tap closes the popup again, and the
+  // theme toggle beside it answers a finger on the bottom edge.
+  await page.setViewportSize(viewport)
   await trigger.tap()
   await expect(notice).toBeHidden()
   await page.getByRole('button', { name: 'Theme: system' }).tap()

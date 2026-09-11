@@ -280,7 +280,7 @@ covered - WebKit is not installed.
 | --- | --- |
 | `files-browser.mobile` | On a phone, opening a real repository file from the sidebar rail, returning with Browse, and opening another file without losing the tree - every control tapped |
 | `onboarding-link.mobile` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach |
-| `status-bar.mobile` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport, with the theme toggle answering a tap on the bottom edge |
+| `status-bar.mobile` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport; on a screen too short for its own readouts it scrolls to them rather than cutting them off, and the theme toggle answers a tap on the bottom edge |
 
 Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
 and a control that answers only a mouse would still pass a click-driven test.
