@@ -246,8 +246,24 @@ func TestReportOpenCodeCallsRunReport(t *testing.T) {
 // writes to would sit between the agent and its next turn.
 func TestReportOpenCodeIgnoresUnmappedEvents(t *testing.T) {
 	sock := newFakeCoordSocket(t)
+	// A pipe nobody ever writes to or closes: reading it would cost the
+	// whole budget, so returning well inside the budget is what says the
+	// reporter never touched it.
 	withStdin(t, "", false)
-	report([]string{"opencode", "--socket", sock.path, "--event", "session.status", "--status", "idle"})
+	stderr := capture(t, &os.Stderr)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		report([]string{"opencode", "--socket", sock.path, "--event", "session.status", "--status", "idle"})
+	}()
+	select {
+	case <-done:
+	case <-time.After(reportBudget / 2):
+		t.Fatal("the reporter waited on a stdin opencode never writes to")
+	}
+	if msg := stderr(); msg != "" {
+		t.Fatalf("stderr = %q, want the reporter silent about an event it ignores", msg)
+	}
 	if req, ok := sock.next(t); ok {
 		t.Fatalf("the reporter dialled for an unmapped event: %+v", req)
 	}
