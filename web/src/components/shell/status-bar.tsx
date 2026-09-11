@@ -399,12 +399,14 @@ export function StatusBar() {
                   </span>
                 </span>
               )}
+              {!wide && <StatusFacts disk={disk} />}
+              {/* Last, so a screen too short for the readouts reaches the
+                  controls by scrolling to the end of the popup. */}
               {!desktop && (
                 <span className="flex min-w-0 flex-wrap items-center gap-1">
                   {statusActions}
                 </span>
               )}
-              {!wide && <StatusFacts disk={disk} />}
             </div>
           </CollapsibleContent>
         </Collapsible>
