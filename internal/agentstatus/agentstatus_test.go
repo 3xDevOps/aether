@@ -24,6 +24,8 @@ func TestFromClaudeHook(t *testing.T) {
 			Report{State: Waiting, Reason: ReasonPermission}, true},
 		{"elicitation dialog shown", `{"hook_event_name":"Notification","notification_type":"elicitation_dialog"}`,
 			Report{State: Waiting, Reason: ReasonPermission}, true},
+		{"elicitation url dialog shown", `{"hook_event_name":"Notification","notification_type":"elicitation_url_dialog"}`,
+			Report{State: Waiting, Reason: ReasonPermission}, true},
 		{"idle at the prompt", `{"hook_event_name":"Notification","notification_type":"idle_prompt"}`,
 			Report{State: Waiting, Reason: ReasonInput}, true},
 		{"turn ended", `{"hook_event_name":"Stop","stop_hook_active":false}`,

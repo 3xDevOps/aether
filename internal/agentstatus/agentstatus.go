@@ -100,7 +100,7 @@ func FromClaudeHook(stdin []byte) (Report, bool) {
 		return Report{State: Waiting, Reason: ReasonPermission}, true
 	case "Notification":
 		switch hook.Notification {
-		case "permission_prompt", "elicitation_dialog":
+		case "permission_prompt", "elicitation_dialog", "elicitation_url_dialog":
 			return Report{State: Waiting, Reason: ReasonPermission}, true
 		case "idle_prompt":
 			return Report{State: Waiting, Reason: ReasonInput}, true
