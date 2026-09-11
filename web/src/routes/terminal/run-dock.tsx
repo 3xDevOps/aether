@@ -4,6 +4,7 @@ import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { type ConnectionState } from '@/lib/stream'
 import {
@@ -73,12 +74,17 @@ export function RunDock({ runID }: { runID: string }) {
     if (document.activeElement === document.body) placeholder.current?.focus()
   }, [showing])
 
+  // A shell tab is one session shared by everyone on that tab, so a phone
+  // follows it for the same reason it follows the agent's terminal.
+  const phone = useMediaQuery(phoneScreen)
+  const [serverSize, setServerSize] = useState<{ cols: number; rows: number } | null>(null)
   const controller = useXterm({
     enabled:
       canOpenShell &&
       activeTab !== null &&
       !dock.collapsed &&
       dock.refusedMessage === null,
+    size: phone ? serverSize ?? standardGeometry : null,
     onData: (data) => {
       if (!activeTab) return
       const current = currentAttachmentRef.current
@@ -138,12 +144,13 @@ export function RunDock({ runID }: { runID: string }) {
     const handlers = {
       onData: (chunk: Uint8Array, kind: AttachDataKind) =>
         emitShellSocketData(runID, socketKey, chunk, kind),
-      onAttached: () => {
+      onAttached: (_write: boolean, size: { cols: number; rows: number }) => {
         // Reattach replay restores the tab's full history, so a tab switch
         // may remount its xterm instead of preserving old instances. A
         // background tab reconnecting must never wipe the active tab or
         // unmute its replay.
         if (isCurrent()) {
+          setServerSize(size)
           setAttachedIdentity(identity)
           gate.current.unmute()
           terminalRef.current?.reset()
@@ -173,6 +180,10 @@ export function RunDock({ runID }: { runID: string }) {
         }
       },
       wantsWrite: () => true,
+      follows: () => phone,
+      onGeometry: (cols: number, rows: number) => {
+        if (isCurrent()) setServerSize({ cols, rows })
+      },
     }
     const existing = getShellSocket(runID, socketKey)
     let attachment: Attachment | null = existing ?? null
@@ -194,6 +205,7 @@ export function RunDock({ runID }: { runID: string }) {
     activeTab,
     canOpenShell,
     dock.refusedMessage,
+    phone,
     removeShellTab,
     runID,
     setShellRefused,
@@ -260,6 +272,7 @@ export function RunDock({ runID }: { runID: string }) {
       ) : (
         <TerminalPane
           controller={controller}
+          className={phone ? 'overflow-x-auto' : undefined}
           imageTarget={runID}
           imageTargetKey={activeTab ?? undefined}
           imageUploadEnabled={

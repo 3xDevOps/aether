@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
-import { usePhoneScreen } from '@/lib/hooks'
+import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { RunStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -82,11 +82,11 @@ function TerminalView({ params }: RouteProps) {
   // grants without the member touching anything. Only a request they made
   // counts as taking control.
   const askedForControl = useRef(false)
-  // A phone renders the session at the server's own geometry and pans over
-  // it: a TUI is drawn for the writers' width, and refitting it to 45
-  // columns would both garble this screen and, once steering, reflow the
-  // agent's screen for every other viewer. The size arrives with the ack.
-  const phone = usePhoneScreen()
+  // A phone follows the session instead of sizing it: it renders at the
+  // geometry the ack reports and imposes none of its own, so an agent's
+  // screen is neither garbled here nor reflowed to 45 columns for everyone
+  // else the moment this phone takes control.
+  const phone = useMediaQuery(phoneScreen)
   const [serverSize, setServerSize] = useState<{ cols: number; rows: number } | null>(null)
   const controller = useXterm({
     enabled: known,
@@ -167,10 +167,14 @@ function TerminalView({ params }: RouteProps) {
         setTerminal(runID, { message, refused: true })
       },
       onWriteDenied: () => setTerminal(runID, { steerDenied: true, write: false }),
+      // Someone with a bigger screen resized the session; a follower
+      // redraws at it rather than at what its ack once said.
+      onGeometry: (cols, rows) => setServerSize({ cols, rows }),
       sessionPending: () => run !== undefined && !endedStatuses.includes(run.status),
       geometry: () =>
         phone ? standardGeometry : { cols: terminal.cols, rows: terminal.rows },
       wantsWrite: () => writeRef.current,
+      follows: () => phone,
     })
     attachRef.current = attachment
 
@@ -284,9 +288,12 @@ function TerminalView({ params }: RouteProps) {
             <TerminalPane
               key={runID}
               controller={controller}
-              // At the server's geometry the grid is wider than the screen,
-              // so the pane pans over it rather than cropping it.
-              className={phone ? 'overflow-auto' : undefined}
+              // At the session's geometry the grid is bigger than the
+              // screen, so the pane pans over it rather than cropping it.
+              // Naming the sideways axis is enough: CSS turns the other
+              // one into a scroller too, which is what reaches the rows
+              // below the fold.
+              className={phone ? 'overflow-x-auto' : undefined}
               writable={state.write && !starting}
               imageTarget={runID}
               imageTargetKey={runID}

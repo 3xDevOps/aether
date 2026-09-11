@@ -191,10 +191,21 @@ describe('the key bar Ctrl modifier', () => {
     act(() => host().terminal?.input('c'))
     expect(sent).toEqual(['\x03', 'c'])
 
-    // A key with no control code of its own goes through as it is.
+    // A key the modifier does not cover goes through as it is and leaves
+    // Ctrl armed, so the next one can still use it rather than the wrong
+    // control code arriving at the agent.
     act(() => host().armCtrl(true))
     act(() => host().terminal?.input('\x1b[A'))
     expect(sent).toEqual(['\x03', 'c', '\x1b[A'])
+    expect(host().ctrlArmed).toBe(true)
+
+    // Case folding is ASCII, not locale text: the German sharp s upper
+    // cases to two letters and must not become Ctrl+S.
+    act(() => host().terminal?.input('\u00df'))
+    expect(sent).toEqual(['\x03', 'c', '\x1b[A', '\u00df'])
+    act(() => host().terminal?.input('d'))
+    expect(sent).toEqual(['\x03', 'c', '\x1b[A', '\u00df', '\x04'])
+    await waitFor(() => expect(host().ctrlArmed).toBe(false))
     view.unmount()
   })
 })

@@ -437,20 +437,47 @@ describe('terminal view', () => {
 describe('the terminal on a phone', () => {
   const phone = () => atViewport(390, { height: 844, pointer: 'coarse' })
 
-  it('adopts the server geometry and sends no size of its own', async () => {
+  it('follows the session geometry and sends no size of its own', async () => {
     phone()
     const resize = vi.spyOn(Terminal.prototype, 'resize')
     const view = mount()
     attached({ cols: 132, rows: 43 })
 
-    // The header asks for a standard terminal rather than for the phone's
-    // own width, which is what a finished run's replay is laid out for.
-    expect(StubSocket.last().frames()[0]).toEqual({ cols: 80, rows: 24 })
+    // The flag is what keeps this client out of the minimum the PTY is
+    // sized to; the geometry beside it is only what a session with no PTY
+    // of its own - a finished run's replay - is laid out at.
+    expect(StubSocket.last().frames()[0]).toEqual({ follow: true, cols: 80, rows: 24 })
     await vi.waitFor(() => expect(resize).toHaveBeenCalledWith(132, 43))
     expect(StubSocket.last().frames().some((frame) => 'type' in (frame as object))).toBe(
       false,
     )
+
+    // Someone with a bigger screen resizes the session: the phone redraws
+    // at what the server reports rather than at what its ack once said.
+    act(() => {
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ type: 'geometry', cols: 120, rows: 40 }),
+      })
+    })
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledWith(120, 40))
     resize.mockRestore()
+    view.unmount()
+  })
+
+  it('keeps following while it steers, which is what the flag is for', () => {
+    phone()
+    const view = mount()
+    attached({ cols: 132, rows: 43 })
+
+    fireEvent.click(screen.getByText('Take control'))
+    attached({ cols: 132, rows: 43 })
+
+    expect(StubSocket.last().frames()[0]).toEqual({
+      write: true,
+      follow: true,
+      cols: 80,
+      rows: 24,
+    })
     view.unmount()
   })
 

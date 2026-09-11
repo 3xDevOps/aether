@@ -32,21 +32,27 @@ const policyClose = 1008
 const inputChunk = 8 * 1024
 
 /**
- * The header geometry of a client that means to adopt the server's answer
- * rather than impose its own: a phone, and any caller with no terminal to
- * measure yet. The gateway echoes the live session's size instead, and only
- * falls back to this when there is none - a finished run's replay, where 80
- * columns reads the recorded transcript far better than a phone's width.
+ * The geometry a client sends when it is not the one deciding: a follower,
+ * and any caller with no terminal to measure yet. The ack answers with the
+ * session's own size; this is only what a session that has none yet - a
+ * finished run's replay - is laid out at, where 80 columns reads a recorded
+ * transcript far better than a phone's width does.
  */
 export const standardGeometry = { cols: 80, rows: 24 }
 
 interface AttachHeader {
   write?: boolean
+  follow?: boolean
   cols: number
   rows: number
 }
 
-interface AttachAck {
+/**
+ * A text frame from the server: the ack, or - once attached - the one
+ * control frame the server sends, the session's new geometry.
+ */
+interface AttachFrame {
+  type?: string
   ok: boolean
   code?: number
   error?: string
@@ -77,6 +83,19 @@ export interface AttachHandlers {
   onRefused: (message: string, code?: number) => void
   /** The member cannot steer this run. The attach continues as a mirror. */
   onWriteDenied: () => void
+  /**
+   * The session's PTY was resized by whoever does decide its size. Only a
+   * follower is sent this, and only after the ack that carried the first
+   * geometry; it is not an event and nothing replays it.
+   */
+  onGeometry?: (cols: number, rows: number) => void
+  /**
+   * Whether this client renders the session at the size it already is
+   * rather than imposing one, read at every connect. A follower is left
+   * out of the minimum the PTY is sized to, so a phone can steer a run
+   * without reflowing the agent's screen for everyone watching it.
+   */
+  follows?: () => boolean
   /**
    * Whether a missing session on this run is worth waiting out rather than
    * reporting. True only while the run can still gain one; read at every
@@ -186,6 +205,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     ws.binaryType = 'arraybuffer'
     socket = ws
     const askedWrite = handlers.wantsWrite() && !writeDenied
+    const follows = handlers.follows?.() ?? false
     // The server closes a refused attach with 1008 too, so the close handler
     // needs to know whether this socket already got its answer.
     let answered = false
@@ -196,6 +216,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // plus geometry.
       const header: AttachHeader = { cols, rows }
       if (askedWrite) header.write = true
+      if (follows) header.follow = true
       ws.send(JSON.stringify(header))
     }
     ws.onmessage = (msg) => {
@@ -216,10 +237,16 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         }
         return
       }
-      let ack: AttachAck
+      let ack: AttachFrame
       try {
-        ack = JSON.parse(msg.data) as AttachAck
+        ack = JSON.parse(msg.data) as AttachFrame
       } catch {
+        return
+      }
+      // Someone who does impose a size resized the session; a follower
+      // redraws at it. Before the ack there is nothing to redraw.
+      if (attached && ack.type === 'geometry') {
+        if (ack.cols && ack.rows) handlers.onGeometry?.(ack.cols, ack.rows)
         return
       }
       replayRemaining = ack.ok && ack.replay !== undefined && ack.replay > 0 ? ack.replay : 0

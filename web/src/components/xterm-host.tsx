@@ -55,16 +55,21 @@ export interface XtermController {
 }
 
 /**
- * The control code a character carries under Ctrl, or null when it has none.
- * `@` through `_` and the letters are the range a terminal maps; anything
- * else, and any multi-character chunk (a paste, an escape sequence from the
- * key bar), goes through untouched.
+ * The control code one character carries under Ctrl, or null when it has
+ * none. A terminal maps `@` through `_`, the ASCII letters, and space; a
+ * key with no control code of its own - and any longer chunk, a paste
+ * among them - has none. Case folding is done by hand rather than with
+ * `toUpperCase`, which is locale text rather than ASCII: it turns the
+ * German sharp s into two letters and the dotless i into an I, and either
+ * would send a control code nobody pressed.
  */
 function controlCode(data: string): string | null {
   if (data.length !== 1) return null
-  const code = data.toUpperCase().charCodeAt(0)
-  if (code < 0x40 || code > 0x5f) return null
-  return String.fromCharCode(code & 0x1f)
+  const code = data.charCodeAt(0)
+  if (code === 0x20) return '\x00'
+  const upper = code >= 0x61 && code <= 0x7a ? code - 0x20 : code
+  if (upper < 0x40 || upper > 0x5f) return null
+  return String.fromCharCode(upper & 0x1f)
 }
 
 function rgba(color: string, alpha: number): string | undefined {
@@ -306,10 +311,13 @@ export function useXterm({
       resize()
 
       // At a fixed size the grid is larger than the pane, so the row being
-      // typed on can sit outside it. A tap is the moment that matters: it is
-      // what raises the keyboard. `scrollIntoView` is absent in jsdom, and
-      // the cursor cell only exists once a renderer has drawn one.
+      // written on can sit outside it: a pane that never followed the
+      // cursor would leave new output below the fold. A tap matters for
+      // the same reason - it is what raises the keyboard over the rows.
+      // `scrollIntoView` is absent in jsdom, and the cursor cell only
+      // exists once a renderer has drawn one.
       const showCursor = () => {
+        if (!sizeRef.current) return
         requestAnimationFrame(() => {
           host
             .querySelector('.xterm-cursor')
@@ -317,18 +325,28 @@ export function useXterm({
         })
       }
       host.addEventListener('focusin', showCursor)
+      const cursor = created.onCursorMove(showCursor)
 
       const input = created.onData((data) => {
         if (!ctrlArmedRef.current) {
           onDataRef.current?.(data)
           return
         }
+        const held = controlCode(data)
+        // A key the modifier does not cover keeps it armed rather than
+        // spending it on a keystroke that would arrive uncontrolled: the
+        // bar still shows Ctrl pressed, and the next key can use it.
+        if (held === null) {
+          onDataRef.current?.(data)
+          return
+        }
         armCtrl(false)
-        onDataRef.current?.(controlCode(data) ?? data)
+        onDataRef.current?.(held)
       })
       const observer = new ResizeObserver(resize)
       observer.observe(host)
       teardown = () => {
+        cursor.dispose()
         host.removeEventListener('focusin', showCursor)
         observer.disconnect()
         themeWatch.disconnect()

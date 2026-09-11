@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
+import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { ConnectionState } from '@/lib/stream'
 import {
@@ -92,8 +93,13 @@ export function TerminalDock({
   const terminalRef = useRef<XtermController['terminal']>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
 
+  // A member can have this terminal open on more than one screen; a phone
+  // follows what the others made it rather than shrinking it for them.
+  const phone = useMediaQuery(phoneScreen)
+  const [serverSize, setServerSize] = useState<{ cols: number; rows: number } | null>(null)
   const controller = useXterm({
     enabled: activeTab !== null && !dock.collapsed,
+    size: phone ? serverSize ?? standardGeometry : null,
     onData: (data) => {
       if (!activeTab || activeTabRef.current !== activeTab || gate.current.muted()) return
       getEnvTerminalSocket(activeTab)?.send(data)
@@ -203,8 +209,9 @@ export function TerminalDock({
     const handlers = {
       onData: (chunk: Uint8Array, kind: AttachDataKind) =>
         emitEnvTerminalSocketData(socketKey, chunk, kind),
-      onAttached: () => {
+      onAttached: (_write: boolean, size: { cols: number; rows: number }) => {
         if (isCurrent()) {
+          setServerSize(size)
           setEnvTerminalSocketReady(socketKey, true)
           setAttachedTab(socketKey)
           gate.current.unmute()
@@ -251,6 +258,10 @@ export function TerminalDock({
         }
       },
       wantsWrite: () => true,
+      follows: () => phone,
+      onGeometry: (cols: number, rows: number) => {
+        if (isCurrent()) setServerSize({ cols, rows })
+      },
     }
     const existing = getEnvTerminalSocket(socketKey)
     let attachment: Attachment
@@ -270,7 +281,7 @@ export function TerminalDock({
       unsubscribe()
       if (activeTabRef.current !== socketKey) unregisterEnvTerminalSocket(socketKey)
     }
-  }, [activeTab, closeTab, reset, rpc, setStatus, terminal])
+  }, [activeTab, closeTab, phone, reset, rpc, setStatus, terminal])
 
   const save = async () => {
     if (saving) return
@@ -455,6 +466,7 @@ export function TerminalDock({
             ) : (
               <TerminalPane
                 controller={controller}
+                className={phone ? 'overflow-x-auto' : undefined}
                 imageTargetKey={activeTab ?? undefined}
                 imageUploadEnabled={attachedTab === activeTab && activeTab !== null}
               >
