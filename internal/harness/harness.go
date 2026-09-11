@@ -484,9 +484,9 @@ func Profiles() []Profile {
 // SetupHarnesses lists the harnesses that may drive environment setup, in
 // the order setup surfaces present them. This list is the single authority:
 // the wizard, the local inventory engine, and the docs all follow it.
-// opencode and custom stay launchable for runs but are never offered here,
-// and the deterministic fake harness is a scheduler registration, not a
-// registry profile.
+// omp, opencode and custom stay launchable for runs but are never offered
+// here, and the deterministic fake harness is a scheduler registration,
+// not a registry profile.
 func SetupHarnesses() []Profile {
 	out := make([]Profile, 0, 3)
 	for _, name := range []string{"claude", "codex", "pi"} {

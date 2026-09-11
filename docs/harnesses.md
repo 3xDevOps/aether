@@ -515,7 +515,7 @@ stopped.
   | `claude` | `projects/`, `shell-snapshots/`, `statsig/`, `todos/`, `file-history/`, `history.jsonl`, `daemon/` |
   | `codex` | `tmp/`, `.tmp/`, `sessions/` |
   | `pi` | `agent/sessions/`, `agent/tmp/` |
-  | `omp` | `agent/sessions/`, `agent/terminal-sessions/`, `agent/cache/`, `agent/history.db*`, `agent/models.db`, `natives/`, `cache/`, `logs/`, `run/`, `collab/` |
+  | `omp` | `agent/sessions/`, `agent/terminal-sessions/`, `agent/cache/`, `agent/history.db`, `agent/history.db-shm`, `agent/history.db-wal`, `agent/models.db`, `natives/`, `cache/`, `logs/`, `run/`, `collab/` |
 
   A skipped directory is reported once, as the directory. These are applied
   before your `.aether-profile-ignore`, so that file has the last word: a
