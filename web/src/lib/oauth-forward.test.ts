@@ -4,6 +4,7 @@ import {
   forwardOAuthCallback,
   oauthCallbackPort,
   openOAuthLink,
+  remoteOAuthInstructions,
 } from '@/lib/oauth-forward'
 import { fakeApi } from '@/test/fixtures'
 
@@ -89,6 +90,21 @@ describe('OAuth callback forwarding', () => {
     await vi.waitFor(() => expect(replace).toHaveBeenCalledWith(uri))
     expect(ready).toHaveBeenCalledWith(1455)
     expect(failed).not.toHaveBeenCalled()
+  })
+
+  it('names the forward command for a loopback callback and skips other links', () => {
+    const uri =
+      'https://auth.example/?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback'
+
+    expect(remoteOAuthInstructions('run:r1', uri)).toEqual({
+      port: 1455,
+      command: 'aether forward run:r1 1455',
+    })
+    expect(remoteOAuthInstructions('terminal', uri)).toEqual({
+      port: 1455,
+      command: 'aether forward terminal 1455',
+    })
+    expect(remoteOAuthInstructions('terminal', 'https://example.com/docs')).toBeNull()
   })
 
   it('leaves ordinary terminal links to the default opener', () => {

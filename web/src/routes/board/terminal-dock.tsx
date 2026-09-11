@@ -15,8 +15,9 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
-import { openOAuthLink } from '@/lib/oauth-forward'
+import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { ConnectionState } from '@/lib/stream'
 import { type AttachDataKind, type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
@@ -96,7 +97,15 @@ export function TerminalDock({
       getEnvTerminalSocket(activeTab)?.resize(cols, rows)
     },
     onLink: (uri) => {
-      if (!capability.hasLocal('forward.start')) return false
+      if (!capability.hasLocal('forward.start')) {
+        const remote = remoteOAuthInstructions('terminal', uri)
+        if (remote === null) return false
+        toast.info(`Run ${remote.command}, then open this link on that machine.`, {
+          description: uri,
+          action: { label: 'Copy link', onClick: () => void copyText(uri, null) },
+        })
+        return true
+      }
       return openOAuthLink(
         rpc,
         'terminal',
