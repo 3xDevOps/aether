@@ -264,8 +264,9 @@ attaches the server's output to the report.
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,
-`run-provisioning`, `run-switch`, `shell-drawer.mobile`, `terminal-images` and
-`terminal-tools` need a reachable Docker daemon and skip without one. That
+`run-provisioning`, `run-switch`, `run-views.mobile`, `shell-drawer.mobile`,
+`terminal-images` and `terminal-tools` need a reachable Docker daemon and
+skip without one. That
 skip is specific to the dashboard suite: `make test-integration` requires its
 real Docker setup and fails when Docker is unavailable. The rest need only
 git, except `window-sizing`, which needs neither: it starts a gateway of its
@@ -295,6 +296,7 @@ covered - WebKit is not installed.
 | `shell-drawer.mobile` | On a phone, the run list as a modal drawer: it opens from the rail, its rows are finger-sized, and tapping a run leaves the drawer closed with that run on screen |
 | `dialog-anchor.mobile` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 | `toast-clearance.mobile` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
+| `run-views.mobile` | On a phone, steering a real run from the one Actions menu the run header keeps, and then reading its diff: the menu items are finger-sized, protecting the run shows on the header, and the file section that holds a line wider than the screen scrolls sideways only once the wrap toggle is off |
 
 Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
 and a control that answers only a mouse would still pass a click-driven test.
@@ -315,8 +317,9 @@ survives a short screen. Playwright cannot raise a platform keyboard either
 way, so content stranded behind a real iOS keyboard stays a manual check on a
 phone (`docs/dashboard-frontend.md` has that path).
 
-The phone specs need git; `shell-drawer.mobile` also needs Docker, because it
-opens a real run, and skips without it. Run them alone against the binaries
+The phone specs need git; `shell-drawer.mobile` and `run-views.mobile` also
+need Docker, because they open a real run, and skip without it. Run them
+alone against the binaries
 `make build` produced:
 
 ```sh

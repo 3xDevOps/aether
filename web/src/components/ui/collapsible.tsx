@@ -21,7 +21,7 @@ export function CollapsibleTrigger({
       data-slot="collapsible-trigger"
       className={cn(
         focusRing,
-        'flex min-h-[22px] w-full cursor-pointer items-center gap-1 px-1 text-left text-[13px] leading-5 hover:bg-toolbar-hover [&[data-state=open]>svg]:rotate-90',
+        'flex min-h-[22px] coarse:min-h-11 w-full cursor-pointer items-center gap-1 px-1 text-left text-[13px] leading-5 hover:bg-toolbar-hover [&[data-state=open]>svg]:rotate-90',
         className,
       )}
       {...props}

@@ -33,7 +33,7 @@ export function ApprovalStatus() {
             }}
             className={cn(
               focusRing,
-              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
+              'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
             )}
           >
             <ShieldQuestion
@@ -80,7 +80,7 @@ export function ApprovalBadge({ run }: CardSlotProps) {
             }}
             className={cn(
               focusRing,
-              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 px-1.5 py-0.5 hover:bg-state-needs-attention/20',
+              'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 py-0.5 hover:bg-state-needs-attention/20',
             )}
           >
             <ShieldQuestion className="size-3.5 text-state-needs-attention" aria-hidden />
@@ -283,7 +283,7 @@ function Row({
             title={runLabel(run)}
             className={cn(
               focusRing,
-              'inline-flex min-h-[26px] min-w-0 max-w-full items-center truncate text-left hover:text-foreground hover:underline sm:max-w-60',
+              'inline-flex min-h-[26px] coarse:min-h-11 min-w-0 max-w-full items-center truncate text-left hover:text-foreground hover:underline sm:max-w-60',
             )}
           >
             {runLabel(run)}

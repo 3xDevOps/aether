@@ -2,6 +2,11 @@ import { History } from 'lucide-react'
 import { useEffect } from 'react'
 import { FeedEntry } from '@/components/feed-entry'
 import { Button } from '@/components/ui/button'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Tooltip } from '@/components/ui/heroui'
 import { Label } from '@/components/ui/label'
 import {
@@ -14,6 +19,7 @@ import {
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { eventLabel, type EventType } from '@/lib/events'
+import { belowSm, useMediaQuery } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import type { RouteProps } from '@/routes/registry'
@@ -60,7 +66,7 @@ export function TimelineStatus() {
             }}
             className={cn(
               focusRing,
-              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
+              'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
             )}
           >
             <History className="size-3.5" aria-hidden />
@@ -122,8 +128,49 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
     if (!useStore.getState().feedLoading) void drain(useStore, client)
   }, [lastSeq, client])
 
+  // Tailwind's `sm`: below it the four selects stack, one labelled row each.
+  const narrow = useMediaQuery(belowSm)
+
   const workspaceRuns = Object.values(runs).filter(
     (r) => r.workspace_id === filters.workspaceID,
+  )
+  const narrowed = [filters.runID, filters.memberID, filters.type].filter(Boolean)
+    .length
+
+  const workspaceFilter = (
+    <FilterSelect
+      label="Workspace"
+      value={filters.workspaceID}
+      // A run belongs to one workspace, so a kept run filter would query the
+      // new workspace for a run it does not have and render nothing.
+      onChange={(workspaceID) => setFilters({ workspaceID, runID: '' })}
+      options={Object.values(workspaces).map((w) => [w.id, w.name])}
+    />
+  )
+  const otherFilters = (
+    <>
+      <FilterSelect
+        label="Run"
+        value={filters.runID}
+        onChange={(runID) => setFilters({ runID })}
+        options={[['', 'Every run'], ...workspaceRuns.map((r) => [r.id, runLabel(r)])]}
+      />
+      <FilterSelect
+        label="Member"
+        value={filters.memberID}
+        onChange={(memberID) => setFilters({ memberID })}
+        options={[
+          ['', 'Everyone'],
+          ...Object.values(members).map((m) => [m.id, m.display_name]),
+        ]}
+      />
+      <FilterSelect
+        label="Type"
+        value={filters.type}
+        onChange={(type) => setFilters({ type })}
+        options={types}
+      />
+    </>
   )
 
   return (
@@ -132,36 +179,24 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
         title="Activity"
         subtitle={`${feed.length} ${feed.length === 1 ? 'entry' : 'entries'}`}
       />
-      <div className="grid shrink-0 grid-cols-1 gap-x-3 gap-y-2 border-b bg-sidebar px-3 py-2 sm:grid-cols-2 sm:px-4 xl:grid-cols-4">
-        <FilterSelect
-          label="Workspace"
-          value={filters.workspaceID}
-          // A run belongs to one workspace, so a kept run filter would query
-          // the new workspace for a run it does not have and render nothing.
-          onChange={(workspaceID) => setFilters({ workspaceID, runID: '' })}
-          options={Object.values(workspaces).map((w) => [w.id, w.name])}
-        />
-        <FilterSelect
-          label="Run"
-          value={filters.runID}
-          onChange={(runID) => setFilters({ runID })}
-          options={[['', 'Every run'], ...workspaceRuns.map((r) => [r.id, runLabel(r)])]}
-        />
-        <FilterSelect
-          label="Member"
-          value={filters.memberID}
-          onChange={(memberID) => setFilters({ memberID })}
-          options={[
-            ['', 'Everyone'],
-            ...Object.values(members).map((m) => [m.id, m.display_name]),
-          ]}
-        />
-        <FilterSelect
-          label="Type"
-          value={filters.type}
-          onChange={(type) => setFilters({ type })}
-          options={types}
-        />
+      <div className="shrink-0 border-b bg-sidebar px-3 py-2 sm:px-4">
+        {narrow ? (
+          // Four labelled selects are most of a phone screen before the first
+          // entry. The workspace one scopes the feed, so it stays; the count
+          // says what is still being filtered out while the rest are away.
+          <Collapsible className="grid gap-2">
+            {workspaceFilter}
+            <CollapsibleTrigger className="text-[13px] font-medium text-foreground">
+              Filters{narrowed > 0 && ` (${narrowed})`}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="grid gap-2">{otherFilters}</CollapsibleContent>
+          </Collapsible>
+        ) : (
+          <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-4">
+            {workspaceFilter}
+            {otherFilters}
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">

@@ -40,9 +40,9 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
           <div className="w-full max-w-lg border border-border/70 bg-card px-4 py-4 text-left">
             <p className="text-base font-medium">Machine settings are unavailable here</p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              These settings manage this machine's link and sync daemon, so they
-              live in the desktop app or `aether gui`. This gateway is a remote
-              monitor.
+              These settings manage a computer's link and sync daemon. This
+              dashboard is served by the Aether server, which cannot reach
+              that computer. Open the desktop app or `aether gui` on it.
             </p>
           </div>
         </div>

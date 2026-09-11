@@ -6,6 +6,7 @@ import { api, type Api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
 import { terminalFontFamily } from '@/lib/term-font'
 import type { Run, Workspace } from '@/lib/types'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { FilePatch } from '@/routes/diff/patch-view'
@@ -128,7 +129,7 @@ function WorkspaceTree({
         type="button"
         className={cn(
           focusRing,
-          'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[13px] font-medium hover:bg-toolbar-hover',
+          'flex min-h-7 coarse:min-h-11 w-full items-center gap-1.5 px-1.5 text-left text-[13px] font-medium hover:bg-toolbar-hover',
         )}
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
@@ -217,7 +218,7 @@ function TreeDirectory({
         type="button"
         className={cn(
           focusRing,
-          'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
+          'flex min-h-7 coarse:min-h-11 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
         )}
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
@@ -263,7 +264,7 @@ function TreeDirectory({
                 aria-current={isSelected ? 'page' : undefined}
                 className={cn(
                   focusRing,
-                  'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
+                  'flex min-h-7 coarse:min-h-11 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
                   isSelected && 'bg-selection text-selection-foreground',
                 )}
                 onClick={() => onSelect(source, childPath)}
@@ -367,7 +368,7 @@ function FileViewer({
           type="button"
           className={cn(
             focusRing,
-            'inline-flex h-[26px] items-center gap-1.5 border border-input bg-background px-2 text-[12px] font-medium md:hidden',
+            'inline-flex h-[26px] coarse:h-11 items-center gap-1.5 border border-input bg-background px-2 text-[12px] font-medium md:hidden',
           )}
           onClick={onBrowse}
         >
@@ -394,7 +395,7 @@ function FileViewer({
               aria-selected={mode === 'file'}
               className={cn(
                 focusRing,
-                'min-h-[22px] shrink-0 px-2 text-[12px] font-medium',
+                'min-h-[22px] coarse:min-h-11 shrink-0 px-2 text-[12px] font-medium',
                 mode === 'file'
                   ? 'bg-selection text-selection-foreground'
                   : 'text-muted-foreground hover:bg-toolbar-hover',
@@ -409,7 +410,7 @@ function FileViewer({
               aria-selected={mode === 'diff'}
               className={cn(
                 focusRing,
-                'min-h-[22px] shrink-0 px-2 text-[12px] font-medium',
+                'min-h-[22px] coarse:min-h-11 shrink-0 px-2 text-[12px] font-medium',
                 mode === 'diff'
                   ? 'bg-selection text-selection-foreground'
                   : 'text-muted-foreground hover:bg-toolbar-hover',
@@ -476,6 +477,12 @@ function DiffDocument({
 }: {
   state?: { patch: string; truncated: boolean; loading?: boolean }
 }) {
+  // The Diff tab's preference, not a second one: this pane has one column and
+  // no room for a toolbar, so it never sets the choice, but a member who made
+  // it there meant it for reading a diff rather than for one tab of them.
+  const stored = useStore((s) => s.diffWrap)
+  const coarse = useMediaQuery(coarsePointer)
+  const wrap = stored ?? coarse
   if (!state || state.loading) {
     return (
       <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">
@@ -496,7 +503,7 @@ function DiffDocument({
       ) : (
         <div>
           {files.map((file) => (
-            <FilePatch key={file.path} file={file} />
+            <FilePatch key={file.path} file={file} wrap={wrap} />
           ))}
         </div>
       )}
