@@ -16,13 +16,21 @@ import { test as base } from './fixtures'
 const softKeyboardHeight = 320
 
 /**
- * Raises a simulated soft keyboard and returns the call that lowers it.
+ * Shrinks the layout viewport to what a phone keyboard would leave, and
+ * returns the call that restores it.
  *
- * Playwright cannot raise the platform keyboard, so this shrinks the layout
- * viewport instead - the shape a keyboard takes on a page that asks for
- * `interactive-widget=resizes-content`. It is the harsher of the two shapes:
- * a browser that only shrinks the visual viewport still has the full page
- * laid out behind the keyboard.
+ * Read this as a short-viewport proxy, not as a keyboard test. Playwright
+ * cannot raise the platform keyboard, and the dashboard ships Next's default
+ * `width=device-width, initial-scale=1` viewport meta, which leaves a phone
+ * on `interactive-widget=resizes-visual`: a real keyboard keeps the layout
+ * at its full height and shrinks only `visualViewport`. Shrinking the layout
+ * viewport is the `resizes-content` shape, so a spec built on this proves
+ * the shell survives a short screen. Content stranded behind a real keyboard
+ * stays a manual check.
+ *
+ * When the shell asks for `interactive-widget=resizes-content`, this becomes
+ * the shape that ships: say so here and in "The phone project" in
+ * docs/testing.md.
  */
 export async function raiseSoftKeyboard(
   page: Page,

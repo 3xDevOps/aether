@@ -49,7 +49,7 @@ test('the version label is plain until an update is available', () => {
 })
 
 test('opens and closes the secondary status actions on a phone', async () => {
-  atViewport(390, 'coarse')
+  atViewport(390, { height: 844 })
   seed()
   render(<StatusBar />)
 
@@ -71,12 +71,17 @@ test('the wide layout keeps every readout up', async () => {
   seed()
   render(<StatusBar />)
 
+  const member = screen.getByText(alice.display_name)
+  const details = member.closest('#status-details')
+  expect(details?.getAttribute('data-state')).toBe('open')
+
   const toggle = screen.getByRole('button', { name: 'Show status details' })
   expect(toggle.getAttribute('aria-expanded')).toBe('true')
 
   toggle.focus()
   await userEvent.keyboard('{Enter}')
   expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(details?.getAttribute('data-state')).toBe('open')
 })
 
 test('a CLI update turns the label into a button that clears the dismissals', async () => {

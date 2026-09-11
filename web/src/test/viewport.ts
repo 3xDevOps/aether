@@ -1,7 +1,8 @@
 // One viewport for a component test. jsdom has no layout, so `setup.ts`
 // answers every media query with `false` and components render their widest
 // layout. `atViewport` answers the width and pointer queries for a screen of
-// a given size instead, which is what a narrow or touch layout needs.
+// a given size instead, and reports that size from `window.innerWidth` and
+// `window.innerHeight`, which is what a narrow or touch layout needs.
 //
 // The browser suite (`web/e2e/`) stays the layer that proves real layout:
 // this decides which branch a component renders, not how it looks.
@@ -10,6 +11,13 @@ import { act } from '@testing-library/react'
 
 /** What a screen's input is: a finger is coarse, a mouse is fine. */
 export type Pointer = 'coarse' | 'fine'
+
+export interface Screen {
+  /** Defaults to the height jsdom already reports. */
+  height?: number
+  /** Defaults to a mouse. */
+  pointer?: Pointer
+}
 
 type Listener = (event: MediaQueryListEvent) => void
 
@@ -31,16 +39,26 @@ function evaluate(query: string, width: number, pointer: Pointer): boolean {
   })
 }
 
+// jsdom defines innerWidth and innerHeight as read-only accessors, so a
+// plain assignment is dropped without an error.
+function report(width: number, height: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: height })
+}
+
 /**
- * Evaluates width and pointer media queries against one screen for the rest
- * of the test. Returns the resize a component listens for: it re-evaluates
- * every query the component asked for and fires `change` on those whose
- * answer moved.
+ * Renders the rest of the test on one screen: width and pointer media
+ * queries answer for it, and `window.innerWidth`/`innerHeight` report it.
+ * Returns the resize a component listens for, which re-evaluates every query
+ * the component asked for, fires `change` on those whose answer moved, and
+ * fires `resize` on the window.
  */
 export function atViewport(
   width: number,
-  pointer: Pointer = 'fine',
+  screen: Screen = {},
 ): (width: number) => void {
+  const pointer = screen.pointer ?? 'fine'
+  const height = screen.height ?? window.innerHeight
   const listeners = new Map<string, Set<Listener>>()
   const asked = (query: string) => {
     const existing = listeners.get(query)
@@ -51,13 +69,22 @@ export function atViewport(
   }
   let current = width
 
-  const previous = window.matchMedia
+  const previous = {
+    matchMedia: window.matchMedia,
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }
   onTestFinished(() => {
-    window.matchMedia = previous
+    window.matchMedia = previous.matchMedia
+    report(previous.width, previous.height)
   })
+  report(width, height)
   window.matchMedia = (query: string) =>
     ({
-      matches: evaluate(query, current, pointer),
+      // A getter, so a list read after a resize answers for the new width.
+      get matches() {
+        return evaluate(query, current, pointer)
+      },
       media: query,
       onchange: null,
       addEventListener: (_: string, fn: Listener) => asked(query).add(fn),
@@ -75,7 +102,9 @@ export function atViewport(
       ]),
     )
     current = next
+    report(next, height)
     act(() => {
+      window.dispatchEvent(new Event('resize'))
       for (const [query, fns] of listeners) {
         const matches = evaluate(query, current, pointer)
         if (matches === before.get(query)) continue

@@ -71,7 +71,18 @@ test('the phone status bar keeps every control inside the viewport', async ({
   expect(popupBox.y).toBeGreaterThanOrEqual(0)
   expect(popupBox.x + popupBox.width).toBeLessThanOrEqual(viewport.width)
   expect(popupBox.y + popupBox.height).toBeLessThanOrEqual(viewport.height)
-  await expect(popup).toHaveCSS('overflow-y', 'auto')
+
+  // Bounded means bounded, not clipped: whatever the popup keeps below its
+  // own edge has to be reachable by scrolling. This content fits today, so
+  // the check is the guard for the day it does not.
+  const scrolled = await popup.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    return {
+      reached: element.scrollTop,
+      below: element.scrollHeight - element.clientHeight,
+    }
+  })
+  expect(scrolled.reached).toBe(scrolled.below)
 
   // Nothing the popup carries may push the page sideways or downwards: the
   // shell owns the whole screen and the member has no window to widen.

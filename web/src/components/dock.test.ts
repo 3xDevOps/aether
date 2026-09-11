@@ -2,23 +2,15 @@ import { createElement, useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Dock, clampDockHeight } from '@/components/dock'
+import { atViewport } from '@/test/viewport'
 
 describe('clampDockHeight', () => {
   it('keeps dock heights between 120px and the viewport limit', () => {
-    const originalHeight = window.innerHeight
-    Object.defineProperty(window, 'innerHeight', {
-      configurable: true,
-      value: 900,
-    })
+    atViewport(1440, { height: 900 })
 
     expect(clampDockHeight(0)).toBe(120)
     expect(clampDockHeight(500)).toBe(500)
     expect(clampDockHeight(900)).toBe(700)
-
-    Object.defineProperty(window, 'innerHeight', {
-      configurable: true,
-      value: originalHeight,
-    })
   })
 })
 describe('Dock controls', () => {
