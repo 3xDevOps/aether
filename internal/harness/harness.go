@@ -316,8 +316,11 @@ type Profile struct {
 	// in the launch environment instead: opencode loads a plugin named in
 	// OPENCODE_CONFIG_CONTENT. CoordPlaceholder stands for the same
 	// directory as in StatusArgs. It is applied after the workspace's own
-	// variables, so a workspace cannot switch the reporter off, and like
-	// StatusArgs only an interactive run gets it.
+	// variables, so these names carry the server's value whatever a
+	// workspace sets them to, and like StatusArgs only an interactive run
+	// gets it. That is not a guarantee the reporter loads: a harness has
+	// other switches of its own, and Aether takes none of them away from
+	// the member (docs/harnesses.md).
 	StatusEnv map[string]string
 	// StatusFiles are the assets StatusArgs and StatusEnv point at, written
 	// into the run's coordination directory before the container exists,

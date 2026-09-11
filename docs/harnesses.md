@@ -151,7 +151,7 @@ on silence alone and parks at `needs-attention` after `--stall-threshold`
 with a reason that leads with `stalled:`. See
 [failure-handling.md](failure-handling.md).
 
-Three things turn the reporter off:
+Four things turn the reporter off:
 
 - **Headless runs.** `--mode headless` never gets the asset: the agent
   exits when it is done and never waits for anyone.
@@ -161,6 +161,11 @@ Three things turn the reporter off:
   shipped harness drops the status arguments and the status environment
   exactly as it drops the MCP flag - nothing checks the overridden command
   is still that CLI.
+- **`OPENCODE_PURE` in the workspace environment.** opencode loads no
+  external plugin at all when that variable is set, Aether's included, and
+  Aether does not take it away from you. The run launches and works
+  normally; it reports nothing, and is judged on silence like a harness
+  with no reporter.
 
 Both assets are server-written, read-only, and live in `/run/aether`, never
 in the worktree or the member's synced profile. Each applies for that launch
@@ -513,7 +518,9 @@ on which timeline.
 
 ## Adding a harness
 
-The registry is one map entry: argv templates for both modes, credential paths,
-profile root, denylist, API key passthrough, and the optional MCP, session,
-and resume flags. An adapter is a separate, optional file. Both are covered in
-[adapters.md](adapters.md).
+The registry is one map entry: argv templates for both modes, credential
+paths, profile root, denylist, API key passthrough, the optional MCP,
+session, and resume flags, and the status reporter - what the harness can
+report, the arguments or environment variables that point it at the
+reporter asset, and the asset files themselves. An adapter is a separate,
+optional file. Both are covered in [adapters.md](adapters.md).
