@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -103,11 +104,11 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 			case protocol.SubsystemControl:
 				handler = func() { s.serveControl(ctx, member, ch) }
 			case protocol.SubsystemEvents:
-				handler = func() { s.serveEvents(ctx, member, ch) }
+				handler = func() { s.serveEvents(ctx, member, sshConn{ch}) }
 			case protocol.SubsystemAttach:
-				handler = func() { s.serveAttach(ctx, member, st, ch) }
+				handler = func() { s.serveAttach(ctx, member, st, sshConn{ch}) }
 			case protocol.SubsystemTerminal:
-				handler = func() { s.serveTerminal(ctx, member, st, ch) }
+				handler = func() { s.serveTerminal(ctx, member, st, sshConn{ch}) }
 			case protocol.SubsystemSync:
 				handler = func() { s.serveSync(ctx, member, ch) }
 			}
@@ -196,3 +197,18 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 func sendExitStatus(ch ssh.Channel, code int) {
 	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{uint32(code)}))
 }
+
+// subsystemConn is the stream the events, attach and terminal handlers
+// serve: the session channel under SSH, an in-memory pipe for the
+// in-process client (Local). The wire contract - header line in, ack line
+// out, raw bytes, exit status - is the same on both.
+type subsystemConn interface {
+	io.ReadWriteCloser
+	// exit reports the handler's exit status the way an SSH channel's
+	// exit-status request does.
+	exit(status int)
+}
+
+type sshConn struct{ ssh.Channel }
+
+func (c sshConn) exit(status int) { sendExitStatus(c.Channel, status) }

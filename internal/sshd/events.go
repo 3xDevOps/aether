@@ -7,8 +7,6 @@ import (
 	"errors"
 	"io"
 
-	"golang.org/x/crypto/ssh"
-
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -18,9 +16,9 @@ import (
 // channel: one SubscribeRequest line in, an ack, then Event lines out. On
 // a buffer drop the channel is closed so the client re-subscribes from its
 // last seen cursor.
-func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch ssh.Channel) {
+func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch subsystemConn) {
 	defer func() {
-		sendExitStatus(ch, 0)
+		ch.exit(0)
 		_ = ch.Close()
 	}()
 	capped := &capReader{r: ch, left: maxSubsystemHeaderBytes}

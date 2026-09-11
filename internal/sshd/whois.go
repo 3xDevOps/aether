@@ -127,18 +127,18 @@ func memberColorsOf(members []*domain.Member) []string {
 func (s *Server) authenticateTailnet(cm ssh.ConnMetadata) (*ssh.Permissions, error) {
 	ctx, cancel := context.WithTimeout(s.authCtx(), authTimeout)
 	defer cancel()
-	id, err := s.cfg.WhoIs.WhoIs(ctx, cm.RemoteAddr().String())
-	if err != nil {
-		slog.Warn("sshd: tailnet whois failed; falling back to key auth", "error", err)
+	id, err := s.tailnetIdentity(ctx, cm.RemoteAddr().String())
+	if errors.Is(err, ErrTaggedNode) {
 		return nil, &ssh.BannerError{
-			Err:     fmt.Errorf("sshd: tailnet whois: %w", err),
-			Message: "tailnet identity unavailable; key authentication required\n",
+			Err:     err,
+			Message: "tagged tailnet node; key authentication required\n",
 		}
 	}
-	if id.Tagged || id.Login == "" {
+	if err != nil {
+		slog.Warn("sshd: tailnet whois failed; falling back to key auth", "error", errors.Unwrap(err))
 		return nil, &ssh.BannerError{
-			Err:     errors.New("sshd: tagged tailnet node"),
-			Message: "tagged tailnet node; key authentication required\n",
+			Err:     err,
+			Message: "tailnet identity unavailable; key authentication required\n",
 		}
 	}
 	if s.cfg.TailnetRequireKey {
@@ -147,6 +147,37 @@ func (s *Server) authenticateTailnet(cm ssh.ConnMetadata) (*ssh.Permissions, err
 			Message: "tailnet login " + id.Login + " must also present a registered SSH key\n",
 		}
 	}
+	m, err := s.tailnetMember(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("sshd: tailnet auth",
+		"member", m.ID, "login", id.Login, "node", id.NodeID,
+		"user", cm.User(), "method", "tailnet", "pending", m.Pending)
+	return &ssh.Permissions{Extensions: map[string]string{memberIDExtension: string(m.ID)}}, nil
+}
+
+// ErrTaggedNode is a tailnet connection from a tagged node: no person
+// stands behind it, so it never maps to a member through WhoIs.
+var ErrTaggedNode = errors.New("sshd: tagged tailnet node")
+
+// tailnetIdentity resolves remoteAddr through WhoIs and refuses tagged
+// nodes. A resolver failure comes back wrapped, so callers can tell it
+// from the tagged-node refusal.
+func (s *Server) tailnetIdentity(ctx context.Context, remoteAddr string) (WhoIsIdentity, error) {
+	id, err := s.cfg.WhoIs.WhoIs(ctx, remoteAddr)
+	if err != nil {
+		return WhoIsIdentity{}, fmt.Errorf("sshd: tailnet whois: %w", err)
+	}
+	if id.Tagged || id.Login == "" {
+		return WhoIsIdentity{}, ErrTaggedNode
+	}
+	return id, nil
+}
+
+// tailnetMember maps a resolved tailnet login to its member, registering
+// an unknown login.
+func (s *Server) tailnetMember(ctx context.Context, id WhoIsIdentity) (*domain.Member, error) {
 	m, err := s.cfg.Store.GetMemberByTailnetLogin(ctx, id.Login)
 	if errors.Is(err, store.ErrNotFound) {
 		m, err = s.registerTailnetMember(ctx, id)
@@ -154,10 +185,34 @@ func (s *Server) authenticateTailnet(cm ssh.ConnMetadata) (*ssh.Permissions, err
 	if err != nil {
 		return nil, fmt.Errorf("sshd: resolve tailnet login %s: %w", id.Login, err)
 	}
-	slog.Info("sshd: tailnet auth",
-		"member", m.ID, "login", id.Login, "node", id.NodeID,
-		"user", cm.User(), "method", "tailnet", "pending", m.Pending)
-	return &ssh.Permissions{Extensions: map[string]string{memberIDExtension: string(m.ID)}}, nil
+	return m, nil
+}
+
+// TailnetMember identifies the tailnet node behind remoteAddr ("ip:port")
+// as a member, exactly as the SSH "none" auth does: WhoIs on the address,
+// tagged nodes refused with ErrTaggedNode, unknown logins registered (the
+// first as admin, later ones pending unless TailnetAutoJoin). It is the
+// identity of every request on the server-hosted dashboard, which cannot
+// present a key; WebIdentity says whether this server allows that.
+func (s *Server) TailnetMember(ctx context.Context, remoteAddr string) (*domain.Member, error) {
+	id, err := s.tailnetIdentity(ctx, remoteAddr)
+	if err != nil {
+		return nil, err
+	}
+	return s.tailnetMember(ctx, id)
+}
+
+// WebIdentity reports whether this server can identify a dashboard
+// request by its tailnet address alone; the error names why not, and
+// what an operator changes.
+func (s *Server) WebIdentity() error {
+	if s.cfg.WhoIs == nil {
+		return errors.New("the dashboard identifies members by tailnet WhoIs and tailscaled was not running when the server started (no " + DefaultTailscaledSocket + "); start Tailscale before the server, or set web-port to 0")
+	}
+	if s.cfg.TailnetRequireKey {
+		return errors.New("tailnet-require-key demands an SSH key on every tailnet connection and the dashboard cannot present one; set one of tailnet-require-key and web-port off")
+	}
+	return nil
 }
 
 // registerTailnetMember auto-registers an unknown tailnet login. The

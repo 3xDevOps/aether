@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 
-	"golang.org/x/crypto/ssh"
-
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -23,7 +21,7 @@ func init() {
 // serveTerminal serves one member's persistent environment terminal. The
 // member identity comes from the authenticated SSH connection, so the header
 // cannot select another member's environment.
-func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *sessionState, ch ssh.Channel) {
+func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *sessionState, ch subsystemConn) {
 	defer func() { _ = ch.Close() }()
 
 	capped := &capReader{r: ch, left: maxSubsystemHeaderBytes}
@@ -92,7 +90,7 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 			e := rpcError(attachErr)
 			_ = writeJSONLine(ch, protocol.TerminalResponse{OK: false, Code: e.Code, Error: e.Message})
 		} else {
-			sendExitStatus(ch, 1)
+			ch.exit(1)
 		}
 		return
 	}
@@ -108,11 +106,11 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	}
 	switch {
 	case errors.Is(context.Cause(attachCtx), errAttachMembershipRevoked):
-		sendExitStatus(ch, protocol.AttachExitMembershipRevoked)
+		ch.exit(protocol.AttachExitMembershipRevoked)
 	case attachErr == nil:
-		sendExitStatus(ch, 0)
+		ch.exit(0)
 	default:
-		sendExitStatus(ch, 1)
+		ch.exit(1)
 	}
 }
 

@@ -75,6 +75,7 @@ run "aether-server serve -h" for what each one does, or keep them in %s
 type serveOptions struct {
 	dataDir              *string
 	addr                 *string
+	webPort              *int
 	standardImage        *string
 	harnessDefinitions   *string
 	tailnetAutoJoin      *bool
@@ -95,6 +96,8 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o := &serveOptions{}
 	o.dataDir = fs.String("data-dir", server.DefaultDataDir, "server data directory")
 	o.addr = fs.String("addr", server.DefaultAddr, "SSH listen address")
+	o.webPort = fs.Int("web-port", 0,
+		"serve the dashboard over HTTPS on this host's tailnet addresses at this port (0 = off; 443 makes it https://<magicdns-name>/)")
 	o.standardImage = fs.String("standard-image", server.DefaultStandardImage,
 		"published standard environment image recommended at workspace creation")
 	o.harnessDefinitions = fs.String("harness-definitions", os.Getenv("AETHER_HARNESS_DEFINITIONS"),
@@ -136,6 +139,7 @@ func serve(args []string) error {
 	srv, err := server.New(ctx, server.Config{
 		DataDir:           *o.dataDir,
 		Addr:              *o.addr,
+		WebPort:           *o.webPort,
 		StandardImage:     *o.standardImage,
 		Harnesses:         harnesses,
 		TailnetAutoJoin:   *o.tailnetAutoJoin,
@@ -156,8 +160,12 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s (data dir %s)%s\n",
-		version.String(), *o.addr, *o.dataDir, from)
+	web := ""
+	if url := srv.WebURL(); url != "" {
+		web = " and the dashboard on " + url
+	}
+	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s%s (data dir %s)%s\n",
+		version.String(), *o.addr, web, *o.dataDir, from)
 	return srv.Run(ctx)
 }
 

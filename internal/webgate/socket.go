@@ -19,12 +19,17 @@ const (
 	// readHeaderTimeout bounds how long a client may take to send its
 	// header frame after the socket opens.
 	readHeaderTimeout = 10 * time.Second
-	// pingInterval is how often a live socket is pinged. A phone that
-	// changed networks or went to sleep leaves a half-open TCP
-	// connection that reads as live on both ends; the ping turns that
-	// into a close within pingInterval plus wsWriteTimeout, which is what
-	// releases its PTY client and stops it clamping the geometry.
+)
+
+// A live socket is pinged every pingInterval and closed when the pong
+// takes longer than pingTimeout. A phone that changed networks or went
+// to sleep leaves a half-open TCP connection that reads as live on both
+// ends; the ping turns that into a close within the sum of the two,
+// which is what releases its PTY client and stops it clamping the
+// geometry. Variables so a test can shorten them.
+var (
 	pingInterval = 30 * time.Second
+	pingTimeout  = 10 * time.Second
 )
 
 // Socket is one accepted WebSocket. Ctx is canceled when the peer goes
@@ -78,7 +83,7 @@ func (s *Socket) keepAlive() {
 		case <-s.Ctx.Done():
 			return
 		case <-ticker.C:
-			ctx, done := context.WithTimeout(s.Ctx, wsWriteTimeout)
+			ctx, done := context.WithTimeout(s.Ctx, pingTimeout)
 			err := s.Conn.Ping(ctx)
 			done()
 			if err != nil {
