@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
@@ -65,6 +66,20 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 			}
 		}
 	}
+	if entry.agentReport == report {
+		// Nothing new to remember. Claude Code fires a working report on
+		// every tool call, so this is the common case and has to stay free
+		// of a disk write.
+		return nil
+	}
 	entry.agentReport = report
+	// Persisted under s.mu, like the other supervision state a restart has
+	// to come back to: the run row says the run needs its member, only the
+	// report says the agent asked for that itself.
+	if s.runs[run] == entry {
+		if err := s.writeSidecar(entry.sidecar()); err != nil {
+			slog.Warn("scheduler: persist agent report", "run", run, "error", err)
+		}
+	}
 	return nil
 }

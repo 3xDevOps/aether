@@ -189,8 +189,12 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
 			case e.status == domain.RunNeedsAttention && observed && idle <= s.cfg.StallThreshold && !heldForTheMember:
 				// The run goes back to being judged on silence alone, so
-				// the next quiet threshold parks it as a stall again.
+				// the next quiet threshold parks it as a stall again - and
+				// a restart must not resurrect the report this clears.
 				e.agentReport = agentstatus.Report{}
+				if serr := s.writeSidecar(e.sidecar()); serr != nil {
+					slog.Warn("scheduler: persist cleared agent report", "run", e.runID, "error", serr)
+				}
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunRunning,
 					"activity resumed", "")
 			}

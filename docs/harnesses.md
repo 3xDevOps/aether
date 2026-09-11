@@ -109,6 +109,10 @@ turns it into a run status straight away:
 Anything else the harness reports - a session opening, a subagent, a
 compaction - is ignored rather than guessed at.
 
+The last report is recorded with the run, so it survives a server restart:
+a run the agent parked comes back parked, and only the agent's own next
+turn releases it. See [failure-handling.md](failure-handling.md).
+
 For a harness with a **Status** of `-`, nothing changes: the run is judged
 on silence alone and parks at `needs-attention` after `--stall-threshold`
 with a reason that leads with `stalled:`. See

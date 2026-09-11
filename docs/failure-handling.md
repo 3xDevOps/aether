@@ -53,7 +53,7 @@ or typing on an attach) is usually what gets it talking. A run parked
 because its agent said it was waiting is the exception: output alone does
 not release it, because a TUI repainting while you type is output and is not
 work. The agent's own next turn releases it, which is what typing into it
-produces.
+produces - across a server restart too.
 
 Steering is not itself that output. A steer's attributed banner is the
 server's own, and so is the terminal's echo of the steered line - or of
@@ -93,7 +93,10 @@ against the runtime's actual containers:
   watch restarts from the tree its last snapshot wrote so the next interval
   continues the chain, and the run stays `running`. Attaches, injects and the
   eventual exit all work as if nothing happened. A kill that was accepted
-  before the crash is re-issued.
+  before the crash is re-issued. A run the agent had parked stays parked
+  with its reason: the last report is recovered with the run, so
+  reattaching - which resizes the terminal and makes a full-screen agent
+  repaint - does not read as the turn resuming.
 - **The container is gone**: the partial work is committed as `wip:`, the
   run branch is published, and the run is marked `interrupted` with its
   checkout preserved.
@@ -200,7 +203,9 @@ answer, with a reason that reads `waiting for your input`,
 `waiting for your permission` or `waiting for your answer`. There is no
 delay: the report arrives as the agent stops. The run returns to `running`
 with `agent resumed` when the agent starts its next turn - which is what
-steering it produces - and not on terminal output alone.
+steering it produces - and not on terminal output alone. A server restart
+does not change that: the report is recovered with the run, so a run that
+was waiting for you is still waiting for you afterwards.
 
 **The run stalled.** No agent output, no file changes and nothing from the
 agent's reporter past `--stall-threshold` parks a live run at

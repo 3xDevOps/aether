@@ -463,12 +463,15 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		containerID: runtime.ID(sc.ContainerID),
 		task:        r.Task,
 		memberID:    r.AccountMember(),
-		// agentReport is deliberately not recovered: the container's agent
-		// has said nothing to this process yet. The run keeps its stored
-		// status until the next report, or until observed activity or a
-		// stall corrects it. The reporter comes off the sidecar because
-		// only the launch knew which reporter the container was given.
+		// The reporter and the last report both come off the sidecar,
+		// because only the live server saw either: which reporter the
+		// container was actually given, and whether the agent parked this
+		// run itself. Reattaching resizes the terminal, so a full-screen
+		// agent repaints at once - and without the report that repaint
+		// would read as work resuming and hand the run back to an agent
+		// that is still waiting for its member.
 		reporter:       sc.Reporter,
+		agentReport:    sc.agentReport(),
 		status:         r.Status,
 		startedAt:      started,
 		paused:         sc.Paused,

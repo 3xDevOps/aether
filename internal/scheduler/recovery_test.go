@@ -1088,3 +1088,53 @@ func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
 		t.Fatalf("run = %s after a repaint, want it still parked: the recovered run kept its reporter", r.Status)
 	}
 }
+
+// TestRecoveryKeepsAWaitingReportAcrossARestart pins the half of a restart
+// the run row cannot carry. The row says needs-attention, but not that the
+// agent itself asked for the member: without the report, the first thing
+// the recovered agent paints - and reattaching resizes the terminal, so a
+// full-screen TUI paints at once - reads as work resuming and hands the
+// run back to the agent it is still waiting for.
+func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
+	e := newReportingEnv(t, func(cfg *Config) {
+		// Far longer than the test: nothing here is a stall.
+		cfg.StallThreshold = time.Hour
+		cfg.PollInterval = 10 * time.Millisecond
+	})
+	run, c := e.launchReporting(t)
+	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
+		t.Fatalf("report waiting: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	pty2 := newFakePTY()
+	s2 := e.newScheduler(t, e.rt, pty2)
+	startScheduler(t, s2)
+	waitFor(t, "supervision resumed", func() bool { return pty2.session(run.ID) != nil })
+
+	// The recovered agent repaints. It has said nothing since the restart,
+	// so this is the same repaint the live scheduler refuses to treat as
+	// work - and the restart must not have forgotten that.
+	for range 10 {
+		c.output("redraw\r\n")
+		time.Sleep(10 * time.Millisecond)
+	}
+	r, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonInput {
+		t.Fatalf("run = %s because %q after a repaint, want it still parked because %q: the waiting report survives a restart",
+			r.Status, r.Reason, agentstatus.ReasonInput)
+	}
+
+	// The agent's own next turn still releases it.
+	if rerr := s2.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working}); rerr != nil {
+		t.Fatalf("report working after recovery: %v", rerr)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+}

@@ -201,9 +201,9 @@ type supervised struct {
 	// agentReport is the last thing the agent said about itself, zero until
 	// it says anything and again whenever activity un-parks the run. It is
 	// only ever set to a report the run's status already matches, so a
-	// report the store refused leaves the silence fallback armed. In memory
-	// only: after a server restart the run keeps its stored status and the
-	// next report - or the next stall - corrects it.
+	// report the store refused leaves the silence fallback armed. Mirrored
+	// into the run's sidecar on every change, so a run the agent parked
+	// for its member comes back from a restart still held for them.
 	agentReport agentstatus.Report
 	// lastWorking is when the agent last said it was working. A report is
 	// the only trace its hook leaves - it writes nothing to the terminal
