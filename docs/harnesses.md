@@ -23,7 +23,7 @@ Two rules shape everything below:
 | `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | hooks (`--settings`) | by session ID (`--session-id`, `--resume`) | PTY | yes |
 | `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | - | no | PTY | yes |
 | `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | - | best effort (`--continue`) | PTY | yes |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | `OPENCODE_CONFIG_CONTENT` | no | plugin (`OPENCODE_CONFIG_CONTENT`) | no | HTTP TUI API | no |
+| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | plugin (`OPENCODE_CONFIG_CONTENT`) | no | HTTP TUI API | no |
 | `fake` | a script you name | - | - | - | - | no | - | no | PTY | no |
 | `custom` | deployment-supplied | - | - | - | - | no | - | no | PTY | no |
 
@@ -44,13 +44,14 @@ The **Status** column is how the agent itself tells Aether it is waiting for
 you, rather than leaving the server to guess from silence. See "Status
 reporting" below.
 
-The **Launch env** column is what the server sets in the run container: a
-variable the CLI will not start without (`claude`), or the one that loads
-the status reporter where the CLI has no flag to point at it (`opencode`,
-on interactive runs only). Both land after the workspace's own variables,
-so a workspace can neither leave the agent unable to run nor switch the
-reporter off. See the launch table below for why `claude` needs one, and
-"Status reporting" for what `opencode` is given.
+The **Launch env** column is what the server sets in the run container
+because the CLI will not start without it. It is applied after the
+workspace's own variables, so a workspace cannot leave the agent unable to
+run. See the launch table below for why `claude` needs one. A reporter that
+rides in the environment rather than on the command line (`opencode`) is
+not in this column: it is set on interactive runs alone and is dropped by
+the same things that drop the reporter, so it lives under "Status
+reporting".
 
 The **Resume** column is what a relaunch uses when a server reboot
 interrupted the run. The flags ride directly behind the executable.
@@ -148,10 +149,10 @@ with a reason that leads with `stalled:`. See
 
 Three things turn the reporter off:
 
-- **Headless runs.** `--mode headless` never gets the hooks: the agent
+- **Headless runs.** `--mode headless` never gets the asset: the agent
   exits when it is done and never waits for anyone.
 - **`--conflict-coordination=false`.** There are no mounts, so there is no
-  socket to report on and no directory to write the settings into.
+  socket to report on and no directory to write the asset into.
 - **An argv override.** A `--harness-definitions` entry that redefines a
   shipped harness drops the status arguments and the status environment
   exactly as it drops the MCP flag - nothing checks the overridden command
