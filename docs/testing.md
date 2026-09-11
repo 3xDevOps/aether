@@ -184,6 +184,13 @@ which proxies every call over a real SSH connection to a real
 `aether-server`. Playwright is the runner, pinned to an exact version in
 `web/package.json`.
 
+Two projects share that one Chromium install. `chromium` uses the desktop
+descriptor and skips every `*.mobile.spec.ts`; `mobile` uses a Pixel-class
+descriptor - `isMobile` and `hasTouch`, so `pointer: coarse` matches and
+`tap()` sends real touch events - and runs those files alone. No spec runs
+under both. Run one with `bunx playwright test --project=mobile` from `web/`.
+A real phone reaches the same dashboard through the server gateway's URL.
+
 ```sh
 (cd web && bunx playwright install chromium)   # once, from the repo root
 make test-e2e
@@ -250,17 +257,19 @@ attaches the server's output to the report.
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
 | `status-bar-sizing` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths and full secondary readouts open by keyboard. The same bar on a phone is `status-bar.mobile` below |
+| `sidebar-drawer` | In a 600px desktop window, the sidebar drawer answering `Mod+B` itself and handing the palette back once it closes |
 | `keyboard-focus` | Real browser checks that Escape closes a dialog on a run without leaving the run, and that a focused control paints the app's outline with computed style and contrast against the actual background |
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,
-`run-provisioning`, `run-switch`, `terminal-images` and `terminal-tools` need a
-reachable Docker daemon and skip without one. That skip is specific to the
-dashboard suite: `make test-integration` requires its real Docker setup and
-fails when Docker is unavailable. The rest need only git, except
-`window-sizing`, which needs neither: it starts a gateway of its own rather
-than taking the `aether` fixture, because the CLI half of `update.check` is
-answered on the member's own machine and no server is involved.
+`run-provisioning`, `run-switch`, `shell-drawer.mobile`, `terminal-images` and
+`terminal-tools` need a reachable Docker daemon and skip without one. That
+skip is specific to the dashboard suite: `make test-integration` requires its
+real Docker setup and fails when Docker is unavailable. The rest need only
+git, except `window-sizing`, which needs neither: it starts a gateway of its
+own rather than taking the `aether` fixture, because the CLI half of
+`update.check` is answered on the member's own machine and no server is
+involved.
 The terminal image component tests separately pin File type/size validation,
 safe insertion without submission, native image-paste registration cleanup,
 and stale callback rejection after a terminal target remounts. The clipboard
@@ -281,6 +290,8 @@ covered - WebKit is not installed.
 | `files-browser.mobile` | On a phone, opening a real repository file from the sidebar rail, returning with Browse, and opening another file without losing the tree - every control tapped |
 | `onboarding-link.mobile` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach |
 | `status-bar.mobile` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport; on a screen too short for its own readouts it scrolls to them rather than cutting them off, and the theme toggle answers a tap on the bottom edge |
+| `shell-drawer.mobile` | On a phone, the run list as a modal drawer: it opens from the rail, its rows are finger-sized, and tapping a run leaves the drawer closed with that run on screen |
+| `launch-dialog.mobile` | On a phone viewport as short as a soft keyboard leaves, the launch form keeping its Launch button on screen |
 
 Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
 and a control that answers only a mouse would still pass a click-driven test.
@@ -299,7 +310,8 @@ helper proves is that the shell survives a short screen; content stranded
 behind a real keyboard stays a manual check on a phone
 (`docs/dashboard-frontend.md` has that path).
 
-The phone specs need git and no Docker. Run them alone against the binaries
+The phone specs need git; `shell-drawer.mobile` also needs Docker, because it
+opens a real run, and skips without it. Run them alone against the binaries
 `make build` produced:
 
 ```sh
