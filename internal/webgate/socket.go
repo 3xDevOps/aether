@@ -27,9 +27,9 @@ const (
 // ends; the ping turns that into a close within the sum of the two,
 // which is what releases its PTY client and stops it clamping the
 // geometry. Variables so a test can shorten them.
-var (
-	pingInterval = 30 * time.Second
-	pingTimeout  = 10 * time.Second
+const (
+	defaultPingInterval = 30 * time.Second
+	defaultPingTimeout  = 10 * time.Second
 )
 
 // Socket is one accepted WebSocket. Ctx is canceled when the peer goes
@@ -41,6 +41,10 @@ type Socket struct {
 	Ctx     context.Context
 	cancel  context.CancelFunc
 	release func()
+	// The keepalive's own copy, taken at accept: the gateway's settings
+	// are read here and nowhere the ping goroutine could race a change.
+	pingInterval time.Duration
+	pingTimeout  time.Duration
 }
 
 // Accept runs the prologue every WebSocket shares: authorize the
@@ -63,7 +67,14 @@ func (g *Gateway) Accept(w http.ResponseWriter, r *http.Request) (*Socket, bool)
 	conn.SetReadLimit(wsReadLimit)
 	ctx, cancel := context.WithCancel(g.ctx)
 	stop := context.AfterFunc(r.Context(), cancel)
-	s := &Socket{Conn: conn, Backend: backend, Ctx: ctx, cancel: cancel}
+	s := &Socket{
+		Conn:         conn,
+		Backend:      backend,
+		Ctx:          ctx,
+		cancel:       cancel,
+		pingInterval: g.cfg.PingInterval,
+		pingTimeout:  g.cfg.PingTimeout,
+	}
 	s.release = func() {
 		stop()
 		g.endHandler(conn)
@@ -76,14 +87,14 @@ func (g *Gateway) Accept(w http.ResponseWriter, r *http.Request) (*Socket, bool)
 // within the write timeout closes the socket, which ends the handler's
 // reads and writes with it.
 func (s *Socket) keepAlive() {
-	ticker := time.NewTicker(pingInterval)
+	ticker := time.NewTicker(s.pingInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-s.Ctx.Done():
 			return
 		case <-ticker.C:
-			ctx, done := context.WithTimeout(s.Ctx, pingTimeout)
+			ctx, done := context.WithTimeout(s.Ctx, s.pingTimeout)
 			err := s.Conn.Ping(ctx)
 			done()
 			if err != nil {
