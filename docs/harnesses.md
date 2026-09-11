@@ -21,8 +21,9 @@ Two rules shape everything below:
 | `--agent` | CLI | Login state | Profile sync root | API key env | Launch env | MCP | Status | Resume | Steering | Env setup |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | hooks (`--settings`) | by session ID (`--session-id`, `--resume`) | PTY | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | - | no | PTY | yes |
-| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | - | best effort (`--continue`) | PTY | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | notify (`-c notify=[...]`) | no | PTY | yes |
+| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | best effort (`--continue`) | PTY | yes |
+| `omp` | oh-my-pi | `~/.omp` | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | best effort (`--continue`) | PTY | no |
 | `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | plugin (`OPENCODE_CONFIG_CONTENT`) | no | HTTP TUI API | no |
 | `fake` | a script you name | - | - | - | - | no | - | no | PTY | no |
 | `custom` | deployment-supplied | - | - | - | - | no | - | no | PTY | no |
@@ -71,9 +72,9 @@ whichever conversation the harness spoke last in the working directory.
 Every run mounts its checkout at the same container path and shares one
 credential home per member, so what comes back is that member's *most
 recent* conversation at that path - not necessarily the interrupted run's
-own, and not necessarily one from the same workspace. `pi` has no
-launch-time session ID, so it stays here, and so does any run row created
-before session pinning existed.
+own, and not necessarily one from the same workspace. Neither `pi` nor its
+fork `omp` has a launch-time session ID, so they stay here, and so does any
+run row created before session pinning existed.
 
 A harness with neither starts fresh, and a deployment-supplied argv override
 never has any of these appended - nothing checks the override is still that
@@ -86,19 +87,23 @@ session of its own. See [failure-handling.md](failure-handling.md).
 first half comes from the agent itself.
 
 A harness with a **Status** entry can run a command on its own lifecycle
-events. Aether writes the asset that arranges it into the run's coordination
-directory beside the MCP config, and points the harness at it for that
-launch alone - by flag where the CLI has one, by environment where it does
-not.
-
-`claude` takes a settings document registering a hook on every event that
-says something. The interactive launch in full, with the session pin and
-the MCP registration it already carried:
+events. Aether points each one at the staged server binary inside the
+container, through whatever the CLI's own mechanism is, for that launch
+alone - by flag where the CLI has one, by environment where it does not -
+and where that mechanism needs a file, the file is written into the run's
+coordination directory beside the MCP config. The interactive launch of
+each, with the session pin and the MCP registration it already carried:
 
 ```
 claude --session-id <uuid> --dangerously-skip-permissions "<task>" \
   --mcp-config /run/aether/mcp.json \
   --settings /run/aether/claude-settings.json
+
+codex --dangerously-bypass-approvals-and-sandbox "<task>" \
+  -c 'notify=["/opt/aether/aether-server","report","codex"]'
+
+pi "<task>" -e /run/aether/status.ts
+omp --auto-approve "<task>" -e /run/aether/status.ts
 ```
 
 `opencode` has no flag for a plugin, so its launch command is untouched and
@@ -109,10 +114,12 @@ OPENCODE_CONFIG_CONTENT={"plugin":["file:///run/aether/opencode-status.js"]}
 opencode --prompt="<task>"
 ```
 
-Either asset ends up running the same command inside the container:
+Every one of them ends up running the same command inside the container:
 
 ```
-/opt/aether/aether-server report claude     # the hook, with the event JSON on stdin
+/opt/aether/aether-server report claude                # hook event JSON on stdin
+/opt/aether/aether-server report codex '<payload>'     # the notify argument
+/opt/aether/aether-server report pi --event <name>     # from the extension, pi and omp
 /opt/aether/aether-server report opencode --event session.idle
 ```
 
@@ -146,9 +153,18 @@ the turn that asked ended while the prompt was still open, that answer
 parks the run at `needs-attention` instead - nothing is working any more -
 and the next turn the agent starts is what returns it to `running`.
 
+`codex` only says when a turn ends. It never says a new one started, so its
+run comes back to `running` the way a harness with no reporter does: on
+agent output or a file change. Everything drawn in the terminal counts
+there, the echo of your own typing included, so a long prompt typed into a
+parked `codex` run can read as `running` before you send it. `claude`, `pi`
+and `omp` report both ends, and their runs stay parked until the agent
+itself says it is working again - a TUI repainting while you type is not
+work.
+
 The last report is recorded with the run, so it survives a server restart:
-a run the agent parked comes back parked, and only the agent's own next
-turn releases it. See [failure-handling.md](failure-handling.md).
+a run the agent parked comes back parked, and only what would have released
+it before releases it now. See [failure-handling.md](failure-handling.md).
 
 For a harness with a **Status** of `-`, nothing changes: the run is judged
 on silence alone and parks at `needs-attention` after `--stall-threshold`
@@ -160,7 +176,7 @@ Four things turn the reporter off:
 - **Headless runs.** `--mode headless` never gets the reporter: the agent
   exits when it is done and never waits for anyone.
 - **`--conflict-coordination=false`.** There are no mounts, so there is no
-  socket to report on and no directory to write the asset into.
+  socket to report on and no directory to write the assets into.
 - **An argv override.** A `--harness-definitions` entry that redefines a
   shipped harness drops the status arguments and the status environment
   exactly as it drops the MCP flag - nothing checks the overridden command
@@ -171,12 +187,15 @@ Four things turn the reporter off:
   normally; it reports nothing, and is judged on silence like a harness
   with no reporter.
 
-Both assets are server-written, read-only, and live in `/run/aether`, never
-in the worktree or the member's synced profile. Each applies for that launch
-alone and merges over what the member already has: `--settings` layers one
-settings document over Claude Code's own, and `OPENCODE_CONFIG_CONTENT` is
-merged into opencode's config with the plugin lists concatenated, so the
-member's own plugins still load.
+The asset files are server-written, read-only, and live in `/run/aether`,
+never in the worktree or the member's synced profile. Each applies for that
+launch alone and merges over what the member already has: `--settings`
+layers one settings document over Claude Code's own, `-e` loads one more pi
+extension beside the ones you already have, `-c` overrides your
+`~/.codex/config.toml` `notify` for this run alone - so if you use `notify`
+for something of your own, it keeps working everywhere except in an Aether
+run - and `OPENCODE_CONFIG_CONTENT` is merged into opencode's config with
+the plugin lists concatenated, so the member's own plugins still load.
 
 What merges is opencode's own config, not a second value of that variable:
 an interactive `opencode` run reserves `OPENCODE_CONFIG_CONTENT` for the
@@ -232,6 +251,7 @@ dashboard surface keep what the member typed. See
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |
 | `pi` | `pi {task}` | `pi -p {task}` |
+| `omp` | `omp --auto-approve {task}` | `omp -p --auto-approve {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
 Every `claude` **run** also gets `IS_SANDBOX=1`. Runs execute as root on the
 standard image, and Claude Code refuses `--dangerously-skip-permissions` as
@@ -339,6 +359,23 @@ a provider. Tokens land in `~/.pi/agent/auth.json` under the member home, and
 the token files are excluded from profile sync. `ANTHROPIC_API_KEY` or
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
+### omp
+
+oh-my-pi is a fork of pi with its own executable and its own home. Install
+it with the vendor's command, `curl -fsSL https://omp.sh/install | sh`,
+which puts `omp` in `~/.local/bin`. Inside `aether terminal`, start the CLI
+and log in through its own flow; credentials land in the agent database
+under `~/.omp/agent/`, which is excluded from profile sync. `ANTHROPIC_API_KEY`
+or `OPENAI_API_KEY` in the server environment is the API-key alternative.
+
+`omp` is a shipped name, and a shipped name always wins over a member's own
+definition of the same name. If you ran `aether agent add omp` before Aether
+shipped it, your stored definition is ignored from now on and runs use the
+launch template in the table above. The row stays where it is - there is no
+command that removes one, and `aether agent list` keeps printing it as
+`agent omp member` next to `agent omp shipped`. To launch your own build,
+register it under a name Aether does not ship.
+
 ### opencode
 
 Inside `aether terminal`, run `opencode auth login` and pick your provider.
@@ -384,8 +421,12 @@ credential paths are explicit absolute container paths under `/root` or
 `/home/aether`; credentials must be inside the profile root when one is
 configured. Deny names are basenames only.
 
-For example, an administrator can pin OMP without adding vendor logic to
-Aether (a member would instead just run `aether agent add omp`):
+For example, an administrator can point `omp` at a different build for every
+member. A shipped name is the one case a member cannot register themselves,
+so an administrator definition is the only way to change one. A definition
+replaces the shipped profile rather than extending it, so it carries the
+deny names too - omp keeps its provider keys in `agent.db`, which no
+generic denylist knows about:
 
 ```json
 {
@@ -396,7 +437,7 @@ Aether (a member would instead just run `aether agent add omp`):
     "Executable": "omp",
     "ProfileRoot": "/home/aether/.omp",
     "CredentialPaths": ["/home/aether/.omp"],
-    "DenyNames": ["auth.json", "token.json"]
+    "DenyNames": ["agent.db", "agent.db-wal", "agent.db-shm"]
   }
 }
 ```
@@ -473,6 +514,8 @@ stopped.
   | --- | --- |
   | `claude` | `projects/`, `shell-snapshots/`, `statsig/`, `todos/`, `file-history/`, `history.jsonl`, `daemon/` |
   | `codex` | `tmp/`, `.tmp/`, `sessions/` |
+  | `pi` | `agent/sessions/`, `agent/tmp/` |
+  | `omp` | `agent/sessions/`, `agent/terminal-sessions/`, `agent/cache/`, `agent/history.db`, `agent/history.db-shm`, `agent/history.db-wal`, `agent/models.db`, `natives/`, `cache/`, `logs/`, `run/`, `collab/` |
 
   A skipped directory is reported once, as the directory. These are applied
   before your `.aether-profile-ignore`, so that file has the last word: a

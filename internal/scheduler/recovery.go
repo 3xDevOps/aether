@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -454,6 +455,13 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	if r.StartedAt != nil {
 		started = *r.StartedAt
 	}
+	// The sidecar does not carry when the report parked the run, and it
+	// does not need to: nothing has been observed on the terminal since the
+	// restart, so the park effectively begins again here.
+	var parked time.Time
+	if sc.agentReport().State == agentstatus.Waiting {
+		parked = time.Now().UTC()
+	}
 	return &supervised{
 		runID: r.ID,
 		// The workspace comes off the run row, not the sidecar: a sidecar
@@ -472,6 +480,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		// that is still waiting for its member.
 		reporter:       sc.Reporter,
 		agentReport:    sc.agentReport(),
+		parkedAt:       parked,
 		status:         r.Status,
 		startedAt:      started,
 		paused:         sc.Paused,

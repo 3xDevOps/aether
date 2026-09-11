@@ -182,16 +182,22 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			// by anything on the terminal.
 			heldForTheMember := e.agentReport.State == agentstatus.Waiting &&
 				e.reporter == harness.ReporterFull
+			released := e.status == domain.RunNeedsAttention && observed &&
+				idle <= s.cfg.StallThreshold && !heldForTheMember
+			if released && e.agentReport.State == agentstatus.Waiting {
+				released = e.unparks(activity)
+			}
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
 					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
-			case e.status == domain.RunNeedsAttention && observed && idle <= s.cfg.StallThreshold && !heldForTheMember:
+			case released:
 				// The run goes back to being judged on silence alone, so
 				// the next quiet threshold parks it as a stall again - and
 				// a restart must not resurrect the report this clears.
 				e.agentReport = agentstatus.Report{}
+				e.parkedAt, e.postParkActivity = time.Time{}, time.Time{}
 				if serr := s.writeSidecar(e.sidecar()); serr != nil {
 					slog.Warn("scheduler: persist cleared agent report", "run", e.runID, "error", serr)
 				}
@@ -204,6 +210,38 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		}
 		s.mu.Unlock()
 	}
+}
+
+// turnTail is how long after a waiting report the terminal is still taken
+// to be painting the turn that ended: the answer it wrote, the prompt
+// being restored, a spinner winding down. It is a bound on a TUI's own
+// trailing frames, not a measured vendor number, so it is generous.
+const turnTail = 3 * time.Second
+
+// unparks reports whether terminal activity on a run the agent parked
+// itself is the next turn rather than the tail of the one that ended.
+//
+// A harness that reports only the end of a turn (harness.ReporterTurnEnd)
+// never says the next one started, so activity is the only thing that can
+// release its run - but the report fires while the finished turn is still
+// being drawn. Counting those frames would hand the run straight back to
+// an agent that is waiting, which is the failure this whole mechanism
+// exists to fix. So the frames are measured against the clock rather than
+// against polls: a poll landing inside the trailing burst would otherwise
+// see it advance twice and release the run, whatever --poll-interval is
+// set to. Past the tail, activity still has to move on a later poll, so a
+// single late frame is not a turn either.
+//
+// Caller must hold s.mu.
+func (e *supervised) unparks(activity time.Time) bool {
+	if !activity.After(e.parkedAt.Add(turnTail)) {
+		return false
+	}
+	if e.postParkActivity.IsZero() {
+		e.postParkActivity = activity
+		return false
+	}
+	return activity.After(e.postParkActivity)
 }
 
 // sweepCheckouts applies the checkout TTL (§6.8): terminal runs whose
