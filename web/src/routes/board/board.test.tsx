@@ -16,7 +16,6 @@ import {
   workspace,
 } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
-import { atViewport } from '@/test/viewport'
 
 function seed(runs: Run[], active = workspace.id) {
   useStore.setState({
@@ -431,25 +430,4 @@ describe('board', () => {
     render(<Board />)
     expect(screen.getByText(`chip:${working.id}`)).toBeDefined()
   })
-})
-
-// The member environment is a desktop setup surface - forward a port, save
-// it, reset it - and its expanded xterm would take the board's whole screen.
-test('the environment dock is on the board for a mouse and gone on a phone', () => {
-  const caps = {
-    gateway: 'local' as const,
-    methods: ['*'],
-    ws: ['events', 'attach', 'terminal'],
-  }
-  seed([working])
-  useStore.setState({ capabilities: caps })
-  const { unmount } = render(<Board />)
-  expect(screen.getByLabelText('Expand terminal dock')).toBeTruthy()
-  unmount()
-
-  atViewport(390, { pointer: 'coarse' })
-  seed([working])
-  useStore.setState({ capabilities: caps })
-  render(<Board />)
-  expect(screen.queryByLabelText('Expand terminal dock')).toBeNull()
 })

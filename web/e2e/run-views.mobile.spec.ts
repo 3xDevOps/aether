@@ -39,7 +39,6 @@ test('a phone steers a run from the Actions menu and reads its diff', async ({
     page.getByRole('heading', { name: 'write the result file', exact: true }),
   ).toBeVisible()
 
-  // Every verb is behind this one button, and the header stays one row.
   const actions = page.getByRole('button', { name: 'Actions', exact: true })
   await expect(actions).toBeVisible()
   expect((await actions.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
@@ -84,7 +83,6 @@ test('a phone steers a run from the Actions menu and reads its diff', async ({
   await expect.poll(() => overflowOf(scroller)).toBeGreaterThan(0)
 })
 
-/** How much of the element's content its own box cannot show sideways. */
 function overflowOf(scroller: Locator): Promise<number> {
   return scroller.evaluate((el) => el.scrollWidth - el.clientWidth)
 }

@@ -2,11 +2,10 @@
 // and tooltip, while their text label yields before the action group wraps.
 // Secondary verbs remain in the overflow menu when the row is constrained.
 //
-// A finger gets the other shape. Six labelled 44px buttons do not fit across
-// a phone, and the mouse layout's answer - shrink them to 22px and put the
-// label in a hover tooltip - leaves a phone with six unnamed icons. So on a
-// coarse pointer every verb moves into the one menu behind a labelled
-// button, where each carries its full label at a size a finger can hit.
+// A finger gets the other shape: six labelled 44px buttons do not fit across
+// a phone, and the narrow mouse layout's answer to that - 22px icons with
+// the label in a hover tooltip - is unreadable and unhittable without a
+// pointer.
 
 import { Ellipsis, Loader2, UserPlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -100,8 +99,6 @@ export function RunActions({ run }: { run: RunRecord }) {
   const confirm = asking?.confirm
   const commands = runCommands(context)
   const handoffs = handoffCommands(context)
-  // On a finger the row holds nothing but the menu button, so the menu holds
-  // every verb rather than only the secondary ones.
   const overflow = coarse
     ? commands
     : commands.filter((command) => !primaryCommands[command.id])
@@ -188,8 +185,8 @@ export function RunActions({ run }: { run: RunRecord }) {
           }}
         >
           {coarse ? (
-            // The label is on the button, so there is nothing for a tooltip
-            // to add - and a finger cannot open one anyway.
+            // No Tooltip: a finger cannot open one, and the label is already
+            // on the button.
             <DropdownMenuTrigger asChild>
               <Button
                 ref={moreTrigger}

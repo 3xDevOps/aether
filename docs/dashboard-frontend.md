@@ -368,13 +368,12 @@ different elements for a finger than for a mouse - the run header's menu, the
 diff timeline's disclosure, the activity filter bar - ask `useMediaQuery` in
 `src/lib/hooks.ts` instead, and every edge it asks about is a named constant
 in the same file: `coarsePointer` is the CSS variant below asked from
-JavaScript, `belowSm` and `belowMd` are Tailwind's own 640px and 768px a
-pixel short, and `phoneScreen` is a coarse pointer below `sm`. New code reads
-an edge from there rather than writing a query, so a layout that stacks in
-CSS and a layout that stacks in JavaScript cannot disagree about where. Two
-call sites predate the hook and still hold their own literals -
-`shell/sidebar.tsx` and `shell/status-bar.tsx` - and move onto it in a
-follow-up; the sidebar's phone edge is a pixel off `phoneScreen` until then.
+JavaScript, and `belowSm` and `belowMd` are Tailwind's own 640px and 768px a
+pixel short. New code reads an edge from there rather than writing a query,
+so a layout that stacks in CSS and a layout that stacks in JavaScript cannot
+disagree about where. Two call sites predate the hook and still hold their
+own literals - `shell/sidebar.tsx` and `shell/status-bar.tsx` - and move onto
+it in a follow-up.
 
 **Touch density is one variant, defined once.** `src/index.css` declares
 `@custom-variant coarse (@media (pointer: coarse))`, and a control that a
@@ -431,10 +430,6 @@ inside itself. `sm` is a width breakpoint, so a desktop window narrower than
   across a phone, and the mouse answer to a narrow row - 22px icons with the
   label in a hover tooltip - is six unnamed icons to a finger. Hand off is in
   the same menu.
-- **The board's environment dock is not mounted on a phone.** Forwarding a
-  port, saving the member environment and resetting it are desktop setup, and
-  the expanded dock is a full terminal over the board. The `phoneScreen`
-  query - a coarse pointer on a screen narrower than `sm` - is what decides.
 - **The board** uses one column on narrow screens and three columns from the
   `lg`/1024px breakpoint, with compact flat run cards and vertical scrolling on
   small screens. State labels remain visible; empty, loading and error panels
