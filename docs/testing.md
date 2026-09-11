@@ -12,9 +12,14 @@ Layers, per the design spec's testing strategy:
   route tests. The multi-member E2E row below joins members and administers
   them; it does not re-prove the matrix.
 - **Integration/E2E tests** are behind the `integration` build tag and run with
-  `make test-integration` (real Docker, real git). CI runs them on every PR in
-  the `integration` job of `.github/workflows/ci.yml`; that job is the merge
-  gate the E2E suite owns.
+  `make test-integration` (real Docker, real git), which covers only the
+  packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
+  to one package and `INTEGRATION_SKIP` leaves some out, as in
+  `make test-integration INTEGRATION_PKGS=./internal/server`. CI runs them on
+  every PR from `.github/workflows/ci.yml`: the `integration` matrix shards
+  them by package, one job each for `internal/server` and `internal/scheduler`
+  and one for the rest, and the `smoke` job runs `internal/harness` on the
+  images it builds. Those jobs are the merge gate the E2E suite owns.
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`
@@ -151,10 +156,10 @@ amount of internal testing sees it coming.
 `TestSmokeHeadlessNoLogin` is the one that runs in CI. It launches each
 headless template with no credentials at all and requires the run to fail
 for want of a login, never for want of a parseable command line - reaching
-the provider is proof the CLI accepted the flags. The `integration` job
-builds `images/standard/Dockerfile`, then `images/smoke/Dockerfile` on top
-of it to add the agent CLIs at whatever version their vendors ship that
-day, and points the gate variables at the result.
+the provider is proof the CLI accepted the flags. The `smoke` job builds
+`images/standard/Dockerfile`, then `images/smoke/Dockerfile` on top of it to
+add the agent CLIs at whatever version their vendors ship that day, and
+points the gate variables at the result.
 
 To run it locally, build the same image and name it:
 

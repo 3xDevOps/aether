@@ -87,7 +87,10 @@ jobs:
       - name: Build binaries
         run: make build
 
-  integration:
+  # Only internal/harness needs the agent images, so it is the only job that
+  # waits for them to build; the sharded `integration` jobs below start at
+  # once.
+  smoke:
     needs: runner-policy
     # The selected runner must provide Docker for these real-runtime tests.
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
@@ -134,12 +137,47 @@ jobs:
             --build-arg BASE=aether-standard:ci \
             --tag aether-smoke:ci \
             --file images/smoke/Dockerfile .
-      - name: Integration tests (real Docker, real git)
+      - name: Real-harness smoke test (real Docker, real git)
         env:
           AETHER_SMOKE_IMAGE_CLAUDE_NOLOGIN: aether-smoke:ci
           AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
           AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
-        run: make test-integration
+        run: make test-integration INTEGRATION_PKGS=./internal/harness
+
+  # Sharded so the two slowest packages do not share one runner's pool. The
+  # last shard is the complement the Makefile computes, so a package that
+  # gains integration tests is gated without a change here. Every test in
+  # these shards pulls the busybox image it needs itself, so none builds one.
+  integration:
+    name: integration (${{ matrix.shard }})
+    needs: runner-policy
+    # The selected runner must provide Docker for these real-runtime tests.
+    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: server
+            make: INTEGRATION_PKGS=./internal/server
+          - shard: scheduler
+            make: INTEGRATION_PKGS=./internal/scheduler
+          - shard: rest
+            make: INTEGRATION_SKIP="./internal/harness ./internal/scheduler ./internal/server"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: ${{ github.event_name != 'pull_request_target' }}
+      # The matrix values are literals from this file, which on
+      # pull_request_target is the base branch's copy, so a PR cannot change
+      # what is interpolated here.
+      - name: Integration tests (real Docker, real git)
+        run: make test-integration ${{ matrix.make }}
 
   dashboard:
     needs: runner-policy
