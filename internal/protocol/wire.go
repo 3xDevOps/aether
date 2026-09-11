@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -416,6 +417,16 @@ const (
 	// pending. Every attach of theirs ends, read-only ones included.
 	AttachExitMembershipRevoked = 4
 )
+
+// RemoteExitError is a subsystem stream ending with a nonzero exit status:
+// the SSH channel's exit-status request, or the in-process transport's
+// equivalent. The attach subsystem uses the AttachExit* statuses to say
+// why the server dropped a live attach.
+type RemoteExitError struct{ Status int }
+
+func (e *RemoteExitError) Error() string {
+	return fmt.Sprintf("remote exited with status %d", e.Status)
+}
 
 // WorkspaceSelector addresses a workspace by exactly one of ID or Name.
 type WorkspaceSelector struct {

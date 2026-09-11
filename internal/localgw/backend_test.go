@@ -184,7 +184,7 @@ func TestSSHBackendDialFailureIsCoded(t *testing.T) {
 		t.Fatalf("Call message = %q, want prefix %q", perr.Message, "server unreachable: ")
 	}
 
-	_, err := b.Events(protocol.SubscribeRequest{})
+	_, err := b.Events(context.Background(), protocol.SubscribeRequest{})
 	if err == nil {
 		t.Fatal("Events against a closed port must fail")
 	}

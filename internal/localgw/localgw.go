@@ -1,8 +1,9 @@
-// Package localgw is the client-side local gateway: it serves the
-// embedded dashboard SPA on a tokened loopback port and proxies the
-// dashboard API shape over the linked server's SSH connection, adding the
-// /local/v1 verbs only a machine with the user's repository and SSH key
-// can offer. Same SPA, same API shape, full SSH authority.
+// Package localgw is the client-side local gateway: it composes the
+// shared dashboard gateway (internal/webgate) on a tokened loopback port,
+// proxying the API shape over the linked server's SSH connection, and
+// adds the /local/v1 verbs and the environment scan only a machine with
+// the user's repository and SSH key can offer. Same SPA, same API shape,
+// full SSH authority.
 package localgw
 
 import (
@@ -10,7 +11,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +27,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/webgate"
-	"github.com/3xDevOps/Aether/web"
 )
 
 // httpReadHeaderTimeout bounds how long a client may dribble request headers.
@@ -36,19 +35,11 @@ const httpReadHeaderTimeout = 10 * time.Second
 // closeTimeout bounds the graceful drain in Close.
 const closeTimeout = 5 * time.Second
 
-// Backend is the local gateway's view of the linked server: control-channel
-// calls plus the streaming subsystems the WebSocket handlers bridge.
+// Backend is the local gateway's view of the linked server: the shared
+// gateway's surface plus the streams and the relink only this gateway
+// uses.
 type Backend interface {
-	// Call performs one control-channel method call. Server-reported
-	// failures and transport failures both surface as *protocol.Error.
-	Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error)
-	// Events opens the events subsystem; the header and ack are already
-	// consumed. A server refusal surfaces as *protocol.Error.
-	Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error)
-	// Attach opens the attach subsystem for one run's PTY.
-	Attach(req protocol.AttachRequest) (cli.Terminal, protocol.AttachResponse, error)
-	// Terminal opens the member's persistent terminal PTY.
-	Terminal(req protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error)
+	webgate.Backend
 	// Sync opens the sync subsystem's raw mutagen endpoint stream.
 	Sync(runID string, force bool) (io.ReadWriteCloser, error)
 	// Forward opens one direct-tcpip channel to a forwarding target.
@@ -89,7 +80,7 @@ type Gateway struct {
 	cfg   Config
 	local *localState
 	token string
-	mux   *http.ServeMux
+	core  *webgate.Gateway
 	srv   *http.Server
 	ln    net.Listener
 	// exit is closed once when a verb asks the process to stop; the
@@ -136,13 +127,6 @@ func New(cfg Config) (*Gateway, error) {
 	if cfg.Backend == nil {
 		return nil, errors.New("localgw: config requires a Backend")
 	}
-	if cfg.Static == nil {
-		sub, err := fs.Sub(web.Dist, "dist")
-		if err != nil {
-			return nil, fmt.Errorf("localgw: embedded spa: %w", err)
-		}
-		cfg.Static = sub
-	}
 	if cfg.Update == nil {
 		cfg.Update = selfupdate.DefaultChecker()
 	}
@@ -160,36 +144,32 @@ func New(cfg Config) (*Gateway, error) {
 		ctx:     ctx,
 		cancel:  cancel,
 	}
-	g.mux = http.NewServeMux()
-	g.mux.HandleFunc("POST /api/v1/{method}", g.handleAPI)
-	g.mux.HandleFunc("GET /api/v1/run/{run}/patch", g.handlePatch)
-	g.mux.HandleFunc("GET /api/v1/disk", g.handleDisk)
-	g.mux.HandleFunc("GET /api/v1/capabilities", g.handleCapabilities)
-	g.mux.HandleFunc("GET /ws/events", g.handleEvents)
-	g.mux.HandleFunc("GET /ws/attach/{run}", g.handleAttach)
-	g.mux.HandleFunc("GET /ws/terminal", g.handleTerminal)
-	g.mux.HandleFunc("GET /ws/envscan", g.handleEnvScan)
-	g.mux.HandleFunc("POST /local/v1/{verb}", g.handleLocal)
-	static := webgate.StaticHandler(cfg.Static)
-	g.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// An /api, /ws, or /local request that misses every
-		// method-qualified pattern lands here; answering it with the SPA
-		// would turn a wrong-verb client bug into a silent 200.
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") || strings.HasPrefix(r.URL.Path, "/local/") {
-			webgate.WriteError(w, http.StatusMethodNotAllowed, &protocol.Error{
-				Code:    protocol.CodeInvalidRequest,
-				Message: "method not allowed",
-			})
-			return
-		}
-		static.ServeHTTP(w, r)
-	}))
+	core, err := webgate.New(webgate.Config{
+		Authorize: g.authorize,
+		Capabilities: protocol.GatewayCapabilities{
+			Gateway: "local",
+			WS:      []string{"events", "attach", "terminal", "envscan"},
+			Local:   localVerbs,
+		},
+		Static: cfg.Static,
+	})
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	g.core = core
+	core.HandleFunc("GET /ws/envscan", g.handleEnvScan)
+	core.HandleFunc("POST /local/v1/{verb}", g.handleLocal)
 	g.srv = &http.Server{
-		Handler:           g.mux,
+		Handler:           core,
 		ReadHeaderTimeout: httpReadHeaderTimeout,
 	}
 	return g, nil
 }
+
+// ServeHTTP serves the gateway's routes: the shared core's plus the local
+// verbs and the environment scan.
+func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) { g.core.ServeHTTP(w, r) }
 
 // mintToken returns the per-process bearer token: 32 random bytes,
 // base64url without padding.
@@ -201,32 +181,41 @@ func mintToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-// authorized reports whether r carries the gateway token, as a Bearer
-// header always and as ?token= only when allowQuery is set - the query
-// form exists for WebSocket handshakes and the initial browser tab, which
-// cannot set headers.
-func (g *Gateway) authorized(r *http.Request, allowQuery bool) bool {
+// authorize admits a request that carries the gateway token, as a Bearer
+// header always and as ?token= only on a WebSocket handshake and the
+// initial browser tab, which cannot set headers. Every admitted request
+// acts through the one linked-server backend: the token guards the
+// loopback port, the SSH key behind the backend is the identity.
+func (g *Gateway) authorize(r *http.Request, handshake bool) (webgate.Backend, *webgate.Refusal) {
 	token := ""
 	if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
 		token = strings.TrimSpace(h[7:])
 	}
-	if token == "" && allowQuery {
+	if token == "" && handshake {
 		token = r.URL.Query().Get("token")
 	}
-	if token == "" {
-		return false
+	if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(g.token)) != 1 {
+		return nil, &webgate.Refusal{
+			Status: http.StatusUnauthorized,
+			Error: &protocol.Error{
+				Code:    protocol.CodeDenied,
+				Message: "a valid gateway token is required; restart `aether gui` for a fresh URL",
+			},
+		}
 	}
-	return subtle.ConstantTimeCompare([]byte(token), []byte(g.token)) == 1
+	return g.cfg.Backend, nil
 }
 
-// deny answers an unauthorized request with the JSON 401 the SPA's API
-// client decodes.
-func (g *Gateway) deny(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", "Bearer")
-	webgate.WriteError(w, http.StatusUnauthorized, &protocol.Error{
-		Code:    protocol.CodeDenied,
-		Message: "a valid gateway token is required; restart `aether gui` for a fresh URL",
-	})
+// authorized reports whether r carries the gateway token; the local
+// verbs and the environment scan share the core's rule.
+func (g *Gateway) authorized(w http.ResponseWriter, r *http.Request) bool {
+	_, refusal := g.authorize(r, false)
+	if refusal != nil {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		webgate.WriteError(w, refusal.Status, refusal.Error)
+		return false
+	}
+	return true
 }
 
 // Start binds 127.0.0.1 and serves in the background. The context bounds
@@ -287,6 +276,7 @@ func (g *Gateway) Close() error {
 			serveErr = g.srv.Close()
 		}
 	}
+	g.core.Close()
 	// The cancelled context has killed any rebuild; its goroutine still has
 	// to reap the child and record why it stopped. Waiting here keeps that
 	// record with this gateway rather than whatever comes after it, which

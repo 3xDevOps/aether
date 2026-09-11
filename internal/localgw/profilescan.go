@@ -10,6 +10,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/cli/profile"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/localops"
+	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
 // envScanNothingToImport is the answer for a machine with no agent
@@ -22,16 +23,16 @@ const envScanNothingToImport = "no agent configuration found on this machine; no
 // to the chosen agent, and ends with one result frame carrying the import
 // recommendation or one error frame. The caller holds the scan slot and
 // has already sent the detecting status frame.
-func (g *Gateway) runProfileScan(ctx context.Context, conn *websocket.Conn, req envScanRequest) {
+func (g *Gateway) runProfileScan(ctx context.Context, s *webgate.Socket, req envScanRequest) {
 	previews, err := profileScanInventories(ctx)
 	if err != nil {
-		_ = writeFrame(ctx, conn, envScanFrame{Type: envScanFrameError, Detail: err.Error()})
-		_ = conn.Close(websocket.StatusNormalClosure, "scan failed")
+		_ = s.WriteJSON(envScanFrame{Type: envScanFrameError, Detail: err.Error()})
+		_ = s.Conn.Close(websocket.StatusNormalClosure, "scan failed")
 		return
 	}
 	if len(previews) == 0 {
-		_ = writeFrame(ctx, conn, envScanFrame{Type: envScanFrameError, Detail: envScanNothingToImport})
-		_ = conn.Close(websocket.StatusNormalClosure, "nothing to import")
+		_ = s.WriteJSON(envScanFrame{Type: envScanFrameError, Detail: envScanNothingToImport})
+		_ = s.Conn.Close(websocket.StatusNormalClosure, "nothing to import")
 		return
 	}
 
@@ -46,10 +47,10 @@ func (g *Gateway) runProfileScan(ctx context.Context, conn *websocket.Conn, req 
 		// means the client is gone; the handler's read pump is already
 		// canceling.
 		if e.Status != "" {
-			_ = writeFrame(ctx, conn, envScanFrame{Type: envScanFrameStatus, Status: e.Status})
+			_ = s.WriteJSON(envScanFrame{Type: envScanFrameStatus, Status: e.Status})
 			return
 		}
-		_ = writeFrame(ctx, conn, envScanFrame{Type: envScanFrameOutput, Line: e.Line})
+		_ = s.WriteJSON(envScanFrame{Type: envScanFrameOutput, Line: e.Line})
 	})
 	if err != nil {
 		frame := envScanFrame{Type: envScanFrameError, Detail: err.Error()}
@@ -57,17 +58,17 @@ func (g *Gateway) runProfileScan(ctx context.Context, conn *websocket.Conn, req 
 		if errors.As(err, &failure) {
 			frame.OutputTail = failure.OutputTail
 		}
-		_ = writeFrame(ctx, conn, frame)
-		_ = conn.Close(websocket.StatusNormalClosure, "scan failed")
+		_ = s.WriteJSON(frame)
+		_ = s.Conn.Close(websocket.StatusNormalClosure, "scan failed")
 		return
 	}
-	if writeFrame(ctx, conn, envScanFrame{
+	if s.WriteJSON(envScanFrame{
 		Type:           envScanFrameResult,
 		Recommendation: &result.Recommendation,
 	}) != nil {
 		return
 	}
-	_ = conn.Close(websocket.StatusNormalClosure, "scan complete")
+	_ = s.Conn.Close(websocket.StatusNormalClosure, "scan complete")
 }
 
 // profileScanInventories previews every harness that syncs a profile and

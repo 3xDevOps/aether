@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 
 	"github.com/3xDevOps/Aether/internal/cli/profile"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -81,29 +80,19 @@ func (s *localState) scanArgvOverride() []string {
 
 // handleEnvScan serves the profile scan websocket.
 func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
-	if !g.authorized(r, true) {
-		g.deny(w)
+	s, ok := g.core.Accept(w, r)
+	if !ok {
 		return
 	}
-	conn, err := websocket.Accept(w, r, nil)
-	if err != nil {
-		return
-	}
-	defer func() { _ = conn.CloseNow() }()
-	conn.SetReadLimit(wsReadLimit)
-
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	defer s.Close()
+	conn, ctx := s.Conn, s.Ctx
 	var req envScanRequest
-	readCtx, readDone := context.WithTimeout(ctx, readHeaderTimeout)
-	err = wsjson.Read(readCtx, conn, &req)
-	readDone()
-	if err != nil {
+	if s.ReadHeader(&req) != nil {
 		return
 	}
 
 	if !g.local.beginScan() {
-		_ = writeFrame(ctx, conn, envScanFrame{
+		_ = s.WriteJSON(envScanFrame{
 			Type:   envScanFrameError,
 			Detail: "an environment scan is already running; wait for it to finish or cancel it first",
 		})
@@ -114,6 +103,8 @@ func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
 
 	// Frames after the start frame are discarded; the read loop noticing
 	// the peer go away cancels the scan, which kills the agent process.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	go func() {
 		defer cancel()
 		for {
@@ -123,11 +114,11 @@ func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if writeFrame(ctx, conn, envScanFrame{Type: envScanFrameStatus, Status: envScanStatusDetecting}) != nil {
+	if s.WriteJSON(envScanFrame{Type: envScanFrameStatus, Status: envScanStatusDetecting}) != nil {
 		return
 	}
 	if req.Mode != localops.ScanModeProfile {
-		_ = writeFrame(ctx, conn, envScanFrame{
+		_ = s.WriteJSON(envScanFrame{
 			Type:   envScanFrameError,
 			Detail: "unsupported scan mode",
 		})
@@ -137,5 +128,5 @@ func (g *Gateway) handleEnvScan(w http.ResponseWriter, r *http.Request) {
 	widenCtx, widenDone := context.WithTimeout(ctx, loginPathTimeout)
 	_, _ = localops.AdoptLoginPath(widenCtx)
 	widenDone()
-	g.runProfileScan(ctx, conn, req)
+	g.runProfileScan(ctx, s, req)
 }
