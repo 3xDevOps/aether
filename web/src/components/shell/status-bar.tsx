@@ -282,6 +282,13 @@ export function StatusBar() {
   // owns Escape first, which is what `inModal` answers. The popup is not a
   // Radix overlay because the status Slot inside it stays mounted while it is
   // closed - a contributor owns a keyboard shortcut of its own.
+  //
+  // Both listeners capture, because the shell's own Escape is a window
+  // listener registered when the workbench mounted, long before this one:
+  // in the bubble phase it would leave the run first and mark the key
+  // handled, which this handler reads as someone else's. Taking the key
+  // first and marking it handled is what makes Escape dismiss the topmost
+  // thing and only that.
   useEffect(() => {
     if (wide || !mobileDetailsOpen) return
     const outside = (event: PointerEvent) => {
@@ -290,6 +297,7 @@ export function StatusBar() {
     }
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || inModal(event.target)) return
+      event.preventDefault()
       setMobileDetailsOpen(false)
       // A dismissed popup can be holding the focus; the trigger is where it
       // came from and where it opens again.
@@ -298,10 +306,10 @@ export function StatusBar() {
         ?.focus()
     }
     window.addEventListener('pointerdown', outside, true)
-    window.addEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
     return () => {
       window.removeEventListener('pointerdown', outside, true)
-      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keydown', onKey, true)
     }
   }, [mobileDetailsOpen, wide])
 

@@ -160,6 +160,37 @@ test('Escape closes a dialog on a run without leaving the run', async ({
   await expect(tabs).toHaveCount(0)
 })
 
+test('Escape closes the status popup without leaving the run', async ({
+  page,
+  aether,
+}) => {
+  // Wide enough for the expanded sidebar, narrow enough that the secondary
+  // readouts are behind the popup rather than inline in the bar.
+  await page.setViewportSize({ width: 1100, height: 700 })
+  await openFirstRun(page, aether)
+
+  // The shortcut stands down inside the terminal, and the terminal takes the
+  // focus when it mounts. Clicking the title is how a reader gets out of it.
+  await page.getByRole('heading', { name: task, exact: true }).click()
+
+  const trigger = page.getByRole('button', { name: 'Show status details' })
+  await trigger.click()
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+
+  await page.keyboard.press('Escape')
+
+  // Escape dismisses the topmost thing and only that. The popup is a pair of
+  // window listeners rather than a Radix layer, so which one sees the key
+  // first is real ordering that jsdom cannot reproduce.
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
+
+  // The same key with nothing over the run does leave it, so the assertions
+  // above cannot pass on a build where the shell shortcut never registered.
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('heading', { name: 'Board', exact: true })).toBeVisible()
+})
+
 test('keyboard focus paints a visible outline on the shell controls', async ({
   page,
   aether,
