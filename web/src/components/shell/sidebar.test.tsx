@@ -121,6 +121,22 @@ describe('Sidebar', () => {
     expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
   })
 
+  // A dialog stands the shell's global keys down inside itself, so without
+  // the drawer answering it the key that opened the drawer could not close
+  // it again.
+  it('closes the phone drawer from the key that opened it', () => {
+    atViewport(phoneWidth, { pointer: 'coarse' })
+    render(<Sidebar />)
+
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
+    const drawer = screen.getByRole('dialog', { name: 'Runs' })
+
+    fireEvent.keyDown(drawer, { key: 'b', ctrlKey: true })
+
+    expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
+    expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
+  })
+
   it('closes the phone drawer after it navigates', () => {
     atViewport(phoneWidth, { pointer: 'coarse' })
     render(<Sidebar />)

@@ -240,6 +240,21 @@ export function Sidebar() {
             <DialogPrimitive.Content
               aria-describedby={undefined}
               onCloseAutoFocus={(event) => event.preventDefault()}
+              // A dialog stands the shell's global keys down inside itself,
+              // and Mod+B is the pair of the key that opened this one, so the
+              // drawer answers it here. Preventing the default is what stops
+              // the window listener above from toggling it straight back.
+              onKeyDown={(event) => {
+                if (
+                  !(event.metaKey || event.ctrlKey) ||
+                  event.altKey ||
+                  event.shiftKey ||
+                  event.key.toLowerCase() !== 'b'
+                )
+                  return
+                event.preventDefault()
+                toggleAndFollow()
+              }}
               className="fixed inset-y-0 left-0 z-50 flex max-w-full shadow-xl outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-left motion-reduce:animate-none"
             >
               <DialogPrimitive.Title className="sr-only">Runs</DialogPrimitive.Title>
