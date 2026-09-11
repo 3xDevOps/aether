@@ -42,6 +42,7 @@ func admitAll(b Backend) Authorizer {
 
 func post(g *Gateway, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	g.ServeHTTP(rec, req)
 	return rec
@@ -53,7 +54,7 @@ func TestTerminalImageAPIHasDedicatedBodyLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer g.Close()
+	defer func() { _ = g.Close() }()
 
 	ordinary := `{"padding":"` + strings.Repeat("x", MaxRequestBody) + `"}`
 	if rec := post(g, "/api/v1/run.list", ordinary); rec.Code != http.StatusBadRequest {
@@ -89,7 +90,7 @@ func TestCapabilitiesFillTheSharedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer g.Close()
+	defer func() { _ = g.Close() }()
 	rec := httptest.NewRecorder()
 	g.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil))
 	if rec.Code != http.StatusOK {
@@ -104,5 +105,62 @@ func TestCapabilitiesFillTheSharedFields(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"version"`) {
 		t.Fatalf("capabilities carry no version: %s", rec.Body)
+	}
+}
+
+// A cross-site page can post without a CORS preflight only with a simple
+// content type, and it always carries its own Origin; both are refused
+// before the backend is reached, so a browser's ambient credential on the
+// server gateway cannot be borrowed.
+func TestAPIRefusesCrossSiteRequests(t *testing.T) {
+	backend := &stubBackend{}
+	g, err := New(Config{Authorize: admitAll(backend)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.Close() }()
+
+	plain := httptest.NewRequest(http.MethodPost, "/api/v1/run.kill", strings.NewReader(`{"run_id":"run_1"}`))
+	plain.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	g.ServeHTTP(rec, plain)
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("text/plain POST = %d, want 415: %s", rec.Code, rec.Body)
+	}
+
+	foreign := httptest.NewRequest(http.MethodPost, "/api/v1/run.kill", strings.NewReader(`{"run_id":"run_1"}`))
+	foreign.Header.Set("Content-Type", "application/json")
+	foreign.Header.Set("Origin", "https://evil.example")
+	rec = httptest.NewRecorder()
+	g.ServeHTTP(rec, foreign)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("foreign Origin POST = %d, want 403: %s", rec.Code, rec.Body)
+	}
+	var body ErrorBody
+	if json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != protocol.CodeDenied {
+		t.Fatalf("foreign Origin body = %s", rec.Body)
+	}
+	if len(backend.calls) != 0 {
+		t.Fatalf("cross-site requests reached the backend: %v", backend.calls)
+	}
+
+	own := httptest.NewRequest(http.MethodPost, "/api/v1/run.list", strings.NewReader(`{}`))
+	own.Header.Set("Content-Type", "application/json; charset=utf-8")
+	own.Header.Set("Origin", "http://"+own.Host)
+	rec = httptest.NewRecorder()
+	g.ServeHTTP(rec, own)
+	if rec.Code != http.StatusOK || len(backend.calls) != 1 {
+		t.Fatalf("same-origin JSON POST = %d (calls %v), want 200", rec.Code, backend.calls)
+	}
+}
+
+func TestLocalVerbsAreNotFoundWithoutTheLocalGateway(t *testing.T) {
+	g, err := New(Config{Authorize: admitAll(&stubBackend{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.Close() }()
+	if rec := post(g, "/local/v1/link.status", "{}"); rec.Code != http.StatusNotFound {
+		t.Fatalf("/local/v1 on a gateway without local verbs = %d, want 404", rec.Code)
 	}
 }

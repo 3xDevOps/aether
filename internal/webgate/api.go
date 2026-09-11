@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -28,9 +29,21 @@ func requestBodyLimit(method string) int64 {
 // control-channel method name and the body is its params. There is no
 // method allowlist: the backend carries the caller's own authority, and
 // every call still passes the server's capability checks.
+//
+// The body must be declared application/json. A cross-site page can post
+// a text/plain body without a CORS preflight, and on the server gateway
+// nothing else stands between it and the member's authority; a JSON
+// content type forces the preflight, which the gateway never answers.
 func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 	backend, ok := g.authorize(w, r, false)
 	if !ok {
+		return
+	}
+	if mediaType, _, cerr := mime.ParseMediaType(r.Header.Get("Content-Type")); cerr != nil || mediaType != "application/json" {
+		WriteError(w, http.StatusUnsupportedMediaType, &protocol.Error{
+			Code:    protocol.CodeInvalidRequest,
+			Message: "request body must be application/json",
+		})
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, requestBodyLimit(r.PathValue("method"))))

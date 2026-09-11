@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"time"
 
@@ -20,16 +21,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
-const (
-	// httpReadHeaderTimeout bounds how long a client may dribble request
-	// headers.
-	httpReadHeaderTimeout = 10 * time.Second
-	// closeTimeout bounds the graceful drain in Close.
-	closeTimeout = 5 * time.Second
-	// identityTimeout bounds the WhoIs lookup a request waits on, so a
-	// stalled tailscaled cannot pin handlers.
-	identityTimeout = 10 * time.Second
-)
+// identityTimeout bounds the WhoIs lookup a request waits on, so a
+// stalled tailscaled cannot pin handlers.
+const identityTimeout = 10 * time.Second
 
 // Config wires the gateway to the server it fronts.
 type Config struct {
@@ -43,8 +37,10 @@ type Config struct {
 type Gateway struct {
 	core *webgate.Gateway
 	ssh  *sshd.Server
-	srv  *http.Server
-	lns  []listener
+	lns  []net.Listener
+	// ctx bounds the certificate refresh Start begins; Close cancels it.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New builds the gateway. It refuses a server that cannot identify HTTP
@@ -57,7 +53,8 @@ func New(cfg Config) (*Gateway, error) {
 	if err := cfg.SSH.WebIdentity(); err != nil {
 		return nil, fmt.Errorf("servergw: %w", err)
 	}
-	g := &Gateway{ssh: cfg.SSH}
+	ctx, cancel := context.WithCancel(context.Background())
+	g := &Gateway{ssh: cfg.SSH, ctx: ctx, cancel: cancel}
 	core, err := webgate.New(webgate.Config{
 		Authorize: g.authorize,
 		Capabilities: protocol.GatewayCapabilities{
@@ -67,13 +64,10 @@ func New(cfg Config) (*Gateway, error) {
 		Static: cfg.Static,
 	})
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	g.core = core
-	g.srv = &http.Server{
-		Handler:           core,
-		ReadHeaderTimeout: httpReadHeaderTimeout,
-	}
 	return g, nil
 }
 
@@ -110,19 +104,12 @@ func (g *Gateway) authorize(r *http.Request, _ bool) (webgate.Backend, *webgate.
 	return backend{local: g.ssh.Local(m.ID)}, nil
 }
 
-// Close stops serving, drains in-flight requests briefly, and ends every
-// live WebSocket. Safe before Start, and safe to call twice.
+// Close stops serving, drains in-flight requests briefly, ends every
+// live WebSocket and stops the certificate refresh. Safe before Start,
+// and safe to call twice.
 func (g *Gateway) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-	defer cancel()
-	err := g.srv.Shutdown(ctx)
-	if errors.Is(err, context.DeadlineExceeded) {
-		err = g.srv.Close()
-	}
-	if errors.Is(err, http.ErrServerClosed) {
-		err = nil
-	}
-	g.core.Close()
+	g.cancel()
+	err := g.core.Close()
 	for _, ln := range g.lns {
 		_ = ln.Close()
 	}

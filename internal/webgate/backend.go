@@ -47,7 +47,8 @@ type Refusal struct {
 	Error  *protocol.Error
 }
 
-func (r *Refusal) write(w http.ResponseWriter) {
+// Write answers the request with the refusal.
+func (r *Refusal) Write(w http.ResponseWriter) {
 	if r.Status == http.StatusUnauthorized {
 		w.Header().Set("WWW-Authenticate", "Bearer")
 	}

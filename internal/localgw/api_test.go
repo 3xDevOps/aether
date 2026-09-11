@@ -105,6 +105,9 @@ func do(g *Gateway, method, path, body string, withToken bool) *httptest.Respons
 		r = strings.NewReader(body)
 	}
 	req := httptest.NewRequest(method, path, r)
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if withToken {
 		req.Header.Set("Authorization", "Bearer "+g.Token())
 	}

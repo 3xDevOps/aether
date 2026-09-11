@@ -29,9 +29,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
-// httpReadHeaderTimeout bounds how long a client may dribble request headers.
-const httpReadHeaderTimeout = 10 * time.Second
-
 // closeTimeout bounds the graceful drain in Close.
 const closeTimeout = 5 * time.Second
 
@@ -81,7 +78,6 @@ type Gateway struct {
 	local *localState
 	token string
 	core  *webgate.Gateway
-	srv   *http.Server
 	ln    net.Listener
 	// exit is closed once when a verb asks the process to stop; the
 	// command that owns the process waits on it beside its signals.
@@ -160,10 +156,14 @@ func New(cfg Config) (*Gateway, error) {
 	g.core = core
 	core.HandleFunc("GET /ws/envscan", g.handleEnvScan)
 	core.HandleFunc("POST /local/v1/{verb}", g.handleLocal)
-	g.srv = &http.Server{
-		Handler:           core,
-		ReadHeaderTimeout: httpReadHeaderTimeout,
-	}
+	// A local path hit with the wrong method answers 405 like the core's
+	// own routes, rather than the core's 404 for a gateway without them.
+	core.HandleFunc("/local/", func(w http.ResponseWriter, _ *http.Request) {
+		webgate.WriteError(w, http.StatusMethodNotAllowed, &protocol.Error{
+			Code:    protocol.CodeInvalidRequest,
+			Message: "method not allowed",
+		})
+	})
 	return g, nil
 }
 
@@ -211,8 +211,7 @@ func (g *Gateway) authorize(r *http.Request, handshake bool) (webgate.Backend, *
 func (g *Gateway) authorized(w http.ResponseWriter, r *http.Request) bool {
 	_, refusal := g.authorize(r, false)
 	if refusal != nil {
-		w.Header().Set("WWW-Authenticate", "Bearer")
-		webgate.WriteError(w, refusal.Status, refusal.Error)
+		refusal.Write(w)
 		return false
 	}
 	return true
@@ -226,7 +225,7 @@ func (g *Gateway) Start(_ context.Context) error {
 		return fmt.Errorf("localgw: listen: %w", err)
 	}
 	g.ln = ln
-	go func() { _ = g.srv.Serve(ln) }()
+	g.core.Serve(ln)
 	return nil
 }
 
@@ -267,16 +266,7 @@ func (g *Gateway) Close() error {
 	g.cancel()
 	g.local.forward.Close()
 	backendErr := g.cfg.Backend.Close()
-	var serveErr error
-	if g.ln != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
-		defer cancel()
-		serveErr = g.srv.Shutdown(ctx)
-		if errors.Is(serveErr, context.DeadlineExceeded) {
-			serveErr = g.srv.Close()
-		}
-	}
-	g.core.Close()
+	serveErr := g.core.Close()
 	// The cancelled context has killed any rebuild; its goroutine still has
 	// to reap the child and record why it stopped. Waiting here keeps that
 	// record with this gateway rather than whatever comes after it, which

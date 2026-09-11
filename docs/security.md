@@ -209,6 +209,21 @@ identify its callers.
   the browser, so there is no credential to leak, copy, or forget to revoke:
   losing the tailnet loses the dashboard on the next request. A tagged node
   is refused `403`, a failed lookup `503`.
+- **A cross-site page cannot act as the member.** With no token, the
+  browser's tailnet position is the whole credential, so the gateway refuses
+  any request whose `Origin` is not its own host and any `POST /api/v1` body
+  not declared `application/json`; a foreign page can neither send the
+  simple request that skips the CORS preflight nor pass the preflight, which
+  the gateway never answers. WebSocket handshakes apply the same origin rule.
+  Both gateways enforce it.
+- **Who the tailnet address vouches for.** WhoIs names the owner of the
+  node the request came from, so any process on the server host that
+  connects to the host's own tailnet address is served as the node's owner,
+  usually the admin, with no credential; a device behind a Tailscale subnet
+  router arrives as the router node and is served as the router's owner.
+  SSH on `:2222` has had exactly the same boundary since tailnet identity
+  shipped; the dashboard adds no new one. Loopback, LAN and container
+  addresses resolve to nobody and are refused.
 - **The same capability checks, run by the same code.** Each identified
   member is served in-process through `internal/sshd`'s `Local` client,
   which runs the handlers an SSH channel runs - pending gating, per-method
@@ -226,10 +241,11 @@ identify its callers.
   `/ws/` and `/local/` is gated.
 - **Live sockets are re-checked by the server, not by the transport.** The
   server re-runs its capability checks on every call and on each subsystem
-  channel, and re-checks live attach and sync channels every few seconds. A
-  write attach that loses the steer capability is dropped exactly as a CLI
-  attach would be - the terminal view falls back to a mirror - and a removed
-  member loses every open channel. On the local gateway the token cannot be
+  channel, and re-checks live attach, terminal, event and sync channels
+  every few seconds. A write attach that loses the steer capability is
+  dropped exactly as a CLI attach would be - the terminal view falls back to
+  a mirror - and a member removed or set back to pending loses every open
+  channel within that interval. On the local gateway the token cannot be
   revoked out from under a socket, because it lives and dies with the
   process serving it. On the server gateway a socket keeps the member it
   was opened as; the tailnet is asked again on the next request or

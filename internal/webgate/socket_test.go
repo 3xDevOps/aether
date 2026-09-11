@@ -45,7 +45,7 @@ func TestKeepAliveDropsAPeerThatStopsAnsweringPings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer g.Close()
+	defer func() { _ = g.Close() }()
 	defer func() { _ = pw.Close() }()
 	ts := httptest.NewServer(g)
 	defer ts.Close()
