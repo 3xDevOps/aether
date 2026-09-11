@@ -2,8 +2,9 @@
 //
 // A keyboard takes most of a phone's screen, and what is left has to hold
 // the field being typed into and the button that submits it.
-// `shrinkToKeyboardHeight` takes the viewport down to what is left; it is a
-// short-viewport proxy rather than a real keyboard - see e2e/mobile.ts.
+// `shrinkToKeyboardHeight` takes the viewport down to what is left, which is
+// what a keyboard does to the layout viewport wherever the shell's
+// `interactive-widget=resizes-content` is honoured - see e2e/mobile.ts.
 
 import { expect, shrinkToKeyboardHeight, test } from './mobile'
 import { OnboardingWizard } from './pages/wizard'

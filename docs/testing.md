@@ -258,7 +258,6 @@ attaches the server's output to the report.
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
 | `status-bar-sizing` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths and full secondary readouts open by keyboard. The same bar on a phone is `status-bar.mobile` below |
 | `sidebar-drawer` | In a 600px desktop window, the sidebar drawer answering `Mod+B` itself and handing the palette back once it closes |
-| `toast-clearance.mobile` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
 | `keyboard-focus` | Real browser checks that Escape closes a dialog on a run without leaving the run, and that a focused control paints the app's outline with computed style and contrast against the actual background |
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
@@ -293,6 +292,7 @@ covered - WebKit is not installed.
 | `status-bar.mobile` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport; on a screen too short for its own readouts it scrolls to them rather than cutting them off, and the theme toggle answers a tap on the bottom edge |
 | `shell-drawer.mobile` | On a phone, the run list as a modal drawer: it opens from the rail, its rows are finger-sized, and tapping a run leaves the drawer closed with that run on screen |
 | `dialog-anchor.mobile` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
+| `toast-clearance.mobile` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
 
 Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
 and a control that answers only a mouse would still pass a click-driven test.

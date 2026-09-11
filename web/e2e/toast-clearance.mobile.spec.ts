@@ -4,8 +4,8 @@
 // to both - and the bar is 44px on a coarse pointer, twice what it is for a
 // mouse, which is what makes the default land inside it.
 
-import { expect, test } from './fixtures'
 import { seedWorkspace } from './harness/setup'
+import { expect, test } from './mobile'
 
 test('a toast clears the status bar on a phone', async ({ page, aether }) => {
   const alice = await aether.member('alice')

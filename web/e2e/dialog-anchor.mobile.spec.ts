@@ -5,7 +5,7 @@
 // viewport.
 
 import { seedWorkspace } from './harness/setup'
-import { expect, test } from './mobile'
+import { expect, shrinkToKeyboardHeight, test } from './mobile'
 
 /** The 1rem inset `top-4` puts a narrow-viewport dialog at. */
 const inset = 16
@@ -57,17 +57,12 @@ test('the launch form keeps its footer on screen with the keyboard up', async ({
   page,
   aether,
 }) => {
-  // Roughly what a phone keyboard leaves of an 844px screen. The page loads
-  // at that height because Chromium's device emulation resolves `dvh` against
-  // the height the page started at.
-  const height = 440
-  await page.setViewportSize({ width: 390, height })
-
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
 
   await page.goto(alice.url)
+  await shrinkToKeyboardHeight(page)
 
   await page.getByRole('button', { name: 'Expand sidebar' }).tap()
   await page
@@ -82,6 +77,7 @@ test('the launch form keeps its footer on screen with the keyboard up', async ({
     .poll(async () => (await dialog.boundingBox())?.y ?? -1)
     .toBeLessThanOrEqual(inset)
   const box = await dialog.boundingBox()
+  const height = await page.evaluate(() => window.innerHeight)
   if (!box) throw new Error('the launch form did not render')
   // The form is taller than this viewport, so what keeps the footer reachable
   // is the dialog being clamped to the viewport and scrolling inside itself.
