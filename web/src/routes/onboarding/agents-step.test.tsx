@@ -86,6 +86,12 @@ async function choose(files: File[]) {
   await waitFor(() => expect(screen.getByText('Preview')).toBeDefined())
 }
 
+async function confirmImport() {
+  const button = screen.getByRole('button', { name: 'Import configuration' })
+  await waitFor(() => expect(button).toHaveProperty('disabled', false))
+  fireEvent.click(button)
+}
+
 beforeEach(() => {
   vi.restoreAllMocks()
 })
@@ -124,8 +130,7 @@ describe('agents step', () => {
     })
     await waitFor(() => expect(screen.getByText('Preview')).toBeDefined())
     expect(screen.queryByText(/old.md/)).toBeNull()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Import configuration' })).toHaveProperty('disabled', false))
-    fireEvent.click(screen.getByRole('button', { name: 'Import configuration' }))
+    await confirmImport()
     await waitFor(() => expect(client.configImport).toHaveBeenCalledTimes(1))
     expect(client.configImport).toHaveBeenCalledWith({
       harness: 'claude',
@@ -155,7 +160,7 @@ describe('agents step', () => {
     expect((screen.getByRole('button', { name: 'Import configuration' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(destination, { target: { value: 'codex' } })
     expect((screen.getByRole('button', { name: 'Import configuration' }) as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Import configuration' }))
+    await confirmImport()
     await waitFor(() => expect(client.configImport).toHaveBeenCalledTimes(1))
     expect(client.configImport).toHaveBeenCalledWith({
       harness: 'codex',
@@ -180,7 +185,7 @@ describe('agents step', () => {
     })
     renderStep(client)
     await choose([directoryFile('notes.md', 'ok')])
-    fireEvent.click(screen.getByRole('button', { name: 'Import configuration' }))
+    await confirmImport()
     await waitFor(() => expect(screen.getByText(/Imported 1 files/)).toBeDefined())
     expect(screen.getByText('notes.md')).toBeDefined()
     expect(screen.getByText(/secret detected \(aws-access-key\) at 3:4/)).toBeDefined()
@@ -205,9 +210,7 @@ describe('agents step', () => {
       directoryFile('settings.json', '{}'),
       directoryFile('blocked.md', 'ok'),
     ])
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Import configuration' })).toHaveProperty('disabled', false))
-
-    fireEvent.click(screen.getByRole('button', { name: 'Import configuration' }))
+    await confirmImport()
     const warning = await screen.findByRole('alert')
     expect(warning.textContent).toContain(error)
     expect(screen.getByText(/Import incomplete: 1 files \(2 B\) imported into/)).toBeDefined()
@@ -227,8 +230,7 @@ describe('agents step', () => {
     })
     renderStep(client)
     await choose([directoryFile('settings.json', '{}')])
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Import configuration' })).toHaveProperty('disabled', false))
-    fireEvent.click(screen.getByRole('button', { name: 'Import configuration' }))
+    await confirmImport()
     const warning = await screen.findByRole('alert')
     expect(warning.textContent).toContain(error)
     expect(warning.textContent).toMatch(/unknown/i)
@@ -242,7 +244,7 @@ describe('agents step', () => {
     const client = fakeApi({ configImport: vi.fn(() => pending.promise) })
     const first = render(<ProfileImport client={client} />)
     await choose([directoryFile('settings.json', '{}')])
-    fireEvent.click(screen.getByRole('button', { name: 'Import configuration' }))
+    await confirmImport()
     first.unmount()
     render(<ProfileImport client={client} />)
 
