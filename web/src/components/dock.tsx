@@ -250,8 +250,9 @@ export function Dock({
           className={cn(
             focusRing,
             // Without `touch-none` the browser claims a touch drag as a pan
-            // and cancels the pointer stream this listens to.
-            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20 coarse:-top-1.5 coarse:h-3',
+            // and cancels the pointer stream this listens to. The coarse hit
+            // area is 24px centred on the edge, the same as the sidebar's.
+            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20 coarse:-top-3 coarse:h-6',
           )}
         />
       )}

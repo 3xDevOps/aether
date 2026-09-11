@@ -203,8 +203,10 @@ export function Sidebar() {
           className={cn(
             focusRing,
             // Without `touch-none` the browser claims a touch drag as a pan
-            // and cancels the pointer stream this listens to.
-            'absolute inset-y-0 -right-1 w-2 cursor-col-resize touch-none hover:bg-toolbar-hover coarse:-right-2 coarse:w-4',
+            // and cancels the pointer stream this listens to. The coarse hit
+            // area is 24px centred on the edge, and it needs the z-index to
+            // win the half of itself that overhangs the pane beside it.
+            'absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none hover:bg-toolbar-hover coarse:-right-3 coarse:w-6',
           )}
         />
       )}
