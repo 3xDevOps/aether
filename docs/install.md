@@ -81,8 +81,9 @@ itself, so the question and the command it launches read your terminal
 provisioning script - nothing is asked and nothing extra runs, the same as
 `--role none`. It never blocks waiting for an answer that cannot come.
 
-Either way the script ends by naming the next command for the role you picked
-and linking the quickstart.
+The script ends by naming the next command for the role you picked and linking
+the quickstart. Cancelling setup or the desktop build stops the installer
+instead, preserving the interrupted command's exit status.
 
 The script is POSIX-only: it covers Linux and macOS. There is no Windows
 installer and no PowerShell equivalent. Windows clients install by hand, which
