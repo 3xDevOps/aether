@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -48,6 +49,12 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 			return err
 		}
 	case agentstatus.Working:
+		// The report is the agent's own proof that it is alive, and the
+		// only one a hook produces: it writes nothing to the terminal and
+		// touches no files. Without this the next poll would park a run as
+		// stalled seconds after it resumed, and every tool call would flip
+		// the run card twice.
+		entry.lastWorking = time.Now().UTC()
 		// Claude Code fires this on every tool call, so the common case has
 		// to be free: a run that is already running is left alone, with no
 		// store write and no event.

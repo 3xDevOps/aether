@@ -206,6 +206,29 @@ func TestAgentWorkingStillStalls(t *testing.T) {
 	}
 }
 
+// TestWorkingReportOutlastsTheNextPoll: a hook writes nothing to the
+// terminal and touches no files, so the report itself has to count as
+// activity. Otherwise the poll that follows a resumed run re-parks it as
+// stalled, and every tool call flips the run card twice.
+func TestWorkingReportOutlastsTheNextPoll(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		// Long enough that several polls run before the threshold is a
+		// stall again, short enough to park the launched run quickly.
+		cfg.StallThreshold = 200 * time.Millisecond
+		cfg.PollInterval = 10 * time.Millisecond
+	})
+	sub := e.subscribe(t)
+	e.startStalls(t)
+	run, _ := e.launchReporting(t)
+
+	waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
+		t.Fatalf("report working: %v", err)
+	}
+	waitStatusEvent(t, sub, run.ID, domain.RunRunning)
+	expectNoStatusEvent(t, sub, run.ID, "the polls after a working report")
+}
+
 // pump keeps a container's terminal producing agent output until the
 // returned function is called, the way an agent that is talking again does.
 func pump(t *testing.T, c *fakeContainer) func() {

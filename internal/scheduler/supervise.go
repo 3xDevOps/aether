@@ -137,7 +137,8 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 // Two rules follow. Where the harness reports both ends of a turn, activity
 // must not un-park it: a TUI that repaints while the member types is
 // producing output, not work, and only the agent's own "working" means the
-// turn resumed. And un-parking takes activity that was actually observed,
+// turn resumed - which is activity in its own right, because a hook writes
+// nothing to the terminal and touches no files. And un-parking takes activity that was actually observed,
 // not a run that merely started recently - after a restart nothing has been
 // observed yet, and every run parked for its member would otherwise be
 // declared working again on the first poll.
@@ -165,10 +166,16 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		if t, ok := s.cfg.Git.LastFileChange(e.runID); ok && t.After(activity) {
 			activity, observed = t, true
 		}
-		idle := now.Sub(activity)
 
 		s.mu.Lock()
 		if s.runs[e.runID] == e && !e.paused {
+			// An agent that says it is working leaves no other trace, so
+			// the report is read here, under the lock, and counts as the
+			// activity it is - including one that lands mid-poll.
+			if e.lastWorking.After(activity) {
+				activity, observed = e.lastWorking, true
+			}
+			idle := now.Sub(activity)
 			// A run whose harness reports both ends of a turn and has said
 			// it is waiting is released by the agent's own next report, not
 			// by anything on the terminal.

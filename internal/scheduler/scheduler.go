@@ -205,6 +205,12 @@ type supervised struct {
 	// only: after a server restart the run keeps its stored status and the
 	// next report - or the next stall - corrects it.
 	agentReport agentstatus.Report
+	// lastWorking is when the agent last said it was working. A report is
+	// the only trace its hook leaves - it writes nothing to the terminal
+	// and touches no files - so the stall detector counts it as the
+	// activity it is, and a run does not park as stalled seconds after the
+	// agent proved it is alive.
+	lastWorking time.Time
 	done        chan struct{}
 	// runUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root (no ownership pass). Set once
