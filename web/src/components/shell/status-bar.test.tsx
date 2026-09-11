@@ -12,6 +12,7 @@ import {
   vera,
 } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
+import { atViewport } from '@/test/viewport'
 
 /** The desktop gateway's descriptor, carrying the update verbs. */
 function caps(): GatewayCapabilities {
@@ -47,7 +48,8 @@ test('the version label is plain until an update is available', () => {
   expect(screen.queryByRole('button', { name: /Update available/ })).toBeNull()
 })
 
-test('opens and closes the secondary status actions from the narrow menu', async () => {
+test('opens and closes the secondary status actions on a phone', async () => {
+  atViewport(390, { height: 844 })
   seed()
   render(<StatusBar />)
 
@@ -60,6 +62,26 @@ test('opens and closes the secondary status actions from the narrow menu', async
 
   await userEvent.keyboard('{Enter}')
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
+})
+
+// Above the wide breakpoint the readouts are the row itself, so the menu
+// that carries them on a narrow screen has nothing left to close.
+test('the wide layout keeps every readout up', async () => {
+  atViewport(1440)
+  seed()
+  render(<StatusBar />)
+
+  const member = screen.getByText(alice.display_name)
+  const details = member.closest('#status-details')
+  expect(details?.getAttribute('data-state')).toBe('open')
+
+  const toggle = screen.getByRole('button', { name: 'Show status details' })
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+
+  toggle.focus()
+  await userEvent.keyboard('{Enter}')
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(details?.getAttribute('data-state')).toBe('open')
 })
 
 test('a CLI update turns the label into a button that clears the dismissals', async () => {
