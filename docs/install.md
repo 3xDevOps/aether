@@ -438,6 +438,9 @@ at 960 by 600, the smallest size the dashboard's own layout holds.
 aether gui build
 ```
 
+On Linux and macOS, cancelling the build with SIGINT exits 130; SIGTERM exits
+143. Ordinary build failures exit 1 and print the build's original error.
+
 The CLI carries the shell sources, unpacks them into your cache directory
 (`~/.cache/aether/desktop-build` on Linux,
 `~/Library/Caches/aether/desktop-build` on macOS,
