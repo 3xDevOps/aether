@@ -10,6 +10,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 )
 
 // newReportingEnv is a test scheduler whose runs really do get a status
@@ -35,7 +36,13 @@ func newReportingEnv(t *testing.T, mutate func(*Config)) *testEnv {
 // must come from newReportingEnv, or the run gets no reporter at all.
 func (e *testEnv) launchReporting(t *testing.T) (*domain.Run, *fakeContainer) {
 	t.Helper()
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", "claude", domain.LaunchTUI)
+	return e.launchOn(t, "claude")
+}
+
+// launchOn launches an interactive run on one shipped harness.
+func (e *testEnv) launchOn(t *testing.T, harnessName string) (*domain.Run, *fakeContainer) {
+	t.Helper()
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", harnessName, domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -359,5 +366,39 @@ func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
 	}
 	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonInput {
 		t.Fatalf("resumed run = %s because %q, want it still parked because %q", r.Status, r.Reason, agentstatus.ReasonInput)
+	}
+}
+
+// TestTurnEndReportComesBackOnActivity is the codex half of the rule. A
+// harness that says when a turn ends but never when the next one starts
+// has nothing to un-park its run with, so activity still does - which is
+// exactly what a full reporter turns off.
+func TestTurnEndReportComesBackOnActivity(t *testing.T) {
+	e := newReportingEnv(t, func(cfg *Config) {
+		// Far longer than the test: nothing here is a stall.
+		cfg.StallThreshold = time.Hour
+		cfg.PollInterval = 10 * time.Millisecond
+	})
+	sub := e.subscribe(t)
+	e.startStalls(t)
+	run, c := e.launchOn(t, "codex")
+	if got := e.reporterOf(t, run.ID); got != harness.ReporterTurnEnd {
+		t.Fatalf("codex run reporter = %s, want %s", got, harness.ReporterTurnEnd)
+	}
+
+	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
+		t.Fatalf("report waiting: %v", err)
+	}
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	if p := ev.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonInput {
+		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonInput)
+	}
+
+	stop := pump(t, c)
+	defer stop()
+	resumed := waitStatusEvent(t, sub, run.ID, domain.RunRunning)
+	if p := resumed.Payload.(events.RunStatusPayload); p.Reason != "activity resumed" {
+		t.Fatalf("resume reason = %q, want \"activity resumed\"", p.Reason)
 	}
 }

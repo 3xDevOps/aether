@@ -243,3 +243,52 @@ func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 		t.Fatalf("headless opencode run recorded reporter %s, want %s", got, harness.ReporterNone)
 	}
 }
+
+// TestReporterRegistrationPerHarness is the same contract for the three
+// harnesses that carry a reporter of their own. Codex needs no asset - the
+// whole command rides a configuration override - while pi and omp share
+// one extension file, so each has to be launched with what it was given
+// and recorded as what it can actually say.
+func TestReporterRegistrationPerHarness(t *testing.T) {
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	dir := t.TempDir()
+	coord := &recordingCoordinator{
+		fakeCoordinator: fakeCoordinator{root: filepath.Join(dir, "coord")},
+		files:           make(map[domain.RunID]map[string][]byte),
+	}
+	e.sched.UseCoordination(coord, filepath.Join(dir, "runtime", "bin"))
+
+	codex, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "review the diff", "codex", domain.LaunchTUI)
+	if err != nil {
+		t.Fatalf("launch codex run: %v", err)
+	}
+	argv := e.rt.byName(string(codex.ID)).spec.Command
+	if i := slices.Index(argv, "-c"); i < 0 || i+1 >= len(argv) || argv[i+1] != agentstatus.CodexNotifySetting {
+		t.Fatalf("interactive codex argv = %v, want -c %s in it", argv, agentstatus.CodexNotifySetting)
+	}
+	if !strings.Contains(agentstatus.CodexNotifySetting, mcpbridge.BinaryPath) {
+		t.Fatalf("the codex notify setting %s names something other than the staged binary",
+			agentstatus.CodexNotifySetting)
+	}
+	if got := e.reporterOf(t, codex.ID); got != harness.ReporterTurnEnd {
+		t.Fatalf("interactive codex run recorded reporter %s, want %s", got, harness.ReporterTurnEnd)
+	}
+
+	extension := path.Join(mcpbridge.MountDir, agentstatus.PiExtensionName)
+	for _, name := range []string{"pi", "omp"} {
+		run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add a test", name, domain.LaunchTUI)
+		if err != nil {
+			t.Fatalf("launch %s run: %v", name, err)
+		}
+		argv := e.rt.byName(string(run.ID)).spec.Command
+		if i := slices.Index(argv, "-e"); i < 0 || i+1 >= len(argv) || argv[i+1] != extension {
+			t.Fatalf("interactive %s argv = %v, want -e %s in it", name, argv, extension)
+		}
+		if got := coord.file(run.ID, agentstatus.PiExtensionName); !bytes.Equal(got, agentstatus.PiExtension) {
+			t.Fatalf("%s extension written for the run = %s, want the embedded asset", name, got)
+		}
+		if got := e.reporterOf(t, run.ID); got != harness.ReporterFull {
+			t.Fatalf("interactive %s run recorded reporter %s, want %s", name, got, harness.ReporterFull)
+		}
+	}
+}
