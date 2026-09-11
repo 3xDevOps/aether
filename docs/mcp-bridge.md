@@ -191,8 +191,9 @@ event never dials at all, and a failure is one line on stderr, which the
 harness shows only for a non-zero exit. A hook that breaks or slows the
 agent would be worse than a run card that is briefly wrong.
 
-The whole round trip is budgeted under the timeout the harness gives the
-hook. Which harnesses have one, what the settings document looks like, and
+Reading the event and the round trip that follows share one budget, set
+under the timeout the harness gives the hook, so a harness that hands over
+an open pipe cannot leave the reporter waiting on it either. Which harnesses have one, what the settings document looks like, and
 what each state does to the run: [harnesses.md](harnesses.md) and
 [failure-handling.md](failure-handling.md).
 

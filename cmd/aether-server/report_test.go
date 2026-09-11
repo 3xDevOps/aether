@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -66,8 +67,9 @@ func (f *fakeCoordSocket) next(t *testing.T) (protocol.Request, bool) {
 }
 
 // withStdin points os.Stdin at a pipe carrying payload, the way a harness
-// hook hands the reporter its event.
-func withStdin(t *testing.T, payload string) {
+// hook hands the reporter its event. closes says whether the harness closes
+// its end afterwards.
+func withStdin(t *testing.T, payload string, closes bool) {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -75,19 +77,50 @@ func withStdin(t *testing.T, payload string) {
 	}
 	go func() {
 		_, _ = w.WriteString(payload)
-		_ = w.Close()
+		if closes {
+			_ = w.Close()
+		}
 	}()
 	saved := os.Stdin
 	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = saved; _ = r.Close() })
+	t.Cleanup(func() { os.Stdin = saved; _ = w.Close(); _ = r.Close() })
+}
+
+// captureStdout points os.Stdout at a pipe and returns what the reporter
+// wrote to it.
+func captureStdout(t *testing.T) func() string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	saved := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = saved; _ = r.Close() })
+	return func() string {
+		if cerr := w.Close(); cerr != nil {
+			t.Fatalf("close stdout: %v", cerr)
+		}
+		out, rerr := io.ReadAll(r)
+		if rerr != nil {
+			t.Fatalf("read stdout: %v", rerr)
+		}
+		return string(out)
+	}
 }
 
 // TestReportClaudeCallsRunReport: a Stop payload becomes exactly one
 // run.report naming the waiting state and the reason a member reads.
 func TestReportClaudeCallsRunReport(t *testing.T) {
 	sock := newFakeCoordSocket(t)
-	withStdin(t, `{"hook_event_name":"Stop","session_id":"abc"}`)
+	withStdin(t, `{"hook_event_name":"Stop","session_id":"abc"}`, true)
+	stdout := captureStdout(t)
 	report([]string{"--socket", sock.path, "claude"})
+	// The harness reads the hook's stdout: anything printed there is the
+	// reporter talking to the agent instead of to the server.
+	if out := stdout(); out != "" {
+		t.Fatalf("the reporter wrote %q to stdout, want nothing", out)
+	}
 
 	req, ok := sock.next(t)
 	if !ok {
@@ -110,7 +143,7 @@ func TestReportClaudeCallsRunReport(t *testing.T) {
 // the agent's state costs no round trip at all.
 func TestReportClaudeIgnoresUnmappedEvents(t *testing.T) {
 	sock := newFakeCoordSocket(t)
-	withStdin(t, `{"hook_event_name":"SessionStart","source":"startup"}`)
+	withStdin(t, `{"hook_event_name":"SessionStart","source":"startup"}`, true)
 	report([]string{"--socket", sock.path, "claude"})
 	if req, ok := sock.next(t); ok {
 		t.Fatalf("the reporter dialled for an unmapped event: %+v", req)
@@ -120,7 +153,7 @@ func TestReportClaudeIgnoresUnmappedEvents(t *testing.T) {
 // TestReportSurvivesAMissingSocket: coordination may be off, or the server
 // may be restarting. The hook must still end quickly and quietly.
 func TestReportSurvivesAMissingSocket(t *testing.T) {
-	withStdin(t, `{"hook_event_name":"Stop"}`)
+	withStdin(t, `{"hook_event_name":"Stop"}`, true)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -130,5 +163,29 @@ func TestReportSurvivesAMissingSocket(t *testing.T) {
 	case <-done:
 	case <-time.After(reportBudget + 2*time.Second):
 		t.Fatal("the reporter hung on a socket that is not there")
+	}
+}
+
+// TestReportGivesUpOnAnUnclosedStdin: the budget is the whole run, not just
+// the call. A harness that writes the payload and leaves the pipe open must
+// not leave the reporter sitting between the agent and its next turn.
+func TestReportGivesUpOnAnUnclosedStdin(t *testing.T) {
+	sock := newFakeCoordSocket(t)
+	withStdin(t, `{"hook_event_name":"Stop"}`, false)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		report([]string{"--socket", sock.path, "claude"})
+	}()
+	select {
+	case <-done:
+	case <-time.After(reportBudget + 2*time.Second):
+		t.Fatal("the reporter hung on a stdin the harness never closed")
+	}
+	// report has already returned, so a dial would already be here.
+	select {
+	case req := <-sock.requests:
+		t.Fatalf("the reporter dialled without a payload it could read: %+v", req)
+	case <-time.After(100 * time.Millisecond):
 	}
 }

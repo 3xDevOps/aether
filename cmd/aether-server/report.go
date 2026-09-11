@@ -13,10 +13,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// reportBudget is the whole time the reporter may spend, dial included.
-// It sits under the timeout the harness gives the hook, because the hook
-// runs on the agent's own turn boundaries: being late is worse than being
-// wrong.
+// reportBudget is the whole time the reporter may spend, from the first
+// byte of the hook payload through the call. It sits under the timeout the
+// harness gives the hook, because the hook runs on the agent's own turn
+// boundaries: being late is worse than being wrong.
 const reportBudget = 4 * time.Second
 
 // maxHookPayload bounds the hook body read from stdin. A hook payload is a
@@ -51,13 +51,15 @@ func report(args []string) {
 		return
 	}
 	harness := fs.Arg(0)
+	ctx, cancel := context.WithTimeout(context.Background(), reportBudget)
+	defer cancel()
 	var (
 		rep    agentstatus.Report
 		mapped bool
 	)
 	switch harness {
 	case "claude":
-		payload, err := io.ReadAll(io.LimitReader(os.Stdin, maxHookPayload))
+		payload, err := readHookPayload(ctx, os.Stdin)
 		if err != nil {
 			warn("report %s: read the hook payload: %v", harness, err)
 			return
@@ -72,14 +74,35 @@ func report(args []string) {
 	if !mapped {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), reportBudget)
-	defer cancel()
 	err := mcpbridge.Call(ctx, *socket, protocol.MethodRunReport, protocol.RunReportParams{
 		State:  string(rep.State),
 		Reason: rep.Reason,
 	}, nil)
 	if err != nil {
 		warn("report %s: %v", harness, err)
+	}
+}
+
+// readHookPayload reads the hook body under the same budget as the call.
+// The harness owns the write end of this pipe and the reporter is the last
+// thing between the agent and its next turn, so a harness that hands over a
+// pipe and forgets to close it must not leave the reporter waiting on it.
+// The read goroutine outlives the wait and the process exits behind it.
+func readHookPayload(ctx context.Context, r io.Reader) ([]byte, error) {
+	type read struct {
+		payload []byte
+		err     error
+	}
+	done := make(chan read, 1)
+	go func() {
+		payload, err := io.ReadAll(io.LimitReader(r, maxHookPayload))
+		done <- read{payload, err}
+	}()
+	select {
+	case res := <-done:
+		return res.payload, res.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
