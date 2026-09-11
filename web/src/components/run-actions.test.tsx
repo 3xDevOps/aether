@@ -7,6 +7,7 @@ import { useStore } from '@/store'
 import { toRecord, type RunRecord } from '@/store/runs'
 import { alice, bob, run, serverInfo, vera, workspace } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
+import { atViewport } from '@/test/viewport'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -489,4 +490,31 @@ test('nothing else in the bar fires while a verb is in flight', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
   expect(api.runPause).not.toHaveBeenCalled()
   expect(api.localPull).toHaveBeenCalledTimes(1)
+})
+
+// A finger gets one button and a menu of full labels, because six 44px
+// buttons do not fit across a phone and 22px icons cannot be tapped or read.
+test('a coarse pointer puts every verb behind one labelled button', async () => {
+  atViewport(390, { pointer: 'coarse' })
+  const record = seedWidest()
+  render(<RunActions run={record} />)
+
+  for (const name of ['Pause', 'Send', 'Close', 'Kill', 'Hand off']) {
+    expect(screen.queryByRole('button', { name })).toBeNull()
+  }
+
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Actions' }), { key: 'Enter' })
+  const menu = within(await screen.findByRole('menu'))
+  for (const name of [
+    'Pause run',
+    'Send a message to the agent...',
+    'Close run...',
+    'Pull branch',
+    'Hand off',
+  ]) {
+    expect(menu.getByRole('menuitem', { name })).toBeTruthy()
+  }
+
+  fireEvent.click(menu.getByRole('menuitem', { name: 'Pause run' }))
+  await waitFor(() => expect(api.runPause).toHaveBeenCalledWith(record.id))
 })

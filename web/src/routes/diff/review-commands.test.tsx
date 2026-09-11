@@ -25,7 +25,9 @@ function seed() {
     members: { [alice.id]: alice },
     runs: { [active.id]: record },
     diffs: { [active.id]: { ...initialDiff, base: 'abcdef1234567890' } },
-    capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
+    // The tab's local-review block is gated on the verb that fetches into a
+    // repository on this machine.
+    capabilities: { gateway: 'local', methods: ['*'], ws: [], local: ['pull'] },
     hydrated: true,
   })
   return record
@@ -76,4 +78,13 @@ test('copy falls back to selecting the text where the clipboard is missing', asy
     expect(selection?.rangeCount).toBe(1)
     expect(selection?.getRangeAt(0).toString()).toBe(command)
   })
+})
+
+test('a gateway that cannot pull shows no local review block', () => {
+  const record = seed()
+  useStore.setState({
+    capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
+  })
+  const { container } = renderCommands(record)
+  expect(container.firstChild).toBeNull()
 })

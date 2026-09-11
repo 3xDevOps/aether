@@ -89,9 +89,10 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
           <div className="w-full max-w-lg border border-border/70 bg-card px-4 py-4 text-left">
             <p className="text-base font-medium">Onboarding needs a local gateway</p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Onboarding runs in the desktop app or `aether gui`, where the
-              gateway holds your SSH identity and can reach your local
-              repositories. This gateway is a remote monitor.
+              This dashboard is served by the Aether server, which holds no SSH
+              identity of yours and can reach no repository on your computer.
+              Onboarding runs in the desktop app or `aether gui` there, where
+              the gateway has both.
             </p>
           </div>
         </div>

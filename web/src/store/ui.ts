@@ -93,6 +93,13 @@ export interface UiSlice {
   /** Zoom level shared by every terminal, in pixels. */
   terminalFontSize: number
   /**
+   * Whether the Diff tab wraps long lines, or null while it still follows
+   * the pointer. One run-detail route is mounted at a time, so component
+   * state would reset the toggle every time the member left Diff and came
+   * back - several times a minute on a phone.
+   */
+  diffWrap: boolean | null
+  /**
    * Whether the member has ever taken control of a run. Until they have, the
    * Terminal tab says what the default attach is, because nothing else on
    * screen distinguishes a read-only mirror from a steered session.
@@ -138,6 +145,7 @@ export interface UiSlice {
   setTerminalDockHeight: (height: number) => void
   setRunDockHeight: (height: number) => void
   setTerminalFontSize: (size: number) => void
+  setDiffWrap: (wrap: boolean) => void
   markTerminalControlTaken: () => void
   toggleSidebar: () => void
   setOnboarded: (onboarded: boolean) => void
@@ -161,6 +169,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   terminalDockHeight: 280,
   runDockHeight: 240,
   terminalFontSize: defaultTerminalFontSize,
+  diffWrap: null,
   terminalControlTaken: false,
   onboarded: false,
   onboardingStep: 'Link',
@@ -182,6 +191,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   setTerminalDockHeight: (height) => set({ terminalDockHeight: clampDockHeight(height) }),
   setRunDockHeight: (height) => set({ runDockHeight: clampDockHeight(height) }),
   setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
+  setDiffWrap: (diffWrap) => set({ diffWrap }),
   markTerminalControlTaken: () => set({ terminalControlTaken: true }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setOnboarded: (onboarded) =>

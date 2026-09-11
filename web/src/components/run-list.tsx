@@ -93,7 +93,7 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
                       }}
                       className={cn(
                         focusRing,
-                        'block min-h-[22px] max-w-full rounded-[2px] text-left',
+                        'block min-h-[22px] coarse:min-h-11 max-w-full rounded-[2px] text-left',
                       )}
                     >
                       <span className="block line-clamp-2 break-words text-[13px] font-medium leading-5">

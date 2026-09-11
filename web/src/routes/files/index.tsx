@@ -27,6 +27,7 @@ import { ViewHeader } from '@/components/view-header'
 import { runLabel } from '@/lib/status'
 import type { ConfigRoot, Run, Workspace } from '@/lib/types'
 import { terminalFontFamily } from '@/lib/term-font'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { FilePatch } from '@/routes/diff/patch-view'
@@ -241,13 +242,13 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
                 value={newFile.path}
                 onChange={(event) => setNewFile({ ...newFile, path: event.target.value, error: undefined })}
                 placeholder="settings.json or skills/my-skill.md"
-                className="h-8 w-full border border-input bg-background px-2 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-8 coarse:h-11 coarse:min-h-11 w-full border border-input bg-background px-2 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
               <p className="text-[11px] text-muted-foreground">Relative paths only. Existing files are never overwritten.</p>
               {newFile.error && <p role="alert" className="text-[11px] text-destructive">{newFile.error}</p>}
               <div className="flex justify-end gap-2">
-                <button type="button" className={cn(focusRing, 'px-2 py-1 text-[11px]')} onClick={() => setNewFile(null)}>Cancel</button>
-                <button type="submit" className={cn(focusRing, 'border border-input bg-primary px-2 py-1 text-[11px] text-primary-foreground')}>Create</button>
+                <button type="button" className={cn(focusRing, 'min-h-7 px-2 py-1 text-[11px] coarse:min-h-11')} onClick={() => setNewFile(null)}>Cancel</button>
+                <button type="submit" className={cn(focusRing, 'min-h-7 border border-input bg-primary px-2 py-1 text-[11px] text-primary-foreground coarse:min-h-11')}>Create</button>
               </div>
             </form>
           )}
@@ -294,8 +295,20 @@ function WorkspaceTree({
   const [expanded, setExpanded] = useState(true)
   return (
     <section className="space-y-0.5">
-      <button type="button" className={cn(focusRing, 'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[13px] font-medium hover:bg-toolbar-hover')} onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>
-        {expanded ? <ChevronDown className="size-3.5 shrink-0" aria-hidden /> : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
+      <button
+        type="button"
+        className={cn(
+          focusRing,
+          'flex min-h-7 coarse:min-h-11 w-full items-center gap-1.5 px-1.5 text-left text-[13px] font-medium hover:bg-toolbar-hover',
+        )}
+        onClick={() => setExpanded((open) => !open)}
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+        ) : (
+          <ChevronRight className="size-3.5 shrink-0" aria-hidden />
+        )}
         <FolderTree className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
       </button>
@@ -365,14 +378,14 @@ function TreeDirectory({
   const label = path === '' ? sourceLabel(source) : path.split('/').at(-1) ?? path
   return (
     <div>
-      <div className="flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover">
+      <div className="flex min-h-7 coarse:min-h-11 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover">
         <button type="button" className={cn(focusRing, 'flex min-w-0 flex-1 items-center gap-1.5 text-left')} onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>
           {expanded ? <ChevronDown className="size-3 shrink-0" aria-hidden /> : <ChevronRight className="size-3 shrink-0" aria-hidden />}
           <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1 truncate">{label}</span>
         </button>
         {source.kind === 'config' && path === '' && onNewFile && (
-          <button type="button" aria-label={`New file in ${source.label}`} title="New file" className={cn(focusRing, 'p-1 text-muted-foreground hover:text-foreground')} onClick={() => onNewFile(source)}>
+          <button type="button" aria-label={`New file in ${source.label}`} title="New file" className={cn(focusRing, 'inline-flex min-h-7 min-w-7 items-center justify-center p-1 text-muted-foreground hover:text-foreground coarse:min-h-11 coarse:min-w-11')} onClick={() => onNewFile(source)}>
             <FolderPlus className="size-3.5" aria-hidden />
           </button>
         )}
@@ -389,7 +402,17 @@ function TreeDirectory({
             const isSelected = selected ? sourceKey(selected, selected.path) === sourceKey(source, childPath) : false
             const marked = touched.has(childPath)
             return (
-              <button key={childPath} type="button" aria-current={isSelected ? 'page' : undefined} className={cn(focusRing, 'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover', isSelected && 'bg-selection text-selection-foreground')} onClick={() => onSelect(source, childPath)}>
+              <button
+                key={childPath}
+                type="button"
+                aria-current={isSelected ? 'page' : undefined}
+                className={cn(
+                  focusRing,
+                  'flex min-h-7 coarse:min-h-11 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
+                  isSelected && 'bg-selection text-selection-foreground',
+                )}
+                onClick={() => onSelect(source, childPath)}
+              >
                 <File className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 {marked && <span className="size-1.5 shrink-0 rounded-full bg-primary" title="Changed in this run" aria-label="Changed in this run" />}
@@ -513,22 +536,120 @@ function FileEditor({
   return (
     <article className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <header className="shrink-0 border-b bg-sidebar">
-        <div className="flex min-h-[35px] min-w-0 items-center gap-2 px-2">
-          <button type="button" className={cn(focusRing, 'inline-flex h-[26px] items-center gap-1.5 border border-input bg-background px-2 text-[12px] font-medium md:hidden')} onClick={onBrowse}><ArrowLeft className="size-3.5" aria-hidden />Browse</button>
-          <div className="min-w-0 flex-1"><p className="truncate font-mono text-[12px] font-medium" title={selection.path}>{selection.path}</p><p className="truncate text-[11px] text-muted-foreground" title={sourceLabel(selection)}>{sourceLabel(selection)}</p></div>
-          <button type="button" aria-label="Find and replace" title="Find and replace (Ctrl/Cmd-F)" className={cn(focusRing, 'inline-flex h-[26px] items-center gap-1 border border-input bg-background px-2 text-[11px]')} onClick={() => editorCommands.openSearch()}><Search className="size-3.5" aria-hidden />Find</button>
-          <button type="button" disabled={!canEdit || !draft || draft.content === draft.baseContent || draft.saving} className={cn(focusRing, 'h-[26px] border border-input bg-primary px-2 text-[11px] text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50')} onClick={() => void save()}>{draft?.saving ? 'Saving…' : selection.kind === 'workspace' && !selection.runID ? `Commit to ${selection.branch ?? 'branch'}` : 'Save'}</button>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1">
+          <button
+            type="button"
+            className={cn(
+              focusRing,
+              'inline-flex h-[26px] coarse:h-11 coarse:min-h-11 items-center gap-1.5 border border-input bg-background px-2 text-[12px] font-medium md:hidden',
+            )}
+            onClick={onBrowse}
+          >
+            <ArrowLeft className="size-3.5" aria-hidden />
+            Browse
+          </button>
+          <div className="min-w-0 flex-[1_1_14rem]">
+            <p className="truncate font-mono text-[12px] font-medium" title={selection.path}>
+              {selection.path}
+            </p>
+            <p className="truncate text-[11px] text-muted-foreground" title={sourceLabel(selection)}>
+              {sourceLabel(selection)}
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Find and replace"
+            title="Find and replace (Ctrl/Cmd-F)"
+            className={cn(
+              focusRing,
+              'inline-flex h-[26px] coarse:h-11 coarse:min-h-11 items-center gap-1 border border-input bg-background px-2 text-[11px]',
+            )}
+            onClick={() => editorCommands.openSearch()}
+          >
+            <Search className="size-3.5" aria-hidden />
+            Find
+          </button>
+          <button
+            type="button"
+            disabled={!canEdit || !draft || draft.content === draft.baseContent || draft.saving}
+            className={cn(
+              focusRing,
+              'h-[26px] coarse:h-11 coarse:min-h-11 border border-input bg-primary px-2 text-[11px] text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50',
+            )}
+            onClick={() => void save()}
+          >
+            {draft?.saving ? 'Saving…' : selection.kind === 'workspace' && !selection.runID ? `Commit to ${selection.branch ?? 'branch'}` : 'Save'}
+          </button>
         </div>
-        {selection.kind === 'workspace' && !selection.runID && <p className="border-t px-2 py-1 text-[11px] text-muted-foreground">Commit creates a workspace commit on {selection.branch ?? 'the base branch'}; it does not push upstream.</p>}
+        {selection.kind === 'workspace' && !selection.runID && (
+          <p className="border-t px-2 py-1 text-[11px] text-muted-foreground">
+            Commit creates a workspace commit on {selection.branch ?? 'the base branch'}; it does not push upstream.
+          </p>
+        )}
         <div role="tablist" aria-label="Open files" className="flex min-w-0 gap-0.5 overflow-x-auto border-t px-2 pt-1">
           {tabs.map((tab) => {
             const tabKey = sourceKey(tab, tab.path)
             const tabDraft = useStore.getState().drafts[tabKey]
             const active = tabKey === key
-            return <button key={tabKey} type="button" role="tab" aria-selected={active} className={cn(focusRing, 'group flex min-h-7 max-w-[220px] shrink-0 items-center gap-1 border border-b-0 px-2 text-[11px]', active ? 'bg-background' : 'text-muted-foreground hover:bg-toolbar-hover')} onClick={() => onSelect(tab, tab.path)}><span className="truncate">{tab.path.split('/').at(-1) ?? tab.path}</span>{tabDraft && (tabDraft.content !== tabDraft.baseContent || tabDraft.saving) && <span aria-label="Unsaved changes" title="Unsaved changes">•</span>}<span role="button" tabIndex={0} aria-label={`Close ${tab.path}`} className="ml-1 rounded-sm p-0.5 opacity-60 hover:bg-toolbar-hover hover:opacity-100" onClick={(event) => { event.stopPropagation(); onClose(tab) }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onClose(tab) } }}><X className="size-3" aria-hidden /></span></button>
+            return (
+              <button
+                key={tabKey}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={cn(
+                  focusRing,
+                  'group flex min-h-7 max-w-[220px] shrink-0 items-center gap-1 border border-b-0 px-2 text-[11px] coarse:min-h-11',
+                  active ? 'bg-background' : 'text-muted-foreground hover:bg-toolbar-hover',
+                )}
+                onClick={() => onSelect(tab, tab.path)}
+              >
+                <span className="truncate">{tab.path.split('/').at(-1) ?? tab.path}</span>
+                {tabDraft && (tabDraft.content !== tabDraft.baseContent || tabDraft.saving) && <span aria-label="Unsaved changes" title="Unsaved changes">•</span>}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Close ${tab.path}`}
+                  className="ml-1 inline-flex min-h-7 min-w-7 items-center justify-center rounded-sm p-0.5 opacity-60 hover:bg-toolbar-hover hover:opacity-100 coarse:min-h-11 coarse:min-w-11"
+                  onClick={(event) => { event.stopPropagation(); onClose(tab) }}
+                  onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onClose(tab) } }}
+                >
+                  <X className="size-3" aria-hidden />
+                </span>
+              </button>
+            )
           })}
         </div>
-        {selection.kind === 'workspace' && selection.runID && <div role="tablist" aria-label="File view" className="flex gap-1 border-t px-2 py-1"><button type="button" role="tab" aria-selected={mode === 'file'} className={cn(focusRing, 'px-2 py-1 text-[11px]', mode === 'file' ? 'bg-selection text-selection-foreground' : 'text-muted-foreground hover:bg-toolbar-hover')} onClick={() => onMode('file')}>File</button><button type="button" role="tab" aria-selected={mode === 'diff'} className={cn(focusRing, 'px-2 py-1 text-[11px]', mode === 'diff' ? 'bg-selection text-selection-foreground' : 'text-muted-foreground hover:bg-toolbar-hover')} onClick={() => onMode('diff')}>Diff vs base</button></div>}
+        {selection.kind === 'workspace' && selection.runID && (
+          <div role="tablist" aria-label="File view" className="flex gap-1 border-t px-2 py-1">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'file'}
+              className={cn(
+                focusRing,
+                'min-h-[22px] coarse:min-h-11 shrink-0 px-2 text-[11px]',
+                mode === 'file' ? 'bg-selection text-selection-foreground' : 'text-muted-foreground hover:bg-toolbar-hover',
+              )}
+              onClick={() => onMode('file')}
+            >
+              File
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'diff'}
+              className={cn(
+                focusRing,
+                'min-h-[22px] coarse:min-h-11 shrink-0 px-2 text-[11px]',
+                mode === 'diff' ? 'bg-selection text-selection-foreground' : 'text-muted-foreground hover:bg-toolbar-hover',
+              )}
+              onClick={() => onMode('diff')}
+            >
+              Diff vs base
+            </button>
+          </div>
+        )}
       </header>
       {error && <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-destructive/10 px-3 py-2 text-[12px] text-destructive"><span className="min-w-0 flex-1">{error}</span>{draft?.conflict && <><button type="button" className={cn(focusRing, 'border border-input bg-background px-2 py-1 text-foreground')} onClick={reloadFromServer}>Reload from server</button><button type="button" className={cn(focusRing, 'border border-input bg-background px-2 py-1 text-foreground')} onClick={() => clearDraft(key)}>Discard edits</button></>}</div>}
       {mode === 'diff' && selection.kind === 'workspace' && selection.runID ? <DiffDocument client={client} selection={selection} epoch={epoch} /> : document?.error ? <p role="alert" className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-destructive">{document.error}</p> : <EditableDocument path={selection.path} document={document} draft={draft} canEdit={canEdit} onChange={handleDraftChange} onSave={save} />}
@@ -648,6 +769,9 @@ function DiffDocument({ selection, client, epoch }: { selection: WorkspaceSource
   const setFileDiff = useStore((s) => s.setFileDiff)
   const identityEpoch = useStore((s) => s.identityEpoch)
   const requestID = useRef(0)
+  const stored = useStore((s) => s.diffWrap)
+  const coarse = useMediaQuery(coarsePointer)
+  const wrap = stored ?? coarse
   useEffect(() => {
     if (state || !selection.runID) return
     setFileDiff(key, { patch: '', truncated: false, loading: true, error: undefined })
@@ -667,7 +791,7 @@ function DiffDocument({ selection, client, epoch }: { selection: WorkspaceSource
   if (!state || state.loading) return <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">Loading diff…</p>
   if (state.error) return <p role="alert" className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-destructive">{state.error}</p>
   const files = parsePatch(state.patch)
-  return <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">{state.truncated && <p className="border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">Truncated at 512 KiB</p>}{files.length === 0 ? <p className="p-4 text-[12px] text-muted-foreground">No changes.</p> : <div>{files.map((file) => <FilePatch key={file.path} file={file} />)}</div>}</div>
+  return <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">{state.truncated && <p className="border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">Truncated at 512 KiB</p>}{files.length === 0 ? <p className="p-4 text-[12px] text-muted-foreground">No changes.</p> : <div>{files.map((file) => <FilePatch key={file.path} file={file} wrap={wrap} />)}</div>}</div>
 }
 
 async function createConfigFile(

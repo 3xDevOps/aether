@@ -63,6 +63,7 @@ const persistedUi = (s: RootState) => ({
   terminalDockHeight: s.terminalDockHeight,
   runDockHeight: s.runDockHeight,
   terminalFontSize: s.terminalFontSize,
+  diffWrap: s.diffWrap,
   terminalControlTaken: s.terminalControlTaken,
   activeWorkspace: s.activeWorkspace,
   groupBy: s.groupBy,

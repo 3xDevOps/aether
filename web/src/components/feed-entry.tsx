@@ -54,7 +54,7 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
               title={runLabel(run)}
               className={cn(
                 focusRing,
-                'col-start-2 row-start-3 min-h-[26px] min-w-0 max-w-full justify-self-start break-words text-left text-xs text-muted-foreground hover:text-foreground hover:underline @md/feed-entry:col-start-3 @md/feed-entry:row-start-1 @md/feed-entry:row-span-2 @md/feed-entry:justify-self-end',
+                'col-start-2 row-start-3 min-h-[26px] coarse:min-h-11 min-w-0 max-w-full justify-self-start break-words text-left text-xs text-muted-foreground hover:text-foreground hover:underline @md/feed-entry:col-start-3 @md/feed-entry:row-start-1 @md/feed-entry:row-span-2 @md/feed-entry:justify-self-end',
               )}
             >
               <span className="line-clamp-2">{runLabel(run)}</span>
