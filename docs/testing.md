@@ -303,13 +303,15 @@ nothing to look at.
 
 `shrinkToKeyboardHeight(page)` in the same file takes the layout viewport
 down by 320px, what a keyboard leaves of a portrait phone, and returns the
-call that restores it. Read it as a short-viewport proxy rather than a
-keyboard test: Playwright cannot raise the platform keyboard, and the
-dashboard ships Next's default viewport meta, so a real phone keyboard leaves
-the layout at its full height and shrinks only the visual viewport. What the
-helper proves is that the shell survives a short screen; content stranded
-behind a real keyboard stays a manual check on a phone
-(`docs/dashboard-frontend.md` has that path).
+call that restores it. The shell asks for
+`interactive-widget=resizes-content`, so on a browser that honours it - Chrome
+and the Android WebView - that is what a real keyboard does to the layout
+viewport, and the helper reproduces the shape that ships rather than standing
+in for it. iOS Safari ignores the setting and shrinks only the visual
+viewport, so for that browser the helper proves the narrower claim: the shell
+survives a short screen. Playwright cannot raise a platform keyboard either
+way, so content stranded behind a real iOS keyboard stays a manual check on a
+phone (`docs/dashboard-frontend.md` has that path).
 
 The phone specs need git; `shell-drawer.mobile` also needs Docker, because it
 opens a real run, and skips without it. Run them alone against the binaries
