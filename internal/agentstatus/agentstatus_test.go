@@ -532,3 +532,22 @@ func TestPiExtensionSubscribesToMappedEvents(t *testing.T) {
 		t.Errorf("the codex notify setting does not run %s: %s", ReporterCommand, CodexNotifySetting)
 	}
 }
+
+// The extension is TypeScript nothing in the Go build ever reads, so a
+// syntax error in it would first surface inside a member's run, as an agent
+// that silently never reports. bun is the runtime pi and omp are built on;
+// where it is installed, it is what says the file parses.
+func TestPiExtensionParses(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Skipf("bun is not installed: %v", err)
+	}
+	file := filepath.Join(t.TempDir(), PiExtensionName)
+	if werr := os.WriteFile(file, PiExtension, 0o600); werr != nil {
+		t.Fatalf("write %s: %v", PiExtensionName, werr)
+	}
+	out, berr := exec.Command(bun, "build", "--no-bundle", file).CombinedOutput()
+	if berr != nil {
+		t.Fatalf("bun build %s: %v\n%s", PiExtensionName, berr, out)
+	}
+}
