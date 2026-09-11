@@ -69,7 +69,12 @@ export function App() {
                 expand={false}
                 visibleToasts={4}
                 gap={4}
-                offset={{ bottom: 30, right: 8 }}
+                // Above the status bar and clear of the home indicator; the
+                // inset is 0 on a device without one.
+                offset={{
+                  bottom: 'calc(30px + env(safe-area-inset-bottom))',
+                  right: 'calc(8px + env(safe-area-inset-right))',
+                }}
                 toastOptions={{
                   className:
                     'rounded-[4px] border border-border bg-popover px-3 py-2 text-[13px] text-popover-foreground shadow-overlay',

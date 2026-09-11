@@ -10,6 +10,12 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Touch density. A finger needs roughly 44px where a mouse needs 22, so the
+   controls a phone has to hit carry `coarse:` sizes beside their desktop
+   ones. The query answers for the primary pointer, so a touch laptop with a
+   trackpad keeps the desktop density and a tablet does not. */
+@custom-variant coarse (@media (pointer: coarse));
+
 /* Terminal font: JetBrainsMono Nerd Font Mono. Agent TUIs draw powerline and
    devicon glyphs from the private use area; the previous symbols-only overlay
    font carried them at full-em advance while the text font's cell is ~0.6em,

@@ -56,7 +56,6 @@ export function ThemeToggle() {
               triggerProps.onClick?.(event)
               setTheme(order[(order.indexOf(theme) + 1) % order.length])
             }}
-            className="size-[22px] min-h-[22px] min-w-[22px] rounded-sm"
           >
             <Icon className="size-3.5" />
           </Button>

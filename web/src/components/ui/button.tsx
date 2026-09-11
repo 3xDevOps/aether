@@ -5,7 +5,7 @@ import { cn, focusRing } from '@/lib/utils'
 const buttonVariants = cva(
   // An `aria-disabled` control stays focusable and keeps its pointer, so each
   // variant suppresses hover and pressed-state paints without removing it.
-  `inline-flex min-h-[26px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[2px] text-[13px] font-medium transition-[background-color,border-color,color,box-shadow] duration-100 motion-reduce:transition-none ${focusRing} disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4`,
+  `inline-flex min-h-[26px] coarse:min-h-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[2px] text-[13px] font-medium transition-[background-color,border-color,color,box-shadow] duration-100 motion-reduce:transition-none ${focusRing} disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4`,
   {
     variants: {
       variant: {
@@ -21,9 +21,9 @@ const buttonVariants = cva(
           'bg-destructive text-destructive-foreground hover:not-aria-disabled:bg-destructive/90 active:not-aria-disabled:bg-destructive/90',
       },
       size: {
-        default: 'h-[26px] rounded-[2px] px-2.5 py-0',
-        sm: 'h-[22px] min-h-[22px] rounded-[2px] px-2 py-0 text-[12px]',
-        icon: 'size-[22px] min-h-[22px] min-w-[22px] rounded-[2px] p-0',
+        default: 'h-[26px] rounded-[2px] px-2.5 py-0 coarse:h-10 coarse:px-3',
+        sm: 'h-[22px] min-h-[22px] rounded-[2px] px-2 py-0 text-[12px] coarse:h-10 coarse:min-h-10 coarse:px-3',
+        icon: 'size-[22px] min-h-[22px] min-w-[22px] rounded-[2px] p-0 coarse:size-11 coarse:min-h-11 coarse:min-w-11',
       },
     },
     defaultVariants: { variant: 'default', size: 'default' },

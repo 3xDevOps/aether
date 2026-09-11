@@ -37,7 +37,7 @@ export function CommandPaletteTrigger({ disabled = false }: { disabled?: boolean
             aria-label="Commands"
             className={cn(
               focusRing,
-              'flex h-[26px] min-w-0 w-full max-w-[600px] items-center justify-start gap-2 rounded-sm border border-border/70 bg-background/50 px-2 text-[12px] text-muted-foreground transition-colors hover:border-border hover:bg-toolbar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60',
+              'flex h-[26px] min-w-0 w-full max-w-[600px] items-center justify-start gap-2 rounded-sm border border-border/70 coarse:h-10 bg-background/50 px-2 text-[12px] text-muted-foreground transition-colors hover:border-border hover:bg-toolbar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60',
             )}
           >
             <SearchIcon aria-hidden className="size-3.5 shrink-0" />

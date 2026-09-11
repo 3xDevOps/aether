@@ -13,7 +13,7 @@ export function AppShell() {
     <div className="flex h-full min-h-0 flex-col bg-background text-[13px] leading-[1.4] text-foreground">
       {/* The update surface stays above the workbench without stealing its
           vertical space when it has nothing to say. */}
-      <div className="min-h-0 min-w-0 shrink-0 max-h-[max(0px,calc(100vh-35px-22px-10rem))] overflow-y-auto overscroll-contain">
+      <div className="min-h-0 min-w-0 shrink-0 max-h-[max(0px,calc(100dvh-35px-22px-10rem))] overflow-y-auto overscroll-contain">
         <UpdateBanners />
       </div>
       <div className="relative flex min-h-0 flex-1 overflow-hidden">

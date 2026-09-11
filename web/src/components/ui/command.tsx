@@ -53,7 +53,7 @@ function CommandDialog({
         onOpenAutoFocus={onOpenAutoFocus}
         onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
-          'top-[43px] min-h-0 max-h-[calc(100dvh-51px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-border/90 bg-popover p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:max-w-[min(600px,calc(100%-1rem))]',
+          'top-[43px] min-h-0 max-h-[calc(100dvh-51px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-border/90 bg-popover p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[43px] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
           className,
         )}
         showCloseButton={showCloseButton}
@@ -160,7 +160,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        'relative flex min-h-[22px] cursor-default items-center gap-2 rounded-[2px] px-2 py-0 text-[13px] leading-5 outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4 [&_svg:not([class*="text-"])]:text-muted-foreground',
+        'relative flex min-h-[22px] coarse:min-h-11 cursor-default items-center gap-2 rounded-[2px] px-2 py-0 text-[13px] leading-5 outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4 [&_svg:not([class*="text-"])]:text-muted-foreground',
         className,
       )}
       {...props}
