@@ -53,7 +53,7 @@ function CommandDialog({
         onOpenAutoFocus={onOpenAutoFocus}
         onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
-          'top-[43px] min-h-0 max-h-[calc(100dvh-51px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-border/90 bg-popover p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[43px] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
+          'top-[calc(var(--title-bar-height)_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--title-bar-height)_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-border/90 bg-popover p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[calc(var(--title-bar-height)_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
           className,
         )}
         showCloseButton={showCloseButton}
@@ -78,14 +78,14 @@ function CommandInput({
   return (
     <div
       data-slot="command-input-wrapper"
-      className="flex h-[35px] items-center gap-2 border-b px-2"
+      className="flex h-[var(--title-bar-height)] items-center gap-2 border-b px-2"
     >
       <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
           focusRing,
-          'flex h-[26px] w-full rounded-[2px] bg-transparent px-1 text-[13px] leading-6 placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
+          'flex h-[26px] w-full rounded-[2px] bg-transparent px-1 text-[13px] leading-6 placeholder:text-muted-foreground coarse:h-10 disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
         {...props}
@@ -102,7 +102,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        'max-h-[min(520px,calc(100dvh-78px))] scroll-py-1 overflow-x-hidden overflow-y-auto',
+        'max-h-[min(520px,calc(100dvh_-_2_*_var(--title-bar-height)_-_8px))] scroll-py-1 overflow-x-hidden overflow-y-auto',
         className,
       )}
       {...props}

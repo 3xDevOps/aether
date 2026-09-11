@@ -136,7 +136,7 @@ function LocalStatus() {
             }}
             className={cn(
               focusRing,
-              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 rounded-sm px-1 hover:text-foreground coarse:h-11 coarse:min-h-11',
+              'flex h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] shrink-0 items-center gap-1 rounded-sm px-1 hover:text-foreground',
             )}
           >
             <span
@@ -197,7 +197,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
             aria-label={`Update available: ${latest}`}
             className={cn(
               focusRing,
-              'flex min-h-[22px] min-w-0 shrink items-center gap-1 rounded-sm px-1 break-words whitespace-normal coarse:min-h-11 xl:h-[22px] xl:truncate xl:whitespace-nowrap hover:text-foreground',
+              'flex min-h-[var(--status-bar-height)] min-w-0 shrink items-center gap-1 rounded-sm px-1 break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap hover:text-foreground',
             )}
           >
             {label}
@@ -306,9 +306,9 @@ export function StatusBar() {
   }, [mobileDetailsOpen, wide])
 
   return (
-    <footer className="relative flex min-h-[22px] shrink-0 items-center gap-1 border-0 bg-sidebar py-0 pr-[max(0.5rem,env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] pl-[max(0.5rem,env(safe-area-inset-left))] text-[12px] leading-none text-muted-foreground coarse:min-h-11 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border before:content-['']">
+    <footer className="relative flex min-h-[var(--status-bar-height)] shrink-0 items-center gap-1 border-0 bg-sidebar py-0 pr-[max(0.5rem,env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] pl-[max(0.5rem,env(safe-area-inset-left))] text-[12px] leading-none text-muted-foreground before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border before:content-['']">
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="flex h-[22px] shrink-0 items-center gap-1 coarse:h-11">
+        <span className="flex h-[var(--status-bar-height)] shrink-0 items-center gap-1">
           <span
             className={cn('size-1.5 rounded-full', connectionDot[connection])}
             aria-hidden
@@ -317,7 +317,7 @@ export function StatusBar() {
         </span>
         <Collapsible
           ref={details}
-          className="relative block h-[22px] min-w-0 leading-none coarse:h-11 xl:flex-1"
+          className="relative block h-[var(--status-bar-height)] min-w-0 leading-none xl:flex-1"
           open={detailsOpen}
           onOpenChange={(open) => {
             if (!wide) setMobileDetailsOpen(open)
@@ -328,7 +328,7 @@ export function StatusBar() {
               render={(triggerProps) => (
                 <CollapsibleTrigger
                   {...triggerProps}
-                  className="h-[22px] w-[22px] justify-center rounded-sm border border-transparent text-muted-foreground hover:border-border hover:bg-toolbar-hover hover:text-foreground coarse:h-11 coarse:min-h-11 coarse:w-11 xl:hidden"
+                  className="h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] w-[var(--status-bar-height)] justify-center rounded-sm border border-transparent text-muted-foreground hover:border-border hover:bg-toolbar-hover hover:text-foreground xl:hidden"
                   aria-label="Show status details"
                   aria-controls="status-details"
                 />
@@ -342,7 +342,7 @@ export function StatusBar() {
             className="block min-w-0 data-[state=closed]:hidden xl:h-[22px] xl:flex-1"
           >
             <div
-              className="fixed inset-x-2 bottom-[calc(1.75rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[70dvh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-4 shadow-lg coarse:bottom-[calc(3rem_+_env(safe-area-inset-bottom))] xl:static xl:flex xl:h-[22px] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none"
+              className="fixed inset-x-2 bottom-[calc(var(--status-bar-height)_+_0.375rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[70dvh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-4 shadow-lg xl:static xl:flex xl:h-[22px] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none"
             >
               {unreachable !== null && (
                 // needs-attention has no HeroUI colour of its own, so the

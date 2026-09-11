@@ -280,7 +280,7 @@ function WorkspaceSwitcher({
   const current = workspaces[active]
 
   return (
-    <div className="flex h-[35px] shrink-0 items-center gap-1 border-b border-border px-2">
+    <div className="flex h-[var(--title-bar-height)] shrink-0 items-center gap-1 border-b border-border px-2">
       <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
       {list.length > 1 ? (
         <Select value={active} onValueChange={setActiveWorkspace}>
@@ -327,7 +327,7 @@ function SidebarHeader() {
   // it. A member who cannot start a run is not offered the way in.
   const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
   return (
-    <div className="flex min-h-[35px] shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-0.5">
+    <div className="flex min-h-[var(--title-bar-height)] shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-0.5">
       <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
         Runs
       </span>
