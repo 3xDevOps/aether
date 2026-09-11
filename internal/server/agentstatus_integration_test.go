@@ -58,7 +58,7 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 	if !dockerReachable(t) {
 		t.Skip("the agent status reporter scenario needs a reachable Docker daemon")
 	}
-	image, _ := buildStatusAgentImage(t)
+	image := buildStatusAgentImage(t)
 	docker, _, ok := dockerRuntime(t)
 	if !ok {
 		t.Fatal("the Docker daemon went away after the image was built")
@@ -134,7 +134,7 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 // busybox, the scripted agent installed as the "claude" executable the
 // shipped profile launches, and a non-root user - the same user the
 // container coordination scenario needs, for the same reason.
-func buildStatusAgentImage(t *testing.T) (image, user string) {
+func buildStatusAgentImage(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "claude"), statusAgentScript)
@@ -145,10 +145,10 @@ func buildStatusAgentImage(t *testing.T) (image, user string) {
 	if uid == 0 {
 		uid, gid = 1000, 1000
 	}
-	user = fmt.Sprintf("%d:%d", uid, gid)
+	user := fmt.Sprintf("%d:%d", uid, gid)
 	writeFile(t, filepath.Join(dir, "Dockerfile"),
 		"FROM busybox\nCOPY claude /usr/local/bin/claude\nUSER "+user+"\n")
-	image = fmt.Sprintf("aether-e2e-statusagent:%d", os.Getpid())
+	image := fmt.Sprintf("aether-e2e-statusagent:%d", os.Getpid())
 	if out, err := exec.Command("docker", "build", "-q", "-t", image, dir).CombinedOutput(); err != nil {
 		t.Fatalf("docker build %s: %v (%s)", image, err, out)
 	}
@@ -157,5 +157,5 @@ func buildStatusAgentImage(t *testing.T) (image, user string) {
 			t.Logf("remove image %s: %v (%s)", image, err, out)
 		}
 	})
-	return image, user
+	return image
 }
