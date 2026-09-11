@@ -40,6 +40,39 @@ coordination bridge, so conflict coordination between overlapping runs works for
 Claude Code and degrades to the advisory overlap notice for the rest. See
 [coordination.md](coordination.md).
 
+The **Status** column is how the agent itself tells Aether it is waiting for
+you, rather than leaving the server to guess from silence. See "Status
+reporting" below.
+
+The **Launch env** column is what the server sets in the run container
+because the CLI will not start without it. It is applied after the
+workspace's own variables, so a workspace cannot leave the agent unable to
+run. See the launch table below for why `claude` needs one.
+
+The **Resume** column is what a relaunch uses when a server reboot
+interrupted the run. The flags ride directly behind the executable.
+
+**By session ID** is exact. The server generates one UUID per run and
+launches with `claude --session-id <uuid>`, recording it on the run row; the
+relaunch runs `claude --resume <uuid>`, which names that conversation
+outright. `--session-id` is launch-only - Claude Code refuses an ID that
+already names a conversation ("Session ID `<id>` is already in use.") - so
+the two flags never appear together.
+
+**Best effort** is `--continue`, which names no conversation: it continues
+whichever conversation the harness spoke last in the working directory.
+Every run mounts its checkout at the same container path and shares one
+credential home per member, so what comes back is that member's *most
+recent* conversation at that path - not necessarily the interrupted run's
+own, and not necessarily one from the same workspace. `pi` has no
+launch-time session ID, so it stays here, and so does any run row created
+before session pinning existed.
+
+A harness with neither starts fresh, and a deployment-supplied argv override
+never has any of these appended - nothing checks the override is still that
+CLI. Relaunching a run that finished on its own never resumes; it gets a
+session of its own. See [failure-handling.md](failure-handling.md).
+
 ## Status reporting
 
 **Needs you** means the agent is waiting for you, or the run stalled. The
@@ -92,35 +125,6 @@ The settings file is server-written, read-only, and lives in
 `/run/aether`, never in the worktree or the member's synced profile.
 `--settings` applies for that launch only and merges over the member's own
 settings, so it adds the hooks rather than replacing anything they have.
-
-The **Launch env** column is what the server sets in the run container
-because the CLI will not start without it. It is applied after the
-workspace's own variables, so a workspace cannot leave the agent unable to
-run. See the launch table below for why `claude` needs one.
-
-The **Resume** column is what a relaunch uses when a server reboot
-interrupted the run. The flags ride directly behind the executable.
-
-**By session ID** is exact. The server generates one UUID per run and
-launches with `claude --session-id <uuid>`, recording it on the run row; the
-relaunch runs `claude --resume <uuid>`, which names that conversation
-outright. `--session-id` is launch-only - Claude Code refuses an ID that
-already names a conversation ("Session ID `<id>` is already in use.") - so
-the two flags never appear together.
-
-**Best effort** is `--continue`, which names no conversation: it continues
-whichever conversation the harness spoke last in the working directory.
-Every run mounts its checkout at the same container path and shares one
-credential home per member, so what comes back is that member's *most
-recent* conversation at that path - not necessarily the interrupted run's
-own, and not necessarily one from the same workspace. `pi` has no
-launch-time session ID, so it stays here, and so does any run row created
-before session pinning existed.
-
-A harness with neither starts fresh, and a deployment-supplied argv override
-never has any of these appended - nothing checks the override is still that
-CLI. Relaunching a run that finished on its own never resumes; it gets a
-session of its own. See [failure-handling.md](failure-handling.md).
 
 ## Steering delivery
 
