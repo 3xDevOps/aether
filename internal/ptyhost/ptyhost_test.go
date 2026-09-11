@@ -1134,7 +1134,8 @@ func TestActiveSessionsDoesNotBlockUnrelatedAttach(t *testing.T) {
 
 	attachDone := make(chan error, 1)
 	go func() {
-		attachDone <- h.Attach(context.Background(), otherKey, "m-other", 80, 24, true,
+		attachDone <- h.Attach(context.Background(), otherKey,
+			AttachClient{Member: "m-other", Cols: 80, Rows: 24, ReadOnly: true},
 			&testConn{r: strings.NewReader(""), w: &sink{}}, nil)
 	}()
 	select {
