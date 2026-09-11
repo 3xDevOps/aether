@@ -33,8 +33,7 @@ test('mobile Files returns from one viewer to the repository tree', async ({
 
   const viewer = page.getByRole('article')
   await expect(viewer.locator('header')).toContainText('README.md')
-  await expect(viewer.locator('pre')).toContainText('# project')
-
+  await expect(viewer.locator('.cm-content')).toContainText('# project')
   await viewer.getByRole('button', { name: 'Browse', exact: true }).click()
   await expect(tree).toBeVisible()
   await expect(viewer).toBeHidden()
@@ -43,5 +42,5 @@ test('mobile Files returns from one viewer to the repository tree', async ({
   await expect(agent).toBeVisible()
   await agent.click()
   await expect(viewer.locator('header')).toContainText('agent.sh')
-  await expect(viewer.locator('pre')).toContainText('echo agent-ready')
+  await expect(viewer.locator('.cm-content')).toContainText('echo agent-ready')
 })

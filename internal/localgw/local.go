@@ -35,8 +35,6 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 	"link.repo":         (*Gateway).localLinkRepo,
 	"link.status":       (*Gateway).localLinkStatus,
 	"link.switch":       (*Gateway).localLinkSwitch,
-	"profile.preview":   (*Gateway).localProfilePreview,
-	"profile.push":      (*Gateway).localProfilePush,
 	"pull":              (*Gateway).localPull,
 	"pull.switch":       (*Gateway).localPullSwitch,
 	"repo.fast-forward": (*Gateway).localRepoFastForward,
@@ -52,20 +50,15 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 
 var localVerbs = slices.Sorted(maps.Keys(localHandlers))
 
-// localState is the mutable client-machine state behind /local/v1 and
-// /ws/envscan: the saved link config (link.repo updates it), the
-// background sync sessions, and the single environment-scan slot.
+// localState is the mutable client-machine state behind /local/v1:
+// the saved link config (link.repo updates it) and the background sync
+// sessions.
 type localState struct {
 	mu      sync.Mutex
 	cfg     cli.Config
 	mtime   time.Time
 	sync    *localops.SyncManager
 	forward *localops.ForwardManager
-	// scanActive claims the one-scan-at-a-time slot for /ws/envscan.
-	scanActive bool
-	// scanArgv overrides the scan's harness command; tests set it to run
-	// stub executables.
-	scanArgv []string
 }
 
 // newLocalState seeds the verb state from the gateway config. It never

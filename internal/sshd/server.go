@@ -93,10 +93,13 @@ type Config struct {
 	// disables member.invite and invite-code joins.
 	InvitesDir string
 
-	// Profiles is the agent-profile snapshot service. Nil disables the
-	// profile.push / profile.status / profile.rollback methods.
+	// Profiles is the legacy agent-profile snapshot service. Nil disables
+	// profile.push / profile.status / profile.rollback.
 	Profiles ProfileService
 
+	// Config provides authenticated access to the caller's persistent
+	// harness configuration roots. It never accepts a member selector.
+	Config ConfigBackend
 	// Services carries the team-feature service seams; see services.go.
 	// Each nil field disables its methods with CodeUnavailable.
 	Services Services

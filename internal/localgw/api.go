@@ -11,16 +11,20 @@ import (
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
-// maxRequestBody bounds ordinary API request bodies, matching the remote
-// dashboard's limit. Image uploads get a separate cap below because an
-// 8 MiB decoded payload is about 11.2 MiB in base64 plus JSON framing.
+// Config import carries up to 20 MiB of base64-encoded files. Text saves
+// allow JSON escaping of the editor's 512 KiB UTF-8 limit.
 const maxRequestBody = 1 << 20
 
 const maxTerminalImageRequestBody = 12 << 20
 
 func requestBodyLimit(method string) int64 {
-	if method == protocol.MethodTerminalImage {
+	switch method {
+	case protocol.MethodTerminalImage:
 		return maxTerminalImageRequestBody
+	case protocol.MethodConfigImport:
+		return 30 << 20
+	case protocol.MethodFilesWrite, protocol.MethodConfigWrite:
+		return 4 << 20
 	}
 	return maxRequestBody
 }
@@ -108,7 +112,7 @@ func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(protocol.GatewayCapabilities{
 		Gateway: "local",
 		Methods: []string{"*"},
-		WS:      []string{"events", "attach", "terminal", "envscan"},
+		WS:      []string{"events", "attach", "terminal"},
 		Local:   localVerbs,
 		Version: version.Version,
 		Commit:  version.Commit,

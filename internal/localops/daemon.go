@@ -13,10 +13,10 @@ import (
 // InstallDaemonUnit renders the user-service definition for the sync
 // daemon on this OS and writes it under the user home. cfg carries the
 // `daemon run` flags (zero-valued fields at their flag defaults are
-// omitted from the rendered argv, exactly like `aether daemon install`);
-// noProfileSync appends --no-profile-sync. It returns the written file
-// path and the shell command that activates the service.
-func InstallDaemonUnit(cfg syncd.Config, noProfileSync bool) (path, activate string, err error) {
+// omitted from the rendered argv, exactly like `aether daemon install`).
+// It returns the written file path and the shell command that activates the
+// service.
+func InstallDaemonUnit(cfg syncd.Config) (path, activate string, err error) {
 	if cfg.Server == "" {
 		return "", "", errors.New("localops: daemon install requires a server address")
 	}
@@ -50,9 +50,6 @@ func InstallDaemonUnit(cfg syncd.Config, noProfileSync bool) (path, activate str
 	}
 	if cfg.SyncOrigin {
 		runArgs = append(runArgs, "--sync-origin")
-	}
-	if noProfileSync {
-		runArgs = append(runArgs, "--no-profile-sync")
 	}
 
 	unit, err := syncd.ServiceUnit(runtime.GOOS, exe, runArgs)
@@ -88,7 +85,7 @@ func InstallDaemon(server, repo, keyPath string) (unitPath, note string, err err
 		User:       "aether",
 		Remote:     "aether",
 		BaseBranch: "main",
-	}, false)
+	})
 	if err != nil {
 		return "", "", err
 	}

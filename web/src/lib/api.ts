@@ -9,11 +9,13 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
+  ConfigImportParams,
+  ConfigImportResult,
+  ConfigRoot,
   DaemonInstallResult,
   DiskUsage,
   DaemonStatusResult,
   EnvHarnessesResult,
-  EnvScanStatus,
   EnvSaveResult,
   GatewayCapabilities,
   GitHubConnectResult,
@@ -25,10 +27,6 @@ import type {
   Member,
   Overlap,
   PresenceEntry,
-  ProfilePreview,
-  ProfilePushResult,
-  ProfileRecommendation,
-  ProfileStatus,
   PullResult,
   PullSwitchResult,
   RepoFastForwardResult,
@@ -229,117 +227,6 @@ export function socketURL(path: string): string {
   return url.toString()
 }
 
-/** A profile scan's session; closing cancels the gateway process. */
-export interface EnvScanSession {
-  close: () => void
-}
-
-/** The start frame of a profile scan: the harness that runs the agent, and
- * optionally the repository folder so the project can inform the call. */
-export interface ProfileScanRequest {
-  harness: string
-  repo_path?: string
-}
-
-/** A profile scan's output and status stream, ending in a recommendation. */
-export interface ProfileScanHandlers {
-  onOutput: (line: string) => void
-  onStatus: (status: EnvScanStatus) => void
-  /** The agent's proposal: which harnesses to import, and why. Nothing is
-   * imported until the user approves and profile.push runs. */
-  onResult: (recommendation: ProfileRecommendation) => void
-  onError: (detail: string, outputTail?: string) => void
-}
-
-type ProfileScanFrame =
-  | { type: 'output'; line: string }
-  | { type: 'status'; status: EnvScanStatus }
-  | { type: 'result'; recommendation?: ProfileRecommendation }
-  | { type: 'error'; detail: string; output_tail?: string }
-
-/**
- * Asks the chosen harness which of this machine's agent configuration is
- * worth bringing to the server. The agent sees paths and category counts
- * only, never file contents.
- */
-function openProfileScan(
-  req: ProfileScanRequest,
-  h: ProfileScanHandlers,
-): EnvScanSession {
-  let socket: WebSocket | null = null
-  let disposed = false
-  let settled = false
-
-  const settle = (deliver: () => void) => {
-    if (disposed || settled) return
-    settled = true
-    deliver()
-  }
-
-  try {
-    socket = new WebSocket(socketURL('/ws/envscan'))
-  } catch {
-    settled = true
-    queueMicrotask(() => {
-      if (!disposed) h.onError('connection failed')
-    })
-  }
-
-  if (socket) {
-    const ws = socket
-    ws.onopen = () => {
-      const start: Record<string, unknown> = {
-        harness: req.harness,
-        mode: 'profile',
-      }
-      if (req.repo_path) start.repo_path = req.repo_path
-      ws.send(JSON.stringify(start))
-    }
-    ws.onmessage = (msg) => {
-      if (settled || typeof msg.data !== 'string') return
-      let frame: ProfileScanFrame
-      try {
-        frame = JSON.parse(msg.data) as ProfileScanFrame
-      } catch {
-        return
-      }
-      switch (frame.type) {
-        case 'output':
-          h.onOutput(frame.line)
-          break
-        case 'status':
-          h.onStatus(frame.status)
-          break
-        case 'result':
-          settle(() =>
-            frame.recommendation
-              ? h.onResult(frame.recommendation)
-              : h.onError('the scan returned no recommendation'),
-          )
-          break
-        case 'error':
-          settle(() => h.onError(frame.detail, frame.output_tail))
-          break
-      }
-    }
-    ws.onerror = () => ws.close()
-    ws.onclose = (ev) => {
-      socket = null
-      settle(() => h.onError(ev.reason || `connection closed (${ev.code})`))
-    }
-  }
-
-  return {
-    close: () => {
-      disposed = true
-      const ws = socket
-      socket = null
-      if (!ws) return
-      ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null
-      ws.close()
-    },
-  }
-}
 
 // Only what the SPA actually calls; the team-feature methods land with the
 // tickets that use them.
@@ -493,11 +380,6 @@ export const api = {
     ),
   scheduleDelete: (workspaceID: string, template: string) =>
     call<unknown>('schedule.delete', { workspace_id: workspaceID, template }),
-  // Harness profiles and custom agents.
-  profileStatus: (harness: string) =>
-    call<ProfileStatus>('profile.status', { harness }),
-  profileRollback: (harness: string, snapshotID: string) =>
-    call<unknown>('profile.rollback', { harness, snapshot_id: snapshotID }),
   agentList: (accountMemberID?: string) =>
     call<{ agents: AgentInfo[] }>('agent.list', {
       ...(accountMemberID ? { account_member_id: accountMemberID } : {}),
@@ -523,6 +405,17 @@ export const api = {
     call<FilesTreeResult>('files.tree', params),
   filesRead: (params: { workspace_id: string; run_id?: string; path: string }) =>
     call<FileRead>('files.read', params),
+  filesWrite: (params: { workspace_id: string; run_id?: string; path: string; content: string; revision: string }) =>
+    call<FileRead>('files.write', params),
+  configRoots: () => call<{ roots: ConfigRoot[] }>('config.roots'),
+  configTree: (params: { harness: string; path: string }) =>
+    call<FilesTreeResult>('config.tree', params),
+  configRead: (params: { harness: string; path: string }) =>
+    call<FileRead>('config.read', params),
+  configWrite: (params: { harness: string; path: string; content: string; revision: string }) =>
+    call<FileRead>('config.write', params),
+  configImport: (params: ConfigImportParams) =>
+    call<ConfigImportResult>('config.import', params),
   filesDiff: (runID: string, path: string) =>
     call<FileDiff>('files.diff', { run_id: runID, path }),
   disk: () => get<DiskUsage>('/disk'),
@@ -580,16 +473,6 @@ export const api = {
   /** Which setup-capable harnesses this machine has on PATH, plus the
    * linked repository folder when the gateway knows exactly one. */
   envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
-  /** What `aether profile push --agent <harness>` would carry from this
-   * machine, uploading nothing. It walks the whole profile root, so it
-   * takes a signal: aborting stops the walk on the gateway too. */
-  localProfilePreview: (harness: string, signal?: AbortSignal) =>
-    local<ProfilePreview>('profile.preview', { harness }, signal),
-  /** Pushes this member's configuration for one harness. There is no
-   * allow-secret parameter: a scanner finding leaves that one file out
-   * and reports it, and sending it anyway lives on the CLI. */
-  localProfilePush: (harness: string) =>
-    local<ProfilePushResult>('profile.push', { harness }),
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
   uploadTerminalImage: (file: File, runID?: string) => uploadTerminalImage(file, runID),
   envSave: () => call<EnvSaveResult>('env.save', {}),
@@ -606,7 +489,6 @@ export const api = {
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),
-  openProfileScan,
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),

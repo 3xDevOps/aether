@@ -13,7 +13,7 @@ The home is the member's durable environment:
 
 - Executables installed in `~/.local/bin`
 - Vendor login state and other files written by the agent
-- Profile files synced with `aether profile push`
+- Configuration imported once from the browser or edited in **Files**
 - The GitHub login written by `gh auth login`, in `~/.config/gh/hosts.yml`
 - The commit signing key, `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`
 - `~/.gitconfig`, which carries the git identity, gh's credential helper, and
@@ -235,11 +235,47 @@ own gh take over, or to replace it with 2.81.0 or newer:
 rm ~/.local/bin/gh
 ```
 
-## Profile sync
+## Importing and editing configuration
 
-Profile sync copies the declared profile files from a member's laptop into the
-member home. Credential files are excluded by the harness denylist and content
-scan. A profile push affects later containers, not one already running.
+In the Agents step, choose one local directory with the browser's directory
+picker, preview it, and explicitly import it once. The picker recognizes
+known basenames such as `~/.claude`, `~/.codex`, and `~/.pi`; an unknown or
+ambiguous basename needs an explicit destination. There is no directory
+watcher and no AI-generated inventory.
+
+Known credential names in any path component and runtime/history defaults are
+skipped locally. Remaining bytes are uploaded and scanned by the server, so
+secret content is not guaranteed to stay on the browser machine. Empty files
+and arbitrary binary assets are preserved. The limits are **1 MiB per file**,
+**20 MiB decoded total**, and **2,000 files**. New browser-imported files use
+mode `0644`; executable mode and symlinks cannot be represented by the browser.
+Server-side validation rejects unsafe paths, symlink components, hardlinks, and
+nonregular files, while preserving directory and staged-file ownership.
+
+The import writes the authenticated member's own persistent home. Because that
+home is mounted read-write in the environment terminal and in every run using
+the account, imported or edited files take effect immediately, including in
+active runs; the agent may need to reload. An account share intentionally gives
+another member's run the same home, not an isolated per-run profile. A snapshot
+pin is audit metadata, not a private writable copy, and changing configuration
+does not rebuild an installed-agent image.
+
+Use **Files** to browse your configuration beside workspace base and live-run
+files. Configuration edits are full UTF-8 text up to **512 KiB**; binary and
+truncated files are read-only. New configuration files accept nested relative
+paths and refuse to overwrite an existing file. Save explicitly with **Save** or
+Ctrl/Cmd-S. Dirty tabs remain in memory across routes, and the browser warns
+before unloading them. There is no autosave or force-save. A failed or stale
+save keeps the draft; **Reload from server** deliberately discards it.
+`config.*` always targets the authenticated member's own home, with no
+admin/member selector.
+
+For the separate workspace explorer, base-branch saves are **Commit to
+<branch>**, creating one file commit without pushing upstream; live-run saves
+modify the uncommitted checkout. Base writes require **Push**, and run writes
+require **Steer**. Revisions hash the exact original bytes; Aether checks the
+revision immediately before rename under its root lock, not against arbitrary
+live agent filesystem writers.
 
 ## Migration
 

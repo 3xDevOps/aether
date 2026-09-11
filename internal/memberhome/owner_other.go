@@ -2,8 +2,17 @@
 
 package memberhome
 
-import "os"
+import (
+	"io/fs"
+	"os"
+)
 
-// chownLikeHome needs Unix ownership semantics; the server only ships for
-// Linux, and a non-Linux development host runs everything as one uid.
+func homeOwner(_ *os.Root) (int, int, bool, error) { return 0, 0, false, nil }
+
+func chownFileLikeHome(_ *os.Root, _ *os.File) error { return nil }
+
+func chownLikeHomeAt(_, _ *os.Root, _ string) error { return nil }
+
 func chownLikeHome(_ *os.Root, _ ...string) error { return nil }
+
+func hasMultipleLinks(_ fs.FileInfo) bool { return false }

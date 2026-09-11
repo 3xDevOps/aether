@@ -23,8 +23,8 @@ one entry to the `profiles` map:
 | `EnvPassthrough` | Environment variables copied from the server process into run containers when set. API keys only. |
 | `Env` | Fixed environment variables the CLI needs to start at all, applied after the workspace's own so a workspace cannot break the launch. Not for configuration - a variable belongs here only when the agent refuses to run without it. |
 | `CredentialPaths` | Home-relative directories holding native login state. Persisted with the member account and mounted read-write into every run using that account. Directories, not files. |
-| `LocalRoot` | Home-relative directory captured by profile sync. Empty means the harness has no profile sync. |
-| `DenyNames` | Basenames profile sync always excludes - credential files, token caches, keychains. |
+| `LocalRoot` | Home-relative configuration root exposed to the browser's one-time import and the **Files** editor. It also names the local root used by the explicit legacy `profile` CLI commands. Empty means the harness has no configuration root. |
+| `DenyNames` | Basenames the browser import skips before upload and the manual profile path excludes - credential files, token caches, keychains. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
 | `MCPConfigFlag` | The CLI's flag for a server-supplied MCP server config, if it has one. Set it and the run is wired to the coordination bridge; leave it empty and coordination degrades to the overlap notice. |
 | `SessionFlag` | The CLI's flag for naming a conversation at launch (Claude Code's `--session-id <uuid>`). Set it and every run is launched with a UUID of its own, recorded on the run row. |
@@ -37,11 +37,16 @@ Rules that are easy to get wrong:
   the default stance: the container is the isolation boundary, and an agent
   stopping to ask for approval in a headless fleet is a hang, not a safeguard.
 - **`CredentialPaths` and `DenyNames` are two different lists.** The first says
-  what to *persist* across runs; the second says what profile sync must never
-  *upload*. A credential file usually appears in both, from opposite directions.
-- **Nothing under `LocalRoot` may be a secret.** Everything there is uploaded
-  from the member's laptop. If the harness mixes config and tokens in one
-  directory, the token filenames belong in `DenyNames`.
+  what to *persist* across runs; the second says what configuration import and
+  explicit profile commands must never *upload*. A credential file usually
+  appears in both, from opposite directions.
+- **Nothing under `LocalRoot` may be assumed private.** Browser import sends
+  ordinary remaining bytes to the server for scanning. Known credential names
+  are skipped locally, but scanner findings are a server-side boundary, not a
+  promise that all secret content stays local.
+- **Configuration has two explicit paths.** The browser directory picker imports
+  once into the authenticated member's persistent home; the Files editor then
+  reads and writes that home. A local daemon never watches `LocalRoot`.
 - **The MCP, session, and resume flags belong to the CLI they ship with.** A
   deployment that overrides a harness's argv gets none of them appended,
   because nothing checks that the override is still that CLI.

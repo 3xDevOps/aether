@@ -3,9 +3,10 @@
 Layers, per the design spec's testing strategy:
 
 - **Unit tests** live beside their packages and run with `make test`
-  (race detector on). Permission matrices, budget math, profile push rules,
-  tailnet auth edge cases, scheduler transitions, and the local gateway's own
-  behaviors are proven there, once, and the E2E suite does not restate them.
+  (race detector on). Permission matrices, budget math, configuration import
+  and file revision rules, tailnet auth edge cases, scheduler transitions, and
+  the local gateway's own behaviors are proven there, once, and the E2E suite
+  does not restate them.
   Role changes belong to the same layer: `internal/sshd/role_test.go` and
   `internal/sshd/permissions_test.go` own promotion, demotion, the last-admin
   guard and what each role may do, and the SPA's half of it is in its rendered
@@ -51,7 +52,7 @@ Scenarios:
 | `TestIntegrationEndToEnd` (`integration_test.go`) | Solo lifecycle, the acceptance gate: seed over git push -> launch -> attach -> detach -> reattach -> steer -> finish -> pull, with the bus traffic checked against the Wave 1 contract |
 | Gateway (`internal/localgw`) | The `aether gui` HTTP/WS surface, covered at this layer by unit tests against a stub backend: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror and steer channels (`ws_test.go`). A real gateway against a real server is the dashboard suite below |
 | `TestIntegrationMultiMember` (`multimember_integration_test.go`) | Three clients: tailnet initial join and invite-code key joins, WhoIs-down fallback with banner, remote administration, steering another member's run, presence roster, handoff, approval inbox, budget cap and override, agent crash -> `failed` + `wip:` commit, and the finished branch authored as the run's owner after the handoff, committed by Aether, and carrying one `Co-authored-by:` trailer per other steerer |
-| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Profile sync and harness logins: a login in the environment terminal persists into two runs, push -> next run sees it, mid-run push never touches a running agent, denylisted credential names refused from pushes (Docker only - it needs a real terminal) |
+| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Explicit profile push and harness logins: a login in the environment terminal persists into two runs, a manual push updates the shared persistent member home for a later run and an already-running run, and denylisted credential names are refused (Docker only - it needs a real terminal) |
 | `TestIntegrationGitHubConnect` (`github_integration_test.go`) | Connecting GitHub end to end in one environment terminal, with the stub `gh` swapped in the bind-mounted member home so it comes first on that container's `PATH`: three `github.probe` round trips over the same container - no gh, gh 2.45, then a current one - report `missing` with a remedy, `outdated` naming the version it found, and `ok` with no remedy, and the first two are refused by `github.connect` by name, before the login is asked about at all; then `github.connect` sets up git credentials, generates the signing key and registers it, a run pushes its branch to a bare `origin` repository inside the member home and commits with the signing config that home carries, and Aether's own end-of-run commit verifies against the member's public key through an allowed-signers file |
 | `TestIntegrationMemberEnvironmentImage` (`environment_image_integration_test.go`) | The saved environment image: what the container layer keeps, and that a container started from it **without** the member home mounted has no signing key, no `.gitconfig` and no gh token - Docker's commit never captures a bind mount |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
@@ -200,9 +201,9 @@ tears it down with everything it created:
   wizard's Link step does.
 - One `aether gui` per member, each with its own `HOME` and
   `AETHER_CONFIG_DIR`, so the SSH key the Link step generates, the
-  `known_hosts` entry it writes, the saved link config and the agent
-  configuration a profile push reads all belong to that member and never
-  touch the developer's own. `PATH` and `SHELL` are fixed too, because
+  `known_hosts` entry it writes, the saved link config and the member's
+  persistent agent/configuration home all belong to that member and never touch
+  the developer's own. `PATH` and `SHELL` are fixed too, because
   `env.harnesses` reports what is installed on this machine and that answer
   has to be the same on a laptop and on a runner.
 - Real git repositories on disk, seeded with the `agent.sh` the fake harness
@@ -229,7 +230,7 @@ attaches the server's output to the report.
 | `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
 | `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |
 | `onboarding-github` | The Agents step's Connect GitHub screen against the member's own environment container, in two acts. First with no gh in it: the screen names both halves of the remedy - the admin's `docker pull` of the standard image and the member's `aether terminal stop` - and shows no `gh auth login` command at all. Then Back, a stub `gh` installed into the member's environment home, and the screen reopened: the screen reporting the login command ready - the state, because the command block alone is also what a failed check shows - the stub's own log proving the dock typed that login into the container, the account and signing-key fingerprint the connect reports, the key on disk and registered through gh, the home's `.gitconfig` carrying both gh's credential helper and the signing settings, and Back closing the sub-screen without leaving the step |
-| `onboarding-configuration` | Bringing a member's own agent configuration across, from a fixture home holding an empty file and a file the secret scanner flags: the flagged file is named on the row and left out, everything else imports |
+| `onboarding-configuration` | An explicit one-time browser directory import: unknown basename destination selection, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
 | `onboarding-first-run` | Launching the first run on an agent installed into the member's environment home, and watching it reach needs-attention with its work committed; and, with nothing installed, the step offering "Set up an agent" instead of a picker and sending the reader back to Agents |
 | `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through, and the Git identity step reached in both directions between Link and Workspace |
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
@@ -239,7 +240,7 @@ attaches the server's output to the report.
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
 | `status-bar-sizing` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport |
-| `files-browser` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree |
+| `files-browser` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree; the explorer/editor's workspace base, live-run and member-configuration writes are covered by focused regressions |
 | `keyboard-focus` | Real browser checks that Escape closes a dialog on a run without leaving the run, and that a focused control paints the app's outline with computed style and contrast against the actual background |
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
@@ -254,8 +255,22 @@ answered on the member's own machine and no server is involved.
 The terminal image component tests separately pin File type/size validation,
 safe insertion without submission, native image-paste registration cleanup,
 and stale callback rejection after a terminal target remounts. The clipboard
-unit tests pin native `Ctrl+Shift+V` when the async clipboard API is denied;
-these are browser/component regressions, not claims of a local Windows run.
+unit tests pin native `Ctrl+Shift+V` when the async clipboard API is denied.
+
+The focused regressions own the editor and configuration edges without
+duplicating the browser smoke path:
+
+- `internal/memberhome/config_test.go` covers member isolation, omitted-root
+  reads, revision conflicts, import exclusions and unsafe-file preflight.
+- `internal/sshd/config_test.go` covers authenticated own-member config RPC
+  authorization and lifecycle behavior.
+- `web/src/routes/onboarding/agents-step.test.tsx` covers the import UI's
+  explicit action, destination selection and excluded-file reporting.
+- `web/src/store/files.test.ts` covers drafts surviving live-run cache
+  invalidation and newer typing surviving an in-flight save.
+- `web/e2e/onboarding-configuration.spec.ts` covers the browser import and
+  config read/write path; `web/e2e/files-browser.spec.ts` covers the narrow
+  viewport tree/viewer round trip.
 
 ### Adding a step to the wizard
 
@@ -280,7 +295,7 @@ layer that owns them.
 | SSH drop mid-attach | Solo E2E detach/reattach; `FuzzAttachDropMidInput`, the post-unwind straggler test and the reattach-leak test in `internal/ptyhost` |
 | Live overlay conflict | `internal/sshd` sync overlay tests |
 | Disk pressure | Disk chaos E2E (TTL GC under load with the branches surviving, the gauge's breakdown, the free-space floor refusing launch and relaunch); checkout GC in `internal/scheduler`; disk gauge proxy in `internal/localgw` (`TestDiskProxies`) |
-| Profile push fails / stale | Profile E2E (runs pin the last good snapshot; bad pushes refused) |
+| Profile/configuration update fails or is stale | Profile E2E (manual pushes and shared-home updates); `internal/memberhome/config_test.go` (config revisions and import exclusions); browser onboarding configuration E2E |
 | Harness login expired | Profile E2E's login-home persistence (re-login writes persist the same way) |
 | Budget cap hit | Multi-member E2E (refusal, running run untouched, override); full matrix in `internal/sshd` cost tests |
 | Scheduled run on stale base | `internal/templates` schedule tests |

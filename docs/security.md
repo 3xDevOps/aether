@@ -24,9 +24,9 @@ second sandbox inside it.
 Each member's persistent home is mounted only into that member's environment
 terminal and runs that use their agent account. Account sharing is the sole
 exception: `aether account share <member-id>` lets that member launch runs with
-the owner's home, saved image, profile, custom harness definitions, and vendor
-login. This is equivalent to handing them every credential and file in that
-home. The grant is directional, explicit, and never implied by the admin role.
+the owner's home, saved image, configuration, custom harness definitions, and
+vendor login. This is equivalent to handing them every credential and file in
+that home.
 The authenticated launcher remains the run owner, and the run's commits are
 authored as that member's git identity, not the account owner's; usage and
 cost are attributed to the selected account.
@@ -223,6 +223,33 @@ home or the member is deleted. A member-home bind mount is not part of
 environment image. Account sharing therefore has the same implication as for
 other home files and credentials: a recipient's run can read images in the
 shared account's home.
+## Browser configuration and Files
+
+The onboarding directory picker is an explicit, one-time browser import. The
+browser skips known credential names in any path component and runtime/history
+defaults before upload. It reads remaining selected regular-file bytes and
+sends them to the server, where they are scanned before writing; a secret
+finding is therefore not proof that the content stayed local. Empty files and
+arbitrary binary regular bytes are preserved under the 1 MiB/file, 20 MiB
+decoded aggregate, and 2,000-file limits.
+
+Browser metadata is intentionally limited. New imported files are `0644`; the
+browser cannot preserve executable mode or symlinks. The server rejects unsafe
+paths, symlink components, hardlinks, and nonregular files, and retains
+directory and staged-file ownership. Account configuration belongs to the
+authenticated member only: `config.*` has no admin/member selector override.
+
+The imported and edited files are in the member's shared read-write home,
+mounted into that member's environment terminal and runs, including active
+runs. An account share grants another member's run that same home; it is not a
+per-run isolated configuration copy. A snapshot pin is audit metadata, not an
+isolation boundary. Files edits do not rebuild the installed-agent image.
+
+The Files editor accepts complete UTF-8 text up to 512 KiB. Binary and
+truncated files are read-only. Saves use SHA-256 revisions and check the
+revision immediately before rename while holding Aether's root lock; that is
+optimistic concurrency, not an exclusive lock against arbitrary live agent
+filesystem writers. A stale or failed save leaves the browser draft available.
 
 ## SSH port forwarding
 

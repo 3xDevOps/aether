@@ -1,10 +1,10 @@
 # Dashboard SPA (`web/`)
 
-The browser client the server embeds and serves. Next.js 16.3.4 produces the
-static export, while React 19 + TypeScript render the client runtime, Tailwind
-v4 and shadcn/ui primitives with CSS variables provide the base style,
-selected HeroUI v3 wrappers provide Chip and Tooltip, and Zustand holds
-the state.
+The browser client that `aether gui` serves from the user's own machine.
+Next.js 16.3.4 produces the static export, while React 19 + TypeScript render
+the client runtime, Tailwind v4 and shadcn/ui primitives with CSS variables
+provide the base style, selected HeroUI v3 wrappers provide Chip and Tooltip,
+and Zustand holds the state. The server does not host a dashboard.
 
 The visual contract is a VS Code-inspired developer workbench, not an official
 reusable VS Code component package. It follows VS Code Dark Modern and Light
@@ -203,18 +203,35 @@ width handle remains a keyboard and pointer window splitter (see
 
 ## Files view
 
-`src/routes/files/` is the read-only repository browser. It groups each visible
-workspace's base branch and live run checkouts in a lazy tree, caches each
-directory request in `src/store/files.ts`, and reads file contents through
-`files.read`. Run files can switch to a one-file `files.diff` patch; editing
-stays in the existing local sync and the user's editor.
+`src/routes/files/` is the Files explorer and editor. It combines each visible
+workspace's base branch, live run checkouts, and the authenticated member's
+own persistent configuration roots from `config.roots`. Directory requests are
+lazy and cached in `src/store/files.ts`; file content comes from `files.read`
+or `config.read`. A live run can switch from **File** to **Diff vs base**.
 
-The tree is a browse pane beside the viewer at medium widths, with a compact
-source header and a bordered code surface. On narrow screens the tree is the
-first view; selecting a file moves to the viewer, whose **Browse files** action
-returns to the tree. Code scrolls horizontally inside the viewer rather than
-forcing the page wider. Loading, empty, binary, truncated and error states keep
-their exact server details and use bounded panels.
+The tree is a browse pane beside the editor at medium widths. On narrow
+screens it is the first view; selecting a file opens the editor and **Browse**
+returns to the tree. CodeMirror provides syntax highlighting for JSON/JSONC,
+JavaScript/TypeScript, Markdown, Python and TOML, plus find/replace. The
+editor is bounded to complete UTF-8 text without NUL bytes and 512 KiB;
+binary and truncated responses remain read-only.
+
+The action label states the write target: base files show **Commit to
+<branch>**, creating one file commit without pushing upstream; live-run files
+show **Save**, changing the run's uncommitted checkout; configuration files
+show **Save**, changing only the authenticated member's persistent home.
+Base writes require **Push**, run writes require **Steer**, and config reads or
+writes are always for the calling member and require **Launch**. A new
+configuration file accepts nested relative paths and refuses to overwrite an
+existing file.
+
+Saves are explicit (**Save**, **Commit to <branch>**, or Ctrl/Cmd-S); there is
+no autosave or force-save. Open tabs and dirty drafts live in memory and
+survive route navigation. The browser warns before unloading dirty buffers.
+The revision is the SHA-256 of the complete bytes read. A failed or stale save
+keeps the draft and its error. On a conflict, **Reload from server** replaces
+the document and discards that draft. **Discard edits** restores the last
+successfully loaded or saved content without fetching.
 
 ## Title bar
 
@@ -272,19 +289,7 @@ the same rules degrade below it rather than break.
   status-slot contributors reachable at every width. Narrow layouts put
   secondary readouts in a bounded, keyboard-reachable popup; wide layouts
   expand them inline. The single status Slot remains mounted while details are
-  collapsed.
-- **The run header** keeps the title, task, branch and harness mode readable with
-  compact headers and a wrapping action group. Terminal tabs remain one keyboard
-  stop with internal horizontal overflow.
-- **The board** uses one column on narrow screens and three columns from the
-  `lg`/1024px breakpoint, with compact flat run cards and vertical scrolling on
-  small screens. State labels remain visible; empty, loading and error panels
-  use the same bounded surface hierarchy.
-- **The workspace/run sidebar** collapses at 1000px and narrower into the
-  persistent 48px activity rail, which exposes **Expand sidebar** without
-  changing the stored preference. At 640px and narrower its expanded pane
-  overlays the main view from the rail's right edge instead of pushing it off
-  screen.
+expanded.
 
 ## Data flow
 
@@ -1169,13 +1174,12 @@ refusals stay verbatim.
 ## Onboarding wizard
 
 `src/routes/onboarding/` is the guided first-run path, six steps: Link, Git
-identity, Workspace, Repository, Agents, First run. It renders only where the
-gateway serves the client-machine verbs (the capability descriptor lists
-`link.status`); a remote monitor gets an explanatory empty state instead of a
-broken wizard. Link, Workspace and First run live in `steps.tsx`; Repository
-is `repo-step.tsx`, Git identity is `git-identity-step.tsx`, and Agents is
-`agents-step.tsx` with its GitHub part in `github-connect.tsx` and its
-configuration import in `profile-import.tsx`.
+identity, Workspace, Repository, Agents, First run. It is a local-gateway
+surface; the shipped server has no separate hosted dashboard. Link, Workspace
+and First run live in `steps.tsx`; Repository is `repo-step.tsx`, Git identity
+is `git-identity-step.tsx`, and Agents is `agents-step.tsx` with its GitHub
+part in `github-connect.tsx` and its configuration import in
+`profile-import.tsx`.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
 whichever step has sub-screens. The Agents step owns both of today's - a
@@ -1224,8 +1228,8 @@ without answering. Typing stays the fallback, because a browser tab has no
 dialog and a shell built by an older `aether gui build` has no method.
 
 The step adds the `aether` remote (`link.repo`) and then seeds the workspace:
-where the gateway serves `repo.push` it shows a **Push now** button. The
-gateway compares the clone's base branch with the workspace's copy before
+where the local gateway serves `repo.push` it shows a **Push now** button.
+The gateway compares the clone's base branch with the workspace's copy before
 pushing and answers with one of four states, so the second member to join a
 workspace reads what happened instead of git's `! [rejected] main -> main
 (fetch first)`.
@@ -1259,8 +1263,8 @@ diverged and the fast-forward result - are `aria-live="polite"`, because they
 appear without a page change.
 
 The branch is the workspace's base branch, so a workspace created with
-`--base` seeds the branch its runs fork from. A gateway that does not serve
-`repo.push` - the server-served dashboard - shows only the copyable command.
+`--base` seeds the branch its runs fork from. When `repo.push` is unavailable,
+the step shows only the copyable command.
 
 What the step settled - the clone path, the remote the gateway wrote,
 git's push answer, and the fast-forward once one has run - lives on the UI
@@ -1307,7 +1311,7 @@ focus, so a separate `aether link` command appears without restarting the GUI.
 
 The Agents step has three optional parts and never blocks: **Skip for now**
 is reachable from every state, including an open setup shell and a failed
-scan.
+configuration import.
 
 Part A lists the setup-capable harnesses from `env.harnesses` against
 `agent.list`, saying for each whether it is installed on this machine and
@@ -1404,34 +1408,21 @@ terminal to log in through, the whole flow is the CLI's. The login command
 itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
 assert one string.
 
-Part B (`ProfileImport`) previews each harness configuration on this machine
-with `profile.preview`, showing the category counts and, behind an expander,
-every exclusion with its reason. Previews never run on mount: a profile root
-can hold hundreds of megabytes, so the user presses **Look at what is here**,
-the harnesses are walked one at a time with the current one named, and
-**Stop** aborts the fetch - which cancels the request context and stops the
-walk on the gateway, not just the waiting. A preview that fails shows its
-error on that harness's row; only the `-32602` that means "this harness does
-not sync a profile" is silent, and the "nothing to bring" line renders only
-when every harness answered without one. Checkboxes start unchecked: approving calls
-`profile.push` once per checked harness, one at a time, and a refusal lands
-on its own row while the rest still run. No preview can refuse an import.
-A `secret` exclusion is a finding in a file the member wrote, so the row
-names each one on the harness's own line, above the **Left out of**
-expander, with what the scanner matched - five paths, then a count
-deferring to that expander - and the harness still imports without those
-files. A `vendored-secret` exclusion reads as the member's own secret in a
-flat list, so the row instead says how many files inside installed plugins
-tripped the scanner and that they are third-party. Sending a flagged file
-anyway is deliberately not in the dashboard: the row prints one
-`aether profile push` command that repeats `--allow-secret <path>` for
-every file it named, and it needs `--workspace` to be attributable.
-Where a setup-capable harness is installed locally,
-**Ask an agent** runs the `profile` scan over
-`/ws/envscan`, streams the agent's output, and pre-checks what it
-recommended with each one-sentence reason next to its row; the scan is a
-proposal the user edits, and a failure leaves the manual path and both
-buttons live.
+Part B (`ProfileImport`) is an explicit, one-time browser directory import.
+`config.roots` supplies destinations such as `~/.claude`, `~/.codex`, and
+`~/.pi`. The user presses **Choose directory**, reviews the local preview and
+omitted paths, selects a destination when the basename is unknown or matches
+multiple roots, then presses **Import configuration**. This is an explicit
+import, not an agent-driven or continuously synchronized flow.
+
+Credential names found in any path component and runtime/history defaults are
+left out in the browser. Every other selected byte is uploaded and server-
+scanned; the result reports accepted file/byte counts and server exclusions.
+The import limits are 1 MiB per file, 20 MiB decoded in aggregate, and 2,000
+files. Empty and binary regular files are preserved. The local directory is
+not watched. Accepted files change the calling member's persistent home
+immediately, including for already-running agents that share that home; an
+agent may need to reload. Auth/vendor login is separate.
 
 The First run step is the last one, and launches a run in the workspace the
 Workspace step settled on. Its **Agent** select offers only the entries
@@ -1457,10 +1448,10 @@ of date: it hosts the banners, with the CLI one in
 `src/components/cli-update-banner.tsx` and the pieces they share in
 `src/components/update-banner-shared.tsx`. It is mounted by `AppShell` above
 everything else, because an out-of-date binary is about the whole app rather
-than the view that happens to be open. The CLI and shell prompts need the
-gateway to serve `update.check` - a remote monitor cannot update anything on
-your machine - while the server prompt asks the server about itself and shows
-wherever the member is an admin.
+than the view that happens to be open. The CLI and shell prompts read
+`update.check` from the local gateway, because the dashboard can update only
+the machine running `aether gui`. The server prompt asks the linked server
+about itself and appears wherever the member is an admin.
 
 - **Two reads.** The host reads `update.check` on mount, again every half
   hour, and again whenever the window comes back to the front, on `focus` and

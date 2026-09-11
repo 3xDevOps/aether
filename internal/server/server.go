@@ -317,7 +317,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		TailnetRequireKey: cfg.TailnetRequireKey,
 		TailnetHostname:   tailnetHostname,
 		InvitesDir:        filepath.Join(cfg.DataDir, "invites"),
-		Profiles:          prof,
+		Config:            sshd.NewConfigBackend(homes, s.db),
 	}
 	if err = s.buildServices(Deps{
 		Config:  cfg,

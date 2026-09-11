@@ -261,7 +261,7 @@ with git's `! [rejected] main -> main (fetch first)`:
 | `aether github connect` | Finish connecting GitHub after `gh auth login` in your environment terminal: sets up git credentials there, generates and registers a commit signing key. See [environment-home.md](environment-home.md#connect-github). |
 | `aether workspace origin [--workspace <name-or-id>] [<url>\|--clear]` | Show or set the upstream git URL run checkouts get as their `origin` remote. Needs the push capability. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
-| `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. |
+| `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base, live-run files, and your own persistent member configuration. |
 
 ### Task templates and schedules
 
@@ -403,8 +403,8 @@ aether account revoke <member-id>
 The dashboard exposes the same grant controls on **Members** and an **Account**
 picker in the launch dialog. The run is owned by the authenticated launcher,
 whose identity is used for the timeline and Git author. The selected account
-supplies its saved environment, complete home and credentials, synced profile,
-custom harness definitions, vendor quota, and cost attribution.
+supplies its saved environment, complete home and credentials, configuration
+roots, custom harness definitions, vendor quota, and cost attribution.
 
 Sharing is directional. It does not let the recipient open the owner's
 environment terminal, and admins get no implicit account access. It does let a
@@ -412,8 +412,47 @@ root process in the recipient's run read or change every file and credential in
 the shared home. Revocation blocks new launches and relaunches but does not
 stop existing runs; stop them first if access must end immediately.
 
-Agent *configuration* - skills, plugins, custom commands - syncs one way from
-each member's laptop with `aether profile push` (and automatically, if the
-local daemon is running). Secrets are excluded twice over: a per-harness
-credential denylist plus a client-side content scan that leaves any file
-carrying key material behind. Nothing ever syncs back down.
+Agent configuration is not watched or inventoried automatically. In the
+Agents step, choose one local directory with the browser directory picker,
+preview it, and explicitly import it once. Known credential names and
+runtime/history defaults are skipped locally; remaining bytes are uploaded
+and server-scanned, so do not assume all secret content stays local. The
+import writes the authenticated member's persistent home immediately, including
+for active runs using that account. An agent may need to reload its
+configuration.
+
+The **Files** view browses and edits that own-member configuration beside
+workspace base and live-run files. It has explicit **Save** or
+**Commit to <branch>** actions, Ctrl/Cmd-S, syntax highlighting, find/replace,
+dirty tabs that survive navigation, unload warnings, and no autosave or
+force-save. A failed or stale save keeps the draft; **Reload from server**
+deliberately discards it. Configuration files are full UTF-8 text up to
+512 KiB; binary and truncated files are read-only. New configuration files
+accept nested relative paths and refuse overwrite. `config.*` always targets
+the authenticated member's own home; an admin cannot select another member.
+
+New browser-import files are mode `0644`; executable mode and symlinks cannot
+be represented by the browser. Imports preserve empty and arbitrary binary
+regular files under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
+limits. The server rejects unsafe paths, symlink components, hardlinks, and
+nonregular files. A shared account uses the same read-write home rather than
+an isolated per-run copy. A snapshot pin is audit metadata, not an isolated
+writable home, and editing does not rebuild the installed-agent image.
+
+The manual CLI profile surface remains available for operators who need
+snapshots or rollback:
+
+```sh
+aether profile push --agent claude
+aether profile status --agent claude
+aether profile rollback --agent claude <snapshot-id>
+```
+
+`profile push` is explicit and not run by the sync daemon. Its repeatable
+secret flags are `--skip-secret <file>` and
+`--allow-secret <file>`; the latter requires `--workspace <workspace>`:
+
+```sh
+aether profile push --agent claude --skip-secret <file>
+aether profile push --agent claude --allow-secret <file> --workspace <workspace>
+```

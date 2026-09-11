@@ -208,40 +208,47 @@ headless launch templates. Install that executable into `~/.local/bin` using
 the vendor's instructions, then complete its login in the environment terminal.
 Return to the dashboard when finished.
 
-The member home persists the executable, login state, and synced profile files
-across containers. See [the environment terminal guide](terminal.md) for tab
+The member home persists the executable and vendor login state across
+containers. Configuration can be imported once from the browser and then
+edited in **Files**. See [the environment terminal guide](terminal.md) for tab
 and stop behavior.
 
-Your own agent configuration - skills, custom commands, standing
-instructions like `CLAUDE.md`, settings, plugins - is separate from the
-login and syncs one way from your machine:
+Your own configuration is separate from vendor login and image setup. In the
+Agents step, choose one directory such as `~/.claude`, `~/.codex`, or `~/.pi`
+with **Choose directory**. Review the preview, select a destination when the
+basename is unknown or ambiguous, and click **Import configuration**. This is
+explicit and one-time; there is no local directory watcher or AI inventory.
 
-```sh
-aether profile push --agent claude
-```
+Known credential names in any path component and runtime/history defaults are
+skipped in the browser before upload. Remaining bytes are uploaded and
+server-scanned, so never assume all secret content stays on your machine.
+Empty files and arbitrary binary regular files are preserved. Imports are
+limited to 1 MiB per file, 20 MiB decoded total, and 2,000 files. Browser
+imports create files with mode `0644`; executable mode and symlinks cannot be
+preserved, so a script may need `chmod` in the remote terminal.
 
-The dashboard does both without a separate terminal window. Its onboarding
-wizard's **Agents** step opens the same setup dock in the page, types the
-install command, and then shows what a profile push would carry from each agent
-grouped as skills, commands, memory, settings, MCP config and plugins, with
-every file the credential denylist or the secret scanner left behind and
-why. Check the agents you want and approve. Where a setup-capable agent is
-installed on your machine you can also let one read the inventory and
-recommend what is worth bringing, with a sentence of reasoning per agent;
-the recommendation is a checklist you edit, never something that acts on
-its own. Both parts are optional - **Skip for now** moves on.
+The imported files go into your authenticated member's persistent home, which
+is mounted read-write in the environment terminal and in runs using that
+account. Changes are immediately visible, including to active runs; the agent
+may need to reload. This is a shared home, not an isolated per-run profile.
+Snapshot pins are audit metadata, not isolated writable copies. Importing or
+editing configuration does not rebuild the installed-agent image.
 
-That scan runs the agent on your own machine, and it takes the launch command
-from the client, not the server. If it fails with the agent rejecting its
-arguments, upgrade the client - the CLI, or the desktop app if you started it
-there. Upgrading the server alone does not change what the scan runs.
+Open **Files** to browse your own configuration beside workspace base and
+live-run files. The editor supports JSON, JavaScript, TypeScript, Markdown,
+Python, and TOML syntax highlighting, plus find/replace. Save explicitly with
+**Save**, **Commit to <branch>**, or Ctrl/Cmd-S. Dirty tabs remain in memory
+across routes, the browser warns before unloading them, and there is no
+autosave or force-save. A failed or stale save keeps the draft; **Reload from
+server** replaces it with current server content.
 
-Secrets never sync. A scanner finding drops the one file it named and lists
-it on that agent's row before the import button, so the rest still imports
-in one click. Sending a flagged file anyway is deliberately not in the
-dashboard: it stays on the CLI, where `--workspace` records who did it.
-[harnesses.md](harnesses.md) has the full rules, including `--skip-secret`
-and `--allow-secret`.
+Configuration editing accepts full UTF-8 text up to 512 KiB. Binary and
+truncated files are read-only. New configuration files accept nested relative
+paths and refuse overwrites. `config.*` always targets your own authenticated
+member home. For workspace files, **Commit to <branch>** creates one commit on
+the base branch but does not push upstream; live-run writes modify the
+uncommitted checkout. Base saves require **Push** and run saves require
+**Steer**.
 
 ### Connect GitHub
 

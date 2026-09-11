@@ -115,6 +115,7 @@ type Store interface {
 	// already exists for that member+harness the existing row is returned
 	// (same identity) and files are not rewritten.
 	SaveProfileSnapshot(ctx context.Context, s *domain.ProfileSnapshot, files []ProfileFile) error
+	SaveProfileSnapshotStaged(ctx context.Context, s *domain.ProfileSnapshot, files []ProfileFile) error
 	GetProfileSnapshot(ctx context.Context, id domain.ProfileSnapshotID) (*domain.ProfileSnapshot, error)
 	GetProfileSnapshotByDigest(ctx context.Context, member domain.MemberID, harness, digest string) (*domain.ProfileSnapshot, error)
 	ListProfileSnapshots(ctx context.Context, member domain.MemberID, harness string) ([]*domain.ProfileSnapshot, error)

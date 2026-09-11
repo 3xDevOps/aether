@@ -1,15 +1,9 @@
-import type {
-  Api,
-  EnvScanSession,
-  ProfileScanHandlers,
-  ProfileScanRequest,
-} from '@/lib/api'
+import type { Api } from '@/lib/api'
 import type {
   AgentInfo,
   Approval,
   BudgetReport,
   Member,
-  ProfilePreview,
   Run,
   Schedule,
   ServerInfo,
@@ -135,44 +129,6 @@ export function agentInfo(over: Partial<AgentInfo> = {}): AgentInfo {
   }
 }
 
-/** What profile.preview answers for the harness this machine configured.
- * Other setup-capable harnesses answer present:false, which is a normal
- * answer rather than an error. */
-export function profilePreview(
-  over: Partial<ProfilePreview> = {},
-): ProfilePreview {
-  return {
-    harness: 'claude',
-    root: '/home/alice/.claude',
-    present: true,
-    files: 42,
-    bytes: 183422,
-    categories: [
-      {
-        category: 'skills',
-        files: 12,
-        bytes: 40201,
-        paths: ['skills/pdf/SKILL.md'],
-        truncated: false,
-      },
-      {
-        category: 'commands',
-        files: 4,
-        bytes: 8120,
-        paths: ['commands/review.md'],
-        truncated: false,
-      },
-    ],
-    excluded: [
-      {
-        path: '.credentials.json',
-        reason: 'credential',
-        detail: 'credential file excluded for claude',
-      },
-    ],
-    ...over,
-  }
-}
 export function budget(
   workspaceID: string,
   over: Partial<BudgetReport> = {},
@@ -273,7 +229,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       truncated: false,
     })),
     filesTree: vi.fn(async () => ({ entries: [] })),
-    filesRead: vi.fn(async () => ({ content: '', truncated: false, binary: false, size: 0 })),
+    filesRead: vi.fn(async () => ({
+      content: '', truncated: false, binary: false, size: 0, revision: '', writable: true,
+    })),
+    filesWrite: vi.fn(async ({ content }) => ({
+      content, truncated: false, binary: false,
+      size: new TextEncoder().encode(content).length, revision: 'saved', writable: true,
+    })),
     filesDiff: vi.fn(async () => ({ patch: '', truncated: false })),
     disk: vi.fn(async () => ({
       used_bytes: 512 * 1024 * 1024,
@@ -337,42 +299,23 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     scheduleList: vi.fn(async () => [schedule()]),
     scheduleSave: vi.fn(async () => schedule()),
     scheduleDelete: vi.fn(async () => ({})),
-    profileStatus: vi.fn(async () => ({
-      snapshot: {
-        id: 'psn_1',
-        harness: 'claude',
-        digest: 'sha256:beef5678',
-        created_at: '2026-08-14T08:00:00Z',
-      },
-      snapshots: [
-        {
-          id: 'psn_1',
-          harness: 'claude',
-          digest: 'sha256:beef5678',
-          created_at: '2026-08-14T08:00:00Z',
-        },
+    configRoots: vi.fn(async () => ({
+      roots: [
+        { harness: 'claude', path: '~/.claude' },
+        { harness: 'codex', path: '~/.codex' },
+        { harness: 'pi', path: '~/.pi' },
       ],
     })),
-    profileRollback: vi.fn(async () => ({})),
-    localProfilePreview: vi.fn(async (harness: string) =>
-      harness === 'claude'
-        ? profilePreview()
-        : profilePreview({
-            harness,
-            root: `/home/alice/.${harness}`,
-            present: false,
-            files: 0,
-            bytes: 0,
-            categories: [],
-            excluded: [],
-          }),
-    ),
-    localProfilePush: vi.fn(async (harness: string) => ({
-      harness,
-      snapshot_id: 'psn_2',
-      digest: 'sha256:cafe9012',
-      files: 42,
-      bytes: 183422,
+    configTree: vi.fn(async () => ({ entries: [] })),
+    configRead: vi.fn(async () => ({
+      content: '', size: 0, binary: false, truncated: false, revision: '', writable: true,
+    })),
+    configWrite: vi.fn(async ({ content }) => ({
+      content, size: new TextEncoder().encode(content).length,
+      binary: false, truncated: false, revision: 'saved', writable: true,
+    })),
+    configImport: vi.fn(async ({ harness, files }) => ({
+      harness, files: files.length, bytes: 0, excluded: [],
     })),
     agentList: vi.fn(async () => [
       agentInfo(),
@@ -496,33 +439,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       searched: ['/usr/local/bin', '/home/alice/.local/bin'],
       repo_path: '/src/repo',
     })),
-    // A profile scan that recommends the configured harness, like the
-    // gateway's fake harness; tests drive other outcomes by overriding.
-    openProfileScan: vi.fn(
-      (_req: ProfileScanRequest, h: ProfileScanHandlers): EnvScanSession => {
-        let closed = false
-        queueMicrotask(() => {
-          if (closed) return
-          h.onStatus('running')
-          h.onOutput('fake harness: reading the profile inventory')
-          h.onResult({
-            harnesses: [
-              {
-                harness: 'claude',
-                import: true,
-                categories: ['skills', 'commands'],
-                reason: 'your skills and commands match this project',
-              },
-            ],
-          })
-        })
-        return {
-          close: () => {
-            closed = true
-          },
-        }
-      },
-    ),
     ...over,
   }
 }

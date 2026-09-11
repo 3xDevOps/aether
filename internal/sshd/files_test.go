@@ -12,17 +12,22 @@ import (
 )
 
 type fakeFiles struct {
-	treeErr error
-	readErr error
-	diffErr error
+	treeErr  error
+	readErr  error
+	writeErr error
+	diffErr  error
 }
 
 func (f *fakeFiles) FilesTree(context.Context, domain.WorkspaceID, domain.RunID, string, string) ([]gitengine.TreeEntry, error) {
 	return nil, f.treeErr
 }
 
-func (f *fakeFiles) FilesRead(context.Context, domain.WorkspaceID, domain.RunID, string, string, int) ([]byte, bool, bool, error) {
-	return nil, false, false, f.readErr
+func (f *fakeFiles) FilesRead(context.Context, domain.WorkspaceID, domain.RunID, string, string, int) (gitengine.FileRead, error) {
+	return gitengine.FileRead{}, f.readErr
+}
+
+func (f *fakeFiles) FilesWrite(context.Context, domain.WorkspaceID, domain.RunID, string, string, []byte, string, domain.GitIdentity, []byte) (gitengine.FileRead, error) {
+	return gitengine.FileRead{}, f.writeErr
 }
 
 func (f *fakeFiles) FileDiff(context.Context, domain.RunID, string) (gitengine.Patch, error) {
@@ -62,5 +67,19 @@ func TestFilesReadDoesNotEchoServicePath(t *testing.T) {
 	}
 	if strings.Contains(pe.Message, "/var/lib/aether") {
 		t.Fatalf("files.read leaked host path: %q", pe.Message)
+	}
+}
+func TestFilesWriteRequiresRunOrWorkspaceWritePermission(t *testing.T) {
+	reader := &fakeFiles{}
+	e := newTestEnv(t, func(c *Config) { c.Services.Files = reader })
+	viewerSigner, _ := addMember(t, e, "Viewer", domain.RoleViewer, false)
+	viewer := controlAs(t, e, viewerSigner)
+	for _, target := range []protocol.FilesWriteParams{
+		{WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID), Path: "file.txt", Content: "edit"},
+		{WorkspaceID: string(e.ws.ID), Path: "file.txt", Content: "edit"},
+	} {
+		if pe := wireErrOf(t, viewer.Call(protocol.MethodFilesWrite, target, nil)); pe.Code != protocol.CodeDenied {
+			t.Errorf("viewer files.write target %#v code = %d, want %d", target.RunID, pe.Code, protocol.CodeDenied)
+		}
 	}
 }

@@ -108,7 +108,6 @@ and prefix as a `POST /api/v1` error.
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
 | `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
-| `GET` | `/ws/envscan` | environment scan on this machine (WebSocket) |
 | `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
 
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
@@ -118,9 +117,9 @@ so client-side routing works on a hard refresh. An `/api/`, `/ws/`, or
 `/local/` path hit with the wrong method is the exception: it answers `405`
 with a JSON error body instead of falling through to the SPA, so a
 wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
-bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` is
-the per-method exception: its HTTP body cap is 12 MiB so base64 plus JSON
-framing can carry an image whose decoded bytes are capped separately at 8 MiB.
+bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
+a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
+separately at 8 MiB. File and configuration exceptions are listed below.
 
 ### `POST /api/v1/<method>`
 
@@ -160,12 +159,12 @@ audit history.
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
+{"gateway":"local","methods":["*"],"ws":["events","attach","terminal"],
  "local":["daemon.install","daemon.status","env.harnesses","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
-          "link.status","link.switch","profile.preview","profile.push","pull",
-          "pull.switch","repo.fast-forward","repo.push","repo.sync","sync.start",
-          "sync.status","sync.stop","update.apply","update.check","update.status"],
+          "link.status","link.switch","pull","pull.switch","repo.fast-forward",
+          "repo.push","repo.sync","sync.start","sync.status","sync.stop",
+          "update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -178,6 +177,77 @@ local-only surfaces.
 `version` and `commit` are the `aether` build serving this gateway, which is
 the only way the SPA can learn what CLI it is running against - `server.info`
 answers for the server. Both are absent on a gateway that predates them.
+
+### Control-channel methods this gateway calls
+
+The two `GET` endpoints above are backed by SSH control-channel methods, as
+are the file reads and the member and workspace writes below. This gateway
+proxies the whole API shape over SSH, so it needs all of them without a
+listener on the server.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
+| `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+| `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
+| `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
+| `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
+| `files.diff` | `{"run_id":"...","path":"README.md"}` | `{"patch":"...","truncated":false}` |
+| `config.roots` | `{}` | `{"roots":[{"harness":"claude","path":"~/.claude"}]}` |
+| `config.tree` | `{"harness":"claude","path":"."}` (`path` may be omitted, empty, or `"."` for the root) | `{"entries":[{"name":"settings.json","kind":"file","size":1234},...]}` |
+| `config.read` | `{"harness":"claude","path":"settings.json"}` | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
+| `config.write` | `{"harness":"claude","path":"settings.json","content":"...","revision":"<sha256>"}` (`revision` is empty only for a new file) | the same `FileRead` shape as `config.read`, for the saved bytes |
+| `config.import` | `{"harness":"claude","files":[{"path":"settings.json","content_base64":"...","mode":420}]}` | `{"harness":"claude","files":1,"bytes":12,"excluded":[{"path":"notes.md","reason":"secret","detail":"..."}]}` |
+| `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
+| `terminal.stop` | none | empty result; stops the member environment and its tabs |
+| `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
+| `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
+| `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
+| `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
+| `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
+| `github.probe` | none | `GitHubProbeResult` (`{"status":"ok","version":"2.100.0","minimum":"2.81.0","detail":"gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.7"}`) - the gh in the calling member's environment terminal |
+
+### Files and member configuration
+
+`files.tree` and `files.read` address a workspace's base branch when
+`run_id` is omitted, or a live run checkout when it is present. Complete
+valid UTF-8 text without NUL bytes is returned with an exact SHA-256
+`revision` and may be writable. Binary or truncated content is bounded to a
+read-only response with an empty revision. The file/editor limit is 512 KiB;
+the same limit applies to `files.write` and `config.write`.
+
+`files.write` without `run_id` requires **Push** and creates a one-file commit
+on the workspace base branch; it does not push upstream. With `run_id`, it
+requires **Steer** and changes that run's uncommitted checkout. Existing file
+modes are preserved and new files use `0644`. Run-checkout saves recheck the
+revision immediately before atomic rename under Aether's root lock. Base
+commits compare-and-swap the branch head. Aether's locks do not serialize
+arbitrary live-agent filesystem writers.
+
+`config.roots`, `config.tree`, `config.read`, `config.write`, and
+`config.import` always address the authenticated member's own persistent home.
+They require **Launch**; an administrator cannot select another member with an
+extra request field. `config.write` has the same explicit-save and revision
+rules as `files.write`, while `config.import` installs a one-time directory
+selection into that home.
+
+The browser filters known credential names (wherever they occur in a path)
+and runtime/history defaults before upload, but all remaining bytes are
+uploaded and server-scanned. Imports allow at most 2,000 files, 1 MiB per
+file, and 20 MiB decoded in aggregate. Empty and binary regular files are
+preserved; a browser import sends mode `0644` and cannot preserve executable
+mode or symlinks. Existing remote modes are preserved. The server rejects
+unsafe paths, symlink components, hardlinks, and non-regular destinations.
+The result's `files` and `bytes` count
+accepted files only; `excluded` reports server-side credential, ignore,
+secret, or safety exclusions. Explicit CLI profile `push`, `status`, and
+`rollback` remain separate manual operations; the dashboard does not call
+local profile verbs or watch a local directory.
+
+The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
+`files.write` and `config.write` at 4 MiB, and `config.import` at 30 MiB.
+The SSH control-channel line cap is 32 MiB; the decoded import limits above
+remain authoritative.
 
 ### `GET /api/v1/run/<run_id>/patch`
 
@@ -271,28 +341,6 @@ server was not told where the data directory is, or the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
 zero anywhere else).
 
-### Control-channel methods this gateway calls
-
-The two `GET` endpoints above are backed by SSH control-channel methods, as
-are the file reads and the member and workspace writes below. This gateway
-proxies the whole API shape over SSH, so it needs all of them without a
-listener on the server.
-
-| Method | Params | Result |
-| --- | --- | --- |
-| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
-| `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
-| `files.tree` | `FilesTreeParams` (`{"workspace_id":"...","run_id":"...","path":"src"}`; `run_id` optional) | `FilesTreeResult` - immediate file and directory entries |
-| `files.read` | `FilesReadParams` (`{"workspace_id":"...","run_id":"...","path":"README.md"}`; `run_id` optional) | `FilesReadResult` - read-only content, size, binary, and truncation |
-| `files.diff` | `FilesDiffParams` (`{"run_id":"...","path":"README.md"}`) | `FilesDiffResult` - one file's patch against the run base |
-| `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
-| `terminal.stop` | none | empty result; stops the member environment and its tabs |
-| `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
-| `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
-| `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
-| `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
-| `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
-| `github.probe` | none | `GitHubProbeResult` (`{"status":"ok","version":"2.100.0","minimum":"2.81.0","detail":"gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.7"}`) - the gh in the calling member's environment terminal |
 
 `terminal.image` accepts the original image bytes as strict base64 in
 `content`; the server decodes and validates the bytes again. Only PNG, JPEG,
@@ -392,8 +440,6 @@ authority.
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace's upstream afterwards, omitted when it has none) |
 | `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
-| `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
-| `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422,"skipped":[...]}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |
 | `pull.switch` | `{"run_id":"..."}` | `{"branch":"..."}` |
 | `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","state":"pushed"\|"up-to-date"\|"behind"\|"diverged","local_commit":"...","workspace_commit":"...","ahead":0,"behind":0,"output":"..."}` |
@@ -519,85 +565,6 @@ no SSH key is offered and the server requires one, it may create
   reach `ssh`: a passphrase-protected key with no agent still waits on
   ssh's own prompt until the ten minutes are up. Load the key into an agent
   before pushing, fast-forwarding, or syncing from the dashboard.
-- `profile.preview` runs the discovery `aether profile push --agent
-  <harness>` would run and uploads nothing. It reports what a push would
-  carry, grouped into categories a developer recognizes, and everything
-  the guards left behind:
-
-  ```json
-  {"harness":"claude","root":"/home/you/.claude","present":true,
-   "files":42,"bytes":183422,
-   "categories":[{"category":"skills","files":12,"bytes":40201,
-                  "paths":["skills/pdf/SKILL.md"],"truncated":false}],
-   "excluded":[{"path":"notes/key.txt","reason":"secret",
-                "detail":"secret detected (aws-access-token) at 3:9"},
-               {"path":".credentials.json","reason":"credential",
-                "detail":"credential file excluded for claude"}],
-   "excluded_total":2}
-  ```
-
-  Categories, in the order they are reported: `memory` (standing
-  instructions - `CLAUDE.md`, `AGENTS.md`, `memory/`), `skills`,
-  `commands` (`commands/`, and codex's `prompts/`), `settings`, `mcp`,
-  `plugins`, `other`. `paths` is capped at 200 entries per category, with
-  `truncated` set when it was cut; `files` and `bytes` stay exact.
-  `reason` on an exclusion is `credential` (a denylisted basename),
-  `secret` (a content-scanner finding in a file the user wrote),
-  `vendored-secret` (a finding inside a plugin tree the harness installs
-  into - claude's `plugins/cache/` and `plugins/marketplaces/`), `ignored` (an
-  `.aether-profile-ignore` match, or one of the per-harness defaults in
-  [harnesses.md](harnesses.md)), `symlink` (a link out of the profile
-  root, skipped rather than followed - its target is never opened),
-  `not-regular` (a socket, named pipe, or device node, refused on its
-  mode without being opened), `too-large` (over the 1 MiB a push allows
-  for one file), or `over-budget` (the 20 MiB a snapshot holds was
-  already filled).
-- An ignored directory is reported once, as the directory, rather than
-  once per file inside it. `excluded` is capped at 200 entries;
-  `excluded_total` is the exact count.
-- `excluded` lists every `secret` first, then the rest in path order.
-  Those are the entries a caller has to put in front of the user, and
-  ordering them by path would let a profile with a few hundred ignored
-  files push the one file the user has to act on past the cap. It also
-  means a capped list still carries all of them, and so an exact count,
-  unless every entry sent is a `secret`.
-- The snapshot budget is spent by category priority - memory, skills,
-  commands, settings, mcp, plugins, other - not directory order, so the
-  files this feature exists to carry are not crowded out by whatever
-  sorts first.
-- The two size reasons are decided from the file's stat, before it is
-  opened, so an oversized file is never read and never scanned. That is
-  not only a saving: an agent's configuration directory routinely holds
-  hundreds of megabytes of transcripts, and scanning those would make a
-  preview take minutes. The caps are the server's own
-  (`internal/profile`), so the preview offers exactly the files a push
-  can carry.
-- No exclusion refuses a gateway push. Every one of them - both secret reasons,
-  symlink escapes, and both size caps - lets the push succeed carrying
-  what is left, so `excluded` and `excluded_total` are the whole preview
-  and there is no field a caller has to check before offering the import.
-  The two secret reasons differ only in what a caller can offer the user:
-  a `secret` is in a file the user wrote and can edit, a
-  `vendored-secret` is a string in a package the harness installed. Both
-  carry the scanner's rule and location in `detail`.
-- `present:false` - this machine has no profile root for that harness -
-  is a normal answer with zero counts, not an error. A harness name the
-  registry does not know, or one with no profile sync, answers `-32602`.
-- `profile.push` performs the push `aether profile push --agent
-  <harness>` performs, through the gateway's SSH connection: the same
-  discovery, the same per-harness credential denylist, the same secret
-  scanner, and the same content-addressed delta against the server's
-  current head. **It takes no allow-secret parameter.** A scanner finding
-  drops the one file it named and the push runs; carrying a flagged file
-  anyway stays on the CLI, where `--workspace` makes it attributable on a
-  timeline. A missing profile root refuses with `-32002`. `skipped`
-  carries every exclusion the walk made - both secret reasons, the size
-  caps, and symlink escapes - in the same shape `profile.preview` uses:
-  the push succeeded without those files, so this is the only place the
-  caller learns they are not on the server.
-- Both verbs walk the whole profile root, and both stop when the request
-  is cancelled: a client that closes the connection stops the work on
-  this machine, rather than only stopping its own wait.
 - `pull` fetches the run branch, fast-forwards it when it is checked out, and
   otherwise creates or updates the local branch without switching branches.
   `current` reports whether the checkout is on that branch and `dirty` reports
@@ -937,66 +904,3 @@ time, and active tabs; `terminal.stop` stops the container and deletes its tab
 sessions while preserving the member home.
 
 
-### `GET /ws/envscan`
-
-Runs the onboarding **profile** scan on this machine. The chosen setup-capable
-coding agent runs headless and recommends which local agent configurations are
-worth importing into Aether. Every frame is JSON text. Before the agent runs,
-the gateway widens its `PATH` from your login shell the way `env.harnesses`
-does.
-
-1. The client sends one **text** start frame within 10 seconds. `mode` must be
-   `profile`; `harness` names the setup-capable agent to run. `repo_path` is
-   optional. When present, it must name a Git repository; the agent runs from
-   that directory, never writes it, and the scan fails if its Git status
-   changes:
-
-   ```json
-   {"harness":"claude","mode":"profile"}
-   {"harness":"claude","mode":"profile","repo_path":"/path/to/clone"}
-   ```
-
-   The gateway answers an unsupported mode with one `error` frame and a
-   **1008** close. A bad `repo_path` answers one `error` frame naming the
-   problem, then closes with **1000**.
-
-2. Server streams progress frames while the agent runs:
-
-   ```json
-   {"type":"status","status":"running"}
-   {"type":"output","line":"one raw line of agent output"}
-   ```
-
-   Statuses arrive in order: `detecting`, `running`, `validating`, and
-   `retrying` when the agent's output failed validation and the one automatic
-   retry starts.
-
-3. Exactly one terminal frame ends the scan, then the socket closes with
-   **1000**. Success carries a recommendation with one entry per harness the
-   agent was shown:
-
-   ```json
-   {"type":"result","recommendation":{"harnesses":[
-     {"harness":"claude","import":true,"categories":["skills","commands"],
-      "reason":"..."},
-     {"harness":"codex","import":false,"categories":[],"reason":"..."}]}}
-   ```
-
-   The recommendation is a proposal, never an action. The user edits and
-   approves it before importing with a separate `profile.push` call per
-   harness. The agent sees names, paths, category counts, and sizes only:
-   file contents, credential paths, and anything the denylist or secret
-   scanner flagged never reach the prompt. A machine with no agent
-   configuration answers one `error` frame:
-   `no agent configuration found on this machine; nothing to import`.
-
-   Failure carries the reason and the last agent output for diagnosis:
-
-   ```json
-   {"type":"error","detail":"the scan timed out after 10m0s","output_tail":"..."}
-   ```
-
-One scan runs at a time per gateway. A second start frame answers an `error`
-frame whose `detail` says a scan is already running, then closes with **1008**.
-Closing the socket cancels the scan and kills the agent process; its scratch
-directory is removed in every outcome.
