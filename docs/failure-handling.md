@@ -27,7 +27,7 @@ scheduler.
 The threshold is the **hang detector**, and the fallback for harnesses that
 cannot report their own state.
 
-Where the agent reports (`claude` and `opencode` today - see
+Where the agent reports (`claude`, `codex`, `opencode`, `pi` and `omp` - see
 [harnesses.md](harnesses.md)), a turn that ends parks the run immediately
 with a reason that says what it is waiting for, and the threshold is left
 to catch the case the agent cannot report: one that hangs mid-turn, which
@@ -201,11 +201,18 @@ and the reason on the run says which.
 parks the run the moment its turn ends, or it asks for permission or an
 answer, with a reason that reads `waiting for your input`,
 `waiting for your permission` or `waiting for your answer`. There is no
-delay: the report arrives as the agent stops. The run returns to `running`
-with `agent resumed` when the agent starts its next turn - which is what
-steering it produces - and not on terminal output alone. A server restart
-does not change that: the report is recovered with the run, so a run that
-was waiting for you is still waiting for you afterwards.
+delay: the report arrives as the agent stops. A server restart does not
+change that: the report is recovered with the run, so a run that was
+waiting for you is still waiting for you afterwards.
+
+How such a run comes back depends on how much its harness can say. Where the
+agent reports both ends of a turn (`claude`, `pi`, `omp`), the run returns
+to `running` with `agent resumed` when the agent starts its next turn -
+which is what steering it produces - and not on terminal output alone, since
+a TUI repaints while the member types. Where it only reports that a turn
+ended (`codex`), there is no such report to wait for, so the run returns
+with `activity resumed` on agent output or a file change, exactly as a run
+with no reporter does.
 
 **The run stalled.** No agent output, no file changes and nothing from the
 agent's reporter past `--stall-threshold` parks a live run at
