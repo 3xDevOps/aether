@@ -55,16 +55,18 @@ hand if you skipped the question:
 sudo aether-server setup
 ```
 
-It asks for the listen address, data directory, and tailnet policy (Enter
-accepts each default), then prints:
+It asks for the listen address, data directory, and tailnet policy - plus, on
+a host that already runs tailscaled, the dashboard's HTTPS port on the tailnet
+(Enter accepts each default) - then prints:
 
 ```sh
 systemctl daemon-reload && systemctl enable --now aether-server
 ```
 
 Run that and the server is live on `:2222`. The SSH host key is generated on
-first start and nothing is exposed to the network except the SSH port. Change
-any option later with `aether-server config set <key> <value>`, then restart.
+first start, and the SSH port is the only thing exposed unless you answered the
+dashboard question. Change any option later with
+`aether-server config set <key> <value>`, then restart.
 
 To try it in the foreground first, `sudo aether-server serve` runs until
 Ctrl-C. [install.md](install.md) covers unattended installs, running
@@ -298,6 +300,11 @@ the CLI can do works from the page, plus local verbs like pulling a run
 branch into your clone. Leave it running; Ctrl-C stops the gateway and the
 token dies with it. `aether gui --url` prints the URL instead of opening a
 browser. See [local-gateway.md](local-gateway.md).
+
+On a tailnet, the server can host the dashboard instead, so a phone or any
+other tailnet device opens `https://<the server's MagicDNS name>/` with
+nothing installed and no token. Set `web-port` and restart the server; see
+[networking.md](networking.md#the-dashboard).
 
 ### Prefer a native window?
 

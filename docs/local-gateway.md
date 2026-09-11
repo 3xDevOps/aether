@@ -3,14 +3,31 @@
 `aether gui` serves the dashboard from the user's own machine
 (`internal/localgw`): the embedded SPA, the `/api/v1` shape, and the
 WebSocket surfaces, all proxied over the machine's SSH connection to the
-linked server. It is the only web transport Aether ships; the server itself
-listens on SSH and nothing else. Because the identity is the member's own
-SSH key rather than a token minted somewhere else, the **full
-control-channel method map** is reachable - no allowlist - plus the
-client-machine verbs under `/local/v1` that only a machine with the user's
-repository and SSH key can offer. The security stances are in
-[security.md](security.md#the-dashboard-gateway); the SPA that runs against
-it is in [dashboard-frontend.md](dashboard-frontend.md).
+linked server. Because the identity is the member's own SSH key rather than a
+token minted somewhere else, the **full control-channel method map** is
+reachable - no allowlist - plus the client-machine verbs under `/local/v1`
+that only a machine with the user's repository and SSH key can offer. The
+security stances are in [security.md](security.md#the-dashboard-gateways); the
+SPA that runs against it is in
+[dashboard-frontend.md](dashboard-frontend.md).
+
+## Which gateway serves what
+
+A server with `web-port` set serves the same dashboard itself over HTTPS on
+its tailnet addresses, identifying each request by Tailscale WhoIs instead of
+a token (`internal/servergw`; how to turn it on and what it needs are in
+[networking.md](networking.md#the-dashboard)). Everything below describes
+both gateways except where this table says otherwise: the routes, framing,
+timeouts and close reasons are one implementation (`internal/webgate`), and
+each gateway only supplies the identity and the transport behind it.
+
+| Surface | `aether gui` | `aether-server --web-port` |
+| --- | --- | --- |
+| Listener | `127.0.0.1` on an ephemeral or `--port` port, plain HTTP | the host's tailnet addresses, HTTPS with the tailnet certificate |
+| Identity | per-process bearer token, backed by the user's SSH key | Tailscale WhoIs on the request's source address, per request |
+| `/api/v1/*`, `/ws/events`, `/ws/attach`, `/ws/terminal` | yes | yes |
+| `/local/v1/*` and `/ws/envscan` | yes | no - nothing on the server is the caller's own machine |
+| Backend | one SSH connection to the linked server | in-process, running the same handlers an SSH channel runs |
 
 ## Running it
 
@@ -49,6 +66,20 @@ When an agent prints an OAuth URL in the dashboard, click it. If the URL
 contains an HTTP loopback callback, the dashboard opens a blank browser tab,
 starts the local forward, and only then loads the authorization page. The
 forward targets the run or environment terminal where the link appeared.
+
+The server gateway has no `forward.start` verb to do that with, and the
+callback port only exists on the machine that runs the forward, so opening
+the link there would strand the login. Instead the dashboard leaves the link
+unopened and shows a toast carrying it, the command to run on the machine
+where the login will be finished, and a **Copy link** action:
+
+```sh
+aether forward run:<run-id> <port>     # a link that appeared in a run's terminal
+aether forward terminal <port>         # a link in the environment terminal
+```
+
+Links whose callback is not a loopback address open normally on both
+gateways.
 
 For a CLI terminal, or as a dashboard fallback, forward the callback port
 before completing authorization:
@@ -183,11 +214,20 @@ audit history.
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
-`methods` is `["*"]` because this gateway forwards every control-channel
-method; `ws` lists the WebSocket surfaces it serves; `local` is the sorted
-`/local/v1` verb list. A client probes this rather than hard-coding what it
-is talking to; the SPA's `useCapability` seam reads it to gate the
-local-only surfaces.
+The server gateway answers the same shape with no `local` field at all, which
+is what the SPA reads to hide Onboarding, Settings, the link chip, the update
+banner and the pull, forward and sync controls:
+
+```json
+{"gateway":"server","methods":["*"],"ws":["events","attach","terminal"],
+ "version":"v1.2.3","commit":"abc1234"}
+```
+
+`methods` is `["*"]` because both gateways forward every control-channel
+method; `ws` lists the WebSocket surfaces served; `local` is the sorted
+`/local/v1` verb list, absent where there are none. A client probes this
+rather than hard-coding what it is talking to; the SPA's `useCapability` seam
+reads it to gate the local-only surfaces.
 
 `version` and `commit` are the `aether` build serving this gateway, which is
 the only way the SPA can learn what CLI it is running against - `server.info`
@@ -288,9 +328,9 @@ zero anywhere else).
 ### Control-channel methods this gateway calls
 
 The two `GET` endpoints above are backed by SSH control-channel methods, as
-are the file reads and the member and workspace writes below. This gateway
-proxies the whole API shape over SSH, so it needs all of them without a
-listener on the server.
+are the file reads and the member and workspace writes below. Every read and
+write the dashboard makes is a control-channel method, which is what lets one
+gateway proxy it over SSH and the other dispatch it in-process.
 
 | Method | Params | Result |
 | --- | --- | --- |
@@ -836,6 +876,16 @@ open, with the browser still reporting it as connected and no close ever
 arriving on the client side. An attach the gateway refused, one parked on a
 `session ended` close, and a run still waiting for its PTY session are not
 reopened by either event.
+
+On the server gateway the handshake carries nothing; WhoIs identifies it
+like any other request.
+
+Every live socket - `events`, `attach`, `terminal`, and `envscan` - is pinged
+by the server every **30 seconds** and closed when the pong does not arrive
+within **10**. A client that changed networks or went to sleep leaves a
+half-open connection that reads as live on both ends; the ping is what
+releases the PTY client it was holding, whose geometry clamps every other
+viewer. The SPA reconnects on its normal path.
 
 ### `GET /ws/events`
 

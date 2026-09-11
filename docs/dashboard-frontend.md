@@ -11,8 +11,11 @@ reusable VS Code component package. It follows VS Code Dark Modern and Light
 Modern semantics, dense flat panes and compact controls while preserving
 Aether's routes, capabilities, run states and startup behavior.
 
-The gateway it talks to is documented in `docs/local-gateway.md`; this guide
-describes the dashboard's public route, store, and component structure.
+The gateways it talks to are documented in `docs/local-gateway.md`: `aether
+gui` on the user's own machine, and `aether-server` itself on a tailnet when
+`web-port` is set. The same bundle serves both, gating the machine-local
+surfaces on the capabilities descriptor. This guide describes the dashboard's
+public route, store, and component structure.
 
 ## Runtime boundary and commands
 
@@ -436,9 +439,11 @@ run's wire `paused` field, skipping runs that do not carry it.
   prompts.
 
 **The capabilities descriptor is the transport seam.** The store holds the
-`GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, `local`), and
+`GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, and `local`
+where the gateway has local verbs - the server gateway omits it), and
 `useCapability()` in `src/store/hooks.ts` wraps it as three predicates -
-`hasMethod`, `hasLocal`, `hasWS` - with `methods: ["*"]` meaning everything.
+`hasMethod`, `hasLocal`, `hasWS` - with `methods: ["*"]` meaning everything
+and a missing `local` meaning no local verb is available.
 When the descriptor is `null` (a gateway that predates the endpoint), the
 fallback is the read-and-steer method set every gateway has always served,
 `events` and `attach` sockets, and no local verbs, so an unknown gateway
@@ -1828,3 +1833,27 @@ plumbing. When changing a visible contract, update the assertion at the layer
 that can observe it. Use a component test for state, text, role, focus and
 navigation behavior, and Playwright for computed layout, actual browser focus
 outlines, responsive overflow, Escape ordering and gateway-backed flows.
+
+### Testing on a real phone
+
+The browser suite runs against `aether gui`, so the server-hosted gateway and
+a real touch device are checked by hand. Give the server a dashboard port and
+restart it:
+
+```sh
+sudo aether-server config set web-port 443
+sudo systemctl restart aether-server
+```
+
+Then open `https://<the server's MagicDNS name>/` on a phone joined to the
+same tailnet. Expect the board as the first screen, already signed in: no
+onboarding wizard, no Settings, no link chip, no update banner, and no pull,
+forward or sync controls, because the descriptor carries no `local` verbs.
+Watch what the server saw with:
+
+```sh
+journalctl -u aether-server -f
+```
+
+Prerequisites and the refusals a bad tailnet setup produces are in
+[networking.md](networking.md#the-dashboard).
