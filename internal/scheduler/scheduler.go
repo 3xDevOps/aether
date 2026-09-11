@@ -197,12 +197,14 @@ type supervised struct {
 	paused        bool
 	killRequested bool
 	killActor     domain.MemberID
-	// agentState is the last thing the agent said about itself, zero until
-	// it says anything. It is in-memory only: after a server restart the
-	// run keeps its stored status and the next report - or the next stall -
-	// corrects it.
-	agentState agentstatus.State
-	done       chan struct{}
+	// agentReport is the last thing the agent said about itself, zero until
+	// it says anything and again whenever activity un-parks the run. It is
+	// only ever set to a report the run's status already matches, so a
+	// report the store refused leaves the silence fallback armed. In memory
+	// only: after a server restart the run keeps its stored status and the
+	// next report - or the next stall - corrects it.
+	agentReport agentstatus.Report
+	done        chan struct{}
 	// runUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root (no ownership pass). Set once
 	// the user is resolved during provisioning, or from the sidecar on

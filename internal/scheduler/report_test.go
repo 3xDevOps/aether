@@ -13,9 +13,9 @@ import (
 
 // launchReporting launches a run on a harness whose profile carries a full
 // status reporter (claude) and returns it with its fake container.
-func (e *testEnv) launchReporting(t *testing.T, task string) (*domain.Run, *fakeContainer) {
+func (e *testEnv) launchReporting(t *testing.T) (*domain.Run, *fakeContainer) {
 	t.Helper()
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, task, "claude", domain.LaunchTUI)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", "claude", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestAgentWaitingParksAndResumes(t *testing.T) {
 	})
 	sub := e.subscribe(t)
 	e.startStalls(t)
-	run, c := e.launchReporting(t, "add OAuth login")
+	run, c := e.launchReporting(t)
 
 	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
@@ -97,19 +97,25 @@ func TestAgentWaitingParksAndResumes(t *testing.T) {
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
 		t.Fatalf("second report working: %v", err)
 	}
+	expectNoStatusEvent(t, sub, run.ID, "a working report on a running run")
+}
+
+// expectNoStatusEvent fails if a run.status event for run arrives in the
+// next tenth of a second. what names the thing that must not have published.
+func expectNoStatusEvent(t *testing.T, sub events.Subscription, run domain.RunID, what string) {
+	t.Helper()
 	deadline := time.After(100 * time.Millisecond)
-	for quiet := false; !quiet; {
+	for {
 		select {
 		case ev, ok := <-sub.Events():
 			if !ok {
-				quiet = true
-				break
+				return
 			}
-			if p, isStatus := ev.Payload.(events.RunStatusPayload); isStatus && ev.RunID == run.ID {
-				t.Fatalf("a working report on a running run published %+v", p)
+			if p, isStatus := ev.Payload.(events.RunStatusPayload); isStatus && ev.RunID == run {
+				t.Fatalf("%s published %+v", what, p)
 			}
 		case <-deadline:
-			quiet = true
+			return
 		}
 	}
 }
@@ -171,7 +177,7 @@ func TestAgentWorkingStillStalls(t *testing.T) {
 	})
 	sub := e.subscribe(t)
 	e.startStalls(t)
-	run, _ := e.launchReporting(t, "add OAuth login")
+	run, _ := e.launchReporting(t)
 
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
 		t.Fatalf("report working: %v", err)
@@ -192,10 +198,85 @@ func TestReportAgentStateRefusesRunsItDoesNotSupervise(t *testing.T) {
 	if err := e.sched.ReportAgentState(t.Context(), domain.RunID("nosuchrun"), working); err == nil {
 		t.Error("report for an unknown run succeeded")
 	}
-	run, c := e.launchReporting(t, "add OAuth login")
+	run, c := e.launchReporting(t)
 	c.exitNow(0)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, working); err == nil {
 		t.Error("report for a finished run succeeded")
+	}
+}
+
+// TestRepeatedWaitingReportIsNotNews: Claude Code reports one wait twice -
+// as the turn ends, and again once it has been idle at its prompt for a
+// minute - and the pair for a permission six seconds apart. The second
+// report says what the run already says, so it costs no store write and no
+// event; a report that changes the reason still lands.
+func TestRepeatedWaitingReportIsNotNews(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.StallThreshold = time.Hour
+		cfg.PollInterval = 10 * time.Millisecond
+	})
+	sub := e.subscribe(t)
+	e.startStalls(t)
+	run, _ := e.launchReporting(t)
+
+	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
+		t.Fatalf("report waiting: %v", err)
+	}
+	waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
+		t.Fatalf("report the same wait again: %v", err)
+	}
+	expectNoStatusEvent(t, sub, run.ID, "the same wait reported twice")
+
+	// A different reason is news: the member is now being asked for
+	// something else.
+	permission := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonPermission}
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, permission); err != nil {
+		t.Fatalf("report a permission wait: %v", err)
+	}
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	if p := ev.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonPermission {
+		t.Fatalf("event reason = %q, want %q", p.Reason, agentstatus.ReasonPermission)
+	}
+}
+
+// TestAgentWaitingWhilePausedStillParks: a hook whose report is in flight
+// when the member pauses the run arrives against a frozen container. The
+// agent cannot repeat it - it is stopped at the prompt it sent it from - so
+// holding the report back would leave the run reading Working with nothing
+// left to correct it: silence from a container the member froze is not a
+// stall either.
+func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.StallThreshold = 40 * time.Millisecond
+		cfg.PollInterval = 10 * time.Millisecond
+	})
+	e.startStalls(t)
+	run, _ := e.launchReporting(t)
+	if err := e.sched.Pause(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
+		t.Fatalf("report waiting on a paused run: %v", err)
+	}
+	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != agentstatus.ReasonInput {
+		t.Fatalf("stored reason = %q, want %q", r.Reason, agentstatus.ReasonInput)
+	}
+	if err := e.sched.Resume(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	// Well past the stall threshold: the run stays parked for the reason
+	// the agent gave, and the silence heuristic does not relabel it.
+	time.Sleep(100 * time.Millisecond)
+	r, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonInput {
+		t.Fatalf("resumed run = %s because %q, want it still parked because %q", r.Status, r.Reason, agentstatus.ReasonInput)
 	}
 }
