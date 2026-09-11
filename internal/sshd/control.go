@@ -129,37 +129,44 @@ func (s *Server) handleRequest(ctx context.Context, member domain.MemberID, line
 	if !valid {
 		return resp
 	}
-	handler, ok := methodHandlers[req.Method]
-	if !ok {
-		resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
+	result, rpcErr := s.dispatch(ctx, member, req.Method, req.Params)
+	if rpcErr != nil {
+		resp.Error = rpcErr
 		return resp
+	}
+	resp.Result = result
+	return resp
+}
+
+// dispatch runs one control-channel method for member: the SSH control
+// loop and the in-process client (Local) both call it, so the pending
+// gate and the per-call capability checks have one implementation.
+func (s *Server) dispatch(ctx context.Context, member domain.MemberID, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	handler, ok := methodHandlers[method]
+	if !ok {
+		return nil, &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + method}
 	}
 	// Re-validate the caller per request. Pending members may call only
 	// server.info; everything else is denied until an admin approves them.
 	m, err := s.memberFor(ctx, member)
 	if err != nil {
-		resp.Error = rpcError(err)
-		return resp
+		return nil, rpcError(err)
 	}
-	if m.Pending && req.Method != protocol.MethodServerInfo {
-		resp.Error = &protocol.Error{
+	if m.Pending && method != protocol.MethodServerInfo {
+		return nil, &protocol.Error{
 			Code:    protocol.CodeDenied,
 			Message: "membership pending admin approval; ask an admin to run member.approve " + string(member),
 		}
-		return resp
 	}
-	result, rpcErr := handler(s, ctx, member, req.Params)
+	result, rpcErr := handler(s, ctx, member, params)
 	if rpcErr != nil {
-		resp.Error = rpcErr
-		return resp
+		return nil, rpcErr
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
-		resp.Error = &protocol.Error{Code: protocol.CodeInternal, Message: "marshal result: " + err.Error()}
-		return resp
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "marshal result: " + err.Error()}
 	}
-	resp.Result = raw
-	return resp
+	return raw, nil
 }
 
 type methodHandler func(s *Server, ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error)

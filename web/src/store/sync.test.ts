@@ -634,6 +634,49 @@ describe('connect', () => {
     await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
     stop()
   })
+  it('shows the gateway refusal instead of an unreachable server', async () => {
+    const store = createRootStore()
+    const client = fakeApi({
+      capabilities: vi.fn(async () => {
+        throw new ApiError(
+          403,
+          'capabilities: tagged tailnet node; the dashboard identifies members by their tailnet login and a tagged node has none',
+        )
+      }),
+    })
+    const stop = connect(store, client)
+
+    await vi.waitFor(() => expect(store.getState().hydrationError).toContain('tagged tailnet node'))
+    expect(store.getState().hydrationError?.startsWith('tagged tailnet node')).toBe(true)
+    expect(store.getState().unreachable).toBe('refused')
+    expect(store.getState().hydrated).toBe(false)
+    // The stream still opens and keeps retrying; its own failure can only
+    // say "unreachable" and never overwrites the recorded reason.
+    await vi.waitFor(() => expect(StubSocket.opened.length).toBeGreaterThan(0))
+    StubSocket.last().onclose?.({ code: 1006, reason: '' })
+    await vi.waitFor(() => expect(StubSocket.opened.length).toBeGreaterThan(1))
+    expect(store.getState().hydrationError).toContain('tagged tailnet node')
+    stop()
+  })
+
+  it('names the tailnet identity outage instead of an unreachable server', async () => {
+    const store = createRootStore()
+    const client = fakeApi({
+      capabilities: vi.fn(async () => {
+        throw new ApiError(
+          503,
+          '/capabilities: tailnet identity unavailable: sshd: tailnet whois: dial unix /var/run/tailscale/tailscaled.sock: connect: no such file or directory',
+        )
+      }),
+    })
+    const stop = connect(store, client)
+
+    await vi.waitFor(() => expect(store.getState().unreachable).toBe('identity'))
+    expect(store.getState().hydrationError?.startsWith('tailnet identity unavailable: ')).toBe(true)
+    expect(store.getState().hydrated).toBe(false)
+    stop()
+  })
+
   it('hydrates onboarding directly for an unlinked local gateway', async () => {
     const store = createRootStore()
     const client = fakeApi({

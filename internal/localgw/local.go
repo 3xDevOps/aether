@@ -125,11 +125,10 @@ func (s *localState) snapshot() cli.Config {
 // JSON object in the body; failures answer the same error envelope as the
 // proxied API.
 func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
-	if !g.authorized(r, false) {
-		g.deny(w)
+	if !g.authorized(w, r) {
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBody))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, webgate.MaxRequestBody))
 	if err != nil {
 		webgate.WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeParse, Message: "read body: " + err.Error()})
 		return

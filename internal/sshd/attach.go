@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -30,7 +28,7 @@ var (
 // serveAttach wires an aether-attach subsystem channel to the PTY host:
 // one header line in, an ack, then a raw byte pipe. Geometry precedence is
 // pty-req > header > 80x24; an attach without pty-req is forced read-only.
-func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *sessionState, ch ssh.Channel) {
+func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *sessionState, ch subsystemConn) {
 	defer func() { _ = ch.Close() }()
 	capped := &capReader{r: ch, left: maxSubsystemHeaderBytes}
 	r := bufio.NewReaderSize(capped, 4<<10)
@@ -121,7 +119,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			e := rpcError(attachErr)
 			_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
 		} else {
-			sendExitStatus(ch, 1)
+			ch.exit(1)
 		}
 		return
 	}
@@ -129,23 +127,23 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 
 	s.publishPresence(run, member, events.PresenceWatching)
 	if !returned {
-		s.spawn(func() { s.revokeAttachOnPolicyChange(attachCtx, revoke, member, run.ID, readOnly) })
+		s.spawn(func() { s.revokeOnPolicyChange(attachCtx, revoke, member, run.ID, readOnly) })
 		attachErr = <-errCh
 	}
 	s.publishPresence(run, member, events.PresenceOnline)
 	switch cause := context.Cause(attachCtx); {
 	case errors.Is(cause, errAttachSteerRevoked):
-		sendExitStatus(ch, protocol.AttachExitSteerRevoked)
+		ch.exit(protocol.AttachExitSteerRevoked)
 	case errors.Is(cause, errAttachMembershipRevoked):
-		sendExitStatus(ch, protocol.AttachExitMembershipRevoked)
+		ch.exit(protocol.AttachExitMembershipRevoked)
 	case attachErr == nil:
 		// Session end: server closes with exit-status 0.
-		sendExitStatus(ch, 0)
+		ch.exit(0)
 	default:
 		// Attach failed after the ack was already on the wire; a nonzero
 		// exit-status is the remaining signal that distinguishes the
 		// failure from a clean session end.
-		sendExitStatus(ch, 1)
+		ch.exit(1)
 	}
 }
 
@@ -161,7 +159,7 @@ func replayableStatus(st domain.RunStatus) bool {
 // served. A run without a transcript - an artifact predating recording -
 // reports false so the caller falls back to the real refusal. A replay is
 // read-only history: no presence, no revocation watch, no input.
-func (s *Server) serveReplay(ch ssh.Channel, run *domain.Run, cols, rows uint) bool {
+func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint) bool {
 	rc, err := s.cfg.PTY.Replay(run.ID)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -173,14 +171,14 @@ func (s *Server) serveReplay(ch ssh.Channel, run *domain.Run, cols, rows uint) b
 	_ = writeJSONLine(ch, protocol.AttachResponse{OK: true, Cols: cols, Rows: rows})
 	if _, cerr := io.Copy(ch, rc); cerr != nil {
 		slog.Warn("sshd: stream transcript replay", "run", run.ID, "error", cerr)
-		sendExitStatus(ch, 1)
+		ch.exit(1)
 		return true
 	}
-	sendExitStatus(ch, 0)
+	ch.exit(0)
 	return true
 }
 
-// revokeAttachOnPolicyChange re-runs the attach's authorization for as
+// revokeOnPolicyChange re-runs the attach's authorization for as
 // long as it is served, the way revokeSyncOnPolicyChange does for the sync
 // bridge. The gate consulted at attach time is a snapshot: without this, a
 // member demoted, removed, or handed off mid-attach - or whose run was
@@ -189,7 +187,7 @@ func (s *Server) serveReplay(ch ssh.Channel, run *domain.Run, cols, rows uint) b
 // the most direct access to a running agent. Steer loss ends a write
 // attach; a read-only attach ends only when the membership itself goes.
 // Store reads only, every few seconds per live attach.
-func (s *Server) revokeAttachOnPolicyChange(ctx context.Context, revoke context.CancelCauseFunc, member domain.MemberID, run domain.RunID, readOnly bool) {
+func (s *Server) revokeOnPolicyChange(ctx context.Context, revoke context.CancelCauseFunc, member domain.MemberID, run domain.RunID, readOnly bool) {
 	ticker := time.NewTicker(s.cfg.revalidateInterval)
 	defer ticker.Stop()
 	for {
@@ -233,7 +231,7 @@ func (s *Server) publishPresence(run *domain.Run, member domain.MemberID, state 
 // attachConn is the io.ReadWriter handed to PTYAttacher.Attach. It delays
 // the acknowledgment until the PTY host identifies the replay boundary.
 type attachConn struct {
-	ch    ssh.Channel
+	ch    io.Writer
 	r     *bufio.Reader
 	ack   any
 	mu    sync.Mutex
@@ -241,7 +239,7 @@ type attachConn struct {
 	first chan struct{}
 }
 
-func newAttachConn(ch ssh.Channel, r *bufio.Reader, ack any) *attachConn {
+func newAttachConn(ch io.Writer, r *bufio.Reader, ack any) *attachConn {
 	return &attachConn{ch: ch, r: r, ack: ack, first: make(chan struct{})}
 }
 

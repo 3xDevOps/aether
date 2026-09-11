@@ -16,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
 // wsStubBackend records the requests the WS handlers hand it and answers
@@ -26,12 +27,12 @@ type wsStubBackend struct {
 	attachReq   protocol.AttachRequest
 	terminalReq protocol.TerminalRequest
 
-	eventsStream io.ReadWriteCloser
+	eventsStream io.ReadCloser
 	eventsErr    error
-	attachTerm   cli.Terminal
+	attachTerm   webgate.Terminal
 	attachAck    protocol.AttachResponse
 	attachErr    error
-	terminalTerm cli.Terminal
+	terminalTerm webgate.Terminal
 	terminalAck  protocol.TerminalResponse
 	terminalErr  error
 }
@@ -40,20 +41,20 @@ func (b *wsStubBackend) Call(context.Context, string, json.RawMessage) (json.Raw
 	return nil, &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "not implemented"}
 }
 
-func (b *wsStubBackend) Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error) {
+func (b *wsStubBackend) Events(_ context.Context, req protocol.SubscribeRequest) (io.ReadCloser, error) {
 	b.mu.Lock()
 	b.eventsReq = req
 	b.mu.Unlock()
 	return b.eventsStream, b.eventsErr
 }
-func (b *wsStubBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protocol.AttachResponse, error) {
+func (b *wsStubBackend) Attach(_ context.Context, req protocol.AttachRequest) (webgate.Terminal, protocol.AttachResponse, error) {
 	b.mu.Lock()
 	b.attachReq = req
 	b.mu.Unlock()
 	return b.attachTerm, b.attachAck, b.attachErr
 }
 
-func (b *wsStubBackend) Terminal(req protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error) {
+func (b *wsStubBackend) Terminal(_ context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
 	b.mu.Lock()
 	b.terminalReq = req
 	b.mu.Unlock()
@@ -101,7 +102,7 @@ func newWSStubStream(lines string) *wsStubStream {
 func (s *wsStubStream) Write(p []byte) (int, error) { return len(p), nil }
 func (s *wsStubStream) Close() error                { s.once.Do(func() {}); return nil }
 
-// wsStubTerminal is a cli.Terminal recording input and resizes; output is
+// wsStubTerminal is a webgate.Terminal recording input and resizes; output is
 // emitted on demand and finish ends Read with readErr.
 type wsStubTerminal struct {
 	inputCh  chan []byte
@@ -164,7 +165,7 @@ func newWSGateway(t *testing.T, b Backend) (*Gateway, string) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	srv := httptest.NewServer(g.mux)
+	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
 	return g, srv.URL
 }
@@ -251,7 +252,7 @@ func TestEventsStreamsThenSignalsStreamEnd(t *testing.T) {
 			t.Fatalf("event seq = %d, want %d", ev.Seq, want)
 		}
 	}
-	reason := expectClose(t, conn, statusStreamEnded)
+	reason := expectClose(t, conn, websocket.StatusServiceRestart)
 	if !strings.Contains(reason, "after_seq") {
 		t.Fatalf("close reason = %q, want resubscribe hint", reason)
 	}
@@ -283,8 +284,8 @@ func TestAttachShellQueryForcesWriteAndResize(t *testing.T) {
 		t.Fatalf("ack = %+v, want ok", ack)
 	}
 	req := b.recordedAttach()
-	if req.Shell != "tab-1" || req.ReadOnly || req.Cols != defaultCols || req.Rows != defaultRows {
-		t.Fatalf("attach request = %+v, want writable shell tab-1 %dx%d", req, defaultCols, defaultRows)
+	if req.Shell != "tab-1" || req.ReadOnly || req.Cols != 80 || req.Rows != 24 {
+		t.Fatalf("attach request = %+v, want writable shell tab-1 80x24", req)
 	}
 
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "pwd\n"})

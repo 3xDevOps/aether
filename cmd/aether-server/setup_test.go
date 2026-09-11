@@ -18,7 +18,7 @@ func answers(lines ...string) *strings.Reader {
 func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 	var out bytes.Buffer
 	in := answers("", "", "", "", "yes")
-	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"))
+	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 func TestAskServerOptionsUsesTypedAnswers(t *testing.T) {
 	var out bytes.Buffer
 	in := answers(":2300", "/srv/aether", "true", "true", "yes")
-	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"))
+	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), path)
+	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), path, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 	var out bytes.Buffer
 	in := answers("", "", "not-a-bool", "true", "", "yes")
-	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"))
+	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,11 +90,58 @@ func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 
 func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "no"), filepath.Join(t.TempDir(), "absent.conf"))
+	values, err := askServerOptions(&out, answers("", "", "", "", "no"), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if values != nil {
 		t.Errorf("values = %v, want nil when the operator declines", values)
+	}
+}
+
+func TestAskServerOptionsOffersTheDashboardOnATailnet(t *testing.T) {
+	var out bytes.Buffer
+	values, err := askServerOptions(&out, answers("", "", "", "", "", "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["web-port"] != "443" {
+		t.Errorf("web-port = %q, want 443 by default on a tailnet host", values["web-port"])
+	}
+	if !strings.Contains(out.String(), "HTTPS certificates") {
+		t.Errorf("dashboard prompt does not name what the tailnet needs:\n%s", out.String())
+	}
+
+	out.Reset()
+	values, err = askServerOptions(&out, answers("", "", "", "", "8443", "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["web-port"] != "8443" {
+		t.Errorf("web-port = %q, want the typed 8443", values["web-port"])
+	}
+}
+
+func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tailnet bool
+		input   []string
+	}{
+		"no tailscaled":       {false, []string{"", "", "", "", "yes"}},
+		"tailnet-require-key": {true, []string{"", "", "", "true", "yes"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			values, err := askServerOptions(&out, answers(tc.input...), filepath.Join(t.TempDir(), "absent.conf"), tc.tailnet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := values["web-port"]; ok {
+				t.Errorf("web-port = %q, want it left unset", values["web-port"])
+			}
+			if strings.Contains(out.String(), "Dashboard HTTPS port") {
+				t.Errorf("dashboard prompt shown where it cannot start:\n%s", out.String())
+			}
+		})
 	}
 }

@@ -38,14 +38,14 @@ func (b *apiStubBackend) Call(_ context.Context, method string, params json.RawM
 	return b.results[method], nil
 }
 
-func (b *apiStubBackend) Events(protocol.SubscribeRequest) (io.ReadWriteCloser, error) {
+func (b *apiStubBackend) Events(context.Context, protocol.SubscribeRequest) (io.ReadCloser, error) {
 	panic("not reached")
 }
 
-func (b *apiStubBackend) Attach(protocol.AttachRequest) (cli.Terminal, protocol.AttachResponse, error) {
+func (b *apiStubBackend) Attach(context.Context, protocol.AttachRequest) (webgate.Terminal, protocol.AttachResponse, error) {
 	panic("not reached")
 }
-func (b *apiStubBackend) Terminal(protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error) {
+func (b *apiStubBackend) Terminal(context.Context, protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
 	panic("not reached")
 }
 
@@ -105,11 +105,14 @@ func do(g *Gateway, method, path, body string, withToken bool) *httptest.Respons
 		r = strings.NewReader(body)
 	}
 	req := httptest.NewRequest(method, path, r)
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if withToken {
 		req.Header.Set("Authorization", "Bearer "+g.Token())
 	}
 	rec := httptest.NewRecorder()
-	g.mux.ServeHTTP(rec, req)
+	g.ServeHTTP(rec, req)
 	return rec
 }
 
@@ -359,5 +362,38 @@ func TestTokenShape(t *testing.T) {
 	g2 := newTestGateway(t, &apiStubBackend{})
 	if g2.Token() == tok {
 		t.Error("two gateways minted the same token")
+	}
+}
+
+func TestTerminalImageAPIRequiresGatewayToken(t *testing.T) {
+	backend := &apiStubBackend{}
+	g := newTestGateway(t, backend)
+	rec := do(g, http.MethodPost, "/api/v1/terminal.image", `{"content":"aGVsbG8="}`, false)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without token = %d, want 401", rec.Code)
+	}
+	if len(backend.calls) != 0 {
+		t.Fatalf("backend calls without token = %d, want 0", len(backend.calls))
+	}
+}
+
+// The local verbs sit behind the core's same-origin rule like every other
+// route: a foreign page holding the token still cannot use them.
+func TestLocalVerbsRefuseAForeignOrigin(t *testing.T) {
+	g := newTestGateway(t, &apiStubBackend{})
+	req := httptest.NewRequest(http.MethodPost, "/local/v1/link.status", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+g.Token())
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	g.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("foreign Origin local verb = %d, want 403: %s", rec.Code, rec.Body)
+	}
+	if perr := decodeError(t, rec.Body.Bytes()); perr.Code != protocol.CodeDenied {
+		t.Fatalf("error code = %d, want CodeDenied", perr.Code)
+	}
+	if rec := do(g, http.MethodPost, "/local/v1/link.status", "{}", true); rec.Code != http.StatusOK {
+		t.Fatalf("same-origin local verb = %d, want 200: %s", rec.Code, rec.Body)
 	}
 }

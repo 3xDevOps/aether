@@ -1,6 +1,11 @@
-// Package webgate holds the transport-independent web-gateway pieces the
-// local gateway (internal/localgw) builds on: the HTTP error envelope,
-// the wire-code to HTTP-status mapping, and the SPA static handler.
+// Package webgate is the transport-neutral dashboard gateway: the
+// embedded SPA, the /api/v1 shape, and the events, attach and terminal
+// WebSockets, bridged onto a Backend the composer's Authorizer hands back
+// per request. The local gateway (internal/localgw) composes it with a
+// per-process bearer token over the member's SSH connection; the server
+// gateway (internal/servergw) with Tailscale WhoIs and in-process
+// subsystems. Framing, timeouts, keepalive pings and close reasons live
+// here once, so both transports behave identically.
 package webgate
 
 import (
