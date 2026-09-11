@@ -335,12 +335,15 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 - `viewport-fit=cover` - the shell paints under the notch and the home
   indicator, and the chrome that touches those edges pads itself back out with
   `env(safe-area-inset-*)`: the title bar sideways, the status bar and its
-  details popup downwards. Every inset is 0 where there is none, so nothing
-  guards them. Toasts sit above the status bar rather than against the screen
-  edge, so their offset adds the inset to the bar's own height - and it has to
-  be given to `sonner` twice, as `offset` and as `mobileOffset`, because
-  `sonner` swaps to the second below 600px and otherwise falls back to a 16px
-  default that lands inside the bar.
+  details popup downwards, and the sidebar drawer on all three edges it
+  reaches, since it is the one surface that spans a screen corner to corner.
+  A surface that pads itself keeps painting to the edge and insets only what
+  it holds, so the notch shows the bar's own colour rather than a gap. Every
+  inset is 0 where there is none, so nothing guards them. Toasts sit above the
+  status bar rather than against the screen edge, so their offset adds the
+  inset to the bar's own height - and it has to be given to `sonner` twice, as
+  `offset` and as `mobileOffset`, because `sonner` swaps to the second below
+  600px and otherwise falls back to a 16px default that lands inside the bar.
 - `interactive-widget=resizes-content` - on a browser that honours it
   (Chrome and the Android WebView; iOS Safari does not), the soft keyboard
   shrinks the layout viewport instead of sliding the page under itself. That
@@ -391,7 +394,10 @@ inside itself. `sm` is a width breakpoint, so a desktop window narrower than
   collapsed - a contributor owns a keyboard shortcut of its own, which is why
   the popup is a `Collapsible` with its own dismissal rather than a Radix
   overlay that unmounts when it closes. It dismisses on Escape and on a
-  pointer down anywhere outside it, unless a dialog above it owns the key.
+  pointer down anywhere outside it, unless a dialog above it owns the key;
+  it takes Escape before the shell's own does, so dismissing the popup on a
+  run does not also leave the run (see
+  [Keyboard and focus](#keyboard-and-focus)).
   The popup also writes out the facts a pointer reads from a hover: the disk
   breakdown, the protocol version and what this machine is linked to. Tooltips
   and `title` stay hints for a pointer, never the only copy of a fact.
@@ -845,6 +851,14 @@ never hears that press at all: on a run, the first Escape closes the tooltip
 and the second leaves. Every other key reaches the shell as usual, and a
 tooltip closes on the first of them whatever it is, so a pending `g` is
 untouched.
+
+The status bar's details popup is the other overlay outside Radix, and it
+dismisses itself, so it has to do by hand what Radix does for a dialog: its
+Escape listener captures, and marks the key handled. The shell's own Escape
+is a window listener registered when the workbench mounted, long before the
+popup opened, so in the bubble phase it would run first and leave the run.
+Capturing is what makes Escape dismiss the topmost thing and only that; an
+open dialog still wins, through the same `inModal` target guard.
 
 Blocking a control with `aria-disabled` rather than `disabled` keeps it in the
 tab order, which is the point; the Styleguide rule below says why. The run
