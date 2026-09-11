@@ -318,11 +318,12 @@ scene's motion details.
 
 ## Window size and overflow
 
-The shell is a fixed column - 35px title and command bar, update prompts,
-activity rail with its adjacent workspace/run sidebar and center view, and a
-22px status bar - and nothing in its own chrome scrolls sideways. A control
-pushed past an edge is unreachable, not merely off screen, so every row states
-what gives way first.
+The shell is a fixed column - title and command bar, update prompts, activity
+rail with its adjacent workspace/run sidebar and center view, and a status bar
+- and nothing in its own chrome scrolls sideways. The two bars are 35px and
+22px for a mouse and grow for a finger; see the tokens below. A control pushed
+past an edge is unreachable, not merely off screen, so every row states what
+gives way first.
 
 `desktop/main.js` sets `minWidth: 960` and `minHeight: 600`. That is the size
 the desktop rules are designed against; a browser tab has no such floor, so
@@ -334,13 +335,20 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 - `viewport-fit=cover` - the shell paints under the notch and the home
   indicator, and the chrome that touches those edges pads itself back out with
   `env(safe-area-inset-*)`: the title bar sideways, the status bar and its
-  details popup downwards, and the `Toaster` offset in `App.tsx`. Every inset
-  is 0 where there is none, so nothing guards them.
-- `interactive-widget=resizes-content` - the soft keyboard shrinks the layout
-  viewport instead of sliding the page under itself. This is the root fix for
-  the keyboard: every `dvh` in the app - dialogs, the palette, selects, menus,
-  the status popup - is already sized against that viewport, so they all
-  shorten when the keyboard opens. Nothing in the shell uses `vh`.
+  details popup downwards. Every inset is 0 where there is none, so nothing
+  guards them. Toasts sit above the status bar rather than against the screen
+  edge, so their offset adds the inset to the bar's own height - and it has to
+  be given to `sonner` twice, as `offset` and as `mobileOffset`, because
+  `sonner` swaps to the second below 600px and otherwise falls back to a 16px
+  default that lands inside the bar.
+- `interactive-widget=resizes-content` - on a browser that honours it
+  (Chrome and the Android WebView; iOS Safari does not), the soft keyboard
+  shrinks the layout viewport instead of sliding the page under itself. That
+  is what every `dvh` in the app - dialogs, the palette, selects, menus, the
+  status popup - is already sized against, so they all shorten when the
+  keyboard opens. Nothing in the shell uses `vh`. Where it is ignored the
+  layout viewport does not move, which is why dialogs also anchor to the top
+  below `sm` (see the end of this section).
 - `themeColor` per `prefers-color-scheme` - the browser reads it before the
   SPA has applied the member's stored theme, so it follows the OS scheme
   rather than the app setting.
@@ -359,19 +367,18 @@ Use this variant rather than a new breakpoint or a per-component pixel value.
 `--status-bar-height` are declared in `src/index.css` and redeclared once
 under `(pointer: coarse)`, where they become 48px and 44px so a 44px control
 fits inside them. A row that has to line up with a bar reads the token - the
-title bar and the sidebar's workspace switcher, the status bar and every
-control in it, the command palette's drop from under the title bar - and so
-does every offset measured from one: the update banner cap and the toast
-offset. Add a coarse size to a control in a fixed-height row only together
-with the row, or the control grows out of the bar that holds it.
+title bar and the sidebar's workspace switcher, the status bar with every
+control and readout in it, the command palette's drop from under the title
+bar - and so does every offset measured from one: the update banner cap and
+the toast offset. Add a coarse size to a control in a fixed-height row only
+together with the row, or the control grows out of the bar that holds it.
 
-Dialogs anchor to the top (`top-4`) below `sm` and centre from `sm` up. iOS
-Safari ignores `interactive-widget`, so there the layout viewport does not
-shrink and a centred fixed dialog sits behind the keyboard; anchored to the
-top it stays in the visual viewport, and a dialog taller than the screen is
-clamped by `max-h-[calc(100dvh-2rem)]` and scrolls inside itself. `sm` is a
-width breakpoint, so a desktop window narrower than 640px is treated as a
-phone here too.
+Dialogs anchor to the top (`top-4`) below `sm` and centre from `sm` up. Where
+`interactive-widget` is ignored, a centred fixed dialog sits behind the
+keyboard; anchored to the top it stays in the visual viewport, and a dialog
+taller than the screen is clamped by `max-h-[calc(100dvh-2rem)]` and scrolls
+inside itself. `sm` is a width breakpoint, so a desktop window narrower than
+640px is treated as a phone here too.
 
 - **Update notices** keep the message, status icon and action hierarchy visible.
   Their actions become a narrow-screen grid and return to a desktop flex row;
@@ -1898,11 +1905,12 @@ The touch shell is driven by the `mobile` project, which
 drawer, taps a run and finds the drawer gone with the run on screen, and
 `dialog-anchor.mobile` checks that a dialog short enough to tell the two
 apart sits at the top rather than the middle, and that the launch form keeps
-its footer on screen on a viewport as short as a keyboard leaves.
-`sidebar-drawer` stays on the desktop project, because the keyboard contract
-it pins - `Mod+B` closing the drawer and the palette coming back once it is
-gone - needs a narrow window with a keyboard rather than a phone.
-`board-card`, `run-switch`, `run-attach-retry`,
+its footer on screen on a viewport as short as a keyboard leaves, and
+`toast-clearance.mobile` checks that a toast comes to rest above the status
+bar rather than on top of it. `sidebar-drawer` stays on the desktop project,
+because the keyboard contract it pins - `Mod+B` closing the drawer and the
+palette coming back once it is gone - needs a narrow window with a keyboard
+rather than a phone. `board-card`, `run-switch`, `run-attach-retry`,
 `run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
 corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and

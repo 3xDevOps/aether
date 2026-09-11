@@ -258,6 +258,7 @@ attaches the server's output to the report.
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
 | `status-bar-sizing` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths and full secondary readouts open by keyboard. The same bar on a phone is `status-bar.mobile` below |
 | `sidebar-drawer` | In a 600px desktop window, the sidebar drawer answering `Mod+B` itself and handing the palette back once it closes |
+| `toast-clearance.mobile` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
 | `keyboard-focus` | Real browser checks that Escape closes a dialog on a run without leaving the run, and that a focused control paints the app's outline with computed style and contrast against the actual background |
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
