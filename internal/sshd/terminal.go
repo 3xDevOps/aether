@@ -75,7 +75,12 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	conn := newAttachConn(ch, r, ack)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.cfg.PTY.Attach(attachCtx, ptyhost.TerminalSession(member, tab), member, cols, rows, false, conn, st.resize)
+		errCh <- s.cfg.PTY.Attach(attachCtx, ptyhost.TerminalSession(member, tab), ptyhost.AttachClient{
+			Member: member,
+			Cols:   cols,
+			Rows:   rows,
+			Follow: req.Follow,
+		}, conn, st.resize)
 	}()
 
 	var attachErr error

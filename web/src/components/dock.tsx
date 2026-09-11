@@ -1,8 +1,8 @@
-import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Plus, X } from 'lucide-react'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
-import { useDrag, useWindowHeight } from '@/lib/hooks'
+import { coarsePointer, useDrag, useMediaQuery, useWindowHeight } from '@/lib/hooks'
 import { onTabListKeyDown, splitterTarget } from '@/lib/keys'
 import { cn, focusRing } from '@/lib/utils'
 
@@ -70,6 +70,7 @@ export function Dock({
   const panelID = `${id}-panel`
   const dockID = `${id}-dock`
   const viewport = useWindowHeight()
+  const coarse = useMediaQuery(coarsePointer)
   const beginDrag = useDrag()
   const dockRef = useRef<HTMLElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
@@ -116,6 +117,11 @@ export function Dock({
           )
   const min = Math.min(requiredMinimum, max)
   const currentHeight = Math.min(max, Math.max(min, height))
+  // A finger cannot drag an edge, so touch gets the two heights the drag was
+  // ever used for - half the room and all of it - as one toggle beside the
+  // collapse control. Half is measured, not stored, so it follows the screen.
+  const halfHeight = Math.min(max, Math.max(min, Math.round(max / 2)))
+  const full = currentHeight >= max
   const index = Math.max(
     0,
     tabs.findIndex((tab) => tab.id === activeTab),
@@ -235,7 +241,7 @@ export function Dock({
       style={collapsed ? undefined : { height: currentHeight }}
       aria-label="Terminal dock"
     >
-      {!collapsed && (
+      {!collapsed && !coarse && (
         <div
           role="separator"
           aria-orientation="horizontal"
@@ -249,10 +255,9 @@ export function Dock({
           onKeyDown={resizeKey}
           className={cn(
             focusRing,
-            // Without `touch-none` the browser claims a touch drag as a pan
-            // and cancels the pointer stream this listens to. The coarse hit
-            // area is 24px centred on the edge, the same as the sidebar's.
-            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20 coarse:-top-3 coarse:h-6',
+            // Without `touch-none` the browser claims a pen or trackpad drag
+            // as a pan and cancels the pointer stream this listens to.
+            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20',
           )}
         />
       )}
@@ -373,6 +378,23 @@ export function Dock({
           <div className="flex min-w-0 max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[640px]:order-3 max-[640px]:max-w-full max-[640px]:basis-full max-[640px]:justify-end max-[640px]:border-t max-[640px]:border-border max-[640px]:py-1">
             {actions}
           </div>
+        )}
+        {!collapsed && coarse && (
+          <Button
+            className="max-[640px]:order-2"
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={
+              full
+                ? 'Shrink terminal dock to half the screen'
+                : 'Expand terminal dock to the full screen'
+            }
+            aria-controls={dockID}
+            onClick={() => onHeightChange(full ? halfHeight : max)}
+          >
+            {full ? <ChevronsDown /> : <ChevronsUp />}
+          </Button>
         )}
         <Button
           ref={collapse}

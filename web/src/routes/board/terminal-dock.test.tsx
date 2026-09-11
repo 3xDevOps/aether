@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { vi } from 'vitest'
 import { api } from '@/lib/api'
 import { TerminalDock } from '@/routes/board/terminal-dock'
+import { standardGeometry } from '@/routes/terminal/attach'
 import type { AttachHandlers } from '@/routes/terminal/attach'
 import type * as attachModule from '@/routes/terminal/attach'
 import { initialEnvTerminal } from '@/store/env-terminal'
@@ -92,7 +93,7 @@ describe('environment terminal dock', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
     await waitFor(() => expect(attach.handlers).not.toBeNull())
 
-    act(() => attach.handlers?.onAttached(true))
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
 
     expect(await screen.findByRole('button', { name: 'Save environment' })).toBeDefined()
     expect(screen.getByText('Installs here reach agents after you save.')).toBeDefined()
@@ -105,7 +106,7 @@ describe('environment terminal dock', () => {
 
     render(<TerminalDock />)
     await waitFor(() => expect(attach.handlers).not.toBeNull())
-    act(() => attach.handlers?.onAttached(true))
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
 
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
   })
@@ -114,7 +115,7 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
     await waitFor(() => expect(attach.handlers).not.toBeNull())
     const oldHandlers = attach.handlers
-    act(() => oldHandlers?.onAttached(true))
+    act(() => oldHandlers?.onAttached(true, standardGeometry))
 
     xterm.terminal.write.mockClear()
     fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
@@ -123,7 +124,7 @@ describe('environment terminal dock', () => {
       expect(attach.handlers).not.toBe(oldHandlers)
     })
     const currentHandlers = attach.handlers
-    act(() => currentHandlers?.onAttached(true))
+    act(() => currentHandlers?.onAttached(true, standardGeometry))
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
 
     const currentOutput = new TextEncoder().encode('current output')
@@ -288,7 +289,7 @@ describe('environment terminal dock', () => {
     })
     render(<TerminalDock />)
     await waitFor(() => expect(attach.handlers).not.toBeNull())
-    act(() => attach.handlers?.onAttached(true))
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
 
     act(() => attach.handlers?.onExit?.())
 
@@ -377,7 +378,7 @@ describe('environment terminal dock', () => {
     expect(screen.getByText('Starting your environment container')).toBeDefined()
     await waitFor(() => expect(attach.handlers).not.toBeNull())
 
-    act(() => attach.handlers?.onAttached(true))
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
 
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     expect(screen.queryByText('Starting your environment container')).toBeNull()
@@ -388,14 +389,14 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
     await waitFor(() => expect(attach.handlers).not.toBeNull())
-    act(() => attach.handlers?.onAttached(true))
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
 
     // A second tab runs another shell in the container that is already up.
     fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
     expect(await screen.findByText('Connecting to your environment')).toBeDefined()
     expect(screen.queryByText('Starting your environment container')).toBeNull()
-    act(() => attach.handlers?.onAttached(true))
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
 
     // And neither does switching back to the first tab.
@@ -429,7 +430,7 @@ describe('environment terminal dock', () => {
     act(() => attach.handlers?.onRefused('membership withdrawn'))
     expect(screen.getByText('membership withdrawn')).toBeDefined()
 
-    act(() => attach.handlers?.onAttached(true))
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
     await waitFor(() => expect(screen.queryByText('membership withdrawn')).toBeNull())
   })
 

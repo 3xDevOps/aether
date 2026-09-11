@@ -16,6 +16,12 @@ import { useStore } from '@/store'
 
 export interface XtermOptions {
   enabled?: boolean
+  /**
+   * Render at exactly this size instead of fitting the pane, and report no
+   * resize. A phone adopts the server's geometry this way and pans the pane
+   * over it, so the shared PTY is never reflowed to a phone's width.
+   */
+  size?: { cols: number; rows: number } | null
   onData?: (data: string) => void
   onResize?: (cols: number, rows: number) => void
   /** Called synchronously before a terminal hyperlink opens. Return true to handle it. */
@@ -39,6 +45,31 @@ export interface XtermController {
   setFindOpen: (open: boolean) => void
   /** Focuses xterm now, or records the focused action owner until it mounts. */
   focusTerminal: () => void
+  /**
+   * The key bar's Ctrl modifier. A soft keyboard sends characters rather than
+   * key codes, so Ctrl cannot be a held key: armed, it turns the next
+   * character - typed or tapped - into its control code, then disarms.
+   */
+  ctrlArmed: boolean
+  armCtrl: (armed: boolean) => void
+}
+
+/**
+ * The control code one character carries under Ctrl, or null when it has
+ * none. A terminal maps `@` through `_`, the ASCII letters, and space; a
+ * key with no control code of its own - and any longer chunk, a paste
+ * among them - has none. Case folding is done by hand rather than with
+ * `toUpperCase`, which is locale text rather than ASCII: it turns the
+ * German sharp s into two letters and the dotless i into an I, and either
+ * would send a control code nobody pressed.
+ */
+function controlCode(data: string): string | null {
+  if (data.length !== 1) return null
+  const code = data.charCodeAt(0)
+  if (code === 0x20) return '\x00'
+  const upper = code >= 0x61 && code <= 0x7a ? code - 0x20 : code
+  if (upper < 0x40 || upper > 0x5f) return null
+  return String.fromCharCode(upper & 0x1f)
 }
 
 function rgba(color: string, alpha: number): string | undefined {
@@ -132,6 +163,7 @@ function paint(host: HTMLDivElement, terminal: Terminal): void {
 
 export function useXterm({
   enabled = true,
+  size = null,
   onData,
   onResize,
   onLink,
@@ -149,9 +181,17 @@ export function useXterm({
   const fontSize = useStore((s) => s.terminalFontSize)
   const fitRef = useRef<FitAddon | null>(null)
   const appliedFontSize = useRef(fontSize)
+  const [ctrlArmed, setCtrlArmed] = useState(false)
+  const ctrlArmedRef = useRef(false)
+  const sizeRef = useRef(size)
+  sizeRef.current = size
   onDataRef.current = onData
   onResizeRef.current = onResize
   onLinkRef.current = onLink
+  const armCtrl = useCallback((armed: boolean) => {
+    ctrlArmedRef.current = armed
+    setCtrlArmed(armed)
+  }, [])
   const focusTerminal = useCallback(() => {
     const activeElement = document.activeElement
     if (terminal) {
@@ -256,16 +296,58 @@ export function useXterm({
       const themeWatch = new MutationObserver(repaint)
       themeWatch.observe(document.documentElement, { attributeFilter: ['class'] })
 
+      // A fixed size is the caller's, not this pane's, so the pane's own
+      // measurements are ignored and nothing is reported back: reporting is
+      // what sends a resize to the shared PTY.
       const resize = () => {
+        const fixed = sizeRef.current
+        if (fixed) {
+          created.resize(fixed.cols, fixed.rows)
+          return
+        }
         fit.fit()
         onResizeRef.current?.(created.cols, created.rows)
       }
       resize()
 
-      const input = created.onData((data) => onDataRef.current?.(data))
+      // At a fixed size the grid is larger than the pane, so the row being
+      // written on can sit outside it: a pane that never followed the
+      // cursor would leave new output below the fold. A tap matters for
+      // the same reason - it is what raises the keyboard over the rows.
+      // `scrollIntoView` is absent in jsdom, and the cursor cell only
+      // exists once a renderer has drawn one.
+      const showCursor = () => {
+        if (!sizeRef.current) return
+        requestAnimationFrame(() => {
+          host
+            .querySelector('.xterm-cursor')
+            ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+        })
+      }
+      host.addEventListener('focusin', showCursor)
+      const cursor = created.onCursorMove(showCursor)
+
+      const input = created.onData((data) => {
+        if (!ctrlArmedRef.current) {
+          onDataRef.current?.(data)
+          return
+        }
+        const held = controlCode(data)
+        // A key the modifier does not cover keeps it armed rather than
+        // spending it on a keystroke that would arrive uncontrolled: the
+        // bar still shows Ctrl pressed, and the next key can use it.
+        if (held === null) {
+          onDataRef.current?.(data)
+          return
+        }
+        armCtrl(false)
+        onDataRef.current?.(held)
+      })
       const observer = new ResizeObserver(resize)
       observer.observe(host)
       teardown = () => {
+        cursor.dispose()
+        host.removeEventListener('focusin', showCursor)
         observer.disconnect()
         themeWatch.disconnect()
         input.dispose()
@@ -277,6 +359,7 @@ export function useXterm({
 
     return () => {
       active = false
+      armCtrl(false)
       cancelFontWait()
       teardown?.()
       created.dispose()
@@ -284,15 +367,25 @@ export function useXterm({
       setSearch(null)
       setFindOpen(false)
     }
-  }, [enabled, host])
+  }, [armCtrl, enabled, host])
+
+  // The server's geometry arrives with the attach ack, after the terminal was
+  // built, and changes again on a reattach. Leaving a fixed size behind hands
+  // the pane back to the fit addon, which the next observed resize runs.
+  useEffect(() => {
+    if (!terminal || !size) return
+    terminal.resize(size.cols, size.rows)
+  }, [size?.cols, size?.rows, terminal])
 
   // A zoom step changes the cell size, so the pane has to be re-fitted and
   // the new geometry sent to the shell; nothing else observes the resize. A
-  // terminal that was just built at this size is already fitted.
+  // terminal that was just built at this size is already fitted. At a fixed
+  // size zoom only changes how much of the same grid fits on screen.
   useEffect(() => {
     if (!terminal || appliedFontSize.current === fontSize) return
     appliedFontSize.current = fontSize
     terminal.options.fontSize = fontSize
+    if (sizeRef.current) return
     fitRef.current?.fit()
     onResizeRef.current?.(terminal.cols, terminal.rows)
   }, [fontSize, terminal])
@@ -305,5 +398,7 @@ export function useXterm({
     findOpen,
     setFindOpen,
     focusTerminal,
+    ctrlArmed,
+    armCtrl,
   }
 }

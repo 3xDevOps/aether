@@ -17,9 +17,16 @@ import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
+import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { ConnectionState } from '@/lib/stream'
-import { type AttachDataKind, type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
+import {
+  type AttachDataKind,
+  type Attachment,
+  connectAttach,
+  replayGate,
+  standardGeometry,
+} from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import {
@@ -86,8 +93,13 @@ export function TerminalDock({
   const terminalRef = useRef<XtermController['terminal']>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
 
+  // A member can have this terminal open on more than one screen; a phone
+  // follows what the others made it rather than shrinking it for them.
+  const phone = useMediaQuery(phoneScreen)
+  const [serverSize, setServerSize] = useState<{ cols: number; rows: number } | null>(null)
   const controller = useXterm({
     enabled: activeTab !== null && !dock.collapsed,
+    size: phone ? serverSize ?? standardGeometry : null,
     onData: (data) => {
       if (!activeTab || activeTabRef.current !== activeTab || gate.current.muted()) return
       getEnvTerminalSocket(activeTab)?.send(data)
@@ -197,8 +209,9 @@ export function TerminalDock({
     const handlers = {
       onData: (chunk: Uint8Array, kind: AttachDataKind) =>
         emitEnvTerminalSocketData(socketKey, chunk, kind),
-      onAttached: () => {
+      onAttached: (_write: boolean, size: { cols: number; rows: number }) => {
         if (isCurrent()) {
+          setServerSize(size)
           setEnvTerminalSocketReady(socketKey, true)
           setAttachedTab(socketKey)
           gate.current.unmute()
@@ -238,13 +251,17 @@ export function TerminalDock({
         if (socketKey !== 'main') closeTab(socketKey)
       },
       geometry: () => {
-        if (!isCurrent()) return { cols: 80, rows: 24 }
+        if (!isCurrent()) return standardGeometry
         return {
-          cols: terminalRef.current?.cols ?? 80,
-          rows: terminalRef.current?.rows ?? 24,
+          cols: terminalRef.current?.cols ?? standardGeometry.cols,
+          rows: terminalRef.current?.rows ?? standardGeometry.rows,
         }
       },
       wantsWrite: () => true,
+      follows: () => phone,
+      onGeometry: (cols: number, rows: number) => {
+        if (isCurrent()) setServerSize({ cols, rows })
+      },
     }
     const existing = getEnvTerminalSocket(socketKey)
     let attachment: Attachment
@@ -264,7 +281,7 @@ export function TerminalDock({
       unsubscribe()
       if (activeTabRef.current !== socketKey) unregisterEnvTerminalSocket(socketKey)
     }
-  }, [activeTab, closeTab, reset, rpc, setStatus, terminal])
+  }, [activeTab, closeTab, phone, reset, rpc, setStatus, terminal])
 
   const save = async () => {
     if (saving) return
@@ -449,6 +466,7 @@ export function TerminalDock({
             ) : (
               <TerminalPane
                 controller={controller}
+                className={phone ? 'overflow-x-auto' : undefined}
                 imageTargetKey={activeTab ?? undefined}
                 imageUploadEnabled={attachedTab === activeTab && activeTab !== null}
               >

@@ -21,7 +21,7 @@ func (h *Host) TapOutput(run domain.RunID) (io.ReadCloser, error) {
 		return nil, ErrNoSession
 	}
 	pr, pw := io.Pipe()
-	c := newClient(tapConn{pw}, true, 0, 0)
+	c := newClient(tapConn{pw}, AttachClient{ReadOnly: true})
 	if err := s.addClient(c); err != nil {
 		return nil, err
 	}

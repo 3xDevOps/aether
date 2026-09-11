@@ -12,6 +12,7 @@ import {
   Minus,
   Plus,
   RotateCcw,
+  ScanText,
   Search,
   X,
 } from 'lucide-react'
@@ -27,7 +28,9 @@ import {
   type TerminalImageController,
   useTerminalImage,
 } from '@/components/terminal-image'
-import { copySelection } from '@/lib/term-clipboard'
+import { TerminalKeys } from '@/components/terminal-keys'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { copyScreen, copySelection } from '@/lib/term-clipboard'
 import {
   defaultTerminalFontSize,
   maxTerminalFontSize,
@@ -61,6 +64,16 @@ function ToolButton({
       <Tooltip.Content>{hint}</Tooltip.Content>
     </Tooltip>
   )
+}
+
+/**
+ * What a touch screen reads instead of a tooltip. A tooltip opens on hover,
+ * which a finger never produces, so two actions that differ only by icon -
+ * copying a selection and copying the screen - need the word beside them
+ * where there is no pointer to hover with.
+ */
+function ToolLabel({ children }: { children: React.ReactNode }) {
+  return <span className="hidden pr-1 text-[12px] text-muted-foreground coarse:inline">{children}</span>
 }
 
 function TerminalTools({
@@ -144,6 +157,21 @@ function TerminalTools({
       >
         <ClipboardCopy />
       </ToolButton>
+      <ToolLabel>Selection</ToolLabel>
+      <ToolButton
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Copy last screen"
+        hint="Copy the rows on screen"
+        disabled={!terminal}
+        onClick={() => {
+          if (terminal) void copyScreen(terminal)
+        }}
+      >
+        <ScanText />
+      </ToolButton>
+      <ToolLabel>Screen</ToolLabel>
       <ToolButton
         type="button"
         variant="ghost"
@@ -191,14 +219,14 @@ function FindBar({
     <div
       role="search"
       aria-label="Find terminal output"
-      className="flex h-8 min-h-8 min-w-0 w-full items-center gap-1 border border-input bg-background px-1"
+      className="flex h-8 min-h-8 min-w-0 w-full items-center gap-1 border border-input bg-background px-1 coarse:h-11 coarse:min-h-11"
     >
       <Input
         ref={input}
         aria-label="Find in terminal"
         placeholder="Find"
         value={term}
-        className="h-[26px] min-w-0 flex-1 sm:w-40"
+        className="h-[26px] min-w-0 flex-1 coarse:h-10 sm:w-40"
         onChange={(event) => {
           setTerm(event.target.value)
           setMissing(false)
@@ -254,6 +282,7 @@ export function TerminalPane({
   imageTarget,
   imageTargetKey,
   imageUploadEnabled,
+  writable = true,
 }: {
   controller: XtermController
   /** Extra classes for the terminal element itself. */
@@ -266,6 +295,8 @@ export function TerminalPane({
   imageTargetKey?: string
   /** Whether this attached terminal may accept an uploaded path. */
   imageUploadEnabled?: boolean
+  /** Whether what is typed here reaches the shell. A mirror shows no keys. */
+  writable?: boolean
 }) {
   const image = useTerminalImage({
     terminal: controller.terminal,
@@ -274,9 +305,18 @@ export function TerminalPane({
     imageUploadEnabled,
     focusTerminal: controller.focusTerminal,
   })
+  const coarse = useMediaQuery(coarsePointer)
+  // A terminal that cannot take input holds no modifier: the key bar goes
+  // with the write access it needed, and a Ctrl left armed across that
+  // would turn the first character of the next turn at the keyboard into a
+  // control code nobody pressed.
+  const armCtrl = controller.armCtrl
+  useEffect(() => {
+    if (!writable) armCtrl(false)
+  }, [armCtrl, writable])
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex h-9 min-h-9 shrink-0 items-center border-b border-border bg-sidebar px-2">
+      <div className="flex h-9 min-h-9 shrink-0 items-center border-b border-border bg-sidebar px-2 coarse:h-12 coarse:min-h-12">
         {!controller.findOpen ? (
           <TerminalTools controller={controller} image={image} />
         ) : (
@@ -293,6 +333,7 @@ export function TerminalPane({
         ref={controller.hostRef}
         className={cn('min-h-0 flex-1 overflow-hidden bg-background p-2 text-foreground', className)}
       />
+      {coarse && writable && <TerminalKeys controller={controller} />}
       {children}
       {image.dialog}
     </div>

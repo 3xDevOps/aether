@@ -3,6 +3,7 @@ package sshd
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -489,5 +490,63 @@ func TestAttachFinishedRunWithoutTranscriptStillRefuses(t *testing.T) {
 	readJSONLine(t, r, &ack)
 	if ack.OK || ack.Code != protocol.CodeUnavailable {
 		t.Fatalf("ack = %+v, want unavailable", ack)
+	}
+}
+
+// The SSH transport carries the same two halves the in-process one does
+// (TestLocalAttachFollowsTheSessionGeometry): the ack reports the size the
+// session is, and a later resize arrives as a window-change request on the
+// attach channel. The channel is opened raw here because that is what
+// internal/cli does - an ssh.Session would swallow the request before a
+// client could see it.
+func TestAttachFollowerIsToldTheSessionGeometry(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.pty.session = [2]uint{132, 43}
+	e.pty.tell = make(chan [2]uint, 1)
+
+	ch, reqs, err := e.dial(t).OpenChannel("session", nil)
+	if err != nil {
+		t.Fatalf("open channel: %v", err)
+	}
+	defer func() { _ = ch.Close() }()
+	sizes := make(chan [2]uint, 4)
+	go func() {
+		for req := range reqs {
+			if req.Type == protocol.WindowChangeRequest && len(req.Payload) >= 8 {
+				sizes <- [2]uint{
+					uint(binary.BigEndian.Uint32(req.Payload)),
+					uint(binary.BigEndian.Uint32(req.Payload[4:])),
+				}
+			}
+			if req.WantReply {
+				_ = req.Reply(false, nil)
+			}
+		}
+	}()
+	ok, err := ch.SendRequest("subsystem", true, ssh.Marshal(struct{ Subsystem string }{protocol.SubsystemAttach}))
+	if err != nil || !ok {
+		t.Fatalf("subsystem: ok=%v err=%v", ok, err)
+	}
+	header := `{"run_id":"` + string(e.run.ID) + `","cols":80,"rows":24,"follow":true}` + "\n"
+	if _, err := ch.Write([]byte(header)); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	var ack protocol.AttachResponse
+	readJSONLine(t, bufio.NewReader(ch), &ack)
+	if !ack.OK || ack.Cols != 132 || ack.Rows != 43 {
+		t.Fatalf("ack = %+v, want ok with the session's 132x43", ack)
+	}
+	if !e.pty.following() {
+		t.Fatal("the follow flag never reached the PTY host")
+	}
+
+	e.pty.tell <- [2]uint{120, 40}
+	select {
+	case size := <-sizes:
+		if size != [2]uint{120, 40} {
+			t.Fatalf("window-change = %v, want 120x40", size)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no window-change request reached the client")
 	}
 }

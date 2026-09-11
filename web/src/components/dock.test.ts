@@ -36,6 +36,35 @@ describe('Dock controls', () => {
     expect(screen.getByRole('status')).toHaveProperty('textContent', 'At most 2 tabs')
   })
 
+  it('trades the drag separator for half and full heights on a touch screen', () => {
+    // A phone: the separator is a drag, and a finger has no drag to give it.
+    atViewport(390, { height: 844, pointer: 'coarse' })
+    const onHeightChange = vi.fn()
+    const props = (height: number) => ({
+      tabs: [{ id: 't1', label: 't1' }],
+      activeTab: 't1',
+      onSelectTab: vi.fn(),
+      maxTabs: 1,
+      height,
+      onHeightChange,
+      collapsed: false,
+      onToggleCollapse: vi.fn(),
+      children: createElement('div'),
+    })
+
+    const view = render(createElement(Dock, props(240)))
+    expect(screen.queryByRole('separator')).toBeNull()
+
+    // Half and full are measured from the room the dock has, which here is
+    // the viewport less the shell's own chrome.
+    fireEvent.click(screen.getByRole('button', { name: /full screen/ }))
+    expect(onHeightChange).toHaveBeenLastCalledWith(644)
+
+    view.rerender(createElement(Dock, props(644)))
+    fireEvent.click(screen.getByRole('button', { name: /half the screen/ }))
+    expect(onHeightChange).toHaveBeenLastCalledWith(322)
+  })
+
   it('focuses the expand control when Enter collapses the dock separator', () => {
     function FocusableDock() {
       const [collapsed, setCollapsed] = useState(false)

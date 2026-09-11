@@ -297,6 +297,7 @@ covered - WebKit is not installed.
 | `dialog-anchor.mobile` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 | `toast-clearance.mobile` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
 | `run-views.mobile` | On a phone, steering a real run from the one Actions menu the run header keeps, and then reading its diff: the menu items are finger-sized, protecting the run shows on the header, and the file section that holds a line wider than the screen scrolls sideways only once the wrap toggle is off |
+| `terminal-phone.mobile` | A real run's Terminal tab on a phone, against the real gateway: a desktop-sized writer attached straight to the gateway's WebSocket sets the session to 132x43, the phone opens as a mirror rather than steering, renders every one of those rows at that width and pans over them, and the session is still 132x43 after the phone takes control, taps Esc from the key bar and loses half its screen to a keyboard - read back from the server through a fresh attach ack, not inferred from what the phone sent. Then the writer's window changes, and the phone follows it there |
 
 Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
 and a control that answers only a mouse would still pass a click-driven test.
@@ -317,9 +318,9 @@ survives a short screen. Playwright cannot raise a platform keyboard either
 way, so content stranded behind a real iOS keyboard stays a manual check on a
 phone (`docs/dashboard-frontend.md` has that path).
 
-The phone specs need git; `shell-drawer.mobile` and `run-views.mobile` also
-need Docker, because they open a real run, and skip without it. Run them
-alone against the binaries
+The phone specs need git; `shell-drawer.mobile`, `run-views.mobile` and
+`terminal-phone.mobile` also need Docker, because they open a real run, and
+skip without it. Run them alone against the binaries
 `make build` produced:
 
 ```sh

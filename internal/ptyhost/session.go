@@ -59,8 +59,9 @@ type session struct {
 	ring            *ring
 	cols            uint
 	rows            uint
-	geoGen          uint64 // bumped whenever the PTY must be (re)sized
-	geoApplied      uint64 // last geoGen an applier has picked up
+	geoGen          uint64  // bumped whenever the PTY must be (re)sized
+	geoApplied      uint64  // last geoGen an applier has picked up
+	geoTold         [2]uint // last size the clients were told about
 	ended           bool
 	stopped         bool
 	lastOut         time.Time
@@ -184,7 +185,7 @@ func (s *session) addClient(c *client) error {
 	}
 	c.replay = s.ring.bytes()
 	s.clients[c] = struct{}{}
-	if !c.readOnly {
+	if c.imposes() {
 		s.reconcileLocked(true)
 	}
 	return nil
@@ -194,12 +195,19 @@ func (s *session) removeClient(c *client) {
 	s.mu.Lock()
 	if _, ok := s.clients[c]; ok {
 		delete(s.clients, c)
-		if !c.readOnly && !s.ended && !s.stopped {
+		if c.imposes() && !s.ended && !s.stopped {
 			s.reconcileLocked(false)
 		}
 	}
 	s.mu.Unlock()
 	c.close(nil)
+}
+
+// geometry is the size the session's PTY has now.
+func (s *session) geometry() (uint, uint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cols, s.rows
 }
 
 func (s *session) resizeClient(c *client, cols, rows uint) {
@@ -212,22 +220,23 @@ func (s *session) resizeClient(c *client, cols, rows uint) {
 		return
 	}
 	c.cols, c.rows = cols, rows
-	if !c.readOnly && !s.ended && !s.stopped {
+	if c.imposes() && !s.ended && !s.stopped {
 		s.reconcileLocked(false)
 	}
 }
 
 // reconcileLocked recomputes the effective PTY size as the per-dimension
-// minimum over write-capable clients (read-only mirrors never affect it),
-// records it, and schedules the att.Resize application off the lock (a slow
-// runtime resize must never stall output delivery). With no writers the
-// size stays unchanged. force schedules a redraw nudge even when the size
-// did not change (repaint for a new write-mode joiner).
+// minimum over the clients that impose one (a read-only mirror and a
+// follower never do), records it, and schedules the att.Resize application
+// off the lock (a slow runtime resize must never stall output delivery).
+// With no such client the size stays unchanged. force schedules a redraw
+// nudge even when the size did not change (repaint for a new write-mode
+// joiner).
 func (s *session) reconcileLocked(force bool) {
 	var cols, rows uint
 	found := false
 	for c := range s.clients {
-		if c.readOnly {
+		if !c.imposes() {
 			continue
 		}
 		if !found {
@@ -254,10 +263,14 @@ func (s *session) reconcileLocked(force bool) {
 }
 
 // applyResize applies the latest recorded geometry to the attachment with a
-// redraw nudge (rows-1 then rows) so TUIs repaint. Appliers serialize on
-// resizeMu and always apply the newest geometry, so concurrent reconciles
-// coalesce and never apply stale sizes; each call is bounded by
-// resizeTimeout so a hung runtime cannot wedge the session.
+// redraw nudge (rows-1 then rows) so TUIs repaint, then tells the attached
+// followers what the session now is. Appliers serialize on resizeMu and
+// always apply the newest geometry, so concurrent reconciles coalesce and
+// never apply stale sizes, and the clients are told in that same order;
+// each call is bounded by resizeTimeout so a hung runtime cannot wedge the
+// session. A resize the runtime refuses or takes too long to answer tells
+// nobody: the PTY is not that size, so a follower would be drawing at a
+// geometry that exists only here.
 func (s *session) applyResize() {
 	s.resizeMu.Lock()
 	defer s.resizeMu.Unlock()
@@ -274,10 +287,26 @@ func (s *session) applyResize() {
 	if rows > 1 {
 		_ = s.att.Resize(ctx, cols, rows-1)
 	}
-	_ = s.att.Resize(ctx, cols, rows)
+	applied := s.att.Resize(ctx, cols, rows) == nil
 	s.mu.Lock()
 	s.paintQuietUntil = time.Now().Add(paintQuiet)
+	var followers []*client
+	// Left unrecorded, a size that failed is told the next time it is
+	// reconciled rather than suppressed as already sent.
+	if applied && s.geoTold != [2]uint{cols, rows} {
+		s.geoTold = [2]uint{cols, rows}
+		for c := range s.clients {
+			// Only a follower redraws at someone else's geometry; a
+			// client that imposed this size asked for it.
+			if c.follow {
+				followers = append(followers, c)
+			}
+		}
+	}
 	s.mu.Unlock()
+	for _, c := range followers {
+		c.tellGeometry(cols, rows)
+	}
 }
 
 // writeStdin forwards keystrokes to the agent; false once the session is
@@ -495,9 +524,13 @@ func (r *ring) bytes() []byte {
 type client struct {
 	conn     io.ReadWriter
 	readOnly bool
-	cols     uint // guarded by session.mu
-	rows     uint // guarded by session.mu
-	replay   []byte
+	// follow keeps this client out of the geometry reconcile whether or
+	// not it may write: it renders the size the session is, so it can
+	// never reflow the agent's screen for anyone else.
+	follow bool
+	cols   uint // guarded by session.mu
+	rows   uint // guarded by session.mu
+	replay []byte
 
 	mu     sync.Mutex
 	cond   *sync.Cond
@@ -507,10 +540,31 @@ type client struct {
 	done   chan struct{}
 }
 
-func newClient(conn io.ReadWriter, readOnly bool, cols, rows uint) *client {
-	c := &client{conn: conn, readOnly: readOnly, cols: cols, rows: rows, done: make(chan struct{})}
+func newClient(conn io.ReadWriter, a AttachClient) *client {
+	c := &client{
+		conn:     conn,
+		readOnly: a.ReadOnly,
+		follow:   a.Follow,
+		cols:     a.Cols,
+		rows:     a.Rows,
+		done:     make(chan struct{}),
+	}
 	c.cond = sync.NewCond(&c.mu)
 	return c
+}
+
+// imposes reports whether this client's geometry is one the PTY has to fit
+// inside: a mirror never counts, and neither does a client that follows.
+func (c *client) imposes() bool { return !c.readOnly && !c.follow }
+
+// tellGeometry hands the session's size to a client that asked to be told,
+// which is how an ack reports the live geometry and how a later change
+// reaches a follower. Never called with the session lock held: the conn
+// writes.
+func (c *client) tellGeometry(cols, rows uint) {
+	if w, ok := c.conn.(GeometryWriter); ok {
+		w.SetGeometry(cols, rows)
+	}
 }
 
 func (c *client) enqueue(p []byte) {
