@@ -168,15 +168,23 @@ func TestFromOpenCodeEvent(t *testing.T) {
 // The plugin asset is what makes the opencode events reach the reporter at
 // all, so it is run here rather than read: opencode hands the hook every
 // event on its bus, and what the plugin does with a subagent's session has
-// no other test. The reporter command is stubbed by replacing the one
-// constant naming it; the run container's real path is pinned where the
-// scheduler mounts it (internal/scheduler registration tests).
+// no other test, nor does the order its reports reach the server in. The
+// reporter command is stubbed by replacing the one constant naming it; the
+// run container's real path is pinned where the scheduler mounts it
+// (internal/scheduler registration tests).
 func TestOpenCodePluginReportsTheRunsOwnTurn(t *testing.T) {
 	node := requireNode(t)
 	dir := t.TempDir()
 	reports := filepath.Join(dir, "reports.log")
 	stub := filepath.Join(dir, "reporter")
-	writePluginFile(t, stub, "#!/bin/sh\necho \"$@\" >> "+reports+"\n", 0o755)
+	// A reporter that takes longer the earlier its event was posted. The
+	// plugin runs one at a time, so the log below comes out in event order;
+	// a plugin that spawned them together would write it upside down.
+	writePluginFile(t, stub, "#!/bin/sh\ncase \"$*\" in\n"+
+		"*session.status*) sleep 0.4 ;;\n"+
+		"*permission.asked*) sleep 0.3 ;;\n"+
+		"*permission.replied*) sleep 0.2 ;;\n"+
+		"esac\necho \"$@\" >> "+reports+"\n", 0o755)
 	stageOpenCodePlugin(t, dir, stub)
 	writePluginFile(t, filepath.Join(dir, "drive.mjs"), openCodeDriver, 0o644)
 
@@ -197,6 +205,9 @@ func TestOpenCodePluginReportsTheRunsOwnTurn(t *testing.T) {
 	}, "\n")
 	if string(got) != want {
 		t.Errorf("the plugin posted\n%s\nwant\n%s", got, want)
+	}
+	if len(bytes.TrimSpace(out)) != 0 {
+		t.Errorf("the plugin said %s, want nothing: every report reached the server", out)
 	}
 }
 
