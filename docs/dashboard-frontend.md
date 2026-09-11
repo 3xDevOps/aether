@@ -384,7 +384,8 @@ sizes, `CommandItem`, `DropdownMenuItem`, the `CollapsibleTrigger`, the
 `Select` trigger and its options, the dialog close, the palette trigger and
 input, the status bar controls, the sidebar run rows and the sidebar's own
 buttons, the run-list title, the files tree rows and the approvals controls
-grow to 40-44px. Desktop density is untouched.
+grow to 40-44px, and the terminal toolbar row grows with the buttons in it.
+Desktop density is untouched.
 Use this variant rather than a new breakpoint or a per-component pixel value.
 
 **The two bars are tokens, not repeated numbers.** `--title-bar-height` and
@@ -950,11 +951,14 @@ report `aria-valuenow` against their available bounds, move 16px per arrow
 press, snap to those bounds on Home and End, and collapse the pane on Enter,
 handing focus to the control that restores it. Pointer dragging stays within
 the available space and follows the same bounds. Both handles set
-`touch-action: none`, without which the browser claims a touch drag as a pan
-and cancels the pointer stream the drag listens to. Under `coarse:` both grow
-to a 24px hit area centred on the edge they sit at, without changing what they
-paint; the sidebar's carries a `z-index` so the half of it that overhangs the
-pane beside it is not covered by that pane.
+`touch-action: none`, without which the browser claims a pen or trackpad drag
+as a pan and cancels the pointer stream the drag listens to. The sidebar's
+grows to a 24px hit area centred on its edge under `coarse:`, without changing
+what it paints, and carries a `z-index` so the half of it that overhangs the
+pane beside it is not covered by that pane. The docks' handle is not drawn on
+a coarse pointer at all: dragging a horizontal edge to size a terminal is not
+something a finger does, and the dock offers collapsed, half and full instead
+(see [Terminal view](#terminal-view)).
 
 ## Terminal view
 
@@ -1014,7 +1018,7 @@ primitive.
 
 `TerminalPane` keeps xterm's host geometry intact while layering the shared
 toolbar and Find over it. `TerminalTools` in the same module owns the search,
-zoom/reset, copy, paste, and `TerminalImageAction` controls; it delegates
+zoom/reset, copy, copy-last-screen, paste, and `TerminalImageAction` controls; it delegates
 terminal key behavior to the xterm controller and clipboard helpers rather
 than putting those actions in each dock. `useTerminalImage` owns the hidden
 file input, preview dialog, validation, upload call, and shell-quoted path
@@ -1032,9 +1036,39 @@ claims only image-file paste events and leaves text to the native xterm path.
 `xterm-host.tsx` composes it with zoom and find in xterm's one custom key
 handler.
 
+**The terminal on a phone.** The PTY is the per-dimension minimum over the
+write-capable clients attached to it (`docs/local-gateway.md`), so a client
+that fits xterm to its own pane reflows the agent's screen for everyone else.
+On a coarse pointer or a viewport at or under 640px - `usePhoneScreen` in
+`src/lib/hooks.ts` - the run's terminal therefore:
+
+- asks for `standardGeometry` (80x24) in the attach header and renders at the
+  `cols` and `rows` the ack reports, through `useXterm`'s `size` option, which
+  replaces the fit addon and reports no resize. The pane gets `overflow-auto`
+  and pans over a grid wider than the screen. This holds while steering as
+  well: what the phone never sends is what keeps the session unchanged.
+- does not steer on entry even on the member's own run. `Take control` is the
+  only way in, and `disableStdin` holds until the ack grants write - that is
+  what makes xterm's textarea read-only, so a tap on a mirror raises no
+  keyboard.
+- shows `TerminalKeys` under the host while the terminal is writable: Ctrl,
+  Esc, Tab, the arrows, Enter and Ctrl+C, each through `terminal.input` so the
+  replay gate and `disableStdin` treat a tap exactly like a keystroke. Ctrl is
+  a one-shot modifier held in the host (`armCtrl`), because a soft keyboard
+  sends characters and never a modifier: it rewrites the next character into
+  its control code.
+
+A focus on the host scrolls the cursor cell into view, since at a fixed size
+the row being typed on can be outside the pane.
+
 The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once
-expanded, a resizer. Both docks start collapsed
+expanded, a resizer on a fine pointer. A finger cannot drag an edge, so under
+`coarse` the separator is not rendered at all and an expanded dock gets a
+second header control instead, toggling between half of the room it has and
+all of it; collapsed, half and full are the three states touch has. Half is
+measured from the dock's own maximum rather than stored, so it follows the
+screen. Both docks start collapsed
 (`initialRunShellDock`, `initialEnvTerminal`), so the terminal a member came
 for owns the window until they ask for a shell. Neither flag is persisted, so a
 reload starts collapsed again, and the run dock's is per run because
