@@ -188,6 +188,14 @@ computed layout, responsive overflow, painted focus outlines and event ordering
 across document listeners. Component tests remain responsible for rendered
 roles, labels, state transitions, navigation and real gateway error text; a
 CSS class or source-pattern assertion is not a substitute for either layer.
+
+A component test picks its screen with `atViewport` (`web/src/test/viewport.ts`).
+jsdom has no layout, so `web/src/test/setup.ts` answers every media query with
+`false` and components render their widest branch. `atViewport(390, 'coarse')`
+answers width and pointer queries for one screen instead, and returns a resize
+that fires `change` on the queries whose answer moved; the sidebar and
+status-bar tests use it. It decides which branch renders and nothing more -
+real layout stays the browser suite's.
 The `aether` fixture (`web/e2e/fixtures.ts`) builds one stack per test and
 tears it down with everything it created:
 
@@ -238,8 +246,7 @@ attaches the server's output to the report.
 | `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, native `Ctrl+Shift+V` paste through the terminal's input path, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
-| `status-bar-sizing` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport |
-| `files-browser` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree |
+| `status-bar-sizing` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths and full secondary readouts open by keyboard. The same bar on a phone is `status-bar.mobile` below |
 | `keyboard-focus` | Real browser checks that Escape closes a dialog on a run without leaving the run, and that a focused control paints the app's outline with computed style and contrast against the actual background |
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
@@ -256,6 +263,47 @@ safe insertion without submission, native image-paste registration cleanup,
 and stale callback rejection after a terminal target remounts. The clipboard
 unit tests pin native `Ctrl+Shift+V` when the async clipboard API is denied;
 these are browser/component regressions, not claims of a local Windows run.
+
+### The phone project
+
+`web/playwright.config.ts` defines two projects over the one Chromium install
+CI has. `chromium` runs every spec except `*.mobile.spec.ts`, and `mobile`
+runs only those, under Playwright's `Pixel 7` descriptor: `isMobile`,
+`hasTouch`, a 412x839 viewport, a 2.625 device scale and a mobile user agent.
+Nothing runs twice, and no second browser engine is needed. iOS Safari is not
+covered - WebKit is not installed.
+
+| Spec | Scenario |
+| --- | --- |
+| `files-browser.mobile` | On a phone, opening a real repository file from the sidebar rail, returning with Browse, and opening another file without losing the tree - every control tapped |
+| `onboarding-link.mobile` | The Link step with the soft keyboard up: the focused field stays on screen, typing lands, and the submit can still be scrolled into reach |
+| `status-bar.mobile` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport, with the theme toggle answering a tap on the bottom edge |
+
+Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
+and a control that answers only a mouse would still pass a click-driven test.
+They import `test` from `web/e2e/mobile.ts`, which attaches a full-page
+screenshot to every mobile test, passing or failing: a phone layout can be
+wrong while every DOM assertion holds, and a green run otherwise leaves
+nothing to look at.
+
+`raiseSoftKeyboard(page)` in the same file simulates the on-screen keyboard
+by shrinking the layout viewport by 320px - what a keyboard leaves of a
+portrait phone, and the shape it takes on a page that asks for
+`interactive-widget=resizes-content`. It returns the call that lowers it
+again. Playwright cannot raise the platform keyboard, so the real thing stays
+a manual check: `docs/dashboard-frontend.md` has the phone path.
+
+The phone specs need git and no Docker. Run them alone against the binaries
+`make build` produced:
+
+```sh
+cd web && bunx playwright test --project=mobile
+```
+
+They add about 15 seconds to `make test-e2e` and to the `dashboard-e2e` job,
+which stays inside the suite's 30-minute `globalTimeout` unchanged. That job
+uploads its `playwright-report` artifact on a pass as well as a failure, so
+the phone screenshots are on every run.
 
 ### Adding a step to the wizard
 

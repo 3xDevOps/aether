@@ -64,6 +64,41 @@ Node 22+ is required for a hand-run dashboard build. The complete contributor
 toolchain and the optional desktop installer workflow are in
 [CONTRIBUTING.md](../CONTRIBUTING.md#toolchain).
 
+## Testing on a phone
+
+`aether gui` binds loopback and has no exposure flag - see
+[security.md](security.md) - so a phone cannot open it. Until the server
+serves the dashboard itself, the development server is the way there: it
+binds whatever address you give it and proxies to the gateway without
+rewriting `Host` or `Origin`, which is exactly what the gateway's WebSocket
+origin check needs.
+
+```sh
+# terminal 1, on the computer the phone will reach
+aether gui --port 8080 --url
+
+# terminal 2, with <lan-ip> that computer's address on the phone's network
+cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
+  bun run dev -- --port 3000 --hostname <lan-ip>
+# on the phone: http://<lan-ip>:3000/?token=<token-from-aether-gui>
+```
+
+- `--hostname` has to be the address typed on the phone. Next's development
+  server permits only localhost and the hostname it was started on; any other
+  origin needs `allowedDevOrigins` in `web/next.config.ts`.
+- The token is minted per `aether gui` process, and the phone needs that one.
+  Nothing else authenticates.
+- A tunnel or proxy in front of this must preserve `Host` and `Origin`. One
+  that rewrites `Host` breaks every WebSocket - the terminal, the event feed
+  and the attach stream - while plain HTTP keeps working, which makes for a
+  confusing half-broken dashboard.
+- This serves the Next development build over plain HTTP, not the static
+  export the binary embeds, and it needs the computer awake and on the same
+  network. It is a contributor's loop, not a way to run Aether from a phone.
+
+Automated phone coverage is the `mobile` Playwright project, described in
+[testing.md](testing.md).
+
 ## Build pipeline and the embed
 
 `web/next.config.ts` sets `output: 'export'` and `distDir: 'dist'` outside
