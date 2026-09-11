@@ -144,15 +144,19 @@ the overlap notice in its terminal. The arguments and the config are
 decided at launch, so a run that was started without them can only gain
 them by being relaunched.
 
-The status reporter is registered the same way and in the same directory:
-a profile that carries status arguments gets its settings document written
-there and the arguments appended, for an interactive run only.
+The status reporter is registered the same way and in the same directory,
+for an interactive run only: a profile that carries a reporter asset gets
+it written there, and the harness is pointed at it in whatever shape its
+CLI takes - `claude` by the appended `--settings` argument, `opencode` by
+`OPENCODE_CONFIG_CONTENT` in the launch environment, because it has no
+flag for a plugin.
 
 An argv override in the server config (scheduler `Harnesses`) is respected
-verbatim: the registry's MCP and status flags belong to the CLI the registry
-ships, and nothing checks that an overridden command still is that CLI, so
-neither is appended to it. The overridden harness degrades to notice-only
-coordination and to the stall threshold the same way.
+verbatim: the registry's MCP flag, its status arguments and its status
+environment all belong to the CLI the registry ships, and nothing checks
+that an overridden command still is that CLI, so none of them reaches it.
+The overridden harness degrades to notice-only coordination and to the
+stall threshold the same way.
 
 ### What the end-to-end tests cover
 
@@ -272,6 +276,6 @@ and go inert - `coord` unlinks the sockets behind them, so a bridge still
 running in there gets `CodeUnavailable` and nothing else.
 
 Turning it back on affects new containers only. A run created while the
-switch was off has no mounts, no config, no `--mcp-config` and no
-`--settings` argument, and cannot gain them; it stays notice-only, and
-judged on silence alone, until it is relaunched.
+switch was off has no mounts, no config, no `--mcp-config` or `--settings`
+argument, no `OPENCODE_CONFIG_CONTENT`, and cannot gain them; it stays
+notice-only, and judged on silence alone, until it is relaunched.

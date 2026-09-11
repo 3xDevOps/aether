@@ -127,7 +127,11 @@ turns it into a run status straight away:
 Anything else the harness reports - a session opening, a reply streaming
 in, a compaction - is ignored rather than guessed at, and so is a subagent's
 own turn: opencode gives one a session of its own, and that session going
-idle is not the run's turn ending.
+idle is not the run's turn ending. The rule holds the other way round too.
+The run is `running` while any of its sessions is, so an opencode
+background subagent still working after the turn that spawned it ended
+keeps the run off your queue until it finishes - something there is still
+working.
 
 opencode never announces the resume after a permission or a question of its
 own accord - its session stays busy for the whole tool call the prompt
