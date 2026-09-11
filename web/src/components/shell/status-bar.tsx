@@ -94,7 +94,7 @@ function ServerUpdateNotice() {
     <span
       role="status"
       title={notice}
-      className="flex min-h-[22px] min-w-0 shrink items-center break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap"
+      className="flex min-h-[var(--status-bar-height)] min-w-0 shrink items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap"
     >
       <Chip
         color="warning"
@@ -175,7 +175,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
   if (!available) {
     return (
       <span
-        className="flex min-h-[22px] min-w-0 items-center break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap"
+        className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap"
         title={`${label} · protocol ${protocol}`}
       >
         {label}
@@ -276,7 +276,7 @@ export function StatusBar() {
   const details = useRef<HTMLDivElement>(null)
 
   // The compact popup covers the view it sits over, and the only thing that
-  // closes it is a 22px trigger at the screen edge. Touch has no hover to
+  // closes it is one small trigger at the screen edge. Touch has no hover to
   // find that trigger with, so the popup dismisses the way every other
   // overlay does: a tap or click anywhere else, or Escape. A dialog above it
   // owns Escape first, which is what `inModal` answers. The popup is not a
@@ -339,10 +339,10 @@ export function StatusBar() {
           <CollapsibleContent
             id="status-details"
             forceMount
-            className="block min-w-0 data-[state=closed]:hidden xl:h-[22px] xl:flex-1"
+            className="block min-w-0 data-[state=closed]:hidden xl:h-[var(--status-bar-height)] xl:flex-1"
           >
             <div
-              className="fixed inset-x-2 bottom-[calc(var(--status-bar-height)_+_0.375rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[70dvh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-4 shadow-lg xl:static xl:flex xl:h-[22px] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none"
+              className="fixed inset-x-2 bottom-[calc(var(--status-bar-height)_+_0.375rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[70dvh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-4 shadow-lg xl:static xl:flex xl:h-[var(--status-bar-height)] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none"
             >
               {unreachable !== null && (
                 // needs-attention has no HeroUI colour of its own, so the
@@ -351,7 +351,7 @@ export function StatusBar() {
                 <span
                   role="status"
                   title={unreachableLabel[unreachable]}
-                  className="flex min-h-[22px] min-w-0 items-center break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap"
                 >
                   <Chip
                     color="warning"
@@ -375,14 +375,14 @@ export function StatusBar() {
               {info && (
                 <span
                   title={info.member.display_name}
-                  className="flex min-h-[22px] min-w-0 items-center break-words whitespace-normal xl:h-[22px] xl:max-w-40 xl:shrink-0 xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:max-w-40 xl:shrink-0 xl:truncate xl:whitespace-nowrap"
                 >
                   {info.member.display_name}
                 </span>
               )}
               {disk && disk.total_bytes > 0 && (
                 <span
-                  className="flex min-h-[22px] min-w-0 items-center gap-1 break-words whitespace-normal xl:h-[22px] xl:shrink xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1 break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:shrink xl:truncate xl:whitespace-nowrap"
                   aria-label="Disk usage"
                   title={diskLines(disk).join(' · ')}
                 >
