@@ -2,7 +2,7 @@ import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Plus, X } from 'lucid
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
-import { useCoarsePointer, useDrag, useWindowHeight } from '@/lib/hooks'
+import { coarsePointer, useDrag, useMediaQuery, useWindowHeight } from '@/lib/hooks'
 import { onTabListKeyDown, splitterTarget } from '@/lib/keys'
 import { cn, focusRing } from '@/lib/utils'
 
@@ -70,7 +70,7 @@ export function Dock({
   const panelID = `${id}-panel`
   const dockID = `${id}-dock`
   const viewport = useWindowHeight()
-  const coarse = useCoarsePointer()
+  const coarse = useMediaQuery(coarsePointer)
   const beginDrag = useDrag()
   const dockRef = useRef<HTMLElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
