@@ -14,6 +14,7 @@ import {
   workspace,
 } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
+import { fire } from '@/test/wake'
 
 function statusEvent(over: Partial<Event> = {}): Event {
   return {
@@ -817,6 +818,41 @@ describe('connect', () => {
     expect(store.getState().hydrationError).toBeNull()
     stop()
   })
+
+  it(
+    're-hydrates at once when the tab returns with a retry pending',
+    async () => {
+      let failing = true
+      const serverInfo = vi.fn(async () => {
+        if (failing) throw new Error('502 Bad Gateway')
+        return serverInfoFixture
+      })
+      const store = createRootStore()
+      const stop = connect(store, fakeApi({ serverInfo }))
+
+      await subscribe()
+      // Three failures put the next retry seconds out. That timer is the one
+      // a frozen tab stops, and the reopened sockets cannot restart it: the
+      // stream goes live again with a cursor to replay from, so nothing else
+      // re-fetches.
+      await vi.waitFor(
+        () => expect(serverInfo.mock.calls.length).toBeGreaterThanOrEqual(3),
+        { timeout: 6_000 },
+      )
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      const before = serverInfo.mock.calls.length
+      failing = false
+
+      fire('visibilitychange')
+
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true), {
+        timeout: 300,
+      })
+      expect(serverInfo.mock.calls.length).toBeGreaterThan(before)
+      stop()
+    },
+    15_000,
+  )
 
   it('marks the server hop dead on a -32004 subscribe refusal', async () => {
     const client = fakeApi()

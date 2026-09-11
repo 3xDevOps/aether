@@ -1,6 +1,7 @@
 import { type Attachment, codeDenied, connectAttach, replayGate } from '@/routes/terminal/attach'
 import type { ConnectionState } from '@/lib/stream'
 import { StubSocket } from '@/test/stub-socket'
+import { fire } from '@/test/wake'
 
 let output: string[] = []
 let outputKinds: Array<[string, string]> = []
@@ -11,6 +12,10 @@ let refusalCode: number | undefined
 let denied = false
 let write = false
 let sessionPending = false
+// Every attachment this file opens, closed in afterEach. A test that fails
+// before its own `close()` would otherwise leave its wake listeners on
+// `document` and open a socket during the next test.
+let attachments: Attachment[] = []
 
 function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
   output = []
@@ -21,7 +26,7 @@ function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
   refusalCode = undefined
   denied = false
   const socketURL = typeof url === 'function' ? url : () => url
-  return connectAttach(socketURL, {
+  const attachment = connectAttach(socketURL, {
     onData: (chunk, kind) => {
       const text = new TextDecoder().decode(chunk)
       output.push(text)
@@ -43,6 +48,8 @@ function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
     geometry: () => ({ cols: 120, rows: 40 }),
     wantsWrite: () => write,
   })
+  attachments.push(attachment)
+  return attachment
 }
 
 // A missing-session refusal, plus the 1008 close the gateway sends behind
@@ -54,12 +61,6 @@ function refuseMissingSession() {
   })
   StubSocket.last().onclose?.({ code: 1008 })
   vi.advanceTimersByTime(60_000)
-}
-
-/** A foreground return or a network return, as the browser delivers it. */
-function fire(event: string) {
-  const target = event === 'online' ? window : document
-  target.dispatchEvent(new Event(event))
 }
 
 function ack(over: Record<string, unknown> = {}) {
@@ -76,6 +77,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  for (const attachment of attachments) attachment.close()
+  attachments = []
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -349,7 +352,7 @@ describe('connectAttach', () => {
     a.close()
   })
 
-  it.each(['visibilitychange', 'online'])(
+  it.each(['visibilitychange', 'online'] as const)(
     'reattaches at once on %s instead of waiting out the backoff',
     (event) => {
       const a = attach()
@@ -383,6 +386,7 @@ describe('connectAttach', () => {
     StubSocket.last().onopen?.()
     ack()
     fire('visibilitychange')
+    fire('online')
     expect(StubSocket.opened).toHaveLength(1)
     live.close()
 
@@ -395,10 +399,75 @@ describe('connectAttach', () => {
     const before = StubSocket.opened.length
 
     fire('visibilitychange')
+    fire('online')
 
     // A refusal is the server's answer, not a dropped socket: coming back to
     // the foreground must not re-ask a question already answered.
     expect(StubSocket.opened).toHaveLength(before)
+    a.close()
+  })
+
+  it('leaves a finished session parked until the caller reopens it', () => {
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack()
+
+    // The run's terminal session ended: the gateway names the close, and the
+    // client parks rather than looping attach -> EOF -> reattach.
+    StubSocket.last().onclose?.({ code: 1000, reason: 'session ended' })
+    vi.advanceTimersByTime(60_000)
+    expect(StubSocket.opened).toHaveLength(1)
+
+    fire('visibilitychange')
+    fire('online')
+
+    // Re-attaching would re-serve the whole finished transcript and rewrite
+    // the pane, on every app switch, for output that cannot change again.
+    expect(StubSocket.opened).toHaveLength(1)
+
+    // An explicit reopen is still the way back in.
+    a.reopen()
+    expect(StubSocket.opened).toHaveLength(2)
+    a.close()
+  })
+
+  it('drops a socket that never attached when the network returns', () => {
+    const a = attach()
+    StubSocket.last().onopen?.()
+
+    // A wifi-to-cellular switch leaves the socket half open: the browser
+    // still reports it as connected, and the ack will never arrive. Only
+    // `online` says the network under it is gone.
+    fire('visibilitychange')
+    expect(StubSocket.opened).toHaveLength(1)
+
+    fire('online')
+
+    expect(StubSocket.opened).toHaveLength(2)
+    expect(StubSocket.opened[0].closed).toBe(true)
+    a.close()
+  })
+
+  it('resets the backoff on a wake that lands before the queued close', () => {
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack()
+    for (let n = 0; n < 5; n++) {
+      StubSocket.last().onclose?.({ code: 1006 })
+      vi.advanceTimersByTime(30_000)
+    }
+    const before = StubSocket.opened.length
+
+    // The newest socket died while the tab was frozen and its close has not
+    // been delivered yet. The reset must happen anyway, or the close that
+    // arrives next schedules the pre-suspend backoff.
+    fire('visibilitychange')
+    expect(StubSocket.opened).toHaveLength(before)
+
+    StubSocket.last().onclose?.({ code: 1006 })
+    vi.advanceTimersByTime(600)
+
+    expect(StubSocket.opened).toHaveLength(before + 1)
     a.close()
   })
 

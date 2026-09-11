@@ -149,6 +149,11 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   let waitingForSession = false
   let disposed = false
   let refused = false
+  // The run's terminal session is over and this attachment is parked. A
+  // reconnect could only replay the same finished transcript, so nothing -
+  // a dropped socket or a foreground return - may reopen it; only an
+  // explicit reopen() does.
+  let ended = false
   let attached = false
   // Sticky for the life of the attachment: once the server has said this
   // member cannot steer, every reconnect is a mirror.
@@ -257,6 +262,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         return
       }
       if (attached && ev.reason === 'session ended') {
+        ended = true
         handlers.onState('offline')
         return
       }
@@ -305,12 +311,18 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   }
 
   // A phone that was in a pocket comes back to a dead socket and a frozen
-  // retry timer; a refused attach is not revived by either event.
-  const stopWake = onWake(() => {
-    if (disposed || refused || socket) return
+  // retry timer. An attach the gateway refused, and one parked on a finished
+  // session, are answers rather than failures: neither event re-asks them.
+  const stopWake = onWake((kind) => {
+    if (disposed || refused || ended) return
     if (timer) clearTimeout(timer)
     timer = null
     attempt = 0
+    // A foreground return leaves any existing socket alone, but a new
+    // network invalidates one that is not attached, including one the
+    // browser still reports as open.
+    if (socket && (kind === 'visible' || attached)) return
+    drop()
     open()
   })
 
@@ -338,6 +350,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (timer) clearTimeout(timer)
       timer = null
       refused = false
+      ended = false
       attempt = 0
       unavailableTries = 0
       waitingForSession = false

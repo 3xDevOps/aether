@@ -153,12 +153,18 @@ export function useTeamRefresh(client: Api = api): void {
   // presence already expired server-side and an inbox that may have gained an
   // approval while it was away. Neither has a push channel, and the event
   // cursor only moves if something else happened, so returning to the
-  // foreground is the signal.
+  // foreground is the signal. The fan-out keeps the same floor the debounced
+  // refresh has - flipping between two apps, or a cellular link flapping
+  // `online`, must not become 2 + 2N requests a time - while the heartbeat,
+  // one small request and the reason the wake exists, always goes.
   useEffect(
     () =>
       onWake(() => {
-        lastRun.current = Date.now()
-        void refreshTeam(useStore, client)
+        const now = Date.now()
+        if (now - lastRun.current >= minGapMs) {
+          lastRun.current = now
+          void refreshTeam(useStore, client)
+        }
         void heartbeat(useStore, client)
       }),
     [client],

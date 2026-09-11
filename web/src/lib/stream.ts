@@ -35,6 +35,12 @@ export function backoff(attempt: number): number {
   return capped * (0.5 + Math.random() / 2)
 }
 
+/** Which event woke us. The two are not interchangeable: a foreground
+ * return says nothing about the network, while `online` says the network
+ * this machine had is gone and a new one is up - which is what leaves a
+ * socket half open and still reading as connected. */
+export type WakeKind = 'visible' | 'online'
+
 /**
  * Calls back when the tab comes to the foreground or the network returns.
  * A phone suspends a background tab: the socket dies and the pending retry
@@ -42,15 +48,16 @@ export function backoff(attempt: number): number {
  * 30 seconds before trying anything. These two events are the evidence that
  * a reconnect can work now. Returns a disposer.
  */
-export function onWake(wake: () => void): () => void {
+export function onWake(wake: (kind: WakeKind) => void): () => void {
   const visible = () => {
-    if (document.visibilityState === 'visible') wake()
+    if (document.visibilityState === 'visible') wake('visible')
   }
+  const online = () => wake('online')
   document.addEventListener('visibilitychange', visible)
-  window.addEventListener('online', wake)
+  window.addEventListener('online', online)
   return () => {
     document.removeEventListener('visibilitychange', visible)
-    window.removeEventListener('online', wake)
+    window.removeEventListener('online', online)
   }
 }
 
@@ -60,9 +67,15 @@ export function connectEvents(h: StreamHandlers): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
   let closed = false
+  // Whether the server has acknowledged the subscription on the current
+  // socket. An open socket is not evidence of a working one: a network
+  // switch leaves it half open, and the browser goes on reporting it as
+  // connected until the OS times the TCP connection out.
+  let live = false
 
   const open = () => {
     if (closed) return
+    live = false
     h.onState(attempt === 0 ? 'connecting' : 'reconnecting')
     let ws: WebSocket
     try {
@@ -97,6 +110,7 @@ export function connectEvents(h: StreamHandlers): () => void {
           // and the close reason does not survive every proxy.
           if (parsed.ok) {
             attempt = 0
+            live = true
             h.onState('live')
           } else if (parsed.ok === false && parsed.code === codeUnavailable) {
             const detail = parsed.error ?? ''
@@ -130,13 +144,29 @@ export function connectEvents(h: StreamHandlers): () => void {
     attempt++
   }
 
-  // A socket that is still open is left alone: tearing a live subscription
-  // down on every tab switch would replay the log for nothing.
-  const stopWake = onWake(() => {
-    if (closed || socket) return
+  // Detach the handlers first, so a close we asked for does not schedule a
+  // reconnect on top of the one we are about to make.
+  const drop = () => {
+    const ws = socket
+    socket = null
+    if (!ws) return
+    ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null
+    ws.close()
+  }
+
+  const stopWake = onWake((kind) => {
+    if (closed) return
+    // The frozen timer and the backoff it was counting are stale whatever we
+    // do next: a tab that was away has no idea how long the failure lasted.
     if (timer) clearTimeout(timer)
     timer = null
     attempt = 0
+    // A foreground return leaves any existing socket alone - tearing a
+    // working subscription down would replay the log for nothing - but a new
+    // network invalidates a socket that is not live, including one the
+    // browser still reports as open.
+    if (socket && (kind === 'visible' || live)) return
+    drop()
     open()
   })
 

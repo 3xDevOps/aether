@@ -2,7 +2,7 @@
 // stream is the only thing that changes it.
 
 import { api, ApiError, type Api } from '@/lib/api'
-import { backoff, connectEvents } from '@/lib/stream'
+import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
   Event,
   GatewayCapabilities,
@@ -363,7 +363,10 @@ export function connect(store: RootStore, client: Api = api): () => void {
     hydrating = false
     if (disposed) return
     if (!ok) {
-      retryTimer = setTimeout(() => void load(), backoff(attempts++))
+      retryTimer = setTimeout(() => {
+        retryTimer = null
+        void load()
+      }, backoff(attempts++))
       return
     }
     attempts = 0
@@ -417,6 +420,20 @@ export function connect(store: RootStore, client: Api = api): () => void {
     })
   }
 
+  // The hydration retry is the third timer a frozen tab stops, and the only
+  // one the reopened sockets cannot restart: a re-hydration that failed after
+  // the first good one leaves a cursor to replay from, so the stream goes
+  // live again without re-fetching. Without this the store would show stale
+  // data for the rest of a wait that also caps at 30 seconds. A wake with no
+  // retry pending re-fetches nothing.
+  const stopWake = onWake(() => {
+    if (disposed || !retryTimer) return
+    clearTimeout(retryTimer)
+    retryTimer = null
+    attempts = 0
+    void load()
+  })
+
   void probeGateway(client).then((probe) => {
     if (disposed) return
     if (probe && 'rejected' in probe) {
@@ -444,6 +461,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
 
   return () => {
     disposed = true
+    stopWake()
     if (retryTimer) clearTimeout(retryTimer)
     stopStream()
   }
