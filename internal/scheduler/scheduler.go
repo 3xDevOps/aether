@@ -484,6 +484,7 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 		profile.ResumeFlag = ""
 		profile.Reporter = harness.ReporterNone
 		profile.StatusArgs = nil
+		profile.StatusEnv = nil
 		profile.StatusFiles = nil
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs

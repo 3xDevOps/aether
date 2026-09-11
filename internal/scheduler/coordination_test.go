@@ -252,28 +252,38 @@ func TestStagedBridgesAreCollectedOnlyWhenUnreferenced(t *testing.T) {
 // belong to the CLI the registry ships, so an overridden harness gets
 // neither appended - it degrades to notice-only coordination and to the
 // stall threshold - while the rest of the registry profile still applies.
+// Both shapes of reporter registration are overridden: claude's arguments
+// and opencode's environment.
 func TestArgvOverrideDropsRegistryRegistration(t *testing.T) {
-	s := &Scheduler{harnesses: map[string]HarnessSpec{
-		"claude": {TUIArgs: []string{"claude-shim", harness.TaskPlaceholder}},
-	}}
-	argv, profile, err := s.command(t.Context(), "", "claude", domain.LaunchTUI, "add OAuth login")
-	if err != nil {
-		t.Fatalf("command: %v", err)
-	}
-	if want := []string{"claude-shim", "add OAuth login"}; !slices.Equal(argv, want) {
-		t.Fatalf("argv = %v, want %v", argv, want)
-	}
-	if args := profile.MCPArgs("/run/aether/mcp.json"); len(args) != 0 {
-		t.Fatalf("override kept the registry MCP registration: %v", args)
-	}
-	if args := profile.StatusLaunchArgs(mcpbridge.MountDir); len(args) != 0 {
-		t.Fatalf("override kept the registry status arguments: %v", args)
-	}
-	if profile.Reporter != harness.ReporterNone || len(profile.StatusFiles) != 0 {
-		t.Fatalf("override kept reporter %s with %d status files", profile.Reporter, len(profile.StatusFiles))
-	}
-	if len(profile.CredentialPaths) == 0 {
-		t.Fatal("override lost the registry credential paths")
+	for _, name := range []string{"claude", "opencode"} {
+		t.Run(name, func(t *testing.T) {
+			shim := name + "-shim"
+			s := &Scheduler{harnesses: map[string]HarnessSpec{
+				name: {TUIArgs: []string{shim, harness.TaskPlaceholder}},
+			}}
+			argv, profile, err := s.command(t.Context(), "", name, domain.LaunchTUI, "add OAuth login")
+			if err != nil {
+				t.Fatalf("command: %v", err)
+			}
+			if want := []string{shim, "add OAuth login"}; !slices.Equal(argv, want) {
+				t.Fatalf("argv = %v, want %v", argv, want)
+			}
+			if args := profile.MCPArgs("/run/aether/mcp.json"); len(args) != 0 {
+				t.Fatalf("override kept the registry MCP registration: %v", args)
+			}
+			if args := profile.StatusLaunchArgs(mcpbridge.MountDir); len(args) != 0 {
+				t.Fatalf("override kept the registry status arguments: %v", args)
+			}
+			if env := profile.StatusLaunchEnv(mcpbridge.MountDir); len(env) != 0 {
+				t.Fatalf("override kept the registry status environment: %v", env)
+			}
+			if profile.Reporter != harness.ReporterNone || len(profile.StatusFiles) != 0 {
+				t.Fatalf("override kept reporter %s with %d status files", profile.Reporter, len(profile.StatusFiles))
+			}
+			if len(profile.CredentialPaths) == 0 {
+				t.Fatal("override lost the registry credential paths")
+			}
+		})
 	}
 }
 

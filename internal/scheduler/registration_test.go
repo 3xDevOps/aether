@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -170,4 +171,75 @@ func (e *testEnv) reporterOf(t *testing.T, run domain.RunID) harness.Reporter {
 		t.Fatalf("run %s is not supervised", run)
 	}
 	return entry.reporter
+}
+
+// TestOpenCodeStatusReporterRegistration is the same contract for a
+// harness whose reporter rides in the environment instead of on the
+// command line: the plugin lands in the run's coordination directory and
+// opencode is told to load it from there, an interactive run alone, and
+// the argv it was launched with is untouched.
+func TestOpenCodeStatusReporterRegistration(t *testing.T) {
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	dir := t.TempDir()
+	coord := &recordingCoordinator{
+		fakeCoordinator: fakeCoordinator{root: filepath.Join(dir, "coord")},
+		files:           make(map[domain.RunID]map[string][]byte),
+	}
+	e.sched.UseCoordination(coord, filepath.Join(dir, "runtime", "bin"))
+	// A workspace that sets the variable the plugin rides in cannot win it:
+	// unsetting the reporter would park every run of its own accord. The
+	// run says so on its timeline rather than leaving the member to work it
+	// out from an agent that loads different config than they asked for.
+	const workspaceConfig = `{"model":"anthropic/claude-sonnet-4-5"}`
+	e.ws.Environment.Variables["OPENCODE_CONFIG_CONTENT"] = workspaceConfig
+	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+		t.Fatalf("UpdateWorkspace: %v", err)
+	}
+
+	tui, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", "opencode", domain.LaunchTUI)
+	if err != nil {
+		t.Fatalf("launch opencode run: %v", err)
+	}
+	if got := coord.file(tui.ID, agentstatus.OpenCodePluginName); !bytes.Equal(got, agentstatus.OpenCodePlugin) {
+		t.Fatalf("plugin written for the run = %s, want the embedded asset", got)
+	}
+	spec := e.rt.byName(string(tui.ID)).spec
+	wantConfig := `{"plugin":["file://` + path.Join(mcpbridge.MountDir, agentstatus.OpenCodePluginName) + `"]}`
+	if got := spec.Env["OPENCODE_CONFIG_CONTENT"]; got != wantConfig {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT = %q, want %q", got, wantConfig)
+	}
+	// opencode has no flag for a plugin, so the launch command is exactly
+	// what a run without a reporter would have had: nothing on it names
+	// the coordination directory.
+	if argv := spec.Command; len(argv) != 2 || slices.ContainsFunc(argv, func(a string) bool {
+		return strings.Contains(a, agentstatus.OpenCodePluginName)
+	}) {
+		t.Fatalf("opencode argv = %v, want the launch command untouched", argv)
+	}
+	if got := e.reporterOf(t, tui.ID); got != harness.ReporterFull {
+		t.Fatalf("interactive opencode run recorded reporter %s, want %s", got, harness.ReporterFull)
+	}
+	// The plugin is a leaf package's bytes and the binary path is the
+	// scheduler's; nothing but this pins the two together.
+	wantCommand := `"` + mcpbridge.BinaryPath + `"`
+	if !bytes.Contains(agentstatus.OpenCodePlugin, []byte(wantCommand)) {
+		t.Fatalf("%s spawns something other than %s; the staged binary is what the container has",
+			agentstatus.OpenCodePluginName, wantCommand)
+	}
+
+	headless, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "ship it", "opencode", domain.LaunchHeadless)
+	if err != nil {
+		t.Fatalf("launch headless opencode run: %v", err)
+	}
+	if got := coord.file(headless.ID, agentstatus.OpenCodePluginName); got != nil {
+		t.Fatalf("headless run had the plugin written: %s", got)
+	}
+	// A headless run gets no reporter at all, so nothing replaces the
+	// workspace's own value of the variable there.
+	if got := e.rt.byName(string(headless.ID)).spec.Env["OPENCODE_CONFIG_CONTENT"]; got != workspaceConfig {
+		t.Fatalf("headless opencode run carries OPENCODE_CONFIG_CONTENT = %q, want the workspace value %q", got, workspaceConfig)
+	}
+	if got := e.reporterOf(t, headless.ID); got != harness.ReporterNone {
+		t.Fatalf("headless opencode run recorded reporter %s, want %s", got, harness.ReporterNone)
+	}
 }

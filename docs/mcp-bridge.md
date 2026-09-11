@@ -19,6 +19,7 @@ all: the agent's own status reports (`aether-server report`, below).
 /run/aether/                      read-only  the run's coordination directory
 /run/aether/mcp.json              read-only  the MCP server config, for a registered harness
 /run/aether/claude-settings.json  read-only  the status-reporter hooks, for an interactive claude run
+/run/aether/opencode-status.js    read-only  the status-reporter plugin, for an interactive opencode run
 /run/aether/co-authors            read-only  the trailers to end commits with
 /run/aether/coord2.sock                      the socket the bridge dials (wire v2)
 ```
@@ -143,15 +144,19 @@ the overlap notice in its terminal. The arguments and the config are
 decided at launch, so a run that was started without them can only gain
 them by being relaunched.
 
-The status reporter is registered the same way and in the same directory:
-a profile that carries status arguments gets its settings document written
-there and the arguments appended, for an interactive run only.
+The status reporter is registered the same way and in the same directory,
+for an interactive run only: a profile that carries a reporter asset gets
+it written there, and the harness is pointed at it in whatever shape its
+CLI takes - `claude` by the appended `--settings` argument, `opencode` by
+`OPENCODE_CONFIG_CONTENT` in the launch environment, because it has no
+flag for a plugin.
 
 An argv override in the server config (scheduler `Harnesses`) is respected
-verbatim: the registry's MCP and status flags belong to the CLI the registry
-ships, and nothing checks that an overridden command still is that CLI, so
-neither is appended to it. The overridden harness degrades to notice-only
-coordination and to the stall threshold the same way.
+verbatim: the registry's MCP flag, its status arguments and its status
+environment all belong to the CLI the registry ships, and nothing checks
+that an overridden command still is that CLI, so none of them reaches it.
+The overridden harness degrades to notice-only coordination and to the
+stall threshold the same way.
 
 ### What the end-to-end tests cover
 
@@ -184,12 +189,21 @@ does not call through a tool. It carries two fields - a state, `working` or
 run is the socket it arrived on, exactly as for the three mailbox methods.
 
 What calls it is the harness's own lifecycle hook, running
-`/opt/aether/aether-server report <harness>` with the hook's event JSON on
-stdin. That subcommand is hidden like `mcp`: no operator runs it. It maps
-the event, dials the socket, and exits 0 whatever happens - an unmapped
-event never dials at all, and a failure is one line on stderr, which the
-harness shows only for a non-zero exit. A hook that breaks or slows the
-agent would be worse than a run card that is briefly wrong.
+`/opt/aether/aether-server report <harness>`. How the event reaches it is
+the harness's own shape: Claude Code writes the hook's event JSON on stdin,
+opencode's plugin names the event on the command line
+(`report opencode --event session.idle`). That subcommand is hidden like
+`mcp`: no operator runs it. It maps the event, dials the socket, and exits 0
+whatever happens - an unmapped event never dials at all, and a failure is
+one line on stderr. A hook that breaks or slows the agent would be worse
+than a run card that is briefly wrong. Where that line surfaces is the
+harness's own shape too: Claude Code shows a hook's stderr only for a
+non-zero exit, so it sits in the transcript; opencode's plugin reads the
+reporter's stderr itself and writes the first failure of the run into
+opencode's own log (`~/.local/share/opencode/log/`), as an `ERROR` line
+whose message starts `status reporter:`, then stays quiet. It never
+prints: opencode's TUI owns the terminal for the whole run, so anything
+written there would corrupt the screen rather than tell anyone anything.
 
 Reading the event and the round trip that follows share one budget, set
 under the timeout the harness gives the hook, so a harness that hands over
@@ -198,8 +212,8 @@ the reporter's size cap is reported on stderr rather than truncated: half a
 JSON document maps to nothing, which would look exactly like an event Aether
 ignores.
 
-Which harnesses have a reporter, what the settings document looks like, and
-what each state does to the run: [harnesses.md](harnesses.md) and
+Which harnesses have a reporter, what the asset pointing them at it looks
+like, and what each state does to the run: [harnesses.md](harnesses.md) and
 [failure-handling.md](failure-handling.md).
 
 The wire method set is closed all the same: `run.report` is four of four,
@@ -268,6 +282,6 @@ and go inert - `coord` unlinks the sockets behind them, so a bridge still
 running in there gets `CodeUnavailable` and nothing else.
 
 Turning it back on affects new containers only. A run created while the
-switch was off has no mounts, no config, no `--mcp-config` and no
-`--settings` argument, and cannot gain them; it stays notice-only, and
-judged on silence alone, until it is relaunched.
+switch was off has no mounts, no config, no `--mcp-config` or `--settings`
+argument, no `OPENCODE_CONFIG_CONTENT`, and cannot gain them; it stays
+notice-only, and judged on silence alone, until it is relaunched.

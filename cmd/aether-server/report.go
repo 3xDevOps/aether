@@ -29,10 +29,12 @@ const maxHookPayload = 8 << 20
 // report tells the server what the agent is doing. Like mcp it is absent
 // from the usage text: no operator runs it. The server stages this binary
 // into a run container and the harness's own status hooks call it there,
-// with the hook payload on stdin, against the coordination socket mounted
-// beside it:
+// against the coordination socket mounted beside it. How the event
+// arrives is the harness's choice: Claude Code writes its hook payload on
+// stdin, opencode's plugin names the event on the command line.
 //
 //	aether-server report claude
+//	aether-server report opencode --event session.idle
 //
 // It never fails and never prints to stdout: a hook that breaks or slows
 // the agent is worse than a run card that is briefly wrong, so every
@@ -43,17 +45,23 @@ const maxHookPayload = 8 << 20
 // Adding a harness is one case below plus one mapping function in
 // internal/agentstatus.
 func report(args []string) {
-	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	if len(args) == 0 {
+		warn("report: usage: aether-server report <harness> [flags]")
+		return
+	}
+	harness, args := args[0], args[1:]
+	fs := flag.NewFlagSet("report "+harness, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	socket := fs.String("socket", mcpbridge.SocketPath, "coordination socket to report on")
+	event := fs.String("event", "", "the event being reported (opencode)")
+	status := fs.String("status", "", "the session status type the event carries (opencode session.status)")
 	if err := fs.Parse(args); err != nil {
 		return
 	}
-	if fs.NArg() != 1 {
-		warn("report: usage: aether-server report <harness>")
+	if fs.NArg() != 0 {
+		warn("report %s: unexpected argument %q", harness, fs.Arg(0))
 		return
 	}
-	harness := fs.Arg(0)
 	ctx, cancel := context.WithTimeout(context.Background(), reportBudget)
 	defer cancel()
 	var (
@@ -68,6 +76,8 @@ func report(args []string) {
 			return
 		}
 		rep, mapped = agentstatus.FromClaudeHook(payload)
+	case "opencode":
+		rep, mapped = agentstatus.FromOpenCodeEvent(*event, *status)
 	default:
 		warn("report: unknown harness %q", harness)
 		return
