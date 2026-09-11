@@ -128,7 +128,7 @@ function WorkspaceTree({
         type="button"
         className={cn(
           focusRing,
-          'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[13px] font-medium hover:bg-toolbar-hover',
+          'flex min-h-7 coarse:min-h-11 w-full items-center gap-1.5 px-1.5 text-left text-[13px] font-medium hover:bg-toolbar-hover',
         )}
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
@@ -217,7 +217,7 @@ function TreeDirectory({
         type="button"
         className={cn(
           focusRing,
-          'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
+          'flex min-h-7 coarse:min-h-11 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
         )}
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
@@ -263,7 +263,7 @@ function TreeDirectory({
                 aria-current={isSelected ? 'page' : undefined}
                 className={cn(
                   focusRing,
-                  'flex min-h-7 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
+                  'flex min-h-7 coarse:min-h-11 w-full items-center gap-1.5 px-1.5 text-left text-[12px] hover:bg-toolbar-hover',
                   isSelected && 'bg-selection text-selection-foreground',
                 )}
                 onClick={() => onSelect(source, childPath)}
@@ -367,7 +367,7 @@ function FileViewer({
           type="button"
           className={cn(
             focusRing,
-            'inline-flex h-[26px] items-center gap-1.5 border border-input bg-background px-2 text-[12px] font-medium md:hidden',
+            'inline-flex h-[26px] coarse:h-11 items-center gap-1.5 border border-input bg-background px-2 text-[12px] font-medium md:hidden',
           )}
           onClick={onBrowse}
         >
@@ -394,7 +394,7 @@ function FileViewer({
               aria-selected={mode === 'file'}
               className={cn(
                 focusRing,
-                'min-h-[22px] shrink-0 px-2 text-[12px] font-medium',
+                'min-h-[22px] coarse:min-h-11 shrink-0 px-2 text-[12px] font-medium',
                 mode === 'file'
                   ? 'bg-selection text-selection-foreground'
                   : 'text-muted-foreground hover:bg-toolbar-hover',
@@ -409,7 +409,7 @@ function FileViewer({
               aria-selected={mode === 'diff'}
               className={cn(
                 focusRing,
-                'min-h-[22px] shrink-0 px-2 text-[12px] font-medium',
+                'min-h-[22px] coarse:min-h-11 shrink-0 px-2 text-[12px] font-medium',
                 mode === 'diff'
                   ? 'bg-selection text-selection-foreground'
                   : 'text-muted-foreground hover:bg-toolbar-hover',
