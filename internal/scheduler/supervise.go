@@ -182,16 +182,22 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			// by anything on the terminal.
 			heldForTheMember := e.agentReport.State == agentstatus.Waiting &&
 				e.reporter == harness.ReporterFull
+			released := e.status == domain.RunNeedsAttention && observed &&
+				idle <= s.cfg.StallThreshold && !heldForTheMember
+			if released && e.agentReport.State == agentstatus.Waiting {
+				released = e.unparks(activity)
+			}
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
 					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
-			case e.status == domain.RunNeedsAttention && observed && idle <= s.cfg.StallThreshold && !heldForTheMember:
+			case released:
 				// The run goes back to being judged on silence alone, so
 				// the next quiet threshold parks it as a stall again - and
 				// a restart must not resurrect the report this clears.
 				e.agentReport = agentstatus.Report{}
+				e.parkedAt, e.postParkActivity = time.Time{}, time.Time{}
 				if serr := s.writeSidecar(e.sidecar()); serr != nil {
 					slog.Warn("scheduler: persist cleared agent report", "run", e.runID, "error", serr)
 				}
@@ -204,6 +210,31 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		}
 		s.mu.Unlock()
 	}
+}
+
+// unparks reports whether terminal activity on a run the agent parked
+// itself is the next turn rather than the tail of the one that ended.
+//
+// A harness that reports only the end of a turn (harness.ReporterTurnEnd)
+// never says the next one started, so activity is the only thing that can
+// release its run - but the report fires while the finished turn is still
+// being drawn, and codex keeps repainting for a second or two after it.
+// Counting those frames would hand the run straight back to an agent that
+// is waiting, which is the failure this whole mechanism exists to fix. So
+// activity has to move twice: past the park, and again on a later poll. A
+// trailing burst ends inside one poll interval and never does; an agent
+// that is really working again keeps writing and does it on the next poll.
+//
+// Caller must hold s.mu.
+func (e *supervised) unparks(activity time.Time) bool {
+	if !activity.After(e.parkedAt) {
+		return false
+	}
+	if e.postParkActivity.IsZero() {
+		e.postParkActivity = activity
+		return false
+	}
+	return activity.After(e.postParkActivity)
 }
 
 // sweepCheckouts applies the checkout TTL (§6.8): terminal runs whose

@@ -211,8 +211,12 @@ to `running` with `agent resumed` when the agent starts its next turn -
 which is what steering it produces - and not on terminal output alone, since
 a TUI repaints while the member types. Where it only reports that a turn
 ended (`codex`), there is no such report to wait for, so the run returns
-with `activity resumed` on agent output or a file change, exactly as a run
-with no reporter does.
+with `activity resumed` on agent output or a file change. That takes
+activity the report did not already cover: the answer the turn wrote before
+it ended, and the frames codex paints for a second or two after, belong to
+the turn that is over, so output has to keep arriving into a later poll
+before the run reads as working again. Expect the return to `running` to
+land one `--poll-interval` behind the agent.
 
 **The run stalled.** No agent output, no file changes and nothing from the
 agent's reporter past `--stall-threshold` parks a live run at

@@ -36,6 +36,12 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 	}
 	switch report.State {
 	case agentstatus.Waiting:
+		// parkedAt is when the agent said it was waiting, and
+		// postParkActivity the terminal activity seen since. A harness that
+		// reports only the end of a turn is released by activity, and these
+		// two are what separate the next turn from the frames the finished
+		// one is still painting (see unparks).
+		entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
 		// needs-attention -> needs-attention is legal and is the point: a
 		// run parked by a stall, or waiting for a different thing, gets the
 		// reason the agent is actually waiting for. Saying again what the
@@ -56,6 +62,7 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 		// stalled seconds after it resumed, and every tool call would flip
 		// the run card twice.
 		entry.lastWorking = time.Now().UTC()
+		entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
 		// Claude Code fires this on every tool call, so the common case has
 		// to be free: a run that is already running is left alone, with no
 		// store write and no event.

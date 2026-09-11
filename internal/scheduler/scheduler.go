@@ -211,7 +211,13 @@ type supervised struct {
 	// activity it is, and a run does not park as stalled seconds after the
 	// agent proved it is alive.
 	lastWorking time.Time
-	done        chan struct{}
+	// parkedAt is when the agent's own waiting report parked this run, and
+	// postParkActivity the newest terminal activity seen since. They are
+	// what a turn-end reporter is judged on: see unparks. Both zero unless
+	// a waiting report is what parked the run.
+	parkedAt         time.Time
+	postParkActivity time.Time
+	done             chan struct{}
 	// runUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root (no ownership pass). Set once
 	// the user is resolved during provisioning, or from the sidecar on
