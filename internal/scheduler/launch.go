@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
@@ -319,7 +318,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	// After the workspace's own variables and the harness's launch
 	// requirements, for the same reason both of those come last: what the
 	// server needs the container to have is not a preference.
-	s.noteReservedVariables(ctx, run, ws, coordEnv)
+	s.noteReservedVariables(ctx, run, ws, profile.Env, coordEnv)
 	maps.Copy(plan.Env, coordEnv)
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan))
 	if err != nil {
@@ -435,26 +434,29 @@ func (s *Scheduler) freshen(ctx context.Context, run *domain.Run) *domain.Run {
 	return run
 }
 
-// noteReservedVariables puts one timeline note on the run for every
-// workspace variable the coordination environment replaces. The server's
-// value has to win - a workspace that could unset it could switch the
-// status reporter off and park every run of its own accord - but a member
-// whose own value is dropped has to be able to see that from the run
-// rather than from the agent behaving unexpectedly.
-func (s *Scheduler) noteReservedVariables(ctx context.Context, run *domain.Run, ws *domain.Workspace, coordEnv map[string]string) {
+// noteReservedVariables puts a timeline note on the run for every
+// workspace variable the server sets itself: the harness's own launch
+// requirement (Profile.Env) and the status reporter's (Profile.StatusEnv).
+// The server's value has to win - a workspace that could unset one could
+// stop the agent starting or switch the status reporter off and park every
+// run of its own accord - but a member whose own value is dropped has to be
+// able to see that from the run rather than from the agent behaving
+// unexpectedly.
+func (s *Scheduler) noteReservedVariables(ctx context.Context, run *domain.Run, ws *domain.Workspace, reserved ...map[string]string) {
 	if ws == nil {
 		return
 	}
 	var names []string
-	for name, value := range coordEnv {
-		if configured, ok := ws.Environment.Variables[name]; ok && configured != value {
-			names = append(names, name)
+	for _, env := range reserved {
+		for name, value := range env {
+			if configured, ok := ws.Environment.Variables[name]; ok && configured != value {
+				names = append(names, name)
+			}
 		}
 	}
-	if len(names) == 0 {
-		return
-	}
 	slices.Sort(names)
-	s.publishTimeline(ctx, run.WorkspaceID, run.ID, run.MemberID, events.TimelineNote,
-		"this run reserves "+strings.Join(names, ", ")+" for the status reporter; the workspace value is not used")
+	for _, name := range names {
+		s.publishTimeline(ctx, run.WorkspaceID, run.ID, run.MemberID, events.TimelineNote,
+			"this run sets "+name+" itself; the workspace value is not used")
+	}
 }

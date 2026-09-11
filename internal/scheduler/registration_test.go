@@ -249,3 +249,29 @@ func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 		t.Fatalf("headless opencode run recorded reporter %s, want %s", got, harness.ReporterNone)
 	}
 }
+
+// TestReservedLaunchVariableIsNotedOnTheRun: the status reporter is not
+// the only thing the server puts in the launch environment over a
+// workspace's own value - claude's sandbox marker is there for the agent
+// to start at all - and a member whose value is dropped learns it from the
+// run, not from an agent behaving unexpectedly.
+func TestReservedLaunchVariableIsNotedOnTheRun(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.ws.Environment.Variables["IS_SANDBOX"] = "0"
+	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+		t.Fatalf("UpdateWorkspace: %v", err)
+	}
+	sub := e.subscribe(t)
+
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatalf("launch claude run: %v", err)
+	}
+	note := waitTimelineEvent(t, sub, run.ID, events.TimelineNote)
+	if msg := note.Payload.(events.TimelinePayload).Message; !strings.Contains(msg, "IS_SANDBOX") {
+		t.Fatalf("timeline note = %q, want the replaced workspace variable named", msg)
+	}
+	if got := e.rt.byName(string(run.ID)).spec.Env["IS_SANDBOX"]; got != "1" {
+		t.Fatalf("IS_SANDBOX = %q, want the harness's own value 1", got)
+	}
+}

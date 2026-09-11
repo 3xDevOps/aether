@@ -53,6 +53,10 @@ not in this column: it is set on interactive runs alone and is dropped by
 the same things that drop the reporter, so it lives under "Status
 reporting".
 
+Either way, a variable the server sets itself replaces a workspace
+environment variable of the same name rather than merging with it, and the
+run's timeline names the variable on launch.
+
 The **Resume** column is what a relaunch uses when a server reboot
 interrupted the run. The flags ride directly behind the executable.
 
@@ -168,9 +172,9 @@ member's own plugins still load.
 What merges is opencode's own config, not a second value of that variable:
 an interactive `opencode` run reserves `OPENCODE_CONFIG_CONTENT` for the
 plugin, and a workspace environment variable of that name is replaced
-rather than combined. The run's timeline says so on launch. Inline config a
-workspace needs on every run goes in a file the workspace names with
-`OPENCODE_CONFIG`, which Aether never sets.
+rather than combined. Inline config a workspace needs on every run goes in
+a file the workspace names with `OPENCODE_CONFIG`, which Aether never
+sets.
 
 ## Steering delivery
 
