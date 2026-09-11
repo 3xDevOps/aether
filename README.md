@@ -6,7 +6,7 @@
 
 **A self-hosted development environment for AI coding agents running in the cloud, for teams & *multiplayer* control.**
 
-[![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-6EE7D6?style=flat-square)](go.mod)
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-6EE7D6?style=flat-square)](go.mod)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-4A6FA5?style=flat-square)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/3xDevOps/aether?include_prereleases&style=flat-square&color=4A6FA5)](https://github.com/3xDevOps/aether/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/3xDevOps/aether/ci.yml?branch=main&style=flat-square)](https://github.com/3xDevOps/aether/actions/workflows/ci.yml)
@@ -55,22 +55,32 @@ while you sleep.**
 - **Results arrive as git branches.** Every run gets its own worktree and
   branch. You can pull, review, and merge - or set your agent up with Git & Github on Aether
   to let them handle Git operations autonomously. 
-- **Your agents, your setup.** Your skills, plugins and custom commands
-  are mirrored to the server on a per-user basis. Logins stay on the remote that you own, through each vendor's own
+- **Your agents, your setup.** Each member has a server-owned persistent home,
+  mounted read-write in that member's environment terminal and runs. Import
+  configuration once with the local dashboard's directory picker, or edit it
+  remotely in **Files**; changes are immediately visible, including to active
+  runs. Vendor logins stay on the remote you own, through each vendor's own
   authentication flow, and are never extracted or proxied.
 - **Full support for solo developers.** Team features are present, never in the way.
   Linking a fresh server makes you its administrator, giving you full control for your solo workflow. 
 
 ## Dashboard
 
-The desktop app builds on top of the CLI and serves the dashboard and control entrypoint from your own client machine. 
+`aether gui` serves the dashboard and control entrypoint from your own client
+machine, bound to loopback and carried over the same SSH connection as the
+CLI. On a tailnet, the server can optionally host the dashboard over HTTPS with
+`--web-port`; Tailscale WhoIs identifies each request, so a phone needs no
+install or token. The server-hosted surface has no machine-local verbs or
+onboarding wizard; use local `aether gui` for the one-time directory picker and
+other local filesystem or repository actions.
 
-Inside: a workspace switcher, a board bucketed by what needs attention, a
-live read-only terminal mirror of any run, per-run diff timelines, the event
-feed, the shared approval inbox, presence indicators, the member roster, and a
-disk gauge. Launch, inject, pause, kill, close, relaunch and handoff all call
-the same methods the CLI does, with the same permission checks and timeline
-attribution.
+Inside either dashboard: a workspace switcher, a board bucketed by what needs
+attention, a live read-only terminal mirror of any run, per-run diff timelines,
+the event feed, the shared approval inbox, presence indicators, the member
+roster, and a disk gauge. Launch, inject, pause, kill, close, relaunch and
+handoff all call the same methods the CLI does, with the same permission checks
+and timeline attribution. The server-hosted dashboard also exposes the shared
+member-home **Files** editor through the same authenticated RPCs.
 
 ## Supported agents
 
@@ -87,7 +97,7 @@ environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
 | [Environments](docs/environments.md) | Member images, saving, resetting, and persistence. |
 | [Networking](docs/networking.md) | Tailscale-first keyless setup, plus LAN and VPN. |
 | [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
-| [Harnesses](docs/harnesses.md) | Per-agent login, profile sync, and launch requirements. |
+| [Harnesses](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
 | [Adapters](docs/adapters.md) | Adding a harness profile or an output adapter. |
 | [Security](docs/security.md) | What the container boundary does and does not do. |
 | [Local gateway](docs/local-gateway.md) | The HTTP/WS surface `aether gui` serves. |
@@ -100,7 +110,7 @@ environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
 
 ## Building from source
 
-Requires Go 1.25+, GNU make, Bun 1.3+, and Node.js 22+. Bun installs the web
+Requires Go 1.26+, GNU make, Bun 1.3+, and Node.js 22+. Bun installs the web
 dependencies and drives the scripts; Node.js runs the Next build and
 development server.
 

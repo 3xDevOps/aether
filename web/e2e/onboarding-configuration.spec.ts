@@ -1,18 +1,34 @@
-// Bringing a member's own agent configuration across. The fixture profile
-// holds an empty file and a file whose content trips the secret scanner:
-// the flagged file is named on the row and left out, the empty one is
-// carried, and the push succeeds either way.
+// A browser directory import is explicit and one-time. The fixture directory
+// includes an empty file and a scanner finding; the empty file is carried and
+// the finding is reported by the server without blocking the rest of import.
+
+import { cpSync, mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { expect, test } from './fixtures'
 import { OnboardingWizard } from './pages/wizard'
 
-test('a flagged file is left out and the rest of the profile imports', async ({
+const claudeFixture = fileURLToPath(new URL('./testdata/claude-profile', import.meta.url))
+
+test('a directory import reports server exclusions and writes the remote config', async ({
   page,
   aether,
 }) => {
   const alice = await aether.member('alice')
-  aether.giveClaudeProfile(alice)
   const repo = await aether.seedRepo('project')
+  const source = join(alice.home, 'claude-profile')
+  cpSync(claudeFixture, source, { recursive: true })
+  const destinationSpecificFiles = {
+    'cache/plugin.json': '{"cache":"configured"}',
+    'logs/plugin.json': '{"log":"configured"}',
+    'run/plugin.json': '{"run":"configured"}',
+  }
+  for (const [path, content] of Object.entries(destinationSpecificFiles)) {
+    const filename = join(source, path)
+    mkdirSync(dirname(filename), { recursive: true })
+    writeFileSync(filename, content)
+  }
 
   const wizard = await OnboardingWizard.open(page, alice.url)
   await wizard.link.link(aether.server.addr, { name: 'Alice' })
@@ -25,22 +41,51 @@ test('a flagged file is left out and the rest of the profile imports', async ({
   await wizard.expectStep('Agents')
 
   const configuration = wizard.agents.configuration
-  await configuration.look().click()
+  await configuration.chooseDirectory(source)
+  await expect(configuration.preview()).toHaveCount(0)
+  await expect(configuration.section).toContainText('claude-profile')
 
-  const row = configuration.row('Claude Code')
-  await expect(row).toContainText(`${alice.home}/.claude`)
-  await expect(row).toContainText(
-    '1 file you wrote tripped the secret scanner. It is left out and the rest of this profile still imports.',
-  )
-  // The callout on the row, not the expander beside it: a shut disclosure
-  // holds nothing, so these two would be unreachable if the callout stopped
-  // naming the file it caught.
-  await expect(row).toContainText('skills/deploy/README.md')
-  await expect(row).toContainText('secret detected (curl-auth-header)')
-
-  await configuration.select('Claude Code').check()
+  // The fixture basename is intentionally not a harness root. The small
+  // destination selector is the explicit fallback for such directories.
+  await configuration.destination().selectOption('omp')
+  await expect(configuration.preview()).toBeVisible()
+  for (const path of Object.keys(destinationSpecificFiles)) {
+    await expect(configuration.section.getByText(path, { exact: true })).toBeVisible()
+  }
+  await configuration.destination().selectOption('claude')
+  await expect(configuration.preview()).toBeVisible()
+  for (const path of Object.keys(destinationSpecificFiles)) {
+    await expect(configuration.section.getByText(path, { exact: true })).toHaveCount(0)
+  }
   await configuration.import().click()
 
-  await expect(row).toContainText('Imported 5 files')
-  await expect(row).toContainText('skills/deploy/README.md was not sent')
+  await expect(configuration.section).toContainText('Imported 8 files')
+  await expect(configuration.section).toContainText('README.md')
+  await expect(configuration.section).toContainText('secret')
+  await expect(configuration.import()).toHaveCount(0)
+  for (const [path, content] of Object.entries(destinationSpecificFiles)) {
+    const imported = await alice.api.rpc<{ content: string }>('config.read', {
+      harness: 'claude',
+      path,
+    })
+    expect(imported.content).toBe(content)
+  }
+  const settings = await alice.api.rpc<{ content: string; revision: string }>('config.read', {
+    harness: 'claude',
+    path: 'settings.json',
+  })
+  expect(settings.content).toContain('"theme": "dark"')
+  const empty = await alice.api.rpc<{ content: string; size: number }>('config.read', {
+    harness: 'claude',
+    path: 'skills/deploy/notes.md',
+  })
+  expect(empty.content).toBe('')
+  expect(empty.size).toBe(0)
+  const edited = await alice.api.rpc<{ content: string }>('config.write', {
+    harness: 'claude',
+    path: 'settings.json',
+    content: '{"theme":"light"}',
+    revision: settings.revision,
+  })
+  expect(edited.content).toBe('{"theme":"light"}')
 })

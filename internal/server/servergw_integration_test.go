@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -236,6 +237,159 @@ func TestIntegrationServerGateway(t *testing.T) {
 	}
 	verifyNoLeaks(t)
 }
+func TestIntegrationServerGatewayHTTPSConfigImport(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	rt, _, verifyNoLeaks := pickRuntime(t)
+	whois := &stubWhoIs{}
+	whois.set(sshd.WhoIsIdentity{Login: "ada@example.com", NodeID: "node-ada"}, nil)
+	dataDir := filepath.Join(t.TempDir(), "data")
+	srv, err := New(ctx, Config{
+		DataDir:         dataDir,
+		Addr:            "127.0.0.1:0",
+		Runtime:         rt,
+		WhoIs:           whois,
+		TailnetAutoJoin: true,
+	})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	runDone := make(chan error, 1)
+	runCtx, stopServer := context.WithCancel(ctx)
+	defer stopServer()
+	go func() { runDone <- srv.Run(runCtx) }()
+	_ = waitSSHAddr(t, srv)
+
+	gw, err := servergw.New(servergw.Config{SSH: srv.ssh})
+	if err != nil {
+		t.Fatalf("servergw.New: %v", err)
+	}
+	defer func() { _ = gw.Close() }()
+
+	certPEM, keyPEM := selfSignedPair(t, "aether.test")
+	issuing := fakeTailscaled(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/localapi/v0/cert/aether.test" || r.URL.Query().Get("type") != "pair" {
+			http.Error(w, "unexpected certificate request", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(certPEM)
+		_, _ = w.Write(keyPEM)
+	})
+	port := freePort(t)
+	node := reachability.Node{
+		DNSName: "aether.test",
+		Addrs:   []netip.Addr{netip.MustParseAddr("127.0.0.1")},
+	}
+	if err := gw.Start(ctx, servergw.Tailnet{
+		Node: node, Port: port, Certs: reachability.NewTailscale(issuing),
+	}); err != nil {
+		t.Fatalf("gateway.Start: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(certPEM)
+	client := &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs: roots, ServerName: "aether.test", MinVersion: tls.VersionTLS12,
+		},
+	}}
+	base := fmt.Sprintf("https://127.0.0.1:%d", port)
+
+	var adaInfo protocol.ServerInfoResult
+	if status := postJSONClient(t, client, base+"/api/v1/server.info", "", &adaInfo); status != http.StatusOK {
+		t.Fatalf("Ada server.info status = %d", status)
+	}
+	if adaInfo.Member.ID == "" || adaInfo.Member.Role != string(domain.RoleAdmin) {
+		t.Fatalf("Ada server.info member = %+v", adaInfo.Member)
+	}
+
+	const fileBytes = 1 << 20
+	first := bytes.Repeat([]byte("A"), fileBytes)
+	second := bytes.Repeat([]byte("B"), fileBytes)
+	importParams := protocol.ConfigImportParams{
+		Harness: "claude",
+		Files: []protocol.ConfigImportFile{
+			{Path: "settings.json", ContentBase64: base64.StdEncoding.EncodeToString(first), Mode: 0o600},
+			{Path: "nested/state.json", ContentBase64: base64.StdEncoding.EncodeToString(second), Mode: 0o644},
+		},
+	}
+	importBody, err := json.Marshal(importParams)
+	if err != nil {
+		t.Fatalf("marshal config import: %v", err)
+	}
+	var imported protocol.ConfigImportResult
+	if status := postJSONClient(t, client, base+"/api/v1/config.import", string(importBody), &imported); status != http.StatusOK {
+		t.Fatalf("config.import status = %d", status)
+	}
+	if imported.Files != 2 || imported.Bytes != 2*fileBytes || len(imported.Excluded) != 0 {
+		t.Fatalf("config.import result = %+v", imported)
+	}
+
+	home := filepath.Join(dataDir, "homes", adaInfo.Member.ID, ".claude")
+	gotFirst, err := os.ReadFile(filepath.Join(home, "settings.json"))
+	if err != nil {
+		t.Fatalf("read persisted settings: %v", err)
+	}
+	gotSecond, err := os.ReadFile(filepath.Join(home, "nested", "state.json"))
+	if err != nil {
+		t.Fatalf("read persisted nested state: %v", err)
+	}
+	if !bytes.Equal(gotFirst, first) || !bytes.Equal(gotSecond, second) {
+		t.Fatal("persisted config bytes differ from the imported files")
+	}
+
+	quoted := strings.Repeat("\"", 512<<10)
+	writeBody, err := json.Marshal(protocol.ConfigWriteParams{
+		Harness: "claude", Path: "quoted.md", Content: quoted,
+	})
+	if err != nil {
+		t.Fatalf("marshal escaped config: %v", err)
+	}
+	var written protocol.ConfigFileReadResult
+	if status := postJSONClient(t, client, base+"/api/v1/config.write", string(writeBody), &written); status != http.StatusOK {
+		t.Fatalf("escaped config.write status = %d", status)
+	}
+	persistedQuoted, err := os.ReadFile(filepath.Join(home, "quoted.md"))
+	if err != nil || string(persistedQuoted) != quoted {
+		t.Fatalf("escaped config persistence: bytes=%d err=%v", len(persistedQuoted), err)
+	}
+
+	whois.set(sshd.WhoIsIdentity{Login: "bob@example.com", NodeID: "node-bob"}, nil)
+	var bobInfo protocol.ServerInfoResult
+	if status := postJSONClient(t, client, base+"/api/v1/server.info", "", &bobInfo); status != http.StatusOK {
+		t.Fatalf("Bob server.info status = %d", status)
+	}
+	if bobInfo.Member.ID == "" || bobInfo.Member.ID == adaInfo.Member.ID {
+		t.Fatalf("Bob member = %+v, want an isolated member", bobInfo.Member)
+	}
+	var refusal webgate.ErrorBody
+	readParams := `{"harness":"claude","path":"settings.json"}`
+	if status := postJSONClient(t, client, base+"/api/v1/config.read", readParams, &refusal); status != http.StatusNotFound ||
+		refusal.Error == nil || refusal.Error.Code != protocol.CodeNotFound {
+		t.Fatalf("Bob config.read status = %d body = %+v", status, refusal)
+	}
+
+	whois.set(sshd.WhoIsIdentity{Login: "ada@example.com", NodeID: "node-ada"}, nil)
+	var read protocol.ConfigFileReadResult
+	if status := postJSONClient(t, client, base+"/api/v1/config.read", readParams, &read); status != http.StatusOK {
+		t.Fatalf("Ada config.read status = %d", status)
+	}
+	if read.Size != int64(fileBytes) || !read.Truncated || len(read.Content) != fileBytes/2 {
+		t.Fatalf("Ada config.read metadata = size %d truncated %t content length %d", read.Size, read.Truncated, len(read.Content))
+	}
+
+	_ = gw.Close()
+	stopServer()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("server.Run: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+	verifyNoLeaks(t)
+}
 
 func getJSON(t *testing.T, url string, v any) int {
 	t.Helper()
@@ -252,7 +406,17 @@ func getJSON(t *testing.T, url string, v any) int {
 
 func postJSON(t *testing.T, url, body string, v any) int {
 	t.Helper()
-	resp, err := http.Post(url, "application/json", strings.NewReader(body))
+	return postJSONClient(t, http.DefaultClient, url, body, v)
+}
+
+func postJSONClient(t *testing.T, client *http.Client, url, body string, v any) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}

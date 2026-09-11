@@ -7,6 +7,8 @@ const (
 	MethodFilesRead = "files.read"
 	// MethodFilesDiff renders one run file against its recorded base.
 	MethodFilesDiff = "files.diff"
+	// MethodFilesWrite writes one file to a run checkout or workspace base.
+	MethodFilesWrite = "files.write"
 )
 
 // FilesTreeParams addresses a workspace tree, or a run checkout when RunID is
@@ -43,6 +45,22 @@ type FilesReadResult struct {
 	Truncated bool   `json:"truncated"`
 	Binary    bool   `json:"binary"`
 	Size      int64  `json:"size"`
+	// Revision is the SHA-256 of the exact whole file when it is a complete,
+	// valid text read. It is empty for truncated and binary files.
+	Revision string `json:"revision"`
+	// Writable reports whether the authenticated member may save this file.
+	Writable bool `json:"writable"`
+}
+
+// FilesWriteParams addresses one file in a workspace base or run checkout.
+// An empty Revision creates a new file; existing files require the revision
+// returned by files.read.
+type FilesWriteParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	RunID       string `json:"run_id,omitempty"`
+	Path        string `json:"path"`
+	Content     string `json:"content"`
+	Revision    string `json:"revision"`
 }
 
 // FilesDiffParams addresses one file in a run checkout.

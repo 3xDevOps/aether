@@ -6,13 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 // Manager owns the per-member home directories under <data>/homes.
 type Manager struct {
-	root string
+	root  string
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
 }
 
 // New creates a manager rooted at root. The root is created when the first
@@ -21,7 +24,7 @@ func New(root string) (*Manager, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, fmt.Errorf("memberhome: root is required")
 	}
-	return &Manager{root: filepath.Clean(root)}, nil
+	return &Manager{root: filepath.Clean(root), locks: make(map[string]*sync.Mutex)}, nil
 }
 
 // Root returns the manager's root directory.
@@ -35,11 +38,14 @@ func (m *Manager) Path(member domain.MemberID) (string, error) {
 	if err := validateMemberID(string(member)); err != nil {
 		return "", fmt.Errorf("memberhome: member %q: %w", member, err)
 	}
-	home := filepath.Join(m.root, string(member))
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		return "", fmt.Errorf("memberhome: create home %q: %w", home, err)
+	root, err := m.openHome(member)
+	if err != nil {
+		return "", err
 	}
-	return home, nil
+	if err := root.Close(); err != nil {
+		return "", fmt.Errorf("memberhome: close home for %q: %w", member, err)
+	}
+	return filepath.Join(m.root, string(member)), nil
 }
 
 // Remove deletes a member's persistent home. Removing an absent home is a

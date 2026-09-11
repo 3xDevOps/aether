@@ -7,12 +7,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
+
+func fileCheckout(t *testing.T, e *Engine) string {
+	t.Helper()
+	checkout, err := os.MkdirTemp(e.cfg.CheckoutsDir, "files-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return checkout
+}
 
 func TestFilePathsRejectTraversal(t *testing.T) {
 	e := newUnitEngine(t)
@@ -36,7 +44,7 @@ func TestFilePathsRejectTraversal(t *testing.T) {
 func TestReadCheckoutFileRejectsSymlinks(t *testing.T) {
 	e := newUnitEngine(t)
 	ctx := context.Background()
-	checkout := t.TempDir()
+	checkout := fileCheckout(t, e)
 	if err := os.Mkdir(filepath.Join(checkout, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir .git: %v", err)
 	}
@@ -65,13 +73,13 @@ func TestReadCheckoutFileRejectsSymlinks(t *testing.T) {
 func TestReadCheckoutFileRejectsFIFO(t *testing.T) {
 	e := newUnitEngine(t)
 	ctx := context.Background()
-	checkout := t.TempDir()
+	checkout := fileCheckout(t, e)
 	if err := os.Mkdir(filepath.Join(checkout, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir .git: %v", err)
 	}
 	pipe := filepath.Join(checkout, "pipe")
-	if err := syscall.Mkfifo(pipe, 0o600); err != nil {
-		t.Fatalf("Mkfifo: %v", err)
+	if err := makeFIFO(pipe); err != nil {
+		t.Skipf("FIFO is unavailable: %v", err)
 	}
 	result := make(chan error, 1)
 	go func() {
@@ -88,6 +96,25 @@ func TestReadCheckoutFileRejectsFIFO(t *testing.T) {
 	}
 }
 
+func TestReadFileMarksLateNULBinary(t *testing.T) {
+	e := newUnitEngine(t)
+	checkout := fileCheckout(t, e)
+	if err := os.Mkdir(filepath.Join(checkout, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := append([]byte(strings.Repeat("a", 8<<10)), 0)
+	content = append(content, '\n')
+	if err := os.WriteFile(filepath.Join(checkout, "late.bin"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read, err := e.ReadFileMeta(context.Background(), checkout, "", "late.bin", MaxFileBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !read.Binary || read.Writable || read.Revision != "" {
+		t.Fatalf("late NUL metadata = binary %v writable %v revision %q, want read-only binary with no revision", read.Binary, read.Writable, read.Revision)
+	}
+}
 func TestBareFilesUseHeadsRef(t *testing.T) {
 	e := newUnitEngine(t)
 	ctx := context.Background()
@@ -261,6 +288,111 @@ func TestListTreeAndFileDiff(t *testing.T) {
 	if patch.Truncated || !strings.Contains(patch.Text, "diff --git a/file.txt b/file.txt") ||
 		!strings.Contains(patch.Text, "+edited") {
 		t.Fatalf("FileDiff = truncated %v, patch %q", patch.Truncated, patch.Text)
+	}
+}
+
+func TestFilesWriteCheckoutIsAtomicAndRevisionChecked(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := context.Background()
+	repo, err := e.InitWorkspaceRepo(ctx, "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	gitFileTest(t, source, "init", "-q", "-b", "main")
+	gitFileTest(t, source, "config", "user.name", "Files Test")
+	gitFileTest(t, source, "config", "user.email", "files@example.test")
+	if err = os.WriteFile(filepath.Join(source, "run.sh"), []byte("old\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitFileTest(t, source, "add", "run.sh")
+	gitFileTest(t, source, "commit", "-q", "-m", "seed")
+	gitFileTest(t, source, "push", "-q", repo, "main")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "write", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(filepath.Join(checkout, "run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Link(filepath.Join(checkout, "run.sh"), filepath.Join(checkout, "copy.sh")); err != nil {
+		t.Fatal(err)
+	}
+	read, err := e.FilesRead(ctx, "ws1", "run1", "", "run.sh", MaxFileBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Revision == "" {
+		t.Fatal("FilesRead returned no revision for text file")
+	}
+	external := filepath.Join(checkout, ".external-run.sh")
+	if err = os.WriteFile(external, []byte("outside\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Rename(external, filepath.Join(checkout, "run.sh")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.FilesWrite(ctx, "ws1", "run1", "", "run.sh", []byte("lost\n"), read.Revision, domain.GitIdentity{}, nil); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale FilesWrite error = %v, want ErrRevisionConflict", err)
+	}
+	got, err := os.ReadFile(filepath.Join(checkout, "run.sh"))
+	if err != nil || string(got) != "outside\n" {
+		t.Fatalf("stale write changed checkout: %q (%v)", got, err)
+	}
+	current, err := e.FilesRead(ctx, "ws1", "run1", "", "run.sh", MaxFileBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.FilesWrite(ctx, "ws1", "run1", "", "run.sh", []byte("new\n"), current.Revision, domain.GitIdentity{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	copy, err := os.ReadFile(filepath.Join(checkout, "copy.sh"))
+	if err != nil || string(copy) != "old\n" {
+		t.Fatalf("hardlink inode was mutated: %q (%v)", copy, err)
+	}
+	mode, err := os.Stat(filepath.Join(checkout, "run.sh"))
+	if err != nil || mode.Mode().Perm() != 0o755 {
+		t.Fatalf("replacement mode = %v (%v), want 0755", mode.Mode().Perm(), err)
+	}
+}
+
+func TestFilesWriteBasePreservesTreeAndExecutableMode(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := context.Background()
+	repo, err := e.InitWorkspaceRepo(ctx, "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	gitFileTest(t, source, "init", "-q", "-b", "main")
+	gitFileTest(t, source, "config", "user.name", "Files Test")
+	gitFileTest(t, source, "config", "user.email", "files@example.test")
+	for name, mode := range map[string]os.FileMode{"script.sh": 0o755, "keep.txt": 0o644} {
+		if err = os.WriteFile(filepath.Join(source, name), []byte(name+"\n"), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitFileTest(t, source, "add", "-A")
+	gitFileTest(t, source, "commit", "-q", "-m", "seed")
+	gitFileTest(t, source, "push", "-q", repo, "main")
+	read, err := e.FilesRead(ctx, "ws1", "", "main", "script.sh", MaxFileBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.FilesWrite(ctx, "ws1", "", "main", "script.sh", []byte("changed\n"), read.Revision, domain.GitIdentity{Name: "Ada", Email: "ada@example.test"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	script, _, _, err := e.ReadFile(ctx, repo, "main", "script.sh", MaxFileBytes)
+	if err != nil || string(script) != "changed\n" {
+		t.Fatalf("base script = %q (%v)", script, err)
+	}
+	keep, _, _, err := e.ReadFile(ctx, repo, "main", "keep.txt", MaxFileBytes)
+	if err != nil || string(keep) != "keep.txt\n" {
+		t.Fatalf("unrelated base file = %q (%v)", keep, err)
+	}
+	tree, err := e.git(ctx, repo, "ls-tree", "refs/heads/main", "--", "script.sh")
+	if err != nil || !strings.HasPrefix(tree, "100755 blob ") {
+		t.Fatalf("base executable mode = %q (%v), want 100755", tree, err)
 	}
 }
 

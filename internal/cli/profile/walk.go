@@ -33,8 +33,7 @@ const (
 	// write and cannot edit. That one file is dropped and reported; the
 	// rest of the profile still syncs.
 	ExcludeVendoredSecret = "vendored-secret"
-	// ExcludeIgnored is a .aether-profile-ignore match, or one of the
-	// per-harness defaults below.
+	// ExcludeIgnored is a .aether-profile-ignore match, or one of the per-harness defaults in the shared profile policy.
 	ExcludeIgnored = "ignored"
 	// ExcludeSymlink is a symlink pointing outside the profile root.
 	ExcludeSymlink = "symlink"
@@ -51,47 +50,6 @@ const (
 	// nothing can interrupt a blocked read, so it is refused on its mode.
 	ExcludeNotRegular = "not-regular"
 )
-
-// defaultIgnores are the gitignore-style patterns Aether applies to a
-// harness before the user's own .aether-profile-ignore. These are the
-// paths a harness writes as it runs - transcripts, shell snapshots,
-// telemetry, scratch trees - rather than anything the user configured.
-// They are large enough to spend the whole per-snapshot budget, none of
-// it is configuration another machine wants, and some of it is actively
-// hostile to a walk: codex plants a symlink to its own installed binary
-// under tmp/ on every run.
-//
-// They come first, so a user's ignore file overrides them the way
-// gitignore does: a later `!projects/` re-includes what this dropped.
-var defaultIgnores = map[string][]string{
-	"claude": {
-		"projects/", "shell-snapshots/", "statsig/", "todos/",
-		"file-history/", "history.jsonl", "daemon/",
-	},
-	// codex/tmp holds a per-run scratch directory whose apply_patch entry
-	// is a symlink out to the codex binary; sessions/ is codex's own
-	// transcript archive, the same thing claude keeps in projects/.
-	// claude's plugins/ trees are deliberately in neither list: they are
-	// real third-party content a user may want on the server.
-	// vendoredRoots below covers them instead.
-	"codex": {"tmp/", ".tmp/", "sessions/"},
-	// pi keeps its transcript archive in agent/sessions/ and unpacks
-	// extension downloads under agent/tmp/. The rest of its agent
-	// directory is configuration, agent/npm/ included: that one holds the
-	// extension packages the member installed.
-	"pi": {"agent/sessions/", "agent/tmp/"},
-	// omp is a fork of pi with its own runtime output around that layout:
-	// terminal-sessions/ is the scratch tree behind its terminal tool,
-	// history.db the prompt history the CLI rewrites on every prompt,
-	// natives/ a per-version download that dwarfs everything a member
-	// configured, and collab/ another transcript archive. None of it is
-	// configuration.
-	"omp": {
-		"agent/sessions/", "agent/terminal-sessions/", "agent/cache/",
-		"agent/history.db", "agent/history.db-shm", "agent/history.db-wal",
-		"agent/models.db", "natives/", "cache/", "logs/", "run/", "collab/",
-	},
-}
 
 // vendoredRoots are the directories inside a harness profile root that
 // hold plugin packages the harness installed, rather than files the user
@@ -183,7 +141,7 @@ func walkRoot(ctx context.Context, root string, prof harness.Profile, allowed ma
 // rootMatcher compiles the harness defaults followed by the user's own
 // .aether-profile-ignore, so the user's file has the last word.
 func rootMatcher(root, harnessName string) (*ignoreMatcher, error) {
-	lines := append([]string(nil), defaultIgnores[harnessName]...)
+	lines := append([]string(nil), profilesvc.DefaultIgnores(harnessName)...)
 	data, err := os.ReadFile(filepath.Join(root, IgnoreFileName))
 	switch {
 	case err == nil:
@@ -373,8 +331,9 @@ func categoryRank(category string) int {
 // harness, or the user's own file. They are compiled together, so the
 // answer is whether a default pattern names this path at all.
 func ignoreDetail(harnessName, rel string) string {
-	for _, pattern := range defaultIgnores[harnessName] {
-		if strings.HasPrefix(rel+"/", strings.TrimSuffix(pattern, "/")+"/") {
+	for _, pattern := range profilesvc.DefaultIgnores(harnessName) {
+		root := strings.TrimSuffix(pattern, "/")
+		if strings.HasPrefix(rel+"/", root+"/") {
 			return "skipped by default for " + harnessName + " (" + pattern +
 				"); add !" + pattern + " to " + IgnoreFileName + " to include it"
 		}

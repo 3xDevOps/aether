@@ -11,18 +11,29 @@ import (
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
-// MaxRequestBody bounds ordinary API request bodies. Image uploads get a
-// separate cap below because an 8 MiB decoded payload is about 11.2 MiB
-// in base64 plus JSON framing.
+// MaxRequestBody bounds ordinary API request bodies.
 const MaxRequestBody = 1 << 20
 
-const maxTerminalImageRequestBody = 12 << 20
+const (
+	maxTerminalImageRequestBody = 12 << 20
+	// Config import carries up to 20 MiB of decoded files in base64 JSON;
+	// leave room for the encoding and request framing.
+	maxConfigImportRequestBody = 30 << 20
+	// JSON escaping can expand the editor's 512 KiB of text sixfold.
+	maxConfigWriteRequestBody = 4 << 20
+)
 
 func requestBodyLimit(method string) int64 {
-	if method == protocol.MethodTerminalImage {
+	switch method {
+	case protocol.MethodTerminalImage:
 		return maxTerminalImageRequestBody
+	case protocol.MethodConfigImport:
+		return maxConfigImportRequestBody
+	case protocol.MethodFilesWrite, protocol.MethodConfigWrite:
+		return maxConfigWriteRequestBody
+	default:
+		return MaxRequestBody
 	}
-	return MaxRequestBody
 }
 
 // handleAPI serves POST /api/v1/{method}: the path segment is the

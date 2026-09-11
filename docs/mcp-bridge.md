@@ -28,7 +28,7 @@ all: the agent's own status reports (`aether-server report`, below).
 The binary and the directory are the two mounts, and both are Aether-owned
 container paths. `runtime.ValidateMounts` refuses any caller-supplied mount
 that targets or nests under them, which is what guarantees a credential home
-or a synced profile can never shadow either one. They are therefore built
+or member configuration cannot shadow either one. They are therefore built
 from server-constructed paths and appended after the caller's mounts have
 been validated.
 
@@ -136,8 +136,8 @@ claude --dangerously-skip-permissions "<task>" --mcp-config /run/aether/mcp.json
 
 The config is server-written and read-only (0444), and it lives beside the
 socket in `/run/aether`. Nothing is written into the worktree - an
-`.mcp.json` there would show up in the run's diff - and the member's synced
-profile is never modified.
+`.mcp.json` there would show up in the run's diff - and the member's
+configuration home is never modified by this bridge.
 
 A harness with no registration is provisioned exactly like any other run,
 mounts and all; it is simply never told about the bridge, and degrades to
@@ -160,6 +160,16 @@ environment all belong to the CLI the registry ships, and nothing checks
 that an overridden command still is that CLI, so none of them reaches it.
 The overridden harness degrades to notice-only coordination and to the
 stall threshold the same way.
+
+## Other MCP services
+
+This bridge is Aether's run-coordination MCP service only. It is not a
+general-purpose proxy for vendor tools or for MCP services named in a member's
+configuration. A copied local MCP setting still needs its executable or
+service available in the remote runtime image and its own authentication.
+Inside a run, `localhost` means that remote runtime, not the operator's laptop.
+Aether does not install or forward an arbitrary local MCP process.
+
 
 ### What the end-to-end tests cover
 

@@ -1,33 +1,37 @@
-# The local gateway (`aether gui`)
+# Dashboard gateways (`aether gui` and `aether-server --web-port`)
 
-`aether gui` serves the dashboard from the user's own machine
-(`internal/localgw`): the embedded SPA, the `/api/v1` shape, and the
-WebSocket surfaces, all proxied over the machine's SSH connection to the
-linked server. Because the identity is the member's own SSH key rather than a
-token minted somewhere else, the **full control-channel method map** is
-reachable - no allowlist - plus the client-machine verbs under `/local/v1`
-that only a machine with the user's repository and SSH key can offer. The
-security stances are in [security.md](security.md#the-dashboard-gateways); the
-SPA that runs against it is in
-[dashboard-frontend.md](dashboard-frontend.md).
+The embedded dashboard is served through two transports. `aether gui` serves
+it on the user's machine and proxies the shared API and WebSocket surfaces to
+the linked server. `aether-server --web-port` serves the same bundle directly
+over HTTPS on the server's tailnet addresses. Both use `internal/webgate`, so
+routes, framing, timeouts, close reasons, capability checks and the control
+method shapes are the same; only authentication, backend and machine-local
+surfaces differ. The SPA is documented in
+[dashboard-frontend.md](dashboard-frontend.md), and the security stances are
+in [security.md](security.md#the-dashboard-gateways).
+
+`aether gui` uses a token on its loopback listener and an SSH-backed backend.
+The server gateway has no browser token: Tailscale WhoIs identifies the source
+address on every request, and the request is dispatched in-process for that
+member.
 
 ## Which gateway serves what
 
-A server with `web-port` set serves the same dashboard itself over HTTPS on
-its tailnet addresses, identifying each request by Tailscale WhoIs instead of
-a token (`internal/servergw`; how to turn it on and what it needs are in
-[networking.md](networking.md#the-dashboard)). Everything below describes
-both gateways except where this table says otherwise: the routes, framing,
-timeouts and close reasons are one implementation (`internal/webgate`), and
-each gateway only supplies the identity and the transport behind it.
+A server with `web-port` set serves the same dashboard over HTTPS on its
+tailnet addresses, identifying each request by Tailscale WhoIs
+(`internal/servergw`; how to turn it on and what it needs are in
+[networking.md](networking.md#the-dashboard)). Everything below describes both
+gateways except where this table says otherwise: the routes, framing, timeouts
+and close reasons are one implementation (`internal/webgate`), and each
+gateway supplies only the identity and backend behind it.
 
 | Surface | `aether gui` | `aether-server --web-port` |
 | --- | --- | --- |
 | Listener | `127.0.0.1` on an ephemeral or `--port` port, plain HTTP | the host's tailnet addresses, HTTPS with the tailnet certificate |
-| Identity | per-process bearer token, backed by the user's SSH key | Tailscale WhoIs on the request's source address, per request |
+| Identity | per-process bearer token; the SSH backend acts for that linked member | Tailscale WhoIs on the request's source address, per request; no browser token |
 | `/api/v1/*`, `/ws/events`, `/ws/attach`, `/ws/terminal` | yes | yes |
-| `/local/v1/*` and `/ws/envscan` | yes | no - nothing on the server is the caller's own machine |
-| Backend | one SSH connection to the linked server | in-process, running the same handlers an SSH channel runs |
+| `/local/v1/*` | yes | no - those verbs need the caller's machine |
+| Backend | shared webgate over one SSH connection to the linked server | shared webgate in-process, using the same handlers as the SSH transport |
 
 ## Running it
 
@@ -112,60 +116,63 @@ should come back on the new binary.
 
 ## Design
 
-The gateway holds no server code: every read and write is a
-control-channel call proxied over one SSH connection to the linked server,
-through the same `internal/cli` client the terminal commands use. One
-fresh subsystem channel per WebSocket for events, attach, terminal, and sync -
-so the HTTP handlers never know they are riding SSH.
+Both transports use `internal/webgate` for HTTP and WebSocket dispatch. The
+local gateway supplies an SSH-backed backend: reads and writes go through one
+lazy, shared control-channel connection to the linked server, using the same
+handlers as the server-hosted gateway. The server gateway supplies an
+in-process backend for the member identified by Tailscale WhoIs. This keeps
+the API and stream behavior independent of whether the browser is local or on
+the tailnet.
 
-The connection is dialed lazily on first use and shared. When a call fails
-on transport (a server restart, a dropped network) the backend redials
-once and retries once before surfacing `-32004` (unavailable); a failure
-the server itself answered passes through untouched as that
-`protocol.Error`. Streams get the same treatment with a guard: a channel
+For the local backend, when a call fails on transport (a server restart or a
+dropped network), it redials once and retries once before surfacing `-32004`
+(unavailable); a failure the server itself answered passes through untouched as
+that `protocol.Error`. Streams get the same treatment with a guard: a channel
 that fails to open triggers a redial only when a keepalive shows the
-connection is actually gone, because tearing down a healthy connection
-would kill every live stream riding on it.
+connection is actually gone, because tearing down a healthy connection would
+kill every live stream riding on it.
 
-Every `-32004` carries a message prefix that says who has to fix it, and
-both map to HTTP 503 as before. `network unreachable: ` means this
-machine could not even attempt the connection (DNS resolution failed, or
-the kernel reported no route or an interface down), so the user fixes
-their own connectivity. `server unreachable: ` is everything else and is
-the default: a refused connection, a dial timeout, a failed SSH
-handshake, or a wedged call, where the server is the thing to check. The
-split stops at unambiguous cases on purpose, since a refusal or a timeout
-cannot tell a stopped server from a firewall, and a wrong guess sends the
-user to fix the wrong thing. Dial failures are classified inside the
-shared dial path, so the `/ws/events` refusal frame carries the same code
-and prefix as a `POST /api/v1` error.
+Every `-32004` carries a message prefix that says who has to fix it, and both
+map to HTTP 503 as before. `network unreachable: ` means this machine could
+not even attempt the connection (DNS resolution failed, or the kernel
+reported no route or an interface down), so the user fixes their own
+connectivity. `server unreachable: ` is everything else and is the default: a
+refused connection, a dial timeout, a failed SSH handshake, or a wedged call,
+where the server is the thing to check. The split stops at unambiguous cases
+on purpose, since a refusal or a timeout cannot tell a stopped server from a
+firewall, and a wrong guess sends the user to fix the wrong thing. Dial
+failures are classified inside the shared dial path, so the `/ws/events`
+refusal frame carries the same code and prefix as a `POST /api/v1` error.
+
+The server gateway performs the equivalent identity lookup on each request.
+WhoIs failures are refused before dispatch; a tagged node is denied and an
+unavailable identity service is reported as `-32004`.
 
 ## Routes
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/` and any other non-API path | the SPA (fallback to `index.html`) |
-| `POST` | `/api/v1/<rpc.method>` | any control-channel method, proxied over SSH |
-| `GET` | `/api/v1/run/<run_id>/patch` | `run.patch`, proxied |
-| `GET` | `/api/v1/disk` | `server.disk`, proxied |
+| `POST` | `/api/v1/<rpc.method>` | any control-channel method, dispatched through the shared webgate |
+| `GET` | `/api/v1/run/<run_id>/patch` | `run.patch` |
+| `GET` | `/api/v1/disk` | `server.disk` |
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
 | `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
-| `GET` | `/ws/envscan` | environment scan on this machine (WebSocket) |
-| `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
+| `POST` | `/local/v1/<verb>` | client-machine verbs, on `aether gui` only |
 
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
-embedded `web/dist`, without a token - the SPA bundle is not secret and has
-to load before it can present one. Unknown paths fall back to `index.html`
-so client-side routing works on a hard refresh. An `/api/`, `/ws/`, or
-`/local/` path hit with the wrong method is the exception: it answers `405`
-with a JSON error body instead of falling through to the SPA, so a
-wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
-bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` is
-the per-method exception: its HTTP body cap is 12 MiB so base64 plus JSON
-framing can carry an image whose decoded bytes are capped separately at 8 MiB.
+embedded `web/dist`, without authentication - the SPA bundle is not secret
+and has to load before the gateway can authenticate API calls. Unknown paths
+fall back to `index.html` so client-side routing works on a hard refresh. An
+`/api/`, `/ws/`, or `/local/` path hit with the wrong method is the exception:
+it answers `405` with a JSON error body instead of falling through to the SPA,
+so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
+bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
+a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
+separately at 8 MiB. File and configuration exceptions are listed below.
 
 ### `POST /api/v1/<method>`
 
@@ -188,17 +195,17 @@ Status mapping (the code is the authority; the status is a convenience):
 | JSON-RPC code | HTTP |
 | --- | --- |
 | `-32700` parse, `-32600` invalid request, `-32602` invalid params | 400 |
-| unauthenticated (no/expired token) | 401 |
-| `-32001` denied, and a foreign `Origin` header | 403 |
+| local bearer token missing or expired | 401 |
+| `-32001` denied, including a tagged WhoIs node, and a foreign `Origin` header | 403 |
+| `-32004` unavailable, including an unavailable WhoIs identity lookup | 503 |
 | `-32600` invalid request: body not `application/json` | 415 |
 | `-32000` not found | 404 |
 | `-32002` invalid state, `-32003` conflict | 409 |
 | `-32603` internal | 500 |
-| `-32004` unavailable | 503 |
 
 Param and result shapes are the ones in `internal/protocol` (`wire.go` and
 the per-feature files), unchanged by this transport, and every call passes
-the same capability checks the SSH transport applies.
+the same capability and member-authorization checks regardless of transport.
 
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
 same `{"run_id":"..."}` params. For a live run it stops the container and
@@ -210,33 +217,136 @@ audit history.
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","terminal","envscan"],
+{"gateway":"local","methods":["*"],"ws":["events","attach","terminal"],
  "local":["daemon.install","daemon.status","env.harnesses","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
-          "link.status","link.switch","profile.preview","profile.push","pull",
-          "pull.switch","repo.fast-forward","repo.push","repo.sync","sync.start",
-          "sync.status","sync.stop","update.apply","update.check","update.status"],
+          "link.status","link.switch","pull","pull.switch","repo.fast-forward",
+          "repo.push","repo.sync","sync.start","sync.status","sync.stop",
+          "update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
-The server gateway answers the same shape with no `local` field at all, which
-is what the SPA reads to hide Onboarding, Settings, the link chip, the update
-banner and the pull, forward and sync controls:
+The server gateway answers the same shape with no `local` field because it
+cannot run verbs on the browser's machine:
 
 ```json
 {"gateway":"server","methods":["*"],"ws":["events","attach","terminal"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
-`methods` is `["*"]` because both gateways forward every control-channel
+`methods` is `["*"]` because both transports dispatch every control-channel
 method; `ws` lists the WebSocket surfaces served; `local` is the sorted
 `/local/v1` verb list, absent where there are none. A client probes this
-rather than hard-coding what it is talking to; the SPA's `useCapability` seam
-reads it to gate the local-only surfaces.
+descriptor rather than hard-coding its transport. The SPA uses it to hide
+machine-local onboarding, linking, repository and update controls while
+leaving shared server surfaces, including Files and member configuration,
+available through either gateway.
 
-`version` and `commit` are the `aether` build serving this gateway, which is
-the only way the SPA can learn what CLI it is running against - `server.info`
-answers for the server. Both are absent on a gateway that predates them.
+`version` and `commit` are the build serving the gateway, which is the only
+way the SPA can learn what CLI it is running against - `server.info` answers
+for the server. Both are absent on a gateway that predates them.
+
+### Control-channel methods this gateway calls
+
+The two `GET` endpoints above are backed by control-channel methods, as are
+the file reads and the member and workspace writes below. `aether gui`
+proxies these methods over SSH; the server gateway dispatches them in-process.
+Both transports therefore expose the same API shape and authorization checks.
+
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
+| `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+| `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
+| `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
+| `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
+| `files.diff` | `{"run_id":"...","path":"README.md"}` | `{"patch":"...","truncated":false}` |
+| `config.roots` | `{}` | `{"roots":[{"harness":"claude","path":"~/.claude","runtime_ignores":["projects/","shell-snapshots/","statsig/","todos/","file-history/","history.jsonl","daemon/"]}]}` |
+| `config.tree` | `{"harness":"claude","path":"."}` (`path` may be omitted, empty, or `"."` for the root) | `{"entries":[{"name":"settings.json","kind":"file","size":1234},...]}` |
+| `config.read` | `{"harness":"claude","path":"settings.json"}` | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
+| `config.write` | `{"harness":"claude","path":"settings.json","content":"...","revision":"<sha256>"}` (`revision` is empty only for a new file) | the same `FileRead` shape as `config.read`, for the saved bytes |
+| `config.import` | `{"harness":"claude","files":[{"path":"settings.json","content_base64":"...","mode":420}]}` | complete: `{"harness":"claude","files":1,"bytes":12,"excluded":[{"path":"notes.md","reason":"secret","detail":"..."}]}`; an incomplete write after at least one file is committed adds `"error":"...failed relative path...: ..."` and `"imported_paths":["settings.json"]` |
+| `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
+| `terminal.stop` | none | empty result; stops the member environment and its tabs |
+| `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
+| `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
+| `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
+| `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
+| `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
+| `github.probe` | none | `GitHubProbeResult` (`{"status":"ok","version":"2.100.0","minimum":"2.81.0","detail":"gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.7"}`) - the gh in the calling member's environment terminal |
+
+### Files and member configuration
+
+`files.tree` and `files.read` address a workspace's base branch when
+`run_id` is omitted, or a live run checkout when it is present. Complete
+valid UTF-8 text without NUL bytes is returned with an exact SHA-256
+`revision` and may be writable. Binary or truncated content is bounded to a
+read-only response with an empty revision. The file/editor limit is 512 KiB;
+the same limit applies to `files.write` and `config.write`.
+
+`files.write` without `run_id` requires **Push** and creates a one-file commit
+on the workspace base branch; it does not push upstream. With `run_id`, it
+requires **Steer** and changes that run's uncommitted checkout. Existing file
+modes are preserved and new files use `0644`. Run-checkout saves recheck the
+revision immediately before atomic rename under Aether's root lock. Base
+commits compare-and-swap the branch head. Aether's locks do not serialize
+arbitrary live-agent filesystem writers.
+
+`config.roots`, `config.tree`, `config.read`, `config.write`, and
+`config.import` always address the authenticated member's own persistent home.
+They require **Launch**; an administrator cannot select another member with an
+extra request field. `config.write` has the same explicit-save and revision
+rules as `files.write`, while `config.import` installs a one-time directory
+selection into that home.
+All of the member's run containers and environment terminal mount one shared
+read-write persistent HOME. A file edit, configuration import, or manual CLI
+profile operation is therefore visible to already-running processes
+immediately, although a tool may need to reload its configuration.
+
+The browser uses the selected root's `runtime_ignores` metadata before
+reading or uploading any bytes. `runtime_ignores` contains exact,
+case-sensitive root-relative paths and component prefixes; trailing slashes
+are ignored for matching. These lists are per harness, so a runtime file
+ignored for Claude is not implicitly ignored for OMP or a member-defined
+custom harness. Known credential names wherever they occur in a path, and
+every basename ending in `.pem`, remain filtered by the existing
+destination-independent credential policy. The browser keeps raw local file
+handles so it can recompute an import when the destination changes, and
+cannot change destinations during import or after a result exists.
+All remaining bytes are uploaded and server-scanned. Imports allow at most
+2,000 files, 1 MiB per file, and 20 MiB decoded in aggregate. Empty and binary
+regular files are preserved; a browser import sends mode `0644` and cannot
+preserve executable mode or symlinks. Existing remote modes are preserved.
+The server rejects unsafe paths, symlink components, hardlinks, and
+non-regular destinations.
+
+The result's `files` and `bytes` count
+accepted files only; `excluded` reports server-side credential, ignore,
+secret, or safety exclusions. Explicit CLI profile `push`, `status`, and
+`rollback` remain separate manual operations; the dashboard does not invoke
+profile synchronization or watch a local directory.
+
+If an import fails after writing one or more files, the response is still a
+`config.import` result rather than a JSON-RPC failure. Its `files` and `bytes`
+are the exact committed counts, `imported_paths` lists the exact canonical
+paths that remain in the member's shared HOME, and `error` names the failed
+relative path and the underlying error. This is an incomplete import, not a
+successful one: the dashboard warns that copied files remain and lets the user
+inspect **Files** before retrying. The optional `error` and `imported_paths`
+fields are absent from complete results and from failures before any file is
+committed.
+
+If the SSH/RPC call fails without such a result, the outcome is unknown: the
+request may have copied some files before the response was lost, so the
+dashboard says that some files may remain and directs the user to inspect
+**Files** before retrying. Cancellation can prevent the response from being
+delivered; the protocol does not claim a stronger delivery guarantee.
+
+The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
+`files.write` and `config.write` at 4 MiB, and `config.import` at 30 MiB.
+The SSH control-channel line cap is 32 MiB; the decoded import limits above
+remain authoritative.
 
 ### `GET /api/v1/run/<run_id>/patch`
 
@@ -330,28 +440,7 @@ server was not told where the data directory is, or the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
 zero anywhere else).
 
-### Control-channel methods this gateway calls
 
-The two `GET` endpoints above are backed by SSH control-channel methods, as
-are the file reads and the member and workspace writes below. Every read and
-write the dashboard makes is a control-channel method, which is what lets one
-gateway proxy it over SSH and the other dispatch it in-process.
-
-| Method | Params | Result |
-| --- | --- | --- |
-| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
-| `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
-| `files.tree` | `FilesTreeParams` (`{"workspace_id":"...","run_id":"...","path":"src"}`; `run_id` optional) | `FilesTreeResult` - immediate file and directory entries |
-| `files.read` | `FilesReadParams` (`{"workspace_id":"...","run_id":"...","path":"README.md"}`; `run_id` optional) | `FilesReadResult` - read-only content, size, binary, and truncation |
-| `files.diff` | `FilesDiffParams` (`{"run_id":"...","path":"README.md"}`) | `FilesDiffResult` - one file's patch against the run base |
-| `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
-| `terminal.stop` | none | empty result; stops the member environment and its tabs |
-| `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
-| `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
-| `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
-| `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
-| `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
-| `github.probe` | none | `GitHubProbeResult` (`{"status":"ok","version":"2.100.0","minimum":"2.81.0","detail":"gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.7"}`) - the gh in the calling member's environment terminal |
 
 `terminal.image` accepts the original image bytes as strict base64 in
 `content`; the server decodes and validates the bytes again. Only PNG, JPEG,
@@ -451,8 +540,6 @@ authority.
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace's upstream afterwards, omitted when it has none) |
 | `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
-| `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
-| `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422,"skipped":[...]}` |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |
 | `pull.switch` | `{"run_id":"..."}` | `{"branch":"..."}` |
 | `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","state":"pushed"\|"up-to-date"\|"behind"\|"diverged","local_commit":"...","workspace_commit":"...","ahead":0,"behind":0,"output":"..."}` |
@@ -578,85 +665,6 @@ no SSH key is offered and the server requires one, it may create
   reach `ssh`: a passphrase-protected key with no agent still waits on
   ssh's own prompt until the ten minutes are up. Load the key into an agent
   before pushing, fast-forwarding, or syncing from the dashboard.
-- `profile.preview` runs the discovery `aether profile push --agent
-  <harness>` would run and uploads nothing. It reports what a push would
-  carry, grouped into categories a developer recognizes, and everything
-  the guards left behind:
-
-  ```json
-  {"harness":"claude","root":"/home/you/.claude","present":true,
-   "files":42,"bytes":183422,
-   "categories":[{"category":"skills","files":12,"bytes":40201,
-                  "paths":["skills/pdf/SKILL.md"],"truncated":false}],
-   "excluded":[{"path":"notes/key.txt","reason":"secret",
-                "detail":"secret detected (aws-access-token) at 3:9"},
-               {"path":".credentials.json","reason":"credential",
-                "detail":"credential file excluded for claude"}],
-   "excluded_total":2}
-  ```
-
-  Categories, in the order they are reported: `memory` (standing
-  instructions - `CLAUDE.md`, `AGENTS.md`, `memory/`), `skills`,
-  `commands` (`commands/`, and codex's `prompts/`), `settings`, `mcp`,
-  `plugins`, `other`. `paths` is capped at 200 entries per category, with
-  `truncated` set when it was cut; `files` and `bytes` stay exact.
-  `reason` on an exclusion is `credential` (a denylisted basename),
-  `secret` (a content-scanner finding in a file the user wrote),
-  `vendored-secret` (a finding inside a plugin tree the harness installs
-  into - claude's `plugins/cache/` and `plugins/marketplaces/`), `ignored` (an
-  `.aether-profile-ignore` match, or one of the per-harness defaults in
-  [harnesses.md](harnesses.md)), `symlink` (a link out of the profile
-  root, skipped rather than followed - its target is never opened),
-  `not-regular` (a socket, named pipe, or device node, refused on its
-  mode without being opened), `too-large` (over the 1 MiB a push allows
-  for one file), or `over-budget` (the 20 MiB a snapshot holds was
-  already filled).
-- An ignored directory is reported once, as the directory, rather than
-  once per file inside it. `excluded` is capped at 200 entries;
-  `excluded_total` is the exact count.
-- `excluded` lists every `secret` first, then the rest in path order.
-  Those are the entries a caller has to put in front of the user, and
-  ordering them by path would let a profile with a few hundred ignored
-  files push the one file the user has to act on past the cap. It also
-  means a capped list still carries all of them, and so an exact count,
-  unless every entry sent is a `secret`.
-- The snapshot budget is spent by category priority - memory, skills,
-  commands, settings, mcp, plugins, other - not directory order, so the
-  files this feature exists to carry are not crowded out by whatever
-  sorts first.
-- The two size reasons are decided from the file's stat, before it is
-  opened, so an oversized file is never read and never scanned. That is
-  not only a saving: an agent's configuration directory routinely holds
-  hundreds of megabytes of transcripts, and scanning those would make a
-  preview take minutes. The caps are the server's own
-  (`internal/profile`), so the preview offers exactly the files a push
-  can carry.
-- No exclusion refuses a gateway push. Every one of them - both secret reasons,
-  symlink escapes, and both size caps - lets the push succeed carrying
-  what is left, so `excluded` and `excluded_total` are the whole preview
-  and there is no field a caller has to check before offering the import.
-  The two secret reasons differ only in what a caller can offer the user:
-  a `secret` is in a file the user wrote and can edit, a
-  `vendored-secret` is a string in a package the harness installed. Both
-  carry the scanner's rule and location in `detail`.
-- `present:false` - this machine has no profile root for that harness -
-  is a normal answer with zero counts, not an error. A harness name the
-  registry does not know, or one with no profile sync, answers `-32602`.
-- `profile.push` performs the push `aether profile push --agent
-  <harness>` performs, through the gateway's SSH connection: the same
-  discovery, the same per-harness credential denylist, the same secret
-  scanner, and the same content-addressed delta against the server's
-  current head. **It takes no allow-secret parameter.** A scanner finding
-  drops the one file it named and the push runs; carrying a flagged file
-  anyway stays on the CLI, where `--workspace` makes it attributable on a
-  timeline. A missing profile root refuses with `-32002`. `skipped`
-  carries every exclusion the walk made - both secret reasons, the size
-  caps, and symlink escapes - in the same shape `profile.preview` uses:
-  the push succeeded without those files, so this is the only place the
-  caller learns they are not on the server.
-- Both verbs walk the whole profile root, and both stop when the request
-  is cancelled: a client that closes the connection stops the work on
-  this machine, rather than only stopping its own wait.
 - `pull` fetches the run branch, fast-forwards it when it is checked out, and
   otherwise creates or updates the local branch without switching branches.
   `current` reports whether the checkout is on that branch and `dirty` reports
@@ -862,40 +870,35 @@ no SSH key is offered and the server requires one, it may create
 ## WebSockets
 
 Cross-origin WebSocket handshakes are rejected; the SPA is served from the
-same origin as the API. Every handshake carries the token, as
-`Authorization: Bearer` or `?token=` - browsers cannot set headers on a
-WebSocket handshake. There is no token watch closing live sockets, because
-the token cannot be revoked: it lives and dies with the process. A
-handshake whose token is missing or stale is refused with `401` before the
-upgrade, so it never becomes a socket; the dashboard's capabilities probe
-catches that case ahead of the stream.
+same origin as the API. On `aether gui`, each handshake carries the
+per-process token as `Authorization: Bearer` or `?token=` - browsers cannot set
+headers on a WebSocket handshake. A missing or stale local token is refused
+with `401` before the upgrade, so it never becomes a socket; the dashboard's
+capabilities probe catches that case ahead of the stream. The server gateway
+carries no token: WhoIs identifies the request's source address instead.
 
-Both sockets reconnect on a jittered backoff that caps at 30 seconds, and
+Both transports reconnect on a jittered backoff that caps at 30 seconds, and
 reopen immediately - backoff reset - when the browser fires
-`visibilitychange` (visible) or `online`. A phone freezes a background
-tab's timers, so without those two events a tab returning from the pocket
-would sit out the rest of a 30-second wait. A foreground return leaves a
-socket that is still there alone; `online` replaces it whatever state it
-reached, because a network switch leaves even an acknowledged socket half
-open, with the browser still reporting it as connected and no close ever
-arriving on the client side. An attach the gateway refused, one parked on a
-`session ended` close, and a run still waiting for its PTY session are not
-reopened by either event.
+`visibilitychange` (visible) or `online`. A phone freezes a background tab's
+timers, so without those two events a tab returning from the pocket would sit
+out the rest of a 30-second wait. A foreground return leaves a socket that is
+still there alone; `online` replaces it whatever state it reached, because a
+network switch leaves even an acknowledged socket half open, with the browser
+still reporting it as connected and no close ever arriving on the client side.
+An attach the gateway refused, one parked on a `session ended` close, and a
+run still waiting for its PTY session are not reopened by either event.
 
-On the server gateway the handshake carries nothing; WhoIs identifies it
-like any other request.
-
-Every live socket - `events`, `attach`, `terminal`, and `envscan` - is pinged
-by the server every **30 seconds** and closed when the pong does not arrive
-within **10**. A client that changed networks or went to sleep leaves a
-half-open connection that reads as live on both ends; the ping is what
-releases the PTY client it was holding, whose geometry clamps every other
-viewer. The SPA reconnects on its normal path.
+Every live socket - `events`, `attach`, and `terminal` - is pinged by the
+server every **30 seconds** and closed when the pong does not arrive within
+**10**. A client that changed networks or went to sleep leaves a half-open
+connection that reads as live on both ends; the ping is what releases the PTY
+client it was holding, whose geometry clamps every other viewer. The SPA
+reconnects on its normal path.
 
 ### `GET /ws/events`
 
-Same subscription semantics as the SSH events subsystem, so a client that
-lost its socket resumes without gaps.
+Same subscription semantics as the shared event-stream subsystem, so a client
+that lost its socket resumes without gaps.
 
 1. Client sends one **text** frame: a `SubscribeRequest`. The header must
    arrive within 10 seconds or the socket is closed; frames sent after it
@@ -917,12 +920,12 @@ lost its socket resumes without gaps.
    ```
 
 Reconnect contract: track the highest `seq` you have seen and resubscribe
-with `"replay":true,"after_seq":<last seq>`. When the SSH event stream ends
-for any reason - a dropped connection, a server restart, or a per-client
-buffer overflow - the socket closes with code **1012** (service restart),
-reason `event stream ended; resubscribe with after_seq`. That close is the
-signal to resubscribe from your last `seq`, not an error to surface; the
-replay recovers anything dropped.
+with `"replay":true,"after_seq":<last seq>`. When the event stream ends for any
+reason - a dropped connection, a server restart, or a per-client buffer
+overflow - the socket closes with code **1012** (service restart), reason
+`event stream ended; resubscribe with after_seq`. That close is the signal to
+resubscribe from your last `seq`, not an error to surface; the replay recovers
+anything dropped.
 
 ### `GET /ws/attach/<run_id>`
 
@@ -1051,66 +1054,3 @@ time, and active tabs; `terminal.stop` stops the container and deletes its tab
 sessions while preserving the member home.
 
 
-### `GET /ws/envscan`
-
-Runs the onboarding **profile** scan on this machine. The chosen setup-capable
-coding agent runs headless and recommends which local agent configurations are
-worth importing into Aether. Every frame is JSON text. Before the agent runs,
-the gateway widens its `PATH` from your login shell the way `env.harnesses`
-does.
-
-1. The client sends one **text** start frame within 10 seconds. `mode` must be
-   `profile`; `harness` names the setup-capable agent to run. `repo_path` is
-   optional. When present, it must name a Git repository; the agent runs from
-   that directory, never writes it, and the scan fails if its Git status
-   changes:
-
-   ```json
-   {"harness":"claude","mode":"profile"}
-   {"harness":"claude","mode":"profile","repo_path":"/path/to/clone"}
-   ```
-
-   The gateway answers an unsupported mode with one `error` frame and a
-   **1008** close. A bad `repo_path` answers one `error` frame naming the
-   problem, then closes with **1000**.
-
-2. Server streams progress frames while the agent runs:
-
-   ```json
-   {"type":"status","status":"running"}
-   {"type":"output","line":"one raw line of agent output"}
-   ```
-
-   Statuses arrive in order: `detecting`, `running`, `validating`, and
-   `retrying` when the agent's output failed validation and the one automatic
-   retry starts.
-
-3. Exactly one terminal frame ends the scan, then the socket closes with
-   **1000**. Success carries a recommendation with one entry per harness the
-   agent was shown:
-
-   ```json
-   {"type":"result","recommendation":{"harnesses":[
-     {"harness":"claude","import":true,"categories":["skills","commands"],
-      "reason":"..."},
-     {"harness":"codex","import":false,"categories":[],"reason":"..."}]}}
-   ```
-
-   The recommendation is a proposal, never an action. The user edits and
-   approves it before importing with a separate `profile.push` call per
-   harness. The agent sees names, paths, category counts, and sizes only:
-   file contents, credential paths, and anything the denylist or secret
-   scanner flagged never reach the prompt. A machine with no agent
-   configuration answers one `error` frame:
-   `no agent configuration found on this machine; nothing to import`.
-
-   Failure carries the reason and the last agent output for diagnosis:
-
-   ```json
-   {"type":"error","detail":"the scan timed out after 10m0s","output_tail":"..."}
-   ```
-
-One scan runs at a time per gateway. A second start frame answers an `error`
-frame whose `detail` says a scan is already running, then closes with **1008**.
-Closing the socket cancels the scan and kills the agent process; its scratch
-directory is removed in every outcome.

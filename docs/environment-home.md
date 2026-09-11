@@ -13,7 +13,7 @@ The home is the member's durable environment:
 
 - Executables installed in `~/.local/bin`
 - Vendor login state and other files written by the agent
-- Profile files synced with `aether profile push`
+- Configuration imported once from the browser or edited in **Files**
 - The GitHub login written by `gh auth login`, in `~/.config/gh/hosts.yml`
 - The commit signing key, `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`
 - `~/.gitconfig`, which carries the git identity, gh's credential helper, and
@@ -25,12 +25,13 @@ terminal turns that layer into your member image so later runs get it; see
 
 ## Setting up an agent
 
-The dashboard and CLI list both the agents Aether ships and the ones members
-define. The launch form and the onboarding wizard's First run step only offer
-agents whose executable is installed in the selected account's `~/.local/bin`,
-and with none installed they say so and offer **Set up an agent** rather than
-a launch the server would refuse; the Agents page still lists uninstalled
-shipped agents so you can set them up.
+The local dashboard (`aether gui`) and CLI list both the agents Aether ships
+and the ones members define. Its launch form and onboarding wizard's First run
+step only offer agents whose executable is installed in the selected account's
+`~/.local/bin`, and with none installed they say so and offer **Set up an
+agent** rather than a launch the server would refuse; the Agents page still
+lists uninstalled shipped agents so you can set them up. The server-hosted
+dashboard has no onboarding wizard.
 
 Discovery follows relative symlinks and absolute links under `/root` or
 `/home/aether` within that account's home. Claude's native installer uses an
@@ -58,9 +59,11 @@ The terminal command ships in this release series.
 
 ## Connect GitHub
 
-Connect GitHub once and every later run of yours can push branches to the
+Connect GitHub once and every run using that account can push branches to the
 workspace's upstream repository, open pull requests, and sign its commits.
-Both halves happen in the member home, so no run needs its own credentials.
+Because the home is shared read-write, active runs can see the files too after
+their agent reloads. Both halves happen in the member home, so no run needs
+its own credentials.
 
 The login runs in your environment terminal, so that container needs
 `gh` 2.81.0 or newer - the release that added `gh auth status --json`,
@@ -235,11 +238,55 @@ own gh take over, or to replace it with 2.81.0 or newer:
 rm ~/.local/bin/gh
 ```
 
-## Profile sync
+## Importing and editing configuration
 
-Profile sync copies the declared profile files from a member's laptop into the
-member home. Credential files are excluded by the harness denylist and content
-scan. A profile push affects later containers, not one already running.
+In the local dashboard (`aether gui`), choose one local directory with the
+browser's directory picker and explicitly import it once. The server-hosted
+dashboard cannot read a directory on your laptop; use `aether gui` for this
+step. The picker compares the selected directory basename with the roots in
+`config.roots`: a known unique basename is selected automatically, while an
+unknown or ambiguous basename requires an explicit destination. The browser
+waits for that metadata and destination before previewing or reading bytes.
+Changing the destination clears the old preview and re-reads the retained
+local file handles with that destination's policy; stale reads are discarded.
+There is no directory watcher and no AI-generated inventory.
+
+Known credential names in any path component and `*.pem` files are always
+skipped locally. Runtime/history paths come from the selected root's
+`runtime_ignores` metadata and are skipped with exact, case-sensitive
+root-relative component-prefix matching. Remaining bytes are uploaded and
+scanned by the server, so secret content is not guaranteed to stay on the
+browser machine. Empty files and arbitrary binary assets are preserved. The
+limits are **1 MiB per file**, **20 MiB decoded total**, and **2,000 files**.
+New browser-imported files use mode `0644`; existing files retain their current
+modes, including restrictive server-side umask modes. Executable mode and
+symlinks cannot be represented by the browser. Server-side validation rejects
+unsafe paths, symlink components, hardlinks, and nonregular files, while
+preserving directory and staged-file ownership.
+
+The import writes the authenticated member's own persistent home. Because that
+home is mounted read-write in the environment terminal and in every run using
+the account, imported or edited files are visible immediately, including to
+active runs; the agent may need to reload. An account share intentionally gives
+another member's run the same home, not an isolated per-run profile. A snapshot
+pin is audit metadata, not a private writable copy, and changing configuration
+does not rebuild an installed-agent image.
+
+Use **Files** to browse your configuration beside workspace base and live-run
+files. Configuration edits are full UTF-8 text up to **512 KiB**; binary and
+truncated files are read-only. New configuration files accept nested relative
+paths and refuse to overwrite an existing file. Save explicitly with **Save** or
+Ctrl/Cmd-S. Dirty tabs remain in memory across routes, and the browser warns
+before unloading them. There is no autosave or force-save. A failed or stale
+save keeps the draft; **Reload from server** deliberately discards it.
+All `config.*` methods require `Launch` and target only the authenticated
+member's own home; there is no admin/member selector.
+
+For the separate workspace explorer, base-branch saves are **Commit to
+<branch>**, creating one file commit without pushing upstream; live-run saves
+modify the uncommitted checkout. Base writes require **Push**, and run writes
+require **Steer**. The [Files protocol](local-gateway.md#files-and-member-configuration)
+defines revision and concurrency rules.
 
 ## Migration
 

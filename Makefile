@@ -1,6 +1,6 @@
 # Aether build and release automation.
 #
-# Requires GNU make and Go 1.25+. Release cross-compilation needs nothing
+# Requires GNU make and Go 1.26+. Release cross-compilation needs nothing
 # beyond the Go toolchain (pure Go, CGO_ENABLED=0 throughout).
 
 MODULE  := github.com/3xDevOps/Aether

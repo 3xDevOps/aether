@@ -63,10 +63,18 @@ type runInfo struct {
 type Engine struct {
 	cfg Config
 
+	// checkoutsRoot pins the configured checkout parent. Individual run
+	// directories are acquired from it with rootfs.OpenRoot so an attacker
+	// cannot swap a checkout's parent between validation and use.
+	checkoutsRoot *os.Root
+
 	mu       sync.Mutex
 	watches  map[domain.RunID]*diffWatch
 	registry map[domain.RunID]runInfo
 	closed   bool
+	// fileWriteMu serializes read/compare/replace and bare ref CAS so two
+	// browser saves cannot overwrite one another within this engine.
+	fileWriteMu sync.Mutex
 }
 
 // New validates cfg, applies defaults, and creates the repos and checkouts
@@ -92,10 +100,15 @@ func New(cfg Config) (*Engine, error) {
 			return nil, fmt.Errorf("gitengine: create %s: %w", dir, err)
 		}
 	}
+	checkoutsRoot, err := os.OpenRoot(cfg.CheckoutsDir)
+	if err != nil {
+		return nil, fmt.Errorf("gitengine: open checkouts root: %w", err)
+	}
 	return &Engine{
-		cfg:      cfg,
-		watches:  make(map[domain.RunID]*diffWatch),
-		registry: make(map[domain.RunID]runInfo),
+		cfg:           cfg,
+		checkoutsRoot: checkoutsRoot,
+		watches:       make(map[domain.RunID]*diffWatch),
+		registry:      make(map[domain.RunID]runInfo),
 	}, nil
 }
 
@@ -115,6 +128,9 @@ func (e *Engine) Close() error {
 	e.mu.Unlock()
 	for _, w := range watches {
 		w.stop()
+	}
+	if e.checkoutsRoot != nil {
+		return e.checkoutsRoot.Close()
 	}
 	return nil
 }
@@ -263,14 +279,18 @@ func (e *Engine) existingCheckoutPath(run domain.RunID) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if fi, err := os.Stat(path); err != nil || !fi.IsDir() {
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("%w: %s", ErrCheckoutNotFound, run)
 	}
 	return path, nil
 }
-
 func isBareRepo(path string) bool {
-	fi, err := os.Stat(filepath.Join(path, "HEAD"))
+	root, err := os.Lstat(path)
+	if err != nil || !root.IsDir() || root.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	fi, err := os.Lstat(filepath.Join(path, "HEAD"))
 	return err == nil && fi.Mode().IsRegular()
 }
 

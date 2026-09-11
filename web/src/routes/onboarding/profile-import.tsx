@@ -1,311 +1,407 @@
-// Part B of the onboarding Agents step: bringing this machine's agent
-// configuration - skills, commands, standing instructions, settings, MCP
-// servers, plugins - to the server, one harness at a time. Every harness
-// is previewed first (profile.preview uploads nothing), the preview's
-// exclusions are shown with the reason the guard gave, and only a checked
-// row is pushed. Nothing here refuses a push: a scanner finding drops the
-// one file it caught and the rest of the profile still imports. A finding
-// in a file the user wrote says so on the row rather than only inside the
-// expander, because that file is theirs to fix and the --allow-secret
-// override stays on the CLI. A finding inside content a harness installed
-// from a marketplace is called out as third-party rather than left to
-// read as the user's own. The agent path (a `profile` scan) only proposes
-// a checklist; the push is still the user's click.
+// Part B of the onboarding Agents step: an explicit, one-time import of a
+// configuration directory. The browser reads the chosen directory; the
+// server remains responsible for validation and secret scanning. Nothing here
+// watches the local directory or depends on a local gateway capability.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { friendly, formatBytes, message } from '@/lib/format'
+import { type ChangeEvent, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
-import { ApiError, type Api, type EnvScanSession } from '@/lib/api'
-import { shellPath } from '@/lib/shell'
+import type { Api } from '@/lib/api'
+import { friendly, formatBytes, message } from '@/lib/format'
 import type {
-  EnvScanStatus,
-  HarnessStatus,
-  ProfileExclusion,
-  ProfilePreview,
-  ProfilePreviewCategory,
-  ProfilePushResult,
-  ProfileStatus,
-  Workspace,
+  ConfigExclusion,
+  ConfigFile,
+  ConfigImportResult,
+  ConfigRoot,
 } from '@/lib/types'
+import { useStore } from '@/store'
 
-const pane =
-  'max-h-64 min-w-0 overflow-x-auto overflow-y-auto border-t px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
+export const MAX_IMPORT_FILES = 2000
+export const MAX_IMPORT_FILE_BYTES = 1024 * 1024
+export const MAX_IMPORT_TOTAL_BYTES = 20 * 1024 * 1024
 
-/** One plain sentence per coarse scan status, in this step's terms. */
-const statusLine: Record<EnvScanStatus, string> = {
-  detecting: 'Getting ready...',
-  running: 'Reading the file lists on this machine...',
-  validating: 'Checking what the agent proposed...',
-  retrying: 'Fixing a problem with the proposal and trying once more...',
+const credentialNames: Record<string, true> = {
+  '.credentials.json': true,
+  'credentials.json': true,
+  credentials: true,
+  '.claude.json': true,
+  'auth.json': true,
+  keychain: true,
+  'token.json': true,
+  'tokens.json': true,
+  'oauth.json': true,
+  'agent.db': true,
+  'agent.db-wal': true,
+  'agent.db-shm': true,
 }
 
-/** Singular and plural for each category the preview reports. */
-const categoryWords: Record<string, [string, string]> = {
-  memory: ['memory file', 'memory files'],
-  skills: ['skill', 'skills'],
-  commands: ['command', 'commands'],
-  settings: ['settings file', 'settings files'],
-  mcp: ['MCP file', 'MCP files'],
-  plugins: ['plugin file', 'plugin files'],
-  other: ['other file', 'other files'],
+interface PathParts {
+  root: string
+  path: string
+  valid: boolean
 }
 
-function countPhrase(c: ProfilePreviewCategory): string {
-  const words = categoryWords[c.category]
-  if (!words) return `${c.files} ${c.category}`
-  return `${c.files} ${c.files === 1 ? words[0] : words[1]}`
+interface LocalExclusion extends ConfigExclusion {
+  detail: string
 }
 
-/** "12 skills, 4 commands, 1 memory file - 179 KB", in report order. */
-export function previewSummary(preview: ProfilePreview): string {
-  const parts = (preview.categories ?? [])
-    .filter((c) => c.files > 0)
-    .map(countPhrase)
-  const counted = parts.length > 0 ? parts.join(', ') : `${preview.files} files`
-  return `${counted} - ${formatBytes(preview.bytes)}`
+interface Selection {
+  basename: string
+  files: ConfigFile[]
+  bytes: number
+  excluded: LocalExclusion[]
 }
 
-/** How many paths a callout names before it defers to the expander. */
-const maxNamed = 5
-
-/** Scanner findings in files the member wrote. These are theirs to fix,
- * so the row names each one rather than leaving it to the expander. */
-function ownFindings(preview: ProfilePreview): {
-  entries: ProfileExclusion[]
-  atLeast: boolean
-} {
-  const excluded = preview.excluded ?? []
-  const entries = excluded.filter((e) => e.reason === 'secret')
-  return {
-    entries,
-    // The gateway sorts these findings ahead of every other exclusion
-    // before it caps the list, so the cap can only reach them once they
-    // fill the whole list themselves. Any other capped list still carries
-    // every one of them, and the count is exact.
-    atLeast:
-      entries.length === excluded.length &&
-      (preview.excluded_total ?? excluded.length) > excluded.length,
+function relativePath(file: File): PathParts {
+  const candidate =
+    (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
+    file.name
+  const normalized = candidate.replaceAll('\\', '/')
+  const parts = normalized.split('/')
+  if (parts.length < 2 || parts.some((part) => part === '' || part === '.' || part === '..')) {
+    return { root: '', path: '', valid: false }
   }
+  const root = parts.shift() ?? ''
+  const path = parts.join('/')
+  if (!root || !path || path.includes('\0')) {
+    return { root: '', path: '', valid: false }
+  }
+  return { root, path, valid: true }
 }
 
-/** Scanner findings inside the plugin trees the harness installs into.
- * They read as the user's own secrets in a flat exclusion list, so the
- * row names where they came from instead of the files. */
-function vendoredFindings(preview: ProfilePreview): {
-  count: number
-  atLeast: boolean
-} {
-  const excluded = preview.excluded ?? []
-  return {
-    count: excluded.filter((e) => e.reason === 'vendored-secret').length,
-    atLeast: (preview.excluded_total ?? excluded.length) > excluded.length,
+function rootName(path: string): string {
+  const normalized = path.replaceAll('\\', '/').replace(/\/+$/, '')
+  const slash = normalized.lastIndexOf('/')
+  return slash < 0 ? normalized : normalized.slice(slash + 1)
+}
+
+function isCredential(path: string): boolean {
+  const parts = path.split('/').map((part) => part.toLowerCase())
+  return parts.some((part) => credentialNames[part] === true || part.endsWith('.pem'))
+}
+
+function isRuntime(path: string, runtimeIgnores: string[]): boolean {
+  return runtimeIgnores.some((entry) => {
+    const ignored = entry.replace(/\/+$/, '')
+    return ignored !== '' && (path === ignored || path.startsWith(`${ignored}/`))
+  })
+}
+
+function readBytes(file: File): Promise<ArrayBuffer> {
+  if (typeof file.arrayBuffer === 'function') return file.arrayBuffer()
+  const { promise, resolve, reject } = Promise.withResolvers<ArrayBuffer>()
+  const reader = new FileReader()
+  reader.onload = () => {
+    if (reader.result instanceof ArrayBuffer) resolve(reader.result)
+    else reject(new Error('The selected file did not return bytes'))
   }
+  reader.onerror = () =>
+    reject(reader.error ?? new Error('Could not read the selected file'))
+  reader.readAsArrayBuffer(file)
+  return promise
+}
+
+function base64(bytes: ArrayBuffer): string {
+  const values = new Uint8Array(bytes)
+  let binary = ''
+  for (let offset = 0; offset < values.length; offset += 0x8000) {
+    binary += String.fromCharCode(...values.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
+}
+
+function exclusion(path: string, reason: string, detail: string): LocalExclusion {
+  return { path, reason, detail }
 }
 
 /**
- * Whether a preview failure means "this harness does not sync a profile"
- * rather than "something went wrong". The gateway answers -32602 for a
- * harness name the registry does not know or that has no profile root;
- * every other failure is real and belongs on the screen.
+ * Reads only files that fit the import limits and builds the byte-preserving
+ * payload sent to config.import. It deliberately does not decode text: an
+ * empty file stays empty and arbitrary bytes stay arbitrary bytes. Callers
+ * should discard the result when their selection generation is stale.
  */
-function notSyncable(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 400
+export async function prepareDirectoryImport(
+  selected: File[] | FileList,
+  root: ConfigRoot,
+  generationIsCurrent: () => boolean = () => true,
+): Promise<Selection | null> {
+  const files = Array.from(selected)
+  if (files.length === 0) return null
+  const first = relativePath(files[0])
+  if (!first.valid) return null
+  const basename = first.root
+  const excluded: LocalExclusion[] = []
+  const payload: ConfigFile[] = []
+  const paths = new Set<string>()
+  let bytes = 0
+
+  for (const file of files) {
+    if (!generationIsCurrent()) return null
+    const parts = relativePath(file)
+    const displayPath = parts.valid ? parts.path : file.name
+    if (!parts.valid || parts.root !== basename) {
+      excluded.push(
+        exclusion(
+          displayPath,
+          'invalid-path',
+          'path is not a file below the selected directory',
+        ),
+      )
+      continue
+    }
+    if (paths.has(parts.path)) {
+      excluded.push(exclusion(parts.path, 'duplicate', 'duplicate path selected'))
+      continue
+    }
+    paths.add(parts.path)
+    if (isCredential(parts.path)) {
+      excluded.push(
+        exclusion(parts.path, 'credential', 'credential file excluded before upload'),
+      )
+      continue
+    }
+    if (isRuntime(parts.path, root.runtime_ignores)) {
+      excluded.push(
+        exclusion(parts.path, 'runtime', 'runtime history excluded before upload'),
+      )
+      continue
+    }
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      excluded.push(
+        exclusion(
+          parts.path,
+          'too-large',
+          `file is larger than ${formatBytes(MAX_IMPORT_FILE_BYTES)} and was not read`,
+        ),
+      )
+      continue
+    }
+    if (payload.length >= MAX_IMPORT_FILES) {
+      excluded.push(
+        exclusion(
+          parts.path,
+          'too-many',
+          `the import is limited to ${MAX_IMPORT_FILES} files`,
+        ),
+      )
+      continue
+    }
+    if (bytes + file.size > MAX_IMPORT_TOTAL_BYTES) {
+      excluded.push(
+        exclusion(
+          parts.path,
+          'over-budget',
+          `the import is limited to ${formatBytes(MAX_IMPORT_TOTAL_BYTES)}`,
+        ),
+      )
+      continue
+    }
+
+    const content = await readBytes(file)
+    if (!generationIsCurrent()) return null
+    // A file can change while the chooser is open. Do not retain a read that
+    // crossed either bound even if its File.size was small when selected.
+    if (content.byteLength > MAX_IMPORT_FILE_BYTES) {
+      excluded.push(
+        exclusion(
+          parts.path,
+          'too-large',
+          `file is larger than ${formatBytes(MAX_IMPORT_FILE_BYTES)} and was not uploaded`,
+        ),
+      )
+      continue
+    }
+    if (bytes + content.byteLength > MAX_IMPORT_TOTAL_BYTES) {
+      excluded.push(
+        exclusion(
+          parts.path,
+          'over-budget',
+          `the import is limited to ${formatBytes(MAX_IMPORT_TOTAL_BYTES)}`,
+        ),
+      )
+      continue
+    }
+    payload.push({ path: parts.path, content_base64: base64(content), mode: 0o644 })
+    bytes += content.byteLength
+  }
+
+  return { basename, files: payload, bytes, excluded }
 }
 
-type ScanPhase =
-  | { name: 'idle' }
-  | { name: 'scanning'; status: EnvScanStatus }
-  | { name: 'failed'; detail: string; outputTail?: string }
+function ExclusionList({ entries, label }: { entries: ConfigExclusion[]; label: string }) {
+  if (entries.length === 0) return null
+  const shown = entries.slice(0, 50)
+  return (
+    <div className="space-y-2 border-t border-border/70 pt-2">
+      <p className="text-sm font-medium">{label}: {entries.length}</p>
+      <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
+        {shown.map((entry, index) => (
+          <li key={`${entry.path}-${index}`}>
+            <span className="font-mono">{entry.path}</span>
+            <span className="text-muted-foreground">
+              {' '}— {entry.detail ? `${entry.reason}: ${entry.detail}` : entry.reason}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {entries.length > shown.length && (
+        <p className="text-xs text-muted-foreground">
+          {entries.length - shown.length} more exclusions are not shown.
+        </p>
+      )}
+    </div>
+  )
+}
 
-export function ProfileImport({
-  client,
-  harnesses,
-  candidates,
-  served,
-  repoPath,
-  workspace,
-}: {
-  client: Api
-  /** The setup-capable harnesses env.harnesses reported. Only these can
-   * run the scan; profile sync itself covers more of them. */
-  harnesses: HarnessStatus[]
-  /** Every harness name worth previewing. Wider than `harnesses`:
-   * opencode syncs a profile from ~/.local/share/opencode but is not
-   * setup-capable, so it would otherwise never be offered. */
-  candidates: string[]
-  /** Whether this gateway serves profile.preview and profile.push. An
-   * older one serves neither, and saying so beats reporting an empty
-   * machine. */
-  served: boolean
-  /** The linked repository folder, passed to a profile scan when known. */
-  repoPath?: string
-  /** The workspace the wizard settled on; only named in the CLI fallback
-   * command, which needs it for the --allow-secret audit trail. */
-  workspace: Workspace | null
-}) {
-  const [previews, setPreviews] = useState<Record<string, ProfilePreview>>({})
-  const [statuses, setStatuses] = useState<Record<string, ProfileStatus>>({})
-  // Which harnesses have answered a preview, and which one is being
-  // walked right now ('' when none is).
-  const [previewed, setPreviewed] = useState<string[]>([])
-  const [looking, setLooking] = useState('')
-  const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({})
-  const [checked, setChecked] = useState<Record<string, boolean>>({})
-  const [results, setResults] = useState<Record<string, ProfilePushResult>>({})
-  const [failures, setFailures] = useState<Record<string, string>>({})
-  const [reasons, setReasons] = useState<Record<string, string>>({})
-  const [suggested, setSuggested] = useState<Record<string, string[]>>({})
-  const [busy, setBusy] = useState(false)
-  const [phase, setPhase] = useState<ScanPhase>({ name: 'idle' })
-  const [lines, setLines] = useState<string[]>([])
-  const session = useRef<EnvScanSession | null>(null)
+export function ProfileImport({ client }: { client: Api }) {
+  const navigate = useStore((state) => state.navigate)
+  const [roots, setRoots] = useState<ConfigRoot[] | null>(null)
+  const [rootsError, setRootsError] = useState<string | null>(null)
+  const [rawFiles, setRawFiles] = useState<File[] | null>(null)
+  const [selection, setSelection] = useState<Selection | null>(null)
+  const [selectedHarness, setSelectedHarness] = useState('')
+  const [reading, setReading] = useState(false)
+  const [selectionError, setSelectionError] = useState<string | null>(null)
+  const [result, setResult] = useState<ConfigImportResult | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const importing = useStore((state) => state.onboardingImportPending)
+  const picker = useRef<HTMLInputElement | null>(null)
+  const generation = useRef(0)
 
-  // A preview walks and secret-scans a whole profile root. That is not
-  // free - an agent's configuration directory routinely holds hundreds of
-  // megabytes of transcripts - so it never runs on mount: the user asks
-  // for it, one harness at a time, and can stop it.
-  const scanning = useRef<AbortController | null>(null)
-
-  const cancelPreviews = useCallback(() => {
-    scanning.current?.abort()
-    scanning.current = null
-    setLooking('')
-  }, [])
-
-  // Aborting on unmount stops the walk on the gateway, not just this
-  // component's interest in it.
-  useEffect(() => () => scanning.current?.abort(), [])
-
-  const runPreviews = useCallback(async () => {
-    if (scanning.current) return
-    const controller = new AbortController()
-    scanning.current = controller
-    setPreviewErrors({})
-    // One at a time: several concurrent walks of the same home directory
-    // are slower than the same work in sequence, and the per-harness
-    // label would be a lie.
-    for (const name of candidates) {
-      if (controller.signal.aborted) break
-      setLooking(name)
-      try {
-        const preview = await client.localProfilePreview(name, controller.signal)
-        if (controller.signal.aborted) break
-        setPreviews((prev) => ({ ...prev, [name]: preview }))
-        setPreviewed((prev) => (prev.includes(name) ? prev : [...prev, name]))
-        if (!preview.present) continue
-        // A snapshot on the server means this member already imported
-        // this harness; the row says so rather than redoing it.
-        try {
-          const status = await client.profileStatus(name)
-          setStatuses((prev) => ({ ...prev, [name]: status }))
-        } catch {
-          // The row simply does not claim a previous import. Nothing the
-          // user has to act on, and the preview itself stands.
-        }
-      } catch (err) {
-        if (controller.signal.aborted) break
-        setPreviewed((prev) => (prev.includes(name) ? prev : [...prev, name]))
-        // A harness the registry has no profile sync for refuses with
-        // -32602. That is the one answer that means "not something this
-        // machine can import" rather than "something went wrong", so it
-        // is the only one swallowed; everything else is the user's to
-        // see, on that harness's own row.
-        if (!notSyncable(err)) {
-          setPreviewErrors((prev) => ({ ...prev, [name]: message(err) }))
-        }
-      }
-    }
-    if (scanning.current === controller) {
-      scanning.current = null
-      setLooking('')
-    }
-  }, [client, candidates])
-
-  // Leaving the step closes the socket, which cancels the scan and its
-  // process on the gateway.
-  useEffect(() => () => session.current?.close(), [])
-
-  const present = candidates
-    .map((name) => previews[name])
-    .filter((p): p is ProfilePreview => p !== undefined && p.present)
-
-  const looked = previewed.length >= candidates.length && looking === ''
-
-  const selected = present
-    .filter((p) => checked[p.harness])
-    .map((p) => p.harness)
-
-  const importSelected = useCallback(async () => {
-    setBusy(true)
-    // One harness at a time, each result or refusal landing on its own
-    // row: a refusal must not abandon the harnesses behind it.
-    for (const name of selected) {
-      setFailures((prev) => {
-        const next = { ...prev }
-        delete next[name]
-        return next
+  const importStarted = useRef(false)
+  useEffect(() => {
+    let active = true
+    setRoots(null)
+    setRootsError(null)
+    client
+      .configRoots()
+      .then((response) => {
+        if (active) setRoots(response.roots)
       })
-      try {
-        const result = await client.localProfilePush(name)
-        setResults((prev) => ({ ...prev, [name]: result }))
-        setChecked((prev) => ({ ...prev, [name]: false }))
-      } catch (err) {
-        setFailures((prev) => ({ ...prev, [name]: message(err) }))
-      }
+      .catch((err) => {
+        if (active) setRootsError(message(err))
+      })
+    return () => {
+      active = false
+      generation.current += 1
     }
-    setBusy(false)
-  }, [client, selected])
+  }, [client])
 
-  const scanHarness = harnesses.find((h) => h.installed)?.name
+  const firstPath = rawFiles ? relativePath(rawFiles[0]) : null
+  const basename = firstPath?.valid ? firstPath.root : ''
+  const matchingRoots = basename && roots
+    ? roots.filter((root) => rootName(root.path) === basename)
+    : []
+  const destinationRoots =
+    matchingRoots.length > 0 ? matchingRoots : (roots ?? [])
+  const destination = destinationRoots.find(
+    (root) => root.harness === selectedHarness,
+  )
+  const friendlyDestination = destination
+    ? friendly[destination.harness] ?? destination.harness
+    : ''
 
-  const startScan = () => {
-    if (!scanHarness) return
-    setLines([])
-    setPhase({ name: 'scanning', status: 'detecting' })
-    session.current = client.openProfileScan(
-      { harness: scanHarness, ...(repoPath ? { repo_path: repoPath } : {}) },
-      {
-        onOutput: (line) => setLines((prev) => [...prev, line]),
-        onStatus: (status) => setPhase({ name: 'scanning', status }),
-        onResult: (recommendation) => {
-          session.current = null
-          // A proposal, not an action: the checklist is pre-filled and the
-          // user still approves it.
-          const next: Record<string, boolean> = {}
-          const why: Record<string, string> = {}
-          const cats: Record<string, string[]> = {}
-          for (const entry of recommendation.harnesses) {
-            // A recommendation for a harness with no preview cannot be
-            // pushed: `selected` filters those out, so the proposal is
-            // recorded as it arrived.
-            next[entry.harness] = entry.import
-            why[entry.harness] = entry.reason
-            cats[entry.harness] = entry.categories
-          }
-          setChecked((prev) => ({ ...prev, ...next }))
-          setReasons(why)
-          setSuggested(cats)
-          setPhase({ name: 'idle' })
-        },
-        onError: (detail, outputTail) => {
-          session.current = null
-          setPhase({ name: 'failed', detail, outputTail })
-        },
-      },
+  // A directory can be selected while roots are loading. Pick the destination
+  // from metadata once it arrives, but do not read bytes until that happens.
+  useEffect(() => {
+    if (!rawFiles || roots === null || !basename) return
+    setSelectedHarness((current) => {
+      if (current && roots.some((root) => root.harness === current)) return current
+      const matching = roots.filter((root) => rootName(root.path) === basename)
+      return matching.length === 1 ? matching[0].harness : ''
+    })
+  }, [basename, rawFiles, roots])
+
+  // Both initial auto-selection and an explicit destination change reach this
+  // effect. The generation guard prevents an old File read from replacing the
+  // current destination's preview.
+  useEffect(() => {
+    if (!rawFiles || roots === null || !destination || importing || result || importError || importStarted.current) return
+    const version = generation.current
+    setReading(true)
+    void prepareDirectoryImport(
+      rawFiles,
+      destination,
+      () => generation.current === version,
     )
+      .then((prepared) => {
+        if (generation.current !== version) return
+        setSelection(prepared)
+        if (!prepared) setSelectionError('The selected directory could not be read.')
+      })
+      .catch((err) => {
+        if (generation.current === version) setSelectionError(message(err))
+      })
+      .finally(() => {
+        if (generation.current === version) setReading(false)
+      })
+  }, [destination, importError, importing, rawFiles, result, roots])
+
+  function chooseDestination(harness: string) {
+    if (importing || result) return
+    importStarted.current = false
+    generation.current += 1
+    setSelectedHarness(harness)
+    setSelection(null)
+    setReading(false)
+    setSelectionError(null)
+    setImportError(null)
   }
 
-  const cancelScan = () => {
-    session.current?.close()
-    session.current = null
-    setPhase({ name: 'idle' })
+  function choose(event: ChangeEvent<HTMLInputElement>) {
+    if (useStore.getState().onboardingImportPending) return
+    importStarted.current = false
+    const selected = Array.from(event.currentTarget.files ?? [])
+    generation.current += 1
+    setRawFiles(null)
+    setSelection(null)
+    setSelectedHarness('')
+    setReading(false)
+    setSelectionError(null)
+    setImportError(null)
+    setResult(null)
+    event.currentTarget.value = ''
+    if (selected.length === 0) return
+    const first = relativePath(selected[0])
+    if (!first.valid) {
+      setSelectionError('Choose a directory, not an individual file.')
+      return
+    }
+    setRawFiles(selected)
+    if (roots !== null) {
+      const matching = roots.filter((root) => rootName(root.path) === first.root)
+      if (matching.length === 1) setSelectedHarness(matching[0].harness)
+    }
   }
+
+  async function importConfiguration() {
+    if (
+      !selection ||
+      !destination ||
+      reading ||
+      result ||
+      useStore.getState().onboardingImportPending
+    ) return
+    const version = generation.current
+    const harness = destination.harness
+    importStarted.current = true
+    const files = selection.files
+    useStore.setState({ onboardingImportPending: true })
+    setImportError(null)
+    try {
+      const imported = await client.configImport({ harness, files })
+      if (generation.current === version) setResult(imported)
+    } catch (err) {
+      if (generation.current === version) {
+        const detail = message(err)
+        setImportError(
+          `Import outcome is unknown: ${detail}. Some files may have been copied; inspect Files before retrying.`,
+        )
+      }
+    } finally {
+      useStore.setState({ onboardingImportPending: false })
+    }
+  }
+  const rootLabel = basename || 'your agent configuration directory'
 
   return (
     <section
@@ -315,322 +411,196 @@ export function ProfileImport({
       <div className="space-y-1">
         <h3 className="text-base font-semibold">Bring your configuration</h3>
         <p className="text-sm leading-6 text-muted-foreground">
-          Your skills, custom commands, standing instructions, settings, MCP
-          servers and plugins live on this machine. Aether can copy them to the
-          server so an agent there runs with your configuration. Credential
-          files are excluded before anything is read, a file over 1 MiB or
-          past the 20 MiB a snapshot holds is left behind, and a push carries
-          an agent's whole configuration minus what is listed as left out.
+          Choose one agent configuration directory to import once. Supported
+          roots include <span className="font-mono">~/.claude</span>,{' '}
+          <span className="font-mono">~/.codex</span>,{' '}
+          <span className="font-mono">~/.pi</span>, and{' '}
+          <span className="font-mono">~/.omp</span>.
         </p>
       </div>
-      {served && looking === '' && !looked && (
-        <div className="border-y border-border/70 bg-card px-3 py-2.5">
-          <Button size="sm" onClick={() => void runPreviews()}>
-            {previewed.length > 0 ? 'Look again' : 'Look at what is here'}
-          </Button>
-          <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
-            Reads the file list under each agent's configuration directory
-            on this machine and checks it for secrets. Nothing is uploaded,
-            and nothing runs until you press it. A large configuration
-            directory takes a while to read.
-          </p>
-        </div>
-      )}
-      {looking !== '' && (
-        <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2">
-          <p className="text-sm" role="status">
-            Reading {friendly[looking] ?? looking}...
-          </p>
-          <Button size="sm" variant="outline" onClick={cancelPreviews}>
-            Stop
-          </Button>
-        </div>
-      )}
-      {Object.entries(previewErrors).map(([name, detail]) => (
-        <div key={name} className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
-          <p className="text-sm text-state-failed">
-            Reading the {friendly[name] ?? name} configuration failed:{' '}
-            {detail}
-          </p>
-        </div>
-      ))}
-
-      {served && looked && scanHarness && phase.name === 'idle' && (
-        <div className="border-y border-border/70 bg-card px-3 py-2.5">
-          <Button size="sm" variant="outline" onClick={startScan}>
-            Ask an agent which configuration to bring
-          </Button>
-          <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
-            {friendly[scanHarness] ?? scanHarness} runs on this machine and
-            proposes what is worth bringing. It sees paths and counts, never
-            file contents. Nothing is copied until you approve the list.
-          </p>
-        </div>
-      )}
-      {phase.name === 'scanning' && (
-        <div className="min-w-0 space-y-3 border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2">
-          <p className="text-sm" role="status">
-            {statusLine[phase.status]}
-          </p>
-          <Collapsible className="min-w-0 border-t border-border/70">
-            <CollapsibleTrigger className="px-3 py-2 text-sm">
-              View process
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <pre className={pane}>{lines.join('\n')}</pre>
-            </CollapsibleContent>
-          </Collapsible>
-          <Button size="sm" variant="outline" onClick={cancelScan}>
-            Cancel
-          </Button>
-        </div>
-      )}
-      {phase.name === 'failed' && (
-        <div className="min-w-0 space-y-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
-          <p className="text-sm font-medium">The agent did not finish.</p>
-          <p className="text-sm text-state-failed">{phase.detail}</p>
-          {phase.outputTail && (
-            <Collapsible className="min-w-0 border-t border-border/70">
-              <CollapsibleTrigger className="px-3 py-2 text-sm">
-                Last output
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <pre className={pane}>{phase.outputTail}</pre>
-              </CollapsibleContent>
-            </Collapsible>
-          )}
-          <p className="text-[13px] leading-5 text-muted-foreground">
-            Choose what to bring below instead, or skip this step.
-          </p>
-          <Button size="sm" variant="outline" onClick={startScan}>
-            Try again
-          </Button>
-        </div>
+      {importing && !selection && (
+        <p role="status" className="text-sm text-muted-foreground">Importing configuration…</p>
       )}
 
-      {!served && (
-        <p className="border-t border-border/70 bg-card py-3 text-sm text-muted-foreground">
-          This gateway does not serve the profile verbs, so the import runs
-          from a terminal with{' '}
-          <span className="font-mono">aether profile push --agent claude</span>
-          .
+      {roots === null && !rootsError && !importing && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Loading configuration destinations…
+        </p>
+      )}
+      {rootsError && (
+        <div className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
+          <p className="text-sm text-state-failed">Loading configuration destinations failed: {rootsError}</p>
+        </div>
+      )}
+      {roots !== null && roots.length === 0 && (
+        <p className="border-y border-border/70 bg-card px-3 py-2.5 text-sm text-muted-foreground">
+          This account has no supported configuration directories.
         </p>
       )}
 
-      {served &&
-        candidates.length > 0 &&
-        looked &&
-        Object.keys(previewErrors).length === 0 &&
-        present.length === 0 && (
-          <p className="border-t border-border/70 py-3 text-sm text-muted-foreground">
-            No agent configuration was found on this machine, so there is
-            nothing to bring.
+      <div className="border-y border-border/70 bg-card px-3 py-2.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-3 text-sm font-medium">
+          <label htmlFor="configuration-directory-picker">Configuration directory</label>
+          <input
+            id="configuration-directory-picker"
+            {...({ webkitdirectory: '' } as Record<string, string>)}
+            ref={picker}
+            type="file"
+            multiple
+            disabled={importing}
+            aria-label="Choose configuration directory"
+            className="sr-only"
+            onChange={choose}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={importing}
+            onClick={() => picker.current?.click()}
+          >
+            Choose directory
+          </Button>
+        </div>
+        {basename && (
+          <p className="mt-2 text-sm">
+            Selected directory: <span className="break-all font-mono">{basename}</span>
           </p>
         )}
-
-      {present.length > 0 && (
-        <>
-          <ul className="min-w-0 border-y border-border/70 bg-card">
-            {present.map((preview) => (
-              <ProfileRow
-                key={preview.harness}
-                preview={preview}
-                status={statuses[preview.harness]}
-                checked={checked[preview.harness] === true}
-                reason={reasons[preview.harness]}
-                suggested={suggested[preview.harness]}
-                result={results[preview.harness]}
-                failure={failures[preview.harness]}
-                workspace={workspace}
-                onToggle={(on) =>
-                  setChecked((prev) => ({ ...prev, [preview.harness]: on }))
-                }
-              />
-            ))}
-          </ul>
-          <Button
-            size="sm"
-            disabled={busy || selected.length === 0}
-            onClick={() => void importSelected()}
-          >
-            Import selected
-          </Button>
-        </>
-      )}
-    </section>
-  )
-}
-
-function ProfileRow({
-  preview,
-  status,
-  checked,
-  reason,
-  suggested,
-  result,
-  failure,
-  workspace,
-  onToggle,
-}: {
-  preview: ProfilePreview
-  status?: ProfileStatus
-  checked: boolean
-  reason?: string
-  suggested?: string[]
-  result?: ProfilePushResult
-  failure?: string
-  workspace: Workspace | null
-  onToggle: (on: boolean) => void
-}) {
-  const label = friendly[preview.harness] ?? preview.harness
-  const excluded = preview.excluded ?? []
-  // excluded is capped by the gateway; excluded_total is exact.
-  const excludedTotal = preview.excluded_total ?? excluded.length
-  const own = ownFindings(preview)
-  const vendored = vendoredFindings(preview)
-  const snapshot = status?.snapshot
-  // --allow-secret repeats, so one command covers every path the callout
-  // named rather than only the first of them. Only the callout renders
-  // it, so there is always at least one.
-  const allowSecret = own.entries
-    .slice(0, maxNamed)
-    .map((e) => `--allow-secret ${shellPath(e.path)}`)
-    .join(' ')
-
-  return (
-    <li className="min-w-0 space-y-3 border-b border-border/70 py-3 text-sm last:border-b-0">
-      <div className="flex items-start gap-3">
-        <Checkbox
-          className="mt-1"
-          aria-label={`Bring ${label} configuration`}
-          checked={checked}
-          onCheckedChange={(state) => onToggle(state === true)}
-        />
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-medium">{label}</p>
-            <span className="rounded-sm bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-              {checked ? 'Selected' : 'Not selected'}
-            </span>
-          </div>
-          <p className="text-[13px] leading-5 text-muted-foreground">
-            {previewSummary(preview)}
-          </p>
-          <p className="font-mono text-xs text-muted-foreground">
-            {preview.root}
-          </p>
-          {snapshot && (
-            <p className="text-[13px] leading-5 text-muted-foreground">
-              Already imported on{' '}
-              {new Date(snapshot.created_at).toLocaleDateString()}. Importing
-              again replaces it with what is on this machine now.
-            </p>
-          )}
-          {reason && <p className="text-[13px] leading-5">{reason}</p>}
-          {own.entries.length > 0 && (
-            <div className="space-y-2 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-xs">
-              <p className="text-state-failed">
-                {own.atLeast ? 'At least ' : ''}
-                {own.entries.length}{' '}
-                {own.entries.length === 1 ? 'file' : 'files'} you wrote tripped
-                the secret scanner.{' '}
-                {own.entries.length === 1 ? 'It is' : 'They are'} left out and
-                the rest of this profile still imports.
-              </p>
-              <ul className="space-y-0.5">
-                {own.entries.slice(0, maxNamed).map((e) => (
-                  <li key={e.path}>
-                    <span className="font-mono">{e.path}</span>
-                    <span className="text-muted-foreground"> - {e.detail}</span>
-                  </li>
-                ))}
-                {own.entries.length > maxNamed && (
-                  <li className="text-muted-foreground">
-                    and {own.entries.length - maxNamed} more, under Left out of{' '}
-                    {label}
-                  </li>
-                )}
-              </ul>
-              <p>
-                To send one anyway, push that agent from a terminal, where
-                the override is attributable:
-              </p>
-              <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap border border-border/70 bg-background px-2 py-1 font-mono">
-                {`aether profile push --agent ${preview.harness} ${allowSecret} --workspace ${workspace?.id ?? '<workspace-id>'}`}
-              </pre>
-            </div>
-          )}
-          {vendored.count > 0 && (
-            <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-xs text-state-failed">
-              {vendored.atLeast ? 'At least ' : ''}
-              {vendored.count} {vendored.count === 1 ? 'file' : 'files'} under{' '}
-              <span className="font-mono">plugins/cache</span> and{' '}
-              <span className="font-mono">plugins/marketplaces</span>, which
-              hold the plugins {label} installed, tripped the secret scanner.{' '}
-              {vendored.count === 1 ? 'It is' : 'They are'} left out and the
-              rest of this profile still imports.
-            </p>
-          )}
-          {suggested && suggested.length > 0 && (
-            <p className="text-[13px] leading-5 text-muted-foreground">
-              The agent pointed at {suggested.join(', ')}; a push carries the
-              whole configuration.
-            </p>
-          )}
-        </div>
+        <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
+          Known credential files and the selected agent's runtime files are
+          left out before reading. Other files are sent to the server for
+          checking when you confirm. Limits: 1 MiB each, 20 MiB total, and{' '}
+          {MAX_IMPORT_FILES} files.
+        </p>
       </div>
-      {excludedTotal > 0 && (
-        <Collapsible className="min-w-0 border-t border-border/70">
-          <CollapsibleTrigger className="px-3 py-2 text-[13px]">
-            {`Left out of ${label}: ${excludedTotal} ${
-              excludedTotal === 1 ? 'entry' : 'entries'
-            }`}
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <ul className="space-y-1 border-t px-3 py-2 text-xs">
-              {excluded.map((e) => (
-                <li key={e.path}>
-                  <span className="font-mono">{e.path}</span>
-                  <span className="text-muted-foreground"> - {e.detail}</span>
-                </li>
+
+      {rawFiles && roots !== null && roots.length > 0 && (
+        <label className="flex min-w-0 flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium">
+            {matchingRoots.length === 1 ? 'Destination' : 'Choose destination'}
+          </span>
+          {matchingRoots.length === 1 ? (
+            <span className="font-mono text-xs text-muted-foreground">
+              {friendlyDestination || matchingRoots[0].harness} ({matchingRoots[0].path})
+            </span>
+          ) : (
+            <select
+              aria-label="Configuration destination"
+              className="h-7 min-w-44 rounded-sm border border-input bg-background px-2 text-sm"
+              value={selectedHarness}
+              disabled={importing || Boolean(result)}
+              onChange={(event) => chooseDestination(event.target.value)}
+            >
+              <option value="">Select an agent</option>
+              {destinationRoots.map((root) => (
+                <option key={root.harness} value={root.harness}>
+                  {friendly[root.harness] ?? root.harness} ({root.path})
+                </option>
               ))}
-              {/* The gateway caps the list it sends; the count above is
-                  exact, so say how many are not shown rather than implying
-                  the list is all of them. */}
-              {excludedTotal > excluded.length && (
-                <li className="text-muted-foreground">
-                  and {excludedTotal - excluded.length} more
-                </li>
-              )}
-            </ul>
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-      {result && (
-        <>
-          <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done">
-            Imported {result.files} files, {formatBytes(result.bytes)}, as
-            snapshot <span className="font-mono">{result.snapshot_id}</span>.
-          </p>
-          {/* The push succeeded without these, so this is the only place
-              the user learns they are not on the server. */}
-          {result.skipped && result.skipped.length > 0 && (
-            <ul className="space-y-1 border-t border-border/70 py-2 text-xs text-muted-foreground">
-              {result.skipped.map((e) => (
-                <li key={e.path}>
-                  <span className="font-mono">{e.path}</span> was not sent -{' '}
-                  {e.detail}
-                </li>
-              ))}
-            </ul>
+            </select>
           )}
-        </>
+        </label>
       )}
-      {failure && (
-        <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
-          {failure}
+
+      {reading && (
+        <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-sm" role="status">
+          Reading {rootLabel}; files over the limits and this destination's runtime files are left out...
         </p>
       )}
-    </li>
+      {selectionError && (
+        <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" role="alert">
+          {selectionError}
+        </p>
+      )}
+      {selection && !reading && (
+        <div className="min-w-0 space-y-3 border-y border-border/70 bg-card px-3 py-3">
+          <div className="space-y-1">
+            <h4 className="text-sm font-semibold">Preview</h4>
+            <p className="text-sm">
+              {selection.files.length} files, {formatBytes(selection.bytes)} ready from{' '}
+              <span className="font-mono">{selection.basename}</span>.
+            </p>
+            <p className="text-[13px] leading-5 text-muted-foreground">
+              Empty files are preserved. Review the omitted paths below before
+              importing.
+            </p>
+          </div>
+
+          <ExclusionList entries={selection.excluded} label="Left out before upload" />
+
+          <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-[13px] leading-5">
+            Before you confirm: matching remote configuration files will be
+            overwritten, accepted files change your persistent remote home
+            immediately, and this local directory will not be watched.
+          </p>
+          {importError && (
+            <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
+              <p className="text-sm text-state-failed" role="alert">
+                {importError}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => navigate('files')}
+              >
+                Inspect Files
+              </Button>
+            </div>
+          )}
+          {result ? (
+            result.error ? (
+              <>
+                <div className="space-y-2 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" role="alert">
+                  <p>
+                    Import incomplete: {result.files} files ({formatBytes(result.bytes)}) imported into{' '}
+                    {friendly[result.harness] ?? result.harness}.
+                  </p>
+                  <p>{result.error}</p>
+                  <p>
+                    Copied files remain. Inspect Files before choosing the
+                    directory again to retry.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => navigate('files')}
+                  >
+                    Inspect Files
+                  </Button>
+                </div>
+                {result.imported_paths && (
+                  <div className="space-y-2 border-t border-border/70 pt-2">
+                    <p className="text-sm font-medium">Imported paths: {result.imported_paths.length}</p>
+                    <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
+                      {result.imported_paths.map((path) => (
+                        <li key={path} className="font-mono">{path}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <ExclusionList entries={result.excluded} label="Server left out" />
+              </>
+            ) : (
+              <>
+                <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done">
+                  Imported {result.files} files ({formatBytes(result.bytes)}) into{' '}
+                  {friendly[result.harness] ?? result.harness}.
+                </p>
+                <ExclusionList entries={result.excluded} label="Server left out" />
+              </>
+            )
+          ) : (
+            <Button
+              size="sm"
+              disabled={importing || selection.files.length === 0 || !destination}
+              onClick={() => void importConfiguration()}
+            >
+              {importing ? 'Importing...' : 'Import configuration'}
+            </Button>
+          )}
+        </div>
+      )}
+    </section>
   )
 }

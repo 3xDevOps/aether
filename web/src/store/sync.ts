@@ -37,6 +37,7 @@ function classifyUnreachable(err: unknown): UnreachableKind | null {
   return null
 }
 
+
 /** Names why the gateway refused the capabilities probe. */
 function refusalKind(err: ApiError): UnreachableKind | null {
   if (err.status === 403) return 'refused'
@@ -62,6 +63,14 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
         // client on its built-in assumptions.
         client.capabilities().catch(() => null),
       ])
+    const origin = typeof window === 'undefined' ? '' : window.location.origin
+    const incomingIdentity = `${origin}\u0000${info.tailnet_hostname ?? ''}\u0000${info.member.id}`
+    const previousIdentity = store.getState().identityKey
+    if (previousIdentity && previousIdentity !== incomingIdentity) {
+      // Reconnects retain drafts; a different authenticated owner must not.
+      store.getState().resetFiles()
+    }
+    s.setIdentityKey(incomingIdentity)
     s.setInfo(info)
     s.setWorkspaces(workspaces)
     // Every scoped surface reads activeWorkspace, so it must name a
@@ -411,8 +420,9 @@ export function connect(store: RootStore, client: Api = api): () => void {
         // that is a server that may have just re-executed on a new version.
         // Only a fresh server.info says it did, and the update banner and the
         // notice in the status bar both end on that answer.
+        // Tailnet reconnects can change member even when replay is possible.
         const s = store.getState()
-        if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress)) {
+        if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress) || s.capabilities?.gateway !== 'local') {
           void load()
         }
         subscribed = true

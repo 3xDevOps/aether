@@ -7,32 +7,34 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"os"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func init() {
-	registerMethod(protocol.MethodProfilePush, (*Server).profilePush)
+	registerGuarded(protocol.MethodProfilePush, permissions.Launch, nil, (*Server).profilePush)
 	registerMethod(protocol.MethodProfileStatus, (*Server).profileStatus)
-	registerMethod(protocol.MethodProfileRollback, (*Server).profileRollback)
+	registerGuarded(protocol.MethodProfileRollback, permissions.Launch, nil, (*Server).profileRollback)
 }
 
 // ProfileService is the sshd seam for agent-profile snapshots. It
 // deliberately omits PinRun: these handlers never select or mutate a run pin.
 type ProfileService interface {
-	Put(ctx context.Context, member, harness string, files []profile.File) (domain.ProfileSnapshot, error)
+	Stage(ctx context.Context, member, harness string, files []profile.File) (domain.ProfileSnapshot, error)
+	Publish(ctx context.Context, snap domain.ProfileSnapshot) error
 	Get(ctx context.Context, id domain.ProfileSnapshotID) (domain.ProfileSnapshot, []profile.File, error)
 	Latest(ctx context.Context, member, harness string) (domain.ProfileSnapshot, error)
 	List(ctx context.Context, member, harness string) ([]domain.ProfileSnapshot, error)
 	Rollback(ctx context.Context, member, harness string, id domain.ProfileSnapshotID) error
-	Materialize(ctx context.Context, id domain.ProfileSnapshotID, destDir string) error
+	MaterializeRoot(ctx context.Context, id domain.ProfileSnapshotID, root *os.Root) error
 }
 
 func (s *Server) profilePush(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -49,8 +51,13 @@ func (s *Server) profilePush(ctx context.Context, member domain.MemberID, params
 	if len(p.AllowSecret) > 0 && p.WorkspaceID == "" {
 		return nil, invalidParams("--allow-secret requires workspace_id")
 	}
+	unlock, err := s.lockProfileRoot(ctx, member, p.Harness)
+	if err != nil {
+		return nil, profileError(err)
+	}
+	defer unlock()
 	if p.WorkspaceID != "" {
-		if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID)); err != nil {
+		if _, err = s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID)); err != nil {
 			return nil, profileError(err)
 		}
 	}
@@ -68,13 +75,15 @@ func (s *Server) profilePush(ctx context.Context, member domain.MemberID, params
 	if err = profile.ScanFiles(files, allow); err != nil {
 		return nil, profileError(err)
 	}
-	snap, err := s.cfg.Profiles.Put(ctx, string(member), p.Harness, files)
+	snap, err := s.cfg.Profiles.Stage(ctx, string(member), p.Harness, files)
 	if err != nil {
 		return nil, profileError(err)
 	}
-
 	if err := s.materializeProfile(ctx, member, p.Harness, snap); err != nil {
-		return nil, profileError(err)
+		return nil, profileError(fmt.Errorf("profile: materialization failed; profile head unchanged and destination may be partially applied: %w", err))
+	}
+	if err := s.cfg.Profiles.Publish(ctx, snap); err != nil {
+		return nil, profileError(fmt.Errorf("profile: materialized profile but could not publish head: %w", err))
 	}
 	if p.WorkspaceID != "" && len(p.AllowSecret) > 0 {
 		msg := "profile.push --allow-secret: " + strings.Join(p.AllowSecret, ", ")
@@ -148,48 +157,82 @@ func (s *Server) profileRollback(ctx context.Context, member domain.MemberID, pa
 	if p.Harness == "" || p.SnapshotID == "" {
 		return nil, invalidParams("harness and snapshot_id are required")
 	}
-	if err := s.cfg.Profiles.Rollback(ctx, string(member), p.Harness, domain.ProfileSnapshotID(p.SnapshotID)); err != nil {
-		return nil, profileError(err)
-	}
-	head, err := s.cfg.Profiles.Latest(ctx, string(member), p.Harness)
+	unlock, err := s.lockProfileRoot(ctx, member, p.Harness)
 	if err != nil {
 		return nil, profileError(err)
 	}
-	if err := s.materializeProfile(ctx, member, p.Harness, head); err != nil {
+	defer unlock()
+	head, _, err := s.cfg.Profiles.Get(ctx, domain.ProfileSnapshotID(p.SnapshotID))
+	if err != nil {
 		return nil, profileError(err)
 	}
+	if head.MemberID != member || head.Harness != p.Harness {
+		return nil, profileError(fmt.Errorf("%w: snapshot does not belong to this member and harness", profile.ErrDenied))
+	}
+	if err := s.materializeProfile(ctx, member, p.Harness, head); err != nil {
+		return nil, profileError(fmt.Errorf("profile: rollback materialization failed; profile head unchanged and destination may be partially applied: %w", err))
+	}
+	if err := s.cfg.Profiles.Publish(ctx, head); err != nil {
+		return nil, profileError(fmt.Errorf("profile: materialized rollback but could not publish head: %w", err))
+	}
 	return protocol.ProfileRollbackResult{Snapshot: protocol.ProfileSnapshotFromDomain(head)}, nil
+}
+
+func (s *Server) profileDefinition(ctx context.Context, member domain.MemberID, harnessName string) (harness.Profile, error) {
+	if profileDef, ok := harness.Lookup(harnessName); ok {
+		return profileDef, nil
+	}
+	row, err := s.cfg.Store.GetHarnessDefinition(ctx, member, harnessName)
+	if err != nil {
+		return harness.Profile{}, fmt.Errorf("resolve harness %q: %w", harnessName, err)
+	}
+	var definition harness.Definition
+	if err := json.Unmarshal(row.Definition, &definition); err != nil {
+		return harness.Profile{}, fmt.Errorf("decode harness %q definition: %w", harnessName, err)
+	}
+	if err := definition.Validate(); err != nil {
+		return harness.Profile{}, fmt.Errorf("validate harness %q definition: %w", harnessName, err)
+	}
+	return definition.Profile(), nil
+}
+
+func (s *Server) lockProfileRoot(ctx context.Context, member domain.MemberID, harnessName string) (func(), error) {
+	if s.cfg.Homes == nil {
+		return func() {}, nil
+	}
+	profileDef, err := s.profileDefinition(ctx, member, harnessName)
+	if err != nil {
+		return nil, err
+	}
+	if profileDef.LocalRoot == "" {
+		return func() {}, nil
+	}
+	return s.cfg.Homes.LockConfigRoot(member, harness.HomeRelative(profileDef.LocalRoot))
 }
 
 func (s *Server) materializeProfile(ctx context.Context, member domain.MemberID, harnessName string, snap domain.ProfileSnapshot) error {
 	if s.cfg.Homes == nil {
 		return nil
 	}
-	profileDef, shipped := harness.Lookup(harnessName)
-	if !shipped {
-		row, err := s.cfg.Store.GetHarnessDefinition(ctx, member, harnessName)
-		if err != nil {
-			return fmt.Errorf("resolve harness %q: %w", harnessName, err)
-		}
-		var definition harness.Definition
-		if err := json.Unmarshal(row.Definition, &definition); err != nil {
-			return fmt.Errorf("decode harness %q definition: %w", harnessName, err)
-		}
-		profileDef = definition.Profile()
+	profileDef, err := s.profileDefinition(ctx, member, harnessName)
+	if err != nil {
+		return err
 	}
 	if profileDef.LocalRoot == "" {
 		return nil
 	}
-	homePath, err := s.cfg.Homes.Path(member)
+	root, err := s.cfg.Homes.OpenConfigRoot(member, profileDef.LocalRoot, true)
 	if err != nil {
-		return fmt.Errorf("resolve home for member %q: %w", member, err)
+		return err
 	}
-	destDir := filepath.Join(homePath, filepath.FromSlash(harness.HomeRelative(profileDef.LocalRoot)))
-	if err := s.cfg.Profiles.Materialize(ctx, snap.ID, destDir); err != nil {
-		return fmt.Errorf("materialize profile %s into %s: %w", snap.ID, destDir, err)
+	defer func() { _ = root.Close() }()
+	if err := s.cfg.Profiles.MaterializeRoot(ctx, snap.ID, root); err != nil {
+		return err
+	}
+	if err := s.cfg.Homes.ChownConfigTree(member, profileDef.LocalRoot); err != nil {
+		return err
 	}
 	return nil
-
 }
 func assemblePushFiles(ctx context.Context, svc ProfileService, member string, p protocol.ProfilePushParams) ([]profile.File, error) {
 	if len(p.Files) > 0 {

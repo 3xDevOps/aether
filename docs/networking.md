@@ -230,17 +230,20 @@ then opens the server's MagicDNS name and is already signed in:
 https://my-server.tailnet-name.ts.net/
 ```
 
-No token, no install, no `aether gui` anywhere. Port 443 gives that bare URL;
-any other port appends `:<port>`. The startup line names the URL it bound:
-
+No token or install is needed to open this URL. Port 443 gives that bare URL;
+any other port appends `:<port>`. The server-hosted dashboard has no
+machine-local verbs or onboarding wizard, but its authenticated **Files** view
+can edit the shared member home. Use local `aether gui` for the directory
+picker and other local filesystem or repository actions. The startup line names
+what it bound:
 ```
 aether-server <version> serving SSH on :2222 and the dashboard on https://my-server.tailnet-name.ts.net/ (data dir /var/lib/aether)
 ```
 
 `web-port` defaults to `0`, which leaves the server SSH-only. `aether-server
-setup` asks for it on a tailnet host; `aether-server install --web-port 443`
-and `aether-server config set web-port 443` set it without questions
-([install.md](install.md#first-boot)).
+setup` asks for it on a tailnet host when `--tailnet-require-key` is off;
+`aether-server install --web-port 443` and `aether-server config set web-port
+443` set it without questions ([install.md](install.md#first-boot)).
 
 ### What it needs
 

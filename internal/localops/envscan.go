@@ -6,9 +6,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 )
 
-// ScanModeProfile asks which local agent configurations are worth importing.
-const ScanModeProfile = "profile"
-
 // HarnessStatus is one setup-capable harness's local availability.
 type HarnessStatus struct {
 	Name      string `json:"name"`

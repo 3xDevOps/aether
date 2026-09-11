@@ -30,13 +30,15 @@ test('mobile Files returns from one viewer to the repository tree', async ({
   const tree = page.getByRole('complementary', { name: 'Files' })
   const readme = tree.getByRole('button', { name: 'README.md', exact: true })
   await expect(readme).toBeVisible()
+  expect((await readme.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
   await readme.tap()
 
   const viewer = page.getByRole('article')
   await expect(viewer.locator('header')).toContainText('README.md')
-  await expect(viewer.locator('pre')).toContainText('# project')
-
-  await viewer.getByRole('button', { name: 'Browse', exact: true }).tap()
+  await expect(viewer.locator('.cm-content')).toContainText('# project')
+  const browse = viewer.getByRole('button', { name: 'Browse', exact: true })
+  expect((await browse.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
+  await browse.tap()
   await expect(tree).toBeVisible()
   await expect(viewer).toBeHidden()
 
@@ -44,5 +46,5 @@ test('mobile Files returns from one viewer to the repository tree', async ({
   await expect(agent).toBeVisible()
   await agent.tap()
   await expect(viewer.locator('header')).toContainText('agent.sh')
-  await expect(viewer.locator('pre')).toContainText('echo agent-ready')
+  await expect(viewer.locator('.cm-content')).toContainText('echo agent-ready')
 })
