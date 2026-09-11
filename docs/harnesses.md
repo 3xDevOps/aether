@@ -423,7 +423,10 @@ configured. Deny names are basenames only.
 
 For example, an administrator can point `omp` at a different build for every
 member. A shipped name is the one case a member cannot register themselves,
-so an administrator definition is the only way to change one:
+so an administrator definition is the only way to change one. A definition
+replaces the shipped profile rather than extending it, so it carries the
+deny names too - omp keeps its provider keys in `agent.db`, which no
+generic denylist knows about:
 
 ```json
 {
@@ -434,7 +437,7 @@ so an administrator definition is the only way to change one:
     "Executable": "omp",
     "ProfileRoot": "/home/aether/.omp",
     "CredentialPaths": ["/home/aether/.omp"],
-    "DenyNames": ["auth.json", "token.json"]
+    "DenyNames": ["agent.db", "agent.db-wal", "agent.db-shm"]
   }
 }
 ```
