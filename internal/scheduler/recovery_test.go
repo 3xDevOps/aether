@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,6 +118,53 @@ func TestRecoveryOfLegacySidecarKeepsWorkspaceScope(t *testing.T) {
 	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	if ev.WorkspaceID != e.ws.ID {
 		t.Fatalf("recovered event workspace = %q, want %q", ev.WorkspaceID, e.ws.ID)
+	}
+}
+
+func TestRecoveryOfLegacySidecarCapturesHomeForImages(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, container := e.launchFake(t, "legacy image")
+	container.mu.Lock()
+	container.spec.Env["HOME"] = "/home/recovered"
+	container.mu.Unlock()
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil {
+		t.Fatalf("readSidecar: %v", err)
+	}
+	sc.Home = ""
+	if writeErr := e.sched.writeSidecar(sc); writeErr != nil {
+		t.Fatalf("write legacy sidecar: %v", writeErr)
+	}
+
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	startScheduler(t, s2)
+	waitFor(t, "legacy run supervision", func() bool {
+		s2.mu.Lock()
+		defer s2.mu.Unlock()
+		entry := s2.runs[run.ID]
+		return entry != nil && entry.home == "/home/recovered"
+	})
+
+	data := []byte("legacy recovered image")
+	path, err := s2.SaveTerminalImage(t.Context(), e.member.ID, run.ID, ".png", data)
+	if err != nil {
+		t.Fatalf("SaveTerminalImage: %v", err)
+	}
+	if got := readSavedTerminalImage(t, e, e.member.ID, path); string(got) != string(data) {
+		t.Fatalf("saved image = %q, want %q", got, data)
+	}
+	if !strings.HasPrefix(path, "/home/recovered/.aether/terminal-images/") {
+		t.Fatalf("image path = %q, want recovered HOME", path)
+	}
+	persisted, err := s2.readSidecar(run.ID)
+	if err != nil {
+		t.Fatalf("read recovered sidecar: %v", err)
+	}
+	if persisted.Home != "/home/recovered" {
+		t.Fatalf("persisted HOME = %q, want /home/recovered", persisted.Home)
 	}
 }
 

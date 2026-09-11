@@ -20,6 +20,7 @@ func (s *Scheduler) SaveTerminalImage(ctx context.Context, actor domain.MemberID
 
 	account := actor
 	var home string
+	var stillLive func() bool
 	if runID != "" {
 		run, err := s.cfg.Store.GetRun(ctx, runID)
 		if err != nil {
@@ -30,6 +31,13 @@ func (s *Scheduler) SaveTerminalImage(ctx context.Context, actor domain.MemberID
 		entry := s.runs[runID]
 		if entry != nil {
 			home = entry.home
+			containerID := entry.containerID
+			stillLive = func() bool {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				current := s.runs[runID]
+				return current == entry && current.containerID == containerID && current.home == home
+			}
 		}
 		s.mu.Unlock()
 		if entry == nil {
@@ -41,9 +49,17 @@ func (s *Scheduler) SaveTerminalImage(ctx context.Context, actor domain.MemberID
 	} else {
 		var running bool
 		s.mu.Lock()
-		if terminal := s.terminals[account]; terminal != nil {
-			home = terminal.home
+		entry := s.terminals[account]
+		if entry != nil {
+			home = entry.home
+			containerID := entry.containerID
 			running = true
+			stillLive = func() bool {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				current := s.terminals[account]
+				return current == entry && current.containerID == containerID && current.home == home
+			}
 		}
 		s.mu.Unlock()
 		if !running {
@@ -57,6 +73,9 @@ func (s *Scheduler) SaveTerminalImage(ctx context.Context, actor domain.MemberID
 	relative, err := s.cfg.Homes.SaveImage(account, extension, data)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: persist terminal image: %w", err)
+	}
+	if stillLive != nil && !stillLive() {
+		return "", errors.New("scheduler: image target container changed while saving")
 	}
 	return path.Join(home, relative), nil
 }

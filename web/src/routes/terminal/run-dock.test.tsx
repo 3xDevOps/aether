@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import type { RunStatus } from '@/lib/types'
@@ -188,6 +188,60 @@ describe('run-shell dock', () => {
     expect(useStore.getState().shellDocks.run_2.tabs).toEqual(['t1'])
     expect(currentShell?.closed).toBe(false)
     first.unmount()
+  })
+
+  it('keeps late background callbacks away from the active shell and refusal', async () => {
+    const view = mount({
+      dock: { tabs: ['t1', 't2'], activeTab: 't1', collapsed: false },
+    })
+    const terminalDock = within(screen.getByRole('region', { name: 'Terminal dock' }))
+    const shellsFor = (tab: string) =>
+      StubSocket.opened.filter((socket) => socket.url.includes(`?shell=${tab}`))
+    const accepted = JSON.stringify({ ok: true, replay: 0 })
+    const denied = JSON.stringify({ ok: false, code: -32001, error: 'write denied' })
+
+    await waitFor(() => expect(shellsFor('t1')).toHaveLength(1))
+    const firstActive = shellsFor('t1')[0]
+    act(() => {
+      firstActive?.onopen?.()
+      firstActive?.onmessage?.({ data: accepted })
+    })
+
+    fireEvent.click(screen.getByRole('tab', { name: 't2' }))
+    await waitFor(() => expect(shellsFor('t2')).toHaveLength(1))
+    const background = shellsFor('t2')[0]
+    act(() => {
+      background?.onopen?.()
+      background?.onmessage?.({ data: accepted })
+    })
+
+    fireEvent.click(screen.getByRole('tab', { name: 't1' }))
+    await waitFor(() => expect(shellsFor('t1')).toHaveLength(2))
+    const active = shellsFor('t1')[1]
+    act(() => {
+      active?.onopen?.()
+      active?.onmessage?.({ data: accepted })
+    })
+    expect(terminalDock.getByRole('toolbar', { name: 'Terminal controls' })).toBeDefined()
+
+    const lateBackgroundMessage = background?.onmessage
+    act(() => lateBackgroundMessage?.({ data: denied }))
+    expect(background?.closed).toBe(true)
+    act(() => lateBackgroundMessage?.({ data: accepted }))
+    expect(terminalDock.getByRole('toolbar', { name: 'Terminal controls' })).toBeDefined()
+
+    const activeMessage = active?.onmessage
+    act(() =>
+      activeMessage?.({
+        data: JSON.stringify({ ok: false, code: -32002, error: 'active backend refusal' }),
+      }),
+    )
+    expect(terminalDock.getByText('active backend refusal')).toBeDefined()
+    expect(active?.closed).toBe(true)
+    act(() => lateBackgroundMessage?.({ data: accepted }))
+    expect(terminalDock.getByText('active backend refusal')).toBeDefined()
+    expect(terminalDock.queryByRole('toolbar', { name: 'Terminal controls' })).toBeNull()
+    view.unmount()
   })
 
   it('waits for pause state instead of offering a rejected shell', () => {

@@ -123,8 +123,10 @@ export function RunDock({ runID }: { runID: string }) {
       if (isCurrent()) setAttachedIdentity(null)
     }
     const refuse = (message: string) => {
-      clearAttached()
-      setShellRefused(runID, message)
+      if (isCurrent()) {
+        clearAttached()
+        setShellRefused(runID, message)
+      }
       unregisterShellSocket(runID, socketKey)
     }
     const handlers = {
@@ -139,8 +141,8 @@ export function RunDock({ runID }: { runID: string }) {
           setAttachedIdentity(identity)
           gate.current.unmute()
           terminalRef.current?.reset()
+          setShellRefused(runID, null)
         }
-        setShellRefused(runID, null)
       },
       onState: (connection: ConnectionState) => {
         if (isCurrent()) {

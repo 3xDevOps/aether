@@ -382,6 +382,22 @@ func (s *Scheduler) didNotSurvive(ctx context.Context, r *domain.Run, cid runtim
 }
 
 func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc sidecar, cid runtime.ID) {
+	// Sidecars written before the captured HOME field was introduced need a
+	// live inspection to recover the container's actual HOME. A failed
+	// inspection is inconclusive metadata, not evidence that the container
+	// exited: keep the survivor supervised and leave the real error in the
+	// log.
+	if sc.Home == "" {
+		info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
+		if inspectErr != nil {
+			slog.Warn("scheduler: inspect container HOME during recovery", "run", r.ID, "container", cid, "error", inspectErr)
+		} else {
+			sc.Home = containerHome(info.Env)
+			if sc.Home == "" {
+				slog.Warn("scheduler: recovered container has no absolute HOME", "run", r.ID, "container", cid)
+			}
+		}
+	}
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err == nil {
 		if serr := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(r.ID), att); serr != nil {
@@ -392,6 +408,11 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 	if err == nil {
 		if werr := s.cfg.Git.StartDiffWatch(ctx, r.WorkspaceID, r.ID); werr != nil {
 			slog.Warn("scheduler: restart diff watch", "run", r.ID, "error", werr)
+		}
+		if sc.Home != "" {
+			if werr := s.writeSidecar(sc); werr != nil {
+				slog.Warn("scheduler: persist recovered container HOME", "run", r.ID, "error", werr)
+			}
 		}
 		entry := s.entryFromSidecar(r, sc)
 		entry.containerID = cid
@@ -408,6 +429,16 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 		return
 	}
 	s.didNotSurvive(ctx, r, cid)
+}
+
+func containerHome(env []string) string {
+	for _, value := range env {
+		name, candidate, ok := strings.Cut(value, "=")
+		if ok && name == "HOME" && strings.HasPrefix(candidate, "/") {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
