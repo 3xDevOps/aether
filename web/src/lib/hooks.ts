@@ -24,6 +24,45 @@ export function useDelayed(active: boolean, delayMs = 200): boolean {
   return active && shown
 }
 
+const coarsePointerQuery = '(pointer: coarse)'
+const phoneWidthQuery = '(max-width: 640px)'
+
+/** A media query, tracked, so a rotation or a resize moves what it decides. */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(
+    () => window.matchMedia?.(query).matches ?? false,
+  )
+  useEffect(() => {
+    const media = window.matchMedia?.(query)
+    if (!media) return
+    setMatches(media.matches)
+    const apply = (event: MediaQueryListEvent) => setMatches(event.matches)
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [query])
+  return matches
+}
+
+/**
+ * Whether a finger is the primary pointer. What a drag or a hover is the only
+ * way to reach has to grow a tapped control here; see the touch density
+ * section of docs/dashboard-frontend.md.
+ */
+export function useCoarsePointer(): boolean {
+  return useMediaQuery(coarsePointerQuery)
+}
+
+/**
+ * A phone-sized screen: a finger, or a window no wider than one. Layout
+ * decisions that a narrow desktop window shares with a phone read this;
+ * decisions about the pointer itself read `useCoarsePointer`.
+ */
+export function usePhoneScreen(): boolean {
+  const coarse = useMediaQuery(coarsePointerQuery)
+  const narrow = useMediaQuery(phoneWidthQuery)
+  return coarse || narrow
+}
+
 /**
  * The viewport height, tracked. The dock derives its ceiling from it, and a
  * value read once at mount leaves both the clamp and the bound it announces

@@ -170,7 +170,25 @@ export function clipboardKeys(term: Terminal): (ev: KeyboardEvent) => boolean {
 
 /** Copy the terminal's selection, reporting whether it reached a clipboard. */
 export async function copySelection(term: Terminal): Promise<boolean> {
-  const text = term.getSelection()
+  return writeText(term.getSelection())
+}
+
+/**
+ * Copy the rows on screen. A drag selection is what copy normally needs, and
+ * touch has no drag over a terminal, so this is how a phone gets the output
+ * it is looking at out of the terminal.
+ */
+export async function copyScreen(term: Terminal): Promise<boolean> {
+  const buffer = term.buffer.active
+  const rows: string[] = []
+  for (let row = 0; row < term.rows; row++) {
+    rows.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
+  }
+  while (rows.length > 0 && rows[rows.length - 1] === '') rows.pop()
+  return writeText(rows.join('\n'))
+}
+
+async function writeText(text: string): Promise<boolean> {
   if (!text) return false
   if (navigator.clipboard?.writeText) {
     try {
