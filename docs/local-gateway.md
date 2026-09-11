@@ -829,9 +829,11 @@ Both sockets reconnect on a jittered backoff that caps at 30 seconds, and
 reopen immediately - backoff reset - when the browser fires
 `visibilitychange` (visible) or `online`. A phone freezes a background
 tab's timers, so without those two events a tab returning from the pocket
-would sit out the rest of a 30-second wait. A socket that is still open is
-left alone, and an attach the gateway refused is not retried by either
-event.
+would sit out the rest of a 30-second wait. A foreground return leaves a
+socket that is still there alone; `online` discards one that has not been
+acknowledged, because a network switch leaves a half-open socket the
+browser still reports as connected. An attach the gateway refused, and one
+parked on a `session ended` close, are not reopened by either event.
 
 ### `GET /ws/events`
 
