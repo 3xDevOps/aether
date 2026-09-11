@@ -480,6 +480,14 @@ func TestFromPiEvent(t *testing.T) {
 		{event: "tool_call", tool: "bash", want: Report{State: Working}, mapped: true},
 		{event: "tool_call", tool: "ask", want: Report{State: Waiting, Reason: ReasonAnswer}, mapped: true},
 		{event: "tool_call", tool: "AskUserQuestion", want: Report{State: Waiting, Reason: ReasonAnswer}, mapped: true},
+		// omp emits tool_call before tool_execution_start, so the start is
+		// the event that decides there: it must not answer "working" for a
+		// tool that is blocked on the member.
+		{event: "tool_execution_start", tool: "ask", want: Report{State: Waiting, Reason: ReasonAnswer}, mapped: true},
+		{event: "tool_execution_start", tool: "AskUserQuestion",
+			want: Report{State: Waiting, Reason: ReasonAnswer}, mapped: true},
+		// The answer arrives and the tool returns: that is the turn moving.
+		{event: "tool_execution_end", tool: "ask", want: Report{State: Working}, mapped: true},
 		{event: "tool_approval_requested", tool: "bash",
 			want: Report{State: Waiting, Reason: ReasonPermission}, mapped: true},
 		{event: "tool_approval_resolved", tool: "bash", want: Report{State: Working}, mapped: true},
@@ -492,6 +500,7 @@ func TestFromPiEvent(t *testing.T) {
 		// The ask tools are named exactly; a tool whose name merely
 		// contains one is an ordinary tool call.
 		{event: "tool_call", tool: "asking", want: Report{State: Working}, mapped: true},
+		{event: "tool_execution_start", tool: "asking", want: Report{State: Working}, mapped: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.event+"/"+tc.tool, func(t *testing.T) {

@@ -202,7 +202,8 @@ const PiExtensionName = "status.ts"
 var PiExtension []byte
 
 // askTools are the pi tool names that hand the turn back: the agent calls
-// one and blocks until the member answers it.
+// one and blocks for as long as it runs, until the member answers it. omp
+// ships one as a built-in; pi's arrives with an extension.
 var askTools = map[string]bool{"ask": true, "AskUserQuestion": true}
 
 // FromPiEvent maps one pi or omp lifecycle event onto a report. tool is
@@ -211,10 +212,16 @@ var askTools = map[string]bool{"ask": true, "AskUserQuestion": true}
 // for its member until the agent's own next event says the turn resumed.
 func FromPiEvent(event, tool string) (Report, bool) {
 	switch event {
-	case "before_agent_start", "agent_start", "tool_execution_start",
-		"tool_execution_end", "message_end", "tool_approval_resolved":
+	case "before_agent_start", "agent_start", "tool_execution_end",
+		"message_end", "tool_approval_resolved":
 		return Report{State: Working}, true
-	case "tool_call":
+	case "tool_call", "tool_execution_start":
+		// Both events name the tool, and the two CLIs order them opposite
+		// ways round: pi fires tool_call after tool_execution_start, omp
+		// before it. So both have to say the same thing about an ask tool,
+		// or whichever lands last decides - and on omp that is the start,
+		// which would hand the run back to an agent blocked on its own
+		// question. The answer releases it through tool_execution_end.
 		if askTools[tool] {
 			return Report{State: Waiting, Reason: ReasonAnswer}, true
 		}
