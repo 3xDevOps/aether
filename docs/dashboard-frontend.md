@@ -69,12 +69,14 @@ toolchain and the optional desktop installer workflow are in
 
 ## Testing on a phone
 
-`aether gui` binds loopback and has no exposure flag - see
-[security.md](security.md) - so a phone cannot open it. Until the server
-serves the dashboard itself, the development server is the way there: it
-binds whatever address you give it and proxies to the gateway without
-rewriting `Host` or `Origin`, which is exactly what the gateway's WebSocket
-origin check needs.
+The shipped way to a phone is the server-hosted gateway: set `web-port` and
+open the server's MagicDNS name on a phone joined to the tailnet
+([Testing on a real phone](#testing-on-a-real-phone)). For a contributor's
+loop against a dashboard build that is not embedded in a server yet, `aether
+gui` binds loopback and has no exposure flag - see [security.md](security.md)
+- so the development server is the way there: it binds whatever address you
+give it and proxies to the gateway without rewriting `Host` or `Origin`,
+which is exactly what the gateway's same-origin rule needs.
 
 ```sh
 # terminal 1, on the computer the phone will reach
@@ -93,7 +95,7 @@ cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
   clear over HTTP, sits in the URL and stays in the phone's history. Use a
   network you trust, and stop the dev server when the session ends. The
   shipped boundary is the loopback rule in
-  [security.md](security.md#the-dashboard-gateway); this is a
+  [security.md](security.md#the-dashboard-gateways); this is a
   development-time exception a contributor opts into by hand.
 - `--hostname` has to be the address typed on the phone. Next's development
   server permits only localhost and the hostname it was started on; any other
