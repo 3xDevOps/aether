@@ -387,6 +387,7 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 	// inspection is inconclusive metadata, not evidence that the container
 	// exited: keep the survivor supervised and leave the real error in the
 	// log.
+	homeRecovered := false
 	if sc.Home == "" {
 		info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
 		if inspectErr != nil {
@@ -395,21 +396,17 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 			sc.Home = containerHome(info.Env)
 			if sc.Home == "" {
 				slog.Warn("scheduler: recovered container has no absolute HOME", "run", r.ID, "container", cid)
+			} else {
+				homeRecovered = true
 			}
 		}
 	}
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err == nil {
-		if serr := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(r.ID), att); serr != nil {
-			_ = att.Close()
-			err = serr
-		}
-	}
-	if err == nil {
 		if werr := s.cfg.Git.StartDiffWatch(ctx, r.WorkspaceID, r.ID); werr != nil {
 			slog.Warn("scheduler: restart diff watch", "run", r.ID, "error", werr)
 		}
-		if sc.Home != "" {
+		if homeRecovered {
 			if werr := s.writeSidecar(sc); werr != nil {
 				slog.Warn("scheduler: persist recovered container HOME", "run", r.ID, "error", werr)
 			}
@@ -419,6 +416,17 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 		s.mu.Lock()
 		s.runs[r.ID] = entry
 		s.mu.Unlock()
+		if serr := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(r.ID), att); serr != nil {
+			_ = att.Close()
+			s.cfg.Git.StopDiffWatch(r.ID)
+			s.mu.Lock()
+			if s.runs[r.ID] == entry {
+				delete(s.runs, r.ID)
+			}
+			s.mu.Unlock()
+			s.didNotSurvive(ctx, r, cid)
+			return
+		}
 		s.wg.Add(1)
 		go s.superviseWait(entry)
 		if sc.KillRequested {

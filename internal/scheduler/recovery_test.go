@@ -14,6 +14,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -165,6 +166,47 @@ func TestRecoveryOfLegacySidecarCapturesHomeForImages(t *testing.T) {
 	}
 	if persisted.Home != "/home/recovered" {
 		t.Fatalf("persisted HOME = %q, want /home/recovered", persisted.Home)
+	}
+}
+
+type gatedRecoveryPTY struct {
+	*fakePTY
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *gatedRecoveryPTY) StartSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error {
+	if err := p.fakePTY.StartSession(ctx, key, att); err != nil {
+		return err
+	}
+	close(p.started)
+	<-p.release
+	return nil
+}
+
+func TestRecoveryPublishesRunBeforePTYStartReturns(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "publish before pty return")
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	gated := &gatedRecoveryPTY{
+		fakePTY: newFakePTY(),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	s2 := e.newScheduler(t, e.rt, gated.fakePTY)
+	s2.cfg.PTY = gated
+	startScheduler(t, s2)
+	t.Cleanup(func() { close(gated.release) })
+	select {
+	case <-gated.started:
+	case <-time.After(waitTimeout):
+		t.Fatal("recovery never published PTY session")
+	}
+	if err := s2.Inject(t.Context(), run.ID, e.member.ID, "inject while PTY starts"); err != nil {
+		t.Fatalf("Inject during PTY start: %v", err)
 	}
 }
 
