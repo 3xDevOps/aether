@@ -208,11 +208,17 @@ ask() { echo "$*" >&4; }
 # Runs a command with its stdin on the terminal - never on the script's own
 # stdin, which is the script itself when this arrives through a pipe.
 run_interactive() {
+	interactive_status=0
 	if [ "$have_tty" = yes ]; then
-		"$@" <&3
+		"$@" <&3 || interactive_status=$?
 	else
-		"$@" </dev/null
+		"$@" </dev/null || interactive_status=$?
 	fi
+	# A POSIX shell cannot trap a signal that was ignored when it started.
+	case "$interactive_status" in
+	130 | 143) exit "$interactive_status" ;;
+	esac
+	return "$interactive_status"
 }
 
 # An explicit --client or --server, or AETHER_COMPONENTS, already answered
@@ -306,9 +312,6 @@ $sudo mkdir -p "$BIN_DIR" || die "cannot create ${BIN_DIR}"
 # --- download and verify -----------------------------------------------
 
 tmp="$(mktemp -d)"
-# A bare INT trap would clean up and then resume the script, which used to be
-# harmless because nothing followed the downloads. Now a cancelled setup or
-# desktop build would fall through to advice the user did not ask for.
 trap 'rm -rf "$tmp"' EXIT
 trap 'rm -rf "$tmp"; exit 130' INT
 trap 'rm -rf "$tmp"; exit 143' TERM
