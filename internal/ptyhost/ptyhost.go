@@ -76,7 +76,7 @@ type Host struct {
 	cfg Config
 
 	mu       sync.Mutex
-	sessions map[SessionKey]*session
+	sessions map[SessionKey]*session // stopped entries are lightweight idempotency sentinels
 	starting map[SessionKey]struct{}
 	closed   bool
 }
@@ -420,22 +420,30 @@ func (h *Host) lookup(key SessionKey) *session {
 	return h.sessions[key]
 }
 
-// reserve claims key for an in-flight StartSession under h.mu.
+// reserve claims key for an in-flight StartSession. The host lock only
+// protects the session and reservation maps; session state is checked after
+// releasing it so a wedged session cannot stall unrelated host operations.
 func (h *Host) reserve(key SessionKey) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if h.closed {
+		h.mu.Unlock()
 		return errHostClosed
 	}
 	if _, ok := h.starting[key]; ok {
+		h.mu.Unlock()
 		return fmt.Errorf("ptyhost: session already started for key %s", key)
 	}
-	// An ended session (its process exited) does not block the key: the
-	// restart in StartSession stops and replaces it.
-	if prev, ok := h.sessions[key]; ok && prev.isActive() {
-		return fmt.Errorf("ptyhost: session already started for key %s", key)
-	}
+	prev := h.sessions[key]
 	h.starting[key] = struct{}{}
+	h.mu.Unlock()
+
+	// An ended session (its process exited) does not block the key: the
+	// restart in StartSession stops and replaces it. Do not hold h.mu while
+	// asking the session for its state.
+	if prev != nil && prev.isActive() {
+		h.unreserve(key)
+		return fmt.Errorf("ptyhost: session already started for key %s", key)
+	}
 	return nil
 }
 
@@ -453,11 +461,24 @@ func (h *Host) transcriptPath(key SessionKey) string {
 // ActiveSessions returns the keys of live sessions with the given prefix.
 func (h *Host) ActiveSessions(prefix string) []SessionKey {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	keys := make([]SessionKey, 0)
+	var sessions []struct {
+		key SessionKey
+		s   *session
+	}
 	for key, s := range h.sessions {
-		if strings.HasPrefix(string(key), prefix) && s.isActive() {
-			keys = append(keys, key)
+		if strings.HasPrefix(string(key), prefix) {
+			sessions = append(sessions, struct {
+				key SessionKey
+				s   *session
+			}{key: key, s: s})
+		}
+	}
+	h.mu.Unlock()
+
+	keys := make([]SessionKey, 0, len(sessions))
+	for _, entry := range sessions {
+		if entry.s.isActive() {
+			keys = append(keys, entry.key)
 		}
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })

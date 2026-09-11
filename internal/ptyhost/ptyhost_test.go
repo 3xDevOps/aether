@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1096,6 +1097,122 @@ func TestAttachDrainHonorsContext(t *testing.T) {
 	}
 }
 
+// TestActiveSessionsDoesNotBlockUnrelatedAttach covers the host-lock handoff:
+// a session state read may wait, but it must not keep unrelated lookup and
+// attach operations from progressing.
+func TestActiveSessionsDoesNotBlockUnrelatedAttach(t *testing.T) {
+	h, _ := newTestHost(t)
+	blockedKey := RunShellSession("r-lock", "blocked")
+	otherKey := RunShellSession("r-lock", "other")
+	if err := h.StartSession(context.Background(), blockedKey, newFakeAtt()); err != nil {
+		t.Fatalf("start blocked session: %v", err)
+	}
+	if err := h.StartSession(context.Background(), otherKey, newFakeAtt()); err != nil {
+		t.Fatalf("start other session: %v", err)
+	}
+	blocked := h.lookup(blockedKey)
+	blocked.mu.Lock()
+	released := false
+	defer func() {
+		if !released {
+			blocked.mu.Unlock()
+		}
+	}()
+
+	activeDone := make(chan []SessionKey, 1)
+	h.mu.Lock()
+	go func() {
+		activeDone <- h.ActiveSessions("run-shell:r-lock:")
+	}()
+	for range 100 {
+		goruntime.Gosched()
+	}
+	h.mu.Unlock()
+	// Give the old implementation's host-locked state read time to acquire
+	// h.mu before the unrelated operation starts.
+	time.Sleep(2 * time.Millisecond)
+
+	attachDone := make(chan error, 1)
+	go func() {
+		attachDone <- h.Attach(context.Background(), otherKey, "m-other", 80, 24, true,
+			&testConn{r: strings.NewReader(""), w: &sink{}}, nil)
+	}()
+	select {
+	case err := <-attachDone:
+		if err != nil {
+			t.Fatalf("unrelated Attach: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unrelated Attach blocked by another session's state read")
+	}
+
+	blocked.mu.Unlock()
+	released = true
+	select {
+	case <-activeDone:
+	case <-time.After(time.Second):
+		t.Fatal("ActiveSessions did not finish after releasing the session lock")
+	}
+}
+
+// TestReserveDoesNotBlockUnrelatedStart covers the same lock ordering for
+// duplicate StartSession checks: reserve must not hold h.mu while inspecting
+// an existing session.
+func TestReserveDoesNotBlockUnrelatedStart(t *testing.T) {
+	h, _ := newTestHost(t)
+	blockedKey := RunShellSession("r-reserve", "blocked")
+	otherKey := RunShellSession("r-reserve", "other")
+	if err := h.StartSession(context.Background(), blockedKey, newFakeAtt()); err != nil {
+		t.Fatalf("start blocked session: %v", err)
+	}
+	if err := h.StartSession(context.Background(), otherKey, newFakeAtt()); err != nil {
+		t.Fatalf("start other session: %v", err)
+	}
+	blocked := h.lookup(blockedKey)
+	blocked.mu.Lock()
+	released := false
+	defer func() {
+		if !released {
+			blocked.mu.Unlock()
+		}
+	}()
+
+	reserveDone := make(chan error, 1)
+	h.mu.Lock()
+	go func() {
+		reserveDone <- h.StartSession(context.Background(), blockedKey, newFakeAtt())
+	}()
+	for range 100 {
+		goruntime.Gosched()
+	}
+	h.mu.Unlock()
+	time.Sleep(2 * time.Millisecond)
+
+	otherStartDone := make(chan error, 1)
+	go func() {
+		otherStartDone <- h.StartSession(context.Background(), otherKey, newFakeAtt())
+	}()
+	select {
+	case err := <-otherStartDone:
+		if err == nil {
+			t.Fatal("unrelated duplicate StartSession succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unrelated StartSession blocked by another session's state read")
+	}
+
+	blocked.mu.Unlock()
+	released = true
+	select {
+	case err := <-reserveDone:
+		if err == nil {
+			t.Fatal("blocked duplicate StartSession succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("duplicate StartSession did not finish after releasing the session lock")
+	}
+}
+
 func TestConcurrentDuplicateStartSessionPreservesTranscript(t *testing.T) {
 	h, dir := newTestHost(t)
 	run := domain.RunID("run-dup")
@@ -1139,25 +1256,44 @@ func TestConcurrentDuplicateStartSessionPreservesTranscript(t *testing.T) {
 	}
 }
 
-func TestStoppedSessionReleasesBuffers(t *testing.T) {
+func TestStoppedSessionClosesAttachmentAndPreservesReplay(t *testing.T) {
 	h, _ := newTestHost(t)
 	att := newFakeAtt()
-	run := domain.RunID("run-mem")
+	run := domain.RunID("run-stopped")
 	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	att.writeOutput(t, "scrollback")
+	waitFor(t, "scrollback recorded before stop", func() bool {
+		ts, ok := h.LastOutput(RunSession(run))
+		return ok && !ts.IsZero()
+	})
 	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
 		t.Fatalf("StopSession: %v", err)
 	}
-	s := h.lookup(RunSession(run))
-	if s == nil {
-		t.Fatal("stopped session must stay in the map")
+	att.mu.Lock()
+	closed := att.closed
+	att.mu.Unlock()
+	if !closed {
+		t.Fatal("StopSession did not close the runtime attachment")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ring != nil || s.clients != nil {
-		t.Fatalf("stopped session retains buffers: ring=%v clients=%v", s.ring != nil, s.clients != nil)
+
+	rc, err := h.Replay(run)
+	if err != nil {
+		t.Fatalf("Replay after StopSession: %v", err)
+	}
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read replay: %v", err)
+	}
+	if err := rc.Close(); err != nil {
+		t.Fatalf("close replay: %v", err)
+	}
+	if string(got) != "scrollback" {
+		t.Fatalf("replay after StopSession = %q, want %q", got, "scrollback")
+	}
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
+		t.Fatalf("second StopSession: %v", err)
 	}
 }
 

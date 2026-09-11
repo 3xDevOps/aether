@@ -56,6 +56,36 @@ func createContainer(t *testing.T, d *Docker, spec Spec) ID {
 	return id
 }
 
+func createContainerWithoutInit(t *testing.T, d *Docker, spec Spec) ID {
+	t.Helper()
+	if _, err := d.cli.ImageInspect(t.Context(), spec.Image); err != nil {
+		if !cerrdefs.IsNotFound(err) {
+			t.Fatalf("inspect image %s: %v", spec.Image, err)
+		}
+		if err := d.pull(t.Context(), spec.Image); err != nil {
+			t.Fatalf("pull image %s: %v", spec.Image, err)
+		}
+	}
+	cfg, hostCfg := d.containerConfig(spec)
+	initDisabled := false
+	hostCfg.Init = &initDisabled
+	resp, err := d.cli.ContainerCreate(t.Context(), cfg, hostCfg, nil, nil, d.namePrefix+spec.Name)
+	if err != nil {
+		t.Fatalf("ContainerCreate() without init: %v", err)
+	}
+	id := ID(resp.ID)
+	t.Cleanup(func() {
+		// Force removal also kills an orphan probe if its context was
+		// cancelled while the probe was still polling.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := d.Destroy(ctx, id); err != nil {
+			t.Errorf("cleanup Destroy() error: %v", err)
+		}
+	})
+	return id
+}
+
 // readLines pumps attachment stdout lines into a channel until EOF.
 func readLines(att Attachment) <-chan string {
 	lines := make(chan string, 256)
@@ -868,5 +898,307 @@ func TestDockerExecTTY(t *testing.T) {
 	}
 	if exitErr.Code != 126 && exitErr.Code != 127 {
 		t.Fatalf("ExecExitError.Code = %d, want 126 or 127", exitErr.Code)
+	}
+}
+
+const (
+	orphanDescendantCount = 8
+	// The probe shares this budget across all polling phases. At 100ms per
+	// iteration, it remains below dockerOrphanZombieCount's context timeout.
+	orphanProbePolls = 240
+)
+
+func orphanWorkloadCommand() string {
+	return fmt.Sprintf(`i=0
+while [ "$i" -lt %d ]; do
+  /bin/sh -c "/bin/sh -c 'echo \$\$ > /workspace/orphan.pid.$i; while [ ! -e /workspace/reap-release ]; do sleep 0.1; done; : > /workspace/orphan.done.$i' & exit 0" &
+  i=$((i + 1))
+done
+echo $$ > /workspace/main.pid
+echo READY
+while [ ! -e /workspace/main-release ]; do sleep 0.1; done
+exec tail -f /dev/null`, orphanDescendantCount)
+}
+
+func orphanReapProbeCommand() string {
+	return fmt.Sprintf(`mode="$1"
+case "$mode" in
+  control|managed) ;;
+  *) echo "orphan probe: invalid mode $mode" >&2; exit 2 ;;
+esac
+
+main=$(cat /workspace/main.pid 2>/dev/null) || {
+  echo "orphan probe: missing /workspace/main.pid" >&2
+  exit 1
+}
+[ -n "$main" ] || {
+  echo "orphan probe: /workspace/main.pid is empty" >&2
+  exit 1
+}
+
+budget=%d
+: > /workspace/main-release
+main_ready=0
+while [ "$budget" -gt 0 ]; do
+  if [ -r "/proc/$main/comm" ] && [ "$(cat "/proc/$main/comm" 2>/dev/null)" = "tail" ]; then
+    main_ready=1
+    break
+  fi
+  budget=$((budget - 1))
+  sleep 0.1
+done
+if [ "$main_ready" -ne 1 ]; then
+  echo "orphan probe: main process did not become tail before deadline" >&2
+  exit 1
+fi
+
+pid_files_ready=0
+while [ "$budget" -gt 0 ]; do
+  pid_files_ready=1
+  i=0
+  while [ "$i" -lt %d ]; do
+    if [ ! -s "/workspace/orphan.pid.$i" ]; then
+      pid_files_ready=0
+    fi
+    i=$((i + 1))
+  done
+  if [ "$pid_files_ready" -eq 1 ]; then
+    break
+  fi
+  budget=$((budget - 1))
+  sleep 0.1
+done
+if [ "$pid_files_ready" -ne 1 ]; then
+  echo "orphan probe: descendant pid files did not appear before deadline" >&2
+  i=0
+  while [ "$i" -lt %d ]; do
+    if [ -s "/workspace/orphan.pid.$i" ]; then
+      echo "orphan probe: orphan.pid.$i=$(cat "/workspace/orphan.pid.$i")" >&2
+    else
+      echo "orphan probe: orphan.pid.$i is missing" >&2
+    fi
+    i=$((i + 1))
+  done
+  exit 1
+fi
+
+# Every tracked descendant must still be alive before the release. This
+# makes the later zombie/disappearance check an actual before/after probe.
+i=0
+while [ "$i" -lt %d ]; do
+  pid=$(cat "/workspace/orphan.pid.$i" 2>/dev/null)
+  state=
+  if [ -r "/proc/$pid/status" ]; then
+    state=$(sed -n 's/^State:[[:space:]]*\([^[:space:]]*\).*/\1/p' "/proc/$pid/status" 2>/dev/null)
+  fi
+  if [ -z "$state" ]; then
+    echo "orphan probe: descendant $i pid $pid disappeared before release" >&2
+    exit 1
+  fi
+  if [ "$state" = "Z" ]; then
+    echo "orphan probe: descendant $i pid $pid was already a zombie before release" >&2
+    exit 1
+  fi
+  i=$((i + 1))
+done
+
+: > /workspace/reap-release
+zombies=0
+if [ "$mode" = "managed" ]; then
+  # Init may expose a short-lived Z state before it reaps the child. Only
+  # success after every tracked /proc entry disappears is a clean result.
+  all_gone=0
+  while [ "$budget" -gt 0 ]; do
+    all_gone=1
+    i=0
+    while [ "$i" -lt %d ]; do
+      if [ ! -e "/workspace/orphan.done.$i" ]; then
+        all_gone=0
+      else
+        pid=$(cat "/workspace/orphan.pid.$i" 2>/dev/null)
+        if [ -e "/proc/$pid/status" ]; then
+          all_gone=0
+        fi
+      fi
+      i=$((i + 1))
+    done
+    if [ "$all_gone" -eq 1 ]; then
+      break
+    fi
+    budget=$((budget - 1))
+    sleep 0.1
+  done
+  if [ "$all_gone" -ne 1 ]; then
+    echo "orphan probe: managed init did not reap descendants before deadline" >&2
+    i=0
+    while [ "$i" -lt %d ]; do
+      pid=$(cat "/workspace/orphan.pid.$i" 2>/dev/null)
+      if [ ! -e "/workspace/orphan.done.$i" ]; then
+        echo "orphan probe: descendant $i pid $pid has not exited" >&2
+      elif [ -e "/proc/$pid/status" ]; then
+        state=$(sed -n 's/^State:[[:space:]]*\([^[:space:]]*\).*/\1/p' "/proc/$pid/status" 2>/dev/null)
+        echo "orphan probe: descendant $i pid $pid remains in state $state" >&2
+      fi
+      i=$((i + 1))
+    done
+    exit 1
+  fi
+else
+  # No init must retain each exited descendant as a zombie. Requiring all
+  # tracked states at once avoids counting a transient Z in the managed case.
+  all_zombies=0
+  while [ "$budget" -gt 0 ]; do
+    all_zombies=1
+    zombies=0
+    i=0
+    while [ "$i" -lt %d ]; do
+      if [ ! -e "/workspace/orphan.done.$i" ]; then
+        all_zombies=0
+      else
+        pid=$(cat "/workspace/orphan.pid.$i" 2>/dev/null)
+        state=
+        if [ -r "/proc/$pid/status" ]; then
+          state=$(sed -n 's/^State:[[:space:]]*\([^[:space:]]*\).*/\1/p' "/proc/$pid/status" 2>/dev/null)
+        fi
+        if [ "$state" = "Z" ]; then
+          zombies=$((zombies + 1))
+        else
+          all_zombies=0
+        fi
+      fi
+      i=$((i + 1))
+    done
+    if [ "$all_zombies" -eq 1 ]; then
+      break
+    fi
+    budget=$((budget - 1))
+    sleep 0.1
+  done
+  if [ "$all_zombies" -ne 1 ]; then
+    echo "orphan probe: no-init descendants did not remain zombies before deadline" >&2
+    i=0
+    while [ "$i" -lt %d ]; do
+      pid=$(cat "/workspace/orphan.pid.$i" 2>/dev/null)
+      if [ ! -e "/workspace/orphan.done.$i" ]; then
+        echo "orphan probe: descendant $i pid $pid has not exited" >&2
+      elif [ -r "/proc/$pid/status" ]; then
+        state=$(sed -n 's/^State:[[:space:]]*\([^[:space:]]*\).*/\1/p' "/proc/$pid/status" 2>/dev/null)
+        echo "orphan probe: descendant $i pid $pid is in state $state" >&2
+      else
+        echo "orphan probe: descendant $i pid $pid is missing from /proc" >&2
+      fi
+      i=$((i + 1))
+    done
+    exit 1
+  fi
+fi
+printf 'zombies:%%d\n' "$zombies"`, orphanProbePolls, orphanDescendantCount, orphanDescendantCount, orphanDescendantCount, orphanDescendantCount, orphanDescendantCount, orphanDescendantCount, orphanDescendantCount)
+}
+
+func dockerOrphanZombieCount(t *testing.T, d *Docker, id ID, expectReaped bool) int {
+	t.Helper()
+	mode := "control"
+	if expectReaped {
+		mode = "managed"
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	code, stdout, stderr, err := d.Exec(ctx, id, []string{"/bin/sh", "-c", orphanReapProbeCommand(), "orphan-reap-probe", mode}, "/workspace")
+	if err != nil {
+		t.Fatalf("orphan probe (%s) error: %v (stdout=%q stderr=%q)", mode, err, stdout, stderr)
+	}
+	if code != 0 {
+		t.Fatalf("orphan probe (%s) exit code = %d (stdout=%q stderr=%q)", mode, code, stdout, stderr)
+	}
+	var zombies int
+	if _, err := fmt.Sscanf(strings.TrimSpace(stdout), "zombies:%d", &zombies); err != nil {
+		t.Fatalf("orphan probe (%s) output = %q, want zombies count: %v", mode, stdout, err)
+	}
+	return zombies
+}
+
+// TestDockerInitReapsOrphanedDescendants verifies Docker's minimal init
+// adopts and reaps descendants left behind by a long-lived agent command.
+// A matching no-init container proves the workload really leaves zombies;
+// the managed container must keep its TTY and main process alive while
+// reaping them, then still stop with a nonzero signal status.
+func TestDockerInitReapsOrphanedDescendants(t *testing.T) {
+	t.Parallel()
+	d := newTestDocker(t)
+
+	controlSpec := Spec{
+		Name:              fmt.Sprintf("it-reap-control-%d", time.Now().UnixNano()),
+		Image:             testImage,
+		TTY:               true,
+		WorktreeHostPath:  t.TempDir(),
+		WorktreeMountPath: "/workspace",
+		WorkingDir:        "/workspace",
+		Command:           []string{"/bin/sh", "-c", orphanWorkloadCommand()},
+	}
+	controlID := createContainerWithoutInit(t, d, controlSpec)
+	controlAtt, err := d.Attach(t.Context(), controlID)
+	if err != nil {
+		t.Fatalf("control Attach() error: %v", err)
+	}
+	defer controlAtt.Close()
+	controlLines := readLines(controlAtt)
+	if err := d.Start(t.Context(), controlID); err != nil {
+		t.Fatalf("control Start() error: %v", err)
+	}
+	waitLine(t, controlLines, 10*time.Second, "READY")
+	if got := dockerOrphanZombieCount(t, d, controlID, false); got == 0 {
+		t.Fatal("no-init control left no zombies; workload did not exercise orphan reaping")
+	}
+	info, err := d.cli.ContainerInspect(t.Context(), string(controlID))
+	if err != nil {
+		t.Fatalf("control inspect after probe: %v", err)
+	}
+	if !info.State.Running {
+		t.Fatalf("control container stopped after probe: %s", info.State.Status)
+	}
+	if err := d.Stop(t.Context(), controlID, 2*time.Second); err != nil {
+		t.Fatalf("control Stop() error: %v", err)
+	}
+	controlStatus, err := d.Wait(t.Context(), controlID)
+	if err != nil {
+		t.Fatalf("control Wait() error: %v", err)
+	}
+	if controlStatus.Code == 0 {
+		t.Fatalf("control Wait().Code = 0, want signal status")
+	}
+
+	managedSpec := controlSpec
+	managedSpec.Name = fmt.Sprintf("it-reap-managed-%d", time.Now().UnixNano())
+	managedSpec.WorktreeHostPath = t.TempDir()
+	managedID := createContainer(t, d, managedSpec)
+	managedAtt, err := d.Attach(t.Context(), managedID)
+	if err != nil {
+		t.Fatalf("managed Attach() error: %v", err)
+	}
+	defer managedAtt.Close()
+	managedLines := readLines(managedAtt)
+	if err := d.Start(t.Context(), managedID); err != nil {
+		t.Fatalf("managed Start() error: %v", err)
+	}
+	waitLine(t, managedLines, 10*time.Second, "READY")
+	if got := dockerOrphanZombieCount(t, d, managedID, true); got != 0 {
+		t.Fatalf("managed orphan probe found %d zombies, want none", got)
+	}
+	info, err = d.cli.ContainerInspect(t.Context(), string(managedID))
+	if err != nil {
+		t.Fatalf("managed inspect after probe: %v", err)
+	}
+	if !info.State.Running {
+		t.Fatalf("managed container stopped after probe: %s", info.State.Status)
+	}
+	if err := d.Stop(t.Context(), managedID, 2*time.Second); err != nil {
+		t.Fatalf("managed Stop() error: %v", err)
+	}
+	managedStatus, err := d.Wait(t.Context(), managedID)
+	if err != nil {
+		t.Fatalf("managed Wait() error: %v", err)
+	}
+	if managedStatus.Code == 0 {
+		t.Fatalf("managed Wait().Code = 0, want signal status")
 	}
 }

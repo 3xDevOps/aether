@@ -123,7 +123,8 @@ func TestRecoveredTerminalUsesCapturedUserAndHomeForImages(t *testing.T) {
 
 type failingPutTerminalStore struct {
 	store.Store
-	fail bool
+	fail      bool
+	deleteErr error
 }
 
 func (s *failingPutTerminalStore) PutTerminal(ctx context.Context, terminal *domain.Terminal) error {
@@ -131,6 +132,48 @@ func (s *failingPutTerminalStore) PutTerminal(ctx context.Context, terminal *dom
 		return errors.New("test: PutTerminal unavailable")
 	}
 	return s.Store.PutTerminal(ctx, terminal)
+}
+
+func (s *failingPutTerminalStore) DeleteTerminal(ctx context.Context, member domain.MemberID) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
+	return s.Store.DeleteTerminal(ctx, member)
+}
+
+type failingDestroyRuntime struct {
+	*scriptedWaitRuntime
+	destroyErr error
+}
+
+func (r *failingDestroyRuntime) Destroy(ctx context.Context, id runtime.ID) error {
+	if r.destroyErr != nil {
+		return r.destroyErr
+	}
+	return r.fakeRuntime.Destroy(ctx, id)
+}
+
+func assertCleanupPendingTerminalIsNotLive(t *testing.T, e *testEnv) {
+	t.Helper()
+	waitFor(t, "pending terminal status to stop reporting live", func() bool {
+		status, err := e.sched.TerminalStatus(t.Context(), e.member.ID)
+		return err == nil && !status.Running && len(status.Tabs) == 0
+	})
+	if _, err := e.sched.TerminalContainerAddr(t.Context(), e.member.ID); err == nil || err.Error() != "environment terminal is not running" {
+		t.Fatalf("TerminalContainerAddr for pending terminal = %v, want not running", err)
+	}
+	if _, err := e.sched.SaveEnvironment(t.Context(), e.member.ID); !errors.Is(err, ErrTerminalNotRunning) {
+		t.Fatalf("SaveEnvironment for pending terminal = %v, want %v", err, ErrTerminalNotRunning)
+	}
+	if _, err := e.sched.SaveTerminalImage(t.Context(), e.member.ID, "", ".png", []byte("pending terminal image")); err == nil || !strings.Contains(err.Error(), "environment terminal is not running") {
+		t.Fatalf("SaveTerminalImage for pending terminal = %v, want not running", err)
+	}
+	if _, err := e.sched.ConnectGitHub(t.Context(), e.member.ID); !errors.Is(err, ErrTerminalNotRunning) {
+		t.Fatalf("ConnectGitHub for pending terminal = %v, want %v", err, ErrTerminalNotRunning)
+	}
+	if _, err := e.sched.ProbeGitHubCLI(t.Context(), e.member.ID); !errors.Is(err, ErrTerminalNotRunning) {
+		t.Fatalf("ProbeGitHubCLI for pending terminal = %v, want %v", err, ErrTerminalNotRunning)
+	}
 }
 
 func TestRecoveredTerminalAttachFailurePreservesAndRetries(t *testing.T) {
@@ -313,19 +356,21 @@ func TestEnsureTerminalRecreatesAfterMainShellExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	container.exitNow(0)
-	waitFor(t, "terminal supervision cleanup", func() bool {
-		return e.sched.lookupTerminal(e.member.ID) == nil
+	var second *domain.Terminal
+	waitFor(t, "terminal recreation after exit", func() bool {
+		candidate, candidateErr := e.sched.EnsureTerminal(context.Background(), e.member.ID)
+		if candidateErr != nil {
+			return false
+		}
+		second = candidate
+		return candidate.ContainerID != first.ContainerID
 	})
-	waitFor(t, "terminal row pruned", func() bool {
-		_, rowErr := e.db.GetTerminal(context.Background(), e.member.ID)
-		return errors.Is(rowErr, store.ErrNotFound)
-	})
-	second, err := e.sched.EnsureTerminal(context.Background(), e.member.ID)
-	if err != nil {
-		t.Fatalf("EnsureTerminal after exit: %v", err)
+	if second == nil || second.ContainerID == first.ContainerID {
+		t.Fatalf("terminal after exit = %+v, want a fresh container", second)
 	}
-	if second.ContainerID == first.ContainerID {
-		t.Fatalf("terminal reused the exited container %s", first.ContainerID)
+	stored, err := e.db.GetTerminal(context.Background(), e.member.ID)
+	if err != nil || stored.ContainerID != second.ContainerID {
+		t.Fatalf("terminal row after recreation = %+v, %v", stored, err)
 	}
 	if _, err := e.rt.get(runtime.ID(first.ContainerID)); err == nil {
 		t.Fatal("exited terminal container was never destroyed")
@@ -345,5 +390,136 @@ func TestEnsureTerminalTabLimit(t *testing.T) {
 	}
 	if err := e.sched.EnsureTerminalTab(context.Background(), e.member.ID, "t6", 80, 24); !errors.Is(err, ErrTerminalTabLimit) {
 		t.Fatalf("EnsureTerminalTab over limit error = %v, want %v", err, ErrTerminalTabLimit)
+	}
+}
+
+func TestSuperviseTerminalRetriesTransportErrorUntilExit(t *testing.T) {
+	e := newTestEnv(t, nil)
+	rt := newScriptedWaitRuntime(e.rt)
+	e.sched.cfg.Runtime = rt
+	terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	c, err := e.rt.get(runtime.ID(terminal.ContainerID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := waitScriptedWaitCall(t, rt); got != runtime.ID(terminal.ContainerID) {
+		t.Fatalf("first Wait container = %q, want %q", got, terminal.ContainerID)
+	}
+	sendScriptedWaitOutcome(t, rt, scriptedWaitOutcome{err: errors.New("test: daemon socket reset")})
+	if got := waitScriptedWaitCall(t, rt); got != runtime.ID(terminal.ContainerID) {
+		t.Fatalf("retry Wait container = %q, want %q", got, terminal.ContainerID)
+	}
+	sendScriptedWaitOutcome(t, rt, scriptedWaitOutcome{useUnderlying: true})
+	if err := e.sched.EnsureTerminalTab(t.Context(), e.member.ID, "logs", 80, 24); err != nil {
+		t.Fatalf("EnsureTerminalTab after transient Wait: %v", err)
+	}
+	c.exitNow(0)
+	var replacement *domain.Terminal
+	waitFor(t, "terminal cleanup after eventual exit", func() bool {
+		next, nextErr := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+		if nextErr != nil {
+			return false
+		}
+		replacement = next
+		return next.ContainerID != terminal.ContainerID
+	})
+	if replacement == nil || replacement.ContainerID == terminal.ContainerID {
+		t.Fatalf("terminal after eventual exit = %+v, want a fresh container", replacement)
+	}
+	if _, err := e.rt.get(runtime.ID(terminal.ContainerID)); !errors.Is(err, runtime.ErrNotFound) {
+		t.Fatalf("exited terminal container = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSuperviseTerminalMissingContainerPrunesState(t *testing.T) {
+	e := newTestEnv(t, nil)
+	terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	if err := e.rt.Destroy(t.Context(), runtime.ID(terminal.ContainerID)); err != nil {
+		t.Fatalf("Destroy terminal: %v", err)
+	}
+	var replacement *domain.Terminal
+	waitFor(t, "missing terminal cleanup", func() bool {
+		next, nextErr := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+		if nextErr != nil {
+			return false
+		}
+		replacement = next
+		return next.ContainerID != terminal.ContainerID
+	})
+	if replacement == nil || replacement.ContainerID == terminal.ContainerID {
+		t.Fatalf("terminal after missing container = %+v, want a fresh container", replacement)
+	}
+}
+
+func TestExitedTerminalCleanupRetainsStateForRetry(t *testing.T) {
+	e := newTestEnv(t, nil)
+	waitRuntime := newScriptedWaitRuntime(e.rt)
+	runtimeWithFailure := &failingDestroyRuntime{
+		scriptedWaitRuntime: waitRuntime,
+		destroyErr:          errors.New("test: destroy unavailable"),
+	}
+	e.sched.cfg.Runtime = runtimeWithFailure
+	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	if got := waitScriptedWaitCall(t, waitRuntime); got != runtime.ID(first.ContainerID) {
+		t.Fatalf("Wait container = %q, want %q", got, first.ContainerID)
+	}
+	sendScriptedWaitOutcome(t, waitRuntime, scriptedWaitOutcome{useUnderlying: true})
+	container, err := e.rt.get(runtime.ID(first.ContainerID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	container.exitNow(0)
+	waitFor(t, "failed terminal cleanup retained", func() bool {
+		_, ensureErr := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+		return ensureErr != nil
+	})
+	stored, err := e.db.GetTerminal(t.Context(), e.member.ID)
+	if err != nil || stored.ContainerID != first.ContainerID {
+		t.Fatalf("terminal row after destroy failure = %+v, %v", stored, err)
+	}
+	assertCleanupPendingTerminalIsNotLive(t, e)
+
+	if _, err = e.sched.EnsureTerminal(t.Context(), e.member.ID); err == nil {
+		t.Fatal("EnsureTerminal succeeded while exited container destroy was unavailable")
+	}
+
+	runtimeWithFailure.destroyErr = nil
+	failingStore := &failingPutTerminalStore{
+		Store:     e.db,
+		deleteErr: errors.New("test: terminal row delete unavailable"),
+	}
+	e.sched.cfg.Store = failingStore
+	if _, err = e.sched.EnsureTerminal(t.Context(), e.member.ID); err == nil {
+		t.Fatal("EnsureTerminal succeeded while terminal row delete was unavailable")
+	}
+	stored, err = e.db.GetTerminal(t.Context(), e.member.ID)
+	if err != nil || stored.ContainerID != first.ContainerID {
+		t.Fatalf("terminal row after delete failure = %+v, %v", stored, err)
+	}
+	assertCleanupPendingTerminalIsNotLive(t, e)
+
+	failingStore.deleteErr = nil
+	second, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal retry after cleanup failures: %v", err)
+	}
+	if second.ContainerID == first.ContainerID {
+		t.Fatalf("EnsureTerminal reused exited container %q", first.ContainerID)
+	}
+	status, err := e.sched.TerminalStatus(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("TerminalStatus after replacement: %v", err)
+	}
+	if !status.Running || len(status.Tabs) != 1 || status.Tabs[0] != terminalTabMain {
+		t.Fatalf("replacement terminal status = %+v, want running main tab", status)
 	}
 }

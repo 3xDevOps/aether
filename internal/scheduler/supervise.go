@@ -14,6 +14,45 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
+// waitRetryInitial and waitRetryMax bound the delay between inconclusive
+// Runtime.Wait calls. A daemon transport error is not evidence that the
+// container exited, but retrying without a delay would busy-loop the daemon.
+const (
+	waitRetryInitial = 50 * time.Millisecond
+	waitRetryMax     = time.Second
+)
+
+func waitForExit(ctx context.Context, wait func(context.Context) (runtime.ExitStatus, error)) (runtime.ExitStatus, error) {
+	delay := waitRetryInitial
+	for {
+		status, err := wait(ctx)
+		if err == nil || errors.Is(err, runtime.ErrNotFound) || ctx.Err() != nil {
+			return status, err
+		}
+		if delay == waitRetryInitial {
+			slog.Warn("scheduler: container wait failed; retrying without stopping container", "error", err)
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return runtime.ExitStatus{}, ctx.Err()
+		case <-timer.C:
+		}
+		if delay < waitRetryMax {
+			delay *= 2
+			if delay > waitRetryMax {
+				delay = waitRetryMax
+			}
+		}
+	}
+}
+
 // finalizeTimeout bounds the post-exit work (commit, publish, destroy),
 // which runs on a fresh context so shutdown cannot orphan half-finalized
 // runs.
@@ -24,13 +63,25 @@ const finalizeTimeout = time.Minute
 // shutdown) ends supervision without touching the container or the run.
 func (s *Scheduler) superviseWait(entry *supervised) {
 	defer s.wg.Done()
-	st, err := s.cfg.Runtime.Wait(s.superCtx, entry.containerID)
+	st, err := waitForExit(s.superCtx, func(ctx context.Context) (runtime.ExitStatus, error) {
+		return s.cfg.Runtime.Wait(ctx, entry.containerID)
+	})
 	if err != nil {
 		if s.superCtx.Err() != nil {
 			return
 		}
-		slog.Warn("scheduler: container wait failed; treating as crash", "run", entry.runID, "error", err)
-		st = runtime.ExitStatus{Code: -1}
+		if errors.Is(err, runtime.ErrNotFound) {
+			// A missing container is the one non-success result that proves
+			// this run can no longer be supervised.
+			slog.Warn("scheduler: container disappeared while waiting", "run", entry.runID, "error", err)
+			st = runtime.ExitStatus{Code: -1}
+		} else {
+			// waitForExit only returns another error when its context was
+			// cancelled; keep this guard so a future implementation cannot
+			// turn a transport error into a bogus exit.
+			slog.Warn("scheduler: container wait inconclusive; retaining supervision", "run", entry.runID, "error", err)
+			return
+		}
 	}
 	s.recordExitObserved(entry, st.Code)
 	s.finalize(entry, st.Code)

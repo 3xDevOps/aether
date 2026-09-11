@@ -19,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -37,6 +38,46 @@ type testEnv struct {
 	cfg    Config
 	ws     *domain.Workspace
 	member *domain.Member
+}
+
+type scriptedWaitOutcome struct {
+	status        runtime.ExitStatus
+	err           error
+	useUnderlying bool
+}
+
+// scriptedWaitRuntime controls each Wait call independently. It lets
+// supervision tests model a daemon transport failure followed by the real
+// container exit without mutating shared fake-runtime state concurrently.
+type scriptedWaitRuntime struct {
+	*fakeRuntime
+	calls    chan runtime.ID
+	outcomes chan scriptedWaitOutcome
+}
+
+func newScriptedWaitRuntime(base *fakeRuntime) *scriptedWaitRuntime {
+	return &scriptedWaitRuntime{
+		fakeRuntime: base,
+		calls:       make(chan runtime.ID),
+		outcomes:    make(chan scriptedWaitOutcome),
+	}
+}
+
+func (r *scriptedWaitRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
+	select {
+	case r.calls <- id:
+	case <-ctx.Done():
+		return runtime.ExitStatus{}, ctx.Err()
+	}
+	select {
+	case outcome := <-r.outcomes:
+		if outcome.useUnderlying {
+			return r.fakeRuntime.Wait(ctx, id)
+		}
+		return outcome.status, outcome.err
+	case <-ctx.Done():
+		return runtime.ExitStatus{}, ctx.Err()
+	}
 }
 
 func testPublicKey(t *testing.T) string {
@@ -282,6 +323,29 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+func waitScriptedWaitCall(t *testing.T, rt *scriptedWaitRuntime) runtime.ID {
+	t.Helper()
+	timer := time.NewTimer(waitTimeout)
+	defer timer.Stop()
+	select {
+	case id := <-rt.calls:
+		return id
+	case <-timer.C:
+		t.Fatalf("timed out waiting for scripted Wait call")
+		return ""
+	}
+}
+
+func sendScriptedWaitOutcome(t *testing.T, rt *scriptedWaitRuntime, outcome scriptedWaitOutcome) {
+	t.Helper()
+	timer := time.NewTimer(waitTimeout)
+	defer timer.Stop()
+	select {
+	case rt.outcomes <- outcome:
+	case <-timer.C:
+		t.Fatalf("timed out sending scripted Wait outcome")
 	}
 }
 
@@ -976,5 +1040,68 @@ func TestContainerAddrRequiresSupervisedRun(t *testing.T) {
 	_, err := e.sched.ContainerAddr(t.Context(), "run_missing")
 	if err == nil || err.Error() != "run has no live container" {
 		t.Fatalf("ContainerAddr missing = %v, want run has no live container", err)
+	}
+}
+
+func TestSuperviseWaitRetriesTransportErrorUntilExit(t *testing.T) {
+	e := newTestEnv(t, nil)
+	sub := e.subscribe(t)
+	rt := newScriptedWaitRuntime(e.rt)
+	e.sched.cfg.Runtime = rt
+	run, c := e.launchFake(t, "wait transport retry")
+
+	if got := waitScriptedWaitCall(t, rt); got != c.id {
+		t.Fatalf("first Wait container = %q, want %q", got, c.id)
+	}
+	sendScriptedWaitOutcome(t, rt, scriptedWaitOutcome{err: errors.New("test: daemon socket reset")})
+	if got := waitScriptedWaitCall(t, rt); got != c.id {
+		t.Fatalf("retry Wait container = %q, want %q", got, c.id)
+	}
+	if _, err := e.sched.ContainerAddr(t.Context(), run.ID); err != nil {
+		t.Fatalf("live run after transient Wait: %v", err)
+	}
+
+	sendScriptedWaitOutcome(t, rt, scriptedWaitOutcome{useUnderlying: true})
+	c.output("still writable\r\n")
+	waitFor(t, "run PTY output after transient Wait", func() bool {
+		session := e.pty.session(run.ID)
+		return session != nil && strings.Contains(session.output(), "still writable")
+	})
+	c.exitNow(0)
+	waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
+	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: wait transport retry" {
+		t.Fatalf("commits after eventual exit = %v", got)
+	}
+}
+
+func TestSuperviseWaitCancellationDuringRetryLeavesRunLive(t *testing.T) {
+	e := newTestEnv(t, nil)
+	rt := newScriptedWaitRuntime(e.rt)
+	e.sched.cfg.Runtime = rt
+	run, c := e.launchFake(t, "wait cancellation")
+	waitScriptedWaitCall(t, rt)
+	sendScriptedWaitOutcome(t, rt, scriptedWaitOutcome{err: errors.New("test: daemon unavailable")})
+
+	closed := make(chan struct{})
+	go func() {
+		_ = e.sched.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel Wait retry promptly")
+	}
+	fresh, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun after cancelled retry: %v", err)
+	}
+	if fresh.Status != domain.RunRunning {
+		t.Fatalf("run status after cancelled retry = %s, want running", fresh.Status)
+	}
+	waitCtx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := e.rt.Wait(waitCtx, c.id); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("container after cancelled retry = %v, want running", err)
 	}
 }

@@ -62,6 +62,17 @@ aether workspace init <name>
 aether workspace init <name> --base <branch>
 ```
 
+## Container process lifecycle
+
+Every newly created run and environment-terminal container enables Docker's
+minimal init. Init adopts and reaps orphaned descendants and forwards signals
+to the agent or shell.
+
+This is a creation-time setting. A container that was already running, or
+that survived a server restart, is not retrofitted or recreated just to add
+init; it keeps the runtime settings it started with. A newly created terminal
+container or run receives the setting.
+
 ## Install in the environment terminal
 
 Open the environment terminal with `aether terminal`, or open the dashboard's

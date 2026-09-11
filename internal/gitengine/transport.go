@@ -66,6 +66,12 @@ func (e *Engine) servePack(ctx context.Context, ws domain.WorkspaceID, service s
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.WaitDelay = packWaitDelay
+	// os/exec cannot interrupt a caller-supplied Writer that blocks in
+	// Write, even when WaitDelay expires. The real SSH channel supports a
+	// half-close, so preserve its read side while signaling that no more
+	// pack output will be written. Generic closers are used only as a
+	// fallback for test pipes and other non-file writers; closing a caller's
+	// *os.File (for example os.Stderr) would be an unsafe side effect.
 
 	// Feed stdin through our own *os.File pipe instead of handing the
 	// reader to exec: exec's managed stdin copy blocks Wait until the
@@ -90,7 +96,26 @@ func (e *Engine) servePack(ctx context.Context, ws domain.WorkspaceID, service s
 		_ = stdinW.Close() // unblocks a copy stuck writing to a full pipe
 	}()
 
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		return -1, fmt.Errorf("gitengine: git %s: %w", service, err)
+	}
+	// CommandContext stops watching ctx as soon as Process.Wait returns, but
+	// Wait still waits for stdout/stderr copies. Keep this independent hook
+	// alive until servePack itself returns so a blocked caller writer can be
+	// released after the child has already exited.
+	cancelDone := make(chan struct{})
+	stopCancel := context.AfterFunc(ctx, func() {
+		unblockPackWriter(stdout)
+		unblockPackWriter(stderr)
+		close(cancelDone)
+	})
+	defer func() {
+		if !stopCancel() {
+			<-cancelDone
+		}
+	}()
+
+	if err := cmd.Wait(); err != nil {
 		if errors.Is(err, exec.ErrWaitDelay) {
 			// git exited cleanly; only the stdio copies were abandoned
 			// because the client kept the channel open.
@@ -103,6 +128,23 @@ func (e *Engine) servePack(ctx context.Context, ws domain.WorkspaceID, service s
 		return -1, fmt.Errorf("gitengine: git %s: %w", service, err)
 	}
 	return 0, nil
+}
+
+// unblockPackWriter releases an os/exec output-copy goroutine without
+// needlessly tearing down the caller's input side. SSH channels and TCP
+// connections expose CloseWrite, while small in-process writers generally
+// only provide Close.
+func unblockPackWriter(w io.Writer) {
+	if c, ok := w.(interface{ CloseWrite() error }); ok {
+		_ = c.CloseWrite()
+		return
+	}
+	if _, ok := w.(*os.File); ok {
+		return
+	}
+	if c, ok := w.(io.Closer); ok {
+		_ = c.Close()
+	}
 }
 
 // watchedBranchTips resolves the current bare-repo tip of every
