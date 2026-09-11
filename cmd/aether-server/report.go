@@ -26,8 +26,6 @@ const reportBudget = 4 * time.Second
 // agent's own turn boundary, and is far above any real tool call.
 const maxHookPayload = 8 << 20
 
-// reportUsage is what every wrong invocation prints. Each harness hands
-// its callback a different shape, so each has its own form.
 const reportUsage = `report: usage: aether-server report claude   (hook JSON on stdin)
                      aether-server report codex <notify JSON>
                      aether-server report pi --event <name> [--tool <name>]
@@ -36,22 +34,15 @@ const reportUsage = `report: usage: aether-server report claude   (hook JSON on 
 // report tells the server what the agent is doing. Like mcp it is absent
 // from the usage text: no operator runs it. The server stages this binary
 // into a run container and the harness's own status callback calls it
-// there, against the coordination socket mounted beside it. How the event
-// arrives is the harness's choice: Claude Code writes its hook payload on
-// stdin, Codex hands its notify program the payload as the one argument,
-// and pi's, omp's and opencode's extensions name the event on the command
-// line.
-//
-//	aether-server report claude
-//	aether-server report codex '{"type":"agent-turn-complete"}'
-//	aether-server report pi --event agent_end
-//	aether-server report opencode --event session.idle
+// there, against the coordination socket mounted beside it. Each harness
+// hands that callback a different shape, which is why the subcommand takes
+// four (docs/mcp-bridge.md).
 //
 // It never fails and never prints to stdout: a callback that breaks or
 // slows the agent is worse than a run card that is briefly wrong, so every
-// problem is one line on stderr - which a harness shows only when the
-// callback exits non-zero, so in normal use it is invisible and greppable
-// in the transcript.
+// problem is one line on stderr - which the pi, omp and opencode
+// extensions read and forward to one warning of their own, and every other
+// harness shows only when the callback exits non-zero.
 //
 // Adding a harness is one case below plus one mapping function in
 // internal/agentstatus.

@@ -54,7 +54,17 @@ function spawnReport(args: string[]): Promise<void> {
   return new Promise((resolve) => {
     try {
       const { spawn } = require('child_process')
-      const child = spawn(REPORTER, args, { stdio: 'ignore' })
+      // The reporter exits 0 whatever happens - a callback that fails the
+      // agent's turn is worse than a run card that is briefly wrong - and
+      // says what went wrong on stderr instead. Nothing else reads that
+      // pipe, so the first line of it is the only trace a member has of a
+      // reporter that ran but could not reach the server.
+      const child = spawn(REPORTER, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+      child.stderr?.setEncoding('utf8')
+      child.stderr?.on('data', (chunk: string) => {
+        const line = chunk.split('\n')[0].trim()
+        if (line) warnOnce(line)
+      })
       child.on('error', (err: unknown) => {
         warnOnce(err)
         resolve()

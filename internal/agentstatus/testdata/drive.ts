@@ -70,6 +70,13 @@ switch (scenario) {
     // the willContinue flag is holding the report back.
     fire('agent_end', { willContinue: true }, idle)
     break
+  case 'unreachable':
+    // The reporter runs and exits 0 but never reaches the server, saying so
+    // on stderr once per report. Two reports, so the warning the extension
+    // forwards has two chances to repeat itself.
+    fire('agent_start')
+    fire('agent_end', {}, idle)
+    break
   case 'double':
     fire('agent_start')
     fire('message_end')

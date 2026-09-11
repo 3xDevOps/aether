@@ -584,6 +584,11 @@ func TestPiExtensionParses(t *testing.T) {
 	}
 }
 
+// reporterUnreachable is what the stub reporter writes on its stderr in the
+// scenario that asks for it, standing in for the real one: a reporter that
+// ran, could not reach the run's socket and exited 0 all the same.
+const reporterUnreachable = "report pi: dial the coordination socket: connection refused"
+
 // extensionDriver stages the extension with its reporter pointed at a
 // script that records every argv it is spawned with, and returns a bun
 // command that loads the staged copies and drives one scenario through
@@ -603,7 +608,11 @@ func extensionDriver(t *testing.T, scenario string) (*exec.Cmd, string) {
 	log := filepath.Join(dir, "reports")
 	stage := func(name, reporterName, record string) {
 		reporter := filepath.Join(dir, reporterName)
-		mustWriteFile(t, reporter, "#!/bin/sh\n"+record+" >> "+log+"\n", 0o700)
+		body := "#!/bin/sh\n" + record + " >> " + log + "\n"
+		if scenario == "unreachable" {
+			body += "echo '" + reporterUnreachable + "' >&2\n"
+		}
+		mustWriteFile(t, reporter, body, 0o700)
 		const decl = "const REPORTER = '" + ReporterCommand + "'"
 		staged := strings.Replace(string(PiExtension), decl, "const REPORTER = '"+reporter+"'", 1)
 		if staged == string(PiExtension) {
@@ -638,8 +647,9 @@ func mustWriteFile(t *testing.T, path, content string, mode os.FileMode) {
 }
 
 // runExtension drives one scenario and returns the reports it produced, in
-// the order the reporter was spawned in.
-func runExtension(t *testing.T, scenario string) []string {
+// the order the reporter was spawned in, and everything the extension wrote
+// to its own stderr.
+func runExtension(t *testing.T, scenario string) ([]string, string) {
 	t.Helper()
 	cmd, log := extensionDriver(t, scenario)
 	out, err := cmd.CombinedOutput()
@@ -656,7 +666,7 @@ func runExtension(t *testing.T, scenario string) []string {
 			reports = append(reports, line)
 		}
 	}
-	return reports
+	return reports, string(out)
 }
 
 // The extension is the only part of the reporter no Go test can execute,
@@ -666,7 +676,7 @@ func runExtension(t *testing.T, scenario string) []string {
 // and omp are built on - with a recording stand-in for the server binary.
 func TestPiExtensionRuntime(t *testing.T) {
 	t.Run("a turn reports in order and ends once", func(t *testing.T) {
-		got := runExtension(t, "turn")
+		got, _ := runExtension(t, "turn")
 		want := []string{
 			"report pi --event agent_start",
 			"report pi --event tool_call --tool bash",
@@ -682,7 +692,7 @@ func TestPiExtensionRuntime(t *testing.T) {
 		// pi finalizes the assistant's last message just after the turn
 		// ends. Reported, it would overwrite the wait the agent just asked
 		// for with "working".
-		got := runExtension(t, "late-message")
+		got, _ := runExtension(t, "late-message")
 		assertReports(t, got, []string{"report pi --event agent_end"})
 	})
 
@@ -690,7 +700,7 @@ func TestPiExtensionRuntime(t *testing.T) {
 		// Modern pi can retry, compact or follow up past agent_end, so the
 		// end of the turn is agent_settled and agent_end is only its first
 		// half: exactly one wait must reach the run.
-		got := runExtension(t, "settled")
+		got, _ := runExtension(t, "settled")
 		assertReports(t, got, []string{"report pi --event agent_settled"})
 	})
 
@@ -699,7 +709,7 @@ func TestPiExtensionRuntime(t *testing.T) {
 		// agent_settled has nothing else to say. Stop re-checking and the
 		// turn is never reported as over: the run reads Working until the
 		// stall threshold parks it with the wrong reason.
-		got := runExtension(t, "idle-later")
+		got, _ := runExtension(t, "idle-later")
 		assertReports(t, got, []string{"report pi --event agent_end"})
 	})
 
@@ -707,13 +717,28 @@ func TestPiExtensionRuntime(t *testing.T) {
 		// The agent's own environment reaches everything it spawns, this
 		// extension included. Only the process that claimed the marker
 		// reports.
-		got := runExtension(t, "foreign-owner")
+		got, _ := runExtension(t, "foreign-owner")
 		assertReports(t, got, nil)
 	})
 
 	t.Run("willContinue is not the end of the turn", func(t *testing.T) {
-		got := runExtension(t, "will-continue")
+		got, _ := runExtension(t, "will-continue")
 		assertReports(t, got, nil)
+	})
+
+	t.Run("a reporter that cannot reach the server is warned about once", func(t *testing.T) {
+		// The reporter exits 0 whatever happens and says what went wrong on
+		// stderr, so an extension that discarded that pipe would leave a run
+		// reporting nowhere with no trace at all. One warning is the trace;
+		// one per report would bury the agent's own output.
+		got, out := runExtension(t, "unreachable")
+		assertReports(t, got, []string{
+			"report pi --event agent_start",
+			"report pi --event agent_end",
+		})
+		if n := strings.Count(out, reporterUnreachable); n != 1 {
+			t.Fatalf("the extension warned %d times carrying %q, want 1:\n%s", n, reporterUnreachable, out)
+		}
 	})
 
 	t.Run("two copies in one agent keep one order", func(t *testing.T) {
@@ -724,7 +749,7 @@ func TestPiExtensionRuntime(t *testing.T) {
 		// strands the run. The second copy here reports slowly, so the
 		// strict alternation below is only possible if the first copy is
 		// queued behind it: one chain for the whole process.
-		got := runExtension(t, "double")
+		got, _ := runExtension(t, "double")
 		want := []string{
 			"report pi --event agent_start",
 			"copy2 report pi --event agent_start",

@@ -206,14 +206,16 @@ That subcommand is hidden like `mcp`: no operator runs it. It maps the
 event, dials the socket, and exits 0 whatever happens - an unmapped event
 never dials at all, and a failure is one line on stderr. A callback that
 breaks or slows the agent would be worse than a run card that is briefly
-wrong. Where that line surfaces is the harness's own shape too: Claude
-Code, Codex, pi and omp show a callback's stderr only for a non-zero exit,
-so it sits in the transcript; opencode's plugin reads the reporter's
-stderr itself and writes the first failure of the run into opencode's own
-log (`~/.local/share/opencode/log/`), as an `ERROR` line whose message
-starts `status reporter:`, then stays quiet. It never prints: opencode's
-TUI owns the terminal for the whole run, so anything written there would
-corrupt the screen rather than tell anyone anything.
+wrong. Where that line surfaces is the harness's own shape too. Claude
+Code and Codex show a callback's stderr only for a non-zero exit, so it
+sits in the transcript. pi's and omp's extension reads the reporter's
+stderr itself and prints the run's first failure as one
+`[aether] status report failed:` warning, then stays quiet. opencode's
+plugin reads it too, but writes that first failure into opencode's own log
+(`~/.local/share/opencode/log/`) - an `ERROR` line whose message starts
+`status reporter:` - instead of printing it: opencode's TUI owns the
+terminal for the whole run, so anything written there would corrupt the
+screen rather than tell anyone anything.
 
 Reading the event and the round trip that follows share one budget, set
 under the timeout the harness gives the callback, so a harness that hands
