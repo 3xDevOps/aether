@@ -138,10 +138,11 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 // must not un-park it: a TUI that repaints while the member types is
 // producing output, not work, and only the agent's own "working" means the
 // turn resumed - which is activity in its own right, because a hook writes
-// nothing to the terminal and touches no files. And un-parking takes activity that was actually observed,
-// not a run that merely started recently - after a restart nothing has been
-// observed yet, and every run parked for its member would otherwise be
-// declared working again on the first poll.
+// nothing to the terminal and touches no files. And un-parking takes
+// activity that was actually observed, not a run that merely started
+// recently - after a restart nothing has been observed yet, and every run
+// parked for its member would otherwise be declared working again on the
+// first poll.
 func (s *Scheduler) checkStalls(ctx context.Context) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0, len(s.runs))
