@@ -51,17 +51,20 @@ function githubDeployKeyURL(source: string): string | null {
 export function WorkspaceMirrorDialog({
   workspaceID,
   client = api,
+  suggestedSource,
   onStatusChange,
   onClose,
 }: {
   workspaceID: string
   client?: Api
+  /** A checkout remote to offer before the workspace's existing origin. */
+  suggestedSource?: string
   onStatusChange?: (result: WorkspaceMirrorResult) => void
   onClose: () => void
 }) {
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const [result, setResult] = useState<WorkspaceMirrorResult | null>(null)
-  const [source, setSource] = useState(workspace?.origin ?? '')
+  const [source, setSource] = useState(suggestedSource ?? workspace?.origin ?? '')
   const [branch, setBranch] = useState(workspace?.base_branch ?? 'main')
   const [auth, setAuth] = useState<WorkspaceMirrorAuth>('public')
   const [knownHosts, setKnownHosts] = useState('')
@@ -209,7 +212,7 @@ export function WorkspaceMirrorDialog({
           <DialogHeader>
             <DialogTitle>Workspace Source</DialogTitle>
             <DialogDescription>
-              {workspace?.name ?? workspaceID} · server-owned base source
+              {workspace?.name ?? workspaceID} · optional server-owned base source
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1">

@@ -57,6 +57,7 @@ const olderCaps: GatewayCapabilities = {
 
 const localTip = '9f1c2ab3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9'
 const workspaceTip = '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b'
+const checkoutOrigin = 'https://github.com/acme/app.git'
 
 /** A repo.push answer that compared the two tips and pushed nothing. */
 function compared(
@@ -88,6 +89,11 @@ const connectedRepo = {
   },
   push: null,
   fastForward: null,
+}
+const settledRepo = {
+  ...connectedRepo,
+  remote: { ...connectedRepo.remote, origin: checkoutOrigin },
+  push: compared('pushed', { workspace_commit: localTip }),
 }
 
 // The Electron preload injects the bridge onto the real window, so a test
@@ -892,8 +898,21 @@ describe('onboarding wizard', () => {
   }
 
   it('pushes the base branch from the wizard and shows what git did', async () => {
-    const client = fakeApi()
+    const client = fakeApi({
+      localLinkRepo: vi.fn(async () => ({
+        repo: '/src/repo',
+        remote: 'aether',
+        url: 'ssh://alice@host:2222/wsp_1',
+        origin: checkoutOrigin,
+      })),
+    })
     await toPushChoice(client)
+    // The source mirror is deliberately withheld until the checkout base is
+    // reconciled with the workspace.
+    expect(
+      screen.queryByRole('status', { name: 'Source mirror status' }),
+    ).toBeNull()
+
 
     fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
 
@@ -904,6 +923,21 @@ describe('onboarding wizard', () => {
     // stay on the page - "[new branch]" and "Everything up-to-date" are
     // both success and mean different things.
     expect(await screen.findByText(/Pushed/)).toBeDefined()
+    const mirrorStatus = await screen.findByRole('status', {
+      name: 'Source mirror status',
+    })
+    expect(mirrorStatus.textContent).toContain('Local-only workspace.')
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set up source mirror' }),
+    )
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toBeDefined()
+    expect(
+      within(dialog).getByLabelText<HTMLInputElement>('Source URL').value,
+    ).toBe(checkoutOrigin)
+    fireEvent.click(
+      within(dialog).getAllByRole('button', { name: 'Close' })[0],
+    )
     const output = screen.getByText(/\[new branch\]/)
     expect(output.textContent).toBe(
       'To ssh://alice@host:2222/wsp_1\n * [new branch] main -> main',
@@ -955,6 +989,12 @@ describe('onboarding wizard', () => {
 
   it('reports a workspace that already has the branch', async () => {
     const client = fakeApi({
+      localLinkRepo: vi.fn(async () => ({
+        repo: '/src/repo',
+        remote: 'aether',
+        url: 'ssh://alice@host:2222/wsp_1',
+        origin: checkoutOrigin,
+      })),
       localRepoPush: vi.fn(async () =>
         compared('up-to-date', { workspace_commit: localTip }),
       ),
@@ -969,12 +1009,47 @@ describe('onboarding wizard', () => {
     expect(settled.textContent).toContain(
       'Workspace already has main at 9f1c2ab. Nothing to push.',
     )
+    expect(
+      await screen.findByRole('status', { name: 'Source mirror status' }),
+    ).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
     // Git's own answer, and the panel holding it open so the reader meets it.
     expect(screen.getByText(/FETCH_HEAD/)).toBeDefined()
     expect(
       screen.getByRole('button', { name: 'What git did' }).getAttribute('aria-expanded'),
     ).toBe('true')
+  })
+
+  it('keeps source mirror setup admin-only', async () => {
+    const client = fakeApi()
+    seed({
+      onboardingStep: 'Repository',
+      onboardingWorkspace: workspace.id,
+      onboardingRepo: settledRepo,
+      info: { ...serverInfo, member: { ...alice, role: 'collaborator' } },
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    expect(
+      screen.queryByRole('status', { name: 'Source mirror status' }),
+    ).toBeNull()
+    expect(client.workspaceMirrorStatus).not.toHaveBeenCalled()
+  })
+
+  it('keeps source mirror setup behind its capability', async () => {
+    const client = fakeApi()
+    seed({
+      capabilities: { ...localCaps, methods: ['server.info'] },
+      onboardingStep: 'Repository',
+      onboardingWorkspace: workspace.id,
+      onboardingRepo: settledRepo,
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    expect(
+      screen.queryByRole('status', { name: 'Source mirror status' }),
+    ).toBeNull()
+    expect(client.workspaceMirrorStatus).not.toHaveBeenCalled()
   })
 
   it('fast-forwards the clone when the workspace is ahead', async () => {
@@ -997,6 +1072,11 @@ describe('onboarding wizard', () => {
     ).toBeDefined()
     expect(screen.getByText('9f1c2ab')).toBeDefined()
     expect(screen.getByText('1a2b3c4')).toBeDefined()
+    // Until the clone is reconciled, source-mirror setup remains unavailable.
+    expect(
+      screen.queryByRole('status', { name: 'Source mirror status' }),
+    ).toBeNull()
+    expect(client.workspaceMirrorStatus).not.toHaveBeenCalled()
     // The push offer stays - a member who resolves by hand retries with it -
     // but `git push` is the wrong command here, so it is not the one on
     // offer to copy.
@@ -1010,6 +1090,13 @@ describe('onboarding wizard', () => {
     })
     const settled = await screen.findByText(/Fast-forwarded/)
     expect(settled.textContent).toBe('Fast-forwarded main to 1a2b3c4.')
+    expect(
+      await screen.findByRole('status', { name: 'Source mirror status' }),
+    ).toBeDefined()
+    expect(
+      await screen.findByRole('button', { name: 'Set up source mirror' }),
+    ).toBeDefined()
+
     // Both commands git ran, in the order they ran: the compare's fetch,
     // then the fast-forward.
     expect(screen.getByText(/FETCH_HEAD/).textContent).toBe(
@@ -1076,6 +1163,11 @@ describe('onboarding wizard', () => {
     )
     expect(screen.getByText('9f1c2ab')).toBeDefined()
     expect(screen.getByText('1a2b3c4')).toBeDefined()
+    // A diverged base is not reconciled, so source-mirror setup stays hidden.
+    expect(
+      screen.queryByRole('status', { name: 'Source mirror status' }),
+    ).toBeNull()
+    expect(client.workspaceMirrorStatus).not.toHaveBeenCalled()
     // A fast-forward would lose the local commits, so it is not offered.
     expect(
       screen.queryByRole('button', { name: 'Fast-forward my clone' }),

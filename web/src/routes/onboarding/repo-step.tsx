@@ -15,8 +15,9 @@ import { desktopBridge } from '@/components/shell/title-bar'
 import type { Api } from '@/lib/api'
 import type { LinkStatus, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
-import type { Capability } from '@/store/hooks'
+import { useIsAdmin, type Capability } from '@/store/hooks'
 import type { OnboardingRepo } from '@/store/ui'
+import { OnboardingSourceOption } from '@/routes/onboarding/source-option'
 import { actionRow, pane } from '@/routes/onboarding/steps'
 
 /**
@@ -114,6 +115,7 @@ export function RepoStep({
   // other's success.
   const [copied, setCopied] = useState('')
   const cmdRef = useRef<HTMLInputElement>(null)
+  const isAdmin = useIsAdmin()
 
   // Every run forks from the workspace's base branch, so that is the branch
   // to seed - not always `main`.
@@ -513,6 +515,17 @@ export function RepoStep({
               </div>
             </>
           )}
+          {workspace &&
+            connected &&
+            settled &&
+            isAdmin &&
+            caps.hasMethod('workspace.mirror.status') && (
+              <OnboardingSourceOption
+                client={client}
+                workspaceID={workspace.id}
+                suggestedSource={connected.remote.origin}
+              />
+            )}
           <div className={actionRow}>
             <Button
               size="sm"

@@ -189,11 +189,13 @@ it by hand. A fast-forward writes no merge commit and never rewrites your own
 commits, and nothing here force-pushes. See
 [teams.md](teams.md#workspaces) for that case.
 
+For optional source-mirror setup, see [the detailed instructions](#optional-configure-source-control).
+
 ### Optional: configure source control
 
 An administrator can make the workspace's base a read-only mirror of an
-upstream branch. Configure it after the initial workspace push, or after
-reconciling the two repositories:
+upstream branch. Configure it from the CLI or local dashboard only after the
+initial workspace push or after reconciling the two repositories:
 
 ```sh
 # Public GitHub or any public HTTPS repository:
@@ -234,13 +236,21 @@ aether workspace mirror adopt --workspace myproject --generation <n> --yes
 aether workspace mirror disable --workspace myproject --yes
 ```
 
-`Source control` on the dashboard's Workspace page is the equivalent
-admin-only flow: its one-time Configure form is prefilled from
-`Workspace.Origin`; choose public or deploy-key authentication, copy the public
-key and follow the GitHub link, then use **Verify** or **Refresh**. **Adopt
-candidate** and **Disable** both ask for explicit confirmation. Disable
-returns the workspace to local-only mode; it does not revoke a deploy key at
-GitHub, so remove that key there.
+The local dashboard's onboarding wizard offers this same setup inline only to
+administrators and only when capability `workspace.mirror.status` exists. The
+entry is prefilled from checkout **Origin** when available and opens this
+existing **Source control** flow for public HTTPS or deploy-key setup and
+verification. Choosing
+it configures the server-owned read-only upstream; new runs refresh it before
+launch. Skipping it leaves the workspace's current source settings unchanged.
+If no source mirror is configured, it remains local-only; configure it later
+from **Workspace > Source control**. On the dashboard's Workspace page, the flow is
+admin-only: its one-time Configure form is prefilled from `Workspace.Origin`;
+choose public or deploy-key authentication, copy the public key and follow the
+GitHub link, then use **Verify** or **Refresh**. **Adopt candidate** and
+**Disable** both ask for explicit confirmation. Disable returns the workspace
+to local-only mode; it does not revoke a deploy key at GitHub, so remove that
+key there.
 
 Every launch refreshes a configured mirror before creating the run. An
 authentication, network, missing-source, rewrite, divergence, or other
