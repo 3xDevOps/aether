@@ -120,6 +120,29 @@ func TestLocalAttachEndsWithTheRevocationExitStatus(t *testing.T) {
 	}
 }
 
+func TestLocalEventsEndWhenMembershipIsRevoked(t *testing.T) {
+	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 20 * time.Millisecond })
+	_, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
+	stream, err := e.srv.Local(cm.ID).Events(context.Background(), protocol.SubscribeRequest{WorkspaceID: string(e.ws.ID)})
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+	if derr := e.store.DeleteMember(context.Background(), cm.ID); derr != nil {
+		t.Fatal(derr)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, rerr := io.ReadAll(stream)
+		done <- rerr
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("events stream stayed open after the member was removed")
+	}
+}
+
 func TestLocalEventsStreamsTheBus(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()

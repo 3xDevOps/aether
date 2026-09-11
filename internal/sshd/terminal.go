@@ -100,7 +100,7 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	// loop checks membership only and skips run steer policy.
 	if !returned {
 		s.spawn(func() {
-			s.revokeAttachOnPolicyChange(attachCtx, revoke, member, "", true)
+			s.revokeOnPolicyChange(attachCtx, revoke, member, "", true)
 		})
 		attachErr = <-errCh
 	}
