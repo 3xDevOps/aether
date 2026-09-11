@@ -17,13 +17,14 @@ test('mobile Files returns from one viewer to the repository tree', async ({
 
   await page.goto(alice.url)
 
-  // At a phone width the real shell starts with its mobile sidebar rail.
+  // At a phone width the real shell starts with its mobile sidebar rail, and
+  // the drawer it opens closes itself on the navigation it makes.
   await page.getByRole('button', { name: 'Expand sidebar' }).tap()
   await page
-    .getByRole('navigation', { name: 'Surfaces' })
+    .getByRole('dialog', { name: 'Runs' })
     .getByRole('button', { name: 'Files', exact: true })
     .tap()
-  await page.getByRole('button', { name: 'Collapse sidebar' }).tap()
+  await expect(page.getByRole('dialog', { name: 'Runs' })).toBeHidden()
 
   await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeVisible()
   const tree = page.getByRole('complementary', { name: 'Files' })
