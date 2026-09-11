@@ -5,7 +5,7 @@
 // The contract is docs/local-gateway.md - one text header frame, one text ack,
 // terminal output as binary frames, input and resizes as text control frames.
 
-import { type ConnectionState, backoff } from '@/lib/stream'
+import { type ConnectionState, backoff, onWake } from '@/lib/stream'
 
 /** JSON-RPC "permission denied": a write attach without the steer capability. */
 export const codeDenied = -32001
@@ -23,9 +23,6 @@ const unavailableRetries = 4
 
 /** WebSocket policy violation: the gateway's authorization watch fired. */
 const policyClose = 1008
-
-/** The gateway's dead-token refusal message (internal/dashboard/auth.go). */
-const deadToken = 'dashboard token revoked or expired'
 
 /**
  * Raw input characters per frame. The gateway reads at most 64KB per frame,
@@ -221,10 +218,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
       answered = true
       // A refused write is not a dead attach: drop the request and mirror.
-      // A token revoked between the handshake and the header answers with
-      // the same code, but reconnecting can never revive it - the message
-      // tells the two apart, and the dead token falls through to refusal.
-      if (ack.code === codeDenied && askedWrite && ack.error !== deadToken) {
+      if (ack.code === codeDenied && askedWrite) {
         writeDenied = true
         handlers.onWriteDenied()
         attempt = 0
@@ -266,10 +260,11 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         handlers.onState('offline')
         return
       }
-      // 1008 with no refusal frame is the gateway's authorization watch.
-      // After a successful attach the close reason names which gate fell:
-      // a lost steer capability just downgrades to a mirror, while a dead
-      // token or withdrawn membership would refuse every reconnect.
+      // 1008 with no refusal frame is the gateway's authorization watch,
+      // and its reason names which gate fell: a lost steer capability just
+      // downgrades to a mirror, while withdrawn membership refuses every
+      // reconnect. An unnamed one is still refused, with that said plainly
+      // rather than dressed up as a cause we did not read.
       if (ev.code === policyClose && !answered) {
         if (attached && ev.reason === 'steer permission withdrawn') {
           writeDenied = true
@@ -279,7 +274,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           return
         }
         refused = true
-        handlers.onRefused(attached && ev.reason ? ev.reason : deadToken)
+        handlers.onRefused(ev.reason || 'the gateway refused the attach')
         handlers.onState('offline')
         return
       }
@@ -308,6 +303,16 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     if (!attached || !socket) return
     socket.send(JSON.stringify(frame))
   }
+
+  // A phone that was in a pocket comes back to a dead socket and a frozen
+  // retry timer; a refused attach is not revived by either event.
+  const stopWake = onWake(() => {
+    if (disposed || refused || socket) return
+    if (timer) clearTimeout(timer)
+    timer = null
+    attempt = 0
+    open()
+  })
 
   open()
 
@@ -341,6 +346,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     },
     close: () => {
       disposed = true
+      stopWake()
       if (timer) clearTimeout(timer)
       drop()
     },

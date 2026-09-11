@@ -744,31 +744,45 @@ describe('connect', () => {
     stop()
   })
 
-  it('stops on a dead-token close and says how to recover', async () => {
-    const client = fakeApi()
+  it('reports a rejected credential rather than an unreachable server', async () => {
+    // The gateway's own 401 body. A stale or missing token would be rejected
+    // the same way on the WebSocket upgrade, where the failure has no voice
+    // at all, so the probe is the only place that can say what went wrong.
+    const denial = 'a valid gateway token is required; restart `aether gui` for a fresh URL'
     const store = createRootStore()
-    const stop = connect(store, client)
+    const stop = connect(
+      store,
+      fakeApi({
+        capabilities: vi.fn(() => Promise.reject(new ApiError(401, denial))),
+      }),
+    )
 
-    await subscribe()
-    await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
-
-    // The gateway's token watch names the dead token in its close reason, and
-    // every reconnect would carry the same dead token.
-    StubSocket.last().onclose?.({
-      code: 1008,
-      reason: 'dashboard token revoked or expired',
-    })
-
+    await vi.waitFor(() => expect(store.getState().streamDead).toBe(true))
     expect(store.getState().connection).toBe('offline')
-    expect(store.getState().hydrationError).toContain('aether gui')
-    // The panes key on this to say "dead token" rather than "retrying".
-    expect(store.getState().streamDead).toBe(true)
+    // The gateway's words, not a guess about the network.
+    expect(store.getState().hydrationError).toBe(denial)
+    // Every reconnect would carry the same credential, so nothing is tried.
     await new Promise((resolve) => setTimeout(resolve, 700))
-    expect(StubSocket.opened).toHaveLength(1)
+    expect(StubSocket.opened).toHaveLength(0)
     stop()
   })
 
-  it('retries a 1008 close that is not the token watch', async () => {
+  it('opens the stream when the capabilities probe fails for any other reason', async () => {
+    const store = createRootStore()
+    const stop = connect(
+      store,
+      fakeApi({
+        capabilities: vi.fn(() => Promise.reject(new ApiError(500, 'boom'))),
+      }),
+    )
+
+    await subscribe()
+    await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+    expect(store.getState().streamDead).toBe(false)
+    stop()
+  })
+
+  it('retries a 1008 close, which no longer means a dead token', async () => {
     const client = fakeApi()
     const store = createRootStore()
     const stop = connect(store, client)
@@ -776,7 +790,7 @@ describe('connect', () => {
     await subscribe()
     await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
 
-    // The gateway also closes 1008 for a refused subscribe or a transient
+    // The gateway closes 1008 for a refused subscribe or a transient
     // membership check failure; the next reconnect can outlive those.
     StubSocket.last().onclose?.({ code: 1008, reason: 'subscribe refused' })
 

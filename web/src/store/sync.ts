@@ -279,14 +279,33 @@ export async function applyEvent(
   return true
 }
 
-async function probeUnlinkedLocal(
-  client: Api,
-): Promise<{ capabilities: GatewayCapabilities; status: LinkStatus } | null> {
+/** What the capabilities probe before the stream found, or null for
+ * "nothing special: open the stream". */
+type Probe =
+  | { unlinked: { capabilities: GatewayCapabilities; status: LinkStatus } }
+  | { rejected: string }
+
+/**
+ * Reads the capabilities descriptor before anything else, because two
+ * answers change what the app does next: a local gateway with no server
+ * configured goes to onboarding, and a 401 means the gateway rejected the
+ * credential. The 401 matters most on a phone, where the token lives in
+ * per-tab session storage: without this the WebSocket upgrade would be
+ * rejected the same way, the socket would retry forever, and the app would
+ * blame an unreachable server.
+ */
+async function probeGateway(client: Api): Promise<Probe | null> {
+  let capabilities: GatewayCapabilities
   try {
-    const capabilities = await client.capabilities()
+    capabilities = await client.capabilities()
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return { rejected: err.message }
+    return null
+  }
+  try {
     if (!capabilities.local?.includes('link.status')) return null
     const status = await client.localLinkStatus()
-    return status.server_configured ? null : { capabilities, status }
+    return status.server_configured ? null : { unlinked: { capabilities, status } }
   } catch {
     return null
   }
@@ -394,26 +413,26 @@ export function connect(store: RootStore, client: Api = api): () => void {
         // recorded: a dead token is more precise than a dead hop.
         if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
       },
-      onDead: (reason) => {
-        // The token died, not the server: the stream has stopped for good, and
-        // only a fresh token brings it back. The flag is what lets the panes
-        // say so instead of claiming a retry that will never come, and the
-        // pending hydrate retry is cancelled so a later 401 cannot overwrite
-        // the recovery hint.
-        if (retryTimer) clearTimeout(retryTimer)
-        store.getState().setStreamDead()
-        store.getState().setHydrated(false, `${reason}; mint one with \`aether gui\``)
-      },
       afterSeq: () => store.getState().lastSeq,
     })
   }
 
-  void probeUnlinkedLocal(client).then((probe) => {
+  void probeGateway(client).then((probe) => {
     if (disposed) return
+    if (probe && 'rejected' in probe) {
+      // Every reconnect would carry the same rejected credential, so the
+      // stream is never opened. The flag is what makes the panes and the
+      // error page say the link expired instead of claiming a retry that
+      // never comes, and the gateway's own message is kept verbatim.
+      store.getState().setStreamDead()
+      store.getState().setConnection('offline')
+      store.getState().setHydrated(false, probe.rejected)
+      return
+    }
     if (probe) {
       // No server to connect to yet: the onboarding wizard links first.
-      store.getState().setCapabilities(probe.capabilities)
-      store.getState().setLinkStatus(probe.status)
+      store.getState().setCapabilities(probe.unlinked.capabilities)
+      store.getState().setLinkStatus(probe.unlinked.status)
       store.getState().setConnection('offline')
       store.getState().setHydrated(true)
       store.getState().setUnreachable(null)

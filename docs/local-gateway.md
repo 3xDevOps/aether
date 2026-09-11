@@ -29,6 +29,20 @@ initial browser tab). The printed URL is
 `http://127.0.0.1:<port>/?token=<token>`. The process serves until
 `SIGINT`, `SIGTERM`, or `SIGHUP`; the token dies with it.
 
+The dashboard moves the token out of the address bar into the tab's
+session storage on first load, so it is held per browser tab: a second tab
+opened from a bookmark, or the same tab after `aether gui` restarted with a
+fresh token, has no usable credential. Both cases answer `401` with
+
+```json
+{"error":{"code":-32001,
+  "message":"a valid gateway token is required; restart `aether gui` for a fresh URL"}}
+```
+
+which the dashboard reports as an expired link, showing that message, rather
+than retrying a credential the gateway has already rejected. Open the URL
+`aether gui` printed again to get a working one.
+
 ### Agent OAuth logins
 
 When an agent prints an OAuth URL in the dashboard, click it. If the URL
@@ -806,7 +820,18 @@ Cross-origin WebSocket handshakes are rejected; the SPA is served from the
 same origin as the API. Every handshake carries the token, as
 `Authorization: Bearer` or `?token=` - browsers cannot set headers on a
 WebSocket handshake. There is no token watch closing live sockets, because
-the token cannot be revoked: it lives and dies with the process.
+the token cannot be revoked: it lives and dies with the process. A
+handshake whose token is missing or stale is refused with `401` before the
+upgrade, so it never becomes a socket; the dashboard's capabilities probe
+catches that case ahead of the stream.
+
+Both sockets reconnect on a jittered backoff that caps at 30 seconds, and
+reopen immediately - backoff reset - when the browser fires
+`visibilitychange` (visible) or `online`. A phone freezes a background
+tab's timers, so without those two events a tab returning from the pocket
+would sit out the rest of a 30-second wait. A socket that is still open is
+left alone, and an attach the gateway refused is not retried by either
+event.
 
 ### `GET /ws/events`
 

@@ -362,14 +362,14 @@ describe('terminal view', () => {
   })
 
   // A refusal that is not a missing session says nothing about the run, so
-  // the tab must not answer a dead token with a sentence about the run.
+  // the tab must not answer it with a sentence about the run.
   it('shows the gateway refusal itself when the session is not the problem', () => {
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ status: 'completed' })))
     act(() => StubSocket.last().onopen?.())
     act(() => StubSocket.last().onclose?.({ code: 1008 }))
 
-    expect(screen.getByText('dashboard token revoked or expired')).toBeDefined()
+    expect(screen.getByText('the gateway refused the attach')).toBeDefined()
     expect(
       screen.queryByText('This run has ended and left no recorded terminal to replay.'),
     ).toBeNull()

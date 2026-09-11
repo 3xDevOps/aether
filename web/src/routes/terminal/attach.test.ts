@@ -56,6 +56,12 @@ function refuseMissingSession() {
   vi.advanceTimersByTime(60_000)
 }
 
+/** A foreground return or a network return, as the browser delivers it. */
+function fire(event: string) {
+  const target = event === 'online' ? window : document
+  target.dispatchEvent(new Event(event))
+}
+
 function ack(over: Record<string, unknown> = {}) {
   StubSocket.last().onmessage?.({
     data: JSON.stringify({ ok: true, cols: 120, rows: 40, ...over }),
@@ -209,30 +215,6 @@ describe('connectAttach', () => {
     a.close()
   })
 
-  it('stops for good when a write attach is refused for a dead token', () => {
-    write = true
-    const a = attach()
-    StubSocket.last().onopen?.()
-
-    // Same code as a steer denial; only the message says the token died,
-    // so this must not downgrade to a mirror that retries forever.
-    StubSocket.last().onmessage?.({
-      data: JSON.stringify({
-        ok: false,
-        code: codeDenied,
-        error: 'dashboard token revoked or expired',
-      }),
-    })
-    StubSocket.last().onclose?.({ code: 1008 })
-    vi.advanceTimersByTime(60_000)
-
-    expect(StubSocket.opened).toHaveLength(1)
-    expect(denied).toBe(false)
-    expect(refusal).toBe('dashboard token revoked or expired')
-    expect(states.at(-1)).toBe('offline')
-    a.close()
-  })
-
   it('backs off after a dropped socket and resends the geometry', () => {
     const a = attach()
     StubSocket.last().onopen?.()
@@ -264,7 +246,7 @@ describe('connectAttach', () => {
     // A refusal the gateway delivers by closing the socket carries no code.
     a.reopen()
     StubSocket.last().onclose?.({ code: 1008 })
-    expect(refusal).toBe('dashboard token revoked or expired')
+    expect(refusal).toBe('the gateway refused the attach')
     expect(refusalCode).toBeUndefined()
     a.close()
   })
@@ -351,22 +333,72 @@ describe('connectAttach', () => {
     a.close()
   })
 
-  it('gives up when the gateway closes a live attach on a dead token', () => {
+  it('gives up on an unnamed policy close of a live attach', () => {
     const a = attach()
     StubSocket.last().onopen?.()
     ack()
 
-    // A post-attach 1008 is the authorization watch; a dead token would be
-    // rejected at every handshake from here on.
-    StubSocket.last().onclose?.({
-      code: 1008,
-      reason: 'dashboard token revoked or expired',
-    })
+    // A post-attach 1008 is the authorization watch. With no reason there is
+    // nothing to name, so the message says only what is known.
+    StubSocket.last().onclose?.({ code: 1008 })
     vi.advanceTimersByTime(60_000)
 
     expect(StubSocket.opened).toHaveLength(1)
-    expect(refusal).toBe('dashboard token revoked or expired')
+    expect(refusal).toBe('the gateway refused the attach')
     expect(states.at(-1)).toBe('offline')
+    a.close()
+  })
+
+  it.each(['visibilitychange', 'online'])(
+    'reattaches at once on %s instead of waiting out the backoff',
+    (event) => {
+      const a = attach()
+      StubSocket.last().onopen?.()
+      ack()
+
+      // Four failed attempts put the next retry at the far end of the
+      // backoff, which is where a pocketed phone comes back from.
+      for (let n = 0; n < 4; n++) {
+        StubSocket.last().onclose?.({ code: 1006 })
+        vi.advanceTimersByTime(30_000)
+      }
+      const before = StubSocket.opened.length
+      StubSocket.last().onclose?.({ code: 1006 })
+      expect(states.at(-1)).toBe('offline')
+
+      fire(event)
+
+      expect(StubSocket.opened).toHaveLength(before + 1)
+      expect(states.at(-1)).toBe('connecting')
+      // The timer the close scheduled was cleared, not left to open a second
+      // socket on top of this one.
+      vi.advanceTimersByTime(60_000)
+      expect(StubSocket.opened).toHaveLength(before + 1)
+      a.close()
+    },
+  )
+
+  it('leaves a live attach and a refused one alone when the tab comes back', () => {
+    const live = attach()
+    StubSocket.last().onopen?.()
+    ack()
+    fire('visibilitychange')
+    expect(StubSocket.opened).toHaveLength(1)
+    live.close()
+
+    const a = attach()
+    StubSocket.last().onopen?.()
+    StubSocket.last().onmessage?.({
+      data: JSON.stringify({ ok: false, code: -32004, error: 'no live terminal' }),
+    })
+    StubSocket.last().onclose?.({ code: 1008 })
+    const before = StubSocket.opened.length
+
+    fire('visibilitychange')
+
+    // A refusal is the server's answer, not a dropped socket: coming back to
+    // the foreground must not re-ask a question already answered.
+    expect(StubSocket.opened).toHaveLength(before)
     a.close()
   })
 

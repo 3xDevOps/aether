@@ -38,7 +38,7 @@ describe('run list empty states', () => {
     useStore.setState({
       hydrated: false,
       hydrationError:
-        'dashboard token revoked or expired; mint one with `aether gui`',
+        'a valid gateway token is required; restart `aether gui` for a fresh URL',
       streamDead: true,
     })
     render(<RunList runs={[]} empty="No runs yet" />)

@@ -124,6 +124,26 @@ describe('team status bar', () => {
     expect(client.presenceHeartbeat).toHaveBeenCalledWith(otherWorkspace.id)
   })
 
+  it('re-reads the queue and beats presence when the tab returns', async () => {
+    const approvalList = vi.fn(async () => [approval()])
+    const presenceHeartbeat = vi.fn(async () => 90)
+    seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
+    render(<TeamStatus client={fakeApi({ approvalList, presenceHeartbeat })} />)
+
+    expect(await screen.findByText('1 waiting')).toBeDefined()
+    const reads = approvalList.mock.calls.length
+    const beats = presenceHeartbeat.mock.calls.length
+
+    // A pocketed phone froze both timers: presence has already expired
+    // server-side and an approval may have arrived while it was away.
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    expect(approvalList.mock.calls.length).toBeGreaterThan(reads)
+    expect(presenceHeartbeat.mock.calls.length).toBeGreaterThan(beats)
+  })
+
   it('says nothing when no workspace is chosen at all', async () => {
     const client = fakeApi()
     seed({ activeWorkspace: '', route: { name: 'board', params: {} } })
