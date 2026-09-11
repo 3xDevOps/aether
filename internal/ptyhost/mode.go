@@ -1,6 +1,9 @@
 package ptyhost
 
-import "strconv"
+import (
+	"slices"
+	"strconv"
+)
 
 // A client that attaches mid-run rebuilds its screen from the replay ring,
 // which is a byte tail: whatever the agent set up before those bytes is
@@ -34,6 +37,7 @@ var trackedModes = map[int]bool{
 	1002: true, // mouse: button events with drag
 	1003: true, // mouse: any-motion tracking
 	1006: true, // mouse: SGR extended coordinates
+	1016: true, // mouse: SGR pixel coordinates
 }
 
 // modeDefaults are the states a terminal powers up in, which is also what
@@ -50,6 +54,8 @@ const (
 	modeEsc
 	modeCSI
 	modeParams
+	modeString
+	modeStringEsc
 )
 
 // maxModeParams bounds the parameter bytes carried between chunks. A
@@ -85,6 +91,11 @@ func (s *modeScanner) byte(b byte) {
 		switch b {
 		case '[':
 			s.state = modeCSI
+		case ']', 'P', 'X', '^', '_':
+			// OSC, DCS, SOS, PM, APC. Everything up to the string
+			// terminator is payload - a window title or a device reply -
+			// which a terminal never executes, so neither may this.
+			s.state = modeString
 		case esc:
 			s.state = modeEsc
 		default:
@@ -121,6 +132,23 @@ func (s *modeScanner) byte(b byte) {
 			// Any other final byte is a different private sequence.
 			s.state = modeNormal
 			s.params = s.params[:0]
+		}
+	case modeString:
+		switch b {
+		case bel:
+			s.state = modeNormal
+		case esc:
+			s.state = modeStringEsc
+		}
+	case modeStringEsc:
+		switch b {
+		case '\\', bel:
+			// ST, or the BEL an OSC may end with instead.
+			s.state = modeNormal
+		case esc:
+			s.state = modeStringEsc
+		default:
+			s.state = modeString
 		}
 	}
 }
@@ -186,7 +214,7 @@ func modeSequence(modes []int, final byte) []byte {
 	if len(modes) == 0 {
 		return nil
 	}
-	sortInts(modes)
+	slices.Sort(modes)
 	out := []byte{esc, '[', '?'}
 	for i, mode := range modes {
 		if i > 0 {
@@ -195,12 +223,4 @@ func modeSequence(modes []int, final byte) []byte {
 		out = strconv.AppendInt(out, int64(mode), 10)
 	}
 	return append(out, final)
-}
-
-func sortInts(v []int) {
-	for i := 1; i < len(v); i++ {
-		for j := i; j > 0 && v[j] < v[j-1]; j-- {
-			v[j], v[j-1] = v[j-1], v[j]
-		}
-	}
 }

@@ -896,7 +896,7 @@ Every live socket - `events`, `attach`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
 **10**. A client that changed networks or went to sleep leaves a half-open
 connection that reads as live on both ends; the ping is what releases the PTY
-client it was holding, whose geometry clamps every other viewer. The SPA
+client it was holding, whose geometry may be clamping every other viewer. The SPA
 reconnects on its normal path.
 
 ### `GET /ws/events`
@@ -969,7 +969,10 @@ needs.
    and falls back to the header only when there is no session to have one.
    The optional `replay` value is the number of binary scrollback bytes
    that follow the ack before live output; clients should mute
-   terminal-generated replies until those bytes have been parsed.
+   terminal-generated replies until those bytes have been parsed. It leads
+   with the terminal modes the session is in - bracketed paste, cursor,
+   autowrap, mouse reporting - rebuilt rather than recorded, since the
+   bytes that set them left the scrollback long ago.
    A write attach is refused with `-32001`
    unless the member holds the **steer** capability on that run; dropping
    `"write"` always works for a member who can see the run. An unknown run is

@@ -174,6 +174,7 @@ func (s *session) stop() {
 	s.att = nil
 	s.stdin = nil
 	s.title = titleScanner{}
+	s.modes = modeScanner{}
 	s.pendingEcho = nil
 	s.onTitle = nil
 	if !s.ended {

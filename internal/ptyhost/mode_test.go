@@ -2,8 +2,12 @@ package ptyhost
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 func scanned(chunks ...string) *modeScanner {
@@ -69,6 +73,21 @@ func TestModePreambleRestoresWhatTheAgentSet(t *testing.T) {
 			name:   "untracked private modes are not asserted for the agent",
 			chunks: []string{"\x1b[?1049h\x1b[?12h"},
 			want:   "",
+		},
+		{
+			name:   "a title whose text spells a mode is still just text",
+			chunks: []string{"\x1b]0;build \x1b[?2004h done\x07"},
+			want:   "",
+		},
+		{
+			name:   "a device reply carrying the same bytes is payload too",
+			chunks: []string{"\x1bPq \x1b[?2004h \x1b\\"},
+			want:   "",
+		},
+		{
+			name:   "a mode after a string terminator is read normally again",
+			chunks: []string{"\x1b]0;title\x07\x1b[?2004h"},
+			want:   "\x1b[?2004h",
 		},
 		{
 			name:   "the public form of a mode is not the private one",
@@ -228,5 +247,24 @@ func TestTapNeverSizesTheSession(t *testing.T) {
 	}
 	if s.cols != 200 || s.rows != 50 {
 		t.Fatalf("session geometry = %dx%d, want the lone watcher's 200x50", s.cols, s.rows)
+	}
+}
+
+// Resuming changes what a client is sent, never what it is allowed to do:
+// a resumed write attach passes the steer gate like any other.
+func TestResumeStillFacesTheSteerGate(t *testing.T) {
+	denied := errors.New("not your run")
+	h, _ := newTestHost(t, func(c *Config) {
+		c.Gate = func(context.Context, domain.MemberID, SessionKey) error { return denied }
+	})
+	run := domain.RunID("run-gate")
+	if err := h.StartSession(context.Background(), RunSession(run), newFakeAtt()); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	err := h.Attach(context.Background(), RunSession(run), AttachClient{
+		Member: "m1", Cols: 80, Rows: 24, Resume: true,
+	}, &bytes.Buffer{}, nil)
+	if !errors.Is(err, ErrWriteDenied) {
+		t.Fatalf("resumed write attach got %v, want ErrWriteDenied", err)
 	}
 }
