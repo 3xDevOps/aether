@@ -4,7 +4,7 @@ import { Chip, Tooltip } from '@/components/ui/heroui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
 import { canLaunch } from '@/lib/commands'
-import { useDelayed } from '@/lib/hooks'
+import { phoneScreen, useDelayed, useMediaQuery } from '@/lib/hooks'
 import { registerRoute } from '@/routes/registry'
 import { TerminalDock } from '@/routes/board/terminal-dock'
 import { RunCard } from '@/routes/board/run-card'
@@ -19,6 +19,7 @@ export function Board() {
   const ackAll = useStore((s) => s.ackAll)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const caps = useCapability()
+  const phone = useMediaQuery(phoneScreen)
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
@@ -89,7 +90,10 @@ export function Board() {
             </div>
           )}
         </div>
-        {caps.hasWS('terminal') && <TerminalDock containment="parent" />}
+        {/* The member environment is a desktop setup surface - forward a
+            port, save it, reset it - not something checked from a phone, and
+            its expanded xterm would take the board's whole screen. */}
+        {caps.hasWS('terminal') && !phone && <TerminalDock containment="parent" />}
       </div>
     </div>
   )
