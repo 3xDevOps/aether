@@ -21,9 +21,10 @@ Two rules shape everything below:
 | `--agent` | CLI | Login state | Configuration root | API key env | Launch env | MCP | Status | Resume | Steering | Env setup |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | hooks (`--settings`) | by session ID (`--session-id`, `--resume`) | PTY | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | - | no | PTY | yes |
-| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | - | best effort (`--continue`) | PTY | yes |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | - | no | HTTP TUI API | no |
+| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | notify (`-c notify=[...]`) | no | PTY | yes |
+| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | best effort (`--continue`) | PTY | yes |
+| `omp` | oh-my-pi | `~/.omp` | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | best effort (`--continue`) | PTY | no |
+| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | plugin (`OPENCODE_CONFIG_CONTENT`) | no | HTTP TUI API | no |
 | `fake` | a script you name | - | - | - | - | no | - | no | PTY | no |
 | `custom` | deployment-supplied | - | - | - | - | no | - | no | PTY | no |
 
@@ -47,7 +48,14 @@ reporting" below.
 The **Launch env** column is what the server sets in the run container
 because the CLI will not start without it. It is applied after the
 workspace's own variables, so a workspace cannot leave the agent unable to
-run. See the launch table below for why `claude` needs one.
+run. See the launch table below for why `claude` needs one. A reporter that
+rides in the environment rather than on the command line (`opencode`) is
+not in this column: it is set on interactive runs alone and is dropped by
+the same things that drop the reporter, so it lives under "Status
+reporting".
+
+Either way, a variable the server sets itself replaces a workspace
+environment variable of the same name rather than merging with it.
 
 The **Resume** column is what a relaunch uses when a server reboot
 interrupted the run. The flags ride directly behind the executable.
@@ -64,9 +72,9 @@ whichever conversation the harness spoke last in the working directory.
 Every run mounts its checkout at the same container path and shares one
 credential home per member, so what comes back is that member's *most
 recent* conversation at that path - not necessarily the interrupted run's
-own, and not necessarily one from the same workspace. `pi` has no
-launch-time session ID, so it stays here, and so does any run row created
-before session pinning existed.
+own, and not necessarily one from the same workspace. Neither `pi` nor its
+fork `omp` has a launch-time session ID, so they stay here, and so does any
+run row created before session pinning existed.
 
 A harness with neither starts fresh, and a deployment-supplied argv override
 never has any of these appended - nothing checks the override is still that
@@ -79,19 +87,40 @@ session of its own. See [failure-handling.md](failure-handling.md).
 first half comes from the agent itself.
 
 A harness with a **Status** entry can run a command on its own lifecycle
-events. Aether gives it one: a small settings document written into the
-run's coordination directory beside the MCP config, registering a hook that
-calls the staged server binary inside the container. The interactive launch
-in full, with the session pin and the MCP registration it already carried:
+events. Aether points each one at the staged server binary inside the
+container, through whatever the CLI's own mechanism is, for that launch
+alone - by flag where the CLI has one, by environment where it does not -
+and where that mechanism needs a file, the file is written into the run's
+coordination directory beside the MCP config. The interactive launch of
+each, with the session pin and the MCP registration it already carried:
 
 ```
 claude --session-id <uuid> --dangerously-skip-permissions "<task>" \
   --mcp-config /run/aether/mcp.json \
   --settings /run/aether/claude-settings.json
+
+codex --dangerously-bypass-approvals-and-sandbox "<task>" \
+  -c 'notify=["/opt/aether/aether-server","report","codex"]'
+
+pi "<task>" -e /run/aether/status.ts
+omp --auto-approve "<task>" -e /run/aether/status.ts
 ```
 
+`opencode` has no flag for a plugin, so its launch command is untouched and
+the plugin is named in the environment:
+
 ```
-/opt/aether/aether-server report claude   # the hook, with the event JSON on stdin
+OPENCODE_CONFIG_CONTENT={"plugin":["file:///run/aether/opencode-status.js"]}
+opencode --prompt="<task>"
+```
+
+Every one of them ends up running the same command inside the container:
+
+```
+/opt/aether/aether-server report claude                # hook event JSON on stdin
+/opt/aether/aether-server report codex '<payload>'     # the notify argument
+/opt/aether/aether-server report pi --event <name>     # from the extension, pi and omp
+/opt/aether/aether-server report opencode --event session.idle
 ```
 
 The report travels back over the run's own coordination socket, so no token
@@ -104,34 +133,76 @@ turns it into a run status straight away:
 | the turn ended, or it has been idle at its prompt | `needs-attention` | `waiting for your input` |
 | it is asking permission | `needs-attention` | `waiting for your permission` |
 | it is asking a question | `needs-attention` | `waiting for your answer` |
-| it started a turn, or ran a tool | `running` | `agent resumed` |
+| it started a turn, ran a tool, or got its answer | `running` | `agent resumed` |
 
-Anything else the harness reports - a session opening, a subagent, a
-compaction - is ignored rather than guessed at.
+Anything else the harness reports - a session opening, a reply streaming
+in, a compaction - is ignored rather than guessed at, and so is a subagent's
+own turn: opencode gives one a session of its own, and that session going
+idle is not the run's turn ending. The rule holds the other way round too.
+The run is `running` while any of its sessions is, so an opencode
+background subagent still working after the turn that spawned it ended
+keeps the run off your queue until it finishes - something there is still
+working.
+
+opencode never announces the resume after a permission or a question of its
+own accord - its session stays busy for the whole tool call the prompt
+interrupted - so the member's answer is what returns the run to `running`.
+A run can have several prompts open at once, one per session, and only the
+answer to the last of them returns it: until then the run stays parked. If
+the turn that asked ended while the prompt was still open, that answer
+parks the run at `needs-attention` instead - nothing is working any more -
+and the next turn the agent starts is what returns it to `running`.
+
+`codex` only says when a turn ends. It never says a new one started, so its
+run comes back to `running` the way a harness with no reporter does: on
+agent output or a file change. Everything drawn in the terminal counts
+there, the echo of your own typing included, so a long prompt typed into a
+parked `codex` run can read as `running` before you send it. `claude`, `pi`
+and `omp` report both ends, and their runs stay parked until the agent
+itself says it is working again - a TUI repainting while you type is not
+work.
 
 The last report is recorded with the run, so it survives a server restart:
-a run the agent parked comes back parked, and only the agent's own next
-turn releases it. See [failure-handling.md](failure-handling.md).
+a run the agent parked comes back parked, and only what would have released
+it before releases it now. See [failure-handling.md](failure-handling.md).
 
 For a harness with a **Status** of `-`, nothing changes: the run is judged
 on silence alone and parks at `needs-attention` after `--stall-threshold`
 with a reason that leads with `stalled:`. See
 [failure-handling.md](failure-handling.md).
 
-Three things turn the reporter off:
+Four things turn the reporter off:
 
-- **Headless runs.** `--mode headless` never gets the hooks: the agent
+- **Headless runs.** `--mode headless` never gets the reporter: the agent
   exits when it is done and never waits for anyone.
 - **`--conflict-coordination=false`.** There are no mounts, so there is no
-  socket to report on and no directory to write the settings into.
+  socket to report on and no directory to write the assets into.
 - **An argv override.** A `--harness-definitions` entry that redefines a
-  shipped harness drops the status arguments exactly as it drops the MCP
-  flag - nothing checks the overridden command is still that CLI.
+  shipped harness drops the status arguments and the status environment
+  exactly as it drops the MCP flag - nothing checks the overridden command
+  is still that CLI.
+- **`OPENCODE_PURE` in the workspace environment.** opencode loads no
+  external plugin at all when that variable is set, Aether's included, and
+  Aether does not take it away from you. The run launches and works
+  normally; it reports nothing, and is judged on silence like a harness
+  with no reporter.
 
-The settings file is server-written, read-only, and lives in
-`/run/aether`, never in the worktree or the member's synced profile.
-`--settings` applies for that launch only and merges over the member's own
-settings, so it adds the hooks rather than replacing anything they have.
+The asset files are server-written, read-only, and live in `/run/aether`,
+never in the worktree or the member's synced profile. Each applies for that
+launch alone and merges over what the member already has: `--settings`
+layers one settings document over Claude Code's own, `-e` loads one more pi
+extension beside the ones you already have, `-c` overrides your
+`~/.codex/config.toml` `notify` for this run alone - so if you use `notify`
+for something of your own, it keeps working everywhere except in an Aether
+run - and `OPENCODE_CONFIG_CONTENT` is merged into opencode's config with
+the plugin lists concatenated, so the member's own plugins still load.
+
+What merges is opencode's own config, not a second value of that variable:
+an interactive `opencode` run reserves `OPENCODE_CONFIG_CONTENT` for the
+plugin, and a workspace environment variable of that name is replaced
+rather than combined. Inline config a workspace needs on every run goes in
+a file the workspace names with `OPENCODE_CONFIG`, which Aether never
+sets.
 
 ## Steering delivery
 
@@ -180,6 +251,7 @@ dashboard surface keep what the member typed. See
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |
 | `pi` | `pi {task}` | `pi -p {task}` |
+| `omp` | `omp --auto-approve {task}` | `omp -p --auto-approve {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
 Every `claude` **run** also gets `IS_SANDBOX=1`. Runs execute as root on the
 standard image, and Claude Code refuses `--dangerously-skip-permissions` as
@@ -290,6 +362,23 @@ a provider. Tokens land in `~/.pi/agent/auth.json` under the member's home.
 The browser configuration import skips known credential names before upload.
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
+### omp
+
+oh-my-pi is a fork of pi with its own executable and its own home. Install
+it with the vendor's command, `curl -fsSL https://omp.sh/install | sh`,
+which puts `omp` in `~/.local/bin`. Inside `aether terminal`, start the CLI
+and log in through its own flow; credentials land in the agent database
+under `~/.omp/agent/`, which is excluded from profile sync. `ANTHROPIC_API_KEY`
+or `OPENAI_API_KEY` in the server environment is the API-key alternative.
+
+`omp` is a shipped name, and a shipped name always wins over a member's own
+definition of the same name. If you ran `aether agent add omp` before Aether
+shipped it, your stored definition is ignored from now on and runs use the
+launch template in the table above. The row stays where it is - there is no
+command that removes one, and `aether agent list` keeps printing it as
+`agent omp member` next to `agent omp shipped`. To launch your own build,
+register it under a name Aether does not ship.
+
 ### opencode
 
 Inside `aether terminal`, run `opencode auth login` and pick your provider.
@@ -335,8 +424,12 @@ credential paths are explicit absolute container paths under `/root` or
 `/home/aether`; credentials must be inside the profile root when one is
 configured. Deny names are basenames only.
 
-For example, an administrator can pin OMP without adding vendor logic to
-Aether (a member would instead just run `aether agent add omp`):
+For example, an administrator can point `omp` at a different build for every
+member. A shipped name is the one case a member cannot register themselves,
+so an administrator definition is the only way to change one. A definition
+replaces the shipped profile rather than extending it, so it carries the
+deny names too - omp keeps its provider keys in `agent.db`, which no
+generic denylist knows about:
 
 ```json
 {
@@ -347,7 +440,7 @@ Aether (a member would instead just run `aether agent add omp`):
     "Executable": "omp",
     "ProfileRoot": "/home/aether/.omp",
     "CredentialPaths": ["/home/aether/.omp"],
-    "DenyNames": ["auth.json", "token.json"]
+    "DenyNames": ["agent.db", "agent.db-wal", "agent.db-shm"]
   }
 }
 ```
@@ -366,8 +459,8 @@ transport for installation and login.
 
 The local dashboard (`aether gui`) does not watch a laptop directory or run an
 AI inventory. During the Agents step, choose one directory such as
-`~/.claude`, `~/.codex`, or `~/.pi` with the browser directory picker. A
-preview shows the files that will be sent and the paths left out before
+`~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp` with the browser directory picker.
+A preview shows the files that will be sent and the paths left out before
 upload. Import is explicit and one-time: after it succeeds, the import control
 is gone. The server-hosted dashboard has no onboarding picker; use local
 `aether gui` for this step.
@@ -376,6 +469,19 @@ The picker normally matches the selected directory basename to a known harness.
 If the basename is unknown or matches more than one destination, choose the
 destination explicitly. The browser skips known credential names (including
 credential names in nested paths) and runtime/history defaults before upload.
+The runtime defaults for pi and omp are:
+
+| Harness | Runtime/history paths left out before upload |
+| --- | --- |
+| `pi` | `agent/sessions/`, `agent/tmp/` |
+| `omp` | `agent/sessions/`, `agent/terminal-sessions/`, `agent/cache/`, `agent/history.db`, `agent/history.db-shm`, `agent/history.db-wal`, `agent/models.db`, `natives/`, `cache/`, `logs/`, `run/`, `collab/` |
+
+The `omp` provider database (`agent/agent.db` and its `-wal`/`-shm`
+companions) is credential material and is also excluded before upload.
+
+These exclusions apply to renamed directories too and are not overridden by
+`.aether-profile-ignore` in browser import. `agent/skills/`, `agent/extensions/`,
+and `agent/npm/` remain configuration and are imported.
 Remaining bytes are uploaded and scanned by the server; do not assume all
 secret-looking content stays on the laptop. A complete response reports
 accepted counts and server exclusions. If the server stops after writing files,
@@ -447,7 +553,10 @@ visible immediately to the shared home.
 
 ## Adding a harness
 
-The registry is one map entry: argv templates for both modes, credential paths,
-profile root, denylist, API key passthrough, and the optional MCP, session,
-and resume flags. An adapter is a separate, optional file. Both are covered in
+The registry is one map entry: argv templates for both modes, credential
+paths, profile root, denylist, API key passthrough, the optional MCP,
+session, and resume flags, and the status reporter - what the harness can
+report, which is what declares a reporter at all, plus the arguments or
+environment variables that point the harness at it and any asset files
+those name. An adapter is a separate, optional file. Both are covered in
 [adapters.md](adapters.md).

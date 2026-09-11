@@ -293,33 +293,60 @@ func (h *Host) reportInput(key SessionKey, member domain.MemberID) {
 	go h.cfg.OnInput(key, member)
 }
 
+// AttachClient is what one attach declares about itself: the geometry it
+// brings, whether it may write, and whether it follows the session.
+type AttachClient struct {
+	Member   domain.MemberID
+	Cols     uint
+	Rows     uint
+	ReadOnly bool
+	// Follow renders at the session's geometry and imposes none, so a
+	// screen too small to hold the agent's can still steer it without
+	// reflowing that screen for everyone else watching. A follower is
+	// told the size it should draw at, at attach and at every change.
+	Follow bool
+}
+
+// GeometryWriter is an attach conn that wants the session's PTY size: once
+// as the attach joins, which is what an ack reports, and - for a follower,
+// the only client that draws at a size it did not choose - again whenever
+// the size changes under it. Out of band from the output the conn also
+// carries, so nothing of this reaches the transcript.
+type GeometryWriter interface {
+	SetGeometry(cols, rows uint)
+}
+
 // Attach connects conn to the session's PTY and blocks until conn's read
 // side returns EOF or an error, ctx is done, the session ends (returns nil),
 // or the host closes. Reads from conn are keystrokes (discarded when
-// readOnly); writes to conn are raw PTY output, starting with a replay of
+// read-only); writes to conn are raw PTY output, starting with a replay of
 // the recent scrollback. resize carries [cols, rows] updates (nil = fixed
 // geometry). Write-mode attaches are checked against the configured Gate.
-func (h *Host) Attach(ctx context.Context, key SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error {
+func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
 	s := h.lookup(key)
 	if s == nil {
 		return ErrNoSession
 	}
-	if !readOnly && h.cfg.Gate != nil {
-		if err := h.cfg.Gate(ctx, member, key); err != nil {
+	if !a.ReadOnly && h.cfg.Gate != nil {
+		if err := h.cfg.Gate(ctx, a.Member, key); err != nil {
 			return fmt.Errorf("%w: %v", ErrWriteDenied, err)
 		}
 	}
-	if cols == 0 {
-		cols = h.cfg.DefaultCols
+	if a.Cols == 0 {
+		a.Cols = h.cfg.DefaultCols
 	}
-	if rows == 0 {
-		rows = h.cfg.DefaultRows
+	if a.Rows == 0 {
+		a.Rows = h.cfg.DefaultRows
 	}
-	c := newClient(conn, readOnly, cols, rows)
+	c := newClient(conn, a)
 	if err := s.addClient(c); err != nil {
 		return err
 	}
 	defer s.removeClient(c)
+	// The size the session is, not the size this client asked for: the ack
+	// reports it, so a follower draws what the writers see from its first
+	// frame rather than from the first change after it joined.
+	c.tellGeometry(s.geometry())
 
 	readDone := make(chan struct{})
 	go func() {
@@ -332,13 +359,13 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, member domain.MemberI
 			if c.isClosed() {
 				return
 			}
-			if n > 0 && !readOnly {
+			if n > 0 && !a.ReadOnly {
 				if !s.writeStdin(buf[:n]) {
 					return
 				}
 				if !typed && scan.typed(buf[:n]) {
 					typed = true
-					h.reportInput(key, member)
+					h.reportInput(key, a.Member)
 				}
 			}
 			if err != nil {

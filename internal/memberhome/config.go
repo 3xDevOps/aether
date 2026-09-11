@@ -868,17 +868,13 @@ func revision(content []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-var defaultIgnores = map[string][]string{
-	"claude": {"projects", "shell-snapshots", "statsig", "todos", "file-history", "history.jsonl", "daemon"},
-	"codex":  {"tmp", ".tmp", "sessions"},
-}
-
 func isDefaultIgnored(harnessName, rel string) bool {
 	clean := path.Clean(rel)
 	if clean == ".aether-profile-ignore" {
 		return true
 	}
-	for _, ignored := range defaultIgnores[harnessName] {
+	for _, pattern := range profilesvc.DefaultIgnores(harnessName) {
+		ignored := strings.TrimSuffix(pattern, "/")
 		if clean == ignored || strings.HasPrefix(clean, ignored+"/") {
 			return true
 		}

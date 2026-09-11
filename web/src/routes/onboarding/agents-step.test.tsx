@@ -66,12 +66,16 @@ function renderStep(client: Api, caps: GatewayCapabilities = localCaps) {
   return { onNext, onReady, view }
 }
 
-function directoryFile(path: string, content: string | Uint8Array): File {
+function directoryFile(
+  path: string,
+  content: string | Uint8Array,
+  root = '.claude',
+): File {
   const fileContent = typeof content === 'string' ? content : new Uint8Array(content).buffer
   const file = new File([fileContent], path.slice(path.lastIndexOf('/') + 1))
   Object.defineProperty(file, 'webkitRelativePath', {
     configurable: true,
-    value: `.claude/${path}`,
+    value: `${root}/${path}`,
   })
   return file
 }
@@ -260,30 +264,68 @@ describe('agents step', () => {
 
 describe('directory import bounds', () => {
   it('filters credentials, runtime history and oversized files before reading', async () => {
-    const oversized = directoryFile(
+    const root = 'renamed-agent-home'
+    const read = vi.fn(async () => new ArrayBuffer(0))
+    const unreadable = (path: string, content: string | Uint8Array) => {
+      const file = directoryFile(path, content, root)
+      Object.defineProperty(file, 'arrayBuffer', {
+        configurable: true,
+        value: read,
+      })
+      return file
+    }
+    const runtime = [
+      'history.jsonl',
+      'agent/sessions/transcript.jsonl',
+      'agent/tmp/download.tgz',
+      'agent/terminal-sessions/terminal.json',
+      'agent/cache/state.json',
+      'agent/history.db',
+      'agent/history.db-shm',
+      'agent/history.db-wal',
+      'agent/models.db',
+      'natives/18.1.4/node',
+      'cache/runtime.json',
+      'logs/omp.log',
+      'run/state.json',
+      'collab/transcript.jsonl',
+    ]
+    const oversized = unreadable(
       'big.bin',
       new Uint8Array(MAX_IMPORT_FILE_BYTES + 1),
     )
-    const read = vi.fn(async () => new ArrayBuffer(0))
-    Object.defineProperty(oversized, 'arrayBuffer', {
-      configurable: true,
-      value: read,
-    })
     const prepared = await prepareDirectoryImport([
-      directoryFile('.credentials.json', 'secret'),
-      directoryFile('history.jsonl', 'transcript'),
+      unreadable('.credentials.json', 'secret'),
+      unreadable('agent/agent.db', 'secret'),
+      unreadable('agent/agent.db-wal', 'secret'),
+      unreadable('agent/agent.db-shm', 'secret'),
+      ...runtime.map((path) => unreadable(path, 'runtime')),
       oversized,
-      directoryFile('empty.txt', ''),
+      directoryFile('agent/skills/work.md', 'skill', root),
+      directoryFile('agent/extensions/work.ts', 'extension', root),
+      directoryFile('agent/npm/package/index.js', 'npm', root),
+      directoryFile('agent/sessions-note.md', 'kept', root),
+      directoryFile('cacheable.json', 'kept', root),
+      directoryFile('empty.txt', '', root),
     ])
 
     expect(read).not.toHaveBeenCalled()
-    expect(prepared?.files).toEqual([
-      { path: 'empty.txt', content_base64: '', mode: 0o644 },
+    expect(prepared?.files.map(({ path }) => path)).toEqual([
+      'agent/skills/work.md',
+      'agent/extensions/work.ts',
+      'agent/npm/package/index.js',
+      'agent/sessions-note.md',
+      'cacheable.json',
+      'empty.txt',
     ])
-    expect(prepared?.bytes).toBe(0)
+    expect(prepared?.bytes).toBe(25)
+    expect(prepared?.excluded.filter(({ reason }) => reason === 'runtime').map(({ path }) => path)).toEqual(runtime)
     expect(prepared?.excluded.map(({ path, reason }) => ({ path, reason }))).toEqual([
       { path: '.credentials.json', reason: 'credential' },
-      { path: 'history.jsonl', reason: 'runtime' },
+      { path: 'agent/agent.db', reason: 'credential' },
+      { path: 'agent/agent.db-wal', reason: 'credential' },
+      { path: 'agent/agent.db-shm', reason: 'credential' },
+      ...runtime.map((path) => ({ path, reason: 'runtime' })),
       { path: 'big.bin', reason: 'too-large' },
     ])
   })

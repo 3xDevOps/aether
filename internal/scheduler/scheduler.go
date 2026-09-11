@@ -74,7 +74,7 @@ type Config struct {
 	// half-written checkout is worse than a refused one.
 	MinFreeBytes int64
 	// Harnesses overrides or extends the shipped harness registry
-	// (internal/harness: claude, codex, pi, opencode, custom); "fake"
+	// (internal/harness: claude, codex, pi, omp, opencode, custom); "fake"
 	// (the deterministic e2e agent) is registered here by default. An
 	// override replaces the registry argv and keeps the profile's user, key
 	// passthrough, and launch environment; it drops the registry's resume
@@ -211,7 +211,13 @@ type supervised struct {
 	// activity it is, and a run does not park as stalled seconds after the
 	// agent proved it is alive.
 	lastWorking time.Time
-	done        chan struct{}
+	// parkedAt is when the agent's own waiting report parked this run, and
+	// postParkActivity the newest terminal activity seen since. They are
+	// what a turn-end reporter is judged on: see unparks. Both zero unless
+	// a waiting report is what parked the run.
+	parkedAt         time.Time
+	postParkActivity time.Time
+	done             chan struct{}
 	// runUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root (no ownership pass). Set once
 	// the user is resolved during provisioning, or from the sidecar on
@@ -484,6 +490,7 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 		profile.ResumeFlag = ""
 		profile.Reporter = harness.ReporterNone
 		profile.StatusArgs = nil
+		profile.StatusEnv = nil
 		profile.StatusFiles = nil
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs

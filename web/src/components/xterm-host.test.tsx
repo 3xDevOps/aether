@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SearchAddon } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
 import { TerminalPane } from '@/components/terminal-pane'
@@ -107,6 +107,106 @@ describe('xterm replay scrollback', () => {
       ),
     )
     attachment.close()
+  })
+})
+
+/** A phone's terminal: the server's geometry, and no fit of its own. */
+function SizedProbe({
+  size,
+  onResize,
+  onReady,
+}: {
+  size: { cols: number; rows: number }
+  onResize: (cols: number, rows: number) => void
+  onReady: (terminal: Terminal) => void
+}) {
+  const { hostRef, terminal } = useXterm({ size, onResize })
+  useEffect(() => {
+    if (terminal) onReady(terminal)
+  }, [onReady, terminal])
+  return <div ref={hostRef} />
+}
+
+describe('a terminal at a fixed size', () => {
+  it('renders the size it was given and reports no resize of its own', async () => {
+    let ready: Terminal | null = null
+    const onResize = vi.fn()
+    const onReady = (terminal: Terminal) => (ready = terminal)
+    const view = render(
+      <SizedProbe size={{ cols: 132, rows: 43 }} onResize={onResize} onReady={onReady} />,
+    )
+    await waitFor(() => expect(ready).not.toBeNull())
+
+    const terminal = ready as unknown as Terminal
+    expect([terminal.cols, terminal.rows]).toEqual([132, 43])
+    // Reporting is what sends a resize to the shared PTY, and a pane that
+    // adopted someone else's geometry has nothing to report.
+    expect(onResize).not.toHaveBeenCalled()
+
+    // A reattach can answer with a different size; the pane follows it.
+    view.rerender(
+      <SizedProbe size={{ cols: 100, rows: 30 }} onResize={onResize} onReady={onReady} />,
+    )
+    await waitFor(() => expect([terminal.cols, terminal.rows]).toEqual([100, 30]))
+    expect(onResize).not.toHaveBeenCalled()
+    view.unmount()
+  })
+})
+
+/** The key bar's half of the Ctrl modifier lives in the host. */
+function CtrlProbe({
+  onData,
+  onController,
+}: {
+  onData: (data: string) => void
+  onController: (controller: ReturnType<typeof useXterm>) => void
+}) {
+  const controller = useXterm({ onData })
+  useEffect(() => {
+    if (controller.terminal) onController(controller)
+  })
+  return <div ref={controller.hostRef} />
+}
+
+describe('the key bar Ctrl modifier', () => {
+  it('turns the next character into its control code, once', async () => {
+    const sent: string[] = []
+    let controller: ReturnType<typeof useXterm> | null = null
+    const view = render(
+      <CtrlProbe
+        onData={(data) => sent.push(data)}
+        onController={(next) => (controller = next)}
+      />,
+    )
+    await waitFor(() => expect(controller).not.toBeNull())
+    const host = () => controller as unknown as ReturnType<typeof useXterm>
+
+    act(() => host().armCtrl(true))
+    await waitFor(() => expect(host().ctrlArmed).toBe(true))
+    act(() => host().terminal?.input('c'))
+    expect(sent).toEqual(['\x03'])
+
+    // One character, then the modifier is spent: the next keystroke is plain.
+    await waitFor(() => expect(host().ctrlArmed).toBe(false))
+    act(() => host().terminal?.input('c'))
+    expect(sent).toEqual(['\x03', 'c'])
+
+    // A key the modifier does not cover goes through as it is and leaves
+    // Ctrl armed, so the next one can still use it rather than the wrong
+    // control code arriving at the agent.
+    act(() => host().armCtrl(true))
+    act(() => host().terminal?.input('\x1b[A'))
+    expect(sent).toEqual(['\x03', 'c', '\x1b[A'])
+    expect(host().ctrlArmed).toBe(true)
+
+    // Case folding is ASCII, not locale text: the German sharp s upper
+    // cases to two letters and must not become Ctrl+S.
+    act(() => host().terminal?.input('\u00df'))
+    expect(sent).toEqual(['\x03', 'c', '\x1b[A', '\u00df'])
+    act(() => host().terminal?.input('d'))
+    expect(sent).toEqual(['\x03', 'c', '\x1b[A', '\u00df', '\x04'])
+    await waitFor(() => expect(host().ctrlArmed).toBe(false))
+    view.unmount()
   })
 })
 
@@ -246,6 +346,8 @@ describe('terminal shortcuts', () => {
           findOpen: true,
           setFindOpen: () => {},
           focusTerminal: () => {},
+          ctrlArmed: false,
+          armCtrl: () => {},
         }}
       />,
     )
@@ -271,6 +373,8 @@ describe('the terminal toolbar', () => {
           findOpen: false,
           setFindOpen: () => {},
           focusTerminal: () => {},
+          ctrlArmed: false,
+          armCtrl: () => {},
         }}
       />,
     )

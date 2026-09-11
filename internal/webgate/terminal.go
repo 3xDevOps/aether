@@ -40,7 +40,12 @@ func (g *Gateway) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	if cols == 0 || rows == 0 {
 		cols, rows = defaultCols, defaultRows
 	}
-	term, ack, err := s.Backend.Terminal(s.Ctx, protocol.TerminalRequest{Tab: tab, Cols: cols, Rows: rows})
+	term, ack, err := s.Backend.Terminal(s.Ctx, protocol.TerminalRequest{
+		Tab:    tab,
+		Cols:   cols,
+		Rows:   rows,
+		Follow: req.Follow,
+	})
 	if err != nil || !ack.OK {
 		var perr *protocol.Error
 		if ack.Code == 0 {

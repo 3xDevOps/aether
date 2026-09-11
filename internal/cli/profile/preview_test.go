@@ -647,6 +647,66 @@ func TestInventoryCodexSessionsIgnored(t *testing.T) {
 	}
 }
 
+// pi writes its transcripts and its extension downloads inside the same
+// agent directory that holds everything a member configured, so the
+// defaults have to cut two subtrees out of it and leave the rest.
+func TestInventoryPiRuntimeIgnored(t *testing.T) {
+	root := setupHarnessRoot(t, "pi")
+	mustWrite(t, filepath.Join(root, "agent", "config.yml"), "model: sonnet\n")
+	mustWrite(t, filepath.Join(root, "agent", "npm", "package.json"), "{}\n")
+	mustWrite(t, filepath.Join(root, "agent", "sessions", "-code", "01.jsonl"), "{}\n")
+	mustWrite(t, filepath.Join(root, "agent", "tmp", "extensions", "pkg", "index.js"), "//\n")
+
+	preview, err := Inventory(t.Context(), "pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Files != 2 {
+		t.Fatalf("files = %d, want config.yml and the installed package; categories %v",
+			preview.Files, preview.CategoryNames())
+	}
+	for _, e := range preview.Excluded {
+		if e.Reason != ExcludeIgnored {
+			t.Errorf("%s excluded as %s, want the default ignore", e.Path, e.Reason)
+		}
+	}
+}
+
+// TestInventoryOmpRuntimeIgnored covers the harness whose profile root is
+// the largest Aether syncs. A real omp home is half a gigabyte, and all
+// but a few megabytes of it is the agent's own output: transcripts under
+// agent/sessions/, the prompt history it rewrites on every prompt, and a
+// per-version native download under natives/. Left in, the budget walk
+// spends the whole per-snapshot cap on it and silently drops the
+// configuration the member actually wanted on the server.
+func TestInventoryOmpRuntimeIgnored(t *testing.T) {
+	root := setupHarnessRoot(t, "omp")
+	mustWrite(t, filepath.Join(root, "agent", "config.yml"), "model: sonnet\n")
+	mustWrite(t, filepath.Join(root, "agent", "extensions", "mine.ts"), "export default () => {}\n")
+	mustWrite(t, filepath.Join(root, "agent", "sessions", "-code", "01.jsonl"), "{}\n")
+	mustWrite(t, filepath.Join(root, "agent", "terminal-sessions", "01.json"), "{}\n")
+	mustWrite(t, filepath.Join(root, "agent", "history.db"), "sqlite\n")
+	mustWrite(t, filepath.Join(root, "agent", "history.db-wal"), "\n")
+	mustWrite(t, filepath.Join(root, "agent", "models.db"), "sqlite\n")
+	mustWrite(t, filepath.Join(root, "natives", "18.1.4", "node"), "binary\n")
+	mustWrite(t, filepath.Join(root, "collab", "abc.jsonl"), "{}\n")
+	mustWrite(t, filepath.Join(root, "logs", "omp.log"), "hello\n")
+
+	preview, err := Inventory(t.Context(), "omp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Files != 2 {
+		t.Fatalf("files = %d, want config.yml and the extension; categories %v",
+			preview.Files, preview.CategoryNames())
+	}
+	for _, e := range preview.Excluded {
+		if e.Reason != ExcludeIgnored {
+			t.Errorf("%s excluded as %s, want the default ignore", e.Path, e.Reason)
+		}
+	}
+}
+
 // TestIrregularKindNamesFileTypes covers the naming behind the
 // not-regular exclusion on every platform. The fixtures that create a
 // real socket or FIFO are POSIX-only (walk_unix_test.go), but what the

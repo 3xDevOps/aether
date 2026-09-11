@@ -28,6 +28,15 @@ const (
 	SubsystemSync = "aether-sync"
 	// SubsystemTerminal is the per-member terminal control and PTY channel.
 	SubsystemTerminal = "aether-terminal"
+
+	// WindowChangeRequest is the RFC 4254 channel request a client sends
+	// to resize its PTY. An attach or terminal channel also carries it the
+	// other way, from the server, to report that the session's PTY has
+	// been resized by someone else; see docs/local-gateway.md. It is a
+	// channel request rather than a frame in the stream because the stream
+	// is the terminal's own bytes, and it is not an event: nothing about
+	// it is durable or replayed.
+	WindowChangeRequest = "window-change"
 )
 
 // MaxLineBytes is the maximum length of one NDJSON line, framing included.

@@ -91,8 +91,16 @@ type fakePTY struct {
 	cols        uint
 	rows        uint
 	readOnly    bool
+	follow      bool
 	input       bytes.Buffer
 	resizes     [][2]uint
+	// session is the size the fake session is; when set it is what the
+	// host reports to the attach, the way the real one reports the size
+	// the PTY actually has rather than the size the header asked for.
+	session [2]uint
+	// tell carries a later geometry the test wants reported, which is
+	// what someone else resizing the session does.
+	tell chan [2]uint
 }
 
 func (p *fakePTY) Replay(run domain.RunID) (io.ReadCloser, error) {
@@ -114,7 +122,8 @@ func (p *fakePTY) setTranscript(run domain.RunID, data []byte) {
 	p.transcripts[run] = data
 }
 
-func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error {
+func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client ptyhost.AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
+	member, cols, rows, readOnly := client.Member, client.Cols, client.Rows, client.ReadOnly
 	p.mu.Lock()
 	if p.err != nil {
 		err, delay := p.err, p.errDelay
@@ -139,9 +148,15 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, member dom
 		}
 	}
 	p.mu.Lock()
-	p.cols, p.rows, p.readOnly = cols, rows, readOnly
+	p.cols, p.rows, p.readOnly, p.follow = cols, rows, readOnly, client.Follow
 	replay := p.replay
+	session, tell := p.session, p.tell
 	p.mu.Unlock()
+
+	geo, hasGeo := conn.(ptyhost.GeometryWriter)
+	if hasGeo && session != [2]uint{} {
+		geo.SetGeometry(session[0], session[1])
+	}
 
 	if rw, ok := conn.(ptyhost.ReplayWriter); ok {
 		if _, err := rw.WriteReplay(replay); err != nil {
@@ -174,6 +189,10 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, member dom
 	}()
 	for {
 		select {
+		case sz := <-tell:
+			if hasGeo {
+				geo.SetGeometry(sz[0], sz[1])
+			}
 		case sz := <-resize:
 			p.mu.Lock()
 			p.resizes = append(p.resizes, sz)
@@ -192,6 +211,13 @@ func (p *fakePTY) state() (cols, rows uint, readOnly bool, input string, resizes
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.cols, p.rows, p.readOnly, p.input.String(), append([][2]uint(nil), p.resizes...)
+}
+
+// following reports whether the last attach declared itself a follower.
+func (p *fakePTY) following() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.follow
 }
 
 func (p *fakePTY) setErr(err error) {

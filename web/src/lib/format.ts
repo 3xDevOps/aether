@@ -58,9 +58,10 @@ export const budgetStateLabel: Record<BudgetState, string> = {
   exceeded: 'past the cap',
 }
 
-/** Display names for the setup-capable harnesses. */
+/** Display names for the harnesses whose CLI is not called what Aether
+ * calls it. Anything absent is shown by its registry name. */
 export const friendly: Record<string, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
-  pi: 'pi',
+  omp: 'oh-my-pi',
 }

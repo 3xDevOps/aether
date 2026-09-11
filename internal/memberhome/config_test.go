@@ -69,6 +69,83 @@ func TestConfigImportExcludesSecretsRuntimeAndCredentials(t *testing.T) {
 	}
 }
 
+func TestConfigImportExcludesPiAndOMPTransientFilesKeepsConfiguration(t *testing.T) {
+	manager, err := New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := []ConfigFile{
+		{Path: "agent/skills/review.md", Content: []byte("# review"), Mode: 0o644},
+		{Path: "agent/extensions/review.js", Content: []byte("export {}"), Mode: 0o644},
+		{Path: "agent/npm/review/package.json", Content: []byte(`{"name":"review"}`), Mode: 0o644},
+	}
+	tests := []struct {
+		name    string
+		member  domain.MemberID
+		root    string
+		ignored []string
+	}{
+		{
+			name:   "pi",
+			member: "member-pi",
+			root:   ".pi",
+			ignored: []string{
+				"agent/sessions/transcript.jsonl",
+				"agent/tmp/extension.tgz",
+			},
+		},
+		{
+			name:   "omp",
+			member: "member-omp",
+			root:   ".omp",
+			ignored: []string{
+				"agent/sessions/transcript.jsonl",
+				"agent/terminal-sessions/terminal.log",
+				"agent/cache/compiled.js",
+				"agent/history.db",
+				"agent/history.db-shm",
+				"agent/history.db-wal",
+				"agent/models.db",
+				"natives/tool",
+				"cache/index",
+				"logs/output.log",
+				"run/pid",
+				"collab/transcript.jsonl",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			files := append([]ConfigFile(nil), config...)
+			for _, ignored := range tc.ignored {
+				files = append(files, ConfigFile{Path: ignored, Content: []byte("runtime"), Mode: 0o644})
+			}
+			result, err := manager.ConfigImport(context.Background(), tc.member, tc.name, tc.root, files, nil)
+			if err != nil {
+				t.Fatalf("import: %v", err)
+			}
+			if result.Files != len(config) || result.Bytes != 34 || len(result.Excluded) != len(tc.ignored) {
+				t.Fatalf("result = %+v, want %d files, 34 bytes, %d exclusions", result, len(config), len(tc.ignored))
+			}
+			excluded := make(map[string]bool, len(result.Excluded))
+			for _, file := range result.Excluded {
+				excluded[file.Path] = true
+			}
+			for _, ignored := range tc.ignored {
+				if !excluded[ignored] {
+					t.Errorf("runtime path %q was imported; exclusions = %+v", ignored, result.Excluded)
+				}
+			}
+			for _, want := range config {
+				got, readErr := manager.ConfigRead(context.Background(), tc.member, tc.name, tc.root, want.Path, nil)
+				if readErr != nil || string(got.Content) != string(want.Content) {
+					t.Errorf("configuration %q = %q, err=%v; want %q", want.Path, got.Content, readErr, want.Content)
+				}
+			}
+		})
+	}
+}
+
 func TestConfigImportPreflightsSymlinkBeforeMutation(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "homes")
 	manager, err := New(root)

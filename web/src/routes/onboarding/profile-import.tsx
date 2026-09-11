@@ -19,18 +19,24 @@ export const MAX_IMPORT_FILES = 2000
 export const MAX_IMPORT_FILE_BYTES = 1024 * 1024
 export const MAX_IMPORT_TOTAL_BYTES = 20 * 1024 * 1024
 
-const credentialNames = new Set([
-  '.credentials.json',
-  'credentials.json',
-  'credentials',
-  '.claude.json',
-  'auth.json',
-  'keychain',
-  'token.json',
-  'tokens.json',
-  'oauth.json',
-])
+const credentialNames: Record<string, true> = {
+  '.credentials.json': true,
+  'credentials.json': true,
+  credentials: true,
+  '.claude.json': true,
+  'auth.json': true,
+  keychain: true,
+  'token.json': true,
+  'tokens.json': true,
+  'oauth.json': true,
+  'agent.db': true,
+  'agent.db-wal': true,
+  'agent.db-shm': true,
+}
 
+// Keep this list aligned with internal/profile.DefaultIgnores.
+// Directory import has no destination yet (and roots may be renamed), so it
+// uses the union while retaining path-component boundaries below.
 const runtimePaths = [
   'projects',
   'shell-snapshots',
@@ -42,6 +48,19 @@ const runtimePaths = [
   'tmp',
   '.tmp',
   'sessions',
+  'agent/sessions',
+  'agent/tmp',
+  'agent/terminal-sessions',
+  'agent/cache',
+  'agent/history.db',
+  'agent/history.db-shm',
+  'agent/history.db-wal',
+  'agent/models.db',
+  'natives',
+  'cache',
+  'logs',
+  'run',
+  'collab',
 ]
 
 interface PathParts {
@@ -86,7 +105,7 @@ function rootName(path: string): string {
 
 function isCredential(path: string): boolean {
   const parts = path.split('/').map((part) => part.toLowerCase())
-  return parts.some((part) => credentialNames.has(part) || part.endsWith('.pem'))
+  return parts.some((part) => credentialNames[part] === true || part.endsWith('.pem'))
 }
 
 function isRuntime(path: string): boolean {
@@ -376,8 +395,9 @@ export function ProfileImport({ client }: { client: Api }) {
         <p className="text-sm leading-6 text-muted-foreground">
           Choose one agent configuration directory to import once. Supported
           roots include <span className="font-mono">~/.claude</span>,{' '}
-          <span className="font-mono">~/.codex</span>, and{' '}
-          <span className="font-mono">~/.pi</span>.
+          <span className="font-mono">~/.codex</span>,{' '}
+          <span className="font-mono">~/.pi</span>, and{' '}
+          <span className="font-mono">~/.omp</span>.
         </p>
       </div>
       {importing && !selection && (

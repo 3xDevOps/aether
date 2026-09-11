@@ -66,6 +66,9 @@ export const coarsePointer = '(pointer: coarse)'
 export const belowSm = '(max-width: 639px)'
 export const belowMd = '(max-width: 767px)'
 
+/** A finger on a screen narrower than `sm`: a phone, not a touch laptop. */
+export const phoneScreen = `${coarsePointer} and ${belowSm}`
+
 /**
  * Answers a media query, and keeps answering it. CSS is where a layout that
  * only changes size belongs; this is for the ones that mount different

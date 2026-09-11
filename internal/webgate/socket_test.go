@@ -34,14 +34,14 @@ func (b *silentBackend) Events(context.Context, protocol.SubscribeRequest) (io.R
 // the socket and, through it, the handler and the stream it holds -
 // which is what stops a vanished phone from holding a PTY client open.
 func TestKeepAliveDropsAPeerThatStopsAnsweringPings(t *testing.T) {
-	interval, timeout := pingInterval, pingTimeout
-	pingInterval, pingTimeout = 50*time.Millisecond, 100*time.Millisecond
-	t.Cleanup(func() { pingInterval, pingTimeout = interval, timeout })
-
 	pr, pw := io.Pipe()
 	stream := &silentStream{PipeReader: pr, closed: make(chan struct{})}
 	backend := &silentBackend{stream: stream}
-	g, err := New(Config{Authorize: admitAll(backend)})
+	g, err := New(Config{
+		Authorize:    admitAll(backend),
+		PingInterval: 50 * time.Millisecond,
+		PingTimeout:  100 * time.Millisecond,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

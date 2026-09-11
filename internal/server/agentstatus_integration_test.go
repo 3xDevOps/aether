@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,21 @@ while read line; do
 done
 `
 
+// piStatusAgentScript stands in for pi and omp, whose shared extension
+// names the event on the command line instead of piping a payload. The
+// shape is the same as the claude stand-in above: end a turn, then start a
+// new one whenever a steer arrives.
+const piStatusAgentScript = `#!/bin/sh
+sleep 1
+echo "argv:$*"
+` + mcpbridge.BinaryPath + ` report pi --event agent_end
+echo "reported:end"
+while read line; do
+  ` + mcpbridge.BinaryPath + ` report pi --event agent_start
+  echo "reported:start"
+done
+`
+
 func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -58,7 +74,7 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 	if !dockerReachable(t) {
 		t.Skip("the agent status reporter scenario needs a reachable Docker daemon")
 	}
-	image := buildStatusAgentImage(t)
+	image := buildStatusAgentImage(t, map[string]string{"claude": statusAgentScript, "pi": piStatusAgentScript})
 	docker, _, ok := dockerRuntime(t)
 	if !ok {
 		t.Fatal("the Docker daemon went away after the image was built")
@@ -128,27 +144,79 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 	if out := att.output(); strings.Contains(out, "aether-server report") {
 		t.Errorf("the reporter wrote an error into the agent's terminal: %q", out)
 	}
+
+	// The second reporter shape, on the same server: pi and omp load one
+	// extension file and name the event on the command line. Nothing about
+	// the path differs, which is the point - the harness profile decides
+	// what is written and what is appended, and the socket takes it from
+	// there.
+	piStarted := time.Now()
+	piRun := e.launch(t, ctrl, "report on yourself", "pi")
+	piAtt := openAttach(t, client, piRun.ID)
+	extension := filepath.Join(e.coordDir(piRun.ID), agentstatus.PiExtensionName)
+	piInfo, err := os.Lstat(extension)
+	if err != nil {
+		t.Fatalf("the server wrote no %s for run %s: %v", agentstatus.PiExtensionName, piRun.ID, err)
+	}
+	if got := piInfo.Mode().Perm(); got != 0o444 {
+		t.Errorf("%s mode = %o, want 0444", agentstatus.PiExtensionName, got)
+	}
+	piAtt.waitOutput(t, "-e "+path.Join(mcpbridge.MountDir, agentstatus.PiExtensionName))
+	piAtt.waitOutput(t, "reported:end")
+
+	piParked := waitEvent(t, sub, &seen, "pi run.status needs-attention", func(ev events.Event) bool {
+		p, isStatus := ev.Payload.(events.RunStatusPayload)
+		return isStatus && ev.RunID == domain.RunID(piRun.ID) && p.To == domain.RunNeedsAttention
+	})
+	if p := piParked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonInput {
+		t.Fatalf("pi park reason = %q, want %q", p.Reason, agentstatus.ReasonInput)
+	}
+	if waited := time.Since(piStarted); waited > time.Minute {
+		t.Errorf("the pi run took %s to park; that is the silence heuristic, not the reporter", waited)
+	}
+
+	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: piRun.ID, Message: "keep going",
+	}, nil); err != nil {
+		t.Fatalf("run.inject on the pi run: %v", err)
+	}
+	piAtt.waitOutput(t, "reported:start")
+	piResumed := waitEvent(t, sub, &seen, "pi run.status back to running", func(ev events.Event) bool {
+		p, isStatus := ev.Payload.(events.RunStatusPayload)
+		return isStatus && ev.RunID == domain.RunID(piRun.ID) &&
+			p.From == domain.RunNeedsAttention && p.To == domain.RunRunning
+	})
+	if p := piResumed.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonResumed {
+		t.Fatalf("pi resume reason = %q, want %q", p.Reason, agentstatus.ReasonResumed)
+	}
 }
 
-// buildStatusAgentImage builds the run image this scenario launches:
-// busybox, the scripted agent installed as the "claude" executable the
-// shipped profile launches, and a non-root user - the same user the
-// container coordination scenario needs, for the same reason.
-func buildStatusAgentImage(t *testing.T) string {
+// buildStatusAgentImage builds the run image one of these scenarios
+// launches: busybox, one scripted agent per reporter shape installed under
+// the executable name the shipped profile launches, and a non-root user -
+// the same user the container coordination scenario needs, for the same
+// reason. The executables it carries also name the image, so two scenarios
+// never build over each other.
+func buildStatusAgentImage(t *testing.T, agents map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "claude"), statusAgentScript)
-	if err := os.Chmod(filepath.Join(dir, "claude"), 0o755); err != nil {
-		t.Fatalf("chmod the scripted agent: %v", err)
+	executables := make([]string, 0, len(agents))
+	for exe, script := range agents {
+		writeFile(t, filepath.Join(dir, exe), script)
+		if err := os.Chmod(filepath.Join(dir, exe), 0o755); err != nil {
+			t.Fatalf("chmod the scripted %s agent: %v", exe, err)
+		}
+		executables = append(executables, exe)
 	}
+	slices.Sort(executables)
 	uid, gid := os.Getuid(), os.Getgid()
 	if uid == 0 {
 		uid, gid = 1000, 1000
 	}
 	user := fmt.Sprintf("%d:%d", uid, gid)
 	writeFile(t, filepath.Join(dir, "Dockerfile"),
-		"FROM busybox\nCOPY claude /usr/local/bin/claude\nUSER "+user+"\n")
-	image := fmt.Sprintf("aether-e2e-statusagent:%d", os.Getpid())
+		"FROM busybox\nCOPY "+strings.Join(executables, " ")+" /usr/local/bin/\nUSER "+user+"\n")
+	image := fmt.Sprintf("aether-e2e-statusagent-%s:%d", strings.Join(executables, "-"), os.Getpid())
 	if out, err := exec.Command("docker", "build", "-q", "-t", image, dir).CombinedOutput(); err != nil {
 		t.Fatalf("docker build %s: %v (%s)", image, err, out)
 	}
@@ -158,4 +226,93 @@ func buildStatusAgentImage(t *testing.T) string {
 		}
 	})
 	return image
+}
+
+// openCodeAgentScript stands in for opencode. Its reporter calls are the
+// ones the embedded plugin makes - the event on the command line, nothing
+// on stdin - and it prints the launch environment the plugin would have
+// been loaded from, which is the whole registration for a harness with no
+// flag to point at a file.
+const openCodeAgentScript = `#!/bin/sh
+sleep 1
+echo "config:$OPENCODE_CONFIG_CONTENT"
+` + mcpbridge.BinaryPath + ` report opencode --event session.idle
+echo "reported:idle"
+while read line; do
+  ` + mcpbridge.BinaryPath + ` report opencode --event session.status --status busy
+  echo "reported:busy"
+done
+`
+
+// The same path for the harness whose reporter rides in the environment:
+// the plugin the server wrote into the run's coordination directory, the
+// variable naming it, and the run moving as the agent says so.
+func TestIntegrationOpenCodeStatusReporterInContainer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	requireBinary(t, "docker")
+	if !dockerReachable(t) {
+		t.Skip("the opencode status reporter scenario needs a reachable Docker daemon")
+	}
+	image := buildStatusAgentImage(t, map[string]string{"opencode": openCodeAgentScript})
+	docker, _, ok := dockerRuntime(t)
+	if !ok {
+		t.Fatal("the Docker daemon went away after the image was built")
+	}
+
+	e := &coordEnv{
+		rt:           docker,
+		image:        image,
+		serverBinary: buildServerBinary(t),
+		dataDir:      filepath.Join(shortTempDir(t), "data"),
+	}
+	srv := e.seed(ctx, t, false)
+	sub := srv.subscribe(ctx, t)
+	var seen []events.Event
+	ctrl, client := srv.control(t, e.ada.key)
+
+	started := time.Now()
+	run := e.launch(t, ctrl, "report on yourself", "opencode")
+	att := openAttach(t, client, run.ID)
+
+	plugin := filepath.Join(e.coordDir(run.ID), agentstatus.OpenCodePluginName)
+	info, err := os.Lstat(plugin)
+	if err != nil {
+		t.Fatalf("the server wrote no %s for run %s: %v", agentstatus.OpenCodePluginName, run.ID, err)
+	}
+	if got := info.Mode().Perm(); got != 0o444 {
+		t.Errorf("%s mode = %o, want 0444", agentstatus.OpenCodePluginName, got)
+	}
+	att.waitOutput(t, `config:{"plugin":["file://`+path.Join(mcpbridge.MountDir, agentstatus.OpenCodePluginName)+`"]}`)
+	att.waitOutput(t, "reported:idle")
+
+	parked := waitEvent(t, sub, &seen, "run.status needs-attention", func(ev events.Event) bool {
+		p, isStatus := ev.Payload.(events.RunStatusPayload)
+		return isStatus && ev.RunID == domain.RunID(run.ID) && p.To == domain.RunNeedsAttention
+	})
+	if p := parked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonInput {
+		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonInput)
+	}
+	if waited := time.Since(started); waited > time.Minute {
+		t.Errorf("the run took %s to park; that is the silence heuristic, not the reporter", waited)
+	}
+
+	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: run.ID, Message: "keep going",
+	}, nil); err != nil {
+		t.Fatalf("run.inject: %v", err)
+	}
+	att.waitOutput(t, "reported:busy")
+	resumed := waitEvent(t, sub, &seen, "run.status back to running", func(ev events.Event) bool {
+		p, isStatus := ev.Payload.(events.RunStatusPayload)
+		return isStatus && ev.RunID == domain.RunID(run.ID) &&
+			p.From == domain.RunNeedsAttention && p.To == domain.RunRunning
+	})
+	if p := resumed.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonResumed {
+		t.Fatalf("resume reason = %q, want %q", p.Reason, agentstatus.ReasonResumed)
+	}
+
+	if out := att.output(); strings.Contains(out, "aether-server report") {
+		t.Errorf("the reporter wrote an error into the agent's terminal: %q", out)
+	}
 }

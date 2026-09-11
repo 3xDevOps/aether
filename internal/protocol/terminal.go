@@ -1,10 +1,13 @@
 package protocol
 
-// TerminalRequest carries tab selection and terminal dimensions.
+// TerminalRequest carries tab selection and terminal dimensions. Follow
+// means the same as it does in AttachRequest: render at the session's size
+// and impose none.
 type TerminalRequest struct {
-	Tab  string `json:"tab,omitempty"`
-	Cols uint   `json:"cols,omitempty"`
-	Rows uint   `json:"rows,omitempty"`
+	Tab    string `json:"tab,omitempty"`
+	Cols   uint   `json:"cols,omitempty"`
+	Rows   uint   `json:"rows,omitempty"`
+	Follow bool   `json:"follow,omitempty"`
 }
 
 // TerminalImageParams carries the base64-encoded original image bytes.

@@ -253,3 +253,41 @@ func TestTailnetMemberMapsAddressesLikeSSHAuth(t *testing.T) {
 		t.Fatalf("resolver failure = %v, want the wrapped whois error", err)
 	}
 }
+
+// A follow attach renders the session at the size it already is, so the
+// ack has to report that size rather than echo the header, and a later
+// resize by someone else has to reach the client while the attach is open.
+// The in-process client is the server-hosted dashboard's transport; the
+// SSH one is covered in transport_test.go.
+func TestLocalAttachFollowsTheSessionGeometry(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.pty.session = [2]uint{132, 43}
+	e.pty.tell = make(chan [2]uint, 1)
+
+	term, ack, err := e.srv.Local(e.member.ID).Attach(context.Background(), protocol.AttachRequest{
+		RunID:  string(e.run.ID),
+		Cols:   80,
+		Rows:   24,
+		Follow: true,
+	})
+	if err != nil || !ack.OK {
+		t.Fatalf("attach: ack=%+v err=%v", ack, err)
+	}
+	defer func() { _ = term.Close() }()
+	if ack.Cols != 132 || ack.Rows != 43 {
+		t.Fatalf("ack = %dx%d, want the session's 132x43 rather than the header's 80x24", ack.Cols, ack.Rows)
+	}
+	if !e.pty.following() {
+		t.Fatal("the follow flag never reached the PTY host")
+	}
+
+	e.pty.tell <- [2]uint{120, 40}
+	select {
+	case size := <-term.Geometry():
+		if size != [2]uint{120, 40} {
+			t.Fatalf("geometry = %v, want 120x40", size)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the session's resize never reached the attach")
+	}
+}

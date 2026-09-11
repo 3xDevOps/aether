@@ -31,6 +31,10 @@ vi.mock('@xterm/xterm', () => {
       return { dispose() {} }
     }
 
+    onCursorMove() {
+      return { dispose() {} }
+    }
+
     dispose() {
       this.input?.remove()
       this.input = null

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
+import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { RunStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -17,6 +18,7 @@ import {
   codeUnavailable,
   connectAttach,
   replayGate,
+  standardGeometry,
 } from '@/routes/terminal/attach'
 import { RunDock } from '@/routes/terminal/run-dock'
 import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
@@ -80,10 +82,19 @@ function TerminalView({ params }: RouteProps) {
   // grants without the member touching anything. Only a request they made
   // counts as taking control.
   const askedForControl = useRef(false)
+  // A phone follows the session instead of sizing it: it renders at the
+  // geometry the ack reports and imposes none of its own, so an agent's
+  // screen is neither garbled here nor reflowed to 45 columns for everyone
+  // else the moment this phone takes control.
+  const phone = useMediaQuery(phoneScreen)
+  const [serverSize, setServerSize] = useState<{ cols: number; rows: number } | null>(null)
   const controller = useXterm({
     enabled: known,
+    size: phone ? serverSize ?? standardGeometry : null,
     onData: (data) => {
-      if (!gate.current.muted()) attachRef.current?.send(data)
+      // A mirror's input frames are ignored by the server; not sending them
+      // is what makes the read-only state true on this side as well.
+      if (writeRef.current && !gate.current.muted()) attachRef.current?.send(data)
     },
     onResize: (cols, rows) => attachRef.current?.resize(cols, rows),
     onLink: (uri) => {
@@ -111,8 +122,11 @@ function TerminalView({ params }: RouteProps) {
     if (!terminal || !known) return
 
     // A stalled run still has a live, recoverable agent session. Completed
-    // and final-run attaches replay history read-only.
+    // and final-run attaches replay history read-only. A phone never steers
+    // on its own: typing into an agent from a phone is a choice, and the
+    // mirror is what a member opening their own run there wants.
     const ownerSteering =
+      !phone &&
       (run?.status === 'running' || run?.status === 'needs-attention') &&
       run?.member_id === self.id
     setTerminal(runID, { ...initialTerminal, write: ownerSteering })
@@ -133,12 +147,13 @@ function TerminalView({ params }: RouteProps) {
       // Every attach starts with the server's transcript replay, so the pane
       // is never blank - and clearing first keeps a reconnect from stacking a
       // second copy of the scrollback under the first.
-      onAttached: (write) => {
+      onAttached: (write, size) => {
         // The ack carries what the server granted, not what was asked: a
         // refused request arrives as onWriteDenied instead. Marking control
         // here rather than on the click keeps a denied first attempt from
         // silencing the mirror hint for good.
         if (write && askedForControl.current) markControlTaken()
+        setServerSize(size)
         gate.current.unmute()
         terminal.reset()
         setTerminal(runID, { message: null, refused: false })
@@ -152,9 +167,14 @@ function TerminalView({ params }: RouteProps) {
         setTerminal(runID, { message, refused: true })
       },
       onWriteDenied: () => setTerminal(runID, { steerDenied: true, write: false }),
+      // Someone with a bigger screen resized the session; a follower
+      // redraws at it rather than at what its ack once said.
+      onGeometry: (cols, rows) => setServerSize({ cols, rows }),
       sessionPending: () => run !== undefined && !endedStatuses.includes(run.status),
-      geometry: () => ({ cols: terminal.cols, rows: terminal.rows }),
+      geometry: () =>
+        phone ? standardGeometry : { cols: terminal.cols, rows: terminal.rows },
       wantsWrite: () => writeRef.current,
+      follows: () => phone,
     })
     attachRef.current = attachment
 
@@ -165,6 +185,7 @@ function TerminalView({ params }: RouteProps) {
   }, [
     known,
     markControlTaken,
+    phone,
     run?.member_id,
     run?.status,
     runID,
@@ -173,6 +194,15 @@ function TerminalView({ params }: RouteProps) {
     starting,
     terminal,
   ])
+
+  // A read-only mirror must not raise a soft keyboard that types into
+  // nothing, and xterm focuses its textarea on any tap. `disableStdin` makes
+  // that textarea read-only, which is what keeps the keyboard down.
+  useEffect(() => {
+    if (!terminal) return
+    terminal.options.disableStdin = !state.write
+    if (!state.write) terminal.blur()
+  }, [state.write, terminal])
 
   if (!run) {
     return <MissingRun />
@@ -258,6 +288,13 @@ function TerminalView({ params }: RouteProps) {
             <TerminalPane
               key={runID}
               controller={controller}
+              // At the session's geometry the grid is bigger than the
+              // screen, so the pane pans over it rather than cropping it.
+              // Naming the sideways axis is enough: CSS turns the other
+              // one into a scroller too, which is what reaches the rows
+              // below the fold.
+              className={phone ? 'overflow-x-auto' : undefined}
+              writable={state.write && !starting}
               imageTarget={runID}
               imageTargetKey={runID}
               imageUploadEnabled={

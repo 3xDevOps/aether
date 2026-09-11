@@ -909,33 +909,33 @@ func TestLaunchWithoutSnapshotHasOnlyHomeMount(t *testing.T) {
 func TestCustomHarnessDefinition(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{
-			"omp": {
-				TUIArgs:         []string{"omp", "{task}"},
-				HeadlessArgs:    []string{"omp", "-p", "{task}"},
-				Executable:      "omp",
-				ProfileRoot:     "/home/aether/.omp",
-				CredentialPaths: []string{"/home/aether/.omp"},
+			"aider": {
+				TUIArgs:         []string{"aider", "{task}"},
+				HeadlessArgs:    []string{"aider", "-p", "{task}"},
+				Executable:      "aider",
+				ProfileRoot:     "/home/aether/.aider",
+				CredentialPaths: []string{"/home/aether/.aider"},
 				DenyNames:       []string{"auth.json"},
 			},
 		}
 	})
-	argv, prof, err := e.sched.command(t.Context(), e.member.ID, "omp", domain.LaunchHeadless, "quoted; task")
+	argv, prof, err := e.sched.command(t.Context(), e.member.ID, "aider", domain.LaunchHeadless, "quoted; task")
 	if err != nil {
 		t.Fatalf("custom command: %v", err)
 	}
-	if got, want := fmt.Sprint(argv), fmt.Sprint([]string{"omp", "-p", "quoted; task"}); got != want {
+	if got, want := fmt.Sprint(argv), fmt.Sprint([]string{"aider", "-p", "quoted; task"}); got != want {
 		t.Fatalf("argv = %s, want %s", got, want)
 	}
-	if prof.LocalRoot != "/home/aether/.omp" || len(prof.CredentialPaths) != 1 {
+	if prof.LocalRoot != "/home/aether/.aider" || len(prof.CredentialPaths) != 1 {
 		t.Fatalf("profile = %+v", prof)
 	}
 }
 func TestCustomHarnessRequiresDefinition(t *testing.T) {
 	e := newTestEnv(t, nil)
-	e.cfg.Harnesses = map[string]HarnessSpec{"omp": {TUIArgs: []string{"omp", "{task}"}}}
+	e.cfg.Harnesses = map[string]HarnessSpec{"aider": {TUIArgs: []string{"aider", "{task}"}}}
 	if _, err := New(e.cfg); err == nil {
 		t.Fatal("custom harness without executable accepted")
-	} else if !strings.Contains(err.Error(), `custom harness "omp" requires an explicit definition`) {
+	} else if !strings.Contains(err.Error(), `custom harness "aider" requires an explicit definition`) {
 		t.Fatalf("custom harness error = %v", err)
 	}
 }

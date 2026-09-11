@@ -27,7 +27,7 @@ scheduler.
 The threshold is the **hang detector**, and the fallback for harnesses that
 cannot report their own state.
 
-Where the agent reports (`claude` today - see
+Where the agent reports (`claude`, `codex`, `opencode`, `pi` and `omp` - see
 [harnesses.md](harnesses.md)), a turn that ends parks the run immediately
 with a reason that says what it is waiting for, and the threshold is left
 to catch the case the agent cannot report: one that hangs mid-turn, which
@@ -150,14 +150,14 @@ relaunch gets a checkout of its own. Once the first relaunch reaches a
 terminal state, relaunching the original row resumes the conversation
 again.
 
-A run whose harness cannot pin a session (`pi`) falls back to `--continue`,
-and so does a run row created before pinning existed. `--continue` names no
-conversation: it resumes that member's most recent conversation at that
-container path, which is not necessarily this run's own and not necessarily
-one from this workspace. Treat that fallback as a convenience, not a
-guarantee, and read the agent's first turn before steering it. The fallback
-is sticky - a row that has no pinned ID never acquires one, because there is
-no earlier conversation to name.
+A run whose harness cannot pin a session (`pi`, `omp`) falls back to
+`--continue`, and so does a run row created before pinning existed.
+`--continue` names no conversation: it resumes that member's most recent
+conversation at that container path, which is not necessarily this run's own
+and not necessarily one from this workspace. Treat that fallback as a
+convenience, not a guarantee, and read the agent's first turn before
+steering it. The fallback is sticky - a row that has no pinned ID never
+acquires one, because there is no earlier conversation to name.
 
 Relaunching a run that finished on its own does *not* resume: there is no
 interrupted conversation behind it. It gets a session of its own instead.
@@ -201,11 +201,31 @@ and the reason on the run says which.
 parks the run the moment its turn ends, or it asks for permission or an
 answer, with a reason that reads `waiting for your input`,
 `waiting for your permission` or `waiting for your answer`. There is no
-delay: the report arrives as the agent stops. The run returns to `running`
-with `agent resumed` when the agent starts its next turn - which is what
-steering it produces - and not on terminal output alone. A server restart
-does not change that: the report is recovered with the run, so a run that
-was waiting for you is still waiting for you afterwards.
+delay: the report arrives as the agent stops. A server restart does not
+change that: the report is recovered with the run, so a run that was
+waiting for you is still waiting for you afterwards.
+
+How such a run comes back depends on how much its harness can say. Where the
+agent reports both ends of a turn (`claude`, `pi`, `omp`), the run returns
+to `running` with `agent resumed` when the agent starts its next turn -
+which is what steering it produces - and not on terminal output alone, since
+a TUI repaints while the member types. Where it only reports that a turn
+ended (`codex`), there is no such report to wait for, so the run returns
+with `activity resumed` on agent output or a file change. That takes
+activity the report did not already cover: the answer the turn wrote before
+it ended, and the frames the TUI keeps painting for a few seconds after it,
+belong to the turn that is over. Those few seconds are measured on the
+clock, not in polls, so `--poll-interval` can be set to anything without
+turning a trailing repaint into a new turn; past them, output still has to
+keep arriving into a later poll before the run reads as working again.
+That second poll is what sets the delay: expect the return to `running` to
+land one to two `--poll-interval`s behind the agent.
+
+Output here is anything drawn in the terminal, because a harness that
+cannot say when a turn starts leaves nothing else to go on. The echo of
+your own typing counts: type a long prompt into a parked `codex` run and it
+can read as `running` before you send it, and read as `stalled:` rather
+than `waiting for your input` if you then walk away.
 
 **The run stalled.** No agent output, no file changes and nothing from the
 agent's reporter past `--stall-threshold` parks a live run at

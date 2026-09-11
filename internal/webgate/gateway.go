@@ -30,6 +30,11 @@ type Config struct {
 	Capabilities protocol.GatewayCapabilities
 	// Static is the built SPA; nil means the embedded web/dist.
 	Static fs.FS
+	// PingInterval and PingTimeout bound how long a half-open socket - a
+	// phone that changed networks or went to sleep - keeps the PTY client
+	// it was holding. Zero means the defaults.
+	PingInterval time.Duration
+	PingTimeout  time.Duration
 }
 
 const (
@@ -80,6 +85,12 @@ func New(cfg Config) (*Gateway, error) {
 			return nil, fmt.Errorf("webgate: embedded spa: %w", err)
 		}
 		cfg.Static = sub
+	}
+	if cfg.PingInterval == 0 {
+		cfg.PingInterval = defaultPingInterval
+	}
+	if cfg.PingTimeout == 0 {
+		cfg.PingTimeout = defaultPingTimeout
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &Gateway{

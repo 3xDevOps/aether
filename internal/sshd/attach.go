@@ -86,11 +86,20 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	// with a cause; the cause picks the exit status once Attach returns.
 	attachCtx, revoke := context.WithCancelCause(ctx)
 	defer revoke(nil)
+	// The geometry here is only what this client brings; the PTY host
+	// overwrites it with the session's own before the ack goes out, and
+	// reports every later change on the same conn.
 	ack := &protocol.AttachResponse{OK: true, Cols: cols, Rows: rows}
 	conn := newAttachConn(ch, r, ack)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.cfg.PTY.Attach(attachCtx, key, member, cols, rows, readOnly, conn, st.resize)
+		errCh <- s.cfg.PTY.Attach(attachCtx, key, ptyhost.AttachClient{
+			Member:   member,
+			Cols:     cols,
+			Rows:     rows,
+			ReadOnly: readOnly,
+			Follow:   req.Follow,
+		}, conn, st.resize)
 	}()
 
 	// The PTY host acks through the conn once it knows the replay boundary
@@ -231,7 +240,7 @@ func (s *Server) publishPresence(run *domain.Run, member domain.MemberID, state 
 // attachConn is the io.ReadWriter handed to PTYAttacher.Attach. It delays
 // the acknowledgment until the PTY host identifies the replay boundary.
 type attachConn struct {
-	ch    io.Writer
+	ch    subsystemConn
 	r     *bufio.Reader
 	ack   any
 	mu    sync.Mutex
@@ -239,8 +248,29 @@ type attachConn struct {
 	first chan struct{}
 }
 
-func newAttachConn(ch io.Writer, r *bufio.Reader, ack any) *attachConn {
+func newAttachConn(ch subsystemConn, r *bufio.Reader, ack any) *attachConn {
 	return &attachConn{ch: ch, r: r, ack: ack, first: make(chan struct{})}
+}
+
+// SetGeometry takes the session's PTY size from the host. Before the ack
+// goes out it is what the ack reports, so every client is told what the
+// session is rather than what it asked for; afterwards it is a
+// window-change request, which is how a follower learns that someone else
+// resized the terminal it is drawing.
+func (c *attachConn) SetGeometry(cols, rows uint) {
+	c.mu.Lock()
+	if !c.sent {
+		switch ack := c.ack.(type) {
+		case *protocol.AttachResponse:
+			ack.Cols, ack.Rows = cols, rows
+		case *protocol.TerminalResponse:
+			ack.Cols, ack.Rows = cols, rows
+		}
+		c.mu.Unlock()
+		return
+	}
+	c.mu.Unlock()
+	c.ch.geometry(cols, rows)
 }
 
 func (c *attachConn) sendOK() {
