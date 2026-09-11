@@ -150,14 +150,14 @@ relaunch gets a checkout of its own. Once the first relaunch reaches a
 terminal state, relaunching the original row resumes the conversation
 again.
 
-A run whose harness cannot pin a session (`pi`) falls back to `--continue`,
-and so does a run row created before pinning existed. `--continue` names no
-conversation: it resumes that member's most recent conversation at that
-container path, which is not necessarily this run's own and not necessarily
-one from this workspace. Treat that fallback as a convenience, not a
-guarantee, and read the agent's first turn before steering it. The fallback
-is sticky - a row that has no pinned ID never acquires one, because there is
-no earlier conversation to name.
+A run whose harness cannot pin a session (`pi`, `omp`) falls back to
+`--continue`, and so does a run row created before pinning existed.
+`--continue` names no conversation: it resumes that member's most recent
+conversation at that container path, which is not necessarily this run's own
+and not necessarily one from this workspace. Treat that fallback as a
+convenience, not a guarantee, and read the agent's first turn before
+steering it. The fallback is sticky - a row that has no pinned ID never
+acquires one, because there is no earlier conversation to name.
 
 Relaunching a run that finished on its own does *not* resume: there is no
 interrupted conversation behind it. It gets a session of its own instead.

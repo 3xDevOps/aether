@@ -176,8 +176,9 @@ such credentials, so those stay a manual check. Every one of them skips when
 its variable is unset, and the no-login test skips as a whole rather than
 reporting a pass with nothing run.
 
-`pi` has no smoke test: it is not in the smoke image, so nothing pins its
-template. Adding it is one more install line and one more map entry.
+`pi` and `omp` have no smoke test: neither is in the smoke image, so
+nothing pins their templates. Adding one is an install line and a map
+entry each.
 
 ## The dashboard end-to-end suite
 

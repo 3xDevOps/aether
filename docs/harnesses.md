@@ -72,9 +72,9 @@ whichever conversation the harness spoke last in the working directory.
 Every run mounts its checkout at the same container path and shares one
 credential home per member, so what comes back is that member's *most
 recent* conversation at that path - not necessarily the interrupted run's
-own, and not necessarily one from the same workspace. `pi` has no
-launch-time session ID, so it stays here, and so does any run row created
-before session pinning existed.
+own, and not necessarily one from the same workspace. Neither `pi` nor its
+fork `omp` has a launch-time session ID, so they stay here, and so does any
+run row created before session pinning existed.
 
 A harness with neither starts fresh, and a deployment-supplied argv override
 never has any of these appended - nothing checks the override is still that
