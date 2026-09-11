@@ -290,6 +290,52 @@ const events = [
 for (const event of events) await hooks.event({ event })
 `
 
+// TestOpenCodePluginReportsIdleWhenTheAnsweredTurnHasEnded is the case the
+// held-back idle leaves behind: the turn that asked the question ends while
+// the prompt is still on the member's screen, so its idle is suppressed and
+// never comes again. Answering the last prompt has to park the run itself,
+// or the finished turn stays on the card as running.
+func TestOpenCodePluginReportsIdleWhenTheAnsweredTurnHasEnded(t *testing.T) {
+	dir := t.TempDir()
+	reports := filepath.Join(dir, "reports.log")
+	stub := filepath.Join(dir, "reporter")
+	writePluginFile(t, stub, "#!/bin/sh\necho \"$@\" >> "+reports+"\n", 0o755)
+	stageOpenCodePlugin(t, dir, stub)
+
+	driveOpenCodePlugin(t, dir, openCodeAnsweredAfterIdleDriver, reports, 3)
+	got, err := os.ReadFile(reports)
+	if err != nil {
+		t.Fatalf("read the reports the plugin posted: %v", err)
+	}
+	want := strings.Join([]string{
+		"report opencode --event session.status --status busy",
+		"report opencode --event question.asked",
+		"report opencode --event session.idle",
+		"",
+	}, "\n")
+	if string(got) != want {
+		t.Errorf("the plugin posted\n%s\nwant\n%s", got, want)
+	}
+}
+
+// openCodeAnsweredAfterIdleDriver ends the only turn there is while its
+// question is unanswered. The answer is the run's last event, so the plugin
+// has no later idle to fall back on.
+const openCodeAnsweredAfterIdleDriver = `
+import { AetherStatus } from "./plugin.mjs"
+
+const client = { app: { log: async ({ body }) => console.log(JSON.stringify(body)) } }
+const hooks = await AetherStatus({ client })
+const events = [
+  { type: "session.status", properties: { sessionID: "root", status: { type: "busy" } } },
+  { type: "question.asked", properties: { sessionID: "root", id: "que_1" } },
+  // The turn ends with the question still on the member's screen.
+  { type: "session.idle", properties: { sessionID: "root" } },
+  { type: "question.replied", properties: { sessionID: "root", requestID: "que_1" } },
+]
+for (const event of events) await hooks.event({ event })
+`
+
 // TestOpenCodePluginWarnsWhatTheReporterSaid drives the failure path: the
 // reporter exits 0 and puts one line on stderr whatever goes wrong, so that
 // line is the only trace a member has of a reporter that ran and could not

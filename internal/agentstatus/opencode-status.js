@@ -104,7 +104,13 @@ export const AetherStatus = async ({ client }) => {
           // Answering one prompt while another is still open does not give
           // the run back to the agent.
           if (pending.size > 0) return
-          post("--event", event.type)
+          // The turn that asked can end while the prompt is still on the
+          // member's screen, and that idle was held back for this answer;
+          // it never comes again. So the answer only says the agent is
+          // working if a session still is - otherwise the run parks here.
+          // An answer that starts a new turn is announced by that session's
+          // own busy.
+          post("--event", busy.size > 0 ? event.type : "session.idle")
           return
       }
     },

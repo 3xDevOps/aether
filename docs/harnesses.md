@@ -141,8 +141,10 @@ opencode never announces the resume after a permission or a question of its
 own accord - its session stays busy for the whole tool call the prompt
 interrupted - so the member's answer is what returns the run to `running`.
 A run can have several prompts open at once, one per session, and only the
-answer to the last of them returns it: until then the run stays parked,
-even if the turn that asked the question has already ended.
+answer to the last of them returns it: until then the run stays parked. If
+the turn that asked ended while the prompt was still open, that answer
+parks the run at `needs-attention` instead - nothing is working any more -
+and the next turn the agent starts is what returns it to `running`.
 
 The last report is recorded with the run, so it survives a server restart:
 a run the agent parked comes back parked, and only the agent's own next
