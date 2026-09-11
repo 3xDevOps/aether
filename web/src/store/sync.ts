@@ -284,6 +284,7 @@ export async function applyEvent(
 type Probe =
   | { unlinked: { capabilities: GatewayCapabilities; status: LinkStatus } }
   | { rejected: string }
+  | { refused: ApiError }
 
 /**
  * Reads the capabilities descriptor before anything else, because two
@@ -292,7 +293,10 @@ type Probe =
  * credential. The 401 matters most on a phone, where the token lives in
  * per-tab session storage: without this the WebSocket upgrade would be
  * rejected the same way, the socket would retry forever, and the app would
- * blame an unreachable server.
+ * blame an unreachable server. A 403 or 503 is the gateway refusing this
+ * caller outright - a tagged tailnet node, a WhoIs outage - whose reason
+ * only an HTTP body carries, so it is recorded before the stream's own
+ * failure can only say "unreachable".
  */
 async function probeGateway(client: Api): Promise<Probe | null> {
   let capabilities: GatewayCapabilities
@@ -300,6 +304,7 @@ async function probeGateway(client: Api): Promise<Probe | null> {
     capabilities = await client.capabilities()
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) return { rejected: err.message }
+    if (err instanceof ApiError && (err.status === 403 || err.status === 503)) return { refused: err }
     return null
   }
   try {
@@ -446,7 +451,12 @@ export function connect(store: RootStore, client: Api = api): () => void {
       store.getState().setHydrated(false, probe.rejected)
       return
     }
-    if (probe) {
+    if (probe && 'refused' in probe) {
+      // The gateway said why; the handshake status never reaches this code,
+      // so the stream keeps retrying and this stays the reason.
+      store.getState().setUnreachable(classifyUnreachable(probe.refused))
+      store.getState().setHydrated(false, probe.refused.message)
+    } else if (probe) {
       // No server to connect to yet: the onboarding wizard links first.
       store.getState().setCapabilities(probe.unlinked.capabilities)
       store.getState().setLinkStatus(probe.unlinked.status)
