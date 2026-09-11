@@ -196,6 +196,9 @@ without another title followed by three quiet seconds parks the run with
 `agent activity stale; no title or output for 3s`. This is uncertain activity,
 not proof that the response finished. Silence alone does not arm this
 three-second fallback; the longer stall guard below still applies.
+The native attention category survives a server restart through the persisted
+run status and reason. A recovered run still requires a new working title;
+old transcript titles are not replayed as fresh activity.
 
 ### Agent stall or crash
 

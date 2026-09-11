@@ -454,27 +454,35 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	if r.StartedAt != nil {
 		started = *r.StartedAt
 	}
+	nativeActivity := ptyhost.ActivityUnknown
+	nativeActivityStale := false
+	if r.Status == domain.RunNeedsAttention {
+		nativeActivity, nativeActivityStale = nativeActivityForReason(r.Reason)
+	}
 	return &supervised{
 		runID: r.ID,
 		// The workspace comes off the run row, not the sidecar: a sidecar
 		// written by an older build has no workspace scope at all, and the
 		// row is the source of truth either way.
-		workspaceID:    r.WorkspaceID,
-		containerID:    runtime.ID(sc.ContainerID),
-		task:           r.Task,
-		memberID:       r.AccountMember(),
-		status:         r.Status,
-		startedAt:      started,
-		paused:         sc.Paused,
-		killRequested:  sc.KillRequested,
-		runUser:        sc.RunUser,
-		home:           sc.Home,
-		exitObserved:   sc.ExitObserved,
-		exitCode:       sc.ExitCode,
-		bridgeDigest:   sc.BridgeDigest,
-		bridgePath:     sc.BridgePath,
-		coordDir:       sc.CoordDir,
-		gitAuthorEmail: sc.GitAuthorEmail,
-		done:           make(chan struct{}),
+		workspaceID:         r.WorkspaceID,
+		containerID:         runtime.ID(sc.ContainerID),
+		task:                r.Task,
+		memberID:            r.AccountMember(),
+		status:              r.Status,
+		startedAt:           started,
+		nativeActivity:      nativeActivity,
+		nativeObservedAt:    started,
+		nativeActivityStale: nativeActivityStale,
+		paused:              sc.Paused,
+		killRequested:       sc.KillRequested,
+		runUser:             sc.RunUser,
+		home:                sc.Home,
+		exitObserved:        sc.ExitObserved,
+		exitCode:            sc.ExitCode,
+		bridgeDigest:        sc.BridgeDigest,
+		bridgePath:          sc.BridgePath,
+		coordDir:            sc.CoordDir,
+		gitAuthorEmail:      sc.GitAuthorEmail,
+		done:                make(chan struct{}),
 	}
 }

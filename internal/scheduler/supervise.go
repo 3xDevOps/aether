@@ -23,6 +23,19 @@ const (
 	nativeStaleReason   = "agent activity stale; no title or output for 3s"
 )
 
+func nativeActivityForReason(reason string) (ptyhost.ActivityState, bool) {
+	switch reason {
+	case nativeIdleReason:
+		return ptyhost.ActivityIdle, false
+	case nativeBlockedReason:
+		return ptyhost.ActivityBlocked, false
+	case nativeStaleReason:
+		return ptyhost.ActivityIdle, true
+	default:
+		return ptyhost.ActivityUnknown, false
+	}
+}
+
 // superviseWait blocks on the container's main process and finalizes the
 // run when it exits. Supervision-context cancellation (Close / server
 // shutdown) ends supervision without touching the container or the run.
@@ -269,6 +282,12 @@ func (s *Scheduler) applyGenericStall(ctx context.Context, e *supervised, now, s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.runs[e.runID] != e || e.paused || e.exitObserved || e.killRequested {
+		return
+	}
+	if e.status == domain.RunNeedsAttention &&
+		(e.nativeActivity == ptyhost.ActivityIdle || e.nativeActivity == ptyhost.ActivityBlocked) {
+		// Unknown activity after recovery cannot override a durable native
+		// blocker with generic PTY or file liveness.
 		return
 	}
 	var err error
