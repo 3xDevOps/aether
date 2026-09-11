@@ -218,8 +218,8 @@ belong to the turn that is over. Those few seconds are measured on the
 clock, not in polls, so `--poll-interval` can be set to anything without
 turning a trailing repaint into a new turn; past them, output still has to
 keep arriving into a later poll before the run reads as working again.
-Expect the return to `running` to land one `--poll-interval` behind the
-agent.
+That second poll is what sets the delay: expect the return to `running` to
+land one to two `--poll-interval`s behind the agent.
 
 Output here is anything drawn in the terminal, because a harness that
 cannot say when a turn starts leaves nothing else to go on. The echo of
