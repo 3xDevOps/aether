@@ -46,7 +46,9 @@ switch (scenario) {
     fire('agent_settled')
     break
   case 'will-continue':
-    fire('agent_end', { willContinue: true }, busy)
+    // omp is already idle when it says more work follows, so nothing but
+    // the willContinue flag is holding the report back.
+    fire('agent_end', { willContinue: true }, idle)
     break
   case 'double':
     fire('agent_start')

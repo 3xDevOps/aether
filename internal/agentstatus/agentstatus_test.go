@@ -589,18 +589,24 @@ func extensionDriver(t *testing.T, scenario string) (*exec.Cmd, string) {
 	}
 	dir := t.TempDir()
 	log := filepath.Join(dir, "reports")
-	reporter := filepath.Join(dir, "reporter.sh")
-	mustWriteFile(t, reporter, "#!/bin/sh\necho \"$@\" >> "+log+"\n", 0o700)
-
-	const decl = "const REPORTER = '" + ReporterCommand + "'"
-	staged := strings.Replace(string(PiExtension), decl, "const REPORTER = '"+reporter+"'", 1)
-	if staged == string(PiExtension) {
-		t.Fatalf("%s no longer declares the reporter as %q", PiExtensionName, decl)
+	stage := func(name, reporterName, record string) {
+		reporter := filepath.Join(dir, reporterName)
+		mustWriteFile(t, reporter, "#!/bin/sh\n"+record+" >> "+log+"\n", 0o700)
+		const decl = "const REPORTER = '" + ReporterCommand + "'"
+		staged := strings.Replace(string(PiExtension), decl, "const REPORTER = '"+reporter+"'", 1)
+		if staged == string(PiExtension) {
+			t.Fatalf("%s no longer declares the reporter as %q", PiExtensionName, decl)
+		}
+		mustWriteFile(t, filepath.Join(dir, name), staged, 0o600)
 	}
 	// Two copies at two paths: pi loads an extension once per path it is
-	// found at, which is how one agent ends up running this file twice.
-	mustWriteFile(t, filepath.Join(dir, "status.ts"), staged, 0o600)
-	mustWriteFile(t, filepath.Join(dir, "status-copy.ts"), staged, 0o600)
+	// found at, which is how one agent ends up running this file twice. The
+	// second copy reports under its own name, through a reporter slow
+	// enough that a copy running on a chain of its own would finish all of
+	// its reports before this one recorded a second - so the order below
+	// only holds while both copies share one chain.
+	stage("status.ts", "reporter.sh", `echo "$@"`)
+	stage("status-copy.ts", "reporter-copy.sh", `sleep 0.1; echo "copy2 $@"`)
 	driver, derr := os.ReadFile(filepath.Join("testdata", "drive.ts"))
 	if derr != nil {
 		t.Fatalf("read the driver: %v", derr)
@@ -686,15 +692,17 @@ func TestPiExtensionRuntime(t *testing.T) {
 		// it twice. The reports double, which costs nothing the server does
 		// not collapse - but they must not interleave, because a "working"
 		// from the second copy landing after the first copy's "waiting"
-		// strands the run.
+		// strands the run. The second copy here reports slowly, so the
+		// strict alternation below is only possible if the first copy is
+		// queued behind it: one chain for the whole process.
 		got := runExtension(t, "double")
 		want := []string{
 			"report pi --event agent_start",
-			"report pi --event agent_start",
+			"copy2 report pi --event agent_start",
 			"report pi --event message_end",
-			"report pi --event message_end",
+			"copy2 report pi --event message_end",
 			"report pi --event agent_end",
-			"report pi --event agent_end",
+			"copy2 report pi --event agent_end",
 		}
 		assertReports(t, got, want)
 	})
