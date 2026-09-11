@@ -1045,7 +1045,7 @@ func TestRelaunchWithoutAPinnedSessionFallsBackToContinue(t *testing.T) {
 // waiting again, a repaint while the member types still does not release
 // it.
 func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) {
+	e := newReportingEnv(t, func(cfg *Config) {
 		// Far longer than the test: nothing here is a stall.
 		cfg.StallThreshold = time.Hour
 		cfg.PollInterval = 10 * time.Millisecond

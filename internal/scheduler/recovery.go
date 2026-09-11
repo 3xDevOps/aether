@@ -467,7 +467,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		// has said nothing to this process yet. The run keeps its stored
 		// status until the next report, or until observed activity or a
 		// stall corrects it. The reporter comes off the sidecar because
-		// only the launch knew which profile the container got.
+		// only the launch knew which reporter the container was given.
 		reporter:       sc.Reporter,
 		status:         r.Status,
 		startedAt:      started,

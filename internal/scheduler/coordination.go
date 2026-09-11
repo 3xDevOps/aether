@@ -175,11 +175,15 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	}
 	// The status reporter goes into the same directory the same way, but
 	// only for an interactive run: a headless agent exits when it is done
-	// and never waits for anyone to answer it.
+	// and never waits for anyone to answer it. The kind is taken from the
+	// same branch that attaches the asset, so what the entry claims about
+	// this run is what the container was actually given.
+	reporter := harness.ReporterNone
 	if run.Mode == domain.LaunchTUI {
 		if statusArgs := profile.StatusLaunchArgs(mcpbridge.MountDir); len(statusArgs) > 0 {
 			maps.Copy(files, profile.StatusFiles)
 			launchArgs = append(launchArgs, statusArgs...)
+			reporter = profile.Reporter
 		}
 	}
 	var dir string
@@ -196,6 +200,7 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 		if err != nil {
 			s.mu.Lock()
 			entry.bridgeDigest, entry.bridgePath, entry.coordDir = "", "", ""
+			entry.reporter = harness.ReporterNone
 			s.mu.Unlock()
 			if rerr := c.svc.Release(run.ID); rerr != nil {
 				slog.Warn("scheduler: release unmounted coordination directory", "run", run.ID, "error", rerr)
@@ -224,6 +229,7 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	}
 	s.mu.Lock()
 	entry.bridgeDigest, entry.bridgePath, entry.coordDir = digest, bin, dir
+	entry.reporter = reporter
 	sc := entry.sidecar()
 	s.mu.Unlock()
 	// The reference has to be durable before the container exists, or a

@@ -248,7 +248,6 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		workspaceID: run.WorkspaceID,
 		task:        run.Task,
 		memberID:    run.AccountMember(),
-		reporter:    profile.Reporter,
 		status:      domain.RunProvisioning,
 		startedAt:   time.Now().UTC(),
 		done:        make(chan struct{}),

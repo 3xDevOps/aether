@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	coordpkg "github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/mcpbridge"
 )
 
@@ -91,7 +92,9 @@ func TestHarnessMCPRegistration(t *testing.T) {
 // status reporter: an interactive run on a harness that can report is
 // given the settings asset and the argument pointing at it, a headless one
 // is not - it never waits for anyone - and a harness with no reporter is
-// launched untouched.
+// launched untouched. What the run records about its reporter follows the
+// asset, not the harness name: it is the claim a restart reads back, and
+// the scheduler holds a parked run for its member on the strength of it.
 func TestHarnessStatusReporterRegistration(t *testing.T) {
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	dir := t.TempDir()
@@ -113,6 +116,9 @@ func TestHarnessStatusReporterRegistration(t *testing.T) {
 	if got := coord.file(tui.ID, agentstatus.ClaudeSettingsName); !bytes.Equal(got, agentstatus.ClaudeSettings) {
 		t.Fatalf("settings written for the run = %s, want the embedded asset", got)
 	}
+	if got := e.reporterOf(t, tui.ID); got != harness.ReporterFull {
+		t.Fatalf("interactive claude run recorded reporter %s, want %s", got, harness.ReporterFull)
+	}
 	// The asset is a leaf package's bytes and the binary path is the
 	// scheduler's, so nothing but this pins the two together: a hook that
 	// names a path the run container does not carry reports nothing, and
@@ -133,6 +139,13 @@ func TestHarnessStatusReporterRegistration(t *testing.T) {
 	if got := coord.file(headless.ID, agentstatus.ClaudeSettingsName); got != nil {
 		t.Fatalf("headless run had settings written: %s", got)
 	}
+	// The registry calls claude a full reporter, but this container was
+	// given no hooks and can never report. Recording the harness's kind
+	// here would make a restart hold the run for a member the agent is
+	// never going to ask for.
+	if got := e.reporterOf(t, headless.ID); got != harness.ReporterNone {
+		t.Fatalf("headless claude run recorded reporter %s, want %s", got, harness.ReporterNone)
+	}
 
 	unreported, _ := e.launchFake(t, "fix the auth bug")
 	if argv := e.rt.byName(string(unreported.ID)).spec.Command; slices.Contains(argv, "--settings") {
@@ -141,4 +154,20 @@ func TestHarnessStatusReporterRegistration(t *testing.T) {
 	if got := coord.file(unreported.ID, agentstatus.ClaudeSettingsName); got != nil {
 		t.Fatalf("harness without a reporter had settings written: %s", got)
 	}
+	if got := e.reporterOf(t, unreported.ID); got != harness.ReporterNone {
+		t.Fatalf("run on a harness without a reporter recorded %s, want %s", got, harness.ReporterNone)
+	}
+}
+
+// reporterOf is the status reporter the scheduler recorded for a live run:
+// what its sidecar carries and what a restart hands back to checkStalls.
+func (e *testEnv) reporterOf(t *testing.T, run domain.RunID) harness.Reporter {
+	t.Helper()
+	e.sched.mu.Lock()
+	defer e.sched.mu.Unlock()
+	entry := e.sched.runs[run]
+	if entry == nil {
+		t.Fatalf("run %s is not supervised", run)
+	}
+	return entry.reporter
 }

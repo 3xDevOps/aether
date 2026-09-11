@@ -164,12 +164,13 @@ type sidecar struct {
 	// server restart.
 	RunUser string `json:"run_user,omitempty"`
 	Home    string `json:"home,omitempty"`
-	// Reporter is how much the harness this run was launched on can say
-	// about its own state. Recorded rather than recomputed on recovery: a
-	// member's own harness definition drops the reporter the same way an
-	// argv override does, and only the launch saw that. Absent in a sidecar
-	// written before runs had reporters, which reads as "none" - the
-	// behavior that build had.
+	// Reporter is how much the status reporter this run's container was
+	// actually given can say about its own state. Recorded rather than
+	// recomputed on recovery: a headless run, a run with coordination off,
+	// an argv override and a member's own harness definition all get no
+	// reporter whatever the registry says about the harness name, and only
+	// the launch saw that. Absent in a sidecar written before runs had
+	// reporters, which reads as "none" - the behavior that build had.
 	Reporter harness.Reporter `json:"reporter,omitempty"`
 	// ExitObserved is set after Runtime.Wait returns successfully, before
 	// finalize. Recovery uses it to resume exit handling without re-attaching.

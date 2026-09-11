@@ -12,8 +12,27 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
+// newReportingEnv is a test scheduler whose runs really do get a status
+// reporter. The reporter rides the run's coordination directory, so a run
+// launched without coordination has none whatever its harness profile says
+// - which is exactly why the reporter is recorded by the launch that
+// attached it rather than looked up from the harness name.
+func newReportingEnv(t *testing.T, mutate func(*Config)) *testEnv {
+	t.Helper()
+	binary := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.ServerBinary = binary
+		if mutate != nil {
+			mutate(cfg)
+		}
+	})
+	withCoordination(t, e)
+	return e
+}
+
 // launchReporting launches a run on a harness whose profile carries a full
-// status reporter (claude) and returns it with its fake container.
+// status reporter (claude) and returns it with its fake container. The env
+// must come from newReportingEnv, or the run gets no reporter at all.
 func (e *testEnv) launchReporting(t *testing.T) (*domain.Run, *fakeContainer) {
 	t.Helper()
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", "claude", domain.LaunchTUI)
@@ -46,7 +65,7 @@ func (e *testEnv) startStalls(t *testing.T) {
 // gave - long before any stall threshold - a repaint while the member
 // types does not un-park it, and the agent's own next turn does.
 func TestAgentWaitingParksAndResumes(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) {
+	e := newReportingEnv(t, func(cfg *Config) {
 		// Far longer than the test: nothing here is a stall.
 		cfg.StallThreshold = time.Hour
 		cfg.PollInterval = 10 * time.Millisecond
@@ -126,7 +145,7 @@ func expectNoStatusEvent(t *testing.T, sub events.Subscription, run domain.RunID
 // waiting for, and a harness without a full reporter still comes back on
 // activity alone.
 func TestAgentWaitingReplacesAStallReason(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) {
+	e := newReportingEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = 40 * time.Millisecond
 		cfg.PollInterval = 10 * time.Millisecond
 	})
@@ -179,7 +198,7 @@ func TestAgentWaitingReplacesAStallReason(t *testing.T) {
 // A run whose agent said it was working and then went silent parks as a
 // stall, with the reason that says so.
 func TestAgentWorkingStillStalls(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) {
+	e := newReportingEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = 40 * time.Millisecond
 		cfg.PollInterval = 10 * time.Millisecond
 	})
@@ -211,7 +230,7 @@ func TestAgentWorkingStillStalls(t *testing.T) {
 // activity. Otherwise the poll that follows a resumed run re-parks it as
 // stalled, and every tool call flips the run card twice.
 func TestWorkingReportOutlastsTheNextPoll(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) {
+	e := newReportingEnv(t, func(cfg *Config) {
 		// Long enough that several polls run before the threshold is a
 		// stall again, short enough to park the launched run quickly.
 		cfg.StallThreshold = 200 * time.Millisecond
@@ -274,7 +293,7 @@ func TestReportAgentStateRefusesRunsItDoesNotSupervise(t *testing.T) {
 // report says what the run already says, so it costs no store write and no
 // event; a report that changes the reason still lands.
 func TestRepeatedWaitingReportIsNotNews(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) {
+	e := newReportingEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = time.Hour
 		cfg.PollInterval = 10 * time.Millisecond
 	})
@@ -311,7 +330,7 @@ func TestRepeatedWaitingReportIsNotNews(t *testing.T) {
 // left to correct it: silence from a container the member froze is not a
 // stall either.
 func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) {
+	e := newReportingEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = 40 * time.Millisecond
 		cfg.PollInterval = 10 * time.Millisecond
 	})
