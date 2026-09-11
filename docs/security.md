@@ -146,6 +146,57 @@ git config --global --unset gpg.format
 `aether env reset` does none of this - it forgets the saved image and never
 touches the home.
 
+## Workspace source mirrors
+
+A workspace without a mirror is **local-only**. A configured mirror is an
+administrator-only, read-only fetch from its source branch into the
+workspace's protected base. It is not the checkout `Origin`: Origin remains
+the independent push destination for run branches and pull requests. A mirror
+source URL must not contain credentials, query strings, or fragments.
+
+Public mode fetches credential-free HTTPS. Deploy-key mode generates a
+dedicated Ed25519 key for each mirror configuration generation. For GitHub,
+the operator installs only the printed public half as a repository deploy key
+and should leave **Allow write access** off. Generic SSH sources use the
+operator-supplied `known_hosts` contents; GitHub uses Aether's pinned
+`github.com` host key rather than the server's global `known_hosts`.
+
+The private key is stored on the server below
+`<data-dir>/mirrors/<workspace>/private_key.<generation>` with mode `0600` and
+a mode-`0700` parent. It is not in `aether.db`, a member home, a saved image,
+an RPC result, or the dashboard. The server uses it only for the mirror fetch.
+The server administrator and any process that can read the server data
+directory can nevertheless copy it, and backups of `mirrors/` are therefore
+credential backups. A compromised server can read the upstream with that key;
+for generic SSH, the account's server-side permissions define the scope. Use a
+repository-scoped, read-only key wherever the provider supports it.
+
+Reconfiguring rotates to a new generation and removes the old local key files,
+but it cannot remove a key already installed at GitHub or another provider.
+Revoke old keys there, using the GitHub deploy-key settings URL or the
+provider's equivalent. Disabling a mirror removes its local key and restores
+client-writable base behavior; it also cannot revoke a remote key. Treat a
+deploy-key public key and its fingerprint as operational metadata, but never
+publish the private key or the `known_hosts` file.
+
+Configuration starts **pending**; it does not fetch until Verify/`refresh`.
+Each launch refreshes exactly the configured branch before a run row is
+created. `ready` accepts an unchanged or forward-only source, while
+`auth-failed`, `offline`, `source-missing`, `rewritten`, `diverged`, and
+`error` explain a failed or intentionally held observation. Rewrites and
+divergence retain an observed candidate without moving the accepted base.
+Every failed refresh blocks that launch and never silently starts from stale
+data. When an accepted commit is available, an operator may make one explicit
+`--cached-base <sha>` retry; Aether verifies that the protected base is still
+exactly that commit and never reuses the cache automatically.
+
+Direct writes to a mirrored base - including `git push aether <base>`,
+dashboard **Push now**, `repo.push`, or a daemon base push - are rejected by
+the server. Only a forward refresh or an administrator's explicit candidate
+adoption can move it. Run branches remain publishable to the workspace, and
+`aether pull` remains the safe review path before a human merges locally and
+pushes the reviewed branch to checkout Origin.
+
 ### Hostile agents
 
 If you run agents you do not trust, put the `--data-dir` on a filesystem

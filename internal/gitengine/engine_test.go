@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -175,5 +178,248 @@ func TestPublishBranchUsesRunMetadataWithoutRegistry(t *testing.T) {
 	}
 	if callbackRun != run || callbackCommit != commit {
 		t.Fatalf("callback = %s/%s, want %s/%s", callbackRun, callbackCommit, run, commit)
+	}
+}
+
+func TestMirrorValidationRequiresExplicitTestSeamForLocalSources(t *testing.T) {
+	req := MirrorRequest{
+		SourceURL:  "/tmp/upstream.git",
+		Branch:     "main",
+		Generation: 1,
+		Auth:       domain.MirrorAuthPublic,
+	}
+	if err := validateMirrorRequest(req, false); err == nil {
+		t.Fatal("local-file mirror source accepted without the test seam")
+	}
+	if err := validateMirrorRequest(req, true); err != nil {
+		t.Fatalf("local-file source rejected through explicit seam: %v", err)
+	}
+}
+
+func TestMirrorResolutionRejectsUnsafeAddresses(t *testing.T) {
+	e := newUnitEngine(t)
+	unsafe := []string{
+		"127.0.0.1", "10.0.0.1", "169.254.1.1", "224.0.0.1",
+		"0.0.0.0", "100.64.0.1", "::1", "fc00::1", "fe80::1",
+		"ff02::1", "::",
+	}
+	for _, raw := range unsafe {
+		raw := raw
+		e.cfg.MirrorResolve = func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP(raw)}, nil
+		}
+		if _, err := e.resolveMirrorHost(t.Context(), "public.example"); err == nil {
+			t.Errorf("resolveMirrorHost(%q) accepted unsafe address", raw)
+		}
+	}
+	e.cfg.MirrorResolve = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8"), net.ParseIP("192.168.1.1")}, nil
+	}
+	if _, err := e.resolveMirrorHost(t.Context(), "public.example"); err == nil {
+		t.Fatal("resolveMirrorHost accepted a mixed safe and unsafe result")
+	}
+	e.cfg.MirrorResolve = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("8.8.8.8"), net.ParseIP("2001:4860:4860::8888")}, nil
+	}
+	if got, err := e.resolveMirrorHost(t.Context(), "public.example"); err != nil || len(got) != 2 {
+		t.Fatalf("resolveMirrorHost safe result = %v, %v", got, err)
+	}
+}
+
+func TestMirrorCurloptResolveFormatting(t *testing.T) {
+	if got := mirrorCurloptResolve("github.example", net.ParseIP("203.0.113.9")); got != "github.example:443:203.0.113.9" {
+		t.Fatalf("IPv4 curloptResolve = %q", got)
+	}
+	if got := mirrorCurloptResolve("github.example", net.ParseIP("2001:4860:4860::8888")); got != "github.example:443:[2001:4860:4860::8888]" {
+		t.Fatalf("IPv6 curloptResolve = %q", got)
+	}
+}
+
+func TestMirrorFetchPublicHTTPSArguments(t *testing.T) {
+	e := newUnitEngine(t)
+	record := filepath.Join(t.TempDir(), "args")
+	git := filepath.Join(t.TempDir(), "git")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + shellQuoteMirror(record) + "\n"
+	if err := os.WriteFile(git, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e.cfg.GitPath = git
+	e.cfg.MirrorResolve = func(_ context.Context, host string) ([]net.IP, error) {
+		if host != "github.example" {
+			t.Fatalf("resolver host = %q", host)
+		}
+		return []net.IP{net.ParseIP("203.0.113.9"), net.ParseIP("2001:4860:4860::8888")}, nil
+	}
+	repo := t.TempDir()
+	req := MirrorRequest{
+		SourceURL: "https://github.example/aether.git",
+		Branch:    "main",
+		Auth:      domain.MirrorAuthPublic,
+	}
+	if err := e.fetchMirror(t.Context(), repo, req, "refs/aether/incoming/test"); err != nil {
+		t.Fatalf("fetchMirror: %v", err)
+	}
+	data, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Split(strings.TrimSpace(string(data)), "\n")
+	want := []string{
+		"-C", repo, "-c", "safe.directory=*",
+		"-c", "http.followRedirects=false",
+		"-c", "http.curloptResolve=github.example:443:203.0.113.9",
+		"-c", "http.curloptResolve=github.example:443:[2001:4860:4860::8888]",
+		"fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
+		"https://github.example/aether.git", "+refs/heads/main:refs/aether/incoming/test",
+	}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("git args = %#v, want %#v", args, want)
+	}
+}
+
+func TestMirrorRequestRejectsHTTPSPortsAndSSHPasswords(t *testing.T) {
+	if err := validateMirrorRequest(MirrorRequest{
+		SourceURL: "https://github.example:8443/aether.git",
+		Branch:    "main",
+		Auth:      domain.MirrorAuthPublic,
+	}, false); err == nil {
+		t.Fatal("public HTTPS non-443 port accepted")
+	}
+	req := MirrorRequest{
+		SourceURL:      "ssh://deploy:secret@github.example/aether.git",
+		Branch:         "main",
+		Auth:           domain.MirrorAuthDeployKey,
+		PrivateKeyPath: "/srv/key",
+		KnownHostsPath: "/srv/known_hosts",
+	}
+	if err := validateMirrorRequest(req, false); err == nil {
+		t.Fatal("deploy-key SSH password accepted")
+	}
+	req.SourceURL = "ssh://deploy@github.example/aether.git"
+	if err := validateMirrorRequest(req, false); err != nil {
+		t.Fatalf("deploy-key SSH username rejected: %v", err)
+	}
+}
+
+func TestConfigureWorkspaceRepoHidesAetherRefsForBothPackServices(t *testing.T) {
+	e := newUnitEngine(t)
+	repo, err := e.InitWorkspaceRepo(t.Context(), "hidden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, initErr := e.InitWorkspaceRepo(t.Context(), "hidden"); initErr != nil {
+		t.Fatal(initErr)
+	}
+	got, err := e.git(t.Context(), repo, "config", "--get-all", "transfer.hideRefs")
+	if err != nil || strings.TrimSpace(got) != "refs/aether" {
+		t.Fatalf("transfer.hideRefs = %q, %v", got, err)
+	}
+}
+
+func TestMirrorFetchDeployKeySkipsDNSResolver(t *testing.T) {
+	e := newUnitEngine(t)
+	git := filepath.Join(t.TempDir(), "git")
+	if err := os.WriteFile(git, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e.cfg.GitPath = git
+	e.cfg.MirrorResolve = func(context.Context, string) ([]net.IP, error) {
+		t.Fatal("deploy-key fetch invoked DNS resolver")
+		return nil, nil
+	}
+	req := MirrorRequest{
+		SourceURL:      "ssh://deploy@github.example/aether.git",
+		Branch:         "main",
+		Auth:           domain.MirrorAuthDeployKey,
+		PrivateKeyPath: "/srv/key",
+		KnownHostsPath: "/srv/known_hosts",
+	}
+	if err := e.fetchMirror(t.Context(), t.TempDir(), req, "refs/aether/incoming/test"); err != nil {
+		t.Fatalf("deploy-key fetch: %v", err)
+	}
+}
+
+func TestDisableWorkspaceMirrorOrdersPolicyBeforeAtomicDelete(t *testing.T) {
+	e := newUnitEngine(t)
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := e.InitWorkspaceRepo(t.Context(), "disable-order")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashCmd := exec.CommandContext(t.Context(), realGit, "-C", repo, "-c", "safe.directory=*", "hash-object", "-w", "--stdin")
+	hashCmd.Stdin = strings.NewReader("disable-order")
+	hashOutput, err := hashCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := strings.TrimSpace(string(hashOutput))
+	if _, updateAcceptedErr := e.git(t.Context(), repo, "update-ref", "refs/aether/mirror/7/accepted", commit); updateAcceptedErr != nil {
+		t.Fatal(updateAcceptedErr)
+	}
+	if _, updateCandidateErr := e.git(t.Context(), repo, "update-ref", "refs/aether/mirror/7/candidate", commit); updateCandidateErr != nil {
+		t.Fatal(updateCandidateErr)
+	}
+	for key, value := range map[string]string{
+		mirrorActiveGenerationConfig: "7",
+		mirrorBaseConfig:             "refs/heads/main",
+	} {
+		if _, configErr := e.git(t.Context(), repo, "config", key, value); configErr != nil {
+			t.Fatal(configErr)
+		}
+	}
+	logPath := filepath.Join(t.TempDir(), "git.log")
+	wrapper := filepath.Join(t.TempDir(), "git-wrapper")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuoteMirror(logPath) + "\n" +
+		"case \"$*\" in *'update-ref --stdin'*) exit 42;; esac\n" +
+		"exec " + shellQuoteMirror(realGit) + " \"$@\"\n"
+	if writeWrapperErr := os.WriteFile(wrapper, []byte(script), 0o755); writeWrapperErr != nil {
+		t.Fatal(writeWrapperErr)
+	}
+	e.cfg.GitPath = wrapper
+	if disableErr := e.DisableWorkspaceMirror(t.Context(), "disable-order"); disableErr == nil {
+		t.Fatal("DisableWorkspaceMirror unexpectedly succeeded with failing ref transaction")
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logLines := strings.Split(strings.TrimSpace(string(logData)), "\n")
+	if len(logLines) == 0 || !strings.Contains(logLines[len(logLines)-1], "update-ref --stdin") {
+		t.Fatalf("last disable command = %q, want atomic ref deletion", logLines)
+	}
+	activeUnset, baseUnset := -1, -1
+	for i, line := range logLines {
+		if strings.Contains(line, "config --unset-all "+mirrorActiveGenerationConfig) {
+			activeUnset = i
+		}
+		if strings.Contains(line, "config --unset-all "+mirrorBaseConfig) {
+			baseUnset = i
+		}
+	}
+	if activeUnset < 0 || baseUnset < 0 {
+		t.Fatalf("disable log lacks policy removal: %v", logLines)
+	}
+	if activeUnset > baseUnset {
+		t.Fatalf("active policy removed after base policy: %v", logLines)
+	}
+	if got := readRefBestEffort(t.Context(), e, repo, "refs/aether/mirror/7/accepted"); got == "" {
+		t.Fatal("failed disable lost accepted ref")
+	}
+	if got := readRefBestEffort(t.Context(), e, repo, "refs/aether/mirror/7/candidate"); got == "" {
+		t.Fatal("failed disable lost candidate ref")
+	}
+
+	e.cfg.GitPath = realGit
+	e.cfg.MirrorFetch = func(context.Context, string, MirrorRequest, string) error { return nil }
+	if _, err := e.ConfigureWorkspaceMirror(t.Context(), "disable-order", MirrorRequest{
+		SourceURL:  "/tmp/test-source.git",
+		Branch:     "main",
+		Generation: 7,
+		Auth:       domain.MirrorAuthPublic,
+	}); err != nil {
+		t.Fatalf("restore mirror policy: %v", err)
 	}
 }

@@ -29,8 +29,8 @@ func GuardRuns(runs RunController, svc CostService, st store.Store) RunControlle
 	return budgetGate{RunController: runs, svc: svc, store: st}
 }
 
-// budgetGate is the admission decorator. It adds no method to
-// RunController; it re-implements the two that create a run.
+// budgetGate is the admission decorator. It forwards both strict launches
+// and the optional cached-base launch without changing admission semantics.
 type budgetGate struct {
 	RunController
 	svc   CostService
@@ -38,10 +38,18 @@ type budgetGate struct {
 }
 
 func (g budgetGate) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+	return g.launch(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
+}
+
+func (g budgetGate) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	return g.launch(ctx, workspace, member, account, task, harness, mode, opts)
+}
+
+func (g budgetGate) launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	if err := g.svc.Admit(ctx, workspace, member); err != nil {
 		return nil, err
 	}
-	return g.RunController.Launch(ctx, workspace, member, account, task, harness, mode)
+	return launchWithOptions(ctx, g.RunController, workspace, member, account, task, harness, mode, opts)
 }
 
 // Relaunch starts a fresh run from a finished one, so it is admitted like

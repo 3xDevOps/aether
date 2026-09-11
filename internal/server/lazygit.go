@@ -38,3 +38,10 @@ func (g lazyGit) CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, r
 	}
 	return g.Engine.CreateRunCheckout(ctx, ws, run, baseBranch, task, origin)
 }
+
+func (g lazyGit) CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseCommit, baseBranch, task, origin string) (string, string, error) {
+	if _, err := g.InitWorkspaceRepo(ctx, ws); err != nil {
+		return "", "", err
+	}
+	return g.Engine.CreateRunCheckoutAt(ctx, ws, run, baseCommit, baseBranch, task, origin)
+}

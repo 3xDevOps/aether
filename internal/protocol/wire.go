@@ -37,6 +37,24 @@ type Run struct {
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
 	ProfileSnapshotID string  `json:"profile_snapshot_id,omitempty"`
+	// BaseCommit, BaseBranch, BaseSource, and BaseCheckedAt are the
+	// immutable base provenance captured for this run.
+	BaseCommit    string  `json:"base_commit,omitempty"`
+	BaseBranch    string  `json:"base_branch,omitempty"`
+	BaseSource    string  `json:"base_source,omitempty"`
+	BaseCheckedAt *string `json:"base_checked_at,omitempty"`
+}
+
+// MirrorFailure is the sanitized provenance available when a base capture
+// cannot complete. It lets a caller decide whether to retry with the exact
+// accepted commit returned by the mirror.
+type MirrorFailure struct {
+	Kind           string `json:"kind"`
+	AcceptedCommit string `json:"accepted_commit,omitempty"`
+	BaseCommit     string `json:"base_commit,omitempty"`
+	ObservedCommit string `json:"observed_commit,omitempty"`
+	Source         string `json:"source,omitempty"`
+	Branch         string `json:"branch,omitempty"`
 }
 
 // Workspace is the wire form of a workspace; image, env, and setup script
@@ -118,6 +136,10 @@ func RunFromDomain(r *domain.Run) Run {
 		StartedAt:         rfc3339Ptr(r.StartedAt),
 		FinishedAt:        rfc3339Ptr(r.FinishedAt),
 		ProfileSnapshotID: string(r.ProfileSnapshotID),
+		BaseCommit:        r.BaseCommit,
+		BaseBranch:        r.BaseBranch,
+		BaseSource:        r.BaseSource,
+		BaseCheckedAt:     rfc3339ValuePtr(r.BaseCheckedAt),
 	}
 }
 
@@ -277,6 +299,9 @@ type RunLaunchParams struct {
 	// AccountMemberID selects an account explicitly shared with the caller.
 	// Empty means the caller's own account.
 	AccountMemberID string `json:"account_member_id,omitempty"`
+	// CachedBase is the exact accepted mirror commit to retry after a
+	// transient base-capture failure. It is consumed by one launch only.
+	CachedBase string `json:"cached_base,omitempty"`
 }
 
 // RunListParams are the params of run.list.

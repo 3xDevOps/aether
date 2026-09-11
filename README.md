@@ -54,7 +54,8 @@ while you sleep.**
 - **Agents run continuously in remote containers.** Agents run in containers on the server. Launch them once, close your laptop laptop and they still continue to work. 
 - **Results arrive as git branches.** Every run gets its own worktree and
   branch. You can pull, review, and merge - or set your agent up with Git & Github on Aether
-  to let them handle Git operations autonomously. 
+  to let them handle Git operations autonomously. Run-branch pulls remain
+  available whether a workspace is local-only or mirror-backed.
 - **Your agents, your setup.** Your skills, plugins and custom commands
   are mirrored to the server on a per-user basis. Logins stay on the remote that you own, through each vendor's own
   authentication flow, and are never extracted or proxied.
@@ -71,6 +72,12 @@ feed, the shared approval inbox, presence indicators, the member roster, and a
 disk gauge. Launch, inject, pause, kill, close, relaunch and handoff all call
 the same methods the CLI does, with the same permission checks and timeline
 attribution.
+Launch freshness is server-owned: before a run row exists, the server captures
+the workspace base. A configured mirror refreshes that base; a local-only
+workspace reads its local base. A failed pre-run check creates no run row.
+Workspace pages expose admin-only Source control for mirror status and
+controls; launch freshness is handled on the server rather than by a client
+pre-launch operation.
 
 ## Supported agents
 

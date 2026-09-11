@@ -214,7 +214,7 @@ audit history.
  "local":["daemon.install","daemon.status","env.harnesses","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
           "link.status","link.switch","profile.preview","profile.push","pull",
-          "pull.switch","repo.fast-forward","repo.push","repo.sync","sync.start",
+          "pull.switch","repo.fast-forward","repo.push","sync.start",
           "sync.status","sync.stop","update.apply","update.check","update.status"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
@@ -349,7 +349,12 @@ gateway proxy it over SSH and the other dispatch it in-process.
 | `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
-| `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
+| `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new checkout `Origin`, the push URL every new run checkout's `origin` remote points at |
+| `workspace.mirror.status` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` - source, branch, state, observed and accepted commits, check times, public key, and safe warning/error fields; no private key or server path |
+| `workspace.mirror.configure` | `WorkspaceMirrorConfigureParams` (`{"workspace_id":"...","source_url":"https://github.com/acme/app.git","branch":"main","auth":"public"\|"deploy-key","known_hosts":"..."}`) | `WorkspaceMirrorResult`; deploy-key configuration includes only the public key and safe installation warning |
+| `workspace.mirror.refresh` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` after fetching the configured source branch |
+| `workspace.mirror.adopt` | `WorkspaceMirrorAdoptParams` (`{"workspace_id":"...","generation":7}`) | `WorkspaceMirrorResult` after explicitly accepting the retained candidate |
+| `workspace.mirror.disable` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` with `enabled:false`; the workspace becomes local-only |
 | `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
 | `github.probe` | none | `GitHubProbeResult` (`{"status":"ok","version":"2.100.0","minimum":"2.81.0","detail":"gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.7"}`) - the gh in the calling member's environment terminal |
 
@@ -449,7 +454,7 @@ authority.
 | `link.apply` | `{"addr":"host[:port]","invite":"...","name":"..."}` (`invite` and `name` optional) | `{"addr":"host:2222","user":"aether","member":{"id":"...","display_name":"...","role":"..."},"key_generated":"/home/u/.ssh/id_ed25519"}` (`key_generated` omitted when no key was created) |
 | `link.status` | `{}` | `{"linked":bool,"server_configured":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"...","repo":"..."}],"active":"..."}` (`links` is present whenever a named profile is saved, `active` only when the gateway runs on one; a profile's `repo` is omitted when it records no clone of its own and inherits the top-level one; `server_configured` reports a configured server even when no repository is linked) |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
-| `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace's upstream afterwards, omitted when it has none) |
+| `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace checkout `Origin` afterwards, omitted when it has none) |
 | `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
 | `profile.preview` | `{"harness":"claude"}` | the whole preview object (below) |
 | `profile.push` | `{"harness":"claude"}` | `{"harness":"...","snapshot_id":"...","digest":"...","files":42,"bytes":183422,"skipped":[...]}` |
@@ -457,7 +462,6 @@ authority.
 | `pull.switch` | `{"run_id":"..."}` | `{"branch":"..."}` |
 | `repo.push` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","remote":"aether","state":"pushed"\|"up-to-date"\|"behind"\|"diverged","local_commit":"...","workspace_commit":"...","ahead":0,"behind":0,"output":"..."}` |
 | `repo.fast-forward` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","commit":"...","current":bool,"dirty":bool,"output":"..."}` |
-| `repo.sync` | `{"workspace_id":"..."}` (optional) | `{"branch":"...","output":"..."}` |
 | `sync.start` | `{"run_id":"...","force":bool}` | `{"run_id":"...","state":"running"}` |
 | `sync.stop` | `{"run_id":"..."}` | `{"run_id":"...","state":"stopped"}` |
 | `sync.status` | `{}` | `{"sessions":[{"run_id":"...","state":"...","conflict":"..."\|null}]}` |
@@ -482,6 +486,16 @@ no SSH key is offered and the server requires one, it may create
   workspace resolves implicitly; none or several answers `-32002`
   (invalid state) and is resolved server-side or with the CLI's
   `--workspace` flag first.
+- `workspace.mirror.*` methods are admin-only. `configure` receives the
+  verified source URL, branch, auth mode, and (for generic SSH) the
+  `known_hosts` file contents; the server generates and stores any deploy key.
+  Results expose source, branch, status, observed/accepted commits, check
+  times, and the public key only. The dashboard's Workspace **Source control**
+  panel calls these same methods.
+- A mirrored workspace's base branch is server-owned. `repo.push` and
+  `repo.fast-forward` retain their normal local-only behavior, but a direct
+  base write against a mirrored policy is rejected; refresh or explicitly
+  adopt the mirror candidate instead.
 - `repo.push` seeds the workspace. It first asks the `aether` remote for
   its copy of `<base>` with `git ls-remote --heads`, where `<base>` is that
   workspace's base branch. Only when the remote answers a tip does it fetch
@@ -531,9 +545,9 @@ no SSH key is offered and the server requires one, it may create
   Fast-forward only - it writes no merge commit and never rewrites commits
   already on the local branch. `commit` is the local branch tip afterwards,
   as a full 40-hex commit id.
-- The branch keeps whatever upstream it already had. A member's `<base>`
-  usually tracks their own remote, and a catch-up that repointed it at the
-  workspace would redirect their next `git pull`; only run branches
+- The branch keeps whatever tracking remote it already had. A member's
+  `<base>` usually tracks their own remote, and a catch-up that repointed it at
+  the workspace would redirect their next `git pull`; only run branches
   `pull` creates track `aether`.
 - Another branch checked out does not stop it: exactly as `pull` does, it
   updates the branch ref and leaves the working tree alone. When `<base>` is
@@ -559,25 +573,14 @@ no SSH key is offered and the server requires one, it may create
   change, answers `-32002` too, carrying git's message, because the member
   fixes it in their own repository. Only a failed fetch - an unreachable
   server, a key git could not use - answers `-32603`.
-- `repo.sync` fetches `<base>` with
-  `git fetch --no-tags origin <base>`, then pushes
-  `refs/remotes/origin/<base>:refs/heads/<base>` to `aether` without force.
-  `<base>` is the selected workspace's base branch, and `output` joins the
-  trimmed stdout and stderr from both commands. It leaves the local branch and
-  working tree alone.
-- `repo.sync` refuses with `-32002` (invalid state) when there is no linked
-  repository, no `origin` remote, no `aether` remote, or the `aether` remote
-  points at another workspace. A failed fetch or push answers `-32603`
-  carrying git's own output, including non-fast-forward refusals.
 - Every git command that dials a remote is bounded at ten minutes and runs
   with `GIT_TERMINAL_PROMPT=0`, so git cannot block on its own credential
   prompt. The bound covers the compare and the push separately, so a
   `repo.push` that compares and then pushes can take twenty minutes;
-  `repo.fast-forward` bounds its compare at ten and finishes locally, and
-  `repo.sync` bounds its fetch and push together at ten. The bound does not
-  reach `ssh`: a passphrase-protected key with no agent still waits on
-  ssh's own prompt until the ten minutes are up. Load the key into an agent
-  before pushing, fast-forwarding, or syncing from the dashboard.
+  `repo.fast-forward` bounds its compare at ten. The bound does not reach
+  `ssh`: a passphrase-protected key with no agent still waits on ssh's own
+  prompt until the ten minutes are up. Load the key into an agent before
+  pushing or fast-forwarding from the dashboard.
 - `profile.preview` runs the discovery `aether profile push --agent
   <harness>` would run and uploads nothing. It reports what a push would
   carry, grouped into categories a developer recognizes, and everything

@@ -12,14 +12,14 @@ import (
 func init() {
 	register(command{
 		name:  "workspace",
-		short: "manage workspaces: init, add, list, settings, origin",
+		short: "manage workspaces: init, add, list, settings, origin, mirror",
 		run:   runWorkspace,
 	})
 }
 
 func runWorkspace(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether workspace <init|add|list|settings|origin>")
+		return fmt.Errorf("usage: aether workspace <init|add|list|settings|origin|mirror>")
 	}
 	switch args[0] {
 	case "init":
@@ -32,6 +32,8 @@ func runWorkspace(args []string) error {
 		return workspaceSettings(args[1:])
 	case "origin":
 		return workspaceOrigin(args[1:])
+	case "mirror":
+		return workspaceMirror(args[1:])
 	default:
 		return fmt.Errorf("unknown workspace command %q", args[0])
 	}

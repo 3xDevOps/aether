@@ -45,7 +45,7 @@ beforeEach(async () => {
       gateway: 'local',
       methods: ['*'],
       ws: ['events', 'attach', 'terminal'],
-      local: ['link.status', 'daemon.status', 'repo.sync', 'pull', 'update.check'],
+      local: ['link.status', 'daemon.status', 'pull', 'update.check'],
     },
   })
 })

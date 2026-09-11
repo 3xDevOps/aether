@@ -258,7 +258,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     templateList: vi.fn(async () => [template]),
     templateLaunch: vi.fn(async () => ({
       run: run({ id: 'run_tpl' }),
+      base_commit: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b',
       base_branch: 'main',
+      base_source: 'local',
+      base_checked_at: '2026-08-14T10:05:00Z',
     })),
     workspaceTimeline: vi.fn(async () => ({
       events: [],
@@ -331,6 +334,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceSettings: vi.fn(async () => workspace),
+    // Local-only is the default in the mirror control plane; tests that
+    // exercise configuration override the relevant response.
+    workspaceMirrorStatus: vi.fn(async () => ({ enabled: false })),
+    workspaceMirrorConfigure: vi.fn(async () => ({ enabled: false })),
+    workspaceMirrorRefresh: vi.fn(async () => ({ enabled: false })),
+    workspaceMirrorAdopt: vi.fn(async () => ({ enabled: false })),
+    workspaceMirrorDisable: vi.fn(async () => ({ enabled: false })),
     budgetSet: vi.fn(async () => budget(workspace.id)),
     templateSave: vi.fn(async () => template),
     templateDelete: vi.fn(async () => ({})),
@@ -436,10 +446,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       behind: 0,
       output:
         'To ssh://alice@host:2222/wsp_1\n * [new branch] main -> main',
-    })),
-    localRepoSync: vi.fn(async () => ({
-      branch: 'main',
-      output: 'From origin\nAlready up to date.',
     })),
     localSyncStart: vi.fn(async (runID: string) => ({
       run_id: runID,

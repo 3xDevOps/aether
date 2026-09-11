@@ -36,7 +36,11 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
-
+  /** Immutable provenance for the workspace base used by this run. */
+  base_commit?: string
+  base_branch?: string
+  base_source?: string
+  base_checked_at?: string | null
 }
 export interface Workspace {
   id: string
@@ -312,8 +316,10 @@ export interface Template {
 
 export interface TemplateLaunch {
   run: Run
+  base_commit: string
   base_branch: string
-  base_age?: string
+  base_source: string
+  base_checked_at: string
 }
 
 /** The first line a client sends on /ws/events. */
@@ -597,11 +603,42 @@ export interface RepoFastForwardResult {
   output: string
 }
 
-/** repo.sync: the workspace base branch fast-forwarded from origin. */
-export interface RepoSyncResult {
-  branch: string
-  output: string
+export type WorkspaceMirrorAuth = 'public' | 'deploy-key'
+
+export type WorkspaceMirrorStatus =
+  | 'pending'
+  | 'refreshing'
+  | 'disabling'
+  | 'ready'
+  | 'auth-failed'
+  | 'offline'
+  | 'source-missing'
+  | 'rewritten'
+  | 'diverged'
+  | 'error'
+
+/** Public state returned by the workspace mirror administration RPCs. */
+export interface WorkspaceMirrorResult {
+  enabled: boolean
+  source_url?: string
+  source_identity?: string
+  branch?: string
+  auth?: WorkspaceMirrorAuth
+  generation?: number
+  status?: WorkspaceMirrorStatus
+  observed_commit?: string
+  accepted_commit?: string
+  key_fingerprint?: string
+  last_error?: string
+  created_at?: string
+  updated_at?: string
+  last_attempt_at?: string | null
+  last_success_at?: string | null
+  /** Returned only when configuring or reconfiguring deploy-key auth. */
+  public_key?: string
+  warning?: string
 }
+
 
 
 /** sync.start / sync.stop: one run's overlay state after the verb. */

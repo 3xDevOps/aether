@@ -167,8 +167,15 @@ func (s *Service) fire(ctx context.Context, sc *store.Schedule, at time.Time) {
 			fmt.Sprintf("schedule for template %q failed: %s", t.Name, err))
 		return
 	}
+	source := launched.Run.BaseSource
+	if source == "" {
+		source = "local"
+	}
 	s.publish(ctx, t.WorkspaceID, launched.Run.ID, sc.MemberID,
-		fmt.Sprintf("scheduled run from template %q (cron %q); %s", t.Name, sc.Cron, launched.Base))
+		fmt.Sprintf("scheduled run %s from %s %s at %s (%s)",
+			launched.Run.ID, source, launched.Run.BaseBranch,
+			launched.Run.BaseCommit, t.Name))
+
 }
 
 // allowed re-reads the schedule's member and checks the launch capability

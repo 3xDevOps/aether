@@ -273,7 +273,7 @@ way.
 workspace's base branch and live run checkouts in a lazy tree, caches each
 directory request in `src/store/files.ts`, and reads file contents through
 `files.read`. Run files can switch to a one-file `files.diff` patch; editing
-stays in the existing local sync and the user's editor.
+stays in the existing local run-file mirror and the user's editor.
 
 The tree is a browse pane beside the viewer at medium widths, with a compact
 source header and a bordered code surface. On narrow screens the tree is the
@@ -716,18 +716,13 @@ also take the command's `short` label and keep the full sentence as their
 tooltip, because the action bar is intentionally compact. The overflow menu
 has the room, so it prints the whole label instead.
 
-**Who may do what is asked twice.** `src/lib/permissions.ts` mirrors
-`internal/permissions`: the role table, plus the two restrictions on top of it
-(a protected run limits steer and every Kill-policy action to its owner and
-admins, and a workspace with `steer_others=admins_only` does the same for
-others' runs). The server is still the authority and checks every call again,
-but a button one click from a denial is worse than no button, so the command
-list asks the same questions first. A viewer sees nothing that mutates a run;
 hand off and protect need the run's owner or an admin. Before hydration the
 caller's own record has not arrived, and the mirror answers yes rather than
 making the shell's buttons appear a beat late. Pull is the exception that is
-not a question for this policy at all: it is the desktop gateway fetching into
-the repository on this machine, so it answers to `hasLocal('pull')` alone.
+not a question for this policy at all: it is the desktop gateway fetching a
+published run branch into the repository on this machine, so it answers to
+`hasLocal('pull')` alone. It does not refresh a workspace base or authorize a
+mirror source.
 
 ### The forms
 
@@ -781,6 +776,10 @@ Launching is gated on `run.launch` **and** on the launch permission
 (`canLaunch`). The local gateway advertises every method regardless of who is
 behind it, so capability alone would put the button in front of someone the
 server would refuse.
+
+Base capture is server-side and precedes row creation. A mirror or local-base
+failure is reported by Launch and leaves no run row; the dashboard does not run
+a client-side base refresh before trying again.
 
 ## Keyboard and focus
 
@@ -1330,8 +1329,9 @@ both what it renders and the overlap set the conflict chips read.
   is an answer rather than a verb, so the pull records it on the `local` slice
   and the tab shows it where a member reviewing the branch will look. The
   whole block is gated on the `pull` local verb, the same one that fetches
-  into the repository it explains: a gateway without it - a phone on the
-  server's dashboard - has no repository for those commands to run in.
+  the run branch into the repository it explains: a gateway without it - a
+  phone on the server's dashboard - has no repository for those commands to
+  run in. Workspace Source control is separate from this run-branch pull.
 - **Conflict chips write their list out for a finger.** The overlapping file
   names live in the chip's hover tooltip, which a touch screen has no way to
   open, so on a coarse pointer the same list is rendered as visible text
@@ -1439,15 +1439,21 @@ like every other view, and gated on the same method the nav gates them on.
   above is for - and says so in those words, naming each workspace and its cap
   in the tooltip. A spend that includes unmetered runs renders as a floor
   (`$1.20+`), because a harness with no adapter reports nothing.
-- **The two admin dialogs live on the workspace view, not the status bar.**
+- **Workspace controls live on the workspace view, not the status bar.**
   `routes/workspace.tsx` is one workspace: its name, its base branch, its runs,
-  and buttons for the budget (`budget.set`) and the steering policy
-  (`workspace.settings`), each gated on `hasMethod` for the method behind it. A
-  spend ceiling and a steering policy belong beside the thing they govern
-  rather than in a header two views away. The settings dialog shows the base
-  branch without offering to change it: runs have already forked from it, so
-  editing it there would only make the displayed branch disagree with the
-  branches on disk.
+  and buttons for the budget (`budget.set`), the steering policy
+  (`workspace.settings`) and, for admins, Source control. Each is gated by its
+  server-side permission. A spend ceiling and a steering policy belong beside
+  the thing they govern rather than in a header two views away. The settings
+  dialog shows the base branch without offering to change it: runs have already
+  forked from it, so editing it there would only make the displayed branch
+  disagree with the branches on disk.
+  Source control reports local-only, pending, ready or failure, including the
+  configured source, branch, accepted SHA and last check time. One-time Configure
+  starts from `Workspace.Origin` and offers public or deploy-key access; the
+  latter exposes only a public key to copy and the GitHub deploy-key link.
+  Verify/Refresh reports the server's result; **Adopt candidate** and
+  **Disable mirror** require explicit confirmations.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored
@@ -1463,11 +1469,8 @@ button.
 
 `src/routes/settings/` shows the local link, the sync daemon and **Mirror run
 files to your repository** in flat bordered sections. That section starts and
-stops a live run's sync overlay. When the local capability includes
-`repo.sync`, the **Base branch** section's **Sync from origin** button
-fast-forwards the server's workspace base branch from this machine's `origin`
-remote. It shows the returned branch and git's output verbatim; server
-refusals stay verbatim.
+stops a live run's sync overlay. Workspace base freshness and Source control
+live on the workspace page; there is no recurring base-refresh button.
 
 ## Onboarding wizard
 
@@ -1536,9 +1539,16 @@ pushing and answers with one of four states, so the second member to join a
 workspace reads what happened instead of git's `! [rejected] main -> main
 (fetch first)`.
 
+Local-only workspaces retain **Push now**, **Fast-forward my clone**, daemon
+base pushes and direct base writes. A mirrored workspace owns its base on the
+server and rejects direct base writes; run branches can still be pulled. After
+repository linking, onboarding may link to the
+workspace's Source control, but it never silently authorizes a source.
+
 When `link.repo` answers an `origin`, the connected line adds `Runs push to
 <origin>`: the upstream a run pushes to, the same one `aether link --repo`
-prints. A link that recorded none says nothing about one.
+prints. That push destination is separate from the Source control read source.
+A link that recorded none says nothing about one.
 
 `pushed` names the branch that landed; `up-to-date` names the commit the
 workspace already has. Both keep git's output in a "What git did" panel,
@@ -2076,8 +2086,9 @@ sudo systemctl restart aether-server
 
 Then open `https://<the server's MagicDNS name>/` on a phone joined to the
 same tailnet. Expect the board as the first screen, already signed in: no
-onboarding wizard, no Settings, no link chip, no update banner, and no pull,
-forward or sync controls, because the descriptor carries no `local` verbs.
+onboarding wizard, no Settings, no link chip, no update banner, and no local
+pull, forward or run-file mirror controls, because the descriptor carries no
+`local` verbs.
 Watch what the server saw with:
 
 ```sh

@@ -1,7 +1,7 @@
 // Local-machine settings: the link, the background sync daemon, and the live
 // overlay. All of it rides the /local/v1 verbs, so the whole route gates on
-// daemon.status; a remote monitor gets an empty state pointing at `aether gui`,
-// not a broken form. Every server refusal is shown verbatim.
+// daemon.status or sync.status; a remote monitor gets an empty state pointing
+// at `aether gui`, not a broken form. Every server refusal is shown verbatim.
 
 import { Copy } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -22,7 +22,6 @@ import { runLabel } from '@/lib/status'
 import type {
   DaemonInstallResult,
   DaemonStatusResult,
-  RepoSyncResult,
 } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { SyncPanel } from '@/routes/run-sync'
@@ -32,7 +31,7 @@ import { useCapability } from '@/store/hooks'
 export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
 
-  if (!caps.hasLocal('daemon.status') && !caps.hasLocal('repo.sync')) {
+  if (!caps.hasLocal('daemon.status') && !caps.hasLocal('sync.status')) {
     return (
       <div className="flex h-full min-w-0 flex-col">
         <ViewHeader title="Settings" />
@@ -57,7 +56,6 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
         <main className="mx-auto grid min-w-0 w-full max-w-5xl gap-0 px-4 sm:px-6">
           {caps.hasLocal('link.status') && <LinkCard client={client} />}
           {caps.hasLocal('daemon.status') && <DaemonCard client={client} />}
-          {caps.hasLocal('repo.sync') && <RepoSyncCard client={client} />}
           {caps.hasLocal('sync.status') && <OverlayCard client={client} />}
         </main>
       </div>
@@ -328,63 +326,6 @@ function DaemonCard({ client }: { client: Api }) {
   )
 }
 
-/**
- * Moves the linked repository's origin base branch into the server's
- * workspace branch and shows git's response without rewriting it.
- */
-function RepoSyncCard({ client }: { client: Api }) {
-  const workspaceID = useStore((s) => s.activeWorkspace)
-  const [result, setResult] = useState<RepoSyncResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  const sync = async () => {
-    setBusy(true)
-    setError(null)
-    setResult(null)
-    try {
-      setResult(await client.localRepoSync(workspaceID || undefined))
-    } catch (err) {
-      setError(message(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <section
-      aria-label="Base branch"
-      className="min-w-0 space-y-3 border-b border-border/70 py-4"
-    >
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold">Base branch</h2>
-        <p className="text-sm leading-6 text-muted-foreground">
-          Fast-forwards the server&apos;s copy of the workspace base branch to
-          your repository&apos;s origin remote.
-        </p>
-      </div>
-      <Button size="sm" onClick={() => void sync()} disabled={busy}>
-        {busy ? 'Syncing...' : 'Sync from origin'}
-      </Button>
-      {error && (
-        <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
-          {error}
-        </p>
-      )}
-      {result && (
-        <div className="min-w-0 space-y-3 border-t border-state-done/30 bg-state-done/5 py-3 text-sm">
-          <div>
-            <span className="text-muted-foreground">Branch </span>
-            <span className="font-mono">{result.branch}</span>
-          </div>
-          <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap border border-border/70 bg-background p-3 font-mono text-xs">
-            {result.output}
-          </pre>
-        </div>
-      )}
-    </section>
-  )
-}
 
 
 /** Picking no run is what shuts the panel below again, so it is a row rather

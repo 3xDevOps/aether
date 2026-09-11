@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -118,8 +119,11 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if perr != nil {
 		return nil, perr
 	}
-	run, err := s.cfg.Runs.Launch(ctx, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode)
+	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{CachedBase: p.CachedBase})
 	if err != nil {
+		if errors.Is(err, errLaunchOptionsUnsupported) {
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.launch: cached base retry is not supported by this server"}
+		}
 		return nil, rpcError(err)
 	}
 	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil

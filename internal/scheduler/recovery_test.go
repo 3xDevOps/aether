@@ -318,6 +318,9 @@ func TestRelaunchFromInterrupted(t *testing.T) {
 	s2 := e.newScheduler(t, rt2, newFakePTY())
 	startScheduler(t, s2)
 	old := e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
+	e.git.mu.Lock()
+	e.git.branchCommits[e.ws.ID][old.Branch] = "published-exact"
+	e.git.mu.Unlock()
 
 	member2 := &domain.Member{DisplayName: "Grace", PublicKey: testPublicKey(t), Color: "#3cb44b", Role: domain.RoleCollaborator}
 	if err := e.db.CreateMember(t.Context(), member2); err != nil {
@@ -336,8 +339,21 @@ func TestRelaunchFromInterrupted(t *testing.T) {
 	if next.Branch == old.Branch || next.Branch == "" {
 		t.Fatalf("relaunch must create a new branch, got %q (old %q)", next.Branch, old.Branch)
 	}
-	if e.git.baseBranchFor(next.ID) != old.Branch {
-		t.Fatalf("CreateRunCheckout base = %q, want old branch %q", e.git.baseBranchFor(next.ID), old.Branch)
+	if got := e.git.baseBranchFor(next.ID); got != old.Branch {
+		t.Fatalf("CreateRunCheckout base branch = %q, want old branch %q", got, old.Branch)
+	}
+	if got := e.git.baseCommitFor(next.ID); got != "published-exact" {
+		t.Fatalf("CreateRunCheckout base commit = %q, want published exact commit", got)
+	}
+	if next.BaseCommit != old.BaseCommit || next.BaseBranch != old.BaseBranch ||
+		next.BaseSource != old.BaseSource || !next.BaseCheckedAt.Equal(old.BaseCheckedAt) {
+		t.Fatalf("relaunch changed base provenance: old=%+v next=%+v", old, next)
+	}
+	e.base.mu.Lock()
+	calls := slices.Clone(e.base.calls)
+	e.base.mu.Unlock()
+	if !slices.Equal(calls, []string{""}) {
+		t.Fatalf("relaunch refreshed base capture: %v", calls)
 	}
 	if next.MemberID != member2.ID || next.Task != old.Task || next.Harness != old.Harness || next.Mode != old.Mode {
 		t.Fatalf("relaunched run = %+v", next)

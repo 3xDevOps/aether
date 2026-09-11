@@ -11,6 +11,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1719,5 +1720,166 @@ func TestCommitAllRefusesAForgedDisplayName(t *testing.T) {
 		if trailer != "m_eve <m_eve@aether.local>" {
 			t.Errorf("display name %q produced the trailer %q", displayName, trailer)
 		}
+	}
+}
+
+func TestMirrorLifecycleWithExplicitLocalTransportSeam(t *testing.T) {
+	e := newTestEngine(t, nil)
+	ctx := t.Context()
+	source := filepath.Join(t.TempDir(), "source.git")
+	gitc(t, filepath.Dir(source), "init", "--bare", source)
+	work := filepath.Join(t.TempDir(), "work")
+	gitc(t, filepath.Dir(work), "init", work)
+	if err := os.WriteFile(filepath.Join(work, "one.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitc(t, work, "add", "-A")
+	gitc(t, work, "commit", "-m", "one")
+	gitc(t, work, "push", source, "HEAD:refs/heads/main")
+
+	if _, err := e.InitWorkspaceRepo(ctx, "mirror"); err != nil {
+		t.Fatal(err)
+	}
+	e.cfg.MirrorFetch = func(ctx context.Context, repo string, req MirrorRequest, incoming string) error {
+		cmd := exec.CommandContext(ctx, "git", "-C", repo, "fetch", "--no-tags", "--no-write-fetch-head", req.SourceURL, "+refs/heads/"+req.Branch+":"+incoming)
+		return cmd.Run()
+	}
+	req := MirrorRequest{SourceURL: source, Branch: "main", Generation: 1, Auth: domain.MirrorAuthPublic}
+	if _, err := e.ConfigureWorkspaceMirror(ctx, "mirror", req); err != nil {
+		t.Fatalf("ConfigureWorkspaceMirror: %v", err)
+	}
+	first, err := e.RefreshWorkspaceMirror(ctx, "mirror", req)
+	if err != nil {
+		t.Fatalf("initial RefreshWorkspaceMirror: %v", err)
+	}
+	if first.Status != domain.MirrorStatusPending || first.CandidateCommit == "" {
+		t.Fatalf("initial mirror result = %+v", first)
+	}
+	adopted, err := e.AdoptWorkspaceMirror(ctx, "mirror", int64(1))
+	if err != nil {
+		t.Fatalf("AdoptWorkspaceMirror: %v", err)
+	}
+	if adopted.BaseCommit == "" || adopted.BaseCommit != adopted.AcceptedCommit {
+		t.Fatalf("adopted mirror result = %+v", adopted)
+	}
+	old := adopted.BaseCommit
+
+	if err := os.WriteFile(filepath.Join(work, "two.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitc(t, work, "add", "-A")
+	gitc(t, work, "commit", "-m", "two")
+	gitc(t, work, "push", source, "HEAD:refs/heads/main")
+	ff, err := e.RefreshWorkspaceMirror(ctx, "mirror", req)
+	if err != nil || ff.BaseCommit == old || ff.Status != domain.MirrorStatusReady {
+		t.Fatalf("fast-forward refresh = %+v, err %v", ff, err)
+	}
+	newTip := ff.BaseCommit
+
+	gitc(t, work, "reset", "--hard", "HEAD~1")
+	gitc(t, work, "commit", "--allow-empty", "-m", "rewrite")
+	gitc(t, work, "push", "--force", source, "HEAD:refs/heads/main")
+	rewritten, err := e.RefreshWorkspaceMirror(ctx, "mirror", req)
+	var me *MirrorError
+	if !errors.As(err, &me) || me.Kind != MirrorErrorRewritten {
+		t.Fatalf("rewrite refresh err = %v, want MirrorErrorRewritten", err)
+	}
+	if rewritten.BaseCommit != newTip || rewritten.CandidateCommit == rewritten.BaseCommit {
+		t.Fatalf("rewrite refresh changed accepted/base: %+v", rewritten)
+	}
+
+	if _, err := e.git(ctx, mustRepo(t, e, "mirror"), "update-ref", "refs/heads/main", old); err != nil {
+		t.Fatal(err)
+	}
+	diverged, err := e.RefreshWorkspaceMirror(ctx, "mirror", req)
+	if !errors.As(err, &me) || me.Kind != MirrorErrorDiverged {
+		t.Fatalf("base divergence err = %v, want MirrorErrorDiverged (result %+v)", err, diverged)
+	}
+	if got := bareRevParse(t, e, "mirror", "refs/heads/main"); got != old {
+		t.Fatalf("diverged base = %s, want %s", got, old)
+	}
+
+	sourceB := filepath.Join(t.TempDir(), "source-b.git")
+	gitc(t, filepath.Dir(sourceB), "init", "--bare", sourceB)
+	gitc(t, work, "push", sourceB, "HEAD:refs/heads/main")
+	reqB := MirrorRequest{SourceURL: sourceB, Branch: "main", Generation: 2, Auth: domain.MirrorAuthPublic}
+	if _, err := e.ConfigureWorkspaceMirror(ctx, "mirror", reqB); err != nil {
+		t.Fatalf("reconfigure mirror: %v", err)
+	}
+	repo := mustRepo(t, e, "mirror")
+	if got := readRefBestEffort(ctx, e, repo, "refs/aether/mirror/1/accepted"); got != "" {
+		t.Fatalf("old accepted ref survived reconfigure: %s", got)
+	}
+	if got := readRefBestEffort(ctx, e, repo, "refs/aether/mirror/1/candidate"); got != "" {
+		t.Fatalf("old candidate ref survived reconfigure: %s", got)
+	}
+	var staleErr *MirrorError
+	if _, err := e.AdoptWorkspaceMirror(ctx, "mirror", 1); !errors.As(err, &staleErr) || staleErr.Kind != MirrorErrorNotConfigured {
+		t.Fatalf("stale generation adoption error = %v, want not-configured", err)
+	}
+	if err := e.DisableWorkspaceMirror(ctx, "mirror"); err != nil {
+		t.Fatalf("disable mirror: %v", err)
+	}
+	if generation, err := e.MirrorGeneration(ctx, "mirror"); err != nil || generation != 2 {
+		t.Fatalf("durable generation after disable = %d, %v; want 2", generation, err)
+	}
+	reqB.Generation = 3
+	if _, err := e.ConfigureWorkspaceMirror(ctx, "mirror", reqB); err != nil {
+		t.Fatalf("configure after disable: %v", err)
+	}
+	if generation, err := e.MirrorGeneration(ctx, "mirror"); err != nil || generation != 3 {
+		t.Fatalf("durable generation after reconfigure = %d, %v; want 3", generation, err)
+	}
+	if _, err := e.AdoptWorkspaceMirror(ctx, "mirror", 2); !errors.As(err, &staleErr) || staleErr.Kind != MirrorErrorNotConfigured {
+		t.Fatalf("disabled generation adoption error = %v, want not-configured", err)
+	}
+}
+
+func mustRepo(t *testing.T, e *Engine, ws domain.WorkspaceID) string {
+	t.Helper()
+	repo, err := e.existingRepoPath(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+func TestMirrorProtectedRefsAndNormalReads(t *testing.T) {
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	e.cfg.MirrorFetch = func(context.Context, string, MirrorRequest, string) error { return nil }
+	req := MirrorRequest{SourceURL: "https://upstream.invalid/repo.git", Branch: "main", Generation: 7, Auth: domain.MirrorAuthPublic}
+	if _, err := e.ConfigureWorkspaceMirror(t.Context(), "ws1", req); err != nil {
+		t.Fatal(err)
+	}
+	base := bareRevParse(t, e, "ws1", "refs/heads/main")
+	if _, err := e.git(t.Context(), mustRepo(t, e, "ws1"), "update-ref", "refs/aether/mirror/7/candidate", base); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := t.TempDir()
+	gitc(t, dst, "clone", url("ws1"), "clone")
+	cl := filepath.Join(dst, "clone")
+	if err := os.WriteFile(filepath.Join(cl, "blocked.txt"), []byte("blocked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitc(t, cl, "add", "-A")
+	gitc(t, cl, "commit", "-m", "blocked")
+	if out := gitcFail(t, cl, "push", url("ws1"), "HEAD:refs/aether/mirror/7/candidate"); !strings.Contains(out, "protected ref") && !strings.Contains(out, "hidden ref") {
+		t.Fatalf("hidden mirror ref was not rejected by receive-pack: %q", out)
+	}
+	if out := gitcFail(t, cl, "push", url("ws1"), "HEAD:refs/heads/main"); !strings.Contains(out, "upstream") {
+		t.Fatalf("mirrored-base rejection lacks upstream guidance: %q", out)
+	}
+	if got := gitc(t, cl, "ls-remote", url("ws1"), "refs/aether/mirror/7/candidate"); got != "" {
+		t.Fatalf("hidden ref advertised as %q", got)
+	}
+	if err := e.DisableWorkspaceMirror(t.Context(), "ws1"); err != nil {
+		t.Fatalf("DisableWorkspaceMirror: %v", err)
+	}
+	gitc(t, cl, "push", url("ws1"), "HEAD:refs/heads/main")
+	if got := gitc(t, cl, "ls-remote", url("ws1"), "refs/heads/main"); got == "" {
+		t.Fatalf("normal mirrored base not readable: %q", got)
 	}
 }

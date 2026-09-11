@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -12,15 +11,13 @@ import (
 // Task templates and their cron schedules (). The cron loop fires
 // templates unattended, which is why it re-checks the schedule creator's
 // launch capability on every fire and launches through the same guarded
-// controller the RPC handlers use. Base branch ages come straight from the
-// workspace bare repos the git engine keeps under <data>/repos.
+// controller the RPC handlers use.
 func init() {
 	registerService("templates", func(d Deps) (Service, error) {
 		svc, err := templates.New(templates.Config{
 			Store: d.Store,
 			Bus:   d.Bus,
 			Runs:  guardedRuns{ssh: d.SSH},
-			Base:  templates.RepoBase{Dir: filepath.Join(d.DataDir, "repos")},
 		})
 		if err != nil {
 			return nil, err

@@ -24,4 +24,7 @@ type Services struct {
 	Files FileReader
 	// ServerUpdate replaces the server's own binaries and restarts ().
 	ServerUpdate ServerUpdateService
+	// Mirrors configures and refreshes workspace upstream mirrors and captures
+	// immutable base provenance for launches.
+	Mirrors MirrorService
 }

@@ -88,14 +88,14 @@ type TemplateLaunchParams struct {
 	Params      map[string]string `json:"params,omitempty"`
 }
 
-// TemplateLaunchResult is the launched run plus the age of the base
-// branch it started from, as the server last saw it. BaseAge is empty when
-// the server has never seen a commit on that branch - the honest answer
-// when no member has pushed it.
+// TemplateLaunchResult is the launched run plus the immutable base
+// provenance captured for it.
 type TemplateLaunchResult struct {
-	Run        Run    `json:"run"`
-	BaseBranch string `json:"base_branch"`
-	BaseAge    string `json:"base_age,omitempty"`
+	Run           Run    `json:"run"`
+	BaseCommit    string `json:"base_commit"`
+	BaseBranch    string `json:"base_branch"`
+	BaseSource    string `json:"base_source"`
+	BaseCheckedAt string `json:"base_checked_at"`
 }
 
 // ScheduleListParams selects one workspace's schedules.

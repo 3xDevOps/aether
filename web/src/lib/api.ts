@@ -33,7 +33,8 @@ import type {
   PullSwitchResult,
   RepoFastForwardResult,
   RepoPushResult,
-  RepoSyncResult,
+  WorkspaceMirrorAuth,
+  WorkspaceMirrorResult,
   FileDiff,
   FileRead,
   FilesTreeResult,
@@ -114,6 +115,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: number,
+    readonly data?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -148,7 +151,10 @@ async function call<T>(method: string, params: unknown = {}): Promise<T> {
     },
     body: JSON.stringify(params),
   })
-  if (!res.ok) throw new ApiError(res.status, `${method}: ${await failure(res)}`)
+  if (!res.ok) {
+    const err = await failure(res)
+    throw new ApiError(res.status, `${method}: ${err.message}`, err.code, err.data)
+  }
   return (await res.json()) as T
 }
 
@@ -157,7 +163,10 @@ async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
   })
-  if (!res.ok) throw new ApiError(res.status, `${path}: ${await failure(res)}`)
+  if (!res.ok) {
+    const err = await failure(res)
+    throw new ApiError(res.status, `${path}: ${err.message}`, err.code, err.data)
+  }
   return (await res.json()) as T
 }
 
@@ -185,7 +194,10 @@ async function local<T>(
     // waiting for it.
     signal,
   })
-  if (!res.ok) throw new ApiError(res.status, `${verb}: ${await failure(res)}`)
+  if (!res.ok) {
+    const err = await failure(res)
+    throw new ApiError(res.status, `${verb}: ${err.message}`, err.code, err.data)
+  }
   return (await res.json()) as T
 }
 
@@ -210,14 +222,27 @@ export interface LocalForwardStatusResult {
 }
 
 // Failures carry the JSON-RPC error object: {"error":{"code":-32001,...}}.
-async function failure(res: Response): Promise<string> {
+async function failure(
+  res: Response,
+): Promise<{ message: string; code?: number; data?: unknown }> {
   try {
-    const body = (await res.json()) as { error?: { message?: string } }
-    if (body.error?.message) return body.error.message
+    const body = (await res.json()) as {
+      error?: { code?: unknown; message?: unknown; data?: unknown }
+    }
+    if (body.error) {
+      return {
+        message:
+          typeof body.error.message === 'string'
+            ? body.error.message
+            : `${res.status} ${res.statusText}`,
+        ...(typeof body.error.code === 'number' ? { code: body.error.code } : {}),
+        ...(body.error.data !== undefined ? { data: body.error.data } : {}),
+      }
+    }
   } catch {
     // Not every failure has a JSON body (a proxy 502, for instance).
   }
-  return `${res.status} ${res.statusText}`
+  return { message: `${res.status} ${res.statusText}` }
 }
 
 /** WebSocket URL for a gateway path, carrying the bearer token when set. */
@@ -453,6 +478,30 @@ export const api = {
       workspace_id: params.workspace_id,
       steer_others: params.steer_others ?? '',
     }).then((r) => r.workspace),
+  workspaceMirrorStatus: (workspaceID: string) =>
+    call<WorkspaceMirrorResult>('workspace.mirror.status', {
+      workspace_id: workspaceID,
+    }),
+  workspaceMirrorConfigure: (params: {
+    workspace_id: string
+    source_url: string
+    branch: string
+    auth: WorkspaceMirrorAuth
+    known_hosts?: string
+  }) => call<WorkspaceMirrorResult>('workspace.mirror.configure', params),
+  workspaceMirrorRefresh: (workspaceID: string) =>
+    call<WorkspaceMirrorResult>('workspace.mirror.refresh', {
+      workspace_id: workspaceID,
+    }),
+  workspaceMirrorAdopt: (workspaceID: string, generation: number) =>
+    call<WorkspaceMirrorResult>('workspace.mirror.adopt', {
+      workspace_id: workspaceID,
+      generation,
+    }),
+  workspaceMirrorDisable: (workspaceID: string) =>
+    call<WorkspaceMirrorResult>('workspace.mirror.disable', {
+      workspace_id: workspaceID,
+    }),
   // Budgets: the server clears a budget on a limit of zero or less, so
   // `clear` is spelled here rather than by every caller.
   budgetSet: (params: {
@@ -552,9 +601,6 @@ export const api = {
    * fresh workspace without leaving the app. */
   localRepoPush: (workspaceID?: string) =>
     local<RepoPushResult>('repo.push', { workspace_id: workspaceID }),
-  /** Fast-forwards the workspace base branch from this machine's origin. */
-  localRepoSync: (workspaceID?: string) =>
-    local<RepoSyncResult>('repo.sync', { workspace_id: workspaceID }),
   localSyncStart: (runID: string, force?: boolean) =>
     local<SyncSessionState>('sync.start', { run_id: runID, force }),
   localSyncStop: (runID: string) =>

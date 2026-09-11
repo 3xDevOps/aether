@@ -27,6 +27,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/mirror"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -46,6 +47,35 @@ var ErrDiskFull = errors.New("scheduler: not enough free disk space to start a n
 // about to produce.
 const DefaultMinFreeBytes = 1 << 30
 
+// BaseCapture is the scheduler's view of immutable workspace-base capture.
+// The mirror service implements this seam for both local-only and configured
+// workspaces.
+type BaseCapture interface {
+	Capture(context.Context, domain.WorkspaceID, string) (mirror.CaptureResult, error)
+}
+
+// BaseCaptureError preserves the sanitized capture result alongside a
+// preflight failure so protocol callers can display a cached retry token
+// without creating a run row.
+type BaseCaptureError struct {
+	Capture mirror.CaptureResult
+	Err     error
+}
+
+func (e *BaseCaptureError) Error() string {
+	if e == nil || e.Err == nil {
+		return "scheduler: base capture failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *BaseCaptureError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 // Config wires the scheduler's dependencies and tuning knobs.
 type Config struct {
 	Store         store.Store
@@ -53,6 +83,7 @@ type Config struct {
 	Bus           events.Bus
 	Git           GitEngine
 	PTY           PTYHost
+	Bases         BaseCapture
 	StateDir      string
 	Homes         *memberhome.Manager
 	Profiles      profileService
@@ -400,6 +431,15 @@ func (s *Scheduler) Close() error {
 	s.wg.Wait()
 	s.flushPendingRunTitles()
 	return nil
+}
+
+// UseBaseCapture attaches the immutable base-capture service. The server
+// builder uses this after constructing the scheduler because services are
+// initialized independently of the core scheduler.
+func (s *Scheduler) UseBaseCapture(c BaseCapture) {
+	s.mu.Lock()
+	s.cfg.Bases = c
+	s.mu.Unlock()
 }
 
 // ContainerAddr returns the network address of a supervised run container.

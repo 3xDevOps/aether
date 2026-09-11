@@ -11,8 +11,9 @@ import (
 
 // GitEngine is the scheduler's view of the git engine (*gitengine.Engine).
 type GitEngine interface {
-	CreateRunCheckout(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseBranch, task, origin string) (checkoutPath, branch string, err error)
+	CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseCommit, baseBranch, task, origin string) (checkoutPath, branch string, err error)
 	WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceID, branch string) (bool, error)
+	WorkspaceBranchCommit(ctx context.Context, ws domain.WorkspaceID, branch string) (commit string, err error)
 	CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (commit string, err error)
 	PublishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error)
 	RemoveRunCheckout(ctx context.Context, run domain.RunID) error
