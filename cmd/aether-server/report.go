@@ -19,9 +19,12 @@ import (
 // boundaries: being late is worse than being wrong.
 const reportBudget = 4 * time.Second
 
-// maxHookPayload bounds the hook body read from stdin. A hook payload is a
-// few hundred bytes of metadata; anything past this is not one.
-const maxHookPayload = 1 << 20
+// maxHookPayload bounds the hook body read from stdin. A payload is not
+// only metadata: Claude Code's tool events carry the tool's own input and
+// response verbatim, so writing a large file produces a payload the size of
+// that file. The cap keeps a runaway one from being read into memory on the
+// agent's own turn boundary, and is far above any real tool call.
+const maxHookPayload = 8 << 20
 
 // report tells the server what the agent is doing. Like mcp it is absent
 // from the usage text: no operator runs it. The server stages this binary
@@ -88,6 +91,11 @@ func report(args []string) {
 // thing between the agent and its next turn, so a harness that hands over a
 // pipe and forgets to close it must not leave the reporter waiting on it.
 // The read goroutine outlives the wait and the process exits behind it.
+//
+// It reads one byte past the cap so an oversized payload is an error the
+// caller can name. Truncating it instead would hand the mapping half a
+// JSON document, which is indistinguishable from an event Aether ignores
+// and would drop the report without a word.
 func readHookPayload(ctx context.Context, r io.Reader) ([]byte, error) {
 	type read struct {
 		payload []byte
@@ -95,11 +103,14 @@ func readHookPayload(ctx context.Context, r io.Reader) ([]byte, error) {
 	}
 	done := make(chan read, 1)
 	go func() {
-		payload, err := io.ReadAll(io.LimitReader(r, maxHookPayload))
+		payload, err := io.ReadAll(io.LimitReader(r, maxHookPayload+1))
 		done <- read{payload, err}
 	}()
 	select {
 	case res := <-done:
+		if res.err == nil && len(res.payload) > maxHookPayload {
+			return nil, fmt.Errorf("the payload is larger than %d bytes", maxHookPayload)
+		}
 		return res.payload, res.err
 	case <-ctx.Done():
 		return nil, ctx.Err()

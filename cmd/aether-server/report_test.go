@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,24 +87,24 @@ func withStdin(t *testing.T, payload string, closes bool) {
 	t.Cleanup(func() { os.Stdin = saved; _ = w.Close(); _ = r.Close() })
 }
 
-// captureStdout points os.Stdout at a pipe and returns what the reporter
-// wrote to it.
-func captureStdout(t *testing.T) func() string {
+// capture points one of the process's standard streams at a pipe and
+// returns what the reporter wrote to it.
+func capture(t *testing.T, stream **os.File) func() string {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
-	saved := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = saved; _ = r.Close() })
+	saved := *stream
+	*stream = w
+	t.Cleanup(func() { *stream = saved; _ = r.Close() })
 	return func() string {
 		if cerr := w.Close(); cerr != nil {
-			t.Fatalf("close stdout: %v", cerr)
+			t.Fatalf("close captured stream: %v", cerr)
 		}
 		out, rerr := io.ReadAll(r)
 		if rerr != nil {
-			t.Fatalf("read stdout: %v", rerr)
+			t.Fatalf("read captured stream: %v", rerr)
 		}
 		return string(out)
 	}
@@ -114,7 +115,7 @@ func captureStdout(t *testing.T) func() string {
 func TestReportClaudeCallsRunReport(t *testing.T) {
 	sock := newFakeCoordSocket(t)
 	withStdin(t, `{"hook_event_name":"Stop","session_id":"abc"}`, true)
-	stdout := captureStdout(t)
+	stdout := capture(t, &os.Stdout)
 	report([]string{"--socket", sock.path, "claude"})
 	// The harness reads the hook's stdout: anything printed there is the
 	// reporter talking to the agent instead of to the server.
@@ -187,5 +188,25 @@ func TestReportGivesUpOnAnUnclosedStdin(t *testing.T) {
 	case req := <-sock.requests:
 		t.Fatalf("the reporter dialled without a payload it could read: %+v", req)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestReportRefusesAnOversizedPayload: a hook payload carries the tool's
+// own input and response verbatim, so writing a large file produces a large
+// payload. One past the cap is named on stderr, not truncated - half a JSON
+// document maps to nothing, which would look exactly like an event Aether
+// ignores and would drop the report without a word.
+func TestReportRefusesAnOversizedPayload(t *testing.T) {
+	sock := newFakeCoordSocket(t)
+	head, tail := `{"hook_event_name":"Stop","tool_input":"`, `"}`
+	oversized := head + strings.Repeat("x", maxHookPayload+1-len(head)-len(tail)) + tail
+	withStdin(t, oversized, true)
+	stderr := capture(t, &os.Stderr)
+	report([]string{"--socket", sock.path, "claude"})
+	if msg := stderr(); !strings.Contains(msg, "larger than") {
+		t.Fatalf("stderr = %q, want it to name the size cap", msg)
+	}
+	if req, ok := sock.next(t); ok {
+		t.Fatalf("the reporter dialled with a payload it could not read: %+v", req)
 	}
 }

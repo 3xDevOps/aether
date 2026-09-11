@@ -193,7 +193,12 @@ agent would be worse than a run card that is briefly wrong.
 
 Reading the event and the round trip that follows share one budget, set
 under the timeout the harness gives the hook, so a harness that hands over
-an open pipe cannot leave the reporter waiting on it either. Which harnesses have one, what the settings document looks like, and
+an open pipe cannot leave the reporter waiting on it either. A payload past
+the reporter's size cap is reported on stderr rather than truncated: half a
+JSON document maps to nothing, which would look exactly like an event Aether
+ignores.
+
+Which harnesses have a reporter, what the settings document looks like, and
 what each state does to the run: [harnesses.md](harnesses.md) and
 [failure-handling.md](failure-handling.md).
 
