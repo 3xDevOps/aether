@@ -123,17 +123,21 @@ export function Sidebar() {
   }, [toggleAndFollow])
 
   // Every navigation out of the drawer is a navigation into the view the
-  // drawer covers, so the route itself closes it: a run row, a rail link and
-  // the palette all land here without any of them knowing about the drawer.
-  // The drawer's own state is read rather than depended on - listing it would
-  // close the drawer in the render that opened it.
+  // drawer covers, so the route itself closes it: a run row and a rail link
+  // both land here without either knowing about the drawer. Only a change of
+  // route may close it, which is why the last one is held rather than
+  // compared by the dependency list - opening the drawer re-runs this effect
+  // and must not close it again.
   const route = useStore((s) => s.route)
   const drawerOpen = mobile && !rail
+  const lastRoute = useRef(route)
   useEffect(() => {
+    if (lastRoute.current === route) return
+    lastRoute.current = route
     if (!drawerOpen) return
     takeToggle.current = true
     setExpandedNarrow(false)
-  }, [route])
+  }, [drawerOpen, route])
 
   const beginDrag = useDrag()
 
