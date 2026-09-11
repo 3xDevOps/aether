@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/3xDevOps/Aether/desktop"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -101,23 +102,39 @@ func buildAndInstall(buildDir string, notes io.Writer, emit func(buildEvent)) er
 		fmt.Fprintf(os.Stderr, "warning: aether was found at %s through this terminal's PATH; the application menu may not share it. If the window reports \"aether CLI not found\", install the CLI into /usr/local/bin or ~/.local/bin, or set AETHER_BIN.\n", shellOnly)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)
-	defer stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopSignals := cancelOnSignal(cancel)
+	defer stopSignals()
 
 	_, _ = fmt.Fprintf(notes, "building the desktop app in %s\n", buildDir)
 	phase := func(name string) { emit(buildEvent{Phase: name}) }
 	built, err := localops.BuildDesktop(ctx, desktop.Source, buildDir, version.Version, notes, os.Stderr, phase)
 	if err != nil {
-		return err
+		return desktopBuildError(stopSignals(), err)
+	}
+	if ctx.Err() != nil {
+		return desktopBuildError(stopSignals(), ctx.Err())
 	}
 	icon, err := desktop.Source.ReadFile("build/icons/256x256.png")
 	if err != nil {
-		return err
+		return desktopBuildError(stopSignals(), err)
+	}
+	if ctx.Err() != nil {
+		return desktopBuildError(stopSignals(), ctx.Err())
 	}
 	phase(localops.PhaseInstalling)
 	app, err := localops.InstallDesktop(runtime.GOOS, home, built, icon)
 	if err != nil {
-		return err
+		return desktopBuildError(stopSignals(), err)
+	}
+	if ctx.Err() != nil {
+		return desktopBuildError(stopSignals(), ctx.Err())
+	}
+	// Stop the watcher before reporting success. A signal racing with the
+	// final install must become an error, never a successful done event.
+	if sig := stopSignals(); sig != nil {
+		return desktopBuildError(sig, ctx.Err())
 	}
 	// This build worked, so whatever the last one recorded is history; the
 	// dashboard must not keep showing an error the user has now fixed.
@@ -139,4 +156,36 @@ func buildAndInstall(buildDir string, notes io.Writer, emit func(buildEvent)) er
 		_, _ = fmt.Fprintf(notes, "launcher %s\nopen it from your application menu as Aether\n", app.Launcher)
 	}
 	return nil
+}
+
+func desktopBuildError(sig os.Signal, err error) error {
+	if sig == nil {
+		var child *exec.ExitError
+		if errors.As(err, &child) {
+			switch child.ExitCode() {
+			case 130:
+				sig = os.Interrupt
+			case 143:
+				sig = syscall.SIGTERM
+			default:
+				if status, ok := child.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+					sig = status.Signal()
+				}
+			}
+		}
+	}
+	code := 1
+	switch sig {
+	case os.Interrupt:
+		code = 130
+	case syscall.SIGTERM:
+		code = 143
+	}
+	if code == 1 {
+		return err
+	}
+	if err == nil {
+		err = context.Canceled
+	}
+	return &exitStatusError{code: code, err: err}
 }

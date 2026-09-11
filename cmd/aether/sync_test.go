@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"runtime"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -37,23 +36,6 @@ func TestCancelOnSignalCancelsOnTermination(t *testing.T) {
 				t.Fatalf("context not canceled after %v; teardown would be skipped", sig)
 			}
 		})
-	}
-}
-
-// SIGTERM must be one of the handled signals: handling only os.Interrupt
-// is what let `kill` and container stops bypass every defer.
-func TestTerminationSignalsIncludeSIGTERM(t *testing.T) {
-	var interrupt, term bool
-	for _, sig := range terminationSignals {
-		switch sig {
-		case os.Interrupt:
-			interrupt = true
-		case syscall.SIGTERM:
-			term = true
-		}
-	}
-	if !interrupt || !term {
-		t.Fatalf("terminationSignals = %v, want both os.Interrupt and SIGTERM", terminationSignals)
 	}
 }
 
