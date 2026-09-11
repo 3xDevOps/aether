@@ -52,10 +52,14 @@ export const AetherStatus = async () => {
           // idle half is read below, where the subagent bookkeeping is.
           const status = event.properties && event.properties.status ? event.properties.status.type : ""
           if (status === "idle") return
+          // opencode publishes busy several times in one turn - once when
+          // the prompt arrives, once when the runner starts, once per step
+          // - and a session already running is not news. Neither is a
+          // nested session starting a turn inside one that is already
+          // running: the run is working either way.
+          const started = session ? !busy.has(session) : true
           if (session) busy.add(session)
-          // A nested session starting a turn inside one that is already
-          // running is not news; the run is working either way.
-          if (status === "busy" && busy.size <= 1) post("--event", "session.status", "--status", status)
+          if (status === "busy" && started && busy.size <= 1) post("--event", "session.status", "--status", status)
           return
         }
         case "session.idle":

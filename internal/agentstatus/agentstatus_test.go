@@ -210,9 +210,12 @@ func TestOpenCodePluginReportsTheRunsOwnTurn(t *testing.T) {
 }
 
 // openCodeDriver feeds the plugin one turn the way opencode would: the run
-// starts, a subagent runs a turn of its own inside it, the agent asks for a
-// permission and gets it, and only then does the run's own turn end. The
-// subagent's half must be invisible - it is not the member's turn to speak.
+// starts - several times over, opencode says busy once for the prompt, once
+// for the runner and once per step - a subagent runs a turn of its own
+// inside it, the agent asks for a permission and gets it, and only then
+// does the run's own turn end. Every busy after the first and the
+// subagent's whole half must be invisible: neither is the member's turn to
+// speak, and a reporter process per step is a process per step.
 const openCodeDriver = `
 import { AetherStatus } from "./plugin.mjs"
 
@@ -220,7 +223,9 @@ const hooks = await AetherStatus({})
 const status = (sessionID, type) => ({ type: "session.status", properties: { sessionID, status: { type } } })
 const events = [
   status("root", "busy"),
+  status("root", "busy"),
   status("sub", "busy"),
+  status("root", "busy"),
   { type: "session.idle", properties: { sessionID: "sub" } },
   { type: "message.part.updated", properties: { part: { sessionID: "root" } } },
   { type: "permission.asked", properties: { sessionID: "root", id: "p1" } },
