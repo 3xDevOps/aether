@@ -78,7 +78,7 @@ vet:
 # Go downloads that toolchain on demand, so no local setup is needed.
 lint:
 	GOTOOLCHAIN=$(or $(GO_TOOLCHAIN),$(error go.mod has no go or toolchain version to pin the linter to)) \
-		go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.4.0 run
+		go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.1 run
 
 # Advisory: the two Moby CVEs reachable through the Docker SDK have no fixed
 # release, and govulncheck has no suppression flag, so this target exits
