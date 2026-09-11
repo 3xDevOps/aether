@@ -165,6 +165,13 @@ settings document over Claude Code's own, and `OPENCODE_CONFIG_CONTENT` is
 merged into opencode's config with the plugin lists concatenated, so the
 member's own plugins still load.
 
+What merges is opencode's own config, not a second value of that variable:
+an interactive `opencode` run reserves `OPENCODE_CONFIG_CONTENT` for the
+plugin, and a workspace environment variable of that name is replaced
+rather than combined. The run's timeline says so on launch. Inline config a
+workspace needs on every run goes in a file the workspace names with
+`OPENCODE_CONFIG`, which Aether never sets.
+
 ## Steering delivery
 
 `run.inject` writes a message, then the harness's submit sequence, to the
