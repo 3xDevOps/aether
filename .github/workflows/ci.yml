@@ -72,7 +72,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.4.0
+          version: v2.10.1
           skip-cache: ${{ github.event_name == 'pull_request_target' }}
       # Advisory only: the reachable Moby CVEs have no fixed release and
       # govulncheck cannot suppress individual findings, so a hard gate would

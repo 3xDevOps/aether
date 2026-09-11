@@ -9,7 +9,7 @@ does, how to run the server as a service, and what lives in the data directory.
 
 ## Building from source
 
-Source builds require Go 1.25+, GNU make, Bun 1.3+, and Node.js 22+. Bun
+Source builds require Go 1.26+, GNU make, Bun 1.3+, and Node.js 22+. Bun
 installs the web dependencies and drives the scripts; Node.js runs the Next
 build and development server.
 
@@ -411,7 +411,7 @@ Everything else is the same client: `link`, `run`, `attach`, `gui`,
 
 ## Building from source
 
-Needs Go 1.25+, GNU make, and Bun 1.3+ (the server embeds the dashboard SPA, so
+Needs Go 1.26+, GNU make, and Bun 1.3+ (the server embeds the dashboard SPA, so
 the web build runs first).
 
 ```sh

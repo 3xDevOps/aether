@@ -6,7 +6,7 @@
 
 **A self-hosted development environment for AI coding agents running in the cloud, for teams & *multiplayer* control.**
 
-[![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-6EE7D6?style=flat-square)](go.mod)
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-6EE7D6?style=flat-square)](go.mod)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-4A6FA5?style=flat-square)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/3xDevOps/aether?include_prereleases&style=flat-square&color=4A6FA5)](https://github.com/3xDevOps/aether/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/3xDevOps/aether/ci.yml?branch=main&style=flat-square)](https://github.com/3xDevOps/aether/actions/workflows/ci.yml)
@@ -110,7 +110,7 @@ environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
 
 ## Building from source
 
-Requires Go 1.25+, GNU make, Bun 1.3+, and Node.js 22+. Bun installs the web
+Requires Go 1.26+, GNU make, Bun 1.3+, and Node.js 22+. Bun installs the web
 dependencies and drives the scripts; Node.js runs the Next build and
 development server.
 

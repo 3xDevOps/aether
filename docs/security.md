@@ -513,6 +513,11 @@ gate would leave CI permanently red and train everyone to ignore it. Read the
 step output on each PR instead: anything beyond those two Docker findings is new
 and should be fixed or explicitly accepted here.
 
+The SSH dependency `golang.org/x/crypto` must be at least `v0.56.0` to fix
+`GO-2026-6303`, `GO-2026-6354`, and `GO-2026-6355`. These fixes require
+Go 1.26; the module and toolchain requirements in `go.mod` must not be
+downgraded independently of the dependency.
+
 The Go toolchain is part of the attack surface. `go.mod` carries a `toolchain`
 directive alongside the `go` directive so that CI, which selects its Go version
 from `go.mod`, builds release binaries with a patched toolchain rather than the
