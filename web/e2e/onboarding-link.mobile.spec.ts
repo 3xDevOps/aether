@@ -2,10 +2,10 @@
 //
 // A keyboard takes most of a phone's screen, and what is left has to hold
 // the field being typed into and the button that submits it.
-// `raiseSoftKeyboard` shrinks the layout viewport to that height; it is a
+// `shrinkToKeyboardHeight` takes the viewport down to what is left; it is a
 // short-viewport proxy rather than a real keyboard - see e2e/mobile.ts.
 
-import { expect, raiseSoftKeyboard, test } from './mobile'
+import { expect, shrinkToKeyboardHeight, test } from './mobile'
 import { OnboardingWizard } from './pages/wizard'
 
 test('the Link step stays usable at the height a keyboard leaves', async ({
@@ -17,7 +17,7 @@ test('the Link step stays usable at the height a keyboard leaves', async ({
 
   const address = wizard.link.section.getByLabel('Server address')
   await address.tap()
-  const lowerKeyboard = await raiseSoftKeyboard(page)
+  const restoreViewport = await shrinkToKeyboardHeight(page)
 
   await expect(address).toBeFocused()
   await expect(address).toBeInViewport({ ratio: 1 })
@@ -42,7 +42,7 @@ test('the Link step stays usable at the height a keyboard leaves', async ({
   await link.tap()
   await expect(wizard.link.section).toContainText('(admin)')
 
-  await lowerKeyboard()
+  await restoreViewport()
   await wizard.link.continue().tap()
   await wizard.expectStep('Git identity')
 })

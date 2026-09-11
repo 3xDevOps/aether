@@ -16,8 +16,8 @@ import { test as base } from './fixtures'
 const softKeyboardHeight = 320
 
 /**
- * Shrinks the layout viewport to what a phone keyboard would leave, and
- * returns the call that restores it.
+ * Shrinks the layout viewport to the height a phone keyboard would leave,
+ * and returns the call that restores it.
  *
  * Read this as a short-viewport proxy, not as a keyboard test. Playwright
  * cannot raise the platform keyboard, and the dashboard ships Next's default
@@ -32,7 +32,7 @@ const softKeyboardHeight = 320
  * the shape that ships: say so here and in "The phone project" in
  * docs/testing.md.
  */
-export async function raiseSoftKeyboard(
+export async function shrinkToKeyboardHeight(
   page: Page,
 ): Promise<() => Promise<void>> {
   const viewport = page.viewportSize()

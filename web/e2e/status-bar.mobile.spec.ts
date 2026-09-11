@@ -74,7 +74,10 @@ test('the phone status bar keeps every control inside the viewport', async ({
 
   // Bounded means bounded, not clipped: whatever the popup keeps below its
   // own edge has to be reachable by scrolling. This content fits today, so
-  // the check is the guard for the day it does not.
+  // the scroll is the guard for the day it does not - and a clipped popup
+  // scrolls the same way a scrollable one does, which is why the rule that
+  // separates `hidden` from `auto` is asserted beside it.
+  await expect(popup).toHaveCSS('overflow-y', 'auto')
   const scrolled = await popup.evaluate((element) => {
     element.scrollTop = element.scrollHeight
     return {
