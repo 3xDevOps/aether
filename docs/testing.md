@@ -13,9 +13,14 @@ Layers, per the design spec's testing strategy:
   route tests. The multi-member E2E row below joins members and administers
   them; it does not re-prove the matrix.
 - **Integration/E2E tests** are behind the `integration` build tag and run with
-  `make test-integration` (real Docker, real git). CI runs them on every PR in
-  the `integration` job of `.github/workflows/ci.yml`; that job is the merge
-  gate the E2E suite owns.
+  `make test-integration` (real Docker, real git), which covers only the
+  packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
+  to one package and `INTEGRATION_SKIP` leaves some out, as in
+  `make test-integration INTEGRATION_PKGS=./internal/server`. CI runs them on
+  every PR from `.github/workflows/ci.yml`: the `integration` matrix shards
+  them by package, one job each for `internal/server` and `internal/scheduler`
+  and one for the rest, and the `smoke` job runs `internal/harness` on the
+  images it builds. Those jobs are the merge gate the E2E suite owns.
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`
@@ -151,10 +156,10 @@ amount of internal testing sees it coming.
 `TestSmokeHeadlessNoLogin` is the one that runs in CI. It launches each
 headless template with no credentials at all and requires the run to fail
 for want of a login, never for want of a parseable command line - reaching
-the provider is proof the CLI accepted the flags. The `integration` job
-builds `images/standard/Dockerfile`, then `images/smoke/Dockerfile` on top
-of it to add the agent CLIs at whatever version their vendors ship that
-day, and points the gate variables at the result.
+the provider is proof the CLI accepted the flags. The `smoke` job builds
+`images/standard/Dockerfile`, then `images/smoke/Dockerfile` on top of it to
+add the agent CLIs at whatever version their vendors ship that day, and
+points the gate variables at the result.
 
 To run it locally, build the same image and name it:
 
@@ -367,6 +372,47 @@ the order the header lists it, and hang it off `OnboardingWizard`. Every
 locator a step builds is scoped to its own section, so nothing else in the
 suite changes.
 
+## Availability regression commands
+
+These focused commands map the retained regressions in the availability
+paths. They are useful before running the full gates; the package tests still
+belong in the normal CI jobs.
+
+```sh
+# Scheduler wait errors, cancellation, and durable terminal cleanup.
+go test -race ./internal/scheduler -run \
+  'TestSuperviseWaitRetriesTransportErrorUntilExit|TestSuperviseWaitCancellationDuringRetryLeavesRunLive|TestSuperviseTerminalRetriesTransportErrorUntilExit|TestExitedTerminalCleanupRetainsStateForRetry'
+
+# PTY session isolation, cancellation, and stopped-session replay.
+go test -race ./internal/ptyhost -run \
+  'TestActiveSessionsDoesNotBlockUnrelatedAttach|TestReserveDoesNotBlockUnrelatedStart|TestAttachContextCancel|TestAttachDrainHonorsContext|TestStoppedSessionClosesAttachmentAndPreservesReplay'
+
+# Direct forwarding: half-close drains; full disconnect cancels.
+go test -race ./internal/sshd -run \
+  'TestDirectTCPIPOwnerEchoAndHalfClose|TestDirectTCPIPFullDisconnectReleasesBackend|TestDirectTCPIPDisconnectCancelsAddressResolution'
+
+# Scalar cost summaries preserve metered/unmetered budget semantics.
+go test -race ./internal/store ./internal/cost -run \
+  'TestSummarizeRunCostsMatchesRollupSemantics|TestBudgetReflectsCostHistoryAcrossUpdatesAndWorkspaces|TestUnmeteredSpendNeverCountsTowardTheCap'
+
+# Real git: ignored-tree pruning, live ignore changes, and pack cancellation.
+go test -race -tags integration ./internal/gitengine -run \
+  'TestDiffWatch|TestUploadPackReturnsOnCtxCancel'
+```
+
+The Docker runtime regressions must run against a reachable, real Docker
+daemon; the in-process E2E runtime is not a substitute for these checks:
+
+```sh
+docker info
+go test -race -tags integration ./internal/runtime -run \
+  'TestDockerStartCancelDuringSetup|TestDockerStartKillsAfterLostStartReply|TestDockerStartTwiceSkipsSetup|TestDockerWaitBeforeStart|TestDockerInitReapsOrphanedDescendants'
+```
+
+`make test-integration` is the merge gate for the complete real-Docker,
+real-git integration suite. It must fail rather than silently pass when
+Docker is unavailable; run it in CI when the local host has no daemon.
+
 ## Failure-table coverage
 
 Every row of the design spec's failure table has at least one covering
@@ -384,8 +430,14 @@ layer that owns them.
 | Disk pressure | Disk chaos E2E (TTL GC under load with the branches surviving, the gauge's breakdown, the free-space floor refusing launch and relaunch); checkout GC in `internal/scheduler`; disk gauge proxy in `internal/localgw` (`TestDiskProxies`) |
 | Profile/configuration update fails or is stale | Profile E2E (manual pushes and shared-home updates); `internal/memberhome/config_test.go` (config revisions and import exclusions); browser onboarding configuration E2E |
 | Harness login expired | Profile E2E's login-home persistence (re-login writes persist the same way) |
-| Budget cap hit | Multi-member E2E (refusal, running run untouched, override); full matrix in `internal/sshd` cost tests |
+| Budget cap hit | Multi-member E2E (refusal, running run untouched, override); `TestSummarizeRunCostsMatchesRollupSemantics` and full matrix in `internal/sshd` cost tests |
 | Scheduled run on stale base | `internal/templates` schedule tests |
+| Container wait transport error | `TestSuperviseWaitRetriesTransportErrorUntilExit`, `TestSuperviseWaitCancellationDuringRetryLeavesRunLive`, and the terminal equivalent in `internal/scheduler` |
+| Exited environment cleanup | `TestExitedTerminalCleanupRetainsStateForRetry`, `TestRecoveredTerminalAttachFailurePreservesAndRetries`, and `TestRecoveredTerminalPutFailurePreservesAndRetries` in `internal/scheduler` |
+| Docker init and orphan reaping | `TestDockerInitReapsOrphanedDescendants` in `internal/runtime` against a real Docker daemon |
+| SSH port forwarding disconnect | `TestDirectTCPIPOwnerEchoAndHalfClose`, `TestDirectTCPIPFullDisconnectReleasesBackend`, and `TestDirectTCPIPDisconnectCancelsAddressResolution` |
+| Git ignored-tree watch pressure | `TestDiffWatchPrunesGitIgnoredTrees`, live-rule/tracked/negated-path regressions, `TestDiffWatchIgnoresDirectoryCreatedAfterStart`, and `TestDiffWatchPrunesExistingTreeAfterIgnoreUpdate` against real git; kernel watch counts are checked on Linux |
+| Git pack cancellation | `TestUploadPackReturnsOnCtxCancelWithBlockedOutputAfterReap` (Linux process-exit boundary) and `TestUploadPackReturnsOnCtxCancel` |
 | tailscaled down | Multi-member E2E (key members connect, tailnet-only refused with banner) |
 
 ## Rules

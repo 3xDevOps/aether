@@ -144,6 +144,7 @@ type Server struct {
 	syncChannels map[domain.MemberID]int
 	closed       bool
 	baseCtx      context.Context
+	baseCancel   context.CancelFunc
 }
 
 // New builds a server, loading (or generating) the host key.
@@ -285,23 +286,29 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("sshd: listen %s: %w", s.cfg.Addr, err)
 	}
+	serveCtx, serveCancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		serveCancel()
 		_ = ln.Close()
 		return errors.New("sshd: server closed")
 	}
 	s.ln = ln
-	s.baseCtx = ctx
+	s.baseCtx = serveCtx
+	s.baseCancel = serveCancel
 	s.mu.Unlock()
 
 	stop := context.AfterFunc(ctx, func() { _ = s.Close() })
-	defer stop()
+	defer func() {
+		stop()
+		serveCancel()
+	}()
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			if ctx.Err() != nil || s.isClosed() {
+			if serveCtx.Err() != nil || s.isClosed() {
 				return nil
 			}
 			return fmt.Errorf("sshd: accept: %w", err)
@@ -312,7 +319,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 		go func() {
 			defer s.wg.Done()
-			s.handleConn(ctx, conn)
+			s.handleConn(serveCtx, conn)
 		}()
 	}
 }
@@ -355,9 +362,11 @@ func (s *Server) Addr() net.Addr {
 // all in-flight handler goroutines to return, so after Close no handler
 // can still be calling into the store or the seam collaborators.
 func (s *Server) Close() error {
+	var cancel context.CancelFunc
 	s.mu.Lock()
 	if !s.closed {
 		s.closed = true
+		cancel = s.baseCancel
 		if s.ln != nil {
 			_ = s.ln.Close()
 		}
@@ -366,6 +375,9 @@ func (s *Server) Close() error {
 		}
 	}
 	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	s.wg.Wait()
 	return nil
 }
@@ -423,6 +435,17 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 	}
 	_ = c.SetDeadline(time.Time{})
 	defer func() { _ = sconn.Close() }()
+
+	connCtx, cancelConn := context.WithCancel(ctx)
+	defer cancelConn()
+	// ssh.Conn has no context or Done channel. Wait observes transport
+	// teardown, including a client that drops the whole SSH connection while
+	// a channel handler is blocked outside SSH I/O.
+	s.spawn(func() {
+		_ = sconn.Wait()
+		cancelConn()
+	})
+
 	member := domain.MemberID(sconn.Permissions.Extensions[memberIDExtension])
 
 	// Signature is proven now: perform any deferred bootstrap or invite
@@ -432,14 +455,14 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 		if code, ok := sconn.Permissions.Extensions[inviteCodeExtension]; ok {
 			keyLine := sconn.Permissions.Extensions[inviteKeyExtension]
 			_, display, _ := parseInviteUser(sconn.User())
-			m, jerr := s.joinInviteMember(ctx, code, keyLine, display)
+			m, jerr := s.joinInviteMember(connCtx, code, keyLine, display)
 			if jerr != nil {
 				slog.Warn("sshd: invite join failed; dropping connection", "error", jerr)
 				return
 			}
 			member = m.ID
 		} else if keyLine, ok := sconn.Permissions.Extensions[bootstrapKeyExtension]; ok {
-			m, berr := s.bootstrapKeyMember(ctx, sconn.User(), keyLine)
+			m, berr := s.bootstrapKeyMember(connCtx, sconn.User(), keyLine)
 			if berr != nil {
 				slog.Warn("sshd: deferred key bootstrap failed; dropping connection", "error", berr)
 				return
@@ -468,9 +491,9 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 	for nc := range chans {
 		switch nc.ChannelType() {
 		case "session":
-			s.spawn(func() { s.handleSession(ctx, member, nc) })
+			s.spawn(func() { s.handleSession(connCtx, member, nc) })
 		case "direct-tcpip":
-			s.spawn(func() { s.handleDirectTCPIP(ctx, member, nc) })
+			s.spawn(func() { s.handleDirectTCPIP(connCtx, member, nc) })
 		default:
 			_ = nc.Reject(ssh.UnknownChannelType, "unsupported channel type")
 		}

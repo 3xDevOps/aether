@@ -33,6 +33,9 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 		rejectDirectTCPIP(nc, ssh.Prohibited, "destination port must be between 1 and 65535")
 		return
 	}
+	if err := ctx.Err(); err != nil {
+		return
+	}
 	var addr string
 	switch {
 	case payload.DestHost == "terminal":
@@ -66,9 +69,14 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 		rejectDirectTCPIP(nc, ssh.Prohibited, "port forwarding targets must be run:<run-id> or terminal")
 		return
 	}
-	tcpConn, err := net.DialTimeout("tcp", net.JoinHostPort(addr, strconv.Itoa(int(payload.DestPort))), 10*time.Second)
+	dialer := net.Dialer{Timeout: 10 * time.Second}
+	tcpConn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(addr, strconv.Itoa(int(payload.DestPort))))
 	if err != nil {
 		rejectDirectTCPIP(nc, ssh.ConnectionFailed, err.Error())
+		return
+	}
+	if ctx.Err() != nil {
+		_ = tcpConn.Close()
 		return
 	}
 	tcp, ok := tcpConn.(*net.TCPConn)
@@ -83,8 +91,20 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 		_ = tcp.Close()
 		return
 	}
-	s.spawn(func() { ssh.DiscardRequests(reqs) })
-	proxyDirectTCPIP(ctx, tcp, ch)
+	channelCtx, cancelChannel := context.WithCancel(ctx)
+	defer cancelChannel()
+	// Request EOF marks a full channel close, not a client half-close.
+	// Keep consuming requests while the proxy is live so SSH cannot stall,
+	// and cancel the proxy once the peer has closed the whole channel.
+	s.spawn(func() {
+		for req := range reqs {
+			if req.WantReply {
+				_ = req.Reply(false, nil)
+			}
+		}
+		cancelChannel()
+	})
+	proxyDirectTCPIP(channelCtx, tcp, ch)
 	_ = tcp.Close()
 	_ = ch.Close()
 }

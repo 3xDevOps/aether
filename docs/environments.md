@@ -62,6 +62,17 @@ aether workspace init <name>
 aether workspace init <name> --base <branch>
 ```
 
+## Container process lifecycle
+
+Every newly created run and environment-terminal container enables Docker's
+minimal init. Init adopts and reaps orphaned descendants and forwards signals
+to the agent or shell.
+
+This is a creation-time setting. A container that was already running, or
+that survived a server restart, is not retrofitted or recreated just to add
+init; it keeps the runtime settings it started with. A newly created terminal
+container or run receives the setting.
+
 ## Install in the environment terminal
 
 Open the environment terminal with `aether terminal`, or open the dashboard's
@@ -69,6 +80,9 @@ terminal dock from the chevron in its header strip. This is where a member insta
 runtimes, for example with `sudo apt-get install -y postgresql-client`,
 Homebrew, or a language toolchain. The terminal is a persistent shell with
 the member home mounted at `$HOME`.
+
+Environment images must include `/bin/sh`. The terminal starts `/bin/bash -l`
+when `/bin/bash` is executable; otherwise it starts `/bin/sh -l`.
 
 Until the environment is saved, only the member home is shared with runs. The
 container layer outside `$HOME` belongs to that terminal container and is not

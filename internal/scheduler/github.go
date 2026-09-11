@@ -115,7 +115,7 @@ func (s *Scheduler) ConnectGitHub(ctx context.Context, member domain.MemberID) (
 	ctx, cancel := context.WithTimeout(ctx, githubConnectTimeout)
 	defer cancel()
 
-	sup := s.lookupTerminal(member)
+	sup := s.lookupLiveTerminal(member)
 	if sup == nil {
 		return domain.GitHubConnection{}, ErrTerminalNotRunning
 	}
@@ -258,7 +258,7 @@ func (s *Scheduler) ProbeGitHubCLI(ctx context.Context, member domain.MemberID) 
 	ctx, cancel := context.WithTimeout(ctx, githubProbeTimeout)
 	defer cancel()
 
-	sup := s.lookupTerminal(member)
+	sup := s.lookupLiveTerminal(member)
 	if sup == nil {
 		return domain.GitHubCLI{}, ErrTerminalNotRunning
 	}
@@ -273,7 +273,7 @@ func (s *Scheduler) ProbeGitHubCLI(ctx context.Context, member domain.MemberID) 
 	// error, and a container replaced under it answers for one the member
 	// no longer has. Every answer describes the terminal it was asked of,
 	// so it is only worth returning while that is still the terminal.
-	if s.lookupTerminal(member) != sup {
+	if s.lookupLiveTerminal(member) != sup {
 		return domain.GitHubCLI{}, ErrTerminalNotRunning
 	}
 	if err != nil {

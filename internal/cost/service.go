@@ -353,12 +353,17 @@ func (s *Service) status(ctx context.Context, workspace domain.WorkspaceID) (Sta
 		return Status{}, err
 	}
 	st.Budget = b
-	records, err := s.store.ListRunCosts(ctx, workspace)
+	summary, err := s.store.SummarizeRunCosts(ctx, workspace)
 	if err != nil {
 		return Status{}, err
 	}
-	for _, c := range records {
-		st.Spend.Add(c)
+	st.Spend = Rollup{
+		Runs:         summary.Runs,
+		Metered:      summary.Metered,
+		Unmetered:    summary.Unmetered,
+		InputTokens:  summary.InputTokens,
+		OutputTokens: summary.OutputTokens,
+		CostUSD:      summary.CostUSD,
 	}
 	st.State = Evaluate(b, st.Spend)
 	return st, nil

@@ -22,6 +22,14 @@ GO_TOOLCHAIN = $(shell awk ' \
   $$1 == "go" && $$2 ~ /^[0-9]/ { g = "go" $$2 } \
   END { print (t != "" ? t : g) }' go.mod)
 
+# The packages whose test files carry the `integration` build tag, minus
+# INTEGRATION_SKIP. Assigned lazily - only `test-integration` reads it. The
+# sed pair is not a no-op: grep implementations differ on whether the paths
+# start with ./, and `go test` needs the ./ to see a directory, not a module.
+INTEGRATION_PKGS = $(filter-out $(INTEGRATION_SKIP),$(shell \
+  grep -rl --include='*_test.go' -E '^//go:build .*integration' . \
+  | xargs -n1 dirname | sed -e 's|^\./||' -e 's|^|./|' | sort -u))
+
 # Release matrix. The server is Linux-only by design (see the v1 cut-line);
 # the CLI additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
@@ -37,10 +45,11 @@ build: dashboard
 test:
 	go test -race ./...
 
-# Integration tests are opt-in (they need real Docker / real git); they are
-# tagged `integration` and skipped by the plain `test` target.
+# The `integration`-tagged tests (real Docker, real git), in the packages that
+# carry them - the unit tests are `make test`'s job. CI shards it: set
+# INTEGRATION_PKGS to run one package, INTEGRATION_SKIP to run all but some.
 test-integration:
-	go test -race -tags integration ./...
+	go test -race -tags integration $(INTEGRATION_PKGS)
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
 # against a real `aether gui` gateway and a real aether-server, so it runs on

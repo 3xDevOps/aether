@@ -39,6 +39,28 @@ type diffWatch struct {
 	base     string
 	watcher  *fsnotify.Watcher
 
+	// gitIgnoredDirs is the repository-relative set of ignored directories
+	// reported by git. visibleFiles and visibleDirs are the tracked or
+	// otherwise unignored paths that must remain reachable below an ignored
+	// directory. Keeping this state from git, rather than matching only
+	// directory names, preserves tracked files and negated rules.
+	// watchedDirs is the set of directories currently registered with
+	// fsnotify. metadataDirs are deliberately retained across ignore-state
+	// reconciliation: Git metadata drives branch and ignore invalidation even
+	// though it is outside the worktree's visible file set.
+	watchedDirs  map[string]struct{}
+	metadataDirs map[string]struct{}
+
+	gitIgnoredDirs map[string]struct{}
+	visibleFiles   map[string]struct{}
+	visibleDirs    map[string]struct{}
+
+	// ignoreRefreshPending coalesces filesystem events that can change Git's
+	// answer. In particular, a new file below an ignored directory may be
+	// re-included by a negation that did not exist at startup.
+	ignoreRefreshPending bool
+	ignoreRefreshAt      time.Time
+
 	lastChange atomic.Int64 // unix nanos of the last fsnotify event; 0 = none
 
 	stopOnce sync.Once
@@ -103,18 +125,27 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 		return fmt.Errorf("gitengine: start watcher: %w", err)
 	}
 	w := &diffWatch{
-		e:        e,
-		run:      run,
-		checkout: checkout,
-		base:     meta.Base,
-		watcher:  watcher,
-		done:     make(chan struct{}),
-		finished: make(chan struct{}),
+		e:            e,
+		run:          run,
+		checkout:     checkout,
+		base:         meta.Base,
+		watcher:      watcher,
+		watchedDirs:  make(map[string]struct{}),
+		metadataDirs: make(map[string]struct{}),
+		done:         make(chan struct{}),
+		finished:     make(chan struct{}),
 		// Nothing has been published yet, so the MinInterval floor must not
 		// delay the first snapshot: only QuietPeriod gates it.
 		lastSnap: time.Now().Add(-e.cfg.MinInterval),
 		lastHead: head,
 		lastTree: lastTree,
+	}
+	if err := w.loadIgnoreState(ctx); err != nil {
+		// A failure to ask git about excludes must never turn a working
+		// checkout blind. Falling back to the full walk costs watches, but
+		// preserves change detection and makes the failure visible.
+		slog.Warn("gitengine: cannot load git ignore state; watching all directories",
+			"run", string(run), "error", err)
 	}
 	if err := w.addRecursive(checkout); err != nil {
 		_ = watcher.Close()
@@ -127,9 +158,10 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	}
 	for _, dir := range []string{
 		filepath.Join(checkout, ".git"),
+		filepath.Join(checkout, ".git", "info"),
 		refDir,
 	} {
-		if err := watcher.Add(dir); err != nil {
+		if err := w.addWatch(dir, true); err != nil {
 			_ = watcher.Close()
 			return fmt.Errorf("gitengine: watch %s: %w", dir, err)
 		}
@@ -188,8 +220,11 @@ func (w *diffWatch) underGit(path string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// ignored reports whether path (absolute) falls outside the watched tree or
-// has an ignored component. .git paths are handled separately by underGit.
+// ignored reports whether path (absolute) falls outside the watched tree,
+// belongs to Aether's own metadata, or is inside a git-ignored directory
+// that has no tracked or otherwise unignored descendant. Git supplies the
+// ignore state; the visible-path sets keep tracked files and negations
+// reachable even when their parent directory itself is ignored.
 func (w *diffWatch) ignored(path string) bool {
 	rel, err := filepath.Rel(w.checkout, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -203,7 +238,239 @@ func (w *diffWatch) ignored(path string) bool {
 			return true
 		}
 	}
+	return w.gitIgnoredPath(rel)
+}
+
+// gitIgnoredPath applies the current Git ignore snapshot to a
+// checkout-relative path. A directory with a visible descendant is never
+// pruned: a tracked file remains watchable even when its directory matches
+// an ignore rule, and a path re-included by a negated rule appears in the
+// visible set as an untracked file. The snapshot is refreshed after
+// coalesced changes to ignore files, the index, or a new path below a
+// pruned directory.
+func (w *diffWatch) gitIgnoredPath(path string) bool {
+	if filepath.IsAbs(path) {
+		rel, err := filepath.Rel(w.checkout, path)
+		if err != nil {
+			return true
+		}
+		path = rel
+	}
+	if len(w.gitIgnoredDirs) == 0 {
+		return false
+	}
+	rel := filepath.ToSlash(filepath.Clean(path))
+	if rel == "." || rel == "" {
+		return false
+	}
+	for cur := rel; cur != "." && cur != ""; {
+		if _, ignored := w.gitIgnoredDirs[cur]; ignored {
+			if _, visible := w.visibleFiles[rel]; visible {
+				return false
+			}
+			if _, visible := w.visibleDirs[rel]; visible {
+				return false
+			}
+			return true
+		}
+		slash := strings.LastIndexByte(cur, '/')
+		if slash < 0 {
+			break
+		}
+		cur = cur[:slash]
+	}
 	return false
+}
+
+// ignoreStateEvent identifies events whose contents can change Git's ignore
+// answer. The index matters too: `git add -f` makes an existing ignored file
+// visible without changing the working tree.
+func (w *diffWatch) ignoreStateEvent(path string) bool {
+	rel, err := filepath.Rel(w.checkout, path)
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if rel == ".git/index" || strings.HasPrefix(rel, ".git/index.") {
+		return true
+	}
+	if rel == ".git/info" || strings.HasPrefix(rel, ".git/info/exclude") {
+		return true
+	}
+	return filepath.Base(rel) == ".gitignore"
+}
+
+// requestIgnoreRefresh coalesces invalidation events into one Git query
+// after the current quiet period. It deliberately does not reset an already
+// pending deadline: a burst of generated-file events stays one refresh.
+func (w *diffWatch) requestIgnoreRefresh(now time.Time) {
+	if w.ignoreRefreshPending {
+		return
+	}
+	w.ignoreRefreshPending = true
+	w.ignoreRefreshAt = now.Add(w.e.cfg.QuietPeriod)
+}
+
+// reconcileIgnoreState refreshes Git's prune decision and then reconciles the
+// actual fsnotify set against one walk using the new state. On query failure,
+// stale prune state is cleared before restoring a full walk: missing events
+// are safer than silently leaving a newly visible subtree unwatched.
+func (w *diffWatch) reconcileIgnoreState(ctx context.Context) {
+	if err := w.loadIgnoreState(ctx); err != nil {
+		w.gitIgnoredDirs = nil
+		w.visibleFiles = nil
+		w.visibleDirs = nil
+		slog.Warn("gitengine: cannot refresh git ignore state; watching all directories",
+			"run", string(w.run), "error", err)
+	} else {
+		slog.Debug("gitengine: refreshed git ignore state", "run", string(w.run))
+	}
+	if err := w.reconcileWatches(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		slog.Warn("gitengine: diff watch cannot reconcile subtree; its changes may not produce snapshots",
+			"run", string(w.run), "error", err)
+	}
+}
+
+// loadIgnoreState asks git for both sides of the prune decision. The
+// ignored-directory listing lets the walk skip a generated tree without
+// visiting every child; the visible listing keeps all tracked files and
+// files re-included by negation reachable below an ignored parent.
+func (w *diffWatch) loadIgnoreState(ctx context.Context) error {
+	visible, err := w.e.git(ctx, w.checkout,
+		"ls-files", "-z", "--cached", "--others", "--exclude-standard", "--")
+	if err != nil {
+		return fmt.Errorf("gitengine: list visible paths: %w", err)
+	}
+	ignored, err := w.e.git(ctx, w.checkout,
+		"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--")
+	if err != nil {
+		return fmt.Errorf("gitengine: list ignored directories: %w", err)
+	}
+
+	visibleFiles := make(map[string]struct{})
+	visibleDirs := make(map[string]struct{})
+	for item := range strings.SplitSeq(visible, "\x00") {
+		item = strings.TrimSuffix(item, "/")
+		if item == "" {
+			continue
+		}
+		item = filepath.ToSlash(filepath.Clean(item))
+		visibleFiles[item] = struct{}{}
+		for dir := item; ; {
+			slash := strings.LastIndexByte(dir, '/')
+			if slash < 0 {
+				break
+			}
+			dir = dir[:slash]
+			if dir == "" {
+				break
+			}
+			visibleDirs[dir] = struct{}{}
+		}
+	}
+
+	ignoredDirs := make(map[string]struct{})
+	for item := range strings.SplitSeq(ignored, "\x00") {
+		if !strings.HasSuffix(item, "/") {
+			continue
+		}
+		item = strings.TrimSuffix(item, "/")
+		if item == "" {
+			continue
+		}
+		item = filepath.ToSlash(filepath.Clean(item))
+		ignoredDirs[item] = struct{}{}
+	}
+	w.visibleFiles = visibleFiles
+	w.visibleDirs = visibleDirs
+	w.gitIgnoredDirs = ignoredDirs
+	return nil
+}
+
+// addWatch registers one directory exactly once and records successful
+// registrations so reconciliation can remove obsolete descendants.
+func (w *diffWatch) addWatch(path string, metadata bool) error {
+	if _, ok := w.watchedDirs[path]; ok {
+		if metadata {
+			w.metadataDirs[path] = struct{}{}
+		}
+		return nil
+	}
+	if err := w.watcher.Add(path); err != nil {
+		return err
+	}
+	w.watchedDirs[path] = struct{}{}
+	if metadata {
+		w.metadataDirs[path] = struct{}{}
+	}
+	return nil
+}
+
+func (w *diffWatch) removeWatch(path string) {
+	if err := w.watcher.Remove(path); err != nil &&
+		!errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fsnotify.ErrNonExistentWatch) {
+		slog.Warn("gitengine: diff watch cannot remove directory watch",
+			"run", string(w.run), "dir", path, "error", err)
+	}
+	delete(w.watchedDirs, path)
+}
+
+// reachableDirs returns the directories that should be watched for the
+// current ignore snapshot. Ignored directories remain sentinels, while
+// visible and tracked/reincluded ancestry is traversed normally.
+func (w *diffWatch) reachableDirs() (map[string]struct{}, error) {
+	reachable := make(map[string]struct{}, len(w.watchedDirs))
+	for path := range w.metadataDirs {
+		reachable[path] = struct{}{}
+	}
+	err := filepath.WalkDir(w.checkout, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if path == w.checkout {
+				return err
+			}
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		reachable[path] = struct{}{}
+		if path != w.checkout && w.ignored(path) {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return reachable, err
+}
+
+// reconcileWatches removes directories no longer reachable under the current
+// Git ignore state before adding newly reachable ones. Metadata watches are
+// included in the desired set so .git/info and branch refs survive pruning.
+func (w *diffWatch) reconcileWatches() error {
+	reachable, err := w.reachableDirs()
+	if err != nil {
+		return err
+	}
+	for path := range w.watchedDirs {
+		if _, keep := reachable[path]; keep {
+			continue
+		}
+		w.removeWatch(path)
+	}
+	for path := range reachable {
+		if _, watched := w.watchedDirs[path]; watched {
+			continue
+		}
+		if err := w.addWatch(path, false); err != nil {
+			if path == w.checkout {
+				return fmt.Errorf("gitengine: watch %s: %w", path, err)
+			}
+			if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
+				slog.Warn("gitengine: diff watch cannot observe subtree; its changes will not produce snapshots",
+					"run", string(w.run), "dir", path, "error", err)
+			}
+		}
+	}
+	return nil
 }
 
 // addRecursive watches root and every directory below it, skipping ignored
@@ -222,13 +489,22 @@ func (w *diffWatch) addRecursive(root string) error {
 			return nil
 		}
 		if path != root && w.ignored(path) {
+			// Keep a watch on the ignored directory itself. A future Create or
+			// Rename may be re-included by a negated rule; watching only the
+			// root gives reconciliation a chance to discover it without
+			// paying for every ignored descendant.
+			if err := w.addWatch(path, false); err != nil &&
+				!errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
+				slog.Warn("gitengine: diff watch cannot observe ignored directory",
+					"run", string(w.run), "dir", path, "error", err)
+			}
 			return filepath.SkipDir
 		}
-		if err := w.watcher.Add(path); err != nil {
+		if err := w.addWatch(path, false); err != nil {
 			if path == root {
 				return fmt.Errorf("gitengine: watch %s: %w", path, err)
 			}
-			if !errors.Is(err, fs.ErrNotExist) {
+			if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
 				slog.Warn("gitengine: diff watch cannot observe subtree; its changes will not produce snapshots",
 					"run", string(w.run), "dir", path, "error", err)
 			}
@@ -252,35 +528,98 @@ func (w *diffWatch) loop() {
 				return
 			}
 			now := time.Now()
+			if ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
+				// Descendant watches follow their old inodes across a rename.
+				// Remove them before the same paths can name replacement dirs.
+				prefix := ev.Name + string(filepath.Separator)
+				for path := range w.watchedDirs {
+					if path == ev.Name || strings.HasPrefix(path, prefix) {
+						w.removeWatch(path)
+						w.requestIgnoreRefresh(now)
+					}
+				}
+			}
 			if w.underGit(ev.Name) {
 				w.headDirty = true
 				w.headEvent = now
 				w.headRetryAt = time.Time{}
+				if w.ignoreStateEvent(ev.Name) {
+					w.requestIgnoreRefresh(now)
+				}
 				w.arm(timer, now)
 				continue
 			}
+			newDir := false
+			if ev.Op.Has(fsnotify.Create) || ev.Op.Has(fsnotify.Rename) {
+				if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
+					newDir = true
+				}
+			}
+			if w.ignoreStateEvent(ev.Name) {
+				w.requestIgnoreRefresh(now)
+			}
+			// A new directory was absent from the previous Git listing, so
+			// its old visibility is unknowable. Add only its root sentinel,
+			// refresh Git's state, and recurse after classification; otherwise
+			// a newly-created ignored tree would be watched in full forever.
+			if newDir {
+				w.requestIgnoreRefresh(now)
+				if err := w.addWatch(ev.Name, false); err != nil &&
+					!errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
+					slog.Warn("gitengine: diff watch cannot observe new directory",
+						"run", string(w.run), "dir", ev.Name, "error", err)
+				}
+				w.arm(timer, now)
+				continue
+			}
+			// An ignored directory is watched as a sentinel. A Create or
+			// Rename below it may be made visible by a negated rule, so
+			// reconcile once for the burst rather than querying Git here.
+			if ev.Op.Has(fsnotify.Create) || ev.Op.Has(fsnotify.Rename) {
+				if w.ignored(ev.Name) {
+					w.requestIgnoreRefresh(now)
+				}
+			}
 			if w.ignored(ev.Name) {
+				if w.ignoreRefreshPending {
+					w.arm(timer, now)
+				}
 				continue
 			}
 			w.lastChange.Store(now.UnixNano())
 			w.lastEvent = now
 			w.dirty = true
-			if ev.Op.Has(fsnotify.Create) {
-				if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
-					if err := w.addRecursive(ev.Name); err != nil && !errors.Is(err, fs.ErrNotExist) {
-						slog.Warn("gitengine: diff watch cannot observe new subtree; its changes will not produce snapshots",
-							"run", string(w.run), "dir", ev.Name, "error", err)
-					}
-				}
-			}
 			w.arm(timer, now)
-		case _, ok := <-w.watcher.Errors:
+		case err, ok := <-w.watcher.Errors:
 			if !ok {
 				return
 			}
+			slog.Warn("gitengine: diff watcher error; refreshing checkout",
+				"run", string(w.run), "error", err)
+			if errors.Is(err, fsnotify.ErrEventOverflow) {
+				for path := range w.watchedDirs {
+					w.removeWatch(path)
+				}
+			}
+			now := time.Now()
+			w.requestIgnoreRefresh(now)
+			w.arm(timer, now)
 		case <-timer.C:
 			now := time.Now()
-			if w.headDirty {
+			if w.ignoreRefreshPending && !w.ignoreRefreshAt.After(now) {
+				w.ignoreRefreshPending = false
+				w.ignoreRefreshAt = time.Time{}
+				ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+				w.reconcileIgnoreState(ctx)
+				cancel()
+				// The ignore/index transition can reveal a path whose
+				// directory was previously pruned. Treat the reconciliation
+				// as a change; tree equality still suppresses empty events.
+				w.lastChange.Store(now.UnixNano())
+				w.lastEvent = now
+				w.dirty = true
+			}
+			if w.headDirty && !now.Before(w.headEvent.Add(w.e.cfg.QuietPeriod)) && !now.Before(w.headRetryAt) {
 				ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 				if w.checkHead(ctx) {
 					w.headDirty = false
@@ -293,24 +632,18 @@ func (w *diffWatch) loop() {
 					w.headRetryAt = time.Now().Add(retry)
 				}
 				cancel()
-				if w.headDirty || w.dirty {
-					w.arm(timer, time.Now())
+			}
+			if w.dirty {
+				quiet := now.Sub(w.lastEvent) >= w.e.cfg.QuietPeriod
+				rested := now.Sub(w.lastSnap) >= w.e.cfg.MinInterval
+				overdue := now.Sub(w.lastSnap) >= w.e.cfg.MaxInterval
+				if (quiet && rested) || overdue {
+					w.dirty = false
+					w.snapshot()
+					w.lastSnap = time.Now()
 				}
-				continue
 			}
-			if !w.dirty {
-				continue
-			}
-			quiet := now.Sub(w.lastEvent) >= w.e.cfg.QuietPeriod
-			rested := now.Sub(w.lastSnap) >= w.e.cfg.MinInterval
-			overdue := now.Sub(w.lastSnap) >= w.e.cfg.MaxInterval
-			if (quiet && rested) || overdue {
-				w.dirty = false
-				w.snapshot()
-				w.lastSnap = time.Now()
-			} else {
-				w.arm(timer, now)
-			}
+			w.arm(timer, time.Now())
 		case <-w.done:
 			return
 		}
@@ -322,13 +655,9 @@ func (w *diffWatch) loop() {
 // lastSnap+MaxInterval (the sustained-churn bound). A HEAD-only event is
 // gated by headEvent and does not affect the tree-change deadline.
 func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
-	deadline := w.lastEvent.Add(w.e.cfg.QuietPeriod)
-	if w.headDirty {
-		deadline = w.headEvent.Add(w.e.cfg.QuietPeriod)
-		if w.headRetryAt.After(deadline) {
-			deadline = w.headRetryAt
-		}
-	} else {
+	var deadline time.Time
+	if w.dirty {
+		deadline = w.lastEvent.Add(w.e.cfg.QuietPeriod)
 		if floor := w.lastSnap.Add(w.e.cfg.MinInterval); deadline.Before(floor) {
 			deadline = floor
 		}
@@ -336,9 +665,17 @@ func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
 			deadline = churn
 		}
 	}
-	d := deadline.Sub(now)
-	if d < 0 {
-		d = 0
+	if w.headDirty {
+		headDeadline := w.headEvent.Add(w.e.cfg.QuietPeriod)
+		if w.headRetryAt.After(headDeadline) {
+			headDeadline = w.headRetryAt
+		}
+		if deadline.IsZero() || headDeadline.Before(deadline) {
+			deadline = headDeadline
+		}
+	}
+	if w.ignoreRefreshPending && (deadline.IsZero() || w.ignoreRefreshAt.Before(deadline)) {
+		deadline = w.ignoreRefreshAt
 	}
 	if !timer.Stop() {
 		select {
@@ -346,7 +683,9 @@ func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
 		default:
 		}
 	}
-	timer.Reset(d)
+	if !deadline.IsZero() {
+		timer.Reset(max(0, deadline.Sub(now)))
+	}
 }
 
 // snapshot records the checkout's content as a git tree, captures its diff

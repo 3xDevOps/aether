@@ -10,6 +10,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 type forwardTestPayload struct {
@@ -87,6 +88,193 @@ func TestDirectTCPIPOwnerEchoAndHalfClose(t *testing.T) {
 	readForwardEOF(t, ch)
 	if err := <-serverDone; err != nil {
 		t.Fatalf("echo server: %v", err)
+	}
+}
+func TestDirectTCPIPFullDisconnectReleasesBackend(t *testing.T) {
+	e := newTestEnv(t, nil)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	e.runs.setAddr("127.0.0.1")
+
+	backendConn := make(chan net.Conn, 1)
+	backendFIN := make(chan struct{})
+	backendDone := make(chan struct{})
+	releaseBackend := make(chan struct{})
+	go func() {
+		defer close(backendDone)
+		conn, aerr := listener.Accept()
+		if aerr != nil {
+			return
+		}
+		backendConn <- conn
+		buf := make([]byte, 64)
+		for {
+			_, rerr := conn.Read(buf)
+			if errors.Is(rerr, io.EOF) {
+				close(backendFIN)
+				<-releaseBackend
+				_ = conn.Close()
+				return
+			}
+			if rerr != nil {
+				_ = conn.Close()
+				return
+			}
+		}
+	}()
+
+	client := e.dial(t)
+	ch, reqs, err := client.OpenChannel("direct-tcpip", ssh.Marshal(forwardTestPayload{
+		DestHost: "run:" + string(e.run.ID),
+		DestPort: uint32(listener.Addr().(*net.TCPAddr).Port),
+		OrigHost: "127.0.0.1",
+	}))
+	if err != nil {
+		t.Fatalf("OpenChannel: %v", err)
+	}
+	go func() {
+		for range reqs {
+		}
+	}()
+	if _, err = ch.Write([]byte("hello")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var backend net.Conn
+	select {
+	case backend = <-backendConn:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forward backend was not opened")
+	}
+	if err = client.Close(); err != nil {
+		t.Fatalf("close SSH client: %v", err)
+	}
+	select {
+	case <-backendFIN:
+	case <-time.After(2 * time.Second):
+		t.Fatal("backend did not observe the client's full disconnect")
+	}
+
+	// A stale forward must not poison the connection's ability to serve
+	// another control channel and forward.
+	freshListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("fresh listen: %v", err)
+	}
+	defer func() { _ = freshListener.Close() }()
+	freshDone := make(chan struct{})
+	go func() {
+		conn, aerr := freshListener.Accept()
+		if aerr != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = io.Copy(conn, conn)
+		close(freshDone)
+	}()
+
+	freshClient := e.dial(t)
+	pipe := openSubsystem(t, freshClient, protocol.SubsystemControl, nil)
+	if err = protocol.NewClient(pipe).Call(protocol.MethodServerInfo, struct{}{}, nil); err != nil {
+		t.Fatalf("fresh control call: %v", err)
+	}
+	freshCh, freshReqs, err := freshClient.OpenChannel("direct-tcpip", ssh.Marshal(forwardTestPayload{
+		DestHost: "run:" + string(e.run.ID),
+		DestPort: uint32(freshListener.Addr().(*net.TCPAddr).Port),
+		OrigHost: "127.0.0.1",
+	}))
+	if err != nil {
+		t.Fatalf("fresh OpenChannel: %v", err)
+	}
+	go func() {
+		for range freshReqs {
+		}
+	}()
+	if _, err := freshCh.Write([]byte("fresh")); err != nil {
+		t.Fatalf("fresh write: %v", err)
+	}
+	if got := readForwardBytes(t, freshCh, 5); string(got) != "fresh" {
+		t.Fatalf("fresh echo = %q, want fresh", got)
+	}
+	_ = freshCh.Close()
+	_ = freshClient.Close()
+	select {
+	case <-freshDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fresh forward did not close")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		_ = e.srv.Close()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+	case <-time.After(2 * time.Second):
+		// Unblock the pre-fix proxy so this test can fail without leaving
+		// Server.Close stuck in a test cleanup.
+		_ = backend.Close()
+		select {
+		case <-closeDone:
+		case <-time.After(2 * time.Second):
+		}
+		t.Fatal("Server.Close waited on the disconnected forward")
+	}
+	close(releaseBackend)
+	select {
+	case <-backendDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("backend helper did not exit")
+	}
+}
+func TestDirectTCPIPDisconnectCancelsAddressResolution(t *testing.T) {
+	e := newTestEnv(t, nil)
+	started, release, canceled := e.runs.blockContainerAddr()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+
+	client := e.dial(t)
+	openResult := make(chan error, 1)
+	go func() {
+		_, _, openErr := client.OpenChannel("direct-tcpip", ssh.Marshal(forwardTestPayload{
+			DestHost: "run:" + string(e.run.ID),
+			DestPort: 1,
+			OrigHost: "127.0.0.1",
+		}))
+		openResult <- openErr
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("container address resolution did not start")
+	}
+	_ = client.Close()
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		close(release)
+		select {
+		case <-openResult:
+		case <-time.After(2 * time.Second):
+		}
+		t.Fatal("disconnect did not cancel container address resolution")
+	}
+	select {
+	case err := <-openResult:
+		if err == nil {
+			t.Fatal("OpenChannel succeeded after client disconnect")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OpenChannel remained blocked after client disconnect")
 	}
 }
 

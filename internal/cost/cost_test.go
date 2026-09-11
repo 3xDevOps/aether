@@ -1,6 +1,8 @@
 package cost
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -49,6 +51,121 @@ func TestRollUpAttributesPerMemberAndKeepsUnmeteredOut(t *testing.T) {
 	// An empty workspace is not advisory: nothing is missing.
 	if empty := Roll("ws2", nil); empty.Total.Runs != 0 || empty.Total.Advisory() {
 		t.Fatalf("empty rollup = %+v, want zero and not advisory", empty.Total)
+	}
+}
+
+// TestBudgetReflectsCostHistoryAcrossUpdatesAndWorkspaces covers the
+// consumer-facing budget result after a metered replacement/replay, an
+// unmetered run, budget deletion, and a second workspace's independent spend.
+func TestBudgetReflectsCostHistoryAcrossUpdatesAndWorkspaces(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "cost.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("NewInProc: %v", err)
+	}
+	defer func() { _ = bus.Close() }()
+	svc, err := New(Config{Store: db, Bus: bus})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	w1 := &domain.Workspace{Name: "one"}
+	if err = db.CreateWorkspace(ctx, w1); err != nil {
+		t.Fatalf("CreateWorkspace one: %v", err)
+	}
+	w2 := &domain.Workspace{Name: "two"}
+	if err = db.CreateWorkspace(ctx, w2); err != nil {
+		t.Fatalf("CreateWorkspace two: %v", err)
+	}
+	member := &domain.Member{
+		DisplayName: "Ada", TailnetLogin: "ada@example", Role: domain.RoleCollaborator,
+	}
+	if err = db.CreateMember(ctx, member); err != nil {
+		t.Fatalf("CreateMember: %v", err)
+	}
+	newRun := func(workspace domain.WorkspaceID) *domain.Run {
+		t.Helper()
+		r := &domain.Run{
+			WorkspaceID: workspace,
+			MemberID:    member.ID,
+			Task:        "task",
+			Harness:     "claude",
+			Mode:        domain.LaunchTUI,
+			Status:      domain.RunRunning,
+		}
+		if createErr := db.CreateRun(ctx, r); createErr != nil {
+			t.Fatalf("CreateRun: %v", createErr)
+		}
+		return r
+	}
+	r1, r2, r3 := newRun(w1.ID), newRun(w1.ID), newRun(w2.ID)
+	put := func(c *store.RunCost) {
+		t.Helper()
+		if putErr := db.PutRunCost(ctx, c); putErr != nil {
+			t.Fatalf("PutRunCost %s: %v", c.RunID, putErr)
+		}
+	}
+	// An unmetered marker is upgraded by the adapter result. Replaying the
+	// same metered result must still leave one run in the aggregate.
+	put(&store.RunCost{
+		RunID: r1.ID, WorkspaceID: w1.ID, MemberID: member.ID,
+		InputTokens: 999, OutputTokens: 999, CostUSD: 99,
+	})
+	put(&store.RunCost{
+		RunID: r2.ID, WorkspaceID: w1.ID, MemberID: member.ID,
+	})
+	put(&store.RunCost{
+		RunID: r3.ID, WorkspaceID: w2.ID, MemberID: member.ID,
+		InputTokens: 300, OutputTokens: 30, CostUSD: 1.25, Metered: true,
+	})
+	metered := &store.RunCost{
+		RunID: r1.ID, WorkspaceID: w1.ID, MemberID: member.ID,
+		InputTokens: 1200, OutputTokens: 340, CostUSD: 8, Metered: true,
+	}
+	put(metered)
+	put(metered)
+
+	got, err := svc.SetBudget(ctx, w1.ID, Change{LimitUSD: 10, WarnUSD: 8}, member.ID)
+	if err != nil {
+		t.Fatalf("SetBudget: %v", err)
+	}
+	wantSpend := Rollup{Runs: 2, Metered: 1, Unmetered: 1, InputTokens: 1200, OutputTokens: 340, CostUSD: 8}
+	if got.State != events.BudgetWarn || got.Budget == nil || got.Spend != wantSpend {
+		t.Fatalf("budget = %+v, want warn with one metered and one unmetered run", got)
+	}
+
+	other, err := svc.Budget(ctx, w2.ID)
+	if err != nil {
+		t.Fatalf("Budget other workspace: %v", err)
+	}
+	wantOther := Rollup{Runs: 1, Metered: 1, InputTokens: 300, OutputTokens: 30, CostUSD: 1.25}
+	if other.Budget != nil || other.State != events.BudgetOK || other.Spend != wantOther {
+		t.Fatalf("other workspace budget = %+v, want only its own spend", other)
+	}
+
+	if err = db.DeleteRun(ctx, r2.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	afterDelete, err := svc.Budget(ctx, w1.ID)
+	if err != nil {
+		t.Fatalf("Budget after run deletion: %v", err)
+	}
+	wantAfterDelete := Rollup{Runs: 1, Metered: 1, InputTokens: 1200, OutputTokens: 340, CostUSD: 8}
+	if afterDelete.State != events.BudgetWarn || afterDelete.Spend != wantAfterDelete {
+		t.Fatalf("budget after run deletion = %+v, want metered spend only", afterDelete)
+	}
+
+	cleared, err := svc.SetBudget(ctx, w1.ID, Change{}, member.ID)
+	if err != nil {
+		t.Fatalf("clear budget: %v", err)
+	}
+	if cleared.Budget != nil || cleared.State != events.BudgetOK || cleared.Spend != wantAfterDelete {
+		t.Fatalf("cleared budget = %+v, want no cap with spend preserved", cleared)
 	}
 }
 
