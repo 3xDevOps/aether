@@ -57,6 +57,37 @@ func TestMemberHarnessDefinitionResolution(t *testing.T) {
 	}
 }
 
+// A shipped name always wins over a stored row that carries it. Registering
+// one is refused at the RPC, but rows written before Aether shipped the name
+// - omp is the case that happened - are still in the store, and there is no
+// command that removes them. They stay inert: the launch uses the registry.
+func TestShippedNameWinsOverAStoredDefinition(t *testing.T) {
+	e := newTestEnv(t, nil)
+	storeMemberDefinition(t, e, e.member.ID, harness.Definition{
+		Name:            "omp",
+		TUIArgs:         []string{"myomp", "{task}"},
+		HeadlessArgs:    []string{"myomp", "-p", "{task}"},
+		Executable:      "myomp",
+		ProfileRoot:     "/root/.myomp",
+		CredentialPaths: []string{"/root/.myomp"},
+	})
+
+	argv, prof, err := e.sched.command(t.Context(), e.member.ID, "omp", domain.LaunchTUI, "go")
+	if err != nil {
+		t.Fatalf("omp did not resolve: %v", err)
+	}
+	shipped, ok := harness.Lookup("omp")
+	if !ok {
+		t.Fatal("omp is not in the registry")
+	}
+	if got, want := fmt.Sprint(argv), fmt.Sprint([]string{"omp", "--auto-approve", "go"}); got != want {
+		t.Fatalf("argv = %s, want the shipped launch %s", got, want)
+	}
+	if prof.LocalRoot != shipped.LocalRoot {
+		t.Fatalf("profile root = %q, want the shipped %q", prof.LocalRoot, shipped.LocalRoot)
+	}
+}
+
 // The server-wide admin spec pins a name for everyone; a member definition
 // must not override it.
 func TestServerSpecWinsOverMemberDefinition(t *testing.T) {

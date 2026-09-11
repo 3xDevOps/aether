@@ -368,8 +368,10 @@ or `OPENAI_API_KEY` in the server environment is the API-key alternative.
 `omp` is a shipped name, and a shipped name always wins over a member's own
 definition of the same name. If you ran `aether agent add omp` before Aether
 shipped it, your stored definition is ignored from now on and runs use the
-launch template in the table above. Delete it, or define your build under a
-different name.
+launch template in the table above. The row stays where it is - there is no
+command that removes one, and `aether agent list` keeps printing it as
+`agent omp member` next to `agent omp shipped`. To launch your own build,
+register it under a name Aether does not ship.
 
 ### opencode
 
@@ -416,8 +418,9 @@ credential paths are explicit absolute container paths under `/root` or
 `/home/aether`; credentials must be inside the profile root when one is
 configured. Deny names are basenames only.
 
-For example, an administrator can pin OMP without adding vendor logic to
-Aether (a member would instead just run `aether agent add omp`):
+For example, an administrator can point `omp` at a different build for every
+member. A shipped name is the one case a member cannot register themselves,
+so an administrator definition is the only way to change one:
 
 ```json
 {
