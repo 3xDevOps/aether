@@ -659,6 +659,24 @@ describe('connect', () => {
     stop()
   })
 
+  it('names the tailnet identity outage instead of an unreachable server', async () => {
+    const store = createRootStore()
+    const client = fakeApi({
+      capabilities: vi.fn(async () => {
+        throw new ApiError(
+          503,
+          '/capabilities: tailnet identity unavailable: sshd: tailnet whois: dial unix /var/run/tailscale/tailscaled.sock: connect: no such file or directory',
+        )
+      }),
+    })
+    const stop = connect(store, client)
+
+    await vi.waitFor(() => expect(store.getState().unreachable).toBe('identity'))
+    expect(store.getState().hydrationError?.startsWith('tailnet identity unavailable: ')).toBe(true)
+    expect(store.getState().hydrated).toBe(false)
+    stop()
+  })
+
   it('hydrates onboarding directly for an unlinked local gateway', async () => {
     const store = createRootStore()
     const client = fakeApi({

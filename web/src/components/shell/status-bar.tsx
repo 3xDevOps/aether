@@ -41,6 +41,7 @@ const unreachableLabel: Record<UnreachableKind, string> = {
   gateway: 'dashboard gateway is gone - restart aether gui',
   server: 'server unreachable over SSH - check the server and network; retrying',
   refused: 'the gateway refused this device - it is not identified as a member',
+  identity: 'the server cannot identify this device - check tailscaled on the server host',
 }
 
 /**

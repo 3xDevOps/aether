@@ -37,6 +37,13 @@ function classifyUnreachable(err: unknown): UnreachableKind | null {
   return null
 }
 
+/** Names why the gateway refused the capabilities probe. */
+function refusalKind(err: ApiError): UnreachableKind | null {
+  if (err.status === 403) return 'refused'
+  if (err.message.includes('tailnet identity unavailable')) return 'identity'
+  return classifyUnreachable(err)
+}
+
 /** Fills the store from the server. False means the server was unreachable. */
 export async function hydrate(store: RootStore, client: Api = api): Promise<boolean> {
   const s = store.getState()
@@ -454,9 +461,10 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (probe && 'refused' in probe) {
       // The gateway said why; the handshake status never reaches this code,
       // so the stream keeps retrying and this stays the reason. A 403 is
-      // the gateway turning this device away, not a dead hop.
+      // the gateway turning this device away, and a 503 naming the tailnet
+      // identity is its own daemon not answering; neither is a dead hop.
       const { refused } = probe
-      store.getState().setUnreachable(refused.status === 403 ? 'refused' : classifyUnreachable(refused))
+      store.getState().setUnreachable(refusalKind(refused))
       // The client prefixes its own request path; the gateway's words are
       // what the page shows.
       store.getState().setHydrated(false, refused.message.replace(/^[^\s:]+: /, ''))

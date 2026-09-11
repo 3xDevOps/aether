@@ -86,6 +86,17 @@ function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
     }
   }
 
+  if (kind === 'identity') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Identity unavailable',
+      title: 'The server cannot identify this device',
+      description:
+        'The server answered but could not ask its Tailscale daemon who this device is, so nobody is signed in. On the server host, check that tailscaled is running and that the server can read its socket, then retry. The details below carry what the server saw.',
+      action: 'Retry connection',
+    }
+  }
+
   if (kind === 'gateway') {
     return {
       icon: Unplug,
