@@ -203,3 +203,30 @@ func TestResumeAtANewSizeStillResizes(t *testing.T) {
 		t.Fatalf("session geometry = %dx%d, want 132x43", s.cols, s.rows)
 	}
 }
+
+// The adapter's tap has no terminal to measure. It must neither size the
+// PTY nor count as company that stops a lone watcher sizing it.
+func TestTapNeverSizesTheSession(t *testing.T) {
+	tr, err := newCastWriter(filepath.Join(t.TempDir(), "cast"), 80, 24)
+	if err != nil {
+		t.Fatalf("newCastWriter: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.close() })
+	s := &session{ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 120, rows: 30}
+
+	tap := newClient(tapConn{}, AttachClient{ReadOnly: true})
+	if aerr := s.addClient(tap); aerr != nil {
+		t.Fatalf("addClient tap: %v", aerr)
+	}
+	if s.cols != 120 || s.rows != 30 {
+		t.Fatalf("the tap resized the PTY to %dx%d", s.cols, s.rows)
+	}
+
+	mirror := newClient(nil, AttachClient{Cols: 200, Rows: 50, ReadOnly: true})
+	if aerr := s.addClient(mirror); aerr != nil {
+		t.Fatalf("addClient mirror: %v", aerr)
+	}
+	if s.cols != 200 || s.rows != 50 {
+		t.Fatalf("session geometry = %dx%d, want the lone watcher's 200x50", s.cols, s.rows)
+	}
+}

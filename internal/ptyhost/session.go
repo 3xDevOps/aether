@@ -598,23 +598,28 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 	return c
 }
 
+// sizes reports whether c brings a screen of its own to the question of
+// how big the PTY should be. A follower renders at whatever size the
+// session is, and an in-process consumer like the adapter tap has no
+// terminal at all and attaches with none - neither is a screen anything
+// has to fit inside, and neither is company for the check below.
+func (c *client) sizes() bool { return !c.follow && c.cols != 0 && c.rows != 0 }
+
 // imposesNow reports whether c's geometry is one the PTY has to fit
-// inside. A follower never counts: it renders at the size the session
-// already is, which is the whole point of following. A client that may
-// write always counts. A read-only mirror counts only while it is the
-// only client that could - alone there is no other screen to reflow, so
-// a watcher resizing its window is just ssh resizing a terminal, and the
-// agent is better drawn at the size someone is actually looking at.
-// Callers hold mu.
+// inside. A client that may write always counts. A read-only mirror
+// counts only while it is the only client bringing a screen at all -
+// alone there is no other screen to reflow, so a watcher resizing its
+// window is just ssh resizing a terminal, and the agent is better drawn
+// at the size someone is actually looking at. Callers hold mu.
 func (s *session) imposesNow(c *client) bool {
-	if c.follow {
+	if !c.sizes() {
 		return false
 	}
 	if !c.readOnly {
 		return true
 	}
 	for other := range s.clients {
-		if other != c && !other.follow {
+		if other != c && other.sizes() {
 			return false
 		}
 	}
