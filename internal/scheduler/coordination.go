@@ -175,13 +175,13 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	}
 	// The status reporter goes into the same directory the same way, but
 	// only for an interactive run: a headless agent exits when it is done
-	// and never waits for anyone to answer it. The asset is what the
-	// harness is pointed at - by argument or by environment, depending on
-	// what it can load - so its absence is what says there is no reporter,
-	// and the kind is taken from this same branch: what the entry claims
-	// about this run is what the container was actually given.
+	// and never waits for anyone to answer it. The profile's Reporter field
+	// is what declares one - what the harness is pointed at may be a file,
+	// a launch flag, or an environment variable, so the assets alone do not
+	// say - and the kind is taken from this same branch: what the entry
+	// claims about this run is what the container was actually given.
 	reporter := harness.ReporterNone
-	if run.Mode == domain.LaunchTUI && len(profile.StatusFiles) > 0 {
+	if run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone {
 		maps.Copy(files, profile.StatusFiles)
 		launchArgs = append(launchArgs, profile.StatusLaunchArgs(mcpbridge.MountDir)...)
 		launchEnv = profile.StatusLaunchEnv(mcpbridge.MountDir)

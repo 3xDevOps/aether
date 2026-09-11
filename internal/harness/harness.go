@@ -324,8 +324,9 @@ type Profile struct {
 	StatusEnv map[string]string
 	// StatusFiles are the assets StatusArgs and StatusEnv point at, written
 	// into the run's coordination directory before the container exists,
-	// keyed by the file name they take there. A profile with no status
-	// files has no reporter at all.
+	// keyed by the file name they take there. A harness whose reporter is
+	// a launch flag alone needs none: the Reporter field above is what
+	// declares a reporter, not this map.
 	StatusFiles map[string][]byte
 	// InstallScript is the vendor's documented install command, run in the
 	// member's terminal (aether terminal). It must install into ~/.local/bin.

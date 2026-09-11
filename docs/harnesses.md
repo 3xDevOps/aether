@@ -152,7 +152,7 @@ with a reason that leads with `stalled:`. See
 
 Four things turn the reporter off:
 
-- **Headless runs.** `--mode headless` never gets the asset: the agent
+- **Headless runs.** `--mode headless` never gets the reporter: the agent
   exits when it is done and never waits for anyone.
 - **`--conflict-coordination=false`.** There are no mounts, so there is no
   socket to report on and no directory to write the asset into.
@@ -520,6 +520,7 @@ on which timeline.
 The registry is one map entry: argv templates for both modes, credential
 paths, profile root, denylist, API key passthrough, the optional MCP,
 session, and resume flags, and the status reporter - what the harness can
-report, the arguments or environment variables that point it at the
-reporter asset, and the asset files themselves. An adapter is a separate,
-optional file. Both are covered in [adapters.md](adapters.md).
+report, which is what declares a reporter at all, plus the arguments or
+environment variables that point the harness at it and any asset files
+those name. An adapter is a separate, optional file. Both are covered in
+[adapters.md](adapters.md).
