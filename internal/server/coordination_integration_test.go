@@ -257,7 +257,12 @@ func newCoordEnv(ctx context.Context, t *testing.T, disabled bool) (*coordEnv, *
 func (e *coordEnv) seed(ctx context.Context, t *testing.T, disabled bool) *coordServer {
 	t.Helper()
 	requireBinary(t, "git")
-	e.dataDir = filepath.Join(t.TempDir(), "data")
+	if e.dataDir == "" {
+		// A coordination socket path is capped near 108 bytes and already
+		// carries a 26-character run ID, so a scenario whose name is long
+		// enough to overflow t.TempDir() sets a short root of its own.
+		e.dataDir = filepath.Join(t.TempDir(), "data")
+	}
 	srv := e.start(ctx, t, disabled)
 
 	adaPath, adaKey := writeClientKey(t)
@@ -405,9 +410,9 @@ func (e *coordEnv) container(t *testing.T, run string) *e2eContainer {
 func (e *coordEnv) assertRegistered(t *testing.T, run protocol.Run) {
 	t.Helper()
 	c := e.container(t, run.ID)
-	if argv := c.spec.Command; len(argv) < 2 ||
-		argv[len(argv)-2] != "--mcp-config" || argv[len(argv)-1] != mcpConfigTarget {
-		t.Fatalf("run %s argv = %v, want it to end with --mcp-config %s", run.ID, c.spec.Command, mcpConfigTarget)
+	argv := c.spec.Command
+	if i := slices.Index(argv, "--mcp-config"); i < 0 || i+1 >= len(argv) || argv[i+1] != mcpConfigTarget {
+		t.Fatalf("run %s argv = %v, want --mcp-config %s in it", run.ID, argv, mcpConfigTarget)
 	}
 	for _, target := range []string{mcpbridge.MountDir, mcpbridge.BinaryPath} {
 		m, ok := c.mount(target)

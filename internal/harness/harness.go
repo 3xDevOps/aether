@@ -24,10 +24,73 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 )
 
 // TaskPlaceholder is replaced by the run's task prompt in argv templates.
 const TaskPlaceholder = "{task}"
+
+// CoordPlaceholder is replaced by the container path of the run's
+// coordination directory in StatusArgs. The directory is where the server
+// writes the harness's status-reporter asset, and a profile must not have
+// to know the mount point.
+const CoordPlaceholder = "{aether}"
+
+// Reporter says how much the harness's status reporter can tell the
+// server: nothing, only that a turn ended, or every start and stop. It is
+// what lets the scheduler tell an agent that has gone quiet because it is
+// waiting for its member from one that has hung.
+type Reporter int
+
+const (
+	// ReporterNone: the harness cannot report at all, so "working" or
+	// "waiting" is inferred from silence alone.
+	ReporterNone Reporter = iota
+	// ReporterTurnEnd: the harness says when a turn ends but not when the
+	// next one starts, so activity is still what un-parks the run.
+	ReporterTurnEnd
+	// ReporterFull: the harness reports both, so only the agent's own
+	// "working" un-parks the run and a repaint while the member types
+	// does not.
+	ReporterFull
+)
+
+// reporterNames is the text form a Reporter travels in. The server records
+// the reporter a run was launched with so a restart knows it without
+// recomputing it, and a name survives reordering the constants where the
+// iota's number would not.
+var reporterNames = map[Reporter]string{
+	ReporterNone:    "none",
+	ReporterTurnEnd: "turn-end",
+	ReporterFull:    "full",
+}
+
+func (r Reporter) String() string {
+	if name, ok := reporterNames[r]; ok {
+		return name
+	}
+	return "reporter(" + strconv.Itoa(int(r)) + ")"
+}
+
+// MarshalText and UnmarshalText are what put a Reporter in a JSON document.
+func (r Reporter) MarshalText() ([]byte, error) {
+	name, ok := reporterNames[r]
+	if !ok {
+		return nil, fmt.Errorf("harness: %s is not a reporter kind", r)
+	}
+	return []byte(name), nil
+}
+
+func (r *Reporter) UnmarshalText(text []byte) error {
+	for kind, name := range reporterNames {
+		if name == string(text) {
+			*r = kind
+			return nil
+		}
+	}
+	return fmt.Errorf("harness: %q is not a reporter kind", text)
+}
 
 // Definition is an administrator-supplied generic harness launch definition.
 // Paths are absolute container paths so the server never has to infer where
@@ -241,6 +304,18 @@ type Profile struct {
 	// means it has no MCP registration and conflict coordination degrades
 	// to the overlap notice alone.
 	MCPConfigFlag string
+	// Reporter is how much this harness's status reporter can say.
+	Reporter Reporter
+	// StatusArgs are appended to an interactive launch so the harness runs
+	// the reporter on its own lifecycle events. CoordPlaceholder stands for
+	// the coordination directory inside the container. Headless runs never
+	// get them: a headless agent exits when it is done and never waits for
+	// anyone.
+	StatusArgs []string
+	// StatusFiles are the assets StatusArgs points at, written into the
+	// run's coordination directory before the container exists, keyed by
+	// the file name they take there.
+	StatusFiles map[string][]byte
 	// InstallScript is the vendor's documented install command, run in the
 	// member's terminal (aether terminal). It must install into ~/.local/bin.
 	// A failed install leaves the member in the terminal to install manually.
@@ -284,7 +359,13 @@ var profiles = map[string]Profile{
 		SessionResumeFlag: "--resume",
 		ResumeFlag:        "--continue",
 		MCPConfigFlag:     "--mcp-config",
-		InstallScript:     "curl -fsSL https://claude.ai/install.sh | bash",
+		// Claude Code runs a command on every lifecycle event a settings
+		// file registers a hook for, and --settings merges one more
+		// settings document over the member's own for this launch alone.
+		Reporter:      ReporterFull,
+		StatusArgs:    []string{"--settings", CoordPlaceholder + "/" + agentstatus.ClaudeSettingsName},
+		StatusFiles:   map[string][]byte{agentstatus.ClaudeSettingsName: agentstatus.ClaudeSettings},
+		InstallScript: "curl -fsSL https://claude.ai/install.sh | bash",
 	},
 	"codex": {
 		Name:            "codex",
@@ -410,6 +491,22 @@ func (p Profile) MCPArgs(configPath string) []string {
 		return nil
 	}
 	return []string{p.MCPConfigFlag, configPath}
+}
+
+// StatusLaunchArgs renders StatusArgs, the arguments appended to an
+// interactive run's launch command so the harness reports its own state,
+// with CoordPlaceholder replaced by dir, the container path of the
+// coordination directory. Nil for a harness with no reporter: it is
+// launched exactly as before and the stall threshold is all the server has.
+func (p Profile) StatusLaunchArgs(dir string) []string {
+	if len(p.StatusArgs) == 0 || dir == "" {
+		return nil
+	}
+	out := make([]string, 0, len(p.StatusArgs))
+	for _, a := range p.StatusArgs {
+		out = append(out, strings.ReplaceAll(a, CoordPlaceholder, dir))
+	}
+	return out
 }
 
 // MCPConfig renders the config file MCPArgs points a harness at: the

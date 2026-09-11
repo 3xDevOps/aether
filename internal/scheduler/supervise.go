@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -128,6 +130,19 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 // PTY output is what the agent wrote: a steer's banner, and the terminal's
 // echo of anything written to the agent's input, are the server's, so only
 // the agent's own answer clears a stall.
+//
+// Silence is now the hang detector and the fallback for harnesses that
+// cannot report (internal/agentstatus): an agent that says it is waiting
+// parks its own run, with a reason that says what for, the moment it stops.
+// Two rules follow. Where the harness reports both ends of a turn, activity
+// must not un-park it: a TUI that repaints while the member types is
+// producing output, not work, and only the agent's own "working" means the
+// turn resumed - which is activity in its own right, because a hook writes
+// nothing to the terminal and touches no files. And un-parking takes
+// activity that was actually observed, not a run that merely started
+// recently - after a restart nothing has been observed yet, and every run
+// parked for its member would otherwise be declared working again on the
+// first poll.
 func (s *Scheduler) checkStalls(ctx context.Context) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0, len(s.runs))
@@ -145,23 +160,41 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		if !live || paused || (status != domain.RunRunning && status != domain.RunNeedsAttention) {
 			continue
 		}
-		activity := started
+		activity, observed := started, false
 		if t, ok := s.cfg.PTY.LastOutput(ptyhost.RunSession(e.runID)); ok && t.After(activity) {
-			activity = t
+			activity, observed = t, true
 		}
 		if t, ok := s.cfg.Git.LastFileChange(e.runID); ok && t.After(activity) {
-			activity = t
+			activity, observed = t, true
 		}
-		idle := now.Sub(activity)
 
 		s.mu.Lock()
 		if s.runs[e.runID] == e && !e.paused {
+			// An agent that says it is working leaves no other trace, so
+			// the report is read here, under the lock, and counts as the
+			// activity it is - including one that lands mid-poll.
+			if e.lastWorking.After(activity) {
+				activity, observed = e.lastWorking, true
+			}
+			idle := now.Sub(activity)
+			// A run whose harness reports both ends of a turn and has said
+			// it is waiting is released by the agent's own next report, not
+			// by anything on the terminal.
+			heldForTheMember := e.agentReport.State == agentstatus.Waiting &&
+				e.reporter == harness.ReporterFull
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
 					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
-			case e.status == domain.RunNeedsAttention && idle <= s.cfg.StallThreshold:
+			case e.status == domain.RunNeedsAttention && observed && idle <= s.cfg.StallThreshold && !heldForTheMember:
+				// The run goes back to being judged on silence alone, so
+				// the next quiet threshold parks it as a stall again - and
+				// a restart must not resurrect the report this clears.
+				e.agentReport = agentstatus.Report{}
+				if serr := s.writeSidecar(e.sidecar()); serr != nil {
+					slog.Warn("scheduler: persist cleared agent report", "run", e.runID, "error", serr)
+				}
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunRunning,
 					"activity resumed", "")
 			}

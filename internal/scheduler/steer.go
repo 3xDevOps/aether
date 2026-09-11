@@ -177,9 +177,11 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 	return nil
 }
 
-// Pause freezes a supervised run's container (SIGSTOP semantics). Status
-// is unchanged; the paused flag is durable and exempts the run from stall
-// detection.
+// Pause freezes a supervised run's container (SIGSTOP semantics). Pause
+// itself does not change the status; the paused flag is durable and exempts
+// the run from stall detection. An agent status report already in flight
+// when the freeze lands still moves the run, because the frozen container
+// cannot send it again (see ReportAgentState).
 func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
 	s.mu.Lock()
 	entry := s.runs[run]

@@ -16,6 +16,15 @@ import (
 // slower than this is a server the agent should stop waiting on.
 const callTimeout = 30 * time.Second
 
+// Call makes one coordination request on socket and decodes its result
+// into result, which may be nil. It is the same framing the MCP tools use,
+// exposed for the in-container callers that are not tools at all - the
+// status reporter ("aether-server report") calls run.report with it. ctx
+// bounds the round trip.
+func Call(ctx context.Context, socket, method string, params, result any) error {
+	return (&client{socket: socket}).call(ctx, method, params, result)
+}
+
 // client speaks coordination wire v1 on the run's unix socket.
 //
 // It dials per tool call and closes the connection again. That is the whole

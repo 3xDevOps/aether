@@ -18,14 +18,14 @@ Two rules shape everything below:
 
 ## Shipped harnesses
 
-| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | MCP | Resume | Steering | Env setup |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | by session ID (`--session-id`, `--resume`) | PTY | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | no | PTY | yes |
-| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | best effort (`--continue`) | PTY | yes |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | no | HTTP TUI API | no |
-| `fake` | a script you name | - | - | - | - | no | no | PTY | no |
-| `custom` | deployment-supplied | - | - | - | - | no | no | PTY | no |
+| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | MCP | Status | Resume | Steering | Env setup |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | hooks (`--settings`) | by session ID (`--session-id`, `--resume`) | PTY | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | - | no | PTY | yes |
+| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | - | best effort (`--continue`) | PTY | yes |
+| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | - | no | HTTP TUI API | no |
+| `fake` | a script you name | - | - | - | - | no | - | no | PTY | no |
+| `custom` | deployment-supplied | - | - | - | - | no | - | no | PTY | no |
 
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user).
@@ -39,6 +39,10 @@ Only harnesses with an **MCP** column of `yes` can be pointed at the in-containe
 coordination bridge, so conflict coordination between overlapping runs works for
 Claude Code and degrades to the advisory overlap notice for the rest. See
 [coordination.md](coordination.md).
+
+The **Status** column is how the agent itself tells Aether it is waiting for
+you, rather than leaving the server to guess from silence. See "Status
+reporting" below.
 
 The **Launch env** column is what the server sets in the run container
 because the CLI will not start without it. It is applied after the
@@ -68,6 +72,66 @@ A harness with neither starts fresh, and a deployment-supplied argv override
 never has any of these appended - nothing checks the override is still that
 CLI. Relaunching a run that finished on its own never resumes; it gets a
 session of its own. See [failure-handling.md](failure-handling.md).
+
+## Status reporting
+
+**Needs you** means the agent is waiting for you, or the run stalled. The
+first half comes from the agent itself.
+
+A harness with a **Status** entry can run a command on its own lifecycle
+events. Aether gives it one: a small settings document written into the
+run's coordination directory beside the MCP config, registering a hook that
+calls the staged server binary inside the container. The interactive launch
+in full, with the session pin and the MCP registration it already carried:
+
+```
+claude --session-id <uuid> --dangerously-skip-permissions "<task>" \
+  --mcp-config /run/aether/mcp.json \
+  --settings /run/aether/claude-settings.json
+```
+
+```
+/opt/aether/aether-server report claude   # the hook, with the event JSON on stdin
+```
+
+The report travels back over the run's own coordination socket, so no token
+enters the container and nothing new is mounted - this is the same bridge
+conflict coordination uses ([mcp-bridge.md](mcp-bridge.md)). The server
+turns it into a run status straight away:
+
+| The agent says | The run becomes | Reason shown |
+| --- | --- | --- |
+| the turn ended, or it has been idle at its prompt | `needs-attention` | `waiting for your input` |
+| it is asking permission | `needs-attention` | `waiting for your permission` |
+| it is asking a question | `needs-attention` | `waiting for your answer` |
+| it started a turn, or ran a tool | `running` | `agent resumed` |
+
+Anything else the harness reports - a session opening, a subagent, a
+compaction - is ignored rather than guessed at.
+
+The last report is recorded with the run, so it survives a server restart:
+a run the agent parked comes back parked, and only the agent's own next
+turn releases it. See [failure-handling.md](failure-handling.md).
+
+For a harness with a **Status** of `-`, nothing changes: the run is judged
+on silence alone and parks at `needs-attention` after `--stall-threshold`
+with a reason that leads with `stalled:`. See
+[failure-handling.md](failure-handling.md).
+
+Three things turn the reporter off:
+
+- **Headless runs.** `--mode headless` never gets the hooks: the agent
+  exits when it is done and never waits for anyone.
+- **`--conflict-coordination=false`.** There are no mounts, so there is no
+  socket to report on and no directory to write the settings into.
+- **An argv override.** A `--harness-definitions` entry that redefines a
+  shipped harness drops the status arguments exactly as it drops the MCP
+  flag - nothing checks the overridden command is still that CLI.
+
+The settings file is server-written, read-only, and lives in
+`/run/aether`, never in the worktree or the member's synced profile.
+`--settings` applies for that launch only and merges over the member's own
+settings, so it adds the hooks rather than replacing anything they have.
 
 ## Steering delivery
 

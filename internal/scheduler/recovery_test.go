@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -1033,4 +1034,107 @@ func TestRelaunchWithoutAPinnedSessionFallsBackToContinue(t *testing.T) {
 	if next.HarnessSessionID != "" {
 		t.Fatalf("--continue relaunch recorded session %q, want none to pin", next.HarnessSessionID)
 	}
+}
+
+// TestRecoveryKeepsARunParkedForItsMember covers what a restart must not do
+// to a run that is waiting for the member. Nothing has been observed on the
+// terminal since the restart, so a run parked seconds before it comes back
+// as Working on the first poll unless un-parking takes activity that was
+// actually seen. And the reporter comes back with the run - it is recorded
+// at launch, not recomputed - so once the recovered agent says it is
+// waiting again, a repaint while the member types still does not release
+// it.
+func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
+	e := newReportingEnv(t, func(cfg *Config) {
+		// Far longer than the test: nothing here is a stall.
+		cfg.StallThreshold = time.Hour
+		cfg.PollInterval = 10 * time.Millisecond
+	})
+	run, c := e.launchReporting(t)
+	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
+		t.Fatalf("report waiting: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	pty2 := newFakePTY()
+	s2 := e.newScheduler(t, e.rt, pty2)
+	startScheduler(t, s2)
+	waitFor(t, "supervision resumed", func() bool { return pty2.session(run.ID) != nil })
+	// Many polls, no observed activity: the run is still the member's.
+	time.Sleep(100 * time.Millisecond)
+	r, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonInput {
+		t.Fatalf("recovered run = %s because %q, want it still parked because %q", r.Status, r.Reason, agentstatus.ReasonInput)
+	}
+
+	if rerr := s2.ReportAgentState(t.Context(), run.ID, waiting); rerr != nil {
+		t.Fatalf("report waiting after recovery: %v", rerr)
+	}
+	for range 10 {
+		c.output("redraw\r\n")
+		time.Sleep(10 * time.Millisecond)
+	}
+	if r, err = e.db.GetRun(t.Context(), run.ID); err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if r.Status != domain.RunNeedsAttention {
+		t.Fatalf("run = %s after a repaint, want it still parked: the recovered run kept its reporter", r.Status)
+	}
+}
+
+// TestRecoveryKeepsAWaitingReportAcrossARestart pins the half of a restart
+// the run row cannot carry. The row says needs-attention, but not that the
+// agent itself asked for the member: without the report, the first thing
+// the recovered agent paints - and reattaching resizes the terminal, so a
+// full-screen TUI paints at once - reads as work resuming and hands the
+// run back to the agent it is still waiting for.
+func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
+	e := newReportingEnv(t, func(cfg *Config) {
+		// Far longer than the test: nothing here is a stall.
+		cfg.StallThreshold = time.Hour
+		cfg.PollInterval = 10 * time.Millisecond
+	})
+	run, c := e.launchReporting(t)
+	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
+		t.Fatalf("report waiting: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	pty2 := newFakePTY()
+	s2 := e.newScheduler(t, e.rt, pty2)
+	startScheduler(t, s2)
+	waitFor(t, "supervision resumed", func() bool { return pty2.session(run.ID) != nil })
+
+	// The recovered agent repaints. It has said nothing since the restart,
+	// so this is the same repaint the live scheduler refuses to treat as
+	// work - and the restart must not have forgotten that.
+	for range 10 {
+		c.output("redraw\r\n")
+		time.Sleep(10 * time.Millisecond)
+	}
+	r, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonInput {
+		t.Fatalf("run = %s because %q after a repaint, want it still parked because %q: the waiting report survives a restart",
+			r.Status, r.Reason, agentstatus.ReasonInput)
+	}
+
+	// The agent's own next turn still releases it.
+	if rerr := s2.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working}); rerr != nil {
+		t.Fatalf("report working after recovery: %v", rerr)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 }

@@ -13,7 +13,7 @@ means "use the default"; a negative value turns a guard off.
 
 | Flag | Default | What it controls |
 | --- | --- | --- |
-| `--stall-threshold` | `10m` | How long a run may go with no agent output and no file changes before it parks at needs-attention. |
+| `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
@@ -24,9 +24,18 @@ scheduler.
 
 ### Picking a stall threshold
 
-The threshold is a bet about the longest legitimate silence. An agent
-thinking, compiling, or waiting on a slow tool call produces no PTY output
-and touches no files, and there is no way to tell that apart from a hang.
+The threshold is the **hang detector**, and the fallback for harnesses that
+cannot report their own state.
+
+Where the agent reports (`claude` today - see
+[harnesses.md](harnesses.md)), a turn that ends parks the run immediately
+with a reason that says what it is waiting for, and the threshold is left
+to catch the case the agent cannot report: one that hangs mid-turn, which
+still parks with a `stalled:` reason. Where the agent does not report,
+silence is all the server has, and the threshold is a bet about the longest
+legitimate silence: an agent thinking, compiling, or waiting on a slow tool
+call produces no PTY output and touches no files, and there is no way to
+tell that apart from a hang.
 
 - **Too low** and long tool calls park healthy runs, which trains people to
   ignore the badge.
@@ -40,7 +49,11 @@ plenty, and polling faster than that just wakes the scheduler up more often.
 
 Parking is not terminal. A stalled run whose agent starts producing output
 again returns to running on the next poll, and steering it (`aether inject`,
-or typing on an attach) is usually what gets it talking.
+or typing on an attach) is usually what gets it talking. A run parked
+because its agent said it was waiting is the exception: output alone does
+not release it, because a TUI repainting while you type is output and is not
+work. The agent's own next turn releases it, which is what typing into it
+produces - across a server restart too.
 
 Steering is not itself that output. A steer's attributed banner is the
 server's own, and so is the terminal's echo of the steered line - or of
@@ -80,7 +93,10 @@ against the runtime's actual containers:
   watch restarts from the tree its last snapshot wrote so the next interval
   continues the chain, and the run stays `running`. Attaches, injects and the
   eventual exit all work as if nothing happened. A kill that was accepted
-  before the crash is re-issued.
+  before the crash is re-issued. A run the agent had parked stays parked
+  with its reason: the last report is recovered with the run, so
+  reattaching - which resizes the terminal and makes a full-screen agent
+  repaint - does not read as the turn resuming.
 - **The container is gone**: the partial work is committed as `wip:`, the
   run branch is published, and the run is marked `interrupted` with its
   checkout preserved.
@@ -178,12 +194,30 @@ exists to stop a disk from filling, not to stop the server.
 
 ### Agent stall or crash
 
-No agent output and no file changes past `--stall-threshold` parks a live run
-at `needs-attention` with a reason that leads with `stalled:`. It remains
-supervised in its run container: while unpaused, members with the existing
-steer permission can attach, inject input, and open or reconnect a writable
-run-container shell to investigate it. Genuine agent output or a file change
-returns it to `running`; server-written steering echoes do not.
+`needs-attention` - **Needs you** on the board - means one of two things,
+and the reason on the run says which.
+
+**The agent is waiting for you.** A harness that reports its own state
+parks the run the moment its turn ends, or it asks for permission or an
+answer, with a reason that reads `waiting for your input`,
+`waiting for your permission` or `waiting for your answer`. There is no
+delay: the report arrives as the agent stops. The run returns to `running`
+with `agent resumed` when the agent starts its next turn - which is what
+steering it produces - and not on terminal output alone. A server restart
+does not change that: the report is recovered with the run, so a run that
+was waiting for you is still waiting for you afterwards.
+
+**The run stalled.** No agent output, no file changes and nothing from the
+agent's reporter past `--stall-threshold` parks a live run at
+`needs-attention` with a reason that leads with `stalled:`. This is the hang
+detector: it catches an agent that said it was working and then wedged, and
+it is the only signal at all for a harness that cannot report. Genuine agent
+output or a file change returns such a run to `running`; server-written
+steering echoes do not.
+
+Either way the run remains supervised in its run container: while unpaused,
+members with the existing steer permission can attach, inject input, and
+open or reconnect a writable run-container shell to investigate it.
 
 A clean agent exit commits the latest work to the run branch, destroys the
 container, and marks the run `completed`. A crashing agent marks the run

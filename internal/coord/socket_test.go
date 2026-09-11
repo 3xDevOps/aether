@@ -55,7 +55,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	}
 	defer timeline.Close() //nolint:errcheck // test cleanup
 
-	dirA, err := h.svc.Provision(ctx, a, []byte(`{"mcpServers":{}}`))
+	dirA, err := h.svc.Provision(ctx, a, map[string][]byte{ConfigName: []byte(`{"mcpServers":{}}`)})
 	if err != nil {
 		t.Fatalf("Provision(a): %v", err)
 	}
@@ -134,6 +134,31 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 // TestLostResponseRedelivers is the at-least-once guarantee over the real
 // socket: the bridge dies between the read and the agent seeing it, so
 // nothing acknowledges the batch and the retry gets it again.
+// TestProvisionRefusesAssetNamesThatAreNotFiles: the asset names come from
+// the harness registry, but Provision joins each one onto the run's
+// directory and hands the result to a container runtime. A name that is not
+// a plain file in that directory is refused, and refused before anything is
+// written or removed - the run directory itself is one of the paths a bad
+// name resolves to.
+func TestProvisionRefusesAssetNamesThatAreNotFiles(t *testing.T) {
+	ctx := context.Background()
+	for _, name := range []string{"/", ".", "..", "", "sub/asset.json", "../escape.json"} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, 1)
+			h.start()
+			run := h.run(0)
+			if _, err := h.svc.Provision(ctx, run, map[string][]byte{name: []byte("x")}); err == nil {
+				t.Fatalf("Provision accepted the asset name %q", name)
+			}
+			dir := filepath.Join(h.dir, "coord", string(run))
+			info, err := os.Lstat(dir)
+			if err != nil || !info.IsDir() {
+				t.Fatalf("run directory after the refusal: %v (dir=%v)", err, info != nil && info.IsDir())
+			}
+		})
+	}
+}
+
 func TestLostResponseRedelivers(t *testing.T) {
 	h := newHarness(t, 2)
 	ctx := context.Background()
@@ -226,7 +251,7 @@ func TestRestartRecovery(t *testing.T) {
 		h := newHarness(t, 1)
 		h.start()
 		run := h.run(0)
-		if _, err := h.svc.Provision(ctx, run, []byte(`{}`)); err != nil {
+		if _, err := h.svc.Provision(ctx, run, map[string][]byte{ConfigName: []byte(`{}`)}); err != nil {
 			t.Fatalf("Provision: %v", err)
 		}
 		if err := h.svc.Close(); err != nil {
