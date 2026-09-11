@@ -14,7 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	coordpkg "github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/mcpbridge"
 )
@@ -196,7 +195,6 @@ func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
 		t.Fatalf("UpdateWorkspace: %v", err)
 	}
-	sub := e.subscribe(t)
 
 	tui, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", "opencode", domain.LaunchTUI)
 	if err != nil {
@@ -209,10 +207,6 @@ func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 	wantConfig := `{"plugin":["file://` + path.Join(mcpbridge.MountDir, agentstatus.OpenCodePluginName) + `"]}`
 	if got := spec.Env["OPENCODE_CONFIG_CONTENT"]; got != wantConfig {
 		t.Fatalf("OPENCODE_CONFIG_CONTENT = %q, want %q", got, wantConfig)
-	}
-	note := waitTimelineEvent(t, sub, tui.ID, events.TimelineNote)
-	if msg := note.Payload.(events.TimelinePayload).Message; !strings.Contains(msg, "OPENCODE_CONFIG_CONTENT") {
-		t.Fatalf("timeline note = %q, want the replaced workspace variable named", msg)
 	}
 	// opencode has no flag for a plugin, so the launch command is exactly
 	// what a run without a reporter would have had: nothing on it names
@@ -247,31 +241,5 @@ func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 	}
 	if got := e.reporterOf(t, headless.ID); got != harness.ReporterNone {
 		t.Fatalf("headless opencode run recorded reporter %s, want %s", got, harness.ReporterNone)
-	}
-}
-
-// TestReservedLaunchVariableIsNotedOnTheRun: the status reporter is not
-// the only thing the server puts in the launch environment over a
-// workspace's own value - claude's sandbox marker is there for the agent
-// to start at all - and a member whose value is dropped learns it from the
-// run, not from an agent behaving unexpectedly.
-func TestReservedLaunchVariableIsNotedOnTheRun(t *testing.T) {
-	e := newTestEnv(t, nil)
-	e.ws.Environment.Variables["IS_SANDBOX"] = "0"
-	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
-		t.Fatalf("UpdateWorkspace: %v", err)
-	}
-	sub := e.subscribe(t)
-
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", "claude", domain.LaunchTUI)
-	if err != nil {
-		t.Fatalf("launch claude run: %v", err)
-	}
-	note := waitTimelineEvent(t, sub, run.ID, events.TimelineNote)
-	if msg := note.Payload.(events.TimelinePayload).Message; !strings.Contains(msg, "IS_SANDBOX") {
-		t.Fatalf("timeline note = %q, want the replaced workspace variable named", msg)
-	}
-	if got := e.rt.byName(string(run.ID)).spec.Env["IS_SANDBOX"]; got != "1" {
-		t.Fatalf("IS_SANDBOX = %q, want the harness's own value 1", got)
 	}
 }

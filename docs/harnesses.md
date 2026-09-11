@@ -54,8 +54,7 @@ the same things that drop the reporter, so it lives under "Status
 reporting".
 
 Either way, a variable the server sets itself replaces a workspace
-environment variable of the same name rather than merging with it, and the
-run's timeline names the variable on launch.
+environment variable of the same name rather than merging with it.
 
 The **Resume** column is what a relaunch uses when a server reboot
 interrupted the run. The flags ride directly behind the executable.
