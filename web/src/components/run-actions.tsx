@@ -1,6 +1,12 @@
 // The header stays readable at narrow widths: primary verbs keep their icon
 // and tooltip, while their text label yields before the action group wraps.
 // Secondary verbs remain in the overflow menu when the row is constrained.
+//
+// A finger gets the other shape. Six labelled 44px buttons do not fit across
+// a phone, and the mouse layout's answer - shrink them to 22px and put the
+// label in a hover tooltip - leaves a phone with six unnamed icons. So on a
+// coarse pointer every verb moves into the one menu behind a labelled
+// button, where each carries its full label at a size a finger can hit.
 
 import { Ellipsis, Loader2, UserPlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -36,6 +42,7 @@ import {
   type Command,
   type RunCommandContext,
 } from '@/lib/commands'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
@@ -59,6 +66,7 @@ export function RunActions({ run }: { run: RunRecord }) {
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
   const self = useSelf()
+  const coarse = useMediaQuery(coarsePointer)
   const perform = useCommandRunner()
   const [asking, setAsking] = useState<Command | null>(null)
   const [handoff, setHandoff] = useState(false)
@@ -92,7 +100,11 @@ export function RunActions({ run }: { run: RunRecord }) {
   const confirm = asking?.confirm
   const commands = runCommands(context)
   const handoffs = handoffCommands(context)
-  const overflow = commands.filter((command) => !primaryCommands[command.id])
+  // On a finger the row holds nothing but the menu button, so the menu holds
+  // every verb rather than only the secondary ones.
+  const overflow = coarse
+    ? commands
+    : commands.filter((command) => !primaryCommands[command.id])
 
   const start = (command: Command) => {
     setRunning(command.id)
@@ -101,48 +113,49 @@ export function RunActions({ run }: { run: RunRecord }) {
 
   return (
     <>
-      {commands.map((command) => {
-        const blocked = running !== null || command.disabled === true
-        const buttonLabel = command.short ?? command.label
-        return (
-          <Tooltip key={command.id}>
-            <Tooltip.Trigger<'button'>
-              render={(triggerProps) => (
-                <Button
-                  {...triggerProps}
-                  variant={primaryCommands[command.id] ? 'secondary' : 'ghost'}
-                  size="sm"
-                  aria-label={buttonLabel}
-                  className={cn(
-                    'h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2',
-                    !primaryCommands[command.id] &&
-                      'hidden @4xl/run-header:inline-flex',
-                  )}
-                  aria-disabled={blocked || undefined}
-                  onClick={() => {
-                    if (blocked) return
-                    if (command.confirm) setAsking(command)
-                    else start(command)
-                  }}
-                >
-                  {running === command.id ? (
-                    <Loader2 className="size-3 animate-spin" aria-hidden />
-                  ) : (
-                    <command.Icon className="size-3" aria-hidden />
-                  )}
-                  <span className="sr-only @sm/run-header:not-sr-only">{buttonLabel}</span>
-                </Button>
-              )}
-            />
-            <Tooltip.Content>{command.label}</Tooltip.Content>
-          </Tooltip>
-        )
-      })}
+      {!coarse &&
+        commands.map((command) => {
+          const blocked = running !== null || command.disabled === true
+          const buttonLabel = command.short ?? command.label
+          return (
+            <Tooltip key={command.id}>
+              <Tooltip.Trigger<'button'>
+                render={(triggerProps) => (
+                  <Button
+                    {...triggerProps}
+                    variant={primaryCommands[command.id] ? 'secondary' : 'ghost'}
+                    size="sm"
+                    aria-label={buttonLabel}
+                    className={cn(
+                      'h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2',
+                      !primaryCommands[command.id] &&
+                        'hidden @4xl/run-header:inline-flex',
+                    )}
+                    aria-disabled={blocked || undefined}
+                    onClick={() => {
+                      if (blocked) return
+                      if (command.confirm) setAsking(command)
+                      else start(command)
+                    }}
+                  >
+                    {running === command.id ? (
+                      <Loader2 className="size-3 animate-spin" aria-hidden />
+                    ) : (
+                      <command.Icon className="size-3" aria-hidden />
+                    )}
+                    <span className="sr-only @sm/run-header:not-sr-only">{buttonLabel}</span>
+                  </Button>
+                )}
+              />
+              <Tooltip.Content>{command.label}</Tooltip.Content>
+            </Tooltip>
+          )
+        })}
 
       {/* Every eligible member behind one button: a viewer cannot own a run
           and the current owner is not a target, so a run with nobody to hand
           to shows nothing at all. */}
-      {handoffs.length > 0 && (
+      {!coarse && handoffs.length > 0 && (
         <Tooltip>
           <Tooltip.Trigger<'button'>
             render={(triggerProps) => (
@@ -174,29 +187,49 @@ export function RunActions({ run }: { run: RunRecord }) {
             setMenuOpen(open)
           }}
         >
-          <Tooltip>
-            <Tooltip.Trigger<'button'>
-              render={(triggerProps) => (
-                <DropdownMenuTrigger asChild {...triggerProps}>
-                  <Button
-                    ref={moreTrigger}
-                    variant="ghost"
-                    size="sm"
-                    className="h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2 @4xl/run-header:hidden"
-                    aria-disabled={running !== null || undefined}
-                  >
-                    {running !== null ? (
-                      <Loader2 className="size-3 animate-spin" aria-hidden />
-                    ) : (
-                      <Ellipsis className="size-3" aria-hidden />
-                    )}
-                    <span className="sr-only @sm/run-header:not-sr-only">More</span>
-                  </Button>
-                </DropdownMenuTrigger>
-              )}
-            />
-            <Tooltip.Content>More actions</Tooltip.Content>
-          </Tooltip>
+          {coarse ? (
+            // The label is on the button, so there is nothing for a tooltip
+            // to add - and a finger cannot open one anyway.
+            <DropdownMenuTrigger asChild>
+              <Button
+                ref={moreTrigger}
+                variant="secondary"
+                size="sm"
+                aria-disabled={running !== null || undefined}
+              >
+                {running !== null ? (
+                  <Loader2 className="size-3 animate-spin" aria-hidden />
+                ) : (
+                  <Ellipsis className="size-3" aria-hidden />
+                )}
+                Actions
+              </Button>
+            </DropdownMenuTrigger>
+          ) : (
+            <Tooltip>
+              <Tooltip.Trigger<'button'>
+                render={(triggerProps) => (
+                  <DropdownMenuTrigger asChild {...triggerProps}>
+                    <Button
+                      ref={moreTrigger}
+                      variant="ghost"
+                      size="sm"
+                      className="h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2 @4xl/run-header:hidden"
+                      aria-disabled={running !== null || undefined}
+                    >
+                      {running !== null ? (
+                        <Loader2 className="size-3 animate-spin" aria-hidden />
+                      ) : (
+                        <Ellipsis className="size-3" aria-hidden />
+                      )}
+                      <span className="sr-only @sm/run-header:not-sr-only">More</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                )}
+              />
+              <Tooltip.Content>More actions</Tooltip.Content>
+            </Tooltip>
+          )}
           {/* Radix hands focus back to the trigger, which the container query
               has just hidden, and focusing a hidden element drops focus to
               the body. Only the forced close needs the substitute. */}

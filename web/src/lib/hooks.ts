@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 
 /**
  * Styleguide rule: match in-flight feedback to perceived duration - a spinner
@@ -46,4 +52,31 @@ export function useDrag(): () => AbortController {
     drag.current = new AbortController()
     return drag.current
   }, [])
+}
+
+/** The CSS variant of the same name, asked from JavaScript. */
+export const coarsePointer = '(pointer: coarse)'
+
+/** A finger on a screen this narrow is a phone, not a touch laptop. */
+export const phoneScreen = '(pointer: coarse) and (max-width: 640px)'
+
+/**
+ * Answers a media query, and keeps answering it. CSS is where a layout that
+ * only changes size belongs; this is for the ones that mount different
+ * elements for a finger than for a mouse, which a class cannot express.
+ */
+export function useMediaQuery(query: string): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const media = window.matchMedia?.(query)
+      if (!media) return () => {}
+      media.addEventListener('change', onChange)
+      return () => media.removeEventListener('change', onChange)
+    },
+    [query],
+  )
+  return useSyncExternalStore(
+    subscribe,
+    () => window.matchMedia?.(query).matches ?? false,
+  )
 }

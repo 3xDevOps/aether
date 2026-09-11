@@ -49,7 +49,7 @@ function DropdownMenuItem({
         // The item sits flush against its neighbours, so the outline is drawn
         // inside it. The background highlight stays for the pointer, but a
         // background is all forced-colors mode discards.
-        'relative flex min-h-[22px] cursor-default items-center gap-2 rounded-[2px] px-2 py-0 text-[13px] leading-5 select-none data-[highlighted]:bg-selection data-[highlighted]:text-selection-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-3.5',
+        'relative flex min-h-[22px] coarse:min-h-11 cursor-default items-center gap-2 rounded-[2px] px-2 py-0 text-[13px] leading-5 select-none data-[highlighted]:bg-selection data-[highlighted]:text-selection-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-3.5',
         'focus-visible:-outline-offset-2',
         className,
       )}
