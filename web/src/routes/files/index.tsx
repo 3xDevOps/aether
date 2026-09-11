@@ -477,9 +477,12 @@ function DiffDocument({
 }: {
   state?: { patch: string; truncated: boolean; loading?: boolean }
 }) {
-  // No toggle here - the viewer has one column and no room for a toolbar - so
-  // the pointer decides, the same default the Diff tab starts from.
-  const wrap = useMediaQuery(coarsePointer)
+  // The Diff tab's preference, not a second one: this pane has one column and
+  // no room for a toolbar, so it never sets the choice, but a member who made
+  // it there meant it for reading a diff rather than for one tab of them.
+  const stored = useStore((s) => s.diffWrap)
+  const coarse = useMediaQuery(coarsePointer)
+  const wrap = stored ?? coarse
   if (!state || state.loading) {
     return (
       <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">

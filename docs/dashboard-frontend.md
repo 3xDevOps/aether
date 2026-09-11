@@ -366,12 +366,15 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 A layout that only changes size belongs in CSS. The ones that mount
 different elements for a finger than for a mouse - the run header's menu, the
 diff timeline's disclosure, the activity filter bar - ask `useMediaQuery` in
-`src/lib/hooks.ts` instead. Every edge it asks about is a named constant in
-that file and nowhere else: `coarsePointer` is the CSS variant below asked
-from JavaScript, `belowSm` and `belowMd` are Tailwind's own 640px and 768px
-a pixel short, and `phoneScreen` is a coarse pointer below `sm`. A layout
-that stacks in CSS and a layout that stacks in JavaScript cannot then
-disagree about where.
+`src/lib/hooks.ts` instead, and every edge it asks about is a named constant
+in the same file: `coarsePointer` is the CSS variant below asked from
+JavaScript, `belowSm` and `belowMd` are Tailwind's own 640px and 768px a
+pixel short, and `phoneScreen` is a coarse pointer below `sm`. New code reads
+an edge from there rather than writing a query, so a layout that stacks in
+CSS and a layout that stacks in JavaScript cannot disagree about where. Two
+call sites predate the hook and still hold their own literals -
+`shell/sidebar.tsx` and `shell/status-bar.tsx` - and move onto it in a
+follow-up; the sidebar's phone edge is a pixel off `phoneScreen` until then.
 
 **Touch density is one variant, defined once.** `src/index.css` declares
 `@custom-variant coarse (@media (pointer: coarse))`, and a control that a
@@ -1264,8 +1267,10 @@ both what it renders and the overlap set the conflict chips read.
   pointer and off for a mouse. The choice itself is a view preference on the
   UI slice (`diffWrap`), stored like the sidebar width, because only one
   run-detail route is mounted at a time and component state would forget it
-  on every trip to the Terminal tab. The Files tab's diff pane has no toolbar
-  to put a toggle in, so there the pointer decides outright.
+  on every trip to the Terminal tab. The Files tab's diff pane reads the same
+  preference: it has no toolbar to put a toggle in, so it never sets one, but
+  a member who turned wrapping off on the Diff tab meant it for diffs and not
+  for one tab of them.
 - **The verbs are not here, the answers are.** The tab keeps what is only
   about reading the diff - the refresh, the snapshot list, the two copyable
   `git` commands that review the run branch in the linked repository, and the
