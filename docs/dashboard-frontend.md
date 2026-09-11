@@ -1019,16 +1019,15 @@ primitive.
 
 `TerminalPane` keeps xterm's host geometry intact while layering the shared
 toolbar and Find over it. `TerminalTools` in the same module owns the search,
-zoom/reset, copy, copy-last-screen, paste, and `TerminalImageAction`
-controls; it delegates
-terminal key behavior to the xterm controller and clipboard helpers rather
-than putting those actions in each dock. `useTerminalImage` owns the hidden
-file input, preview dialog, validation, upload call, and shell-quoted path
-insertion. Its identity (`terminal`, target, active-tab key, and enabled
-state) plus a generation token rejects a chooser, paste, or upload callback
-that completes after the host or target has changed. The find overlay sizes to
-the available width, so a narrow pane clips neither its input nor its close
-control.
+zoom/reset, copy, copy-last-screen, paste, and `TerminalImageAction` controls;
+it delegates terminal key behavior to the xterm controller and clipboard
+helpers rather than putting those actions in each dock. `useTerminalImage`
+owns the hidden file input, preview dialog, validation, upload call, and
+shell-quoted path insertion. Its identity (`terminal`, target, active-tab
+key, and enabled state) plus a generation token rejects a chooser, paste, or
+upload callback that completes after the host or target has changed. The
+find overlay sizes to the available width, so a narrow pane clips neither
+its input nor its close control.
 
 The image half of clipboard handling is registered by `useTerminalImage` with
 `registerClipboardImages` on the current xterm input in capture phase. The
@@ -1051,12 +1050,15 @@ may be watching at a desktop's width.
 
 A following terminal therefore:
 
-- sends `follow` with `standardGeometry` (80x24) in the attach header and
-  renders at the `cols` and `rows` the server reports, through `useXterm`'s
-  `size` option, which replaces the fit addon and reports no resize. The pane
-  gets `overflow-x-auto` and pans over a grid bigger than the screen; naming
-  one axis is enough, since CSS makes the other a scroller too. This holds
-  while steering: the flag, not silence, is what keeps the session unchanged.
+- sends `follow` in the attach header and renders at the `cols` and `rows`
+  the server reports, through `useXterm`'s `size` option, which replaces the
+  fit addon and reports no resize. The geometry beside the flag is the run
+  terminal's `standardGeometry` (80x24) and the docks' own xterm size, which
+  on a phone is that same fixed size; either way it decides nothing but the
+  size of a session being created, a new shell tab. The pane gets
+  `overflow-x-auto` and pans over a grid bigger than the screen; naming one
+  axis is enough, since CSS makes the other a scroller too. This holds while
+  steering: the flag, not silence, is what keeps the session unchanged.
 - does not steer on entry even on the member's own run. `Take control` is the
   only way in, and `disableStdin` holds until the ack grants write - that is
   what makes xterm's textarea read-only, so a tap on a mirror raises no

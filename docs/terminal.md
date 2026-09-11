@@ -117,12 +117,12 @@ screen**, **Paste into terminal**, and **Upload image to terminal** controls.
 without a drag selection - a touch screen has none. On a touch screen both
 copy controls carry their name beside them, since the tooltip that tells
 them apart needs a pointer to hover. Copying an empty screen says so.
-The toolbar's Paste control first uses the browser clipboard API to look for an image and then
-falls back to text. If no usable clipboard read API remains, or its reads are
-denied, it shows a visible **Paste unavailable** error telling you to use the
-native paste shortcut or allow clipboard access. Copy uses the same API with a
-selection fallback; if both routes fail it shows **Copy unavailable** rather
-than silently dropping the copy.
+The toolbar's Paste control first uses the browser clipboard API to look for
+an image and then falls back to text. If no usable clipboard read API
+remains, or its reads are denied, it shows a visible **Paste unavailable**
+error telling you to use the native paste shortcut or allow clipboard
+access. Copy uses the same API with a selection fallback; if both routes
+fail it shows **Copy unavailable** rather than silently dropping the copy.
 
 ### On a touch screen
 
