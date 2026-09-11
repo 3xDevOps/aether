@@ -132,7 +132,7 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[str
 		// an agent, but this path is handed to a container runtime: a name
 		// that is not a plain file in this directory is refused rather than
 		// written somewhere else.
-		if name == "" || filepath.Base(name) != name || name == "." || name == ".." {
+		if name == "" || name == "." || name == ".." || strings.ContainsRune(name, filepath.Separator) {
 			return "", fmt.Errorf("coord: %q is not a usable asset name", name)
 		}
 		path := filepath.Join(dir, name)
