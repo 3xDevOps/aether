@@ -1,11 +1,17 @@
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, WrapText } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import { api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { Land } from '@/routes/diff/land'
@@ -23,6 +29,10 @@ import {
   type RunDiffState,
 } from '@/store/diff'
 
+/** Tailwind's `md`, asked from JavaScript: the width at which the tab stops
+ * putting the timeline beside the patch and starts putting it above. */
+const belowMd = '(max-width: 767px)'
+
 /**
  * The run-detail Diff tab: the run's current diff against its fork point,
  * plus the times its files changed. The server records a git tree per
@@ -38,6 +48,14 @@ function DiffView({ params }: RouteProps) {
   // Keyed on the snapshot's time, not its index: new snapshots are prepended,
   // so an index would silently retarget whenever one arrived.
   const [selected, setSelected] = useState<string | null>(null)
+  // Null until the member says otherwise, so the default follows the pointer
+  // rather than being frozen at whatever it was on the first render.
+  const [wrapping, setWrapping] = useState<boolean | null>(null)
+  const coarse = useMediaQuery(coarsePointer)
+  // The timeline sits above the patch once the grid stacks, so below `md` it
+  // is a disclosure rather than 208px of chrome before the first line.
+  const stacked = useMediaQuery(belowMd)
+  const wrap = wrapping ?? coarse
   usePatch(run ? runID : '')
 
   const snapshot =
@@ -108,6 +126,16 @@ function DiffView({ params }: RouteProps) {
                 </Button>
               )}
               <Button
+                variant={wrap ? 'secondary' : 'ghost'}
+                size="sm"
+                className="px-2"
+                aria-pressed={wrap}
+                onClick={() => setWrapping(!wrap)}
+              >
+                <WrapText className="size-3.5" aria-hidden />
+                Wrap lines
+              </Button>
+              <Button
                 variant="ghost"
                 size="sm"
                 className="px-2"
@@ -136,16 +164,27 @@ function DiffView({ params }: RouteProps) {
           </p>
         )}
 
-        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[14rem_minmax(0,1fr)]">
-          <Timeline
-            snapshots={state.snapshots}
-            selected={selected}
-            onSelect={(time) => setSelected(time === selected ? null : time)}
-          />
+        <div
+          className={cn(
+            'grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden',
+            state.snapshots.length > 0 && 'md:grid-cols-[14rem_minmax(0,1fr)]',
+          )}
+        >
+          {/* Nothing to select is nothing to show: the list starts empty on
+              every page load, so an empty one is the normal state and not
+              worth a panel. */}
+          {state.snapshots.length > 0 && (
+            <Timeline
+              snapshots={state.snapshots}
+              selected={selected}
+              onSelect={(time) => setSelected(time === selected ? null : time)}
+              stacked={stacked}
+            />
+          )}
           <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-background">
             <div>
               {shown.map((file) => (
-                <FilePatch key={file.path} file={file} />
+                <FilePatch key={file.path} file={file} wrap={wrap} />
               ))}
               {shown.length === 0 && note && (
                 <p className="border-b border-dashed p-4 text-[12px] text-muted-foreground">
@@ -191,78 +230,97 @@ function range(snapshot: DiffSnapshot): { from: string; to: string } | null {
 }
 
 /** When files changed: one entry per diff snapshot the server took. Selecting
- * one shows the diff of that interval. */
+ * one shows the diff of that interval. Beside the patch it is a list; above
+ * it, where every row of chrome pushes the first line further down, it is a
+ * disclosure that starts closed. */
 function Timeline({
   snapshots,
   selected,
   onSelect,
+  stacked,
 }: {
   snapshots: DiffSnapshot[]
   selected: string | null
   onSelect: (time: string) => void
+  stacked: boolean
 }) {
+  const rows = (
+    <ul className={cn('p-1', stacked && 'max-h-52 overflow-y-auto')}>
+      {snapshots.map((snap, i) => {
+        const shownable = range(snap) !== null
+        return (
+          <li key={snap.time + i}>
+            {/* Disabled rather than content-less on a row that opens: an
+                open tooltip with nothing in it still points the button's
+                `aria-describedby` at a missing element and still swallows
+                the first Escape. */}
+            <Tooltip isDisabled={shownable}>
+              <Tooltip.Trigger<'button'>
+                render={(triggerProps) => (
+                  <button
+                    {...triggerProps}
+                    type="button"
+                    aria-disabled={!shownable || undefined}
+                    onClick={() => {
+                      if (shownable) onSelect(snap.time)
+                    }}
+                    aria-pressed={selected === snap.time}
+                    className={cn(
+                      focusRing,
+                      'min-h-10 w-full border-l-2 border-transparent px-2 py-1.5 text-left text-[12px] hover:not-aria-disabled:bg-toolbar-hover',
+                      'aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
+                      selected === snap.time && 'border-primary bg-selection text-selection-foreground',
+                    )}
+                  >
+                    <span className="block truncate font-medium">{timeAgo(snap.time)}</span>
+                    <span
+                      className={cn(
+                        'mt-0.5 block text-[11px] text-muted-foreground',
+                        selected === snap.time && 'text-selection-foreground/80',
+                      )}
+                    >
+                      {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
+                      {' · '}
+                      <span className="font-mono text-success-foreground">
+                        +{total(snap.files, 'additions')}
+                      </span>{' '}
+                      <span className="font-mono text-destructive">
+                        -{total(snap.files, 'deletions')}
+                      </span>
+                    </span>
+                  </button>
+                )}
+              />
+              <Tooltip.Content>{noTree}</Tooltip.Content>
+            </Tooltip>
+          </li>
+        )
+      })}
+    </ul>
+  )
+
+  if (stacked) {
+    return (
+      <Collapsible asChild>
+        <aside className="min-h-0 border-b bg-sidebar">
+          <CollapsibleTrigger className="min-h-[35px] px-3 py-2 text-[12px] font-medium text-foreground">
+            Change intervals ({snapshots.length})
+          </CollapsibleTrigger>
+          <CollapsibleContent>{rows}</CollapsibleContent>
+        </aside>
+      </Collapsible>
+    )
+  }
+
   return (
-    <aside className="min-h-0 max-h-52 overflow-y-auto border-b bg-sidebar md:max-h-none md:border-b-0 md:border-r">
+    <aside className="min-h-0 overflow-y-auto border-r bg-sidebar">
       <div className="sticky top-0 z-10 min-h-[35px] border-b bg-sidebar px-3 py-2">
         <h2 className="text-[12px] font-medium text-foreground">Change intervals</h2>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {snapshots.length === 0
-            ? 'Nothing since you opened the dashboard.'
-            : 'Select an interval to review what changed.'}
+          Select an interval to review what changed.
         </p>
       </div>
-      <ul className="p-1">
-        {snapshots.map((snap, i) => {
-          const shownable = range(snap) !== null
-          return (
-            <li key={snap.time + i}>
-              {/* Disabled rather than content-less on a row that opens: an
-                  open tooltip with nothing in it still points the button's
-                  `aria-describedby` at a missing element and still swallows
-                  the first Escape. */}
-              <Tooltip isDisabled={shownable}>
-                <Tooltip.Trigger<'button'>
-                  render={(triggerProps) => (
-                    <button
-                      {...triggerProps}
-                      type="button"
-                      aria-disabled={!shownable || undefined}
-                      onClick={() => {
-                        if (shownable) onSelect(snap.time)
-                      }}
-                      aria-pressed={selected === snap.time}
-                      className={cn(
-                        focusRing,
-                        'min-h-10 w-full border-l-2 border-transparent px-2 py-1.5 text-left text-[12px] hover:not-aria-disabled:bg-toolbar-hover',
-                        'aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
-                        selected === snap.time && 'border-primary bg-selection text-selection-foreground',
-                      )}
-                    >
-                      <span className="block truncate font-medium">{timeAgo(snap.time)}</span>
-                      <span
-                        className={cn(
-                          'mt-0.5 block text-[11px] text-muted-foreground',
-                          selected === snap.time && 'text-selection-foreground/80',
-                        )}
-                      >
-                        {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
-                        {' · '}
-                        <span className="font-mono text-success-foreground">
-                          +{total(snap.files, 'additions')}
-                        </span>{' '}
-                        <span className="font-mono text-destructive">
-                          -{total(snap.files, 'deletions')}
-                        </span>
-                      </span>
-                    </button>
-                  )}
-                />
-                <Tooltip.Content>{noTree}</Tooltip.Content>
-              </Tooltip>
-            </li>
-          )
-        })}
-      </ul>
+      {rows}
     </aside>
   )
 }

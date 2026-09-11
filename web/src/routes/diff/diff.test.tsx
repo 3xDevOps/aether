@@ -10,6 +10,7 @@ import { toRecord } from '@/store/runs'
 import type { RunPatch } from '@/lib/types'
 import { alice, bob, run, workspace } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
+import { atViewport } from '@/test/viewport'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -455,4 +456,59 @@ it('sends an unknown run to the shared missing-run view', () => {
   render(<DiffView params={{ runId: 'run_missing' }} />)
 
   expect(screen.getByRole('button', { name: 'Back to board' })).toBeDefined()
+})
+
+// The list starts empty on every page load and fills as the run works, so an
+// empty one is the normal state - and on a stacked layout it would be 208px
+// of nothing between the header and the first line of the patch.
+test('no snapshots means no timeline at all', async () => {
+  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
+  renderDiff()
+
+  expect(await screen.findByText('cmd/main.go')).toBeTruthy()
+  expect(screen.queryByText(/Change intervals/)).toBeNull()
+})
+
+test('below md the timeline is a disclosure that starts closed', async () => {
+  const resize = atViewport(390, { pointer: 'coarse' })
+  seed({
+    status: 'ready',
+    base: 'abcdef12',
+    patch,
+    revision: 0,
+    fetched: 0,
+    snapshots: [snapshot('2026-01-01T00:00:00Z', 'aaa', 'bbb')],
+  })
+  renderDiff()
+
+  const trigger = await screen.findByRole('button', { name: /Change intervals/ })
+  expect(screen.queryByRole('button', { name: /file/ })).toBeNull()
+
+  fireEvent.click(trigger)
+  expect(await screen.findByRole('button', { name: /1 file/ })).toBeTruthy()
+
+  // Beside the patch there is room for the list, so it is a list again.
+  resize(1200)
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: /Change intervals/ })).toBeNull(),
+  )
+  expect(screen.getByText('Change intervals')).toBeTruthy()
+})
+
+// A phone cannot side-scroll each file section separately, so the pointer
+// picks the starting side of the trade and the member keeps the choice.
+test('a coarse pointer wraps long lines until the toggle says otherwise', async () => {
+  atViewport(390, { pointer: 'coarse' })
+  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
+  renderDiff()
+
+  const line = await screen.findByText('+new line')
+  const toggle = screen.getByRole('button', { name: 'Wrap lines' })
+  expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  expect(line.className).toContain('whitespace-pre-wrap')
+
+  fireEvent.click(toggle)
+  await waitFor(() => expect(toggle.getAttribute('aria-pressed')).toBe('false'))
+  expect(screen.getByText('+new line').className).toContain('whitespace-pre')
+  expect(screen.getByText('+new line').className).not.toContain('whitespace-pre-wrap')
 })

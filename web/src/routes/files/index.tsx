@@ -6,6 +6,7 @@ import { api, type Api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
 import { terminalFontFamily } from '@/lib/term-font'
 import type { Run, Workspace } from '@/lib/types'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { FilePatch } from '@/routes/diff/patch-view'
@@ -476,6 +477,9 @@ function DiffDocument({
 }: {
   state?: { patch: string; truncated: boolean; loading?: boolean }
 }) {
+  // No toggle here - the viewer has one column and no room for a toolbar - so
+  // the pointer decides, the same default the Diff tab starts from.
+  const wrap = useMediaQuery(coarsePointer)
   if (!state || state.loading) {
     return (
       <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">
@@ -496,7 +500,7 @@ function DiffDocument({
       ) : (
         <div>
           {files.map((file) => (
-            <FilePatch key={file.path} file={file} />
+            <FilePatch key={file.path} file={file} wrap={wrap} />
           ))}
         </div>
       )}

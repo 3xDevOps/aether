@@ -5,6 +5,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 /**
@@ -14,11 +15,17 @@ import type { RunRecord } from '@/store/runs'
  * live in the run action bar above with every other verb rather than a second
  * time down here - but the fetch output is an answer, not a verb, so it stays
  * where a member reviewing the branch will look for it.
+ *
+ * All of it is about a repository on this machine, so it is gated on the
+ * same `pull` verb that fetches into one. A gateway without it - a phone on
+ * the server's dashboard - has no repository to copy these into.
  */
 export function ReviewCommands({ run }: { run: RunRecord }) {
   const base = useStore((s) => s.diffs[run.id]?.base ?? '')
   const pulled = useStore((s) => s.pulls[run.id])
+  const cap = useCapability()
 
+  if (!cap.hasLocal('pull')) return null
   if (!pulled && !run.branch) return null
 
   return (
