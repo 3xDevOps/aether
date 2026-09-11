@@ -6,6 +6,7 @@
 
 import { useEffect, useRef } from 'react'
 import { api, type Api } from '@/lib/api'
+import { onWake } from '@/lib/stream'
 import type { DiskUsage, TimelineQuery } from '@/lib/types'
 import { useStore, type RootState, type RootStore } from '@/store'
 import type { FeedFilters } from '@/store/timeline'
@@ -147,6 +148,27 @@ export function useTeamRefresh(client: Api = api): void {
     const timer = setInterval(() => void heartbeat(useStore, client), heartbeatMs)
     return () => clearInterval(timer)
   }, [route, client])
+
+  // A backgrounded tab freezes both timers above, so a phone comes back with
+  // presence already expired server-side and an inbox that may have gained an
+  // approval while it was away. Neither has a push channel, and the event
+  // cursor only moves if something else happened, so returning to the
+  // foreground is the signal. The fan-out keeps the same floor the debounced
+  // refresh has - flipping between two apps, or a cellular link flapping
+  // `online`, must not become 2 + 2N requests a time - while the heartbeat,
+  // one small request and the reason the wake exists, always goes.
+  useEffect(
+    () =>
+      onWake(() => {
+        const now = Date.now()
+        if (now - lastRun.current >= minGapMs) {
+          lastRun.current = now
+          void refreshTeam(useStore, client)
+        }
+        void heartbeat(useStore, client)
+      }),
+    [client],
+  )
 }
 
 /**

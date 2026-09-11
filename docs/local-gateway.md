@@ -1,16 +1,37 @@
-# The local gateway (`aether gui`)
+# Dashboard gateways (`aether gui` and `aether-server --web-port`)
 
-`aether gui` serves the dashboard from the user's own machine
-(`internal/localgw`): the embedded SPA, the `/api/v1` shape, and the
-WebSocket surfaces, all proxied over the machine's SSH connection to the
-linked server. It is the only web transport Aether ships; the server itself
-listens on SSH and nothing else. Because the identity is the member's own
-SSH key rather than a token minted somewhere else, the **full
-control-channel method map** is reachable - no allowlist - plus the
-client-machine verbs under `/local/v1` that only a machine with the user's
-repository and SSH key can offer. The security stances are in
-[security.md](security.md#the-dashboard-gateway); the SPA that runs against
-it is in [dashboard-frontend.md](dashboard-frontend.md).
+The embedded dashboard is served through two transports. `aether gui` serves
+it on the user's machine and proxies the shared API and WebSocket surfaces to
+the linked server. `aether-server --web-port` serves the same bundle directly
+over HTTPS on the server's tailnet addresses. Both use `internal/webgate`, so
+routes, framing, timeouts, close reasons, capability checks and the control
+method shapes are the same; only authentication, backend and machine-local
+surfaces differ. The SPA is documented in
+[dashboard-frontend.md](dashboard-frontend.md), and the security stances are
+in [security.md](security.md#the-dashboard-gateways).
+
+`aether gui` uses a token on its loopback listener and an SSH-backed backend.
+The server gateway has no browser token: Tailscale WhoIs identifies the source
+address on every request, and the request is dispatched in-process for that
+member.
+
+## Which gateway serves what
+
+A server with `web-port` set serves the same dashboard over HTTPS on its
+tailnet addresses, identifying each request by Tailscale WhoIs
+(`internal/servergw`; how to turn it on and what it needs are in
+[networking.md](networking.md#the-dashboard)). Everything below describes both
+gateways except where this table says otherwise: the routes, framing, timeouts
+and close reasons are one implementation (`internal/webgate`), and each
+gateway supplies only the identity and backend behind it.
+
+| Surface | `aether gui` | `aether-server --web-port` |
+| --- | --- | --- |
+| Listener | `127.0.0.1` on an ephemeral or `--port` port, plain HTTP | the host's tailnet addresses, HTTPS with the tailnet certificate |
+| Identity | per-process bearer token; the SSH backend acts for that linked member | Tailscale WhoIs on the request's source address, per request; no browser token |
+| `/api/v1/*`, `/ws/events`, `/ws/attach`, `/ws/terminal` | yes | yes |
+| `/local/v1/*` | yes | no - those verbs need the caller's machine |
+| Backend | shared webgate over one SSH connection to the linked server | shared webgate in-process, using the same handlers as the SSH transport |
 
 ## Running it
 
@@ -29,12 +50,40 @@ initial browser tab). The printed URL is
 `http://127.0.0.1:<port>/?token=<token>`. The process serves until
 `SIGINT`, `SIGTERM`, or `SIGHUP`; the token dies with it.
 
+The dashboard moves the token out of the address bar into the tab's
+session storage on first load, so it is held per browser tab: a second tab
+opened from a bookmark, or the same tab after `aether gui` restarted with a
+fresh token, has no usable credential. Both cases answer `401` with
+
+```json
+{"error":{"code":-32001,
+  "message":"a valid gateway token is required; restart `aether gui` for a fresh URL"}}
+```
+
+which the dashboard reports as an expired link, showing that message, rather
+than retrying a credential the gateway has already rejected. Open the URL
+`aether gui` printed again to get a working one.
+
 ### Agent OAuth logins
 
 When an agent prints an OAuth URL in the dashboard, click it. If the URL
 contains an HTTP loopback callback, the dashboard opens a blank browser tab,
 starts the local forward, and only then loads the authorization page. The
 forward targets the run or environment terminal where the link appeared.
+
+The server gateway has no `forward.start` verb to do that with, and the
+callback port only exists on the machine that runs the forward, so opening
+the link there would strand the login. Instead the dashboard leaves the link
+unopened and shows a toast carrying it, the command to run on the machine
+where the login will be finished, and a **Copy link** action:
+
+```sh
+aether forward run:<run-id> <port>     # a link that appeared in a run's terminal
+aether forward terminal <port>         # a link in the environment terminal
+```
+
+Links whose callback is not a loopback address open normally on both
+gateways.
 
 For a CLI terminal, or as a dashboard fallback, forward the callback port
 before completing authorization:
@@ -67,56 +116,60 @@ should come back on the new binary.
 
 ## Design
 
-The gateway holds no server code: every read and write is a
-control-channel call proxied over one SSH connection to the linked server,
-through the same `internal/cli` client the terminal commands use. One
-fresh subsystem channel per WebSocket for events, attach, terminal, and sync -
-so the HTTP handlers never know they are riding SSH.
+Both transports use `internal/webgate` for HTTP and WebSocket dispatch. The
+local gateway supplies an SSH-backed backend: reads and writes go through one
+lazy, shared control-channel connection to the linked server, using the same
+handlers as the server-hosted gateway. The server gateway supplies an
+in-process backend for the member identified by Tailscale WhoIs. This keeps
+the API and stream behavior independent of whether the browser is local or on
+the tailnet.
 
-The connection is dialed lazily on first use and shared. When a call fails
-on transport (a server restart, a dropped network) the backend redials
-once and retries once before surfacing `-32004` (unavailable); a failure
-the server itself answered passes through untouched as that
-`protocol.Error`. Streams get the same treatment with a guard: a channel
+For the local backend, when a call fails on transport (a server restart or a
+dropped network), it redials once and retries once before surfacing `-32004`
+(unavailable); a failure the server itself answered passes through untouched as
+that `protocol.Error`. Streams get the same treatment with a guard: a channel
 that fails to open triggers a redial only when a keepalive shows the
-connection is actually gone, because tearing down a healthy connection
-would kill every live stream riding on it.
+connection is actually gone, because tearing down a healthy connection would
+kill every live stream riding on it.
 
-Every `-32004` carries a message prefix that says who has to fix it, and
-both map to HTTP 503 as before. `network unreachable: ` means this
-machine could not even attempt the connection (DNS resolution failed, or
-the kernel reported no route or an interface down), so the user fixes
-their own connectivity. `server unreachable: ` is everything else and is
-the default: a refused connection, a dial timeout, a failed SSH
-handshake, or a wedged call, where the server is the thing to check. The
-split stops at unambiguous cases on purpose, since a refusal or a timeout
-cannot tell a stopped server from a firewall, and a wrong guess sends the
-user to fix the wrong thing. Dial failures are classified inside the
-shared dial path, so the `/ws/events` refusal frame carries the same code
-and prefix as a `POST /api/v1` error.
+Every `-32004` carries a message prefix that says who has to fix it, and both
+map to HTTP 503 as before. `network unreachable: ` means this machine could
+not even attempt the connection (DNS resolution failed, or the kernel
+reported no route or an interface down), so the user fixes their own
+connectivity. `server unreachable: ` is everything else and is the default: a
+refused connection, a dial timeout, a failed SSH handshake, or a wedged call,
+where the server is the thing to check. The split stops at unambiguous cases
+on purpose, since a refusal or a timeout cannot tell a stopped server from a
+firewall, and a wrong guess sends the user to fix the wrong thing. Dial
+failures are classified inside the shared dial path, so the `/ws/events`
+refusal frame carries the same code and prefix as a `POST /api/v1` error.
+
+The server gateway performs the equivalent identity lookup on each request.
+WhoIs failures are refused before dispatch; a tagged node is denied and an
+unavailable identity service is reported as `-32004`.
 
 ## Routes
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/` and any other non-API path | the SPA (fallback to `index.html`) |
-| `POST` | `/api/v1/<rpc.method>` | any control-channel method, proxied over SSH |
-| `GET` | `/api/v1/run/<run_id>/patch` | `run.patch`, proxied |
-| `GET` | `/api/v1/disk` | `server.disk`, proxied |
+| `POST` | `/api/v1/<rpc.method>` | any control-channel method, dispatched through the shared webgate |
+| `GET` | `/api/v1/run/<run_id>/patch` | `run.patch` |
+| `GET` | `/api/v1/disk` | `server.disk` |
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
 | `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
-| `POST` | `/local/v1/<verb>` | client-machine verbs (table below) |
+| `POST` | `/local/v1/<verb>` | client-machine verbs, on `aether gui` only |
 
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
-embedded `web/dist`, without a token - the SPA bundle is not secret and has
-to load before it can present one. Unknown paths fall back to `index.html`
-so client-side routing works on a hard refresh. An `/api/`, `/ws/`, or
-`/local/` path hit with the wrong method is the exception: it answers `405`
-with a JSON error body instead of falling through to the SPA, so a
-wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
+embedded `web/dist`, without authentication - the SPA bundle is not secret
+and has to load before the gateway can authenticate API calls. Unknown paths
+fall back to `index.html` so client-side routing works on a hard refresh. An
+`/api/`, `/ws/`, or `/local/` path hit with the wrong method is the exception:
+it answers `405` with a JSON error body instead of falling through to the SPA,
+so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. File and configuration exceptions are listed below.
@@ -125,9 +178,13 @@ separately at 8 MiB. File and configuration exceptions are listed below.
 
 The path segment after `/api/v1/` is the JSON-RPC method name, dots
 included: `POST /api/v1/run.list`. The request body is the method's
-`params` object (an empty body means no params). Success is `200` with the
-method's result object as the whole body; failure is a non-2xx status with
-the JSON-RPC error object wrapped:
+`params` object (an empty body means no params) and must be declared
+`Content-Type: application/json`; any other content type answers `415`
+before the body is read. A request carrying an `Origin` header that is not
+the gateway's own host answers `403` before anything else, on every route
+(the cross-site rule in [security.md](security.md#the-dashboard-gateways)).
+Success is `200` with the method's result object as the whole body;
+failure is a non-2xx status with the JSON-RPC error object wrapped:
 
 ```json
 {"error":{"code":-32001,"message":"run.kill: permission denied"}}
@@ -138,16 +195,17 @@ Status mapping (the code is the authority; the status is a convenience):
 | JSON-RPC code | HTTP |
 | --- | --- |
 | `-32700` parse, `-32600` invalid request, `-32602` invalid params | 400 |
-| unauthenticated (no/expired token) | 401 |
-| `-32001` denied | 403 |
+| local bearer token missing or expired | 401 |
+| `-32001` denied, including a tagged WhoIs node, and a foreign `Origin` header | 403 |
+| `-32004` unavailable, including an unavailable WhoIs identity lookup | 503 |
+| `-32600` invalid request: body not `application/json` | 415 |
 | `-32000` not found | 404 |
 | `-32002` invalid state, `-32003` conflict | 409 |
 | `-32603` internal | 500 |
-| `-32004` unavailable | 503 |
 
 Param and result shapes are the ones in `internal/protocol` (`wire.go` and
 the per-feature files), unchanged by this transport, and every call passes
-the same capability checks the SSH transport applies.
+the same capability and member-authorization checks regardless of transport.
 
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
 same `{"run_id":"..."}` params. For a live run it stops the container and
@@ -168,22 +226,33 @@ audit history.
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
-`methods` is `["*"]` because this gateway forwards every control-channel
-method; `ws` lists the WebSocket surfaces it serves; `local` is the sorted
-`/local/v1` verb list. A client probes this rather than hard-coding what it
-is talking to; the SPA's `useCapability` seam reads it to gate the
-local-only surfaces.
+The server gateway answers the same shape with no `local` field because it
+cannot run verbs on the browser's machine:
 
-`version` and `commit` are the `aether` build serving this gateway, which is
-the only way the SPA can learn what CLI it is running against - `server.info`
-answers for the server. Both are absent on a gateway that predates them.
+```json
+{"gateway":"server","methods":["*"],"ws":["events","attach","terminal"],
+ "version":"v1.2.3","commit":"abc1234"}
+```
+
+`methods` is `["*"]` because both transports dispatch every control-channel
+method; `ws` lists the WebSocket surfaces served; `local` is the sorted
+`/local/v1` verb list, absent where there are none. A client probes this
+descriptor rather than hard-coding its transport. The SPA uses it to hide
+machine-local onboarding, linking, repository and update controls while
+leaving shared server surfaces, including Files and member configuration,
+available through either gateway.
+
+`version` and `commit` are the build serving the gateway, which is the only
+way the SPA can learn what CLI it is running against - `server.info` answers
+for the server. Both are absent on a gateway that predates them.
 
 ### Control-channel methods this gateway calls
 
-The two `GET` endpoints above are backed by SSH control-channel methods, as
-are the file reads and the member and workspace writes below. This gateway
-proxies the whole API shape over SSH, so it needs all of them without a
-listener on the server.
+The two `GET` endpoints above are backed by control-channel methods, as are
+the file reads and the member and workspace writes below. `aether gui`
+proxies these methods over SSH; the server gateway dispatches them in-process.
+Both transports therefore expose the same API shape and authorization checks.
+
 
 | Method | Params | Result |
 | --- | --- | --- |
@@ -230,6 +299,10 @@ They require **Launch**; an administrator cannot select another member with an
 extra request field. `config.write` has the same explicit-save and revision
 rules as `files.write`, while `config.import` installs a one-time directory
 selection into that home.
+All of the member's run containers and environment terminal mount one shared
+read-write persistent HOME. A file edit, configuration import, or manual CLI
+profile operation is therefore visible to already-running processes
+immediately, although a tool may need to reload its configuration.
 
 The browser filters known credential names (wherever they occur in a path)
 and runtime/history defaults before upload, but all remaining bytes are
@@ -241,8 +314,8 @@ unsafe paths, symlink components, hardlinks, and non-regular destinations.
 The result's `files` and `bytes` count
 accepted files only; `excluded` reports server-side credential, ignore,
 secret, or safety exclusions. Explicit CLI profile `push`, `status`, and
-`rollback` remain separate manual operations; the dashboard does not call
-local profile verbs or watch a local directory.
+`rollback` remain separate manual operations; the dashboard does not invoke
+profile synchronization or watch a local directory.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 4 MiB, and `config.import` at 30 MiB.
@@ -340,6 +413,7 @@ deployment has left, not what anyone is running. `503` with `-32004` when the
 server was not told where the data directory is, or the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
 zero anywhere else).
+
 
 
 `terminal.image` accepts the original image bytes as strict base64 in
@@ -770,15 +844,35 @@ no SSH key is offered and the server requires one, it may create
 ## WebSockets
 
 Cross-origin WebSocket handshakes are rejected; the SPA is served from the
-same origin as the API. Every handshake carries the token, as
-`Authorization: Bearer` or `?token=` - browsers cannot set headers on a
-WebSocket handshake. There is no token watch closing live sockets, because
-the token cannot be revoked: it lives and dies with the process.
+same origin as the API. On `aether gui`, each handshake carries the
+per-process token as `Authorization: Bearer` or `?token=` - browsers cannot set
+headers on a WebSocket handshake. A missing or stale local token is refused
+with `401` before the upgrade, so it never becomes a socket; the dashboard's
+capabilities probe catches that case ahead of the stream. The server gateway
+carries no token: WhoIs identifies the request's source address instead.
+
+Both transports reconnect on a jittered backoff that caps at 30 seconds, and
+reopen immediately - backoff reset - when the browser fires
+`visibilitychange` (visible) or `online`. A phone freezes a background tab's
+timers, so without those two events a tab returning from the pocket would sit
+out the rest of a 30-second wait. A foreground return leaves a socket that is
+still there alone; `online` replaces it whatever state it reached, because a
+network switch leaves even an acknowledged socket half open, with the browser
+still reporting it as connected and no close ever arriving on the client side.
+An attach the gateway refused, one parked on a `session ended` close, and a
+run still waiting for its PTY session are not reopened by either event.
+
+Every live socket - `events`, `attach`, and `terminal` - is pinged by the
+server every **30 seconds** and closed when the pong does not arrive within
+**10**. A client that changed networks or went to sleep leaves a half-open
+connection that reads as live on both ends; the ping is what releases the PTY
+client it was holding, whose geometry clamps every other viewer. The SPA
+reconnects on its normal path.
 
 ### `GET /ws/events`
 
-Same subscription semantics as the SSH events subsystem, so a client that
-lost its socket resumes without gaps.
+Same subscription semantics as the shared event-stream subsystem, so a client
+that lost its socket resumes without gaps.
 
 1. Client sends one **text** frame: a `SubscribeRequest`. The header must
    arrive within 10 seconds or the socket is closed; frames sent after it
@@ -800,12 +894,12 @@ lost its socket resumes without gaps.
    ```
 
 Reconnect contract: track the highest `seq` you have seen and resubscribe
-with `"replay":true,"after_seq":<last seq>`. When the SSH event stream ends
-for any reason - a dropped connection, a server restart, or a per-client
-buffer overflow - the socket closes with code **1012** (service restart),
-reason `event stream ended; resubscribe with after_seq`. That close is the
-signal to resubscribe from your last `seq`, not an error to surface; the
-replay recovers anything dropped.
+with `"replay":true,"after_seq":<last seq>`. When the event stream ends for any
+reason - a dropped connection, a server restart, or a per-client buffer
+overflow - the socket closes with code **1012** (service restart), reason
+`event stream ended; resubscribe with after_seq`. That close is the signal to
+resubscribe from your last `seq`, not an error to surface; the replay recovers
+anything dropped.
 
 ### `GET /ws/attach/<run_id>`
 

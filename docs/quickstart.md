@@ -55,16 +55,18 @@ hand if you skipped the question:
 sudo aether-server setup
 ```
 
-It asks for the listen address, data directory, and tailnet policy (Enter
-accepts each default), then prints:
+It asks for the listen address, data directory, and tailnet policy - plus, on
+a host that already runs tailscaled, the dashboard's HTTPS port on the tailnet
+(Enter accepts each default) - then prints:
 
 ```sh
 systemctl daemon-reload && systemctl enable --now aether-server
 ```
 
 Run that and the server is live on `:2222`. The SSH host key is generated on
-first start and nothing is exposed to the network except the SSH port. Change
-any option later with `aether-server config set <key> <value>`, then restart.
+first start, and the SSH port is the only thing exposed unless you answered the
+dashboard question. Change any option later with
+`aether-server config set <key> <value>`, then restart.
 
 To try it in the foreground first, `sudo aether-server serve` runs until
 Ctrl-C. [install.md](install.md) covers unattended installs, running
@@ -114,7 +116,7 @@ aether member git --name "Ada Lovelace" --email ada@example.com
 Every commit an agent makes in your runs, and every commit Aether makes for
 them, is authored as that name and address, so branches you merge upstream
 credit your account. Without it the fallback is your display name at
-`<member-id>@aether.local`, which maps nowhere. The dashboard's onboarding
+`<member-id>@aether.local`, which maps nowhere. The local dashboard's onboarding
 wizard asks for the same two fields in its **Git identity** step, right after
 Link, prefilled from this machine's `git config user.name` and `user.email`.
 `aether member git` with no flags shows what is set.
@@ -152,7 +154,7 @@ The first `link --repo` also reads your clone's own `origin` URL and records
 it on the workspace, printing `workspace origin -> <url>`. Every run
 checkout created afterwards gets an `origin` remote pointing there, so an
 agent in a run can `git push origin <branch>` and open a pull request once
-you have connected GitHub ([step 5](#5-set-up-your-agent)). The dashboard
+you have connected GitHub ([step 5](#5-set-up-your-agent)). The local dashboard
 wizard's Repository step does the same. Recording happens only when you may
 push - a viewer may not - and your clone's origin is one the server accepts;
 otherwise the link still succeeds, prints no `workspace origin ->` line, and
@@ -162,7 +164,7 @@ is recorded in its `https://github.com/...` form, because that is the form a
 run can push to; [teams.md](teams.md#workspaces) has the rule for other
 hosts.
 
-In the dashboard, the onboarding wizard's Repository step does both for
+In the local dashboard's onboarding wizard, the Repository step does both for
 you. Point it at your clone: type the absolute path, or, in the desktop app,
 pick it with **Choose folder**. The step adds the remote, then its
 **Push now** button compares your clone
@@ -190,8 +192,8 @@ Choose an agent once:
 aether agent add claude
 ```
 
-For a shipped agent, the dashboard's Agents step opens the live environment
-terminal dock and types its vendor install script. The dock says
+For a shipped agent, the local dashboard's Agents step opens the live
+environment terminal dock and types its vendor install script. The dock says
 **Starting your environment container** while Docker starts it, then the
 shell appears. When you press **I've installed and logged in**, the wizard
 checks the executable is on the server and runs `env save` for you, naming
@@ -214,10 +216,12 @@ edited in **Files**. See [the environment terminal guide](terminal.md) for tab
 and stop behavior.
 
 Your own configuration is separate from vendor login and image setup. In the
-Agents step, choose one directory such as `~/.claude`, `~/.codex`, or `~/.pi`
-with **Choose directory**. Review the preview, select a destination when the
-basename is unknown or ambiguous, and click **Import configuration**. This is
-explicit and one-time; there is no local directory watcher or AI inventory.
+local dashboard's Agents step, choose one directory such as `~/.claude`,
+`~/.codex`, or `~/.pi` with **Choose directory**. Review the preview, select a
+destination when the basename is unknown or ambiguous, and click **Import
+configuration**. This is explicit and one-time; there is no local directory
+watcher or AI inventory. The server-hosted dashboard has no local directory
+picker; use `aether gui` for this step.
 
 Known credential names in any path component and runtime/history defaults are
 skipped in the browser before upload. Remaining bytes are uploaded and
@@ -231,8 +235,9 @@ The imported files go into your authenticated member's persistent home, which
 is mounted read-write in the environment terminal and in runs using that
 account. Changes are immediately visible, including to active runs; the agent
 may need to reload. This is a shared home, not an isolated per-run profile.
-Snapshot pins are audit metadata, not isolated writable copies. Importing or
-editing configuration does not rebuild the installed-agent image.
+The snapshot pin records launch provenance, not an isolated writable copy or a
+promise that home edits wait for later runs. Importing or editing configuration
+does not rebuild the installed-agent image.
 
 Open **Files** to browse your own configuration beside workspace base and
 live-run files. The editor supports JSON, JavaScript, TypeScript, Markdown,
@@ -244,11 +249,11 @@ server** replaces it with current server content.
 
 Configuration editing accepts full UTF-8 text up to 512 KiB. Binary and
 truncated files are read-only. New configuration files accept nested relative
-paths and refuse overwrites. `config.*` always targets your own authenticated
-member home. For workspace files, **Commit to <branch>** creates one commit on
-the base branch but does not push upstream; live-run writes modify the
-uncommitted checkout. Base saves require **Push** and run saves require
-**Steer**.
+paths and refuse overwrites. `config.*` methods require `Launch` and target only
+your authenticated member home; there is no admin/member selector. For
+workspace files, **Commit to <branch>** creates one commit on the base branch
+but does not push upstream; live-run writes modify the uncommitted checkout.
+Base saves require **Push** and run saves require **Steer**.
 
 ### Connect GitHub
 
@@ -306,6 +311,13 @@ branch into your clone. Leave it running; Ctrl-C stops the gateway and the
 token dies with it. `aether gui --url` prints the URL instead of opening a
 browser. See [local-gateway.md](local-gateway.md).
 
+On a tailnet, the server can host the dashboard instead, so a phone or any
+other tailnet device opens `https://<the server's MagicDNS name>/` with
+nothing installed and no token. Set `web-port` and restart the server; see
+[networking.md](networking.md#the-dashboard). This server-hosted dashboard has
+no machine-local verbs or onboarding wizard, but its authenticated **Files**
+view can edit the shared member home.
+
 ### Prefer a native window?
 
 `aether gui` in a browser tab is the whole dashboard. If you would rather it
@@ -331,8 +343,9 @@ Two things to know:
 - **It is not a standalone client.** The app does not bundle `aether`; it
   launches `aether gui` from your `PATH`, and the dashboard lives inside that
   CLI binary. Install the CLI ([step 1](#1-install)); on an unlinked machine,
-  the app opens its onboarding wizard and links from there. When you update
-  the CLI, the window picks up the new dashboard without rebuilding the app.
+  the app opens its local onboarding wizard and links from there. When you
+  update the CLI, the window picks up the new dashboard without rebuilding the
+  app.
 
 In the dashboard: a workspace switcher over the runs in scope, a board
 bucketed by what needs attention, a live terminal mirror per run, the diff
@@ -455,10 +468,10 @@ Then run steps 3, 4, 6 and 8 above with the default standard image and
 login. Step 7 (`aether gui`) works too if you want to watch.
 
 Launching it is the CLI's job, though. `fake` is a server-side registration
-rather than an executable installed in your account, and the dashboard's two
-launch surfaces - the launch form and the wizard's **First run** step - offer
-only agents installed in the account, plus the `custom` harness a deployment
-pins, so `fake` never appears in either.
+rather than an executable installed in your account, and the local dashboard's
+two launch surfaces - the launch form and the wizard's **First run** step -
+offer only agents installed in the account, plus the `custom` harness a
+deployment pins, so `fake` never appears in either.
 
 ```sh
 aether link <server-host>:2222
@@ -508,5 +521,5 @@ go or the next `aether link` fails.
 - [environment-home.md](environment-home.md) - member home, installed agents, and migration
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
 - [teams.md](teams.md) - joining, roles, workspaces
-- [harnesses.md](harnesses.md) - login, profile sync, and launch definitions
+- [harnesses.md](harnesses.md) - login, configuration import, and launch definitions
 - [security.md](security.md) - what the container boundary does and does not do

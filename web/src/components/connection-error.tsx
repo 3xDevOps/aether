@@ -1,4 +1,4 @@
-import { CircleAlert, KeyRound, RefreshCw, ServerOff, Unplug, WifiOff } from 'lucide-react'
+import { CircleAlert, KeyRound, RefreshCw, ServerOff, ShieldOff, Unplug, WifiOff } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -71,6 +71,28 @@ function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
       title: 'Cannot reach your Aether server',
       description:
         'The network is up and the server did not answer over SSH. Check that the server is running and that its host is reachable, then try again.',
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'refused') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Access refused',
+      title: 'The gateway refused this device',
+      description:
+        'The server answered and turned this device away: it is not identified as a member. The details below carry the reason. A tagged tailnet node, or a device the server cannot identify, has no dashboard.',
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'identity') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Identity unavailable',
+      title: 'The server cannot identify this device',
+      description:
+        'The server answered but could not ask its Tailscale daemon who this device is, so nobody is signed in. On the server host, check that tailscaled is running and that the server can read its socket, then retry. The details below carry what the server saw.',
       action: 'Retry connection',
     }
   }

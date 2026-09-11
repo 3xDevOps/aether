@@ -82,6 +82,8 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
   const workspaces = useStore((s) => s.workspaces)
   const runs = useStore((s) => s.runs)
   const filesEpoch = useStore((s) => s.filesEpoch)
+  const identityEpoch = useStore((s) => s.identityEpoch)
+  const identityKey = useStore((s) => s.identityKey)
   const fileTabs = useStore((s) => s.fileTabs)
   const activeFileKey = useStore((s) => s.activeFileKey)
   const openFileTab = useStore((s) => s.openFileTab)
@@ -99,6 +101,8 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
   useEffect(() => {
     if (!capabilities.hasMethod('config.roots')) return
     let active = true
+    setConfigRoots([])
+    setConfigError(null)
     void client
       .configRoots()
       .then((result) => {
@@ -113,7 +117,12 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
     return () => {
       active = false
     }
-  }, [capabilities, client])
+  }, [capabilities, client, identityKey])
+
+  useEffect(() => {
+    setNewFile(null)
+    setMobileView('tree')
+  }, [identityKey])
 
   const tabs = fileTabs.map(fileTabToSelection)
   const selection = tabs.find((tab) => sourceKey(tab, tab.path) === activeFileKey) ?? null
@@ -150,7 +159,6 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
       if (!next) setMobileView('tree')
     }
   }
-
   const configSources = configRoots.map((root) => ({
     kind: 'config' as const,
     harness: root.harness,
@@ -158,8 +166,11 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
     label: root.harness,
   }))
   const workspaceCount = Object.keys(workspaces).length
-  if (!capabilities.hasMethod('files.tree') && !capabilities.hasMethod('config.roots')) return null
-
+  const canBrowseWorkspaces = capabilities.hasMethod('files.tree')
+  const canBrowseConfig = capabilities.hasMethod('config.roots')
+  const visibleWorkspaceCount = canBrowseWorkspaces ? workspaceCount : 0
+  const visibleSourceCount = visibleWorkspaceCount + (canBrowseConfig ? configSources.length : 0)
+  if (!canBrowseWorkspaces && !canBrowseConfig) return null
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader title="Files" subtitle="Edit workspace files and your agent configuration" />
@@ -177,11 +188,11 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
               <p className="truncate text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Explorer</p>
             </div>
             <span className="shrink-0 text-[11px] text-muted-foreground">
-              {workspaceCount + configSources.length} {workspaceCount + configSources.length === 1 ? 'source' : 'sources'}
+              {visibleSourceCount} {visibleSourceCount === 1 ? 'source' : 'sources'}
             </span>
           </div>
           <div className="space-y-1 p-2">
-            {Object.values(workspaces).map((workspace) => (
+            {canBrowseWorkspaces && Object.values(workspaces).map((workspace) => (
               <WorkspaceTree
                 key={workspace.id}
                 workspace={workspace}
@@ -191,7 +202,7 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
                 selected={selection}
               />
             ))}
-            {configSources.map((source) => (
+            {canBrowseConfig && configSources.map((source) => (
               <TreeDirectory
                 key={source.harness}
                 source={source}
@@ -209,12 +220,15 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
               onSubmit={(event) => {
                 event.preventDefault()
                 const pending = newFile
-                void createConfigFile(pending, client, (created) => {
+                const requestEpoch = identityEpoch
+                void createConfigFile(pending, client, requestEpoch, (created) => {
                   const current = newFileRef.current
                   if (current !== pending) return
                   setNewFile(null)
+                  if (useStore.getState().identityEpoch !== requestEpoch) return
                   select(pending.source, created.path)
                 }).catch((err) => {
+                  if (useStore.getState().identityEpoch !== requestEpoch) return
                   const current = newFileRef.current
                   if (current === pending) setNewFile({ ...current, error: message(err) })
                 })
@@ -238,7 +252,7 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
             </form>
           )}
           {configError && <p role="alert" className="mx-2 border border-dashed px-3 py-2 text-[12px] text-destructive">{configError}</p>}
-          {workspaceCount === 0 && configSources.length === 0 && (
+          {visibleSourceCount === 0 && (
             <p className="mx-2 border border-dashed px-3 py-3 text-xs text-muted-foreground">No workspaces or configuration roots available.</p>
           )}
         </aside>
@@ -319,22 +333,34 @@ function TreeDirectory({
 }) {
   const key = sourceKey(source, path)
   const cached = useStore((s) => s.trees[key])
+  const filesEpoch = useStore((s) => s.filesEpoch)
+  const identityEpoch = useStore((s) => s.identityEpoch)
   const setTree = useStore((s) => s.setTree)
   const sourceKind = source.kind
   const harness = source.kind === 'config' ? source.harness : undefined
   const workspaceID = source.kind === 'workspace' ? source.workspaceID : undefined
   const runID = source.kind === 'workspace' ? source.runID : undefined
   const [expanded, setExpanded] = useState(path === '')
+  const requestID = useRef(0)
   useEffect(() => {
     if (!expanded || cached?.loading || cached?.entries || cached?.error) return
     setTree(key, { entries: [], loading: true, error: undefined })
+    const pending = useStore.getState().trees[key]
+    const requestToken = ++requestID.current
+    const requestIdentityEpoch = identityEpoch
     const request = source.kind === 'config'
       ? client.configTree({ harness: source.harness, path })
       : client.filesTree({ workspace_id: source.workspaceID, ...(source.runID ? { run_id: source.runID } : {}), path })
     void request
-      .then((result) => setTree(key, { entries: result.entries, loading: false, error: undefined }))
-      .catch((err) => setTree(key, { entries: [], loading: false, error: message(err) }))
-  }, [cached, client, expanded, harness, key, path, runID, setTree, sourceKind, workspaceID])
+      .then((result) => {
+        if (requestID.current !== requestToken || useStore.getState().identityEpoch !== requestIdentityEpoch || useStore.getState().trees[key] !== pending) return
+        setTree(key, { entries: result.entries, loading: false, error: undefined })
+      })
+      .catch((err) => {
+        if (requestID.current !== requestToken || useStore.getState().identityEpoch !== requestIdentityEpoch || useStore.getState().trees[key] !== pending) return
+        setTree(key, { entries: [], loading: false, error: message(err) })
+      })
+  }, [cached, client, expanded, filesEpoch, harness, identityEpoch, key, path, runID, setTree, sourceKind, workspaceID])
 
   const label = path === '' ? sourceLabel(source) : path.split('/').at(-1) ?? path
   return (
@@ -398,6 +424,7 @@ function FileEditor({
   epoch: number
 }) {
   const key = selection ? sourceKey(selection, selection.path) : ''
+  const identityEpoch = useStore((s) => s.identityEpoch)
   const document = useStore((s) => (key ? s.documents[key] : undefined))
   const draft = useStore((s) => (key ? s.drafts[key] : undefined))
   const setDocument = useStore((s) => s.setDocument)
@@ -424,13 +451,15 @@ function FileEditor({
     const requestID = (request.current[key] ?? 0) + 1
     request.current[key] = requestID
     const current = selection
+    const requestEpoch = identityEpoch
     setDocument(key, { content: '', truncated: false, binary: false, size: 0, revision: '', writable: false, loading: true, error: undefined })
+    const pending = useStore.getState().documents[key]
     const promise = current.kind === 'config'
       ? client.configRead({ harness: current.harness, path: current.path })
       : client.filesRead({ workspace_id: current.workspaceID, ...(current.runID ? { run_id: current.runID } : {}), path: current.path })
     void promise
       .then((result) => {
-        if (request.current[key] !== requestID) return
+        if (request.current[key] !== requestID || useStore.getState().identityEpoch !== requestEpoch || useStore.getState().documents[key] !== pending) return
         setDocument(key, { ...result, loading: false, error: undefined })
         const discard = reloadDiscard.current[key] === reload
         if (discard) {
@@ -439,11 +468,11 @@ function FileEditor({
         }
       })
       .catch((err) => {
-        if (request.current[key] !== requestID) return
+        if (request.current[key] !== requestID || useStore.getState().identityEpoch !== requestEpoch || useStore.getState().documents[key] !== pending) return
         const detail = message(err)
         setDocument(key, { content: '', truncated: false, binary: false, size: 0, revision: '', writable: false, loading: false, error: detail })
       })
-  }, [clearDraft, client, documentLoading, documentPresent, epoch, key, mode, reload, selectedHarness, selectedRunID, selectedWorkspaceID, selection?.kind, selection?.path, setDocument])
+  }, [clearDraft, client, documentLoading, documentPresent, epoch, identityEpoch, key, mode, reload, selectedHarness, selectedRunID, selectedWorkspaceID, selection?.kind, selection?.path, setDocument])
 
   const save = async () => {
     if (!selection) return
@@ -453,13 +482,16 @@ function FileEditor({
     if (!currentDocument || currentDocument.loading || currentDocument.binary || currentDocument.truncated || !currentDocument.writable || !currentDraft || currentDraft.saving || currentDraft.content === currentDraft.baseContent) return
     const captured = currentDraft.content
     const revision = currentDraft.baseRevision
+    const epochAtStart = currentState.identityEpoch
     setDraft(key, { ...currentDraft, content: captured, saving: true, error: undefined, conflict: false })
     try {
       const result = selection.kind === 'config'
         ? await client.configWrite({ harness: selection.harness, path: selection.path, content: captured, revision })
         : await client.filesWrite({ workspace_id: selection.workspaceID, ...(selection.runID ? { run_id: selection.runID } : {}), path: selection.path, content: captured, revision })
+      if (useStore.getState().identityEpoch !== epochAtStart) return
       markDraftSaved(key, captured, result)
     } catch (err) {
+      if (useStore.getState().identityEpoch !== epochAtStart) return
       const detail = message(err)
       const conflict = err instanceof ApiError && err.status === 409 || /conflict|stale|revision/i.test(detail)
       markDraftError(key, detail, conflict)
@@ -614,11 +646,24 @@ function DiffDocument({ selection, client, epoch }: { selection: WorkspaceSource
   const key = sourceKey(selection, selection.path)
   const state = useStore((s) => s.fileDiffs[key])
   const setFileDiff = useStore((s) => s.setFileDiff)
+  const identityEpoch = useStore((s) => s.identityEpoch)
+  const requestID = useRef(0)
   useEffect(() => {
     if (state || !selection.runID) return
     setFileDiff(key, { patch: '', truncated: false, loading: true, error: undefined })
-    void client.filesDiff(selection.runID, selection.path).then((result) => setFileDiff(key, { ...result, loading: false, error: undefined })).catch((err) => setFileDiff(key, { patch: '', truncated: false, loading: false, error: message(err) }))
-  }, [client, epoch, key, selection.path, selection.runID, setFileDiff, state])
+    const pending = useStore.getState().fileDiffs[key]
+    const requestToken = ++requestID.current
+    const requestIdentityEpoch = identityEpoch
+    void client.filesDiff(selection.runID, selection.path)
+      .then((result) => {
+        if (requestID.current !== requestToken || useStore.getState().identityEpoch !== requestIdentityEpoch || useStore.getState().fileDiffs[key] !== pending) return
+        setFileDiff(key, { ...result, loading: false, error: undefined })
+      })
+      .catch((err) => {
+        if (requestID.current !== requestToken || useStore.getState().identityEpoch !== requestIdentityEpoch || useStore.getState().fileDiffs[key] !== pending) return
+        setFileDiff(key, { patch: '', truncated: false, loading: false, error: message(err) })
+      })
+  }, [client, epoch, identityEpoch, key, selection.path, selection.runID, setFileDiff, state])
   if (!state || state.loading) return <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">Loading diff…</p>
   if (state.error) return <p role="alert" className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-destructive">{state.error}</p>
   const files = parsePatch(state.patch)
@@ -628,6 +673,7 @@ function DiffDocument({ selection, client, epoch }: { selection: WorkspaceSource
 async function createConfigFile(
   pending: { source: ConfigSource; path: string },
   client: Api,
+  requestEpoch: number,
   onCreated: (result: { path: string }) => void,
 ): Promise<void> {
   const path = pending.path.trim()
@@ -635,6 +681,7 @@ async function createConfigFile(
   if (!path || path.startsWith('/') || path.endsWith('/') || pieces.some((piece) => !piece || piece === '.' || piece === '..')) throw new Error('Use a non-empty relative path without . or .. segments.')
   const result = await client.configWrite({ harness: pending.source.harness, path, content: '', revision: '' })
   const store = useStore.getState()
+  if (store.identityEpoch !== requestEpoch) return
   store.setDocument(configKey(pending.source.harness, path), { ...result, loading: false, error: undefined })
   for (let length = pieces.length - 1; length >= 0; length -= 1) {
     store.invalidateTree(configKey(pending.source.harness, pieces.slice(0, length).join('/')))

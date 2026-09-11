@@ -145,8 +145,9 @@ Once per person, per agent:
 aether agent add <name>
 ```
 
-For a shipped name, the dashboard's Agents step opens the live environment
-terminal dock and types the vendor install script for you. In the CLI, run:
+For a shipped name, the local dashboard's Agents step opens the live
+environment terminal dock and types the vendor install script for you. In the
+CLI, run:
 
 ```sh
 aether terminal
@@ -157,7 +158,7 @@ terminal, and return to the dashboard. The login and executable are in your
 member home, so every container for that member sees them. A member-defined
 name also records a launch definition under that member.
 
-The dashboard's **I've installed and logged in** button checks `agent.list`
+The local dashboard's **I've installed and logged in** button checks `agent.list`
 before confirming installation. The Agents page shows **Installed** or
 **Not installed** for your account. These checks verify the executable;
 the agent verifies its vendor login when it starts. Shipped agents need no
@@ -299,11 +300,13 @@ transport for installation and login.
 
 ## Agent configuration: import and Files
 
-The dashboard does not watch a laptop directory or run an AI inventory. During
-the Agents step, choose one directory such as `~/.claude`, `~/.codex`, or
-`~/.pi` with the browser directory picker. A preview shows the files that will
-be sent and the paths left out before upload. Import is explicit and one-time:
-after it succeeds, the import control is gone.
+The local dashboard (`aether gui`) does not watch a laptop directory or run an
+AI inventory. During the Agents step, choose one directory such as
+`~/.claude`, `~/.codex`, or `~/.pi` with the browser directory picker. A
+preview shows the files that will be sent and the paths left out before
+upload. Import is explicit and one-time: after it succeeds, the import control
+is gone. The server-hosted dashboard has no onboarding picker; use local
+`aether gui` for this step.
 
 The picker normally matches the selected directory basename to a known harness.
 If the basename is unknown or matches more than one destination, choose the
@@ -321,8 +324,8 @@ configuration home. That home is mounted read-write in your environment
 terminal and in runs using your account, so the change is immediately visible
 to existing and future runs (an agent may need to reload its configuration).
 An account share gives another member's run the same home; it does not create
-an isolated per-run profile. A snapshot pin is audit metadata, not an isolated
-writable copy and not a promise that future home changes affect only new runs.
+an isolated per-run profile. A snapshot pin records launch provenance, not an
+isolated writable copy or a promise that home changes wait for later runs.
 Changing configuration does not rebuild the installed-agent image.
 
 After import, open **Files** to browse your own member configuration alongside
@@ -334,18 +337,16 @@ force-save. Browser navigation warns before unloading dirty buffers.
 
 Configuration files are full UTF-8 text up to **512 KiB**. Binary or truncated
 files are read-only. New configuration files accept nested relative paths and
-never overwrite an existing file. A stale save keeps the draft; reload from
-the server only when you want to discard it and replace it with current
-content. `config.*` always addresses the authenticated member's own home; an
-admin cannot select another member.
+never overwrite an existing file. A stale save keeps the draft; reload from the
+server only when you want to discard it and replace it with current content.
+Every `config.*` method requires `Launch` and addresses only the authenticated
+member's own home; an admin cannot select another member.
 
 For workspace files, **Commit to <branch>** makes a one-file commit on the
 workspace base branch and does not push upstream. Live-run writes change the
 run's uncommitted checkout. Workspace saves require **Push**; live-run saves
-require **Steer**. File revisions are SHA-256 hashes of the exact original
-full bytes. The server checks the revision immediately before rename while
-holding Aether's root lock; this is not an exclusive lock against arbitrary
-live agent filesystem writers.
+require **Steer**. The [Files protocol](local-gateway.md#files-and-member-configuration)
+defines revision and concurrency rules.
 
 ### Manual profile commands
 

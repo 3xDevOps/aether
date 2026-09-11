@@ -12,6 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
 // sshBackend proxies the Backend surface onto one SSH connection to the
@@ -243,29 +244,35 @@ func stream[T any](b *sshBackend, open func(*cli.Conn) (T, error)) (T, error) {
 	return open(conn)
 }
 
-func (b *sshBackend) Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error) {
-	return stream(b, func(c *cli.Conn) (io.ReadWriteCloser, error) { return c.EventsStream(req) })
+func (b *sshBackend) Events(_ context.Context, req protocol.SubscribeRequest) (io.ReadCloser, error) {
+	return stream(b, func(c *cli.Conn) (io.ReadCloser, error) { return c.EventsStream(req) })
 }
 
-func (b *sshBackend) Attach(req protocol.AttachRequest) (cli.Terminal, protocol.AttachResponse, error) {
+func (b *sshBackend) Attach(_ context.Context, req protocol.AttachRequest) (webgate.Terminal, protocol.AttachResponse, error) {
 	type attachResult struct {
-		term cli.Terminal
+		term webgate.Terminal
 		ack  protocol.AttachResponse
 	}
 	out, err := stream(b, func(c *cli.Conn) (attachResult, error) {
 		term, ack, err := c.AttachStream(req)
+		if term == nil {
+			return attachResult{ack: ack}, err
+		}
 		return attachResult{term: term, ack: ack}, err
 	})
 	return out.term, out.ack, err
 }
 
-func (b *sshBackend) Terminal(req protocol.TerminalRequest) (cli.Terminal, protocol.TerminalResponse, error) {
+func (b *sshBackend) Terminal(_ context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
 	type terminalResult struct {
-		term cli.Terminal
+		term webgate.Terminal
 		ack  protocol.TerminalResponse
 	}
 	out, err := stream(b, func(c *cli.Conn) (terminalResult, error) {
 		term, ack, err := c.TerminalStream(req)
+		if term == nil {
+			return terminalResult{ack: ack}, err
+		}
 		return terminalResult{term: term, ack: ack}, err
 	})
 	return out.term, out.ack, err

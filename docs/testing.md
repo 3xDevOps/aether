@@ -16,6 +16,16 @@ Layers, per the design spec's testing strategy:
   `make test-integration` (real Docker, real git). CI runs them on every PR in
   the `integration` job of `.github/workflows/ci.yml`; that job is the merge
   gate the E2E suite owns.
+- **Dashboard component tests** live beside their components in `web/src/`
+  and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
+  the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`
+  answers every media query with `false` and a component renders its widest
+  branch; `atViewport` (`web/src/test/viewport.ts`) puts one test on one
+  screen instead - width and pointer queries answer for it,
+  `window.innerWidth`/`innerHeight` report it, and the returned resize fires
+  `change` where an answer moved and `resize` on the window. It decides
+  which branch renders and nothing more: real layout belongs to the browser
+  suite below.
 - **Dashboard end-to-end tests** live in `web/e2e/` and run with
   `make test-e2e`: a real browser driving the static Next export embedded by
   the shipped binary, through a real `aether gui` gateway and a real
@@ -50,10 +60,10 @@ Scenarios:
 | Test | Scenario |
 | --- | --- |
 | `TestIntegrationEndToEnd` (`integration_test.go`) | Solo lifecycle, the acceptance gate: seed over git push -> launch -> attach -> detach -> reattach -> steer -> finish -> pull, with the bus traffic checked against the Wave 1 contract |
-| Gateway (`internal/localgw`) | The `aether gui` HTTP/WS surface, covered at this layer by unit tests against a stub backend: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror and steer channels (`ws_test.go`). A real gateway against a real server is the dashboard suite below |
+| Gateway (`internal/localgw` and `internal/webgate`) | The `aether gui` HTTP/WS surface, covered at this layer by unit tests against a stub backend: token-gated API round-trips (`api_test.go`), diff and disk proxies, capability reporting, and the `/ws/attach` mirror and steer channels (`ws_test.go`). Shared `internal/webgate` framing and route dispatch are exercised through this surface; the server-hosted gateway's WhoIs/HTTPS boundary is covered by the row below |
+| `TestIntegrationServerGateway` (`servergw_integration_test.go`) | The server's own dashboard gateway, driven the way a phone on the tailnet drives it: a stub WhoIs resolver identifies an `httptest` client, which reads `capabilities` (no `local` field) and `server.info`, launches a run, follows its events over `/ws/events`, and types into its PTY over `/ws/attach`; then a tagged node is refused `403` and a failing resolver `503`, and the HTTPS listener is started against a stand-in tailscaled that issues the certificate - a tailnet without HTTPS certificates refuses to start. The `WebIdentity` refusals and the in-process `Local` client the gateway serves each member through are unit-tested in `internal/sshd/local_test.go` |
 | `TestIntegrationMultiMember` (`multimember_integration_test.go`) | Three clients: tailnet initial join and invite-code key joins, WhoIs-down fallback with banner, remote administration, steering another member's run, presence roster, handoff, approval inbox, budget cap and override, agent crash -> `failed` + `wip:` commit, and the finished branch authored as the run's owner after the handoff, committed by Aether, and carrying one `Co-authored-by:` trailer per other steerer |
-| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Explicit profile push and harness logins: a login in the environment terminal persists into two runs, a manual push updates the shared persistent member home for a later run and an already-running run, and denylisted credential names are refused (Docker only - it needs a real terminal) |
-| `TestIntegrationGitHubConnect` (`github_integration_test.go`) | Connecting GitHub end to end in one environment terminal, with the stub `gh` swapped in the bind-mounted member home so it comes first on that container's `PATH`: three `github.probe` round trips over the same container - no gh, gh 2.45, then a current one - report `missing` with a remedy, `outdated` naming the version it found, and `ok` with no remedy, and the first two are refused by `github.connect` by name, before the login is asked about at all; then `github.connect` sets up git credentials, generates the signing key and registers it, a run pushes its branch to a bare `origin` repository inside the member home and commits with the signing config that home carries, and Aether's own end-of-run commit verifies against the member's public key through an allowed-signers file |
+| `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Explicit profile operations and harness logins: a login in the environment terminal persists into two runs, a manual profile push updates the shared persistent member home for a later run and an already-running run, and denylisted credential names are refused (Docker only - it needs a real terminal). CLI profile `push`, `status`, and `rollback` remain separate manual operations |
 | `TestIntegrationMemberEnvironmentImage` (`environment_image_integration_test.go`) | The saved environment image: what the container layer keeps, and that a container started from it **without** the member home mounted has no signing key, no `.gitconfig` and no gh token - Docker's commit never captures a bind mount |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
 | `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: both binds realized and read-only, `mcp.json` and `co-authors` found at `0444` inside the container, the staged binary executed as `/opt/aether/aether-server mcp` by a non-root agent, and a status/send/inbox round trip between two overlapping runs |
@@ -172,8 +182,19 @@ template. Adding it is one more install line and one more map entry.
 `web/e2e/` drives the dashboard the way a person does: a Chromium browser on
 the static Next export the CLI embeds, talking to a real `aether gui` gateway,
 which proxies every call over a real SSH connection to a real
-`aether-server`. Playwright is the runner, pinned to an exact version in
-`web/package.json`.
+`aether-server`. Both local and server-hosted paths dispatch through the shared
+`internal/webgate`; the server gateway's HTTPS/WhoIs boundary is covered by
+the integration row below and by the real-phone check. Playwright is the
+runner, pinned to an exact version in `web/package.json`.
+
+Two projects share that one Chromium install. `chromium` uses the desktop
+descriptor and skips every `*.mobile.spec.ts`; `mobile` uses a Pixel-class
+descriptor - `isMobile` and `hasTouch`, so `pointer: coarse` matches and
+`tap()` sends real touch events - and runs those files alone. No spec runs
+under both. Run one with `bunx playwright test --project=mobile` from `web/`.
+A real phone reaches the same dashboard through the server gateway's URL.
+That path carries no browser token: Tailscale WhoIs identifies the source
+address on every request.
 
 ```sh
 (cd web && bunx playwright install chromium)   # once, from the repo root
@@ -189,6 +210,7 @@ computed layout, responsive overflow, painted focus outlines and event ordering
 across document listeners. Component tests remain responsible for rendered
 roles, labels, state transitions, navigation and real gateway error text; a
 CSS class or source-pattern assertion is not a substitute for either layer.
+
 The `aether` fixture (`web/e2e/fixtures.ts`) builds one stack per test and
 tears it down with everything it created:
 
@@ -239,19 +261,21 @@ attaches the server's output to the report.
 | `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, native `Ctrl+Shift+V` paste through the terminal's input path, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
-| `status-bar-sizing` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport |
-| `files-browser` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree; the explorer/editor's workspace base, live-run and member-configuration writes are covered by focused regressions |
+| `status-bar-sizing.spec.ts` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport; the phone behavior is covered by `status-bar.mobile.spec.ts` below |
+| `files-browser.mobile.spec.ts` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree; the explorer/editor's workspace base, live-run and member-configuration writes are covered by focused regressions |
+| `sidebar-drawer.spec.ts` | In a 600px desktop window, the sidebar drawer answering `Mod+B` itself and handing the palette back once it closes |
 | `keyboard-focus` | Real browser checks that Escape closes a dialog on a run without leaving the run, and that a focused control paints the app's outline with computed style and contrast against the actual background |
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,
-`run-provisioning`, `run-switch`, `terminal-images` and `terminal-tools` need a
-reachable Docker daemon and skip without one. That skip is specific to the
-dashboard suite: `make test-integration` requires its real Docker setup and
-fails when Docker is unavailable. The rest need only git, except
-`window-sizing`, which needs neither: it starts a gateway of its own rather
-than taking the `aether` fixture, because the CLI half of `update.check` is
-answered on the member's own machine and no server is involved.
+`run-provisioning`, `run-switch`, `shell-drawer.mobile.spec.ts`,
+`terminal-images` and `terminal-tools` need a reachable Docker daemon and skip
+without one. That skip is specific to the dashboard suite:
+`make test-integration` requires its real Docker setup and fails when Docker is
+unavailable. The rest need only git, except `window-sizing`, which needs
+neither: it starts a gateway of its own rather than taking the `aether`
+fixture, because the CLI half of `update.check` is answered on the member's
+own machine and no server is involved.
 The terminal image component tests separately pin File type/size validation,
 safe insertion without submission, native image-paste registration cleanup,
 and stale callback rejection after a terminal target remounts. The clipboard
@@ -269,8 +293,58 @@ duplicating the browser smoke path:
 - `web/src/store/files.test.ts` covers drafts surviving live-run cache
   invalidation and newer typing surviving an in-flight save.
 - `web/e2e/onboarding-configuration.spec.ts` covers the browser import and
-  config read/write path; `web/e2e/files-browser.spec.ts` covers the narrow
-  viewport tree/viewer round trip.
+  config read/write path; `web/e2e/files-browser.mobile.spec.ts` covers the
+  narrow viewport tree/viewer round trip.
+
+### The phone project
+
+`web/playwright.config.ts` defines two projects over the one Chromium install
+CI has. `chromium` runs every spec except `*.mobile.spec.ts`, and `mobile`
+runs only those, under Playwright's `Pixel 7` descriptor: `isMobile`,
+`hasTouch`, a 412x839 viewport, a 2.625 device scale and a mobile user agent.
+Nothing runs twice, and no second browser engine is needed. iOS Safari is not
+covered - WebKit is not installed.
+
+| Spec | Scenario |
+| --- | --- |
+| `files-browser.mobile.spec.ts` | On a phone, opening a real repository file from the sidebar rail, returning with Browse, and opening another file without losing the tree - every control tapped |
+| `onboarding-link.mobile.spec.ts` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach |
+| `status-bar.mobile.spec.ts` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport; on a screen too short for its own readouts it scrolls to them rather than cutting them off, and the theme toggle answers a tap on the bottom edge |
+| `shell-drawer.mobile.spec.ts` | On a phone, the run list as a modal drawer: it opens from the rail, its rows are finger-sized, and tapping a run leaves the drawer closed with that run on screen |
+| `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
+| `toast-clearance.mobile.spec.ts` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
+
+Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
+and a control that answers only a mouse would still pass a click-driven test.
+They import `test` from `web/e2e/mobile.ts`, which attaches a full-page
+screenshot to every mobile test, passing or failing: a phone layout can be
+wrong while every DOM assertion holds, and a green run otherwise leaves
+nothing to look at.
+
+`shrinkToKeyboardHeight(page)` in the same file takes the layout viewport
+down by 320px, what a keyboard leaves of a portrait phone, and returns the
+call that restores it. The shell asks for
+`interactive-widget=resizes-content`, so on a browser that honours it - Chrome
+and the Android WebView - that is what a real keyboard does to the layout
+viewport, and the helper reproduces the shape that ships rather than standing
+in for it. iOS Safari ignores the setting and shrinks only the visual
+viewport, so for that browser the helper proves the narrower claim: the shell
+survives a short screen. Playwright cannot raise a platform keyboard either
+way, so content stranded behind a real iOS keyboard stays a manual check on a
+phone (`docs/dashboard-frontend.md` has that path).
+
+The phone specs need git; `shell-drawer.mobile.spec.ts` also needs Docker,
+because it opens a real run, and skips without it. Run them alone against the
+binaries `make build` produced:
+
+```sh
+cd web && bunx playwright test --project=mobile
+```
+
+They add about 15 seconds to `make test-e2e` and to the `dashboard-e2e` job,
+which stays inside the suite's 30-minute `globalTimeout` unchanged. That job
+uploads its `playwright-report` artifact on a pass as well as a failure, so
+the phone screenshots are on every run.
 
 ### Adding a step to the wizard
 

@@ -3,8 +3,9 @@
 Aether needs exactly one thing from your network: **the CLI must be able to
 reach the server's SSH port.** Git transport, the control channel, event
 streams, PTY attach and the dashboard forward all multiplex over that one
-connection. There is no second port to open and no HTTP surface you have to
-expose.
+connection. The server opens no HTTP port unless you set `web-port`, and that
+one listens on the host's tailnet addresses only - see
+[The dashboard](#the-dashboard).
 
 How you make that port reachable is up to you. Tailscale is the recommended
 answer, and it is also the recommended identity layer, because it removes SSH
@@ -205,14 +206,118 @@ out invites to someone connecting from outside the tailnet.
 
 ## The dashboard
 
-The dashboard is not a server-side listener at all. `aether gui` serves it
-from your own machine, bound to `127.0.0.1`, and reaches the server over the
-same SSH connection the CLI uses. There is no dashboard port to open, no
-forward to hold, and no exposure flag - the server's only listener is SSH.
+There are two ways to reach the dashboard, and they are independent of each
+other.
 
-That also means nothing about the dashboard changes the server's network
-shape: whatever reachability you arranged for `--addr` is the whole story.
-See [local-gateway.md](local-gateway.md) and [security.md](security.md).
+**From your own machine.** `aether gui` serves it from your laptop, bound to
+`127.0.0.1`, over the same SSH connection the CLI uses. Nothing on the server
+listens for it, and nothing about it changes the server's network shape. See
+[local-gateway.md](local-gateway.md).
+
+**From the server, for phones.** Set `web-port` and the server hosts the
+dashboard itself, over HTTPS, on every tailnet address of the host (IPv4 and
+IPv6):
+
+```sh
+sudo aether-server config set web-port 443
+sudo systemctl restart aether-server
+```
+
+Any device already on the tailnet - a phone, a tablet, a borrowed laptop -
+then opens the server's MagicDNS name and is already signed in:
+
+```
+https://my-server.tailnet-name.ts.net/
+```
+
+No token or install is needed to open this URL. Port 443 gives that bare URL;
+any other port appends `:<port>`. The server-hosted dashboard has no
+machine-local verbs or onboarding wizard, but its authenticated **Files** view
+can edit the shared member home. Use local `aether gui` for the directory
+picker and other local filesystem or repository actions. The startup line names
+what it bound:
+```
+aether-server <version> serving SSH on :2222 and the dashboard on https://my-server.tailnet-name.ts.net/ (data dir /var/lib/aether)
+```
+
+`web-port` defaults to `0`, which leaves the server SSH-only. `aether-server
+setup` asks for it on a tailnet host when `--tailnet-require-key` is off;
+`aether-server install --web-port 443` and `aether-server config set web-port
+443` set it without questions ([install.md](install.md#first-boot)).
+
+### What it needs
+
+- **tailscaled on the server host**, running before the server starts. It is
+  the same daemon and the same unix socket
+  (`/var/run/tailscale/tailscaled.sock`) the WhoIs identity path uses.
+- **MagicDNS and HTTPS certificates enabled for the tailnet**, in the
+  Tailscale admin console on the DNS page. The certificate and key for the
+  node's MagicDNS name come from tailscaled, which issues them through Let's
+  Encrypt and renews them; the server re-fetches hourly in the background and
+  keeps serving the cached pair if a refresh fails.
+- **Permission to fetch that certificate**, which is root or the tailscaled
+  operator (`sudo tailscale set --operator=<user>`). The shipped systemd unit
+  runs as root.
+
+Plain HTTP is never offered - there is no redirect and no cleartext port. A
+server that cannot get the certificate does not start.
+
+### Who you are on it
+
+Every request is identified the same way an SSH connection is: a WhoIs lookup
+on the request's source address, resolved afresh per request. There is no
+session and no token, so nothing can outlive the tailnet's answer - remove
+someone from the tailnet, or deny them the server in your ACLs, and their next
+request is refused.
+
+That means the joining, approval and capability rules above apply unchanged.
+The first identity to reach a fresh server becomes the admin; later ones join
+pending unless `--tailnet-auto-join`, and a pending member's dashboard shows
+`membership pending admin approval` on every call until an admin runs
+`aether member approve <member-id>`. Every call then passes the same
+capability checks a CLI call does.
+
+**The trust boundary is the same one, and it now covers the browser.** WhoIs
+names the device's owner, not the person holding the phone. Tagged nodes are
+refused here too. `--tailnet-require-key` and `web-port` are mutually
+exclusive: HTTP cannot present a key, so a server set to require one refuses
+to start with the dashboard on.
+
+Key-only and invite-code servers - anything with no tailscaled - have no
+phone dashboard in this release. `aether gui` is the whole story there.
+
+### Where it refuses
+
+The server refuses to **start** rather than serving something it cannot
+identify or encrypt. Each message is printed on stderr and lands in
+`journalctl -u aether-server`:
+
+| Message | What to do |
+| --- | --- |
+| `the dashboard identifies members by tailnet WhoIs and tailscaled was not running when the server started (no /var/run/tailscale/tailscaled.sock); start Tailscale before the server, or set web-port to 0` | Start tailscaled first, then the server. |
+| `tailnet-require-key demands an SSH key on every tailnet connection and the dashboard cannot present one; set one of tailnet-require-key and web-port off` | Pick one: keyed tailnet connections, or the dashboard. |
+| `tailscaled did not report this node: status has no DNS name` | Enable MagicDNS for the tailnet. |
+| `servergw: tailscaled reports no tailnet address for <name>` | The node is not up on the tailnet; `tailscale status --self`. |
+| `servergw: HTTPS certificate for <name>: <error>; enable MagicDNS and HTTPS certificates for the tailnet in the Tailscale admin console (DNS page), or set web-port to 0` | Enable HTTPS certificates, or run as root or the tailscaled operator. The error tailscaled gave is quoted in place of `<error>`. |
+| `servergw: listen: no tailnet address could be bound: <errors>` | The port is taken on every tailnet address, or binding it needs privileges the server does not have. One address that will not bind - the IPv6 one on a host with IPv6 disabled - is only a warning in the journal (`servergw: tailnet address not bound`); the others still serve. |
+
+Once it is serving, a request that cannot be identified is refused per
+request, with the JSON error body the dashboard shows:
+
+| Status | Message | What happened |
+| --- | --- | --- |
+| `403` | `tagged tailnet node; the dashboard identifies members by their tailnet login and a tagged node has none` | The request came from a tagged node. Tagged nodes use a key over SSH; they have no dashboard. |
+| `503` | `tailnet identity unavailable: <error>` | The lookup failed - tailscaled is down, or the source address is not on the tailnet. |
+
+### Why it is off by default
+
+The listener has hard prerequisites (tailscaled, MagicDNS, HTTPS
+certificates) that an existing install may not have, and a server that failed
+to start after an upgrade would be the wrong way to find that out. So
+`web-port` defaults to `0` and turning it on is a deliberate act. `aether-server setup`
+offers 443 by default on a host that already has tailscaled, because a phone
+reaching the dashboard is the point of putting the server on a tailnet, and a
+tailnet that is not ready says exactly what to enable on the first start.
 
 ---
 

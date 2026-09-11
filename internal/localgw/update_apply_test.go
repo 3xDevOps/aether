@@ -224,6 +224,7 @@ func TestUpdateApplySupervisedResponseSurvivesShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+g.Token())
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("apply: %v", err)

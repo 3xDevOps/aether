@@ -20,8 +20,10 @@ cd web && bun run dev  # development server
 ```
 
 The production web build is a Next static export in `web/dist`, embedded into
-the Go server and CLI through `web/embed.go`. Running an installed server or
-CLI needs no Node.js and no Next server.
+the Go server and CLI through `web/embed.go`. The CLI serves it from
+`aether gui`; the server serves it when `--web-port` is set, so upgrading the
+server binary is what refreshes the dashboard a phone loads. Running an
+installed server or CLI needs no Node.js and no Next server.
 
 ## The install script
 
@@ -39,7 +41,7 @@ afterwards.
 
 | Answer | What is installed, and where | What it runs next |
 | --- | --- | --- |
-| `server` | On Linux both `aether` and `aether-server`, into `/usr/local/bin`, root-owned, using `sudo` when it has to; on a machine with no `sudo` at all it falls back to `~/.local/bin`. | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, then the systemd activation line. |
+| `server` | On Linux both `aether` and `aether-server`, into `/usr/local/bin`, root-owned, using `sudo` when it has to; on a machine with no `sudo` at all it falls back to `~/.local/bin`. | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, the dashboard port on a tailnet host, then the systemd activation line. |
 | `client` | `aether` alone, into `~/.local/bin`, created if it is missing. No `sudo`, and the files stay yours. | `aether gui build` - packages and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
 | `none` | The same as `server`, `sudo` fallback included. | Nothing further. The binaries are installed and the script stops. |
 
@@ -584,8 +586,12 @@ apply to runs.
 `aether-server setup` walks you through the install: it asks for the listen
 address, data directory, and tailnet policy (Enter accepts each default),
 writes the systemd unit and the config file, and prints the command that
-starts the service. Answering `server` to the install script's question runs
-it for you; this is the same command by hand.
+starts the service. On a host that already runs tailscaled, and where tailnet
+connections are not required to carry a key, it asks one more question -
+`Dashboard HTTPS port on the tailnet (0 = off)`, defaulting to `443` on a
+fresh config - which is how a phone on the tailnet reaches the dashboard
+([networking.md](networking.md#the-dashboard)). Answering `server` to the
+install script's question runs it for you; this is the same command by hand.
 
 ```sh
 sudo aether-server setup
@@ -622,15 +628,23 @@ setup and serve directly:
 aether-server serve --data-dir /var/lib/aether --addr :2222
 ```
 
+It prints one startup line naming what it bound, the dashboard included when
+`--web-port` is set:
+
+```
+aether-server <version> serving SSH on :2222 and the dashboard on https://my-server.tailnet-name.ts.net/ (data dir /var/lib/aether)
+```
+
 Serve options, which are also the config-file keys:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--data-dir` | `/var/lib/aether` | Everything the server owns. |
-| `--addr` | `:2222` | The SSH listener. This is the only port that must be reachable. |
+| `--addr` | `:2222` | The SSH listener. This is the port clients must be able to reach. |
+| `--web-port` | `0` (off) | Serve the dashboard over HTTPS on this host's tailnet addresses at this port; `443` makes it `https://<magicdns-name>/`. Needs tailscaled, MagicDNS and HTTPS certificates; see [networking.md](networking.md#the-dashboard). |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
-| `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key. |
+| `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
 | `--stall-threshold` | `10m` | Silence after which a run parks needs-attention; see [failure-handling.md](failure-handling.md). |
 | `--poll-interval` | `30s` | How often stalls are checked. |
@@ -693,7 +707,8 @@ Task XML (`%USERPROFILE%\aether-daemon.xml`, registered with
 `schtasks /Create`) on Windows. `aether daemon run --server ... --repo ...`
 does the same work in the foreground on any of them. The daemon syncs git
 branches only; it does not watch agent configuration directories. Configuration
-is imported explicitly in the dashboard and edited in **Files**.
+is imported explicitly in the local dashboard (`aether gui`) and edited in
+**Files**; the server-hosted dashboard has no laptop directory picker.
 
 If a service unit was generated by an older release, it may still contain the
 removed `--no-profile-sync` argument. Reinstall the unit with the current
@@ -738,10 +753,10 @@ The dashboard Settings page can run the same sync once, on demand.
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. |
 
 Member homes are server-owned state. Back up the database, `homes/`, and
-`profiles/` when recovery of installed agents, login state, and synced profiles
-matters. That backup carries credentials: every member's vendor logins, their
-GitHub token, and their commit signing key are files under `homes/`, so treat
-it as secret material and store it accordingly
+`profiles/` when recovery of installed agents, login state, and profile
+snapshots matters. That backup carries credentials: every member's vendor
+logins, their GitHub token, and their commit signing key are files under
+`homes/`, so treat it as secret material and store it accordingly
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
 Each member home is mounted only in that member's environment terminal and

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 	"golang.org/x/term"
 )
@@ -29,7 +30,8 @@ func setup(args []string) error {
 	if err := requireRoot(); err != nil {
 		return err
 	}
-	values, err := askServerOptions(os.Stdout, os.Stdin, *configPath)
+	_, tailscaled := os.Stat(reachability.DefaultTailscaledSocket)
+	values, err := askServerOptions(os.Stdout, os.Stdin, *configPath, tailscaled == nil)
 	if err != nil {
 		return err
 	}
@@ -42,9 +44,11 @@ func setup(args []string) error {
 
 // askServerOptions walks the operator through the handful of options a
 // server install actually chooses, seeding each default from the existing
-// config file so re-running setup is not destructive. It returns a nil map
-// when the operator declines the summary.
-func askServerOptions(w io.Writer, in io.Reader, configPath string) (map[string]string, error) {
+// config file so re-running setup is not destructive. tailnet says whether
+// tailscaled is on this host, which is what makes the dashboard port
+// worth offering. It returns a nil map when the operator declines the
+// summary.
+func askServerOptions(w io.Writer, in io.Reader, configPath string, tailnet bool) (map[string]string, error) {
 	current, err := serversetup.Load(configPath)
 	if err != nil {
 		return nil, err
@@ -77,6 +81,23 @@ func askServerOptions(w io.Writer, in io.Reader, configPath string) (map[string]
 	_, _ = fmt.Fprintln(w, "linked a key before their tailnet identity is trusted.")
 	values["tailnet-require-key"] = p.ask("tailnet-require-key",
 		"Also require pubkey verification on tailnet connections (true/false)", def("tailnet-require-key"))
+
+	// The dashboard cannot present a key, so it is only offered where it
+	// could start: tailscaled on this host and no key requirement. The
+	// default is on there, because a phone reaching the dashboard is the
+	// point of putting the server on a tailnet, and a tailnet without
+	// HTTPS certificates fails the first start with the fix in the error.
+	if tailnet && values["tailnet-require-key"] != "true" {
+		webDefault := def("web-port")
+		if _, ok := current["web-port"]; !ok {
+			webDefault = "443"
+		}
+		_, _ = fmt.Fprintln(w, "\nThe server can host the dashboard over HTTPS on its tailnet address, so a")
+		_, _ = fmt.Fprintln(w, "phone or any tailnet device opens https://<this host's MagicDNS name>/ with")
+		_, _ = fmt.Fprintln(w, "no token. The tailnet needs MagicDNS and HTTPS certificates enabled; 0 keeps")
+		_, _ = fmt.Fprintln(w, "the server SSH-only.")
+		values["web-port"] = p.ask("web-port", "Dashboard HTTPS port on the tailnet (0 = off)", webDefault)
+	}
 
 	if p.err != nil {
 		return nil, p.err

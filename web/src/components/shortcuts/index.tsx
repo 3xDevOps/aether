@@ -194,7 +194,7 @@ export function ShortcutsButton() {
               aria-label="Keyboard shortcuts"
               className={cn(
                 focusRing,
-                'flex h-[22px] min-h-[22px] items-center gap-1 rounded-sm px-1.5 text-[12px] transition-colors hover:bg-toolbar-hover hover:text-foreground',
+                'flex h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] items-center gap-1 rounded-sm px-1.5 text-[12px] transition-colors hover:bg-toolbar-hover hover:text-foreground coarse:px-3',
               )}
             >
               <CircleHelp className="size-3.5" aria-hidden />

@@ -16,7 +16,7 @@ import type { SliceCreator } from '@/store/slice'
  * serves the page died - so nothing answers at all.
  * `server`: the gateway answers but its SSH backend cannot reach
  * aether-server (it reports 503 "server unreachable: ..."). */
-export type UnreachableKind = 'network' | 'gateway' | 'server'
+export type UnreachableKind = 'network' | 'gateway' | 'server' | 'refused' | 'identity'
 
 /** The order the phases of one update run in. A terminal phase - failed
  * or cancelled - is not in it: those always win. */
@@ -58,6 +58,12 @@ function stalePhase(
 
 export interface ServerSlice {
   info: ServerInfo | null
+  /**
+   * Identity of the authenticated server/member that populated the caches.
+   * It survives ordinary reconnects so transient outages do not discard
+   * drafts, but changes trigger a file-cache reset during hydration.
+   */
+  identityKey: string | null
   /** What the gateway can do; null until fetched, and stays null on a
    * legacy server that does not serve the endpoint. */
   capabilities: GatewayCapabilities | null
@@ -77,7 +83,7 @@ export interface ServerSlice {
   serverUpdate: ServerUpdateStatus | null
   /**
    * Why the last status read failed, or null. It is what separates a
-   * server that answered "I cannot update myself" from one the dashboard
+   * server that answered "I cannot update yourself" from one the dashboard
    * never reached, which are two different things to tell an admin.
    */
   serverUpdateError: string | null
@@ -85,6 +91,7 @@ export interface ServerSlice {
    * and the RPC results. Session-scoped: a reload re-reads the status. */
   serverUpdateProgress: ServerUpdatePayload | null
   setInfo: (info: ServerInfo) => void
+  setIdentityKey: (identityKey: string) => void
   setCapabilities: (capabilities: GatewayCapabilities | null) => void
   setConnection: (state: ConnectionState) => void
   noteSeq: (seq: number) => void
@@ -114,9 +121,10 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     })
   return {
   info: null,
+  identityKey: null,
   capabilities: null,
-  connectionEpoch: 0,
   connection: 'connecting',
+  connectionEpoch: 0,
   lastSeq: 0,
   hydrated: false,
   hydrationError: null,
@@ -126,6 +134,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
   serverUpdateError: null,
   serverUpdateProgress: null,
   setInfo: (info) => set({ info }),
+  setIdentityKey: (identityKey) => set({ identityKey }),
   setCapabilities: (capabilities) => set({ capabilities }),
   setConnection: (connection) => set({ connection }),
   noteSeq: (seq) =>

@@ -6,8 +6,9 @@ import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
-import { openOAuthLink } from '@/lib/oauth-forward'
+import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { RunStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -86,7 +87,15 @@ function TerminalView({ params }: RouteProps) {
     },
     onResize: (cols, rows) => attachRef.current?.resize(cols, rows),
     onLink: (uri) => {
-      if (!capability.hasLocal('forward.start')) return false
+      if (!capability.hasLocal('forward.start')) {
+        const remote = remoteOAuthInstructions(`run:${runID}`, uri)
+        if (remote === null) return false
+        toast.info(`Run ${remote.command}, then open this link on that machine.`, {
+          description: uri,
+          action: { label: 'Copy link', onClick: () => void copyText(uri, null) },
+        })
+        return true
+      }
       return openOAuthLink(
         api,
         `run:${runID}`,

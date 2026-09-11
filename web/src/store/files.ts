@@ -62,8 +62,12 @@ export interface FilesSlice {
   fileDiffs: Record<string, FileDiffState>
   fileTabs: FileTab[]
   activeFileKey: string | null
-  /** Incremented whenever a run invalidation clears viewer data. */
+  /** Incremented whenever cached viewer data is invalidated. */
   filesEpoch: number
+  /** Incremented only when the authenticated server/member changes. */
+  identityEpoch: number
+  /** Drops every file/config cache at an authenticated identity boundary. */
+  resetFiles: () => void
   setTree: (key: string, patch: FileTreeState) => void
   invalidateTree: (key: string) => void
   setDocument: (key: string, patch: FileDocumentState) => void
@@ -106,6 +110,7 @@ export const createFilesSlice: SliceCreator<FilesSlice> = (set) => ({
   fileTabs: [],
   activeFileKey: null,
   filesEpoch: 0,
+  identityEpoch: 0,
   setTree: (key, patch) =>
     set((s) => ({ trees: { ...s.trees, [key]: { ...(s.trees[key] ?? { entries: [] }), ...patch } } })),
   invalidateTree: (key) =>
@@ -258,6 +263,17 @@ export const createFilesSlice: SliceCreator<FilesSlice> = (set) => ({
       documents: withoutRun(s.documents, runID),
       fileDiffs: withoutRun(s.fileDiffs, runID),
       filesEpoch: s.filesEpoch + 1,
+    })),
+  resetFiles: () =>
+    set((s) => ({
+      trees: {},
+      documents: {},
+      drafts: {},
+      fileDiffs: {},
+      fileTabs: [],
+      activeFileKey: null,
+      filesEpoch: s.filesEpoch + 1,
+      identityEpoch: s.identityEpoch + 1,
     })),
 })
 

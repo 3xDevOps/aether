@@ -12,6 +12,7 @@ import {
   vera,
 } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
+import { atViewport } from '@/test/viewport'
 
 /** The desktop gateway's descriptor, carrying the update verbs. */
 function caps(): GatewayCapabilities {
@@ -47,7 +48,8 @@ test('the version label is plain until an update is available', () => {
   expect(screen.queryByRole('button', { name: /Update available/ })).toBeNull()
 })
 
-test('opens and closes the secondary status actions from the narrow menu', async () => {
+test('opens and closes the secondary status actions on a phone', async () => {
+  atViewport(390, { height: 844 })
   seed()
   render(<StatusBar />)
 
@@ -60,6 +62,71 @@ test('opens and closes the secondary status actions from the narrow menu', async
 
   await userEvent.keyboard('{Enter}')
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
+})
+
+// Above the wide breakpoint the readouts are the row itself, so the menu
+// that carries them on a narrow screen has nothing left to close.
+test('the wide layout keeps every readout up', async () => {
+  atViewport(1440)
+  seed()
+  render(<StatusBar />)
+
+  const member = screen.getByText(alice.display_name)
+  const details = member.closest('#status-details')
+  expect(details?.getAttribute('data-state')).toBe('open')
+
+  const toggle = screen.getByRole('button', { name: 'Show status details' })
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+
+  toggle.focus()
+  await userEvent.keyboard('{Enter}')
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(details?.getAttribute('data-state')).toBe('open')
+})
+
+// Touch has no hover to find the trigger with a second time, so the popup
+// lets go of the screen the way every other overlay does.
+test('the compact details popup closes on Escape and on a tap outside', async () => {
+  seed()
+  render(<StatusBar />)
+
+  const toggle = screen.getByRole('button', { name: 'Show status details' })
+  toggle.focus()
+  await userEvent.keyboard('{Enter}')
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+
+  fireEvent.keyDown(window, { key: 'Escape' })
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+  toggle.focus()
+  await userEvent.keyboard('{Enter}')
+  fireEvent.pointerDown(document.body)
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+})
+
+// A tooltip and a `title` are a pointer's alone. The compact popup is the one
+// place in the shell with room to say the same things out loud.
+test('the compact details popup writes out what only a hint used to carry', async () => {
+  seed()
+  useStore.setState({
+    linkStatus: {
+      server_configured: true,
+      linked: true,
+      addr: 'host:2222',
+      user: 'alice',
+      repo: '/src/repo',
+    },
+  })
+  render(<StatusBar />)
+
+  const toggle = screen.getByRole('button', { name: 'Show status details' })
+  toggle.focus()
+  await userEvent.keyboard('{Enter}')
+
+  expect(screen.getByText('Protocol 1')).toBeTruthy()
+  expect(screen.getByText('Linked to /src/repo')).toBeTruthy()
+  expect(screen.getByText('Worktrees 256 MB')).toBeTruthy()
+  expect(screen.getByText('Repos 512 MB')).toBeTruthy()
 })
 
 test('a CLI update turns the label into a button that clears the dismissals', async () => {

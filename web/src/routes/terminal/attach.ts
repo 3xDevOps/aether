@@ -5,7 +5,7 @@
 // The contract is docs/local-gateway.md - one text header frame, one text ack,
 // terminal output as binary frames, input and resizes as text control frames.
 
-import { type ConnectionState, backoff } from '@/lib/stream'
+import { type ConnectionState, backoff, onWake } from '@/lib/stream'
 
 /** JSON-RPC "permission denied": a write attach without the steer capability. */
 export const codeDenied = -32001
@@ -23,9 +23,6 @@ const unavailableRetries = 4
 
 /** WebSocket policy violation: the gateway's authorization watch fired. */
 const policyClose = 1008
-
-/** The gateway's dead-token refusal message (internal/dashboard/auth.go). */
-const deadToken = 'dashboard token revoked or expired'
 
 /**
  * Raw input characters per frame. The gateway reads at most 64KB per frame,
@@ -152,6 +149,11 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   let waitingForSession = false
   let disposed = false
   let refused = false
+  // The run's terminal session is over and this attachment is parked. A
+  // reconnect could only replay the same finished transcript, so nothing -
+  // a dropped socket or a foreground return - may reopen it; only an
+  // explicit reopen() does.
+  let ended = false
   let attached = false
   // Sticky for the life of the attachment: once the server has said this
   // member cannot steer, every reconnect is a mirror.
@@ -221,10 +223,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
       answered = true
       // A refused write is not a dead attach: drop the request and mirror.
-      // A token revoked between the handshake and the header answers with
-      // the same code, but reconnecting can never revive it - the message
-      // tells the two apart, and the dead token falls through to refusal.
-      if (ack.code === codeDenied && askedWrite && ack.error !== deadToken) {
+      if (ack.code === codeDenied && askedWrite) {
         writeDenied = true
         handlers.onWriteDenied()
         attempt = 0
@@ -263,13 +262,15 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         return
       }
       if (attached && ev.reason === 'session ended') {
+        ended = true
         handlers.onState('offline')
         return
       }
-      // 1008 with no refusal frame is the gateway's authorization watch.
-      // After a successful attach the close reason names which gate fell:
-      // a lost steer capability just downgrades to a mirror, while a dead
-      // token or withdrawn membership would refuse every reconnect.
+      // 1008 with no refusal frame is the gateway's authorization watch,
+      // and its reason names which gate fell: a lost steer capability just
+      // downgrades to a mirror, while withdrawn membership refuses every
+      // reconnect. An unnamed one is still refused, with that said plainly
+      // rather than dressed up as a cause we did not read.
       if (ev.code === policyClose && !answered) {
         if (attached && ev.reason === 'steer permission withdrawn') {
           writeDenied = true
@@ -279,7 +280,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           return
         }
         refused = true
-        handlers.onRefused(attached && ev.reason ? ev.reason : deadToken)
+        handlers.onRefused(ev.reason || 'the gateway refused the attach')
         handlers.onState('offline')
         return
       }
@@ -309,6 +310,31 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     socket.send(JSON.stringify(frame))
   }
 
+  // A phone that was in a pocket comes back to a dead socket and a frozen
+  // retry timer. An attach the gateway refused, and one parked on a finished
+  // session, are answers rather than failures: neither event re-asks them.
+  const stopWake = onWake((kind) => {
+    if (disposed || refused || ended) return
+    // A tolerated missing-session refusal is a deliberate wait, and its
+    // budget is four `backoff()` waits because that is what outlives
+    // recovery starting the PTY. A wake reopens for free, so without this a
+    // burst of app switches would spend all four in a second and report the
+    // wait as a failure. The freeze only delays that reconnect; a run with
+    // no session has nothing to show sooner anyway.
+    if (waitingForSession) return
+    if (timer) clearTimeout(timer)
+    timer = null
+    attempt = 0
+    // A foreground return leaves any existing socket alone; the tab being
+    // hidden said nothing about the network. `online` did: every socket the
+    // old network carried is suspect, attached ones most of all, because a
+    // switch leaves them half open with no close ever arriving. The event is
+    // rare enough that one re-attach and its replay is the cheaper mistake.
+    if (socket && kind === 'visible') return
+    drop()
+    open()
+  })
+
   open()
 
   return {
@@ -333,6 +359,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (timer) clearTimeout(timer)
       timer = null
       refused = false
+      ended = false
       attempt = 0
       unavailableTries = 0
       waitingForSession = false
@@ -341,6 +368,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     },
     close: () => {
       disposed = true
+      stopWake()
       if (timer) clearTimeout(timer)
       drop()
     },

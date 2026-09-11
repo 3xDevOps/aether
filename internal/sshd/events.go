@@ -7,8 +7,6 @@ import (
 	"errors"
 	"io"
 
-	"golang.org/x/crypto/ssh"
-
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -18,9 +16,9 @@ import (
 // channel: one SubscribeRequest line in, an ack, then Event lines out. On
 // a buffer drop the channel is closed so the client re-subscribes from its
 // last seen cursor.
-func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch ssh.Channel) {
+func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch subsystemConn) {
 	defer func() {
-		sendExitStatus(ch, 0)
+		ch.exit(0)
 		_ = ch.Close()
 	}()
 	capped := &capReader{r: ch, left: maxSubsystemHeaderBytes}
@@ -40,7 +38,12 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch ssh
 		_ = writeJSONLine(ch, protocol.SubscribeResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
-	sub, perr := events.SubscribeWire(ctx, s.cfg.Bus, req)
+	// The stream gets its own cancel so the membership re-check below can
+	// end it: a member removed or set back to pending mid-stream would
+	// otherwise keep receiving every workspace event until they reconnect.
+	streamCtx, revoke := context.WithCancelCause(ctx)
+	defer revoke(nil)
+	sub, perr := events.SubscribeWire(streamCtx, s.cfg.Bus, req)
 	if perr != nil {
 		_ = writeJSONLine(ch, protocol.SubscribeResponse{OK: false, Code: perr.Code, Error: perr.Message})
 		return
@@ -51,11 +54,12 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch ssh
 	// the subscription. A stdin half-close (EOF below) deliberately does
 	// not - per the contract only closing the channel unsubscribes, so
 	// piped clients (`echo ... | ssh -s aether-events`) keep streaming.
-	stop := context.AfterFunc(ctx, func() { _ = sub.Close() })
+	stop := context.AfterFunc(streamCtx, func() { _ = sub.Close() })
 	defer stop()
 	if writeJSONLine(ch, protocol.SubscribeResponse{OK: true}) != nil {
 		return
 	}
+	s.spawn(func() { s.revokeOnPolicyChange(streamCtx, revoke, member, "", true) })
 
 	// Drain (and discard) anything else the client writes; only a real
 	// read error - not EOF - tears the subscription down early.

@@ -2,7 +2,7 @@
 // stream is the only thing that changes it.
 
 import { api, ApiError, type Api } from '@/lib/api'
-import { backoff, connectEvents } from '@/lib/stream'
+import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
   Event,
   GatewayCapabilities,
@@ -37,6 +37,14 @@ function classifyUnreachable(err: unknown): UnreachableKind | null {
   return null
 }
 
+
+/** Names why the gateway refused the capabilities probe. */
+function refusalKind(err: ApiError): UnreachableKind | null {
+  if (err.status === 403) return 'refused'
+  if (err.message.includes('tailnet identity unavailable')) return 'identity'
+  return classifyUnreachable(err)
+}
+
 /** Fills the store from the server. False means the server was unreachable. */
 export async function hydrate(store: RootStore, client: Api = api): Promise<boolean> {
   const s = store.getState()
@@ -55,6 +63,14 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
         // client on its built-in assumptions.
         client.capabilities().catch(() => null),
       ])
+    const origin = typeof window === 'undefined' ? '' : window.location.origin
+    const incomingIdentity = `${origin}\u0000${info.tailnet_hostname ?? ''}\u0000${info.member.id}`
+    const previousIdentity = store.getState().identityKey
+    if (previousIdentity && previousIdentity !== incomingIdentity) {
+      // Reconnects retain drafts; a different authenticated owner must not.
+      store.getState().resetFiles()
+    }
+    s.setIdentityKey(incomingIdentity)
     s.setInfo(info)
     s.setWorkspaces(workspaces)
     // Every scoped surface reads activeWorkspace, so it must name a
@@ -279,14 +295,38 @@ export async function applyEvent(
   return true
 }
 
-async function probeUnlinkedLocal(
-  client: Api,
-): Promise<{ capabilities: GatewayCapabilities; status: LinkStatus } | null> {
+/** What the capabilities probe before the stream found, or null for
+ * "nothing special: open the stream". */
+type Probe =
+  | { unlinked: { capabilities: GatewayCapabilities; status: LinkStatus } }
+  | { rejected: string }
+  | { refused: ApiError }
+
+/**
+ * Reads the capabilities descriptor before anything else, because two
+ * answers change what the app does next: a local gateway with no server
+ * configured goes to onboarding, and a 401 means the gateway rejected the
+ * credential. The 401 matters most on a phone, where the token lives in
+ * per-tab session storage: without this the WebSocket upgrade would be
+ * rejected the same way, the socket would retry forever, and the app would
+ * blame an unreachable server. A 403 or 503 is the gateway refusing this
+ * caller outright - a tagged tailnet node, a WhoIs outage - whose reason
+ * only an HTTP body carries, so it is recorded before the stream's own
+ * failure can only say "unreachable".
+ */
+async function probeGateway(client: Api): Promise<Probe | null> {
+  let capabilities: GatewayCapabilities
   try {
-    const capabilities = await client.capabilities()
+    capabilities = await client.capabilities()
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return { rejected: err.message }
+    if (err instanceof ApiError && (err.status === 403 || err.status === 503)) return { refused: err }
+    return null
+  }
+  try {
     if (!capabilities.local?.includes('link.status')) return null
     const status = await client.localLinkStatus()
-    return status.server_configured ? null : { capabilities, status }
+    return status.server_configured ? null : { unlinked: { capabilities, status } }
   } catch {
     return null
   }
@@ -344,7 +384,10 @@ export function connect(store: RootStore, client: Api = api): () => void {
     hydrating = false
     if (disposed) return
     if (!ok) {
-      retryTimer = setTimeout(() => void load(), backoff(attempts++))
+      retryTimer = setTimeout(() => {
+        retryTimer = null
+        void load()
+      }, backoff(attempts++))
       return
     }
     attempts = 0
@@ -377,8 +420,9 @@ export function connect(store: RootStore, client: Api = api): () => void {
         // that is a server that may have just re-executed on a new version.
         // Only a fresh server.info says it did, and the update banner and the
         // notice in the status bar both end on that answer.
+        // Tailnet reconnects can change member even when replay is possible.
         const s = store.getState()
-        if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress)) {
+        if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress) || s.capabilities?.gateway !== 'local') {
           void load()
         }
         subscribed = true
@@ -394,26 +438,50 @@ export function connect(store: RootStore, client: Api = api): () => void {
         // recorded: a dead token is more precise than a dead hop.
         if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
       },
-      onDead: (reason) => {
-        // The token died, not the server: the stream has stopped for good, and
-        // only a fresh token brings it back. The flag is what lets the panes
-        // say so instead of claiming a retry that will never come, and the
-        // pending hydrate retry is cancelled so a later 401 cannot overwrite
-        // the recovery hint.
-        if (retryTimer) clearTimeout(retryTimer)
-        store.getState().setStreamDead()
-        store.getState().setHydrated(false, `${reason}; mint one with \`aether gui\``)
-      },
       afterSeq: () => store.getState().lastSeq,
     })
   }
 
-  void probeUnlinkedLocal(client).then((probe) => {
+  // The hydration retry is the third timer a frozen tab stops, and the only
+  // one the reopened sockets cannot restart: a re-hydration that failed after
+  // the first good one leaves a cursor to replay from, so the stream goes
+  // live again without re-fetching. Without this the store would show stale
+  // data for the rest of a wait that also caps at 30 seconds. A wake with no
+  // retry pending re-fetches nothing.
+  const stopWake = onWake(() => {
+    if (disposed || !retryTimer) return
+    clearTimeout(retryTimer)
+    retryTimer = null
+    attempts = 0
+    void load()
+  })
+
+  void probeGateway(client).then((probe) => {
     if (disposed) return
-    if (probe) {
+    if (probe && 'rejected' in probe) {
+      // Every reconnect would carry the same rejected credential, so the
+      // stream is never opened. The flag is what makes the panes and the
+      // error page say the link expired instead of claiming a retry that
+      // never comes, and the gateway's own message is kept verbatim.
+      store.getState().setStreamDead()
+      store.getState().setConnection('offline')
+      store.getState().setHydrated(false, probe.rejected)
+      return
+    }
+    if (probe && 'refused' in probe) {
+      // The gateway said why; the handshake status never reaches this code,
+      // so the stream keeps retrying and this stays the reason. A 403 is
+      // the gateway turning this device away, and a 503 naming the tailnet
+      // identity is its own daemon not answering; neither is a dead hop.
+      const { refused } = probe
+      store.getState().setUnreachable(refusalKind(refused))
+      // The client prefixes its own request path; the gateway's words are
+      // what the page shows.
+      store.getState().setHydrated(false, refused.message.replace(/^[^\s:]+: /, ''))
+    } else if (probe) {
       // No server to connect to yet: the onboarding wizard links first.
-      store.getState().setCapabilities(probe.capabilities)
-      store.getState().setLinkStatus(probe.status)
+      store.getState().setCapabilities(probe.unlinked.capabilities)
+      store.getState().setLinkStatus(probe.unlinked.status)
       store.getState().setConnection('offline')
       store.getState().setHydrated(true)
       store.getState().setUnreachable(null)
@@ -425,6 +493,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
 
   return () => {
     disposed = true
+    stopWake()
     if (retryTimer) clearTimeout(retryTimer)
     stopStream()
   }

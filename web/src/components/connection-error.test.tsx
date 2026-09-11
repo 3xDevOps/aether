@@ -23,12 +23,41 @@ describe('ConnectionError', () => {
     expect(screen.queryByText(/aether-server/i)).toBeNull()
   })
 
+  it('frames a 403 as the gateway refusing this device and keeps the reason', () => {
+    render(
+      <ConnectionError
+        kind="refused"
+        dead={false}
+        error="tagged tailnet node; the dashboard identifies members by their tailnet login and a tagged node has none"
+        onRetry={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('heading', { name: 'The gateway refused this device' })).toBeDefined()
+    expect(screen.getByText(/^tagged tailnet node; the dashboard identifies/)).toBeDefined()
+    expect(screen.queryByText(/check your connection/i)).toBeNull()
+  })
+
+  it('sends the operator to tailscaled when the server cannot identify the device', () => {
+    render(
+      <ConnectionError
+        kind="identity"
+        dead={false}
+        error="tailnet identity unavailable: sshd: tailnet whois: dial unix /var/run/tailscale/tailscaled.sock: connect: no such file or directory"
+        onRetry={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('heading', { name: 'The server cannot identify this device' })).toBeDefined()
+    expect(screen.getByText(/check that tailscaled is running/)).toBeDefined()
+    expect(screen.getByText(/^tailnet identity unavailable: sshd/)).toBeDefined()
+    expect(screen.queryByText(/check your connection/i)).toBeNull()
+  })
+
   it('explains that a dashboard link needs to be minted again', () => {
     render(
       <ConnectionError
         kind={null}
         dead
-        error="dashboard token revoked"
+        error="a valid gateway token is required"
         onRetry={vi.fn()}
       />,
     )

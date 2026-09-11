@@ -13,10 +13,13 @@ export function AppShell() {
     <div className="flex h-full min-h-0 flex-col bg-background text-[13px] leading-[1.4] text-foreground">
       {/* The update surface stays above the workbench without stealing its
           vertical space when it has nothing to say. */}
-      <div className="min-h-0 min-w-0 shrink-0 max-h-[max(0px,calc(100vh-35px-22px-10rem))] overflow-y-auto overscroll-contain">
+      <div className="min-h-0 min-w-0 shrink-0 max-h-[max(0px,calc(100dvh-var(--title-bar-height)-var(--status-bar-height)-10rem))] overflow-y-auto overscroll-contain">
         <UpdateBanners />
       </div>
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      {/* The rail is against the viewport's left edge, which a landscape
+          notch sits over. The row insets it and carries the rail's own
+          colour, so the gutter reads as more rail rather than a seam. */}
+      <div className="relative flex min-h-0 flex-1 overflow-hidden bg-sidebar pl-[env(safe-area-inset-left)]">
         <Sidebar />
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
           <CenterView />

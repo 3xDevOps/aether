@@ -143,13 +143,13 @@ Three settings belong to the workspace rather than to any run in it:
   sets it at creation; it defaults to `main`.
 - **The upstream origin** is the git URL every new run checkout gets as its
   `origin` remote - normally the GitHub repository your clones came from.
-  Nobody types it in the usual case: the first `aether link --repo` (or the
-  dashboard wizard's Repository step) reads that clone's own `origin` and
-  records it. Recording happens only when the caller may push - a viewer may
-  not - and the clone's origin is one the server accepts. When either does
-  not hold, the link still succeeds and nothing is recorded; set it later
-  with `aether workspace origin`. **First one wins.** A later link from a
-  teammate whose clone points somewhere else does not overwrite it, so one
+  Nobody types it in the usual case: the first `aether link --repo` reads that
+  clone's own `origin` and records it. The local dashboard's onboarding wizard
+  does the same in its Repository step. Recording happens only when the caller
+  may push - a viewer may not - and the clone's origin is one the server accepts.
+  When either does not hold, the link still succeeds and nothing is recorded; set
+  it later with `aether workspace origin`. **First one wins.** A later link from
+  a teammate whose clone points somewhere else does not overwrite it, so one
   member's fork cannot silently redirect everyone's runs. Change it
   deliberately:
 
@@ -219,7 +219,7 @@ doing it from your clone after a pull.
 
 The workspace's base branch is usually already there by the time the second
 member links: whoever created the workspace pushed it. Nothing guarantees
-that, so the dashboard wizard's **Push now** button (step 4 of
+that, so the local dashboard wizard's **Push now** button (step 4 of
 [quickstart.md](quickstart.md)) compares your clone with the workspace's copy
 of the branch before it pushes, and reports what it found instead of failing
 with git's `! [rejected] main -> main (fetch first)`:
@@ -300,10 +300,10 @@ stamped into every workspace's timeline, since it affects all of them.
 Permissive by default, always attributed.
 
 That attribution reaches git too. Each member has a git identity - the real
-name and email their commits are authored as - collected by the dashboard's
-onboarding wizard and shown or changed with `aether member git`. The agent
-in a run container commits with the identity of the member who launched it,
-baked into the container when it is created, and the commits Aether makes
+name and email their commits are authored as - collected by the local
+dashboard's onboarding wizard and shown or changed with `aether member git`. The
+agent in a run container commits with the identity of the member who launched
+it, baked into the container when it is created, and the commits Aether makes
 itself when a run finishes, is killed, or is recovered are authored as the
 run's current owner with Aether as the committer. A member who has set no
 identity keeps the fallback: their display name, or their member id when
@@ -412,13 +412,14 @@ root process in the recipient's run read or change every file and credential in
 the shared home. Revocation blocks new launches and relaunches but does not
 stop existing runs; stop them first if access must end immediately.
 
-Agent configuration is not watched or inventoried automatically. In the
-Agents step, choose one local directory with the browser directory picker,
-preview it, and explicitly import it once. Known credential names and
+Agent configuration is not watched or inventoried automatically. In the local
+dashboard's Agents step, choose one local directory with the browser directory
+picker, preview it, and explicitly import it once. Known credential names and
 runtime/history defaults are skipped locally; remaining bytes are uploaded
 and server-scanned, so do not assume all secret content stays local. The
-import writes the authenticated member's persistent home immediately, including
-for active runs using that account. An agent may need to reload its
+server-hosted dashboard has no local directory picker; use `aether gui` for this
+step. The import writes the authenticated member's persistent home immediately,
+including for active runs using that account. An agent may need to reload its
 configuration.
 
 The **Files** view browses and edits that own-member configuration beside
@@ -428,16 +429,18 @@ dirty tabs that survive navigation, unload warnings, and no autosave or
 force-save. A failed or stale save keeps the draft; **Reload from server**
 deliberately discards it. Configuration files are full UTF-8 text up to
 512 KiB; binary and truncated files are read-only. New configuration files
-accept nested relative paths and refuse overwrite. `config.*` always targets
-the authenticated member's own home; an admin cannot select another member.
+accept nested relative paths and refuse overwrite. Every `config.*` method
+requires `Launch` and targets only the authenticated member's own home; an
+admin cannot select another member.
 
 New browser-import files are mode `0644`; executable mode and symlinks cannot
 be represented by the browser. Imports preserve empty and arbitrary binary
 regular files under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
 limits. The server rejects unsafe paths, symlink components, hardlinks, and
 nonregular files. A shared account uses the same read-write home rather than
-an isolated per-run copy. A snapshot pin is audit metadata, not an isolated
-writable home, and editing does not rebuild the installed-agent image.
+an isolated per-run copy. A snapshot pin records launch provenance, not an
+isolated writable home or a promise that home edits wait for later runs.
+Editing does not rebuild the installed-agent image.
 
 The manual CLI profile surface remains available for operators who need
 snapshots or rollback:

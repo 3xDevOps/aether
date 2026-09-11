@@ -2,6 +2,7 @@ import { ApiError } from '@/lib/api'
 import type { Event, Run } from '@/lib/types'
 import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
+import { configKey } from '@/store/files'
 import { capability } from '@/store/hooks'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
@@ -14,6 +15,7 @@ import {
   workspace,
 } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
+import { fire } from '@/test/wake'
 
 function statusEvent(over: Partial<Event> = {}): Event {
   return {
@@ -69,6 +71,7 @@ describe('hydrate', () => {
     expect(Object.keys(s.members)).toHaveLength(2)
     expect(s.runs.run_1.status).toBe('running')
   })
+
 
   it('points the app at a workspace, keeping one the member already chose', async () => {
     // Nothing chosen: the lowest id wins, so two tabs hydrating off the same
@@ -633,6 +636,49 @@ describe('connect', () => {
     await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
     stop()
   })
+  it('shows the gateway refusal instead of an unreachable server', async () => {
+    const store = createRootStore()
+    const client = fakeApi({
+      capabilities: vi.fn(async () => {
+        throw new ApiError(
+          403,
+          'capabilities: tagged tailnet node; the dashboard identifies members by their tailnet login and a tagged node has none',
+        )
+      }),
+    })
+    const stop = connect(store, client)
+
+    await vi.waitFor(() => expect(store.getState().hydrationError).toContain('tagged tailnet node'))
+    expect(store.getState().hydrationError?.startsWith('tagged tailnet node')).toBe(true)
+    expect(store.getState().unreachable).toBe('refused')
+    expect(store.getState().hydrated).toBe(false)
+    // The stream still opens and keeps retrying; its own failure can only
+    // say "unreachable" and never overwrites the recorded reason.
+    await vi.waitFor(() => expect(StubSocket.opened.length).toBeGreaterThan(0))
+    StubSocket.last().onclose?.({ code: 1006, reason: '' })
+    await vi.waitFor(() => expect(StubSocket.opened.length).toBeGreaterThan(1))
+    expect(store.getState().hydrationError).toContain('tagged tailnet node')
+    stop()
+  })
+
+  it('names the tailnet identity outage instead of an unreachable server', async () => {
+    const store = createRootStore()
+    const client = fakeApi({
+      capabilities: vi.fn(async () => {
+        throw new ApiError(
+          503,
+          '/capabilities: tailnet identity unavailable: sshd: tailnet whois: dial unix /var/run/tailscale/tailscaled.sock: connect: no such file or directory',
+        )
+      }),
+    })
+    const stop = connect(store, client)
+
+    await vi.waitFor(() => expect(store.getState().unreachable).toBe('identity'))
+    expect(store.getState().hydrationError?.startsWith('tailnet identity unavailable: ')).toBe(true)
+    expect(store.getState().hydrated).toBe(false)
+    stop()
+  })
+
   it('hydrates onboarding directly for an unlinked local gateway', async () => {
     const store = createRootStore()
     const client = fakeApi({
@@ -744,31 +790,87 @@ describe('connect', () => {
     stop()
   })
 
-  it('stops on a dead-token close and says how to recover', async () => {
-    const client = fakeApi()
+  it('revalidates tailnet identity on replay reconnects without losing same-member drafts', async () => {
+    let member = alice
+    const client = fakeApi({
+      capabilities: vi.fn(async () => ({ gateway: 'server', methods: ['*'], ws: ['events'] })),
+      serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member })),
+    })
     const store = createRootStore()
     const stop = connect(store, client)
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      const key = configKey('claude', 'settings.json')
+      store.getState().setDocument(key, {
+        content: '{}', size: 2, revision: 'original', writable: true, binary: false, truncated: false,
+      })
+      store.getState().updateDraft(key, '{"private":"draft"}')
+      store.getState().openFileTab({
+        key, kind: 'config', harness: 'claude', rootPath: '~/.claude', path: 'settings.json', label: 'claude',
+      })
+      deliver(socket, statusEvent())
+      await vi.waitFor(() => expect(store.getState().lastSeq).toBe(5))
 
-    await subscribe()
-    await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      socket.onclose?.({ code: 1006 })
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2), { timeout: 2000 })
+      await subscribe()
+      await vi.waitFor(() => expect(client.serverInfo).toHaveBeenCalledTimes(2))
+      expect(store.getState().drafts[key]?.content).toBe('{"private":"draft"}')
 
-    // The gateway's token watch names the dead token in its close reason, and
-    // every reconnect would carry the same dead token.
-    StubSocket.last().onclose?.({
-      code: 1008,
-      reason: 'dashboard token revoked or expired',
-    })
+      member = bob
+      StubSocket.last().onclose?.({ code: 1006 })
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(3), { timeout: 2000 })
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().info?.member.id).toBe(bob.id))
+      expect(store.getState().documents[key]).toBeUndefined()
+      expect(store.getState().drafts[key]).toBeUndefined()
+      expect(store.getState().fileTabs).toEqual([])
+      expect(store.getState().activeFileKey).toBeNull()
+    } finally {
+      stop()
+    }
+  })
 
+  it('reports a rejected credential rather than an unreachable server', async () => {
+    // The gateway's own 401 body. A stale or missing token would be rejected
+    // the same way on the WebSocket upgrade, where the failure has no voice
+    // at all, so the probe is the only place that can say what went wrong.
+    const denial = 'a valid gateway token is required; restart `aether gui` for a fresh URL'
+    const store = createRootStore()
+    const stop = connect(
+      store,
+      fakeApi({
+        capabilities: vi.fn(() => Promise.reject(new ApiError(401, denial))),
+      }),
+    )
+
+    await vi.waitFor(() => expect(store.getState().streamDead).toBe(true))
     expect(store.getState().connection).toBe('offline')
-    expect(store.getState().hydrationError).toContain('aether gui')
-    // The panes key on this to say "dead token" rather than "retrying".
-    expect(store.getState().streamDead).toBe(true)
+    // The gateway's words, not a guess about the network.
+    expect(store.getState().hydrationError).toBe(denial)
+    // Every reconnect would carry the same credential, so nothing is tried.
     await new Promise((resolve) => setTimeout(resolve, 700))
-    expect(StubSocket.opened).toHaveLength(1)
+    expect(StubSocket.opened).toHaveLength(0)
     stop()
   })
 
-  it('retries a 1008 close that is not the token watch', async () => {
+  it('opens the stream when the capabilities probe fails for any other reason', async () => {
+    const store = createRootStore()
+    const stop = connect(
+      store,
+      fakeApi({
+        capabilities: vi.fn(() => Promise.reject(new ApiError(500, 'boom'))),
+      }),
+    )
+
+    await subscribe()
+    await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+    expect(store.getState().streamDead).toBe(false)
+    stop()
+  })
+
+  it('retries a 1008 close, which no longer means a dead token', async () => {
     const client = fakeApi()
     const store = createRootStore()
     const stop = connect(store, client)
@@ -776,7 +878,7 @@ describe('connect', () => {
     await subscribe()
     await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
 
-    // The gateway also closes 1008 for a refused subscribe or a transient
+    // The gateway closes 1008 for a refused subscribe or a transient
     // membership check failure; the next reconnect can outlive those.
     StubSocket.last().onclose?.({ code: 1008, reason: 'subscribe refused' })
 
@@ -803,6 +905,43 @@ describe('connect', () => {
     expect(store.getState().hydrationError).toBeNull()
     stop()
   })
+
+  it(
+    're-hydrates at once when the tab returns with a retry pending',
+    async () => {
+      let failing = true
+      const serverInfo = vi.fn(async () => {
+        if (failing) throw new Error('502 Bad Gateway')
+        return serverInfoFixture
+      })
+      const store = createRootStore()
+      const stop = connect(store, fakeApi({ serverInfo }))
+
+      await subscribe()
+      // Three failures put the next retry seconds out. That timer is the one
+      // a frozen tab stops, and the reopened sockets cannot restart it: the
+      // stream goes live again with a cursor to replay from, so nothing else
+      // re-fetches.
+      await vi.waitFor(
+        () => expect(serverInfo.mock.calls.length).toBeGreaterThanOrEqual(3),
+        { timeout: 6_000 },
+      )
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      const before = serverInfo.mock.calls.length
+      failing = false
+
+      fire('visibilitychange')
+
+      // Comfortably inside the pending retry, which is at least two seconds
+      // out, and wide enough that a loaded CI runner cannot fail it.
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true), {
+        timeout: 1_000,
+      })
+      expect(serverInfo.mock.calls.length).toBeGreaterThan(before)
+      stop()
+    },
+    15_000,
+  )
 
   it('marks the server hop dead on a -32004 subscribe refusal', async () => {
     const client = fakeApi()

@@ -21,7 +21,7 @@ framing anywhere.
 The binary and the directory are the two mounts, and both are Aether-owned
 container paths. `runtime.ValidateMounts` refuses any caller-supplied mount
 that targets or nests under them, which is what guarantees a credential home
-or a synced profile can never shadow either one. They are therefore built
+or member configuration cannot shadow either one. They are therefore built
 from server-constructed paths and appended after the caller's mounts have
 been validated.
 

@@ -11,9 +11,6 @@ export interface StreamHandlers {
   /** `live` fires when the server acknowledges the subscription, not when
    * the socket opens. */
   onState: (state: ConnectionState) => void
-  /** The gateway's token watch closed the socket: the bearer token is dead,
-   * and every reconnect would carry it. The stream has stopped for good. */
-  onDead?: (reason: string) => void
   /** The gateway's subscribe refusal named the failing hop (-32004
    * "network unreachable: ..." or "server unreachable: ..."): the gateway
    * itself is fine, something past it is not. `network` means this machine
@@ -26,14 +23,6 @@ export interface StreamHandlers {
   afterSeq: () => number
 }
 
-/** WebSocket policy violation, which the gateway uses for a dead token. */
-const policyClose = 1008
-
-/** The token watch's close reason (internal/dashboard/auth.go). The gateway
- * also closes 1008 for refused subscribes and transient membership check
- * failures, which a reconnect can outlive - only a dead token is terminal. */
-const deadTokenReason = 'dashboard token revoked or expired'
-
 /** The local gateway's code for a dead SSH hop (protocol.CodeUnavailable). */
 const codeUnavailable = -32004
 
@@ -44,6 +33,32 @@ const maxDelayMs = 30_000
 export function backoff(attempt: number): number {
   const capped = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt)
   return capped * (0.5 + Math.random() / 2)
+}
+
+/** Which event woke us. The two are not interchangeable: a foreground
+ * return says nothing about the network, while `online` says the network
+ * this machine had is gone and a new one is up - which is what leaves a
+ * socket half open and still reading as connected. */
+export type WakeKind = 'visible' | 'online'
+
+/**
+ * Calls back when the tab comes to the foreground or the network returns.
+ * A phone suspends a background tab: the socket dies and the pending retry
+ * timer is frozen, so on return the client would sit out a backoff of up to
+ * 30 seconds before trying anything. These two events are the evidence that
+ * a reconnect can work now. Returns a disposer.
+ */
+export function onWake(wake: (kind: WakeKind) => void): () => void {
+  const visible = () => {
+    if (document.visibilityState === 'visible') wake('visible')
+  }
+  const online = () => wake('online')
+  document.addEventListener('visibilitychange', visible)
+  window.addEventListener('online', online)
+  return () => {
+    document.removeEventListener('visibilitychange', visible)
+    window.removeEventListener('online', online)
+  }
 }
 
 /** Opens the event stream and keeps it open. Returns a disposer. */
@@ -108,16 +123,6 @@ export function connectEvents(h: StreamHandlers): () => void {
     ws.onerror = () => ws.close()
     ws.onclose = (ev) => {
       socket = null
-      // The token watch closes 1008 with this reason when the bearer token is
-      // revoked or expired; reconnecting would carry the same dead token, so
-      // stop and say so instead of looping at the backoff cap forever. Every
-      // other 1008 (subscribe refused, membership check hiccup) is retried.
-      if (ev.code === policyClose && ev.reason === deadTokenReason) {
-        closed = true
-        h.onDead?.(ev.reason)
-        h.onState('offline')
-        return
-      }
       // 4000 is the gateway dropping a client whose backlog overflowed: the
       // cure is an immediate resubscribe from our last seq, not backoff.
       if (ev.code === 4000) attempt = 0
@@ -132,11 +137,43 @@ export function connectEvents(h: StreamHandlers): () => void {
     attempt++
   }
 
+  // Detach the handlers first, so a close we asked for does not schedule a
+  // reconnect on top of the one we are about to make.
+  const drop = () => {
+    const ws = socket
+    socket = null
+    if (!ws) return
+    ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null
+    ws.close()
+  }
+
+  const stopWake = onWake((kind) => {
+    if (closed) return
+    // The frozen timer and the backoff it was counting are stale whatever we
+    // do next: a tab that was away has no idea how long the failure lasted.
+    if (timer) clearTimeout(timer)
+    timer = null
+    attempt = 0
+    // A foreground return leaves any existing socket alone: tearing a working
+    // subscription down would replay the log for nothing, and the tab being
+    // hidden never said anything about the network.
+    if (socket && kind === 'visible') return
+    // `online` did. Every socket the old network carried is suspect,
+    // acknowledged ones most of all: a switch leaves them half open, the
+    // browser goes on reporting them as connected, and no close ever
+    // arrives - the server's own end sees the FIN, the phone does not. The
+    // event is rare enough that one resubscribe from `lastSeq` is the
+    // cheaper mistake.
+    drop()
+    open()
+  })
+
   open()
 
   return () => {
     closed = true
+    stopWake()
     if (timer) clearTimeout(timer)
-    socket?.close()
+    drop()
   }
 }

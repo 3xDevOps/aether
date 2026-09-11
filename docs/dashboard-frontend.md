@@ -1,18 +1,26 @@
 # Dashboard SPA (`web/`)
 
-The browser client that `aether gui` serves from the user's own machine.
+The browser client is one static bundle served through either dashboard
+gateway: `aether gui` on the user's machine, or
+`aether-server --web-port` over HTTPS on the server's tailnet addresses.
 Next.js 16.3.4 produces the static export, while React 19 + TypeScript render
 the client runtime, Tailwind v4 and shadcn/ui primitives with CSS variables
 provide the base style, selected HeroUI v3 wrappers provide Chip and Tooltip,
-and Zustand holds the state. The server does not host a dashboard.
+and Zustand holds the state. Both gateways use the shared `internal/webgate`
+API and WebSocket surfaces; the server gateway authenticates each request with
+Tailscale WhoIs and no browser token.
 
-The visual contract is a VS Code-inspired developer workbench, not an official
-reusable VS Code component package. It follows VS Code Dark Modern and Light
-Modern semantics, dense flat panes and compact controls while preserving
-Aether's routes, capabilities, run states and startup behavior.
+The visual contract is a VS Code-inspired developer workbench, not an
+official reusable VS Code component package. It follows VS Code Dark Modern
+and Light Modern semantics, dense flat panes and compact controls while
+preserving Aether's routes, capabilities, run states and startup behavior.
 
-The gateway it talks to is documented in `docs/local-gateway.md`; this guide
-describes the dashboard's public route, store, and component structure.
+The gateways and their transport boundaries are documented in
+`docs/local-gateway.md`. The same bundle serves both, gating machine-local
+surfaces on the capabilities descriptor while keeping shared Files,
+configuration, runs and terminal surfaces available through either transport.
+This guide describes the dashboard's public route, store and component
+structure.
 
 ## Runtime boundary and commands
 
@@ -34,16 +42,17 @@ cd web && bun run typecheck  # tsc --noEmit
 
 `bun run dev` starts `dev-server.mjs`, the development-only Node loopback
 server. It defaults to `127.0.0.1:3000`, accepts `--port`/`-p` and
-`--hostname`/`-H`, and uses `AETHER_DASHBOARD` as its gateway target (the
-standard local gateway is `http://127.0.0.1:8080`). Requests under `/api` and
-`/local` are proxied over HTTP; `/ws` upgrades are proxied with WebSocket
-support. The proxy preserves the browser `Host` and `Origin` headers so the
-gateway remains the WebSocket origin boundary. Other requests and Next HMR
-upgrades go to Next's development handler. The Next Node inspector attach
-endpoint is unavailable through this server.
+`--hostname`/`-H`, and uses `AETHER_DASHBOARD` as its gateway target. The
+target may be a local `aether gui` URL or a server-hosted HTTPS dashboard;
+local targets also proxy `/local`, while both targets proxy `/api` and `/ws`
+with WebSocket support. The proxy preserves the browser `Host` and `Origin`
+headers so the shared gateway remains the WebSocket origin boundary. Other
+requests and Next HMR upgrades go to Next's development handler. The Next
+Node inspector attach endpoint is unavailable through this server.
 
-Run a local gateway and start the dev server in separate terminals. The gateway
-prints a tokened URL; copy its `token` query value onto the dev URL:
+For a local gateway, run it and start the dev server in separate terminals.
+The local gateway prints a tokened URL; copy its `token` query value onto the
+dev URL:
 
 ```sh
 # terminal 1
@@ -59,10 +68,60 @@ The client moves `?token=` into `sessionStorage` under `aether.token`, removes
 only that query parameter from the address bar, and sends the value as a
 Bearer token on HTTP or a `token` query parameter on WebSockets. The token is
 minted per `aether gui` process and stops working when that process exits.
+When `AETHER_DASHBOARD` points at the server gateway instead, the browser
+sends no token: Tailscale WhoIs identifies the phone or development browser
+on every request.
 
 Node 22+ is required for a hand-run dashboard build. The complete contributor
 toolchain and the optional desktop installer workflow are in
 [CONTRIBUTING.md](../CONTRIBUTING.md#toolchain).
+
+## Testing on a phone
+
+The shipped phone path is the server-hosted gateway: set `web-port`, then open
+the server's MagicDNS name on a phone joined to the tailnet
+([Testing on a real phone](#testing-on-a-real-phone)). The connection is
+HTTPS and carries no browser token; Tailscale WhoIs identifies the phone's
+source address on every request. The server-hosted dashboard opens at the
+board and does not offer machine-local onboarding, linking or update actions.
+
+For a contributor's loop against a dashboard build that is not embedded in a
+server yet, use the development server as a LAN-facing proxy to a local
+`aether gui`:
+
+```sh
+# terminal 1, on the computer the phone will reach
+aether gui --port 8080 --url
+
+# terminal 2, with <lan-ip> that computer's address on the phone's network
+cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
+  bun run dev -- --port 3000 --hostname <lan-ip>
+# on the phone: http://<lan-ip>:3000/?token=<token-from-aether-gui>
+```
+
+- **Binding the LAN address gives up the loopback boundary for as long as
+  the dev server runs.** Every device on that network can reach a proxy in
+  front of a gateway with the member's authority on the linked server, and
+  the local bearer token is the authentication: it travels in clear over
+  HTTP, sits in the URL and stays in the phone's history. Use a network you
+  trust, and stop the dev server when the session ends. The shipped boundary
+  is the loopback rule in [security.md](security.md#the-dashboard-gateways);
+  this is a development-time exception a contributor opts into by hand.
+- `--hostname` has to be the address typed on the phone. Next's development
+  server permits only localhost and the hostname it was started on; any other
+  origin needs `allowedDevOrigins` in `web/next.config.ts`.
+- The token is minted per `aether gui` process, and the phone needs that one.
+  Nothing else authenticates the local development proxy.
+- A tunnel or proxy in front of this must preserve `Host` and `Origin`. One
+  that rewrites `Host` breaks every WebSocket - the terminal, the event feed
+  and the attach stream - while plain HTTP keeps working, which makes for a
+  confusing half-broken dashboard.
+- This serves the Next development build over plain HTTP, not the static
+  export the binary embeds, and it needs the computer awake and on the same
+  network. It is a contributor's loop, not the shipped phone path.
+
+Automated phone coverage is the `mobile` Playwright project, described in
+[testing.md](testing.md).
 
 ## Build pipeline and the embed
 
@@ -169,10 +228,27 @@ There is no run tree: one workspace is in view at a time, so the runs group
 instead by state or by owning member (`groupBy`, persisted). Rows and headers
 are compact rather than a lower navigation card. At 1000px and narrower the
 adjacent workspace/run pane collapses into the persistent activity rail, which
-exposes **Expand sidebar** without changing the stored preference. At 640px and
-narrower an expanded pane overlays the center from the rail's right edge. The
-width handle remains a keyboard and pointer window splitter (see
+exposes **Expand sidebar** without changing the stored preference. The width
+handle remains a keyboard and pointer window splitter (see
 [Keyboard and focus](#keyboard-and-focus)).
+
+At 640px and narrower the expanded pane is a modal drawer instead: a Radix
+`Dialog` over a scrim, dismissed by a tap outside, by Escape, or by any
+navigation it makes, with focus trapped inside it while it is open. The
+activity rail travels inside the drawer, so a surface is still one tap away
+while the run list is up, and the 48px column the drawer leaves behind keeps
+the center view from reflowing under the scrim. The route itself is what
+closes the drawer, so a run row and a rail link both take the drawer away
+without either knowing it exists. There is no splitter in the drawer: the
+viewport sizes it, capped at the width of the screen less the rail.
+
+Being a dialog, the drawer also stands the shell's global keys down while it
+is open, the same way every other modal does (see
+[Keyboard and focus](#keyboard-and-focus)) - the palette, `n` and the `g`
+chords are unreachable until it closes. `Mod+B` is the exception: the drawer
+answers that one itself, because it is the key that opened it, and a member
+who opened the drawer from the keyboard must be able to close it the same
+way.
 
 - **The switcher sits above everything it scopes**, and appears only when there
   is a choice: a single workspace renders as a plain label with its base branch
@@ -205,9 +281,12 @@ width handle remains a keyboard and pointer window splitter (see
 
 `src/routes/files/` is the Files explorer and editor. It combines each visible
 workspace's base branch, live run checkouts, and the authenticated member's
-own persistent configuration roots from `config.roots`. Directory requests are
-lazy and cached in `src/store/files.ts`; file content comes from `files.read`
-or `config.read`. A live run can switch from **File** to **Diff vs base**.
+own persistent configuration roots from `config.roots`. `files.tree`,
+`files.read`, `files.write`, `files.diff`, and the `config.*` methods are
+available through both the local SSH-backed gateway and the server-hosted
+WhoIs gateway. Directory requests are lazy and cached in
+`src/store/files.ts`; file content comes from `files.read` or `config.read`.
+A live run can switch from **File** to **Diff vs base**.
 
 The tree is a browse pane beside the editor at medium widths. On narrow
 screens it is the first view; selecting a file opens the editor and **Browse**
@@ -226,18 +305,25 @@ configuration file accepts nested relative paths and refuses to overwrite an
 existing file.
 
 Saves are explicit (**Save**, **Commit to <branch>**, or Ctrl/Cmd-S); there is
-no autosave or force-save. Open tabs and dirty drafts live in memory and
-survive route navigation. The browser warns before unloading dirty buffers.
+no autosave or force-save. Open tabs and dirty drafts live in memory and survive
+route changes and reconnects to the same identity. A different authenticated
+member or server clears them. The browser warns before unloading dirty buffers.
 The revision is the SHA-256 of the complete bytes read. A failed or stale save
 keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
+All of the member's run containers and environment terminal mount one shared
+read-write persistent HOME, so accepted configuration imports and saves are
+visible to already-running processes immediately; a tool may need to reload.
 
 ## Title bar
 
 `src/components/shell/title-bar.tsx` renders the browser and Electron
 title/command bar at 35px. The command center names the active workspace and
-opens the existing command palette through `togglePalette(true)`.
+opens the existing command palette through `togglePalette(true)`. The bar pads
+itself with `env(safe-area-inset-left/right)` so a landscape notch cannot sit
+over it; the inset is 0 on every screen without one, and the Electron traffic
+light inset above wins where it applies.
 
 In Electron the window is frameless, so the SPA draws the bar and its native
 controls: on Windows and Linux, minimize, maximize/restore and close are wired
@@ -271,15 +357,72 @@ scene's motion details.
 
 ## Window size and overflow
 
-The shell is a fixed column - 35px title and command bar, update prompts,
-activity rail with its adjacent workspace/run sidebar and center view, and a
-22px status bar - and nothing in its own chrome scrolls sideways. A control
-pushed past an edge is unreachable, not merely off screen, so every row states
-what gives way first.
+The shell is a fixed column - title and command bar, update prompts, activity
+rail with its adjacent workspace/run sidebar and center view, and a status bar
+- and nothing in its own chrome scrolls sideways. The two bars are 35px and
+22px for a mouse and grow for a finger; see the tokens below. A control pushed
+past an edge is unreachable, not merely off screen, so every row states what
+gives way first.
 
 `desktop/main.js` sets `minWidth: 960` and `minHeight: 600`. That is the size
 the desktop rules are designed against; a browser tab has no such floor, so
-the same rules degrade below it rather than break.
+the same rules degrade below it rather than break. A phone is the far end of
+that: `src/app/layout.tsx` exports the viewport the shell needs there.
+
+- `width=device-width, initial-scale=1` - the page is laid out at the device's
+  own width rather than a desktop-sized canvas scaled down.
+- `viewport-fit=cover` - the shell paints under the notch and the home
+  indicator, and the chrome that touches those edges pads itself back out with
+  `env(safe-area-inset-*)`: the title bar sideways, the status bar and its
+  details popup downwards, the sidebar drawer on all three edges it reaches,
+  since it is the one surface that spans a screen corner to corner, and the
+  row holding the activity rail on the left, which is the edge a landscape
+  notch covers when the drawer is not up. A surface that pads itself keeps
+  painting to the edge and insets only what it holds, so the notch shows the
+  bar's own colour rather than a gap. Every inset is 0 where there is none, so
+  nothing guards them. Toasts sit above the status bar rather than against the
+  screen edge, so their offset adds the inset to the bar's own height - and it
+  has to be given to `sonner` twice, as `offset` and as `mobileOffset`,
+  because `sonner` swaps to the second below 600px and otherwise falls back to
+  a 16px default that lands inside the bar.
+- `interactive-widget=resizes-content` - on a browser that honours it
+  (Chrome and the Android WebView; iOS Safari does not), the soft keyboard
+  shrinks the layout viewport instead of sliding the page under itself. That
+  is what every `dvh` in the app - dialogs, the palette, selects, menus, the
+  status popup - is already sized against, so they all shorten when the
+  keyboard opens. Nothing in the shell uses `vh`. Where it is ignored the
+  layout viewport does not move, which is why dialogs also anchor to the top
+  below `sm` (see the end of this section).
+- `themeColor` per `prefers-color-scheme` - the browser reads it before the
+  SPA has applied the member's stored theme, so it follows the OS scheme
+  rather than the app setting.
+
+**Touch density is one variant, defined once.** `src/index.css` declares
+`@custom-variant coarse (@media (pointer: coarse))`, and a control that a
+finger has to hit carries its touch size beside its desktop one - for example
+`size-[22px] coarse:size-11`. It answers for the primary pointer, so a touch
+laptop with a trackpad keeps the desktop density. Under it the `Button`
+sizes, `CommandItem`, the `Select` trigger and its options, the dialog close,
+the palette trigger and input, the status bar controls, the sidebar run rows
+and the sidebar's own buttons grow to 40-44px. Desktop density is untouched.
+Use this variant rather than a new breakpoint or a per-component pixel value.
+
+**The two bars are tokens, not repeated numbers.** `--title-bar-height` and
+`--status-bar-height` are declared in `src/index.css` and redeclared once
+under `(pointer: coarse)`, where they become 48px and 44px so a 44px control
+fits inside them. A row that has to line up with a bar reads the token - the
+title bar and the sidebar's workspace switcher, the status bar with every
+control and readout in it, the command palette's drop from under the title
+bar - and so does every offset measured from one: the update banner cap and
+the toast offset. Add a coarse size to a control in a fixed-height row only
+together with the row, or the control grows out of the bar that holds it.
+
+Dialogs anchor to the top (`top-4`) below `sm` and centre from `sm` up. Where
+`interactive-widget` is ignored, a centred fixed dialog sits behind the
+keyboard; anchored to the top it stays in the visual viewport, and a dialog
+taller than the screen is clamped by `max-h-[calc(100dvh-2rem)]` and scrolls
+inside itself. `sm` is a width breakpoint, so a desktop window narrower than
+640px is treated as a phone here too.
 
 - **Update notices** keep the message, status icon and action hierarchy visible.
   Their actions become a narrow-screen grid and return to a desktop flex row;
@@ -289,7 +432,29 @@ the same rules degrade below it rather than break.
   status-slot contributors reachable at every width. Narrow layouts put
   secondary readouts in a bounded, keyboard-reachable popup; wide layouts
   expand them inline. The single status Slot remains mounted while details are
-expanded.
+  collapsed - a contributor owns a keyboard shortcut of its own, which is why
+  the popup is a `Collapsible` with its own dismissal rather than a Radix
+  overlay that unmounts when it closes. It dismisses on Escape and on a
+  pointer down anywhere outside it, unless a dialog above it owns the key;
+  it takes Escape before the shell's own does, so dismissing the popup on a
+  run does not also leave the run (see
+  [Keyboard and focus](#keyboard-and-focus)).
+  The popup also writes out the facts a pointer reads from a hover: the disk
+  breakdown, the protocol version and what this machine is linked to. Tooltips
+  and `title` stay hints for a pointer, never the only copy of a fact.
+- **The run header** keeps the title, task, branch and harness mode readable with
+  compact headers and a wrapping action group. Terminal tabs remain one keyboard
+  stop with internal horizontal overflow.
+- **The board** uses one column on narrow screens and three columns from the
+  `lg`/1024px breakpoint, with compact flat run cards and vertical scrolling on
+  small screens. State labels remain visible; empty, loading and error panels
+  use the same bounded surface hierarchy.
+- **The workspace/run sidebar** collapses at 1000px and narrower into the
+  persistent 48px activity rail, which exposes **Expand sidebar** without
+  changing the stored preference. At 640px and narrower its expanded pane is a
+  modal drawer over the main view, taken away by a tap outside, by Escape or
+  by the navigation it makes, rather than a pane that stays over the run it
+  just opened.
 
 ## Data flow
 
@@ -322,27 +487,58 @@ run's wire `paused` field, skipping runs that do not carry it.
 - **A reconnect with no cursor cannot replay** - on a quiet server nothing has
   advanced `seq` - so the client re-fetches the snapshot instead of
   subscribing live and silently missing the outage.
+- **Server-gateway reconnects also refresh the snapshot** when replay is
+  possible: Tailscale may identify the new connection as a different member.
+  Only a local gateway's fixed identity can reuse replay without that refresh.
 - **A failed hydration retries** on the same backoff, and the affected panes
   say the server is unreachable rather than animating skeletons forever. That
   generic copy never overwrites a more precise error already recorded.
 - **A total failure replaces the shell with one error page.** When nothing has
   hydrated and an error is recorded, `ConnectionError` takes the window
   instead of an empty sidebar and an empty board behind a toast. Which hop
-  failed picks the copy, because each one has a different fix: `network` says
-  this computer is offline (reconnect wifi or the VPN), `server` says the
-  server did not answer over SSH, `gateway` says the local `aether gui`
-  process stopped answering, and a dead token says to mint a new link. The
-  gateway's own message appears in an initially open "Technical details" disclosure,
-  and the page suppresses the toast that would otherwise repeat it. Its Retry
-  button clears the connection state and remounts the subscribe-and-hydrate
-  cycle, rather than reloading the page and dropping the in-memory token.
-- **A `1008` close naming a dead token stops the stream for good.** The
-  gateway closes `1008` for a refused subscribe or a transient membership
-  check too, which the next reconnect can outlive and so are retried; only
-  `dashboard token revoked or expired` is terminal, because reconnecting
-  would carry the same dead token. The panes then say to open a fresh link
-  with `aether gui`, which is the whole fix: the token is minted per
-  process, so a page that outlived its `aether gui` needs a new one.
+  failed picks the copy: `network` says this computer is offline, `server`
+  says the server did not answer through the selected transport, `gateway`
+  says the local `aether gui` process stopped answering, and an access refusal
+  preserves the gateway's own reason. The gateway's message appears in an
+  initially open "Technical details" disclosure, and the page suppresses the
+  toast that would otherwise repeat it. Retry clears connection state and
+  remounts the subscribe-and-hydrate cycle rather than reloading the page.
+- **A local token refusal is reported as access failure, not an unreachable
+  server.** `connect` reads `GET /api/v1/capabilities` before it opens the
+  stream, and a `401` there means the local gateway refused its token. The
+  store records that refusal verbatim, stops retrying and tells the member to
+  open a fresh URL from `aether gui`. The token is minted per process and held
+  in the tab's session storage, so a bookmarked URL, a second tab or a
+  restarted `aether gui` needs a newly printed URL. On the server gateway
+  there is no token check: WhoIs identifies the source address on every
+  request, while a tagged node is denied and an unavailable identity service
+  reports its own `403` or `503` refusal.
+- **The sockets reopen on a foreground or network return.** Both
+  `connectEvents` and `connectAttach` subscribe to `visibilitychange`
+  (visible) and `online` through `onWake` in `src/lib/stream.ts`. A phone
+  freezes a background tab's timers and drops its sockets, so a tab coming
+  back from the pocket would otherwise sit out the remainder of a wait that
+  caps at 30 seconds. Either event clears the pending retry timer and resets
+  the backoff unconditionally - a tab that was away cannot know how long the
+  failure lasted - and reopens when there is no socket. The two differ on a
+  socket that is still there: a foreground return leaves it, since tearing a
+  working subscription down would replay the log for nothing and the tab
+  being hidden said nothing about the network. `online` did, so it replaces
+  the socket whatever state it reached, an acknowledged one included. A
+  wifi-to-cellular switch leaves exactly that socket half open: the browser
+  goes on reporting it as connected, the store goes on saying Live, and no
+  close ever arrives, because the server's end sees the FIN and the phone
+  does not. `online` is rare, so one resubscribe from `lastSeq` and one
+  re-attach with its replay are the cheaper mistake. The 30 second cap stays
+  for genuine outages, and
+  an attach the gateway refused - or one parked on a `session ended` close,
+  whose transcript cannot change again - is an answer rather than a failure,
+  so neither event re-asks it.
+- **The hydration retry wakes as well.** A re-hydration that fails after the
+  first good one leaves a cursor to replay from, so the reopened stream goes
+  live without re-fetching and nothing else would restart that timer. A wake
+  with a retry pending clears it, resets its backoff and re-fetches at once;
+  a wake with none re-fetches nothing.
 - A `run.status` event for a run the client has never seen fetches that run
   before the event is applied, which is what keeps two quick transitions of a
   brand new run in order. If the fetch fails the event is unresolved: the
@@ -361,9 +557,11 @@ run's wire `paused` field, skipping runs that do not carry it.
   prompts.
 
 **The capabilities descriptor is the transport seam.** The store holds the
-`GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, `local`), and
+`GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, and `local`
+where the gateway has local verbs - the server gateway omits it), and
 `useCapability()` in `src/store/hooks.ts` wraps it as three predicates -
-`hasMethod`, `hasLocal`, `hasWS` - with `methods: ["*"]` meaning everything.
+`hasMethod`, `hasLocal`, `hasWS` - with `methods: ["*"]` meaning everything
+and a missing `local` meaning no local verb is available.
 When the descriptor is `null` (a gateway that predates the endpoint), the
 fallback is the read-and-steer method set every gateway has always served,
 `events` and `attach` sockets, and no local verbs, so an unknown gateway
@@ -374,29 +572,23 @@ render against a gateway with or without the local surfaces
 
 **Capability is half the gate; the caller's role is the other half.**
 Transport capability answers what the gateway can carry, not what this member
-may do, and the local gateway advertises `methods: ["*"]` - so gating on
-capability alone put Invite, Approve and Remove in front of a collaborator who
-then learned the truth from a `403`. `useSelfRole()` and `useIsAdmin()` in the
-same hooks file read the role off `server.info`'s member record, and every
-admin affordance now needs both predicates: the gateway can carry the method
-*and* the caller holds the admin role. Reads are gated on capability only, so
-the roster itself is reachable on the remote dashboard - `member.list` is
-allowlisted, `member.approve` is not, and both the sidebar link and the
-palette's Go-to entry gate on `member.list`. A non-admin cannot edit membership
+may do. `useSelfRole()` and `useIsAdmin()` in the same hooks file read the
+role off `server.info`'s member record, and every admin affordance needs both
+predicates: the gateway can carry the method *and* the caller holds the admin
+role. Reads are gated on capability only, so the roster is reachable on the
+server-hosted dashboard as well as through `aether gui`; the server remains
+the authority and checks every call again. A non-admin cannot edit membership
 or roles but can grant or revoke access to their own agent account.
 
 Every request goes through `src/lib/api.ts` - the only module that knows route
-shapes, the bearer token, and error decoding. It carries exactly the methods
-the views call; the team-feature methods arrive with the tickets that use them.
-Every call is a `POST /api/v1/<method>` bar three `GET`s - the diff tab's
-patch text, the status bar's disk number, and the capabilities probe -
+shapes, gateway authentication and error decoding. It carries exactly the
+methods the views call; the team-feature methods arrive with the tickets that
+use them. Every call is a `POST /api/v1/<method>` bar three `GET`s - the diff
+tab's patch text, the status bar's disk number, and the capabilities probe -
 because those read a working tree, a filesystem, and the gateway descriptor
-rather than RPC methods.
-The token arrives as `?token=` in the URL `aether gui` opens (or prints with
-`--url`), moves into session storage, and is sent as
-`Authorization: Bearer` on HTTP and as `?token=` on WebSockets. It is minted
-per `aether gui` process: no TTL, nothing to revoke, and it stops working
-the moment that process exits.
+rather than RPC methods. `aether gui` sends its per-process token as
+`Authorization: Bearer` on HTTP and as `?token=` on WebSockets. The
+server-hosted gateway sends no token; WhoIs authenticates each request.
 
 The status bar's disk gauge renders when `server.info` carries a `disk`
 object (`used_bytes`, `total_bytes`). That field does not arrive with
@@ -692,6 +884,14 @@ and the second leaves. Every other key reaches the shell as usual, and a
 tooltip closes on the first of them whatever it is, so a pending `g` is
 untouched.
 
+The status bar's details popup is the other overlay outside Radix, and it
+dismisses itself, so it has to do by hand what Radix does for a dialog: its
+Escape listener captures, and marks the key handled. The shell's own Escape
+is a window listener registered when the workbench mounted, long before the
+popup opened, so in the bubble phase it would run first and leave the run.
+Capturing is what makes Escape dismiss the topmost thing and only that; an
+open dialog still wins, through the same `inModal` target guard.
+
 Blocking a control with `aria-disabled` rather than `disabled` keeps it in the
 tab order, which is the point; the Styleguide rule below says why. The run
 action bar, its overflow trigger, the terminal toolbar and the diff snapshot
@@ -750,7 +950,12 @@ strip needs none of this, because it is not unmounted by its own tabs.
 report `aria-valuenow` against their available bounds, move 16px per arrow
 press, snap to those bounds on Home and End, and collapse the pane on Enter,
 handing focus to the control that restores it. Pointer dragging stays within
-the available space and follows the same bounds.
+the available space and follows the same bounds. Both handles set
+`touch-action: none`, without which the browser claims a touch drag as a pan
+and cancels the pointer stream the drag listens to. Under `coarse:` both grow
+to a 24px hit area centred on the edge they sit at, without changing what they
+paint; the sidebar's carries a `z-index` so the half of it that overhangs the
+pane beside it is not covered by that pane.
 
 ## Terminal view
 
@@ -1076,7 +1281,13 @@ like every other view, and gated on the same method the nav gates them on.
   re-reads them when the cursor moves, with a floor between refreshes so a
   chatty run does not become a request per event. It is mounted from the
   status-bar contribution, the one surface that is always on screen, which is
-  also where the presence heartbeat lives.
+  also where the presence heartbeat lives. It also refreshes and beats on
+  `onWake`, because a backgrounded tab freezes both timers: a phone returns
+  with its presence already expired server-side (the TTL is 45s) and with no
+  cursor movement to show an approval that arrived while it was away. The
+  refresh keeps the same floor as the debounced one, so app switching cannot
+  turn into a request per workspace each time; the heartbeat is one request
+  and always goes.
 - **One refresh covers every workspace, and there is only the one.** These
   reads are per workspace on the wire, and a workspace is a repo plus its
   team settings. A deployment has a handful of them and they outlive every
@@ -1163,23 +1374,25 @@ button.
 
 ## Settings
 
-`src/routes/settings/` shows the local link, the sync daemon and **Mirror run
-files to your repository** in flat bordered sections. That section starts and
-stops a live run's sync overlay. When the local capability includes
-`repo.sync`, the **Base branch** section's **Sync from origin** button
-fast-forwards the server's workspace base branch from this machine's `origin`
-remote. It shows the returned branch and git's output verbatim; server
-refusals stay verbatim.
+`src/routes/settings/` is a local-gateway surface. It shows the local link,
+the sync daemon and **Mirror run files to your repository** in flat bordered
+sections. That section starts and stops a live run's sync overlay. When the
+local capability includes `repo.sync`, the **Base branch** section's **Sync
+from origin** button fast-forwards the server's workspace base branch from
+this machine's `origin` remote. It shows the returned branch and git's output
+verbatim; server refusals stay verbatim. The server-hosted dashboard omits
+these machine-local settings and controls.
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the guided first-run path, six steps: Link, Git
-identity, Workspace, Repository, Agents, First run. It is a local-gateway
-surface; the shipped server has no separate hosted dashboard. Link, Workspace
-and First run live in `steps.tsx`; Repository is `repo-step.tsx`, Git identity
-is `git-identity-step.tsx`, and Agents is `agents-step.tsx` with its GitHub
-part in `github-connect.tsx` and its configuration import in
-`profile-import.tsx`.
+`src/routes/onboarding/` is the local-gateway guided first-run path, six
+steps: Link, Git identity, Workspace, Repository, Agents, First run. The
+server-hosted dashboard has no machine-local onboarding wizard: it starts at
+the board, while shared runs, terminal, Files and configuration surfaces
+remain available through the server gateway. Link, Workspace and First run
+live in `steps.tsx`; Repository is `repo-step.tsx`, Git identity is
+`git-identity-step.tsx`, and Agents is `agents-step.tsx` with its GitHub and
+configuration-import screens.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
 whichever step has sub-screens. The Agents step owns both of today's - a
@@ -1299,10 +1512,11 @@ place starts over. Repository is where the workspace first becomes
 load-bearing, so resuming onto it or any later step without one falls back to
 the workspace picker; the steps before it resume where they were.
 
-Hydration reads `link.status` first: a linked local gateway is marked
-onboarded before the redirect decision, so a linked machine never re-enters
+Hydration reads `link.status` first for a local gateway: a linked machine is
+marked onboarded before the redirect decision, so it never re-enters
 onboarding after a fresh GUI launch. An unlinked local gateway still routes
-here when `onboarded` is false. Completing the final step or navigating
+here when `onboarded` is false. The server-hosted gateway has no local link
+state and opens at the board. Completing the final step or navigating
 elsewhere marks the UI onboarded and clears that wizard state.
 
 The Link step distinguishes no configured server, a server with no repository,
@@ -1408,21 +1622,27 @@ terminal to log in through, the whole flow is the CLI's. The login command
 itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
 assert one string.
 
-Part B (`ProfileImport`) is an explicit, one-time browser directory import.
-`config.roots` supplies destinations such as `~/.claude`, `~/.codex`, and
-`~/.pi`. The user presses **Choose directory**, reviews the local preview and
-omitted paths, selects a destination when the basename is unknown or matches
-multiple roots, then presses **Import configuration**. This is an explicit
-import, not an agent-driven or continuously synchronized flow.
+**Configuration import** is an explicit, one-time directory import in the
+local onboarding flow. `config.roots` supplies destinations such as
+`~/.claude`, and the user presses **Choose directory**, selects a destination
+when the basename is unknown or matches multiple roots, then presses
+**Import configuration**. This action is not available from the
+server-hosted dashboard, because that browser cannot read a machine-local
+directory; the server dashboard still exposes Files and configuration editing
+through `config.tree`, `config.read` and `config.write`.
+There is no local discovery scan or directory watcher; the picker is the only
+onboarding import action.
 
 Credential names found in any path component and runtime/history defaults are
-left out in the browser. Every other selected byte is uploaded and server-
-scanned; the result reports accepted file/byte counts and server exclusions.
-The import limits are 1 MiB per file, 20 MiB decoded in aggregate, and 2,000
-files. Empty and binary regular files are preserved. The local directory is
-not watched. Accepted files change the calling member's persistent home
-immediately, including for already-running agents that share that home; an
-agent may need to reload. Auth/vendor login is separate.
+left out in the browser. Every other selected byte is uploaded and
+server-scanned; the result reports accepted file/byte counts and server
+exclusions. The import limits are 2,000 files, 1 MiB per file and 20 MiB
+decoded in aggregate, with a 30 MiB HTTP request cap. Empty and binary
+regular files are preserved, but browser imports send mode `0644` and cannot
+preserve executable mode or symlinks. The local directory is not watched.
+Accepted files change the calling member's persistent home immediately,
+including for already-running agents that share that home; an agent may need
+to reload. Auth/vendor login is separate.
 
 The First run step is the last one, and launches a run in the workspace the
 Workspace step settled on. Its **Agent** select offers only the entries
@@ -1715,11 +1935,24 @@ API receives the mutation only after the relevant confirmation. Preserve
 verbatim gateway errors in assertions when they are part of the contract.
 
 `web/e2e/` is the layout and browser-behavior layer. Playwright drives a real
-browser against a real `aether gui` gateway and server. `keyboard-focus`
-checks Escape ordering across an open dialog and run view and confirms that a
-focused control paints the app outline. `window-sizing` and
-`status-bar-sizing` exercise update notices and status controls at narrow and
-desktop dimensions. `board-card`, `run-switch`, `run-attach-retry`,
+browser against the local `aether gui` gateway and the server it proxies, while
+the same static bundle is also usable through the server-hosted gateway.
+`keyboard-focus` checks Escape ordering across an open dialog and run view and
+confirms that a focused control paints the app outline. `window-sizing` and
+`status-bar-sizing.spec.ts` exercise update notices and status controls at
+narrow and desktop dimensions.
+
+The touch shell is driven by the `mobile` project, which
+[testing.md](testing.md) describes: `shell-drawer.mobile.spec.ts` opens the
+phone drawer, taps a run and finds the drawer gone with the run on screen;
+`dialog-anchor.mobile.spec.ts` checks that a dialog short enough to tell the
+two apart sits at the top rather than the middle, and that the launch form
+keeps its footer on screen on a viewport as short as a keyboard leaves; and
+`toast-clearance.mobile.spec.ts` checks that a toast comes to rest above the
+status bar rather than on top of it. `sidebar-drawer.spec.ts` stays on the
+desktop project because its keyboard contract - `Mod+B` closing the drawer
+and the palette coming back once it is gone - needs a narrow window with a
+keyboard rather than a phone. `board-card`, `run-switch`, `run-attach-retry`,
 `run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
 corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and
@@ -1733,3 +1966,27 @@ plumbing. When changing a visible contract, update the assertion at the layer
 that can observe it. Use a component test for state, text, role, focus and
 navigation behavior, and Playwright for computed layout, actual browser focus
 outlines, responsive overflow, Escape ordering and gateway-backed flows.
+
+### Testing on a real phone
+The browser suite exercises the local gateway path; the server-hosted gateway
+and a real touch device are checked by hand. Give the server a dashboard port
+and restart it:
+
+```sh
+sudo aether-server config set web-port 443
+sudo systemctl restart aether-server
+```
+
+Then open `https://<the server's MagicDNS name>/` on a phone joined to the
+same tailnet. Expect the board as the first screen, already identified by
+WhoIs: no onboarding wizard, no Settings, no link chip, no update banner, and
+no pull, forward or sync controls, because the descriptor carries no `local`
+verbs. Files and configuration editing remain available through the
+server-hosted gateway. Watch what the server saw with:
+
+```sh
+journalctl -u aether-server -f
+```
+
+Prerequisites and the refusals a bad tailnet setup produces are in
+[networking.md](networking.md#the-dashboard).

@@ -36,6 +36,21 @@ export function oauthCallbackPort(uri: string): number | null {
   return null
 }
 
+/**
+ * What to tell the user when this gateway cannot forward the callback. The
+ * provider redirects to a loopback port that only exists on the machine
+ * running the forward, so opening the link here would strand the login.
+ * Returns null for links with no loopback callback, which open normally.
+ */
+export function remoteOAuthInstructions(
+  target: string,
+  uri: string,
+): { port: number; command: string } | null {
+  const port = oauthCallbackPort(uri)
+  if (port === null) return null
+  return { port, command: `aether forward ${target} ${port}` }
+}
+
 /** Starts the local half of an OAuth callback forward when uri names one. */
 export async function forwardOAuthCallback(
   client: Api,

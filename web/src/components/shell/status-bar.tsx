@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Slot } from '@/components/slots'
 import {
   Collapsible,
@@ -8,6 +8,7 @@ import {
 import { ThemeToggle } from '@/components/theme'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import { formatBytes } from '@/lib/format'
+import { inModal } from '@/lib/keys'
 import type { ConnectionState } from '@/lib/stream'
 import type { DiskUsage } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
@@ -40,11 +41,14 @@ const unreachableLabel: Record<UnreachableKind, string> = {
   network: 'this computer is offline - reconnect to wifi or your VPN',
   gateway: 'dashboard gateway is gone - restart aether gui',
   server: 'server unreachable over SSH - check the server and network; retrying',
+  refused: 'the gateway refused this device - it is not identified as a member',
+  identity: 'the server cannot identify this device - check tailscaled on the server host',
 }
 
 /**
- * The gauge's tooltip: what is holding the disk, in the order an operator
- * can act on it. Run checkouts are garbage-collected after their TTL,
+ * What is holding the disk, in the order an operator can act on it. The
+ * gauge's tooltip joins these for a pointer; the compact status popup lists
+ * them, because touch has no tooltip. Run checkouts are garbage-collected after their TTL,
  * transcripts live as long as their run rows, the database is where the
  * event log accumulates, and the bare workspace repos keep every push and
  * run branch. The bar says the disk is filling; this says what is filling
@@ -54,7 +58,7 @@ const unreachableLabel: Record<UnreachableKind, string> = {
  * predates the component, so an old server reads as silent instead of as a
  * server with no repositories.
  */
-function diskBreakdown(disk: DiskUsage): string {
+function diskLines(disk: DiskUsage): string[] {
   return [
     'Disk: the filesystem holding the data directory',
     `Worktrees ${formatBytes(disk.worktree_bytes)}`,
@@ -64,7 +68,7 @@ function diskBreakdown(disk: DiskUsage): string {
       ? []
       : [`Repos ${formatBytes(disk.repo_bytes)}`]),
     `${formatBytes(disk.free_bytes)} free`,
-  ].join(' · ')
+  ]
 }
 
 /**
@@ -92,7 +96,7 @@ function ServerUpdateNotice() {
     <span
       role="status"
       title={notice}
-      className="flex min-h-[22px] min-w-0 shrink items-center break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap"
+      className="flex min-h-[var(--status-bar-height)] min-w-0 shrink items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap"
     >
       <Chip
         color="warning"
@@ -134,7 +138,7 @@ function LocalStatus() {
             }}
             className={cn(
               focusRing,
-              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 rounded-sm px-1 hover:text-foreground',
+              'flex h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] shrink-0 items-center gap-1 rounded-sm px-1 hover:text-foreground',
             )}
           >
             <span
@@ -173,7 +177,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
   if (!available) {
     return (
       <span
-        className="flex min-h-[22px] min-w-0 items-center break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap"
+        className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap"
         title={`${label} · protocol ${protocol}`}
       >
         {label}
@@ -195,7 +199,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
             aria-label={`Update available: ${latest}`}
             className={cn(
               focusRing,
-              'flex min-h-[22px] min-w-0 shrink items-center gap-1 rounded-sm px-1 break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap hover:text-foreground',
+              'flex min-h-[var(--status-bar-height)] min-w-0 shrink items-center gap-1 rounded-sm px-1 break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap hover:text-foreground',
             )}
           >
             {label}
@@ -207,6 +211,35 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
         {latest} is available - show the update banner
       </Tooltip.Content>
     </Tooltip>
+  )
+}
+
+/**
+ * The facts a pointer reads from a tooltip or a `title`, written out. Touch
+ * has neither, and the compact popup is the one place in the shell with room
+ * for a sentence, so the disk breakdown, the protocol version and what this
+ * machine is linked to are rows here rather than hints only a mouse can find.
+ */
+function StatusFacts({ disk }: { disk?: DiskUsage }) {
+  const info = useStore((s) => s.info)
+  const cap = useCapability()
+  const link = useStore((s) => s.linkStatus)
+  const rows = [
+    ...(info ? [`Protocol ${info.protocol_version}`] : []),
+    ...(cap.hasLocal('link.status') && link?.linked === true
+      ? [`Linked to ${link.repo}`]
+      : []),
+    ...(disk && disk.total_bytes > 0 ? diskLines(disk) : []),
+  ]
+  if (rows.length === 0) return null
+  return (
+    <ul className="flex min-w-0 flex-col gap-0.5 border-t border-border pt-1 text-[12px] leading-4 text-muted-foreground">
+      {rows.map((row) => (
+        <li key={row} className="min-w-0 break-words">
+          {row}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -242,11 +275,50 @@ export function StatusBar() {
 
   const detailsOpen = wide || mobileDetailsOpen
   const statusActions = <Slot name="statusbar" />
+  const details = useRef<HTMLDivElement>(null)
+
+  // The compact popup covers the view it sits over, and the only thing that
+  // closes it is one small trigger at the screen edge. Touch has no hover to
+  // find that trigger with, so the popup dismisses the way every other
+  // overlay does: a tap or click anywhere else, or Escape. A dialog above it
+  // owns Escape first, which is what `inModal` answers. The popup is not a
+  // Radix overlay because the status Slot inside it stays mounted while it is
+  // closed - a contributor owns a keyboard shortcut of its own.
+  //
+  // Both listeners capture, because the shell's own Escape is a window
+  // listener registered when the workbench mounted, long before this one:
+  // in the bubble phase it would leave the run first and mark the key
+  // handled, which this handler reads as someone else's. Taking the key
+  // first and marking it handled is what makes Escape dismiss the topmost
+  // thing and only that.
+  useEffect(() => {
+    if (wide || !mobileDetailsOpen) return
+    const outside = (event: PointerEvent) => {
+      if (details.current?.contains(event.target as Node | null)) return
+      setMobileDetailsOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || inModal(event.target)) return
+      event.preventDefault()
+      setMobileDetailsOpen(false)
+      // A dismissed popup can be holding the focus; the trigger is where it
+      // came from and where it opens again.
+      details.current
+        ?.querySelector<HTMLElement>('[aria-controls="status-details"]')
+        ?.focus()
+    }
+    window.addEventListener('pointerdown', outside, true)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('pointerdown', outside, true)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [mobileDetailsOpen, wide])
 
   return (
-    <footer className="relative flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 border-0 bg-sidebar px-2 py-0 text-[12px] leading-none text-muted-foreground before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border before:content-['']">
+    <footer className="relative flex min-h-[var(--status-bar-height)] shrink-0 items-center gap-1 border-0 bg-sidebar py-0 pr-[max(0.5rem,env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] pl-[max(0.5rem,env(safe-area-inset-left))] text-[12px] leading-none text-muted-foreground before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border before:content-['']">
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="flex h-[22px] shrink-0 items-center gap-1">
+        <span className="flex h-[var(--status-bar-height)] shrink-0 items-center gap-1">
           <span
             className={cn('size-1.5 rounded-full', connectionDot[connection])}
             aria-hidden
@@ -254,7 +326,8 @@ export function StatusBar() {
           {connectionLabel[connection]}
         </span>
         <Collapsible
-          className="relative block h-[22px] min-w-0 leading-none xl:flex-1"
+          ref={details}
+          className="relative block h-[var(--status-bar-height)] min-w-0 leading-none xl:flex-1"
           open={detailsOpen}
           onOpenChange={(open) => {
             if (!wide) setMobileDetailsOpen(open)
@@ -265,7 +338,7 @@ export function StatusBar() {
               render={(triggerProps) => (
                 <CollapsibleTrigger
                   {...triggerProps}
-                  className="h-[22px] w-[22px] justify-center rounded-sm border border-transparent text-muted-foreground hover:border-border hover:bg-toolbar-hover hover:text-foreground xl:hidden"
+                  className="h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] w-[var(--status-bar-height)] justify-center rounded-sm border border-transparent text-muted-foreground hover:border-border hover:bg-toolbar-hover hover:text-foreground xl:hidden"
                   aria-label="Show status details"
                   aria-controls="status-details"
                 />
@@ -276,9 +349,11 @@ export function StatusBar() {
           <CollapsibleContent
             id="status-details"
             forceMount
-            className="block min-w-0 data-[state=closed]:hidden xl:h-[22px] xl:flex-1"
+            className="block min-w-0 data-[state=closed]:hidden xl:h-[var(--status-bar-height)] xl:flex-1"
           >
-            <div className="fixed inset-x-2 bottom-7 z-50 mb-1 flex max-h-[70vh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-4 shadow-lg xl:static xl:flex xl:h-[22px] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none">
+            <div
+              className="fixed inset-x-2 bottom-[calc(var(--status-bar-height)_+_0.375rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[70dvh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-4 shadow-lg xl:static xl:flex xl:h-[var(--status-bar-height)] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none"
+            >
               {unreachable !== null && (
                 // needs-attention has no HeroUI colour of its own, so the
                 // chip carries the state token rather than the nearest
@@ -286,7 +361,7 @@ export function StatusBar() {
                 <span
                   role="status"
                   title={unreachableLabel[unreachable]}
-                  className="flex min-h-[22px] min-w-0 items-center break-words whitespace-normal xl:h-[22px] xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap"
                 >
                   <Chip
                     color="warning"
@@ -310,16 +385,16 @@ export function StatusBar() {
               {info && (
                 <span
                   title={info.member.display_name}
-                  className="flex min-h-[22px] min-w-0 items-center break-words whitespace-normal xl:h-[22px] xl:max-w-40 xl:shrink-0 xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:max-w-40 xl:shrink-0 xl:truncate xl:whitespace-nowrap"
                 >
                   {info.member.display_name}
                 </span>
               )}
               {disk && disk.total_bytes > 0 && (
                 <span
-                  className="flex min-h-[22px] min-w-0 items-center gap-1 break-words whitespace-normal xl:h-[22px] xl:shrink xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1 break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:shrink xl:truncate xl:whitespace-nowrap"
                   aria-label="Disk usage"
-                  title={diskBreakdown(disk)}
+                  title={diskLines(disk).join(' · ')}
                 >
                   <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-sm bg-muted">
                     <span
@@ -334,6 +409,9 @@ export function StatusBar() {
                   </span>
                 </span>
               )}
+              {!wide && <StatusFacts disk={disk} />}
+              {/* Last, so a screen too short for the readouts reaches the
+                  controls by scrolling to the end of the popup. */}
               {!desktop && (
                 <span className="flex min-w-0 flex-wrap items-center gap-1">
                   {statusActions}

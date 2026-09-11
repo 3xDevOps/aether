@@ -27,6 +27,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/servergw"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -67,6 +68,11 @@ type Config struct {
 	DataDir string
 	// Addr is the SSH listen address; default ":2222".
 	Addr string
+	// WebPort serves the dashboard over HTTPS on the server's tailnet
+	// addresses at this port; 0 leaves the server SSH-only. It needs
+	// tailscaled on this host with MagicDNS and HTTPS certificates
+	// enabled for the tailnet, and refuses to start without them.
+	WebPort int
 	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
 	// StandardImage is the server-owned image used for all runs until member
@@ -131,6 +137,8 @@ type Server struct {
 	sched    *scheduler.Scheduler
 	adapters *adapter.Manager
 	ssh      *sshd.Server
+	web      *servergw.Gateway
+	tailnet  servergw.Tailnet
 	services []namedService
 
 	closeOnce sync.Once
@@ -292,15 +300,16 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}
 	s.adapters = adapter.NewManager(s.bus, s.db, s.pty)
 	whois := cfg.WhoIs
-	var tailnetHostname string
+	var node reachability.Node
+	var nodeErr error
+	tailscaled := reachability.NewTailscale("")
 	if _, statErr := os.Stat(sshd.DefaultTailscaledSocket); whois == nil && statErr == nil {
 		whois = sshd.NewLocalWhoIs("")
-		// Discover the MagicDNS name once at startup; server.info reports
-		// it verbatim. Best-effort: an unreachable LocalAPI leaves it empty.
+		// Read the node once at startup; server.info reports the MagicDNS
+		// name verbatim and the web gateway binds the addresses.
+		// Best-effort for SSH: an unreachable LocalAPI leaves them empty.
 		discoverCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		if ep, derr := reachability.NewTailscale("").Discover(discoverCtx); derr == nil {
-			tailnetHostname = ep.Host
-		}
+		node, nodeErr = tailscaled.Self(discoverCtx)
 		cancel()
 	}
 	sshCfg := sshd.Config{
@@ -315,8 +324,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		WhoIs:             whois,
 		TailnetAutoJoin:   cfg.TailnetAutoJoin,
 		TailnetRequireKey: cfg.TailnetRequireKey,
-		TailnetHostname:   tailnetHostname,
+		TailnetHostname:   node.DNSName,
 		InvitesDir:        filepath.Join(cfg.DataDir, "invites"),
+		Profiles:          prof,
 		Config:            sshd.NewConfigBackend(homes, s.db),
 	}
 	if err = s.buildServices(Deps{
@@ -335,7 +345,31 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if s.ssh, err = sshd.New(sshCfg); err != nil {
 		return nil, err
 	}
+	if cfg.WebPort != 0 {
+		if cfg.WebPort < 0 || cfg.WebPort > 65535 {
+			return nil, fmt.Errorf("server: web-port %d is not a port", cfg.WebPort)
+		}
+		if s.web, err = servergw.New(servergw.Config{SSH: s.ssh}); err != nil {
+			return nil, fmt.Errorf("server: web-port %d: %w", cfg.WebPort, err)
+		}
+		if nodeErr != nil {
+			return nil, fmt.Errorf("server: web-port %d: tailscaled did not report this node: %w", cfg.WebPort, nodeErr)
+		}
+		s.tailnet = servergw.Tailnet{Node: node, Port: cfg.WebPort, Certs: tailscaled}
+	}
 	return s, nil
+}
+
+// WebURL is the address the dashboard is served at, empty when the
+// server is SSH-only.
+func (s *Server) WebURL() string {
+	if s.web == nil {
+		return ""
+	}
+	if s.tailnet.Port == 443 {
+		return "https://" + s.tailnet.Node.DNSName + "/"
+	}
+	return fmt.Sprintf("https://%s:%d/", s.tailnet.Node.DNSName, s.tailnet.Port)
 }
 
 // Store is the server's persistence layer.
@@ -368,12 +402,29 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.startServices(ctx); err != nil {
 		return errors.Join(err, s.Close())
 	}
+	if s.web != nil {
+		if err := s.web.Start(ctx, s.tailnet); err != nil {
+			return errors.Join(err, s.Close())
+		}
+	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errc := make(chan error, 2)
+	errc := make(chan error, 3)
 	var wg sync.WaitGroup
 	wg.Add(2)
+	if s.web != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-s.web.Done():
+				errc <- fmt.Errorf("server: web: %w", s.web.Err())
+				cancel()
+			case <-runCtx.Done():
+			}
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		if err := s.sched.Start(runCtx); err != nil {
@@ -400,15 +451,19 @@ func (s *Server) Run(ctx context.Context) error {
 	return closeErr
 }
 
-// Close shuts the components down in dependency order: SSH transport
-// first (no new work arrives), then the scheduler (supervision loops
-// stop; containers keep running), then the PTY host (transcripts flush),
-// the git engine (diff watchers stop), and finally the bus, event log,
+// Close shuts the components down in dependency order: the transports
+// first (no new work arrives; the web gateway before SSH, whose handlers
+// it drives in-process), then the scheduler (supervision loops stop;
+// containers keep running), then the PTY host (transcripts flush), the
+// git engine (diff watchers stop), and finally the bus, event log,
 // runtime, and store. Idempotent.
 func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
 		var errs []error
 		closeAll := []func() error{}
+		if s.web != nil {
+			closeAll = append(closeAll, s.web.Close)
+		}
 		if s.ssh != nil {
 			closeAll = append(closeAll, s.ssh.Close)
 		}

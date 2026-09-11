@@ -23,7 +23,7 @@ one entry to the `profiles` map:
 | `EnvPassthrough` | Environment variables copied from the server process into run containers when set. API keys only. |
 | `Env` | Fixed environment variables the CLI needs to start at all, applied after the workspace's own so a workspace cannot break the launch. Not for configuration - a variable belongs here only when the agent refuses to run without it. |
 | `CredentialPaths` | Home-relative directories holding native login state. Persisted with the member account and mounted read-write into every run using that account. Directories, not files. |
-| `LocalRoot` | Home-relative configuration root exposed to the browser's one-time import and the **Files** editor. It also names the local root used by the explicit legacy `profile` CLI commands. Empty means the harness has no configuration root. |
+| `LocalRoot` | Home-relative configuration root exposed to the browser's one-time import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the harness has no configuration root. |
 | `DenyNames` | Basenames the browser import skips before upload and the manual profile path excludes - credential files, token caches, keychains. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
 | `MCPConfigFlag` | The CLI's flag for a server-supplied MCP server config, if it has one. Set it and the run is wired to the coordination bridge; leave it empty and coordination degrades to the overlap notice. |

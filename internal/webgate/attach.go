@@ -1,42 +1,34 @@
-package localgw
+package webgate
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 
 	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 
-	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
+)
+
+// defaultCols/defaultRows are the geometry of a terminal whose header
+// carries none.
+const (
+	defaultCols = 80
+	defaultRows = 24
 )
 
 // handleAttach serves GET /ws/attach/{run}: terminal output as binary
 // frames, client input and resizes as JSON control frames. The attach is
 // a read-only mirror unless the header asks for write.
 func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
-	if !g.authorized(r, true) {
-		g.deny(w)
+	s, ok := g.Accept(w, r)
+	if !ok {
 		return
 	}
-	run := r.PathValue("run")
-	conn, err := websocket.Accept(w, r, nil)
-	if err != nil {
-		return
-	}
-	defer func() { _ = conn.CloseNow() }()
-	conn.SetReadLimit(wsReadLimit)
-
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	defer s.Close()
 	var req protocol.DashAttachRequest
-	readCtx, readDone := context.WithTimeout(ctx, readHeaderTimeout)
-	err = wsjson.Read(readCtx, conn, &req)
-	readDone()
-	if err != nil {
+	if s.ReadHeader(&req) != nil {
 		return
 	}
 	cols, rows := req.Cols, req.Rows
@@ -45,8 +37,8 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 	}
 	shell := r.URL.Query().Get("shell")
 	allowWrite := req.Write || shell != ""
-	term, ack, err := g.cfg.Backend.Attach(protocol.AttachRequest{
-		RunID:    run,
+	term, ack, err := s.Backend.Attach(s.Ctx, protocol.AttachRequest{
+		RunID:    r.PathValue("run"),
 		ReadOnly: !allowWrite,
 		Cols:     cols,
 		Rows:     rows,
@@ -56,27 +48,26 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		if !ack.OK && ack.Code == 0 {
 			ack = protocol.AttachResponse{OK: false, Code: protocol.CodeInternal, Error: err.Error()}
 		}
-		_ = writeFrame(ctx, conn, ack)
-		_ = conn.Close(websocket.StatusPolicyViolation, "attach refused")
+		_ = s.WriteJSON(ack)
+		_ = s.Conn.Close(websocket.StatusPolicyViolation, "attach refused")
 		return
 	}
 	defer func() { _ = term.Close() }()
-	if writeFrame(ctx, conn, ack) != nil {
+	if s.WriteJSON(ack) != nil {
 		return
 	}
 
-	// Mirror semantics match the remote dashboard: a read-only attach's
-	// input is dropped rather than refused, and its resizes are ignored.
-	err = pumpTerminal(ctx, cancel, conn, term, allowWrite, allowWrite)
-	if err != nil {
-		_ = conn.Close(attachEndClose(err))
+	// A read-only attach's input is dropped rather than refused, and its
+	// resizes are ignored.
+	if err := s.pumpTerminal(term, allowWrite, allowWrite); err != nil {
+		_ = s.Conn.Close(attachEndClose(err))
 		return
 	}
 	// A clean EOF is the run's terminal session ending (the attach
 	// channel's exit-status 0): a finished agent or a drained transcript
 	// replay. Name it so the dashboard stops reconnecting instead of
 	// looping attach -> EOF -> reattach against a session that is over.
-	_ = conn.Close(websocket.StatusNormalClosure, "session ended")
+	_ = s.Conn.Close(websocket.StatusNormalClosure, "session ended")
 }
 
 // attachEndClose maps a terminal read error to the close frame the
@@ -85,7 +76,7 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 // gate's name, the view downgrades to a mirror or stops reconnecting,
 // exactly as it would for a refusal at attach time.
 func attachEndClose(err error) (websocket.StatusCode, string) {
-	var exit *cli.RemoteExitError
+	var exit *protocol.RemoteExitError
 	if errors.As(err, &exit) {
 		switch exit.Status {
 		case protocol.AttachExitSteerRevoked:
@@ -97,17 +88,17 @@ func attachEndClose(err error) (websocket.StatusCode, string) {
 	return websocket.StatusInternalError, "attach ended"
 }
 
-// pumpTerminal bridges a WebSocket and a remote terminal: terminal output
-// goes out as binary frames; JSON control frames come back as input and
+// pumpTerminal bridges the socket and a terminal: terminal output goes
+// out as binary frames; JSON control frames come back as input and
 // resizes, honored per the allow flags. It returns the terminal's read
 // error, nil on clean EOF. The peer closing the socket closes the
 // terminal, which in turn ends the output loop.
-func pumpTerminal(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, term cli.Terminal, allowInput, allowResize bool) error {
+func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error {
 	go func() {
-		defer cancel()
+		defer s.cancel()
 		defer func() { _ = term.Close() }()
 		for {
-			typ, data, err := conn.Read(ctx)
+			typ, data, err := s.Conn.Read(s.Ctx)
 			if err != nil {
 				return
 			}
@@ -139,10 +130,7 @@ func pumpTerminal(ctx context.Context, cancel context.CancelFunc, conn *websocke
 	for {
 		n, err := term.Read(buf)
 		if n > 0 {
-			wctx, wdone := context.WithTimeout(ctx, wsWriteTimeout)
-			werr := conn.Write(wctx, websocket.MessageBinary, buf[:n])
-			wdone()
-			if werr != nil {
+			if s.write(websocket.MessageBinary, buf[:n]) != nil {
 				return nil
 			}
 		}

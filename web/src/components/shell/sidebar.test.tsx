@@ -15,6 +15,16 @@ import {
   workspace,
 } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
+import { atViewport } from '@/test/viewport'
+
+/**
+ * A window narrow enough for the sidebar's own threshold and no narrower, so
+ * the rail tests below stay clear of the drawer layout; `phoneWidth` is past
+ * the 640px line, where the expanded pane becomes a modal drawer.
+ */
+const narrowWidth = 800
+const wideWidth = 1200
+const phoneWidth = 390
 
 beforeEach(async () => {
   useStore.setState({
@@ -27,30 +37,6 @@ beforeEach(async () => {
   await hydrate(useStore, fakeApi())
 })
 
-afterEach(() => vi.unstubAllGlobals())
-
-/**
- * A narrow window: only the sidebar's own threshold matches, so a component
- * asking a different question gets the wide answer. Returns the resize the
- * component listens for.
- */
-function narrowWindow() {
-  const wide = window.matchMedia
-  const listeners = new Set<(e: MediaQueryListEvent) => void>()
-  vi.stubGlobal('matchMedia', (query: string) => ({
-    ...wide(query),
-    matches: query === '(max-width: 1000px)',
-    addEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) =>
-      listeners.add(fn),
-    removeEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) =>
-      listeners.delete(fn),
-  }))
-  return (matches: boolean) =>
-    act(() => {
-      for (const fn of listeners) fn({ matches } as MediaQueryListEvent)
-    })
-}
-
 describe('Sidebar', () => {
   it('shows the active workspace and its runs', () => {
     render(<Sidebar />)
@@ -60,7 +46,7 @@ describe('Sidebar', () => {
   })
 
   it('collapses to the rail on a narrow window', () => {
-    narrowWindow()
+    atViewport(narrowWidth)
     render(<Sidebar />)
 
     expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
@@ -90,7 +76,7 @@ describe('Sidebar', () => {
     // A member who stored a collapsed sidebar, then narrows the window and
     // glances at the run list, must not have that glance stored.
     useStore.setState({ sidebarCollapsed: true })
-    narrowWindow()
+    atViewport(narrowWidth)
     render(<Sidebar />)
 
     fireEvent.click(screen.getByLabelText('Expand sidebar'))
@@ -104,20 +90,68 @@ describe('Sidebar', () => {
 
   it('drops the narrow-window expansion when the window widens', () => {
     useStore.setState({ sidebarCollapsed: true })
-    const resize = narrowWindow()
+    const resize = atViewport(narrowWidth)
     render(<Sidebar />)
     fireEvent.click(screen.getByLabelText('Expand sidebar'))
 
-    resize(false)
+    resize(wideWidth)
 
     expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
     expect(useStore.getState().sidebarCollapsed).toBe(true)
 
     // The next narrowing starts from the rail again: had the glance survived
     // the widening, the sidebar would open itself here.
-    resize(true)
+    resize(narrowWidth)
 
     expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
+  })
+
+  it('opens the run list as a modal drawer on a phone', () => {
+    atViewport(phoneWidth, { pointer: 'coarse' })
+    render(<Sidebar />)
+
+    fireEvent.click(screen.getByLabelText('Expand sidebar'))
+    const drawer = screen.getByRole('dialog', { name: 'Runs' })
+    // The rail travels with the drawer, so every surface stays one tap away.
+    expect(within(drawer).getByRole('navigation', { name: 'Surfaces' })).toBeDefined()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
+    expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
+  })
+
+  // A dialog stands the shell's global keys down inside itself, so without
+  // the drawer answering it the key that opened the drawer could not close
+  // it again.
+  it('closes the phone drawer from the key that opened it', () => {
+    atViewport(phoneWidth, { pointer: 'coarse' })
+    render(<Sidebar />)
+
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
+    const drawer = screen.getByRole('dialog', { name: 'Runs' })
+
+    fireEvent.keyDown(drawer, { key: 'b', ctrlKey: true })
+
+    expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
+    expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
+  })
+
+  it('closes the phone drawer after it navigates', () => {
+    atViewport(phoneWidth, { pointer: 'coarse' })
+    render(<Sidebar />)
+    fireEvent.click(screen.getByLabelText('Expand sidebar'))
+
+    const drawer = screen.getByRole('dialog', { name: 'Runs' })
+    fireEvent.click(
+      within(drawer).getByRole('button', { name: /rewrite the checkout flow/ }),
+    )
+
+    expect(useStore.getState().route).toEqual({
+      name: 'terminal',
+      params: { runId: 'run_1' },
+    })
+    expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
   })
 
   it('routes to a run when its row is clicked', () => {
@@ -316,6 +350,20 @@ describe('Sidebar', () => {
       name: 'Approvals, 1 waiting on a decision',
     })
     expect(entry.textContent).toContain('1')
+  })
+
+  // CLAUDE.md: show the real error, never a friendlier stand-in. The badge
+  // that marks the failure is decorative, so the entry's name is the only
+  // place a reader meets what the server actually said.
+  it('names the queue error the server reported on the Approvals entry', () => {
+    useStore.setState({ inboxError: 'approval.list: database is locked' })
+    render(<Sidebar />)
+
+    expect(
+      within(screen.getByLabelText('Surfaces')).getByRole('button', {
+        name: 'Approvals, approval.list: database is locked',
+      }),
+    ).toBeDefined()
   })
 
   it('groups the runs by the pressed segment', () => {
