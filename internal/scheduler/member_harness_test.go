@@ -29,30 +29,30 @@ func storeMemberDefinition(t *testing.T, e *testEnv, member domain.MemberID, def
 func TestMemberHarnessDefinitionResolution(t *testing.T) {
 	e := newTestEnv(t, nil)
 	storeMemberDefinition(t, e, e.member.ID, harness.Definition{
-		Name:            "omp",
-		TUIArgs:         []string{"omp", "{task}"},
-		HeadlessArgs:    []string{"omp", "-p", "{task}"},
-		Executable:      "omp",
-		ProfileRoot:     "/root/.omp",
-		CredentialPaths: []string{"/root/.omp"},
+		Name:            "aider",
+		TUIArgs:         []string{"aider", "{task}"},
+		HeadlessArgs:    []string{"aider", "-p", "{task}"},
+		Executable:      "aider",
+		ProfileRoot:     "/root/.aider",
+		CredentialPaths: []string{"/root/.aider"},
 	})
 
-	argv, prof, err := e.sched.command(t.Context(), e.member.ID, "omp", domain.LaunchHeadless, "go")
+	argv, prof, err := e.sched.command(t.Context(), e.member.ID, "aider", domain.LaunchHeadless, "go")
 	if err != nil {
 		t.Fatalf("member definition did not resolve: %v", err)
 	}
-	if got, want := fmt.Sprint(argv), fmt.Sprint([]string{"omp", "-p", "go"}); got != want {
+	if got, want := fmt.Sprint(argv), fmt.Sprint([]string{"aider", "-p", "go"}); got != want {
 		t.Fatalf("argv = %s, want %s", got, want)
 	}
-	if prof.LocalRoot != "/root/.omp" {
-		t.Fatalf("profile root = %q, want /root/.omp", prof.LocalRoot)
+	if prof.LocalRoot != "/root/.aider" {
+		t.Fatalf("profile root = %q, want /root/.aider", prof.LocalRoot)
 	}
 
 	other := &domain.Member{DisplayName: "Eve", PublicKey: testPublicKey(t), Color: "#3cb44b", Role: domain.RoleCollaborator}
 	if err := e.db.CreateMember(t.Context(), other); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
-	if _, _, err := e.sched.command(t.Context(), other.ID, "omp", domain.LaunchHeadless, "go"); err == nil {
+	if _, _, err := e.sched.command(t.Context(), other.ID, "aider", domain.LaunchHeadless, "go"); err == nil {
 		t.Fatal("another member resolved a definition they do not own")
 	}
 }
@@ -62,21 +62,21 @@ func TestMemberHarnessDefinitionResolution(t *testing.T) {
 func TestServerSpecWinsOverMemberDefinition(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{
-			"omp": {
-				TUIArgs: []string{"omp", "{task}"}, HeadlessArgs: []string{"omp", "--admin", "{task}"},
-				Executable: "omp", ProfileRoot: "/root/.omp", CredentialPaths: []string{"/root/.omp"},
+			"aider": {
+				TUIArgs: []string{"aider", "{task}"}, HeadlessArgs: []string{"aider", "--admin", "{task}"},
+				Executable: "aider", ProfileRoot: "/root/.aider", CredentialPaths: []string{"/root/.aider"},
 			},
 		}
 	})
 	storeMemberDefinition(t, e, e.member.ID, harness.Definition{
-		Name: "omp", TUIArgs: []string{"omp", "{task}"}, HeadlessArgs: []string{"omp", "--member", "{task}"},
-		Executable: "omp",
+		Name: "aider", TUIArgs: []string{"aider", "{task}"}, HeadlessArgs: []string{"aider", "--member", "{task}"},
+		Executable: "aider",
 	})
-	argv, _, err := e.sched.command(t.Context(), e.member.ID, "omp", domain.LaunchHeadless, "x")
+	argv, _, err := e.sched.command(t.Context(), e.member.ID, "aider", domain.LaunchHeadless, "x")
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
-	if fmt.Sprint(argv) != fmt.Sprint([]string{"omp", "--admin", "x"}) {
+	if fmt.Sprint(argv) != fmt.Sprint([]string{"aider", "--admin", "x"}) {
 		t.Fatalf("argv = %v, want the admin spec's argv", argv)
 	}
 }
@@ -85,11 +85,11 @@ func TestServerSpecWinsOverMemberDefinition(t *testing.T) {
 // fail the launch loudly, never resolve to a half-usable profile.
 func TestCorruptMemberDefinitionFails(t *testing.T) {
 	e := newTestEnv(t, nil)
-	row := &store.HarnessDefinition{MemberID: e.member.ID, Name: "omp", Definition: []byte(`{"Name":"omp"}`)}
+	row := &store.HarnessDefinition{MemberID: e.member.ID, Name: "aider", Definition: []byte(`{"Name":"aider"}`)}
 	if err := e.db.UpsertHarnessDefinition(t.Context(), row); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if _, _, err := e.sched.command(t.Context(), e.member.ID, "omp", domain.LaunchHeadless, "x"); err == nil {
+	if _, _, err := e.sched.command(t.Context(), e.member.ID, "aider", domain.LaunchHeadless, "x"); err == nil {
 		t.Fatal("invalid stored definition accepted")
 	}
 }

@@ -387,6 +387,12 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".codex"},
 		LocalRoot:       ".codex",
 		DenyNames:       []string{"auth.json", "keychain", "token.json"},
+		// Codex runs an external program when a turn completes, and a -c
+		// override points it at the reporter for this launch alone. It
+		// says nothing when the next turn starts, so the run comes back
+		// on the agent's own output.
+		Reporter:   ReporterTurnEnd,
+		StatusArgs: []string{"-c", agentstatus.CodexNotifySetting},
 		// Codex ships via npm; --prefix keeps the install inside the
 		// member's persistent home. Without npm in the image the member
 		// installs manually, as before.
@@ -407,8 +413,31 @@ var profiles = map[string]Profile{
 		// relaunch keeps the best-effort behavior: it resumes whichever of
 		// the member's conversations at that path spoke last.
 		ResumeFlag: "--continue",
+		// pi loads an extension with -e, and the one Aether ships reports
+		// every start and stop of a turn.
+		Reporter:    ReporterFull,
+		StatusArgs:  []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
+		StatusFiles: map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
+	},
+	// omp is a fork of pi and takes the same extension. It has a
+	// permission prompt of its own, which --auto-approve bypasses.
+	"omp": {
+		Name:            "omp",
+		TUIArgs:         []string{"omp", "--auto-approve", TaskPlaceholder},
+		HeadlessArgs:    []string{"omp", "-p", "--auto-approve", TaskPlaceholder},
+		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		CredentialPaths: []string{".omp"},
+		LocalRoot:       ".omp",
+		// omp keeps provider keys and OAuth tokens in the SQLite database
+		// under ~/.omp/agent/, so the write-ahead log holds them too.
+		DenyNames:     []string{"agent.db", "agent.db-wal", "agent.db-shm"},
+		ResumeFlag:    "--continue",
+		Reporter:      ReporterFull,
+		StatusArgs:    []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
+		StatusFiles:   map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
+		InstallScript: "curl -fsSL https://omp.sh/install | sh",
 	},
 	"opencode": {
 		Name:            "opencode",

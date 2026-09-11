@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-func TestRegistryShipsFiveProfiles(t *testing.T) {
-	want := []string{"claude", "codex", "custom", "opencode", "pi"}
+func TestRegistryShipsSixProfiles(t *testing.T) {
+	want := []string{"claude", "codex", "custom", "omp", "opencode", "pi"}
 	var got []string
 	for _, p := range Profiles() {
 		got = append(got, p.Name)
@@ -26,6 +26,7 @@ func TestProfileDefaults(t *testing.T) {
 	autoFlags := map[string]string{
 		"claude":   "--dangerously-skip-permissions",
 		"codex":    "--dangerously-bypass-approvals-and-sandbox",
+		"omp":      "--auto-approve",
 		"opencode": "", // opencode has no permission prompt flag to bypass
 		"pi":       "", // pi has no permission prompt flag to bypass
 	}
@@ -78,6 +79,7 @@ func TestLocalRootAndDenyNames(t *testing.T) {
 	wantRoot := map[string]string{
 		"claude":   ".claude",
 		"codex":    ".codex",
+		"omp":      ".omp",
 		"opencode": ".local/share/opencode",
 		"pi":       ".pi",
 		"custom":   "",
@@ -161,6 +163,94 @@ func TestPiProfile(t *testing.T) {
 		if !strings.Contains(p.InstallScript, "--prefix \"$HOME/.local\"") {
 			t.Errorf("%s install script %q must install into ~/.local", p.Name, p.InstallScript)
 		}
+	}
+}
+
+// omp is a fork of pi with its own executable, credential home and
+// permission prompt, and it is not offered for environment setup.
+func TestOmpProfile(t *testing.T) {
+	omp, ok := Lookup("omp")
+	if !ok {
+		t.Fatal("omp profile missing")
+	}
+	if !slices.Equal(omp.EnvPassthrough, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}) {
+		t.Errorf("omp env passthrough = %v", omp.EnvPassthrough)
+	}
+	// The credentials live in the agent database, write-ahead log included.
+	for _, denied := range []string{"agent.db", "agent.db-wal", "agent.db-shm"} {
+		if !slices.Contains(omp.DenyNames, denied) {
+			t.Errorf("omp deny names %v missing %q", omp.DenyNames, denied)
+		}
+	}
+	if omp.ResumeFlag != "--continue" {
+		t.Errorf("omp resume flag = %q, want --continue", omp.ResumeFlag)
+	}
+	if !strings.Contains(omp.InstallScript, "omp.sh/install") {
+		t.Errorf("omp install script %q must be the vendor's own", omp.InstallScript)
+	}
+	for _, p := range SetupHarnesses() {
+		if p.Name == "omp" {
+			t.Error("SetupHarnesses() must not offer omp: it runs no local profile scan")
+		}
+	}
+}
+
+// Which harnesses report their own state, and what each is pointed at. The
+// launch arguments and the launch environment are both appended to what the
+// CLI already carries, so a profile that names a file has to name it inside
+// the coordination directory, in one of the two, and ship the bytes that
+// land there.
+func TestStatusReporters(t *testing.T) {
+	want := map[string]Reporter{
+		"claude":   ReporterFull,
+		"codex":    ReporterTurnEnd,
+		"omp":      ReporterFull,
+		"pi":       ReporterFull,
+		"opencode": ReporterFull,
+		"custom":   ReporterNone,
+	}
+	for name, reporter := range want {
+		p, ok := Lookup(name)
+		if !ok {
+			t.Fatalf("Lookup(%q) missing", name)
+		}
+		if p.Reporter != reporter {
+			t.Errorf("%s reporter = %s, want %s", name, p.Reporter, reporter)
+		}
+		// Whatever the CLI's own mechanism is, this is everything the
+		// launch says about the reporter.
+		pointers := p.StatusLaunchArgs("/run/aether")
+		pointers = append(pointers, slices.Collect(maps.Values(p.StatusLaunchEnv("/run/aether")))...)
+		if reporter == ReporterNone {
+			if len(pointers) != 0 || len(p.StatusFiles) != 0 {
+				t.Errorf("%s reports nothing but carries %v and %d files", name, pointers, len(p.StatusFiles))
+			}
+			continue
+		}
+		if len(pointers) == 0 {
+			t.Errorf("%s reports but is launched with nothing", name)
+		}
+		for _, a := range pointers {
+			if strings.Contains(a, CoordPlaceholder) {
+				t.Errorf("%s status launch %v kept the placeholder", name, pointers)
+			}
+		}
+		for file, body := range p.StatusFiles {
+			if len(body) == 0 {
+				t.Errorf("%s ships an empty %s", name, file)
+			}
+			named := slices.ContainsFunc(pointers, func(a string) bool {
+				return strings.Contains(a, "/run/aether/"+file)
+			})
+			if !named {
+				t.Errorf("%s ships %s but its launch %v does not name it", name, file, pointers)
+			}
+		}
+	}
+	// Codex needs no file: the override carries the whole command.
+	codex, _ := Lookup("codex")
+	if len(codex.StatusFiles) != 0 {
+		t.Errorf("codex ships %d status files, want none", len(codex.StatusFiles))
 	}
 }
 
@@ -424,7 +514,7 @@ func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
 		t.Fatalf("registry claude env mutated through an override: %v", again.Env)
 	}
 	// An unshipped name has no registry entry to inherit from.
-	if unknown := (Definition{Name: "omp", Executable: "omp"}).Profile(); len(unknown.Env) != 0 || len(unknown.EnvPassthrough) != 0 {
+	if unknown := (Definition{Name: "aider", Executable: "aider"}).Profile(); len(unknown.Env) != 0 || len(unknown.EnvPassthrough) != 0 {
 		t.Fatalf("unshipped definition inherited environment: %+v", unknown)
 	}
 }
