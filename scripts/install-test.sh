@@ -382,9 +382,12 @@ ran "aether-server setup"
 
 # --- Ctrl-C during the follow-up stops the installer ---------------------
 
-reset "interrupted build"
+reset "interrupted build with inherited ignored SIGINT"
 status=0
-GUI_INTERRUPTS=1 sh "$script" --role client >"$out" 2>&1 || status=$?
+(
+	trap '' INT
+	GUI_INTERRUPTS=1 sh "$script" --role client
+) >"$out" 2>&1 || status=$?
 [ "$status" = 130 ] || fail "expected exit 130 after an interrupt, got $status"
 not_printed "This machine is a client"
 not_printed "$quickstart"

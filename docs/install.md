@@ -81,8 +81,9 @@ itself, so the question and the command it launches read your terminal
 provisioning script - nothing is asked and nothing extra runs, the same as
 `--role none`. It never blocks waiting for an answer that cannot come.
 
-Either way the script ends by naming the next command for the role you picked
-and linking the quickstart.
+The script ends by naming the next command for the role you picked and linking
+the quickstart. Cancelling setup or the desktop build stops the installer
+instead, preserving the interrupted command's exit status.
 
 The script is POSIX-only: it covers Linux and macOS. There is no Windows
 installer and no PowerShell equivalent. Windows clients install by hand, which
@@ -436,6 +437,9 @@ at 960 by 600, the smallest size the dashboard's own layout holds.
 ```sh
 aether gui build
 ```
+
+On Linux and macOS, cancelling the build with SIGINT exits 130; SIGTERM exits
+143. Ordinary build failures exit 1 and print the build's original error.
 
 The CLI carries the shell sources, unpacks them into your cache directory
 (`~/.cache/aether/desktop-build` on Linux,
