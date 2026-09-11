@@ -946,6 +946,15 @@ needs.
    {"write":true,"follow":true,"cols":80,"rows":24}
    ```
 
+   `resume` asks to reattach without the scrollback replay: the client
+   already holds this session's screen and is reattaching only to change
+   what it may do, which is what the dashboard does when you take control
+   or hand it back. The ack reports `"replay":0` and the client keeps what
+   is on screen, along with the terminal state behind it. Output produced
+   between the two sockets is not resent, so a client asks for this only
+   while its current attach is live - after a drop, only a full replay can
+   say what it missed.
+
    `follow` says the client renders the session at the size it already is
    and imposes none of its own, so it is left out of the minimum the PTY is
    sized to whether or not it can write (step 4). Its `cols` and `rows` are
@@ -980,10 +989,15 @@ needs.
    {"type":"resize","cols":132,"rows":50}
    ```
 
-   Control frames from a read-only attach are ignored. The shared terminal
-   geometry is the per-dimension minimum over the attaches that impose one -
-   every write-capable attach except a `follow` client - so a narrow writer
-   reflows the agent's screen for everyone, and a follower never does.
+   Input from a read-only attach is ignored; its resizes are not, because
+   whether they count is the session's to decide. The shared terminal
+   geometry is the per-dimension minimum over the attaches that impose one:
+   every write-capable attach, plus a read-only one while it is the only
+   attach that is not a `follow` client. So a narrow writer reflows the
+   agent's screen for everyone, a follower never does, and a lone watcher
+   sizes the PTY to its own window the way `ssh` does - until a second
+   attach arrives, when it stops imposing and the minimum is recomputed
+   without it.
 5. Server sends one **text** control frame back to a `follow` attach
    whenever the session's PTY is resized by someone who does impose a size:
 

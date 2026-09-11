@@ -142,6 +142,31 @@ describe('connectAttach', () => {
     expect(nextOutput).toEqual(['new host'])
     a.close()
   })
+  it('resumes without a replay so taking control keeps the screen', () => {
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack()
+
+    a.reopen({ resume: true })
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).toMatchObject({ resume: true })
+    a.close()
+  })
+
+  it('asks for the full replay when the attach it would resume is already gone', () => {
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack()
+
+    // The socket dropped: whatever the session did next never reached this
+    // screen, so resuming it would leave a hole only a replay can fill.
+    StubSocket.last().onclose?.({ code: 1006, reason: '' } as CloseEvent)
+    a.reopen({ resume: true })
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('resume')
+    a.close()
+  })
+
   it('splits replay bytes from live output at the acknowledged boundary', () => {
     const a = attach()
     const socket = StubSocket.last()

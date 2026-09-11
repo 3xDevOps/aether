@@ -44,6 +44,7 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		Rows:     rows,
 		Shell:    shell,
 		Follow:   req.Follow,
+		Resume:   req.Resume,
 	})
 	if err != nil {
 		if !ack.OK && ack.Code == 0 {
@@ -58,9 +59,10 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A read-only attach's input is dropped rather than refused, and its
-	// resizes are ignored.
-	if err := s.pumpTerminal(term, allowWrite, allowWrite); err != nil {
+	// A read-only attach's input is dropped rather than refused. Its
+	// resizes still travel: the session decides whether a mirror's size
+	// counts, and a lone one's does.
+	if err := s.pumpTerminal(term, allowWrite, true); err != nil {
 		_ = s.Conn.Close(attachEndClose(err))
 		return
 	}

@@ -68,6 +68,7 @@ type session struct {
 	paintQuietUntil time.Time
 	done            chan struct{}
 	title           titleScanner
+	modes           modeScanner
 	onTitle         func(string)
 
 	// pendingEcho is the echo the terminal still owes for input the server
@@ -119,6 +120,7 @@ func (s *session) deliver(p []byte) {
 		s.lastOut = now
 	}
 	s.title.scan(p, s.onTitle)
+	s.modes.scan(p)
 	s.ring.write(p)
 	s.tr.output(p)
 	for c := range s.clients {
@@ -207,11 +209,19 @@ func (s *session) addClient(c *client) error {
 	if s.ended {
 		return ErrSessionEnded
 	}
-	c.replay = s.ring.bytes()
-	s.clients[c] = struct{}{}
-	if c.imposes() {
-		s.reconcileLocked(true)
+	// A resuming client still holds this session's screen and its terminal
+	// state, so it gets neither. Everyone else rebuilds from the ring,
+	// which is a byte tail: the modes the agent set at startup are long
+	// gone from it, and the preamble puts them back ahead of the replay.
+	if !c.resume {
+		c.replay = append(s.modes.preamble(), s.ring.bytes()...)
 	}
+	s.clients[c] = struct{}{}
+	// Any join can change who imposes, not just this client: the mirror
+	// that was alone here a moment ago no longer is. A resume asks for no
+	// redraw - that is the point of it - so it nudges only if the size it
+	// brings actually differs from the one the session already has.
+	s.reconcileLocked(s.imposesNow(c) && !c.resume)
 	return nil
 }
 
@@ -219,7 +229,9 @@ func (s *session) removeClient(c *client) {
 	s.mu.Lock()
 	if _, ok := s.clients[c]; ok {
 		delete(s.clients, c)
-		if c.imposes() && !s.ended && !s.stopped {
+		// Leaving can promote the client left behind, so the size is
+		// recomputed whoever it was that went.
+		if !s.ended && !s.stopped {
 			s.reconcileLocked(false)
 		}
 	}
@@ -244,14 +256,13 @@ func (s *session) resizeClient(c *client, cols, rows uint) {
 		return
 	}
 	c.cols, c.rows = cols, rows
-	if c.imposes() && !s.ended && !s.stopped {
+	if s.imposesNow(c) && !s.ended && !s.stopped {
 		s.reconcileLocked(false)
 	}
 }
 
 // reconcileLocked recomputes the effective PTY size as the per-dimension
-// minimum over the clients that impose one (a read-only mirror and a
-// follower never do), records it, and schedules the att.Resize application
+// minimum over the clients that impose one (see imposesNow), records it, and schedules the att.Resize application
 // off the lock (a slow runtime resize must never stall output delivery).
 // With no such client the size stays unchanged. force schedules a redraw
 // nudge even when the size did not change (repaint for a new write-mode
@@ -260,7 +271,7 @@ func (s *session) reconcileLocked(force bool) {
 	var cols, rows uint
 	found := false
 	for c := range s.clients {
-		if !c.imposes() {
+		if !s.imposesNow(c) {
 			continue
 		}
 		if !found {
@@ -558,6 +569,9 @@ type client struct {
 	// not it may write: it renders the size the session is, so it can
 	// never reflow the agent's screen for anyone else.
 	follow bool
+	// resume means this client kept the screen from a previous attach, so
+	// it is sent no replay and provokes no redraw.
+	resume bool
 	cols   uint // guarded by session.mu
 	rows   uint // guarded by session.mu
 	replay []byte
@@ -575,6 +589,7 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 		conn:     conn,
 		readOnly: a.ReadOnly,
 		follow:   a.Follow,
+		resume:   a.Resume,
 		cols:     a.Cols,
 		rows:     a.Rows,
 		done:     make(chan struct{}),
@@ -583,9 +598,28 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 	return c
 }
 
-// imposes reports whether this client's geometry is one the PTY has to fit
-// inside: a mirror never counts, and neither does a client that follows.
-func (c *client) imposes() bool { return !c.readOnly && !c.follow }
+// imposesNow reports whether c's geometry is one the PTY has to fit
+// inside. A follower never counts: it renders at the size the session
+// already is, which is the whole point of following. A client that may
+// write always counts. A read-only mirror counts only while it is the
+// only client that could - alone there is no other screen to reflow, so
+// a watcher resizing its window is just ssh resizing a terminal, and the
+// agent is better drawn at the size someone is actually looking at.
+// Callers hold mu.
+func (s *session) imposesNow(c *client) bool {
+	if c.follow {
+		return false
+	}
+	if !c.readOnly {
+		return true
+	}
+	for other := range s.clients {
+		if other != c && !other.follow {
+			return false
+		}
+	}
+	return true
+}
 
 // tellGeometry hands the session's size to a client that asked to be told,
 // which is how an ack reports the live geometry and how a later change

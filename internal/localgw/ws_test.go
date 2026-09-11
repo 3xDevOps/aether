@@ -311,8 +311,10 @@ func TestAttachShellQueryForcesWriteAndResize(t *testing.T) {
 }
 
 // TestAttachMirrorHeaderMapsToReadOnly: write:false must become
-// ReadOnly:true toward the backend, with default geometry filled in, and
-// mirror input must never reach the terminal.
+// ReadOnly:true toward the backend, with default geometry filled in.
+// Mirror input must never reach the terminal; a mirror's resize does
+// travel, because only the session knows whether that mirror is the only
+// one watching and so entitled to size the PTY.
 func TestAttachMirrorHeaderMapsToReadOnly(t *testing.T) {
 	term := newWSStubTerminal(io.EOF)
 	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Cols: 80, Rows: 24}}
@@ -330,18 +332,24 @@ func TestAttachMirrorHeaderMapsToReadOnly(t *testing.T) {
 
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "rm -rf\n"})
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachResize, Cols: 132, Rows: 43})
-	term.finish()
-	expectClose(t, conn, websocket.StatusNormalClosure)
+	// The resize is the later of the two frames on one ordered socket, so
+	// waiting for it to arrive is also what proves the input before it was
+	// dropped rather than merely still in flight.
+	select {
+	case rs := <-term.resizeCh:
+		if rs != [2]uint{132, 43} {
+			t.Fatalf("mirror resize = %v, want [132 43]", rs)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("mirror resize never reached the terminal")
+	}
 	select {
 	case in := <-term.inputCh:
 		t.Fatalf("mirror input reached terminal: %q", in)
 	default:
 	}
-	select {
-	case rs := <-term.resizeCh:
-		t.Fatalf("mirror resize reached terminal: %v", rs)
-	default:
-	}
+	term.finish()
+	expectClose(t, conn, websocket.StatusNormalClosure)
 }
 
 // TestAttachSessionEndNamesTheReason: a terminal ending with a clean EOF is

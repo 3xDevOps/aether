@@ -305,6 +305,12 @@ type AttachClient struct {
 	// reflowing that screen for everyone else watching. A follower is
 	// told the size it should draw at, at attach and at every change.
 	Follow bool
+	// Resume attaches without the scrollback replay. The client already
+	// holds this session's screen and is reattaching only to change what
+	// it may do, so replaying would redraw what is already correct - and
+	// would cost the client the terminal state it built up, which a fresh
+	// replay has to reconstruct from a preamble.
+	Resume bool
 }
 
 // GeometryWriter is an attach conn that wants the session's PTY size: once

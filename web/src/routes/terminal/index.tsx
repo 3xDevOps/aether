@@ -147,7 +147,7 @@ function TerminalView({ params }: RouteProps) {
       // Every attach starts with the server's transcript replay, so the pane
       // is never blank - and clearing first keeps a reconnect from stacking a
       // second copy of the scrollback under the first.
-      onAttached: (write, size) => {
+      onAttached: (write, size, resumed) => {
         // The ack carries what the server granted, not what was asked: a
         // refused request arrives as onWriteDenied instead. Marking control
         // here rather than on the click keeps a denied first attempt from
@@ -155,7 +155,10 @@ function TerminalView({ params }: RouteProps) {
         if (write && askedForControl.current) markControlTaken()
         setServerSize(size)
         gate.current.unmute()
-        terminal.reset()
+        // A resumed attach brings no replay, so the screen on display is
+        // the only copy of it - and the terminal state behind that screen
+        // is what makes a paste arrive as a paste.
+        if (!resumed) terminal.reset()
         setTerminal(runID, { message: null, refused: false })
       },
       onState: (connection) => {
@@ -212,7 +215,9 @@ function TerminalView({ params }: RouteProps) {
     writeRef.current = !state.write
     if (writeRef.current) askedForControl.current = true
     setTerminal(runID, { write: writeRef.current })
-    attachRef.current?.reopen()
+    // Taking control changes what this attach may do, not what it shows,
+    // so it keeps the screen rather than redrawing the whole scrollback.
+    attachRef.current?.reopen({ resume: true })
   }
 
   const retry = () => {

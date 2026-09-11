@@ -135,6 +135,13 @@ then type or tap one more key, and that key arrives as its control code -
 applies to one key and then releases; a key it does not cover is sent as
 itself and leaves **Ctrl** armed for the next one.
 
+A run's terminal is sized by the people steering it: the PTY is the
+smallest window among them, so nobody's screen is reflowed past what it
+can show. Watching it read-only imposes nothing - except when you are the
+only one attached, where there is no other screen to protect and the
+terminal follows your window the way `ssh` does. A second attach ends
+that, and the size is recomputed without you.
+
 On a phone every terminal here - a run's, its shells, and this one - shows
 the session at the size it already is rather than at the phone's own width,
 and pans across it. It follows that size: when someone with a bigger screen
@@ -170,6 +177,11 @@ cannot auto-read arbitrary local paths. Choose the actual file in the chooser
 instead. The server stores the selected bytes and returns a remote absolute
 path; Aether inserts that path with shell quoting and does **not** press
 Enter. Review or edit it, then press Enter yourself when it is ready.
+
+Taking control and handing it back keep the screen you are looking at:
+the terminal reattaches with different permissions rather than redrawing
+its scrollback, so the transition shows nothing beyond the button
+changing.
 
 ### Control availability
 

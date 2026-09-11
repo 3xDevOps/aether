@@ -20,6 +20,9 @@ type DashAttachRequest struct {
 	// sized to. The ack reports the size to draw at, and a geometry frame
 	// reports every later change.
 	Follow bool `json:"follow,omitempty"`
+	// Resume is AttachRequest.Resume: reattach without the scrollback
+	// replay, keeping the screen this client already has.
+	Resume bool `json:"resume,omitempty"`
 }
 
 // Control frame kinds on /ws/attach/{run}. Input and resize travel from

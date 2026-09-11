@@ -475,6 +475,7 @@ describe('the terminal on a phone', () => {
     expect(StubSocket.last().frames()[0]).toEqual({
       write: true,
       follow: true,
+      resume: true,
       cols: 80,
       rows: 24,
     })

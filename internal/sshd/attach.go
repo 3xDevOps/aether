@@ -99,6 +99,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			Rows:     rows,
 			ReadOnly: readOnly,
 			Follow:   req.Follow,
+			Resume:   req.Resume,
 		}, conn, st.resize)
 	}()
 

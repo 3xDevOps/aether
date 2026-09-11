@@ -423,6 +423,15 @@ type AttachRequest struct {
 	// agent's terminal steers it this way without reflowing it for anyone
 	// else.
 	Follow bool `json:"follow,omitempty"`
+	// Resume asks for the attach without its scrollback replay: the
+	// client already holds this session's screen and is reattaching only
+	// to change what it may do. The ack reports a replay of zero and the
+	// client keeps what it has, which is what makes taking control a
+	// change of state rather than a redraw. A client asks for it only
+	// while its previous attach was still live, so an attach that follows
+	// a drop - where the screen may have moved on without it - still gets
+	// the full replay.
+	Resume bool `json:"resume,omitempty"`
 }
 
 // AttachResponse acknowledges an AttachRequest with the session's live

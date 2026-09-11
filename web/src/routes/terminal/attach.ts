@@ -43,6 +43,7 @@ export const standardGeometry = { cols: 80, rows: 24 }
 interface AttachHeader {
   write?: boolean
   follow?: boolean
+  resume?: boolean
   cols: number
   rows: number
 }
@@ -67,13 +68,19 @@ export interface AttachHandlers {
   /** Terminal output, tagged as replay, replay-end, or live. */
   onData?: (chunk: Uint8Array, kind: AttachDataKind) => void
   /**
-   * A fresh attach was accepted. The server replays the recent transcript
+   * An attach was accepted. The server replays the recent transcript
    * straight after, so the caller clears what it has rather than appending a
    * second copy of the scrollback. `size` is the geometry the ack reports -
    * the live session's, not what the header asked for - which is what a
-   * client that renders the session at its own size adopts.
+   * client that renders the session at its own size adopts. `resumed` says
+   * this attach asked to keep the screen it already had: no replay follows,
+   * so clearing it would throw away the only copy.
    */
-  onAttached: (write: boolean, size: { cols: number; rows: number }) => void
+  onAttached: (
+    write: boolean,
+    size: { cols: number; rows: number },
+    resumed?: boolean,
+  ) => void
   onState: (state: ConnectionState) => void
   /**
    * The attach was refused for good; no further reconnect is attempted. The
@@ -114,8 +121,13 @@ export interface Attachment {
   /** Keystrokes for the agent's terminal; dropped while not attached. */
   send: (data: string) => void
   resize: (cols: number, rows: number) => void
-  /** Reattach now, picking up the current write preference. */
-  reopen: () => void
+  /**
+   * Reattach now, picking up the current write preference. `resume` asks
+   * the server for no replay and keeps the screen already on-screen; it is
+   * honoured only while the current attach is still live, because a
+   * reattach after a drop has no idea what it missed.
+   */
+  reopen: (options?: { resume?: boolean }) => void
   /** Update callbacks when a persistent socket gets a new terminal host. */
   rebind: (handlers: AttachHandlers) => void
   close: () => void
@@ -190,7 +202,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   let writeDenied = false
   let replayRemaining = 0
 
-  const open = () => {
+  const open = (resume = false) => {
     if (disposed) return
     attached = false
     waitingForSession = false
@@ -217,6 +229,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       const header: AttachHeader = { cols, rows }
       if (askedWrite) header.write = true
       if (follows) header.follow = true
+      if (resume) header.resume = true
       ws.send(JSON.stringify(header))
     }
     ws.onmessage = (msg) => {
@@ -256,10 +269,14 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         unavailableTries = 0
         waitingForSession = false
         handlers.onState('live')
-        handlers.onAttached(askedWrite, {
-          cols: ack.cols ?? standardGeometry.cols,
-          rows: ack.rows ?? standardGeometry.rows,
-        })
+        handlers.onAttached(
+          askedWrite,
+          {
+            cols: ack.cols ?? standardGeometry.cols,
+            rows: ack.rows ?? standardGeometry.rows,
+          },
+          resume,
+        )
         return
       }
       answered = true
@@ -290,6 +307,10 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     ws.onclose = (ev) => {
       socket = null
       replayRemaining = 0
+      // This socket is no longer attached, whatever happens next: a resume
+      // asked for after this point would be resuming nothing.
+      const wasAttached = attached
+      attached = false
       // 1000 is the terminal process ending. A caller that owns tab
       // lifecycle (the shell dock) takes over; everyone else who gets the
       // gateway's named "session ended" close - the agent exited, or a
@@ -302,7 +323,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         handlers.onState('offline')
         return
       }
-      if (attached && ev.reason === 'session ended') {
+      if (wasAttached && ev.reason === 'session ended') {
         ended = true
         handlers.onState('offline')
         return
@@ -313,7 +334,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // reconnect. An unnamed one is still refused, with that said plainly
       // rather than dressed up as a cause we did not read.
       if (ev.code === policyClose && !answered) {
-        if (attached && ev.reason === 'steer permission withdrawn') {
+        if (wasAttached && ev.reason === 'steer permission withdrawn') {
           writeDenied = true
           handlers.onWriteDenied()
           attempt = 0
@@ -395,8 +416,11 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
     },
     resize: (cols, rows) => control({ type: 'resize', cols, rows }),
-    reopen: () => {
+    reopen: (options) => {
       if (disposed) return
+      // Only a live attach can be resumed: after a drop the screen has
+      // moved on without this client, and only a replay can say how.
+      const resume = (options?.resume ?? false) && attached
       if (timer) clearTimeout(timer)
       timer = null
       refused = false
@@ -405,7 +429,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       unavailableTries = 0
       waitingForSession = false
       drop()
-      open()
+      open(resume)
     },
     close: () => {
       disposed = true

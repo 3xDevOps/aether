@@ -392,7 +392,7 @@ func TestGeometryClampAndRestore(t *testing.T) {
 	att.writeOutput(t, "x")
 	waitFor(t, "read-only mirror output", func() bool { return ro.out.String() == "x" })
 	if n := len(att.sizeCalls()); n != 5 {
-		t.Fatalf("read-only attach changed geometry: %d resize calls", n)
+		t.Fatalf("read-only attach alongside writers changed geometry: %d resize calls", n)
 	}
 
 	b.resize <- [2]uint{90, 45} // min over writers becomes (90,40)
@@ -409,9 +409,8 @@ func TestGeometryClampAndRestore(t *testing.T) {
 		t.Fatalf("detach a: %v", err)
 	}
 	waitAttached(t, h, run, 1)
-	if n := len(att.sizeCalls()); n != 9 {
-		t.Fatalf("no-writer detach changed geometry: %d resize calls", n)
-	}
+	// The mirror is the only client left, so it is now the one deciding.
+	waitSizes(11)
 
 	want := [][2]uint{
 		{120, 30},            // StartSession default
@@ -419,6 +418,7 @@ func TestGeometryClampAndRestore(t *testing.T) {
 		{80, 39}, {80, 40}, // writer b clamps
 		{90, 39}, {90, 40}, // b resizes, min recomputed
 		{100, 39}, {100, 40}, // b detaches, a's size restored
+		{10, 4}, {10, 5}, // a detaches, the lone mirror takes over
 	}
 	got := att.sizeCalls()
 	if len(got) != len(want) {
@@ -440,7 +440,7 @@ func TestGeometryClampAndRestore(t *testing.T) {
 			sizes = append(sizes, ev.data)
 		}
 	}
-	wantSizes := []string{"100x40", "80x40", "90x40", "100x40"}
+	wantSizes := []string{"100x40", "80x40", "90x40", "100x40", "10x5"}
 	if strings.Join(sizes, ",") != strings.Join(wantSizes, ",") {
 		t.Fatalf("transcript resize events = %v, want %v", sizes, wantSizes)
 	}
