@@ -40,7 +40,7 @@ export function SelectTrigger({
       data-slot="select-trigger"
       className={cn(
         field,
-        'h-[26px] min-h-[26px] rounded-[2px] px-2 py-0 text-[13px] leading-6 flex items-center justify-between gap-2 text-left',
+        'h-[26px] min-h-[26px] rounded-[2px] px-2 py-0 text-[13px] leading-6 flex items-center justify-between gap-2 text-left coarse:h-11 coarse:min-h-11',
         '[&>span]:min-w-0 [&>span]:flex-1 [&>span]:truncate data-[placeholder]:text-muted-foreground aria-[invalid=true]:border-destructive',
         className,
       )}
@@ -69,7 +69,7 @@ function SelectScrollButton({
       : SelectPrimitive.ScrollDownButton
   const Icon = direction === 'up' ? ChevronUpIcon : ChevronDownIcon
   return (
-    <Button className="flex h-[22px] min-h-[22px] cursor-default items-center justify-center py-0" {...props}>
+    <Button className="flex h-[22px] min-h-[22px] cursor-default items-center justify-center py-0 coarse:h-11 coarse:min-h-11" {...props}>
       <Icon className="size-3.5" />
     </Button>
   )
@@ -115,7 +115,7 @@ export function SelectItem({
         // The item sits flush against its neighbours, so the outline is drawn
         // inside it, as a menu item's is.
         'focus-visible:-outline-offset-2',
-        'relative flex min-h-[22px] cursor-default items-center gap-2 rounded-[2px] py-0 pr-8 pl-2 text-[13px] leading-5 select-none data-[highlighted]:bg-selection data-[highlighted]:text-selection-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex min-h-[22px] cursor-default items-center gap-2 rounded-[2px] py-0 pr-8 pl-2 text-[13px] leading-5 select-none coarse:min-h-11 data-[highlighted]:bg-selection data-[highlighted]:text-selection-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
       {...props}

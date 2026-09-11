@@ -10,6 +10,12 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Touch density. A finger needs roughly 44px where a mouse needs 22, so the
+   controls a phone has to hit carry `coarse:` sizes beside their desktop
+   ones. The query answers for the primary pointer, so a touch laptop with a
+   trackpad keeps the desktop density and a tablet does not. */
+@custom-variant coarse (@media (pointer: coarse));
+
 /* Terminal font: JetBrainsMono Nerd Font Mono. Agent TUIs draw powerline and
    devicon glyphs from the private use area; the previous symbols-only overlay
    font carried them at full-em advance while the text font's cell is ~0.6em,
@@ -55,6 +61,13 @@
 :root {
   color-scheme: light;
   --radius: 2px;
+
+  /* The two bars the shell column is built from. Every row that has to line
+     up with one of them, and every offset measured from one, reads these
+     rather than repeating the number. They grow on a coarse pointer because
+     a 44px control does not fit in a 22px bar. */
+  --title-bar-height: 35px;
+  --status-bar-height: 22px;
   --font-pixel: 'VT323', monospace;
   --font-sans: system-ui, Ubuntu, 'Droid Sans', sans-serif;
   --font-mono: 'JetBrainsMono NFM', ui-monospace, SFMono-Regular, monospace;
@@ -135,6 +148,13 @@
   --cursor-interactive: pointer;
   --cursor-disabled: not-allowed;
   --ring-offset-width: 2px;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --title-bar-height: 48px;
+    --status-bar-height: 44px;
+  }
 }
 
 .dark {

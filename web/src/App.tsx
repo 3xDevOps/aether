@@ -8,6 +8,12 @@ import { ThemeEffect } from '@/components/theme'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
+/** Clear of the status bar and of the home indicator below it. */
+const toastOffset = {
+  bottom: 'calc(var(--status-bar-height) + 8px + env(safe-area-inset-bottom))',
+  right: 'calc(8px + env(safe-area-inset-right))',
+}
+
 export function App() {
   const hydrationError = useStore((s) => s.hydrationError)
   const streamDead = useStore((s) => s.streamDead)
@@ -69,7 +75,14 @@ export function App() {
                 expand={false}
                 visibleToasts={4}
                 gap={4}
-                offset={{ bottom: 30, right: 8 }}
+                // Above the status bar, whatever height the pointer gives
+                // it, and clear of the home indicator; the inset is 0 on a
+                // device without one. Sonner swaps to `mobileOffset` under
+                // 600px and falls back to its own 16px default when none is
+                // given, which is inside the bar on a phone, so both take
+                // the same value.
+                offset={toastOffset}
+                mobileOffset={toastOffset}
                 toastOptions={{
                   className:
                     'rounded-[4px] border border-border bg-popover px-3 py-2 text-[13px] text-popover-foreground shadow-overlay',

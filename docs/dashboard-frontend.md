@@ -218,10 +218,27 @@ There is no run tree: one workspace is in view at a time, so the runs group
 instead by state or by owning member (`groupBy`, persisted). Rows and headers
 are compact rather than a lower navigation card. At 1000px and narrower the
 adjacent workspace/run pane collapses into the persistent activity rail, which
-exposes **Expand sidebar** without changing the stored preference. At 640px and
-narrower an expanded pane overlays the center from the rail's right edge. The
-width handle remains a keyboard and pointer window splitter (see
+exposes **Expand sidebar** without changing the stored preference. The width
+handle remains a keyboard and pointer window splitter (see
 [Keyboard and focus](#keyboard-and-focus)).
+
+At 640px and narrower the expanded pane is a modal drawer instead: a Radix
+`Dialog` over a scrim, dismissed by a tap outside, by Escape, or by any
+navigation it makes, with focus trapped inside it while it is open. The
+activity rail travels inside the drawer, so a surface is still one tap away
+while the run list is up, and the 48px column the drawer leaves behind keeps
+the center view from reflowing under the scrim. The route itself is what
+closes the drawer, so a run row and a rail link both take the drawer away
+without either knowing it exists. There is no splitter in the drawer: the
+viewport sizes it, capped at the width of the screen less the rail.
+
+Being a dialog, the drawer also stands the shell's global keys down while it
+is open, the same way every other modal does (see
+[Keyboard and focus](#keyboard-and-focus)) - the palette, `n` and the `g`
+chords are unreachable until it closes. `Mod+B` is the exception: the drawer
+answers that one itself, because it is the key that opened it, and a member
+who opened the drawer from the keyboard must be able to close it the same
+way.
 
 - **The switcher sits above everything it scopes**, and appears only when there
   is a choice: a single workspace renders as a plain label with its base branch
@@ -269,7 +286,10 @@ their exact server details and use bounded panels.
 
 `src/components/shell/title-bar.tsx` renders the browser and Electron
 title/command bar at 35px. The command center names the active workspace and
-opens the existing command palette through `togglePalette(true)`.
+opens the existing command palette through `togglePalette(true)`. The bar pads
+itself with `env(safe-area-inset-left/right)` so a landscape notch cannot sit
+over it; the inset is 0 on every screen without one, and the Electron traffic
+light inset above wins where it applies.
 
 In Electron the window is frameless, so the SPA draws the bar and its native
 controls: on Windows and Linux, minimize, maximize/restore and close are wired
@@ -303,15 +323,72 @@ scene's motion details.
 
 ## Window size and overflow
 
-The shell is a fixed column - 35px title and command bar, update prompts,
-activity rail with its adjacent workspace/run sidebar and center view, and a
-22px status bar - and nothing in its own chrome scrolls sideways. A control
-pushed past an edge is unreachable, not merely off screen, so every row states
-what gives way first.
+The shell is a fixed column - title and command bar, update prompts, activity
+rail with its adjacent workspace/run sidebar and center view, and a status bar
+- and nothing in its own chrome scrolls sideways. The two bars are 35px and
+22px for a mouse and grow for a finger; see the tokens below. A control pushed
+past an edge is unreachable, not merely off screen, so every row states what
+gives way first.
 
 `desktop/main.js` sets `minWidth: 960` and `minHeight: 600`. That is the size
 the desktop rules are designed against; a browser tab has no such floor, so
-the same rules degrade below it rather than break.
+the same rules degrade below it rather than break. A phone is the far end of
+that: `src/app/layout.tsx` exports the viewport the shell needs there.
+
+- `width=device-width, initial-scale=1` - the page is laid out at the device's
+  own width rather than a desktop-sized canvas scaled down.
+- `viewport-fit=cover` - the shell paints under the notch and the home
+  indicator, and the chrome that touches those edges pads itself back out with
+  `env(safe-area-inset-*)`: the title bar sideways, the status bar and its
+  details popup downwards, the sidebar drawer on all three edges it reaches,
+  since it is the one surface that spans a screen corner to corner, and the
+  row holding the activity rail on the left, which is the edge a landscape
+  notch covers when the drawer is not up. A surface that pads itself keeps
+  painting to the edge and insets only what it holds, so the notch shows the
+  bar's own colour rather than a gap. Every inset is 0 where there is none, so
+  nothing guards them. Toasts sit above the status bar rather than against the
+  screen edge, so their offset adds the inset to the bar's own height - and it
+  has to be given to `sonner` twice, as `offset` and as `mobileOffset`,
+  because `sonner` swaps to the second below 600px and otherwise falls back to
+  a 16px default that lands inside the bar.
+- `interactive-widget=resizes-content` - on a browser that honours it
+  (Chrome and the Android WebView; iOS Safari does not), the soft keyboard
+  shrinks the layout viewport instead of sliding the page under itself. That
+  is what every `dvh` in the app - dialogs, the palette, selects, menus, the
+  status popup - is already sized against, so they all shorten when the
+  keyboard opens. Nothing in the shell uses `vh`. Where it is ignored the
+  layout viewport does not move, which is why dialogs also anchor to the top
+  below `sm` (see the end of this section).
+- `themeColor` per `prefers-color-scheme` - the browser reads it before the
+  SPA has applied the member's stored theme, so it follows the OS scheme
+  rather than the app setting.
+
+**Touch density is one variant, defined once.** `src/index.css` declares
+`@custom-variant coarse (@media (pointer: coarse))`, and a control that a
+finger has to hit carries its touch size beside its desktop one - for example
+`size-[22px] coarse:size-11`. It answers for the primary pointer, so a touch
+laptop with a trackpad keeps the desktop density. Under it the `Button`
+sizes, `CommandItem`, the `Select` trigger and its options, the dialog close,
+the palette trigger and input, the status bar controls, the sidebar run rows
+and the sidebar's own buttons grow to 40-44px. Desktop density is untouched.
+Use this variant rather than a new breakpoint or a per-component pixel value.
+
+**The two bars are tokens, not repeated numbers.** `--title-bar-height` and
+`--status-bar-height` are declared in `src/index.css` and redeclared once
+under `(pointer: coarse)`, where they become 48px and 44px so a 44px control
+fits inside them. A row that has to line up with a bar reads the token - the
+title bar and the sidebar's workspace switcher, the status bar with every
+control and readout in it, the command palette's drop from under the title
+bar - and so does every offset measured from one: the update banner cap and
+the toast offset. Add a coarse size to a control in a fixed-height row only
+together with the row, or the control grows out of the bar that holds it.
+
+Dialogs anchor to the top (`top-4`) below `sm` and centre from `sm` up. Where
+`interactive-widget` is ignored, a centred fixed dialog sits behind the
+keyboard; anchored to the top it stays in the visual viewport, and a dialog
+taller than the screen is clamped by `max-h-[calc(100dvh-2rem)]` and scrolls
+inside itself. `sm` is a width breakpoint, so a desktop window narrower than
+640px is treated as a phone here too.
 
 - **Update notices** keep the message, status icon and action hierarchy visible.
   Their actions become a narrow-screen grid and return to a desktop flex row;
@@ -321,7 +398,16 @@ the same rules degrade below it rather than break.
   status-slot contributors reachable at every width. Narrow layouts put
   secondary readouts in a bounded, keyboard-reachable popup; wide layouts
   expand them inline. The single status Slot remains mounted while details are
-  collapsed.
+  collapsed - a contributor owns a keyboard shortcut of its own, which is why
+  the popup is a `Collapsible` with its own dismissal rather than a Radix
+  overlay that unmounts when it closes. It dismisses on Escape and on a
+  pointer down anywhere outside it, unless a dialog above it owns the key;
+  it takes Escape before the shell's own does, so dismissing the popup on a
+  run does not also leave the run (see
+  [Keyboard and focus](#keyboard-and-focus)).
+  The popup also writes out the facts a pointer reads from a hover: the disk
+  breakdown, the protocol version and what this machine is linked to. Tooltips
+  and `title` stay hints for a pointer, never the only copy of a fact.
 - **The run header** keeps the title, task, branch and harness mode readable with
   compact headers and a wrapping action group. Terminal tabs remain one keyboard
   stop with internal horizontal overflow.
@@ -331,9 +417,10 @@ the same rules degrade below it rather than break.
   use the same bounded surface hierarchy.
 - **The workspace/run sidebar** collapses at 1000px and narrower into the
   persistent 48px activity rail, which exposes **Expand sidebar** without
-  changing the stored preference. At 640px and narrower its expanded pane
-  overlays the main view from the rail's right edge instead of pushing it off
-  screen.
+  changing the stored preference. At 640px and narrower its expanded pane is a
+  modal drawer over the main view, taken away by a tap outside, by Escape or
+  by the navigation it makes, rather than a pane that stays over the run it
+  just opened.
 
 ## Data flow
 
@@ -774,6 +861,14 @@ and the second leaves. Every other key reaches the shell as usual, and a
 tooltip closes on the first of them whatever it is, so a pending `g` is
 untouched.
 
+The status bar's details popup is the other overlay outside Radix, and it
+dismisses itself, so it has to do by hand what Radix does for a dialog: its
+Escape listener captures, and marks the key handled. The shell's own Escape
+is a window listener registered when the workbench mounted, long before the
+popup opened, so in the bubble phase it would run first and leave the run.
+Capturing is what makes Escape dismiss the topmost thing and only that; an
+open dialog still wins, through the same `inModal` target guard.
+
 Blocking a control with `aria-disabled` rather than `disabled` keeps it in the
 tab order, which is the point; the Styleguide rule below says why. The run
 action bar, its overflow trigger, the terminal toolbar and the diff snapshot
@@ -832,7 +927,12 @@ strip needs none of this, because it is not unmounted by its own tabs.
 report `aria-valuenow` against their available bounds, move 16px per arrow
 press, snap to those bounds on Home and End, and collapse the pane on Enter,
 handing focus to the control that restores it. Pointer dragging stays within
-the available space and follows the same bounds.
+the available space and follows the same bounds. Both handles set
+`touch-action: none`, without which the browser claims a touch drag as a pan
+and cancels the pointer stream the drag listens to. Under `coarse:` both grow
+to a 24px hit area centred on the edge they sit at, without changing what they
+paint; the sidebar's carries a `z-index` so the half of it that overhangs the
+pane beside it is not covered by that pane.
 
 ## Terminal view
 
@@ -1821,7 +1921,19 @@ browser against a real `aether gui` gateway and server. `keyboard-focus`
 checks Escape ordering across an open dialog and run view and confirms that a
 focused control paints the app outline. `window-sizing` and
 `status-bar-sizing` exercise update notices and status controls at narrow and
-desktop dimensions. `board-card`, `run-switch`, `run-attach-retry`,
+desktop dimensions.
+
+The touch shell is driven by the `mobile` project, which
+[testing.md](testing.md) describes: `shell-drawer.mobile` opens the phone
+drawer, taps a run and finds the drawer gone with the run on screen, and
+`dialog-anchor.mobile` checks that a dialog short enough to tell the two
+apart sits at the top rather than the middle, and that the launch form keeps
+its footer on screen on a viewport as short as a keyboard leaves, and
+`toast-clearance.mobile` checks that a toast comes to rest above the status
+bar rather than on top of it. `sidebar-drawer` stays on the desktop project,
+because the keyboard contract it pins - `Mod+B` closing the drawer and the
+palette coming back once it is gone - needs a narrow window with a keyboard
+rather than a phone. `board-card`, `run-switch`, `run-attach-retry`,
 `run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
 corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and
