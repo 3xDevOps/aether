@@ -114,8 +114,10 @@ input. On macOS, `Cmd+V` is the native paste shortcut.
 The terminal toolbar has named **Copy terminal selection**, **Copy last
 screen**, **Paste into terminal**, and **Upload image to terminal** controls.
 **Copy last screen** copies the rows currently on screen, which is how to copy
-without a drag selection - a touch screen has none. The toolbar's Paste
-control first uses the browser clipboard API to look for an image and then
+without a drag selection - a touch screen has none. On a touch screen both
+copy controls carry their name beside them, since the tooltip that tells
+them apart needs a pointer to hover. Copying an empty screen says so.
+The toolbar's Paste control first uses the browser clipboard API to look for an image and then
 falls back to text. If no usable clipboard read API remains, or its reads are
 denied, it shows a visible **Paste unavailable** error telling you to use the
 native paste shortcut or allow clipboard access. Copy uses the same API with a
@@ -129,11 +131,15 @@ four. Below the terminal, whenever it accepts input, is a key bar: **Ctrl**,
 **Esc**, **Tab**, the four arrows, **Enter** and **Ctrl+C**. They send exactly
 what those keys send. **Ctrl** is a modifier rather than a held key: tap it,
 then type or tap one more key, and that key arrives as its control code -
-`Ctrl` then `d` is `Ctrl+D`. It applies to one key and then releases.
+`Ctrl` then `d` is `Ctrl+D`. It covers the letters, space, and `@ [ \ ] ^ _`,
+applies to one key and then releases; a key it does not cover is sent as
+itself and leaves **Ctrl** armed for the next one.
 
-A run's terminal on a phone shows the agent's screen at the size the server's
-session is, not at the phone's own width, and pans across it. Nothing a phone
-does changes that size, watching or steering, so an agent's screen is never
+On a phone every terminal here - a run's, its shells, and this one - shows
+the session at the size it already is rather than at the phone's own width,
+and pans across it. It follows that size: when someone with a bigger screen
+resizes the terminal, the phone redraws at the new one. Nothing a phone does
+changes that size, watching or steering, so an agent's screen is never
 reflowed for the people watching it on a desktop. A run you own opens there as
 a read-only mirror, where on a desktop it would already be steering; **Take
 control** is a tap. While it is a mirror the terminal takes no input, so

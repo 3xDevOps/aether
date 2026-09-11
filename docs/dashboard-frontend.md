@@ -951,13 +951,14 @@ report `aria-valuenow` against their available bounds, move 16px per arrow
 press, snap to those bounds on Home and End, and collapse the pane on Enter,
 handing focus to the control that restores it. Pointer dragging stays within
 the available space and follows the same bounds. Both handles set
-`touch-action: none`, without which the browser claims a pen or trackpad drag
-as a pan and cancels the pointer stream the drag listens to. The sidebar's
-grows to a 24px hit area centred on its edge under `coarse:`, without changing
-what it paints, and carries a `z-index` so the half of it that overhangs the
-pane beside it is not covered by that pane. The docks' handle is not drawn on
-a coarse pointer at all: dragging a horizontal edge to size a terminal is not
-something a finger does, and the dock offers collapsed, half and full instead
+`touch-action: none`, without which the browser claims the drag as a pan and
+cancels the pointer stream the drag listens to. The sidebar's is a drag a
+finger makes: it grows to a 24px hit area centred on its edge under
+`coarse:`, without changing what it paints, and carries a `z-index` so the
+half of it that overhangs the pane beside it is not covered by that pane.
+The docks' is not - dragging a horizontal edge to size a terminal on a phone
+is not something a finger does well - so that handle is not drawn on a
+coarse pointer at all and the dock offers collapsed, half and full instead
 (see [Terminal view](#terminal-view)).
 
 ## Terminal view
@@ -1018,7 +1019,8 @@ primitive.
 
 `TerminalPane` keeps xterm's host geometry intact while layering the shared
 toolbar and Find over it. `TerminalTools` in the same module owns the search,
-zoom/reset, copy, copy-last-screen, paste, and `TerminalImageAction` controls; it delegates
+zoom/reset, copy, copy-last-screen, paste, and `TerminalImageAction`
+controls; it delegates
 terminal key behavior to the xterm controller and clipboard helpers rather
 than putting those actions in each dock. `useTerminalImage` owns the hidden
 file input, preview dialog, validation, upload call, and shell-quoted path
@@ -1037,29 +1039,43 @@ claims only image-file paste events and leaves text to the native xterm path.
 handler.
 
 **The terminal on a phone.** The PTY is the per-dimension minimum over the
-write-capable clients attached to it (`docs/local-gateway.md`), so a client
-that fits xterm to its own pane reflows the agent's screen for everyone else.
-On a coarse pointer or a viewport at or under 640px - `usePhoneScreen` in
-`src/lib/hooks.ts` - the run's terminal therefore:
+clients that impose a geometry on it, so a client that fits xterm to its own
+pane reflows the agent's screen for everyone else. The protocol's answer is
+the `follow` flag (`docs/local-gateway.md`): a follower renders the session
+at the size it already is, is left out of that minimum whether or not it can
+write, and is told the size in the ack and in a `geometry` frame after every
+change. On `phoneScreen` - a coarse pointer on a screen narrower than `sm`,
+from `src/lib/hooks.ts` - all three terminals follow: the run's terminal, its
+shell tabs and the environment dock, each of which is a session someone else
+may be watching at a desktop's width.
 
-- asks for `standardGeometry` (80x24) in the attach header and renders at the
-  `cols` and `rows` the ack reports, through `useXterm`'s `size` option, which
-  replaces the fit addon and reports no resize. The pane gets `overflow-auto`
-  and pans over a grid wider than the screen. This holds while steering as
-  well: what the phone never sends is what keeps the session unchanged.
+A following terminal therefore:
+
+- sends `follow` with `standardGeometry` (80x24) in the attach header and
+  renders at the `cols` and `rows` the server reports, through `useXterm`'s
+  `size` option, which replaces the fit addon and reports no resize. The pane
+  gets `overflow-x-auto` and pans over a grid bigger than the screen; naming
+  one axis is enough, since CSS makes the other a scroller too. This holds
+  while steering: the flag, not silence, is what keeps the session unchanged.
 - does not steer on entry even on the member's own run. `Take control` is the
   only way in, and `disableStdin` holds until the ack grants write - that is
   what makes xterm's textarea read-only, so a tap on a mirror raises no
   keyboard.
-- shows `TerminalKeys` under the host while the terminal is writable: Ctrl,
-  Esc, Tab, the arrows, Enter and Ctrl+C, each through `terminal.input` so the
-  replay gate and `disableStdin` treat a tap exactly like a keystroke. Ctrl is
-  a one-shot modifier held in the host (`armCtrl`), because a soft keyboard
-  sends characters and never a modifier: it rewrites the next character into
-  its control code.
 
-A focus on the host scrolls the cursor cell into view, since at a fixed size
-the row being typed on can be outside the pane.
+`TerminalKeys` is shown under the host on any coarse pointer while the
+terminal is writable, a tablet included: Ctrl, Esc, Tab, the arrows, Enter
+and Ctrl+C, each through `terminal.input` so the replay gate and
+`disableStdin` treat a tap exactly like a keystroke. Ctrl is a one-shot
+modifier held in the host (`armCtrl`), because a soft keyboard sends
+characters and never a modifier: it rewrites the next character into its
+control code, and a key it has no code for keeps the modifier armed rather
+than spending it on the wrong byte. The two copy actions carry a visible
+word beside them under `coarse:`, because a tooltip is the only other thing
+telling them apart and hover is what opens one.
+
+The pane scrolls the cursor into view whenever it moves or the host takes
+focus, but only at a fixed size, where the row being written on can be
+outside the pane.
 
 The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once

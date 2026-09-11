@@ -936,13 +936,25 @@ needs.
 
    ```json
    {"write":true,"cols":120,"rows":40}
+   {"write":true,"follow":true,"cols":80,"rows":24}
    ```
+
+   `follow` says the client renders the session at the size it already is
+   and imposes none of its own, so it is left out of the minimum the PTY is
+   sized to whether or not it can write (step 4). Its `cols` and `rows` are
+   then only what a session with no PTY of its own is laid out at - a
+   finished run's replay. The dashboard follows from a phone, mirroring and
+   steering alike, which is how a 45-column screen steers an agent without
+   reflowing that agent's screen for everyone else watching it.
 
 2. Server answers one **text** frame: `{"ok":true,"cols":120,"rows":40,"replay":4096}`,
    or `{"ok":false,"code":-32001,"error":"..."}` followed by a close. The
-   optional `replay` value is the number of binary scrollback bytes that follow
-   the ack before live output; clients should mute terminal-generated replies
-   until those bytes have been parsed. A write attach is refused with `-32001`
+   ack's geometry is the session's live PTY size, not an echo of the header,
+   and falls back to the header only when there is no session to have one.
+   The optional `replay` value is the number of binary scrollback bytes
+   that follow the ack before live output; clients should mute
+   terminal-generated replies until those bytes have been parsed.
+   A write attach is refused with `-32001`
    unless the member holds the **steer** capability on that run; dropping
    `"write"` always works for a member who can see the run. An unknown run is
    refused with `-32000`.
@@ -961,17 +973,26 @@ needs.
    {"type":"resize","cols":132,"rows":50}
    ```
 
-   Control frames from a read-only attach are ignored. Only write-capable
-   attaches affect the shared terminal geometry, which is the per-dimension
-   minimum over them, so a narrow writer reflows the agent's screen for
-   everyone. A client too narrow to be one of them should send `{"cols":80,
-   "rows":24}` in the header, render at the `cols` and `rows` the ack
-   reports, and send no `resize` at all; it then shows the session the way
-   its writers see it and changes nothing for them. That is what the
-   dashboard does on a phone, mirroring and steering alike. Client frames
-   are capped at 64 KiB; the SPA splits larger input (a paste) across
-   several ordered `input` frames.
-5. The server re-checks the attach's authorization every few seconds. A
+   Control frames from a read-only attach are ignored. The shared terminal
+   geometry is the per-dimension minimum over the attaches that impose one -
+   every write-capable attach except a `follow` client - so a narrow writer
+   reflows the agent's screen for everyone, and a follower never does.
+5. Server sends one **text** control frame back to a `follow` attach
+   whenever the session's PTY is resized by someone who does impose a size:
+
+   ```json
+   {"type":"geometry","cols":132,"rows":43}
+   ```
+
+   A follower redraws at it; an attach that imposes its own size asked for
+   that size and is sent nothing. It is a relayed SSH `window-change`
+   request, not an event: nothing about it is persisted in the event log,
+   nothing replays it, and a reattach learns the current size from the ack
+   instead.
+
+   Client frames are capped at 64 KiB; the SPA splits larger input (a paste)
+   across several ordered `input` frames.
+6. The server re-checks the attach's authorization every few seconds. A
    write attach whose member loses **steer** (role change, handoff, run
    protection, workspace policy) closes with **1008**, reason
    `steer permission withdrawn`; the SPA reconnects as a read-only mirror.
@@ -1006,14 +1027,17 @@ The member environment terminal uses the same binary-output and JSON-control
 framing as run attaches. The `tab` query is `main` or a client-selected name
 matching `^[a-z0-9-]{1,32}$`.
 
-1. Client sends one text header with `cols` and `rows`. The gateway ensures the
+1. Client sends one text header with `cols` and `rows`, and `follow` where
+   it means the same as it does for an attach. The gateway ensures the
    member's environment container and the requested shell.
 2. The gateway answers `{"ok":true,"tab":"main","cols":120,"rows":40,"replay":4096}`
+   with the session's live geometry
    or a JSON error followed by a close. When present, `replay` is the number
    of binary scrollback bytes that follow the ack before live output; clients
    should mute terminal-generated replies until those bytes have been parsed.
    At most six tabs may be active.
-3. Output is binary. Input and resize are text frames:
+3. Output is binary. Input and resize are text frames, and the server's
+   `geometry` frame arrives here the same way it does on an attach:
 
    ```json
    {"type":"input","data":"ls -la\r"}
