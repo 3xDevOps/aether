@@ -113,6 +113,15 @@ func TestHarnessStatusReporterRegistration(t *testing.T) {
 	if got := coord.file(tui.ID, agentstatus.ClaudeSettingsName); !bytes.Equal(got, agentstatus.ClaudeSettings) {
 		t.Fatalf("settings written for the run = %s, want the embedded asset", got)
 	}
+	// The asset is a leaf package's bytes and the binary path is the
+	// scheduler's, so nothing but this pins the two together: a hook that
+	// names a path the run container does not carry reports nothing, and
+	// silently.
+	wantCommand := mcpbridge.BinaryPath + " report claude"
+	if !bytes.Contains(agentstatus.ClaudeSettings, []byte(`"`+wantCommand+`"`)) {
+		t.Fatalf("%s runs something other than %q; the staged binary is what the container has",
+			agentstatus.ClaudeSettingsName, wantCommand)
+	}
 
 	headless, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "ship it", "claude", domain.LaunchHeadless)
 	if err != nil {
