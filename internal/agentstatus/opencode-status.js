@@ -23,19 +23,27 @@ export const AetherStatus = async () => {
   let queue = Promise.resolve()
   let warned = false
 
-  const warn = (err) => {
-    if (warned) return
+  const warn = (message) => {
+    if (warned || !message) return
     warned = true
-    console.error("aether: opencode status reporter:", err && err.message ? err.message : err)
+    console.error("aether: opencode status reporter:", message)
   }
 
   const post = (...args) => {
     queue = queue.then(
       () =>
         new Promise((resolve) => {
-          const child = spawn(reporter, ["report", "opencode", ...args], { stdio: "ignore" })
+          // The reporter exits 0 whatever happens - a hook that fails the
+          // agent's turn is worse than a run card that is briefly wrong -
+          // and says what went wrong on stderr instead. Nothing else here
+          // reads that pipe, so the first line of it is the only trace a
+          // member has of a reporter that ran but could not reach the
+          // server.
+          const child = spawn(reporter, ["report", "opencode", ...args], { stdio: ["ignore", "ignore", "pipe"] })
+          child.stderr.setEncoding("utf8")
+          child.stderr.on("data", (chunk) => warn(chunk.split("\n")[0].trim()))
           child.on("error", (err) => {
-            warn(err)
+            warn(err && err.message ? err.message : String(err))
             resolve()
           })
           child.on("close", () => resolve())

@@ -172,21 +172,12 @@ func TestFromOpenCodeEvent(t *testing.T) {
 // constant naming it; the run container's real path is pinned where the
 // scheduler mounts it (internal/scheduler registration tests).
 func TestOpenCodePluginReportsTheRunsOwnTurn(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("the opencode plugin scenario needs node on PATH")
-	}
+	node := requireNode(t)
 	dir := t.TempDir()
 	reports := filepath.Join(dir, "reports.log")
 	stub := filepath.Join(dir, "reporter")
 	writePluginFile(t, stub, "#!/bin/sh\necho \"$@\" >> "+reports+"\n", 0o755)
-
-	const binary = `"/opt/aether/aether-server"`
-	if bytes.Count(OpenCodePlugin, []byte(binary)) != 1 {
-		t.Fatalf("%s does not name %s exactly once; the container has nothing else to run", OpenCodePluginName, binary)
-	}
-	plugin := bytes.Replace(OpenCodePlugin, []byte(binary), []byte(strconv.Quote(stub)), 1)
-	writePluginFile(t, filepath.Join(dir, "plugin.mjs"), string(plugin), 0o644)
+	stageOpenCodePlugin(t, dir, stub)
 	writePluginFile(t, filepath.Join(dir, "drive.mjs"), openCodeDriver, 0o644)
 
 	out, err := exec.Command(node, filepath.Join(dir, "drive.mjs"), reports).CombinedOutput()
@@ -246,6 +237,80 @@ while (Date.now() < deadline) {
   await new Promise((r) => setTimeout(r, 50))
 }
 `
+
+// TestOpenCodePluginWarnsWhatTheReporterSaid drives the failure path: the
+// reporter exits 0 and puts one line on stderr whatever goes wrong, so that
+// line is the only trace a member has of a reporter that ran and could not
+// reach the server. The plugin has to carry it to opencode's own log, once
+// however many turns fail.
+func TestOpenCodePluginWarnsWhatTheReporterSaid(t *testing.T) {
+	node := requireNode(t)
+	dir := t.TempDir()
+	reports := filepath.Join(dir, "reports.log")
+	stub := filepath.Join(dir, "reporter")
+	writePluginFile(t, stub, "#!/bin/sh\necho \"$@\" >> "+reports+"\n"+
+		"echo 'aether-server report opencode: dial /run/aether/coord.sock: connection refused' >&2\n", 0o755)
+	stageOpenCodePlugin(t, dir, stub)
+	writePluginFile(t, filepath.Join(dir, "drive.mjs"), openCodeFailureDriver, 0o644)
+
+	out, err := exec.Command(node, filepath.Join(dir, "drive.mjs"), reports).CombinedOutput()
+	if err != nil {
+		t.Fatalf("drive the plugin: %v (%s)", err, out)
+	}
+	const want = "aether: opencode status reporter: aether-server report opencode: dial /run/aether/coord.sock: connection refused"
+	if got := strings.Count(string(out), want); got != 1 {
+		t.Fatalf("the plugin logged the reporter's failure %d times, want once:\n%s", got, out)
+	}
+}
+
+// openCodeFailureDriver ends two turns against a reporter that fails every
+// time. The second post is what proves the warning does not repeat: it only
+// starts once the first child has closed, which is after that child's
+// stderr was delivered.
+const openCodeFailureDriver = `
+import { AetherStatus } from "./plugin.mjs"
+
+const hooks = await AetherStatus({})
+for (const sessionID of ["first", "second"]) {
+  await hooks.event({ event: { type: "session.idle", properties: { sessionID } } })
+}
+
+const { readFileSync } = await import("node:fs")
+const deadline = Date.now() + 10000
+while (Date.now() < deadline) {
+  let lines = ""
+  try {
+    lines = readFileSync(process.argv[2], "utf8")
+  } catch {}
+  if (lines.split("\n").length > 2) break
+  await new Promise((r) => setTimeout(r, 50))
+}
+`
+
+// requireNode is the node the plugin scenarios run under. They are the only
+// check that the embedded plugin is valid JavaScript at all, so a machine
+// without node loses that coverage; CI installs one.
+func requireNode(t *testing.T) string {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("the opencode plugin scenario needs node on PATH")
+	}
+	return node
+}
+
+// stageOpenCodePlugin writes the embedded plugin into dir as an importable
+// module, with the staged server binary replaced by stub: the container
+// path is the one thing a scenario cannot provide.
+func stageOpenCodePlugin(t *testing.T, dir, stub string) {
+	t.Helper()
+	const binary = `"/opt/aether/aether-server"`
+	if bytes.Count(OpenCodePlugin, []byte(binary)) != 1 {
+		t.Fatalf("%s does not name %s exactly once; the container has nothing else to run", OpenCodePluginName, binary)
+	}
+	plugin := bytes.Replace(OpenCodePlugin, []byte(binary), []byte(strconv.Quote(stub)), 1)
+	writePluginFile(t, filepath.Join(dir, "plugin.mjs"), string(plugin), 0o644)
+}
 
 // writePluginFile writes one file of the plugin scenario.
 func writePluginFile(t *testing.T, path, content string, mode os.FileMode) {

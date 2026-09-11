@@ -195,9 +195,12 @@ opencode's plugin names the event on the command line
 (`report opencode --event session.idle`). That subcommand is hidden like
 `mcp`: no operator runs it. It maps the event, dials the socket, and exits 0
 whatever happens - an unmapped event never dials at all, and a failure is
-one line on stderr, which the harness shows only for a non-zero exit. A hook
-that breaks or slows the agent would be worse than a run card that is
-briefly wrong.
+one line on stderr. A hook that breaks or slows the agent would be worse
+than a run card that is briefly wrong. Where that line surfaces is the
+harness's own shape too: Claude Code shows a hook's stderr only for a
+non-zero exit, so it sits in the transcript; opencode's plugin reads the
+reporter's stderr itself and logs the first failure of the run, prefixed
+`aether: opencode status reporter:`, then stays quiet.
 
 Reading the event and the round trip that follows share one budget, set
 under the timeout the harness gives the hook, so a harness that hands over
