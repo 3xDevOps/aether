@@ -15,6 +15,7 @@ import {
   workspace,
 } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
+import { atViewport } from '@/test/viewport'
 
 // Well past the 500-seq window, so the arithmetic is visible: an
 // implementation that ignored the probe and started at zero would fail.
@@ -342,6 +343,26 @@ describe('workspace activity feed', () => {
     render(<TimelineFeed params={{}} client={client} />)
 
     expect(await screen.findByText('Session title')).toBeDefined()
+  })
+
+  // Four labelled selects are most of a phone screen before the first entry.
+  it('folds every filter but the workspace one below sm', async () => {
+    const client = feedApi()
+    seed()
+    useStore.setState({
+      feedFilters: { ...emptyFilters, workspaceID: workspace.id, memberID: bob.id },
+    })
+    atViewport(390, { pointer: 'coarse' })
+    render(<TimelineFeed params={{}} client={client} />)
+
+    expect(await screen.findByLabelText('Workspace')).toBeDefined()
+    expect(screen.queryByLabelText('Member')).toBeNull()
+
+    // The count says what is still filtering the feed while the selects are
+    // away, so a member does not read an empty feed as an empty log.
+    const trigger = screen.getByRole('button', { name: 'Filters (1)' })
+    fireEvent.click(trigger)
+    expect(await screen.findByLabelText('Member')).toBeDefined()
   })
 
 })
