@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -356,6 +357,12 @@ func driveOpenCodePlugin(t *testing.T, dir, driver, reports string, want int) st
 // without node loses that coverage; CI installs one.
 func requireNode(t *testing.T) string {
 	t.Helper()
+	// The scenarios run the reporter as a shell script, which Windows has
+	// no way to execute; the plugin itself only ever runs in a Linux run
+	// container.
+	if runtime.GOOS == "windows" {
+		t.Skip("the opencode plugin scenario needs a POSIX shell for its stub reporter")
+	}
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("the opencode plugin scenario needs node on PATH")
