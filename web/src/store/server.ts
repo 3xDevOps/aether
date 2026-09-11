@@ -16,7 +16,7 @@ import type { SliceCreator } from '@/store/slice'
  * serves the page died - so nothing answers at all.
  * `server`: the gateway answers but its SSH backend cannot reach
  * aether-server (it reports 503 "server unreachable: ..."). */
-export type UnreachableKind = 'network' | 'gateway' | 'server'
+export type UnreachableKind = 'network' | 'gateway' | 'server' | 'refused'
 
 /** The order the phases of one update run in. A terminal phase - failed
  * or cancelled - is not in it: those always win. */

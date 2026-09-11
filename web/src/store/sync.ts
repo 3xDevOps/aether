@@ -453,9 +453,13 @@ export function connect(store: RootStore, client: Api = api): () => void {
     }
     if (probe && 'refused' in probe) {
       // The gateway said why; the handshake status never reaches this code,
-      // so the stream keeps retrying and this stays the reason.
-      store.getState().setUnreachable(classifyUnreachable(probe.refused))
-      store.getState().setHydrated(false, probe.refused.message)
+      // so the stream keeps retrying and this stays the reason. A 403 is
+      // the gateway turning this device away, not a dead hop.
+      const { refused } = probe
+      store.getState().setUnreachable(refused.status === 403 ? 'refused' : classifyUnreachable(refused))
+      // The client prefixes its own request path; the gateway's words are
+      // what the page shows.
+      store.getState().setHydrated(false, refused.message.replace(/^[^\s:]+: /, ''))
     } else if (probe) {
       // No server to connect to yet: the onboarding wizard links first.
       store.getState().setCapabilities(probe.unlinked.capabilities)

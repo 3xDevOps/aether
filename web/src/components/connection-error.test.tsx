@@ -23,6 +23,20 @@ describe('ConnectionError', () => {
     expect(screen.queryByText(/aether-server/i)).toBeNull()
   })
 
+  it('frames a 403 as the gateway refusing this device and keeps the reason', () => {
+    render(
+      <ConnectionError
+        kind="refused"
+        dead={false}
+        error="tagged tailnet node; the dashboard identifies members by their tailnet login and a tagged node has none"
+        onRetry={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('heading', { name: 'The gateway refused this device' })).toBeDefined()
+    expect(screen.getByText(/^tagged tailnet node; the dashboard identifies/)).toBeDefined()
+    expect(screen.queryByText(/check your connection/i)).toBeNull()
+  })
+
   it('explains that a dashboard link needs to be minted again', () => {
     render(
       <ConnectionError

@@ -647,6 +647,8 @@ describe('connect', () => {
     const stop = connect(store, client)
 
     await vi.waitFor(() => expect(store.getState().hydrationError).toContain('tagged tailnet node'))
+    expect(store.getState().hydrationError?.startsWith('tagged tailnet node')).toBe(true)
+    expect(store.getState().unreachable).toBe('refused')
     expect(store.getState().hydrated).toBe(false)
     // The stream still opens and keeps retrying; its own failure can only
     // say "unreachable" and never overwrites the recorded reason.
