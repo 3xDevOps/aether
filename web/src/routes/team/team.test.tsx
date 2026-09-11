@@ -21,6 +21,7 @@ import {
   workspace,
 } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
+import { fire } from '@/test/wake'
 
 const watching: PresenceEntry = {
   member_id: bob.id,
@@ -122,6 +123,39 @@ describe('team status bar', () => {
 
     expect(client.presenceHeartbeat).toHaveBeenCalledTimes(1)
     expect(client.presenceHeartbeat).toHaveBeenCalledWith(otherWorkspace.id)
+  })
+
+  it('re-reads the queue and beats presence when the tab returns', async () => {
+    const approvalList = vi.fn(async () => [approval()])
+    const presenceHeartbeat = vi.fn(async () => 90)
+    seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
+    render(<TeamStatus client={fakeApi({ approvalList, presenceHeartbeat })} />)
+
+    expect(await screen.findByText('1 waiting')).toBeDefined()
+    const reads = approvalList.mock.calls.length
+    const beats = presenceHeartbeat.mock.calls.length
+    const mounted = Date.now()
+
+    // Straight after a refresh the fan-out keeps its floor: flipping between
+    // two apps must not become a request per workspace each time. The
+    // heartbeat is one request and the reason the wake exists, so it goes.
+    await act(async () => {
+      fire('visibilitychange')
+    })
+    expect(approvalList.mock.calls.length).toBe(reads)
+    expect(presenceHeartbeat.mock.calls.length).toBeGreaterThan(beats)
+
+    // Past the floor, a pocketed phone gets the read it came back for: an
+    // approval may have arrived while its timers were frozen.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(mounted + 3_000)
+    try {
+      await act(async () => {
+        fire('visibilitychange')
+      })
+      expect(approvalList.mock.calls.length).toBeGreaterThan(reads)
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('says nothing when no workspace is chosen at all', async () => {

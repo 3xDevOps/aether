@@ -370,18 +370,54 @@ run's wire `paused` field, skipping runs that do not carry it.
   failed picks the copy, because each one has a different fix: `network` says
   this computer is offline (reconnect wifi or the VPN), `server` says the
   server did not answer over SSH, `gateway` says the local `aether gui`
-  process stopped answering, and a dead token says to mint a new link. The
-  gateway's own message appears in an initially open "Technical details" disclosure,
-  and the page suppresses the toast that would otherwise repeat it. Its Retry
-  button clears the connection state and remounts the subscribe-and-hydrate
-  cycle, rather than reloading the page and dropping the in-memory token.
-- **A `1008` close naming a dead token stops the stream for good.** The
-  gateway closes `1008` for a refused subscribe or a transient membership
-  check too, which the next reconnect can outlive and so are retried; only
-  `dashboard token revoked or expired` is terminal, because reconnecting
-  would carry the same dead token. The panes then say to open a fresh link
-  with `aether gui`, which is the whole fix: the token is minted per
-  process, so a page that outlived its `aether gui` needs a new one.
+  process stopped answering, and a rejected credential says the link expired.
+  The gateway's own message appears in an initially open "Technical details"
+  disclosure, and the page suppresses the toast that would otherwise repeat
+  it. Its Retry button clears the connection state and remounts the
+  subscribe-and-hydrate cycle, rather than reloading the page and dropping
+  the in-memory token.
+- **A rejected credential is reported as one, not as an unreachable
+  server.** `connect` reads `GET /api/v1/capabilities` before it opens the
+  stream, and a `401` there means the gateway refused the token outright.
+  The store is marked `streamDead` with that refusal verbatim, which stops
+  the retry loop and gives the panes and the error page their expired-link
+  copy. Catching it on the probe is what makes it legible: the
+  same rejection on the WebSocket upgrade is a handshake failure with no
+  body and no close reason, so the socket would just retry forever while the
+  app blamed the network. The token is minted per `aether gui` process and
+  held in the tab's session storage, so a bookmarked URL, a second tab, or a
+  restarted `aether gui` all land here; opening the URL `aether gui` printed
+  is the whole fix. On the event stream every `1008` close is now retried:
+  the gateway sends it for a refused subscribe and for a transient
+  membership check, both of which a reconnect can outlive. The attach socket
+  still treats an unanswered `1008` as final, because there it names
+  withdrawn steer or withdrawn membership.
+- **The sockets reopen on a foreground or network return.** Both
+  `connectEvents` and `connectAttach` subscribe to `visibilitychange`
+  (visible) and `online` through `onWake` in `src/lib/stream.ts`. A phone
+  freezes a background tab's timers and drops its sockets, so a tab coming
+  back from the pocket would otherwise sit out the remainder of a wait that
+  caps at 30 seconds. Either event clears the pending retry timer and resets
+  the backoff unconditionally - a tab that was away cannot know how long the
+  failure lasted - and reopens when there is no socket. The two differ on a
+  socket that is still there: a foreground return leaves it, since tearing a
+  working subscription down would replay the log for nothing and the tab
+  being hidden said nothing about the network. `online` did, so it replaces
+  the socket whatever state it reached, an acknowledged one included. A
+  wifi-to-cellular switch leaves exactly that socket half open: the browser
+  goes on reporting it as connected, the store goes on saying Live, and no
+  close ever arrives, because the server's end sees the FIN and the phone
+  does not. `online` is rare, so one resubscribe from `lastSeq` and one
+  re-attach with its replay are the cheaper mistake. The 30 second cap stays
+  for genuine outages, and
+  an attach the gateway refused - or one parked on a `session ended` close,
+  whose transcript cannot change again - is an answer rather than a failure,
+  so neither event re-asks it.
+- **The hydration retry wakes as well.** A re-hydration that fails after the
+  first good one leaves a cursor to replay from, so the reopened stream goes
+  live without re-fetching and nothing else would restart that timer. A wake
+  with a retry pending clears it, resets its backoff and re-fetches at once;
+  a wake with none re-fetches nothing.
 - A `run.status` event for a run the client has never seen fetches that run
   before the event is applied, which is what keeps two quick transitions of a
   brand new run in order. If the fetch fails the event is unresolved: the
@@ -1115,7 +1151,13 @@ like every other view, and gated on the same method the nav gates them on.
   re-reads them when the cursor moves, with a floor between refreshes so a
   chatty run does not become a request per event. It is mounted from the
   status-bar contribution, the one surface that is always on screen, which is
-  also where the presence heartbeat lives.
+  also where the presence heartbeat lives. It also refreshes and beats on
+  `onWake`, because a backgrounded tab freezes both timers: a phone returns
+  with its presence already expired server-side (the TTL is 45s) and with no
+  cursor movement to show an approval that arrived while it was away. The
+  refresh keeps the same floor as the debounced one, so app switching cannot
+  turn into a request per workspace each time; the heartbeat is one request
+  and always goes.
 - **One refresh covers every workspace, and there is only the one.** These
   reads are per workspace on the wire, and a workspace is a repo plus its
   team settings. A deployment has a handful of them and they outlive every

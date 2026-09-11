@@ -28,7 +28,7 @@ describe('ConnectionError', () => {
       <ConnectionError
         kind={null}
         dead
-        error="dashboard token revoked"
+        error="a valid gateway token is required"
         onRetry={vi.fn()}
       />,
     )
