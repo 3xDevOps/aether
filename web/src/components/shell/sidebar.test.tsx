@@ -18,11 +18,13 @@ import { pickOption } from '@/test/select'
 import { atViewport } from '@/test/viewport'
 
 /**
- * A window narrow enough for the sidebar's own threshold and no narrower:
- * the rail is what this file is about, not the phone layout below 640px.
+ * A window narrow enough for the sidebar's own threshold and no narrower, so
+ * the rail tests below stay clear of the drawer layout; `phoneWidth` is past
+ * the 640px line, where the expanded pane becomes a modal drawer.
  */
 const narrowWidth = 800
 const wideWidth = 1200
+const phoneWidth = 390
 
 beforeEach(async () => {
   useStore.setState({
@@ -102,6 +104,38 @@ describe('Sidebar', () => {
     resize(narrowWidth)
 
     expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
+  })
+
+  it('opens the run list as a modal drawer on a phone', () => {
+    atViewport(phoneWidth, { pointer: 'coarse' })
+    render(<Sidebar />)
+
+    fireEvent.click(screen.getByLabelText('Expand sidebar'))
+    const drawer = screen.getByRole('dialog', { name: 'Runs' })
+    // The rail travels with the drawer, so every surface stays one tap away.
+    expect(within(drawer).getByRole('navigation', { name: 'Surfaces' })).toBeDefined()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
+    expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
+  })
+
+  it('closes the phone drawer after it navigates', () => {
+    atViewport(phoneWidth, { pointer: 'coarse' })
+    render(<Sidebar />)
+    fireEvent.click(screen.getByLabelText('Expand sidebar'))
+
+    const drawer = screen.getByRole('dialog', { name: 'Runs' })
+    fireEvent.click(
+      within(drawer).getByRole('button', { name: /rewrite the checkout flow/ }),
+    )
+
+    expect(useStore.getState().route).toEqual({
+      name: 'terminal',
+      params: { runId: 'run_1' },
+    })
+    expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
   })
 
   it('routes to a run when its row is clicked', () => {

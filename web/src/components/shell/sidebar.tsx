@@ -6,9 +6,11 @@ import {
   PanelLeftOpen,
   Rocket,
 } from 'lucide-react'
+import { Dialog as DialogPrimitive } from 'radix-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
 import { Button } from '@/components/ui/button'
+import { DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import {
   Select,
@@ -120,6 +122,19 @@ export function Sidebar() {
     return () => window.removeEventListener('keydown', onKey)
   }, [toggleAndFollow])
 
+  // Every navigation out of the drawer is a navigation into the view the
+  // drawer covers, so the route itself closes it: a run row, a rail link and
+  // the palette all land here without any of them knowing about the drawer.
+  // The drawer's own state is read rather than depended on - listing it would
+  // close the drawer in the render that opened it.
+  const route = useStore((s) => s.route)
+  const drawerOpen = mobile && !rail
+  useEffect(() => {
+    if (!drawerOpen) return
+    takeToggle.current = true
+    setExpandedNarrow(false)
+  }, [route])
+
   const beginDrag = useDrag()
 
   const startResize = useCallback(
@@ -166,41 +181,80 @@ export function Sidebar() {
         width,
         maxWidth: mobile ? 'calc(100vw - 3rem)' : undefined,
       }}
-      className={cn(
-        'relative flex min-w-0 shrink-0 flex-col border-r border-border bg-sidebar',
-        mobile && 'absolute inset-y-0 left-12 z-40 shadow-xl',
-      )}
+      className="relative flex min-w-0 shrink-0 flex-col border-r border-border bg-sidebar"
       aria-label="Runs"
     >
       <WorkspaceSwitcher onCollapse={toggleAndFollow} controlRef={toggleControl} />
       <SidebarHeader />
       <RunTree />
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        aria-controls="sidebar"
-        aria-valuenow={Math.round(width)}
-        aria-valuemin={minSidebarWidth}
-        aria-valuemax={maxSidebarWidth}
-        tabIndex={0}
-        onPointerDown={startResize}
-        onKeyDown={resizeKey}
-        className={cn(
-          focusRing,
-          'absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-toolbar-hover',
-        )}
-      />
+      {/* The drawer is sized by the viewport, not by a splitter. */}
+      {!mobile && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-controls="sidebar"
+          aria-valuenow={Math.round(width)}
+          aria-valuemin={minSidebarWidth}
+          aria-valuemax={maxSidebarWidth}
+          tabIndex={0}
+          onPointerDown={startResize}
+          onKeyDown={resizeKey}
+          className={cn(
+            focusRing,
+            // Without `touch-none` the browser claims a touch drag as a pan
+            // and cancels the pointer stream this listens to.
+            'absolute inset-y-0 -right-1 w-2 cursor-col-resize touch-none hover:bg-toolbar-hover coarse:-right-2 coarse:w-4',
+          )}
+        />
+      )}
     </aside>
   )
 
+  const nav = (
+    <ActivityRail
+      sidebarCollapsed={rail}
+      onToggleSidebar={toggleAndFollow}
+      toggleControl={toggleControl}
+    />
+  )
+
+  // On a phone the expanded pane is a modal drawer rather than a pane the
+  // center view keeps living beside: Radix gives it the scrim, the
+  // tap-outside and Escape dismissal and the focus trap. The rail travels
+  // inside it so a surface is still one tap away while it is open, and the
+  // strip left behind holds the shell's 48px column so the center view does
+  // not reflow behind the scrim.
+  if (drawerOpen) {
+    return (
+      <div className="relative flex h-full min-h-0 shrink-0">
+        <div aria-hidden className="h-full w-12 shrink-0 border-r border-border bg-sidebar" />
+        <DialogPrimitive.Root
+          open
+          onOpenChange={(open) => {
+            if (!open) toggleAndFollow()
+          }}
+        >
+          <DialogPortal>
+            <DialogOverlay />
+            <DialogPrimitive.Content
+              aria-describedby={undefined}
+              onCloseAutoFocus={(event) => event.preventDefault()}
+              className="fixed inset-y-0 left-0 z-50 flex max-w-full shadow-xl outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-left motion-reduce:animate-none"
+            >
+              <DialogPrimitive.Title className="sr-only">Runs</DialogPrimitive.Title>
+              {nav}
+              {sidebar}
+            </DialogPrimitive.Content>
+          </DialogPortal>
+        </DialogPrimitive.Root>
+      </div>
+    )
+  }
+
   return (
     <div className="relative flex h-full min-h-0 shrink-0">
-      <ActivityRail
-        sidebarCollapsed={rail}
-        onToggleSidebar={toggleAndFollow}
-        toggleControl={toggleControl}
-      />
+      {nav}
       {sidebar}
     </div>
   )
@@ -259,7 +313,7 @@ function WorkspaceSwitcher({
         size="icon"
         aria-label="Collapse sidebar"
         onClick={onCollapse}
-        className="size-[26px] min-h-[26px] min-w-[26px] rounded-sm"
+        className="size-[26px] min-h-[26px] min-w-[26px] rounded-sm coarse:size-11 coarse:min-h-11 coarse:min-w-11"
       >
         <PanelLeftClose className="size-4" />
       </Button>
@@ -290,7 +344,7 @@ function SidebarHeader() {
                   onClick={() => {
                     openDialog('launch')
                   }}
-                  className="h-[26px] rounded-sm px-2 text-[12px]"
+                  className="h-[26px] rounded-sm px-2 text-[12px] coarse:h-11"
                 >
                   <Rocket className="size-3.5" />
                   New run
@@ -326,7 +380,7 @@ function GroupByControl() {
                 aria-pressed={groupBy === mode}
                 onClick={() => setGroupBy(mode)}
                 className={cn(
-                  'h-[26px] rounded-none px-2 text-[12px] first:rounded-l-sm last:rounded-r-sm',
+                  'h-[26px] rounded-none px-2 text-[12px] first:rounded-l-sm last:rounded-r-sm coarse:h-11',
                   groupBy === mode
                     ? 'bg-selection font-medium text-selection-foreground'
                     : 'text-muted-foreground',
@@ -356,7 +410,6 @@ function AttentionBadge() {
     <span
       aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
       role="img"
-      title="Runs waiting on a human"
       className="rounded-sm bg-state-needs-attention/15 px-1.5 text-[11px] font-medium text-state-needs-attention"
     >
       <Chip
@@ -474,7 +527,6 @@ export function ActivityRail({
                 {name === 'approvals' && (waiting > 0 || inboxError !== null) && (
                   <span
                     aria-hidden
-                    title={inboxError ?? 'Requests waiting on a decision'}
                     className="absolute bottom-1 right-1 flex"
                   >
                     <Chip
@@ -566,7 +618,7 @@ function RunRow({ entry }: { entry: SidebarRun }) {
         // Full bleed inside a scroll container: an outline drawn outside the
         // row would be clipped at both edges.
         'focus-visible:-outline-offset-2',
-        'flex h-7 min-h-7 w-full items-center gap-2 border-l-2 py-0.5 pr-3 pl-5 text-left text-[13px] hover:bg-toolbar-hover',
+        'flex h-7 min-h-7 w-full items-center gap-2 border-l-2 py-0.5 pr-3 pl-5 text-left text-[13px] hover:bg-toolbar-hover coarse:h-11 coarse:min-h-11',
         selected
           ? 'bg-selection font-medium text-selection-foreground'
           : unseen
