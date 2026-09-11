@@ -268,3 +268,24 @@ func TestReportOpenCodeIgnoresUnmappedEvents(t *testing.T) {
 		t.Fatalf("the reporter dialled for an unmapped event: %+v", req)
 	}
 }
+
+// TestReportOpenCodeReportsATurnStarting: the event alone does not say
+// whether an opencode session started a turn or ended one - session.status
+// carries that in --status - so the flag has to reach the mapping for a
+// parked run to come back at all.
+func TestReportOpenCodeReportsATurnStarting(t *testing.T) {
+	sock := newFakeCoordSocket(t)
+	report([]string{"opencode", "--socket", sock.path, "--event", "session.status", "--status", "busy"})
+
+	req, ok := sock.next(t)
+	if !ok {
+		t.Fatal("the reporter never dialled the coordination socket")
+	}
+	var params protocol.RunReportParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	if want := (protocol.RunReportParams{State: string(agentstatus.Working)}); params != want {
+		t.Fatalf("params = %+v, want %+v", params, want)
+	}
+}
