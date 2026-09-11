@@ -306,6 +306,14 @@ export function TerminalPane({
     focusTerminal: controller.focusTerminal,
   })
   const coarse = useMediaQuery(coarsePointer)
+  // A terminal that cannot take input holds no modifier: the key bar goes
+  // with the write access it needed, and a Ctrl left armed across that
+  // would turn the first character of the next turn at the keyboard into a
+  // control code nobody pressed.
+  const armCtrl = controller.armCtrl
+  useEffect(() => {
+    if (!writable) armCtrl(false)
+  }, [armCtrl, writable])
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex h-9 min-h-9 shrink-0 items-center border-b border-border bg-sidebar px-2 coarse:h-12 coarse:min-h-12">
