@@ -14,10 +14,12 @@
 // (internal/mcpbridge.BinaryPath).
 const REPORTER = '/opt/aether/aether-server'
 
-// OWNER marks the process that reports. A child agent inherits its
-// parent's environment, and a member who also keeps this file in
-// ~/.pi/agent/extensions loads it twice, so the marker leaves exactly one
-// reporter per process.
+// OWNER marks the process that reports: a child agent inherits its
+// parent's environment and must not report on its parent's run. It is
+// matched on the PID, so a second copy of this file inside the same agent
+// still registers - the shared chain below is what keeps two copies in one
+// order, rather than silencing one of them and losing the reports of a
+// reload.
 const OWNER = 'AETHER_STATUS_OWNER'
 
 // Re-checking idleness after a turn ends: modern pi can retry, compact or
@@ -32,12 +34,19 @@ const IDLE_RECHECK_MAX_MS = 250
 // keeps the reports in order all the same - a "working" that overtook a
 // "waiting" would leave the run reading Working with nothing left to
 // correct it.
-let posts: Promise<void> = Promise.resolve()
-let warned = false
+//
+// It belongs to the process, not to this module. pi loads a copy of an
+// extension for every path it finds it at, so a member who also keeps this
+// file in ~/.pi/agent/extensions has two copies of it inside one agent, and
+// a chain each would be two orders with nothing between them.
+const CHAIN = '__aetherStatusReports'
+
+const shared: { posts: Promise<void>; warned: boolean } =
+  globalThis[CHAIN] || (globalThis[CHAIN] = { posts: Promise.resolve(), warned: false })
 
 function warnOnce(err: unknown): void {
-  if (warned) return
-  warned = true
+  if (shared.warned) return
+  shared.warned = true
   console.warn('[aether] status report failed:', err)
 }
 
@@ -61,7 +70,7 @@ function spawnReport(args: string[]): Promise<void> {
 function report(event: string, tool?: unknown): void {
   const args = ['report', 'pi', '--event', event]
   if (typeof tool === 'string' && tool) args.push('--tool', tool)
-  posts = posts.then(() => spawnReport(args)).catch(() => {})
+  shared.posts = shared.posts.then(() => spawnReport(args)).catch(() => {})
 }
 
 export default function (pi): void {

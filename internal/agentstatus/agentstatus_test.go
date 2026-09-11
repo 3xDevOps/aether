@@ -571,3 +571,143 @@ func TestPiExtensionParses(t *testing.T) {
 		t.Fatalf("bun build %s: %v\n%s", PiExtensionName, berr, out)
 	}
 }
+
+// extensionDriver stages the extension with its reporter pointed at a
+// script that records every argv it is spawned with, and returns a bun
+// command that loads the staged copies and drives one scenario through
+// them. The REPORTER constant is rewritten by exact text: if that line ever
+// changes shape, this fails loudly rather than testing a file that reports
+// nowhere.
+func extensionDriver(t *testing.T, scenario string) (*exec.Cmd, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the recording reporter is a shell script, and the agent runs on Linux")
+	}
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Skipf("bun is not installed: %v", err)
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "reports")
+	reporter := filepath.Join(dir, "reporter.sh")
+	mustWriteFile(t, reporter, "#!/bin/sh\necho \"$@\" >> "+log+"\n", 0o700)
+
+	const decl = "const REPORTER = '" + ReporterCommand + "'"
+	staged := strings.Replace(string(PiExtension), decl, "const REPORTER = '"+reporter+"'", 1)
+	if staged == string(PiExtension) {
+		t.Fatalf("%s no longer declares the reporter as %q", PiExtensionName, decl)
+	}
+	// Two copies at two paths: pi loads an extension once per path it is
+	// found at, which is how one agent ends up running this file twice.
+	mustWriteFile(t, filepath.Join(dir, "status.ts"), staged, 0o600)
+	mustWriteFile(t, filepath.Join(dir, "status-copy.ts"), staged, 0o600)
+	driver, derr := os.ReadFile(filepath.Join("testdata", "drive.ts"))
+	if derr != nil {
+		t.Fatalf("read the driver: %v", derr)
+	}
+	mustWriteFile(t, filepath.Join(dir, "drive.ts"), string(driver), 0o600)
+
+	cmd := exec.Command(bun, "run", "drive.ts", scenario)
+	cmd.Dir = dir
+	return cmd, log
+}
+
+func mustWriteFile(t *testing.T, path, content string, mode os.FileMode) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// runExtension drives one scenario and returns the reports it produced, in
+// the order the reporter was spawned in.
+func runExtension(t *testing.T, scenario string) []string {
+	t.Helper()
+	cmd, log := extensionDriver(t, scenario)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bun run drive.ts %s: %v\n%s", scenario, err, out)
+	}
+	data, rerr := os.ReadFile(log)
+	if rerr != nil && !os.IsNotExist(rerr) {
+		t.Fatalf("read reports: %v", rerr)
+	}
+	var reports []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if line != "" {
+			reports = append(reports, line)
+		}
+	}
+	return reports
+}
+
+// The extension is the only part of the reporter no Go test can execute,
+// and its logic is where a turn gets stranded: a "working" delivered after
+// the "waiting" that ended the turn leaves the run reading Working until
+// the stall threshold. These drive the real file under bun - the runtime pi
+// and omp are built on - with a recording stand-in for the server binary.
+func TestPiExtensionRuntime(t *testing.T) {
+	t.Run("a turn reports in order and ends once", func(t *testing.T) {
+		got := runExtension(t, "turn")
+		want := []string{
+			"report pi --event agent_start",
+			"report pi --event tool_call --tool bash",
+			"report pi --event tool_execution_start --tool bash",
+			"report pi --event tool_execution_end --tool bash",
+			"report pi --event message_end",
+			"report pi --event agent_end",
+		}
+		assertReports(t, got, want)
+	})
+
+	t.Run("a message finalized after the turn ended is not a new turn", func(t *testing.T) {
+		// pi finalizes the assistant's last message just after the turn
+		// ends. Reported, it would overwrite the wait the agent just asked
+		// for with "working".
+		got := runExtension(t, "late-message")
+		assertReports(t, got, []string{"report pi --event agent_end"})
+	})
+
+	t.Run("agent_settled is the end where the harness has it", func(t *testing.T) {
+		// Modern pi can retry, compact or follow up past agent_end, so the
+		// end of the turn is agent_settled and agent_end is only its first
+		// half: exactly one wait must reach the run.
+		got := runExtension(t, "settled")
+		assertReports(t, got, []string{"report pi --event agent_settled"})
+	})
+
+	t.Run("willContinue is not the end of the turn", func(t *testing.T) {
+		got := runExtension(t, "will-continue")
+		assertReports(t, got, nil)
+	})
+
+	t.Run("two copies in one agent keep one order", func(t *testing.T) {
+		// A member who also keeps this file in ~/.pi/agent/extensions runs
+		// it twice. The reports double, which costs nothing the server does
+		// not collapse - but they must not interleave, because a "working"
+		// from the second copy landing after the first copy's "waiting"
+		// strands the run.
+		got := runExtension(t, "double")
+		want := []string{
+			"report pi --event agent_start",
+			"report pi --event agent_start",
+			"report pi --event message_end",
+			"report pi --event message_end",
+			"report pi --event agent_end",
+			"report pi --event agent_end",
+		}
+		assertReports(t, got, want)
+	})
+}
+
+func assertReports(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("reports = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("reports = %q, want %q", got, want)
+		}
+	}
+}

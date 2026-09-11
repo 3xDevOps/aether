@@ -180,6 +180,12 @@ reporting a pass with nothing run.
 nothing pins their templates. Adding one is an install line and a map
 entry each.
 
+The status extension those two load, `internal/agentstatus/status.ts`, is
+the one shipped file the Go build never executes. `internal/agentstatus`
+runs it under `bun` against a recording stand-in for the server binary, so
+a turn's reports are proven to come out in order and to end exactly once.
+Those tests skip where `bun` is not installed.
+
 ## The dashboard end-to-end suite
 
 `web/e2e/` drives the dashboard the way a person does: a Chromium browser on
