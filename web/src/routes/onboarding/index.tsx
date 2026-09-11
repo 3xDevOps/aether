@@ -91,7 +91,8 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               Onboarding runs in the desktop app or `aether gui`, where the
               gateway holds your SSH identity and can reach your local
-              repositories. This gateway is a remote monitor.
+              repositories. You are looking at Aether from another device,
+              which reaches neither.
             </p>
           </div>
         </div>
