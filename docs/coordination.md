@@ -207,6 +207,11 @@ unaffected. With no per-run directory there is no `co-authors` file either,
 so the agent is not asked for the trailers; Aether's own commits still
 carry them.
 
+It also removes the agent status reporter, which rides the same socket and
+the same mounts: with coordination off, an agent cannot tell the server it
+is waiting, and `needs-attention` comes only from the stall threshold. See
+[harnesses.md](harnesses.md).
+
 ## Not in this component
 
 This package owns the host side and the wire. The read-only container

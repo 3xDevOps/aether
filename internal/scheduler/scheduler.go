@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -185,14 +186,32 @@ type supervised struct {
 	// memberID identifies the persistent home shared by every live run
 	// belonging to the member.
 	memberID domain.MemberID
-	harness  string
+	// reporter is how much this run's harness can say about its own state
+	// (internal/harness). It is fixed at launch, because the reporter is
+	// wired into the container's launch command, and recovered from the
+	// sidecar rather than recomputed: only the launch knew which profile
+	// the container actually got.
+	reporter harness.Reporter
 	// Mutated only under Scheduler.mu.
 	status        domain.RunStatus
 	startedAt     time.Time
 	paused        bool
 	killRequested bool
 	killActor     domain.MemberID
-	done          chan struct{}
+	// agentReport is the last thing the agent said about itself, zero until
+	// it says anything and again whenever activity un-parks the run. It is
+	// only ever set to a report the run's status already matches, so a
+	// report the store refused leaves the silence fallback armed. Mirrored
+	// into the run's sidecar on every change, so a run the agent parked
+	// for its member comes back from a restart still held for them.
+	agentReport agentstatus.Report
+	// lastWorking is when the agent last said it was working. A report is
+	// the only trace its hook leaves - it writes nothing to the terminal
+	// and touches no files - so the stall detector counts it as the
+	// activity it is, and a run does not park as stalled seconds after the
+	// agent proved it is alive.
+	lastWorking time.Time
+	done        chan struct{}
 	// runUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root (no ownership pass). Set once
 	// the user is resolved during provisioning, or from the sidecar on
@@ -456,13 +475,16 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 			}).Profile()
 		}
 		// An explicit argv override is respected verbatim. Registry MCP,
-		// session, resume, and semantic-control flags belong to the shipped
-		// CLI, not an override: nothing checks the override is still that
-		// CLI.
+		// session, resume, status-reporter and semantic-control flags
+		// belong to the shipped CLI, not an override: nothing checks the
+		// override is still that CLI.
 		profile.MCPConfigFlag = ""
 		profile.SessionFlag = ""
 		profile.SessionResumeFlag = ""
 		profile.ResumeFlag = ""
+		profile.Reporter = harness.ReporterNone
+		profile.StatusArgs = nil
+		profile.StatusFiles = nil
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:

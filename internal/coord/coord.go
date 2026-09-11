@@ -5,10 +5,15 @@
 // The radar (internal/overlap) says runs A and B are both editing the
 // same file. This package injects one advisory notice into both agents'
 // terminals, gives each run a private unix socket under the server data
-// directory, and serves exactly three methods on it - coord.status,
-// coord.send, coord.inbox. The mount is the authentication: whoever
-// connects on a run's socket is that run, so no token ever enters a
-// container.
+// directory, and serves exactly three mailbox methods on it -
+// coord.status, coord.send, coord.inbox. The mount is the authentication:
+// whoever connects on a run's socket is that run, so no token ever enters
+// a container.
+//
+// The same socket carries one method that is not mailbox traffic at all:
+// run.report, which the agent's own status hooks call to say whether it is
+// working or waiting for its member (internal/agentstatus). It is here
+// because the socket is already the run's identity.
 //
 // Nothing here blocks, locks, or arbitrates. A send is authorized only
 // against a live radar overlap (or its grace window), is size-capped,
@@ -44,6 +49,9 @@ var (
 	ErrDisabled = errors.New("coord: conflict coordination is disabled")
 	// ErrClosed is returned once the service has been closed.
 	ErrClosed = errors.New("coord: service closed")
+	// ErrNoReportSink is returned when run.report arrives with no sink
+	// wired behind it.
+	ErrNoReportSink = errors.New("coord: no agent status sink is attached")
 )
 
 // Runs resolves the runs and members a message is attributed to;
@@ -82,6 +90,10 @@ type Config struct {
 	Peers Peers
 	// PTY injects the overlap notice into a run's terminal.
 	PTY Injector
+	// Reports is where run.report lands: the scheduler. Leaving it unset
+	// makes run.report an internal error rather than a silent success -
+	// the agent's hook would otherwise be told its state was recorded.
+	Reports ReportSink
 	// Disabled is the conflict-coordination kill switch. When set, no
 	// notice, listener, directory, mailbox write, or timeline entry
 	// happens, and every coord.* call fails CodeUnavailable.

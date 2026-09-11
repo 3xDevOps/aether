@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 )
 
 // legalTransition encodes the pinned lifecycle table (Wave 1 contract
@@ -163,6 +165,23 @@ type sidecar struct {
 	// server restart.
 	RunUser string `json:"run_user,omitempty"`
 	Home    string `json:"home,omitempty"`
+	// Reporter is how much the status reporter this run's container was
+	// actually given can say about its own state. Recorded rather than
+	// recomputed on recovery: a headless run, a run with coordination off,
+	// an argv override and a member's own harness definition all get no
+	// reporter whatever the registry says about the harness name, and only
+	// the launch saw that. Absent in a sidecar written before runs had
+	// reporters, which reads as "none" - the behavior that build had.
+	Reporter harness.Reporter `json:"reporter,omitempty"`
+	// AgentState and AgentReason are the last thing the agent said about
+	// itself, in the same text form the state travels in on the wire. The
+	// run row carries the status the report produced but not who asked for
+	// it, and only the report tells a run the agent parked for its member
+	// from one that stalled - so without these a recovered run is released
+	// by the first thing its agent repaints. Absent, or anything but a
+	// state this build knows, reads as "no report yet".
+	AgentState  agentstatus.State `json:"agent_state,omitempty"`
+	AgentReason string            `json:"agent_reason,omitempty"`
 	// ExitObserved is set after Runtime.Wait returns successfully, before
 	// finalize. Recovery uses it to resume exit handling without re-attaching.
 	ExitObserved bool `json:"exit_observed"`
@@ -192,6 +211,9 @@ func (e *supervised) sidecar() sidecar {
 		KillRequested:  e.killRequested,
 		RunUser:        e.runUser,
 		Home:           e.home,
+		Reporter:       e.reporter,
+		AgentState:     e.agentReport.State,
+		AgentReason:    e.agentReport.Reason,
 		ExitObserved:   e.exitObserved,
 		ExitCode:       e.exitCode,
 		BridgeDigest:   e.bridgeDigest,
@@ -199,6 +221,16 @@ func (e *supervised) sidecar() sidecar {
 		CoordDir:       e.coordDir,
 		GitAuthorEmail: e.gitAuthorEmail,
 	}
+}
+
+// agentReport is the report the sidecar carries, or the zero report for a
+// file written before runs recorded one - the behavior that build had.
+func (sc sidecar) agentReport() agentstatus.Report {
+	state, ok := agentstatus.ParseState(string(sc.AgentState))
+	if !ok {
+		return agentstatus.Report{}
+	}
+	return agentstatus.Report{State: state, Reason: sc.AgentReason}
 }
 
 func (s *Scheduler) sidecarPath(run domain.RunID) string {

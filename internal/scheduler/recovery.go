@@ -459,10 +459,19 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		// The workspace comes off the run row, not the sidecar: a sidecar
 		// written by an older build has no workspace scope at all, and the
 		// row is the source of truth either way.
-		workspaceID:    r.WorkspaceID,
-		containerID:    runtime.ID(sc.ContainerID),
-		task:           r.Task,
-		memberID:       r.AccountMember(),
+		workspaceID: r.WorkspaceID,
+		containerID: runtime.ID(sc.ContainerID),
+		task:        r.Task,
+		memberID:    r.AccountMember(),
+		// The reporter and the last report both come off the sidecar,
+		// because only the live server saw either: which reporter the
+		// container was actually given, and whether the agent parked this
+		// run itself. Reattaching resizes the terminal, so a full-screen
+		// agent repaints at once - and without the report that repaint
+		// would read as work resuming and hand the run back to an agent
+		// that is still waiting for its member.
+		reporter:       sc.Reporter,
+		agentReport:    sc.agentReport(),
 		status:         r.Status,
 		startedAt:      started,
 		paused:         sc.Paused,

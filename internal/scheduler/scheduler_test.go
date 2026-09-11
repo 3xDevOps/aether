@@ -620,24 +620,23 @@ func TestContainerSpecNonRootHome(t *testing.T) {
 }
 
 // TestReserveRunUserConflict pins the credential-home ownership guard:
-// a run whose resolved uid:gid differs from a live run of the same
-// member+harness fails provisioning loudly (the ownership pass would
-// otherwise flip the shared home's ownership back and forth), while same
-// mapping, different member or harness, and root runs all pass. The guard
-// is cross-platform; only the chown itself is linux-only.
+// a run whose resolved uid:gid differs from a live run of the same member
+// fails provisioning loudly (the ownership pass would otherwise flip the
+// shared home's ownership back and forth), while same mapping, different
+// member, and root runs all pass. The guard is cross-platform; only the
+// chown itself is linux-only.
 func TestReserveRunUserConflict(t *testing.T) {
 	e := newTestEnv(t, nil)
 	live := &supervised{
 		runID:    "run-live",
 		memberID: e.member.ID,
-		harness:  "claude",
 		runUser:  "1000:1000",
 	}
 	e.sched.mu.Lock()
 	e.sched.runs[live.runID] = live
 	e.sched.mu.Unlock()
 
-	entry := &supervised{runID: "run-new", memberID: e.member.ID, harness: "claude"}
+	entry := &supervised{runID: "run-new", memberID: e.member.ID}
 	err := e.sched.reserveRunUser(entry, "2000:2000", true)
 	if err == nil {
 		t.Fatal("conflicting uid accepted for the shared member home")
@@ -651,7 +650,7 @@ func TestReserveRunUserConflict(t *testing.T) {
 		}
 	}
 
-	same := &supervised{runID: "run-same", memberID: e.member.ID, harness: "claude"}
+	same := &supervised{runID: "run-same", memberID: e.member.ID}
 	if err := e.sched.reserveRunUser(same, "1000:1000", true); err != nil {
 		t.Fatalf("same mapping rejected: %v", err)
 	}
@@ -659,17 +658,17 @@ func TestReserveRunUserConflict(t *testing.T) {
 		t.Errorf("runUser = %q, want recorded 1000:1000", same.runUser)
 	}
 
-	otherMember := &supervised{runID: "run-other-member", memberID: "other-member", harness: "codex"}
+	otherMember := &supervised{runID: "run-other-member", memberID: "other-member"}
 	if err := e.sched.reserveRunUser(otherMember, "2000:2000", true); err != nil {
 		t.Fatalf("different member rejected: %v", err)
 	}
 
-	root := &supervised{runID: "run-root", memberID: e.member.ID, harness: "claude"}
+	root := &supervised{runID: "run-root", memberID: e.member.ID}
 	if err := e.sched.reserveRunUser(root, "", true); err != nil {
 		t.Fatalf("root run rejected: %v", err)
 	}
 
-	noHome := &supervised{runID: "run-nohome", memberID: e.member.ID, harness: "claude"}
+	noHome := &supervised{runID: "run-nohome", memberID: e.member.ID}
 	if err := e.sched.reserveRunUser(noHome, "2000:2000", false); err != nil {
 		t.Fatalf("run without credential mounts rejected: %v", err)
 	}

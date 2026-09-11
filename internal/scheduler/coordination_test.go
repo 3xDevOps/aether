@@ -33,7 +33,7 @@ type fakeCoordinator struct {
 	coAuthorWrites map[domain.RunID]int
 }
 
-func (f *fakeCoordinator) Provision(_ context.Context, run domain.RunID, _ []byte) (string, error) {
+func (f *fakeCoordinator) Provision(_ context.Context, run domain.RunID, _ map[string][]byte) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
@@ -247,12 +247,12 @@ func TestStagedBridgesAreCollectedOnlyWhenUnreferenced(t *testing.T) {
 	}
 }
 
-// TestArgvOverrideDropsMCPRegistration: a Config.Harnesses override is
-// respected verbatim. The registry's MCP flag belongs to the CLI the
-// registry ships, so an overridden harness gets no MCP args appended and
-// degrades to notice-only coordination, while the rest of the registry
-// profile still applies.
-func TestArgvOverrideDropsMCPRegistration(t *testing.T) {
+// TestArgvOverrideDropsRegistryRegistration: a Config.Harnesses override is
+// respected verbatim. The registry's MCP flag and its status reporter both
+// belong to the CLI the registry ships, so an overridden harness gets
+// neither appended - it degrades to notice-only coordination and to the
+// stall threshold - while the rest of the registry profile still applies.
+func TestArgvOverrideDropsRegistryRegistration(t *testing.T) {
 	s := &Scheduler{harnesses: map[string]HarnessSpec{
 		"claude": {TUIArgs: []string{"claude-shim", harness.TaskPlaceholder}},
 	}}
@@ -265,6 +265,12 @@ func TestArgvOverrideDropsMCPRegistration(t *testing.T) {
 	}
 	if args := profile.MCPArgs("/run/aether/mcp.json"); len(args) != 0 {
 		t.Fatalf("override kept the registry MCP registration: %v", args)
+	}
+	if args := profile.StatusLaunchArgs(mcpbridge.MountDir); len(args) != 0 {
+		t.Fatalf("override kept the registry status arguments: %v", args)
+	}
+	if profile.Reporter != harness.ReporterNone || len(profile.StatusFiles) != 0 {
+		t.Fatalf("override kept reporter %s with %d status files", profile.Reporter, len(profile.StatusFiles))
 	}
 	if len(profile.CredentialPaths) == 0 {
 		t.Fatal("override lost the registry credential paths")

@@ -9,13 +9,18 @@ as a stdio MCP server (`aether-server mcp`, a hidden subcommand no operator
 runs). It is built on the official Go MCP SDK; there is no hand-rolled MCP
 framing anywhere.
 
+The same binary and the same socket carry one thing that is not a tool at
+all: the agent's own status reports (`aether-server report`, below).
+
 ## What the container gets
 
 ```
-/opt/aether/aether-server   read-only  the staged bridge binary
-/run/aether/                read-only  the run's coordination directory
-/run/aether/co-authors      read-only  the trailers to end commits with
-/run/aether/coord2.sock                the socket the bridge dials (wire v2)
+/opt/aether/aether-server         read-only  the staged bridge binary
+/run/aether/                      read-only  the run's coordination directory
+/run/aether/mcp.json              read-only  the MCP server config, for a registered harness
+/run/aether/claude-settings.json  read-only  the status-reporter hooks, for an interactive claude run
+/run/aether/co-authors            read-only  the trailers to end commits with
+/run/aether/coord2.sock                      the socket the bridge dials (wire v2)
 ```
 
 The binary and the directory are the two mounts, and both are Aether-owned
@@ -37,9 +42,12 @@ access to it.
 | `aether_send` | `coord.send` | the new message id |
 | `aether_inbox` | `coord.inbox` | one batch of messages, oldest first |
 
-The mapping is 1:1 and the method set is closed - there is no fourth tool,
+The mapping is 1:1 and the tool set is closed - there is no fourth tool,
 and nothing reachable here touches a control verb, git, or another run's
 transcript.
+
+The socket's *method* set has a fourth entry, `run.report`, which no tool
+reaches. See "The status reporter" below.
 
 ### Acknowledgement stays below MCP
 
@@ -135,11 +143,15 @@ the overlap notice in its terminal. The arguments and the config are
 decided at launch, so a run that was started without them can only gain
 them by being relaunched.
 
+The status reporter is registered the same way and in the same directory:
+a profile that carries status arguments gets its settings document written
+there and the arguments appended, for an interactive run only.
+
 An argv override in the server config (scheduler `Harnesses`) is respected
-verbatim: the registry's MCP flag belongs to the CLI the registry ships,
-and nothing checks that an overridden command still is that CLI, so the
-flag is never appended to it and the overridden harness degrades to
-notice-only coordination the same way.
+verbatim: the registry's MCP and status flags belong to the CLI the registry
+ships, and nothing checks that an overridden command still is that CLI, so
+neither is appended to it. The overridden harness degrades to notice-only
+coordination and to the stall threshold the same way.
 
 ### What the end-to-end tests cover
 
@@ -163,6 +175,36 @@ See docs/testing.md for how it stages a binary that really has the
 subcommand. The real-harness smoke tests
 (`internal/harness/smoke_integration_test.go`) cover the argv half against
 the actual CLIs.
+
+## The status reporter
+
+`run.report` is the fourth method on the socket and the only one an agent
+does not call through a tool. It carries two fields - a state, `working` or
+`waiting`, and the user-visible reason - and returns an empty object. The
+run is the socket it arrived on, exactly as for the three mailbox methods.
+
+What calls it is the harness's own lifecycle hook, running
+`/opt/aether/aether-server report <harness>` with the hook's event JSON on
+stdin. That subcommand is hidden like `mcp`: no operator runs it. It maps
+the event, dials the socket, and exits 0 whatever happens - an unmapped
+event never dials at all, and a failure is one line on stderr, which the
+harness shows only for a non-zero exit. A hook that breaks or slows the
+agent would be worse than a run card that is briefly wrong.
+
+Reading the event and the round trip that follows share one budget, set
+under the timeout the harness gives the hook, so a harness that hands over
+an open pipe cannot leave the reporter waiting on it either. A payload past
+the reporter's size cap is reported on stderr rather than truncated: half a
+JSON document maps to nothing, which would look exactly like an event Aether
+ignores.
+
+Which harnesses have a reporter, what the settings document looks like, and
+what each state does to the run: [harnesses.md](harnesses.md) and
+[failure-handling.md](failure-handling.md).
+
+The wire method set is closed all the same: `run.report` is four of four,
+and nothing else - no control verb, no git, no other run's transcript - is
+reachable from inside a container.
 
 ## Staging the binary
 
@@ -226,5 +268,6 @@ and go inert - `coord` unlinks the sockets behind them, so a bridge still
 running in there gets `CodeUnavailable` and nothing else.
 
 Turning it back on affects new containers only. A run created while the
-switch was off has no mounts, no config, and no `--mcp-config` argument,
-and cannot gain them; it stays notice-only until it is relaunched.
+switch was off has no mounts, no config, no `--mcp-config` and no
+`--settings` argument, and cannot gain them; it stays notice-only, and
+judged on silence alone, until it is relaunched.

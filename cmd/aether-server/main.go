@@ -31,6 +31,8 @@ func main() {
 		fmt.Println("aether-server", version.String())
 	case "mcp":
 		exitOn(mcp(args))
+	case "report":
+		report(args)
 	case "serve":
 		exitOn(serve(args))
 	case "install":

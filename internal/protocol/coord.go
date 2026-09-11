@@ -3,7 +3,7 @@ package protocol
 // Coordination wire v2.
 //
 // This is the whole surface an agent reaches on its run's coordination
-// socket: three methods, no control verbs, no git, no other run's
+// socket: four methods, no control verbs, no git, no other run's
 // transcript. It is versioned separately from the control channel because
 // the bridge lives inside a container that outlives a server restart, and
 // carries its version in every coord.status result so a bridge can tell
@@ -11,10 +11,14 @@ package protocol
 const CoordWireVersion = "v2"
 
 // The coordination method set. Nothing else is reachable on the socket.
+// The three coord.* methods are the mailbox and are exposed to the agent
+// as MCP tools; run.report is not a tool at all - the harness's own status
+// hooks call it through "aether-server report" (docs/mcp-bridge.md).
 const (
 	MethodCoordStatus = "coord.status"
 	MethodCoordSend   = "coord.send"
 	MethodCoordInbox  = "coord.inbox"
+	MethodRunReport   = "run.report"
 )
 
 // Coordination caps, enforced by the server and published here so a
@@ -95,3 +99,16 @@ type CoordInboxResult struct {
 	Messages []CoordMessage `json:"messages"`
 	AckToken string         `json:"ack_token,omitempty"`
 }
+
+// RunReportParams are the params of run.report: what the agent behind this
+// run's socket says it is doing now, and the user-visible reason it gives
+// for needing its member. State is one of the two agentstatus values; the
+// run is the socket, never a parameter.
+type RunReportParams struct {
+	State  string `json:"state"`
+	Reason string `json:"reason"`
+}
+
+// RunReportResult is the result of run.report. It is empty: the caller is
+// a hook inside the container that exits immediately either way.
+type RunReportResult struct{}
