@@ -512,13 +512,33 @@ func TestFromPiEvent(t *testing.T) {
 func TestPiExtensionSubscribesToMappedEvents(t *testing.T) {
 	source := string(PiExtension)
 	subscriptions := regexp.MustCompile(`pi\.on\('([a-z_]+)'`).FindAllStringSubmatch(source, -1)
-	if len(subscriptions) == 0 {
-		t.Fatalf("%s subscribes to nothing", PiExtensionName)
-	}
+	subscribed := make(map[string]bool, len(subscriptions))
 	for _, m := range subscriptions {
 		if _, ok := FromPiEvent(m[1], ""); !ok {
 			t.Errorf("%s subscribes to %s, which the mapping ignores", PiExtensionName, m[1])
 		}
+		subscribed[m[1]] = true
+	}
+	// And the other direction: an event the mapping answers to that nobody
+	// subscribes to is a state a run silently never reaches. Dropping the
+	// tool_approval_requested line alone would cost pi and omp runs
+	// "waiting for your permission" with every other test still passing.
+	want := []string{
+		"before_agent_start", "agent_start", "tool_call", "tool_execution_start",
+		"tool_execution_end", "tool_approval_requested", "tool_approval_resolved",
+		"message_end", "agent_settled", "agent_end",
+	}
+	for _, event := range want {
+		if _, ok := FromPiEvent(event, ""); !ok {
+			t.Errorf("the mapping ignores %s, which this test calls mapped", event)
+		}
+		if !subscribed[event] {
+			t.Errorf("%s never subscribes to %s, which the mapping answers to", PiExtensionName, event)
+		}
+	}
+	if len(subscribed) != len(want) {
+		t.Errorf("%s subscribes to %d events, want exactly the %d the mapping answers to",
+			PiExtensionName, len(subscribed), len(want))
 	}
 	// The reporter is spawned by absolute path: nothing puts the staged
 	// binary on the agent's PATH.
