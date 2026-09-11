@@ -268,7 +268,9 @@ func (s *session) reconcileLocked(force bool) {
 // always apply the newest geometry, so concurrent reconciles coalesce and
 // never apply stale sizes, and the clients are told in that same order;
 // each call is bounded by resizeTimeout so a hung runtime cannot wedge the
-// session.
+// session. A resize the runtime refuses or takes too long to answer tells
+// nobody: the PTY is not that size, so a follower would be drawing at a
+// geometry that exists only here.
 func (s *session) applyResize() {
 	s.resizeMu.Lock()
 	defer s.resizeMu.Unlock()
@@ -285,11 +287,13 @@ func (s *session) applyResize() {
 	if rows > 1 {
 		_ = s.att.Resize(ctx, cols, rows-1)
 	}
-	_ = s.att.Resize(ctx, cols, rows)
+	applied := s.att.Resize(ctx, cols, rows) == nil
 	s.mu.Lock()
 	s.paintQuietUntil = time.Now().Add(paintQuiet)
 	var followers []*client
-	if s.geoTold != [2]uint{cols, rows} {
+	// Left unrecorded, a size that failed is told the next time it is
+	// reconciled rather than suppressed as already sent.
+	if applied && s.geoTold != [2]uint{cols, rows} {
 		s.geoTold = [2]uint{cols, rows}
 		for c := range s.clients {
 			// Only a follower redraws at someone else's geometry; a

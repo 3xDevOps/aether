@@ -48,7 +48,10 @@ type fakeAtt struct {
 
 	mu      sync.Mutex
 	resizes [][2]uint
-	closed  bool
+	// resizeErr is what the runtime answers a resize with: a Docker
+	// daemon that refuses one, or takes longer than resizeTimeout.
+	resizeErr error
+	closed    bool
 }
 
 func newFakeAtt() *fakeAtt {
@@ -66,7 +69,15 @@ func (a *fakeAtt) Resize(_ context.Context, cols, rows uint) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.resizes = append(a.resizes, [2]uint{cols, rows})
-	return nil
+	return a.resizeErr
+}
+
+// refuseResizes makes the runtime answer every resize with err until it is
+// called again with nil.
+func (a *fakeAtt) refuseResizes(err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.resizeErr = err
 }
 
 func (a *fakeAtt) Close() error {
@@ -1517,5 +1528,56 @@ func TestFollowClientStealsNoGeometry(t *testing.T) {
 	waitAttached(t, h, run, 1)
 	if n := len(att.sizeCalls()); n != 5 {
 		t.Fatalf("a following detach resized the session: %d resize calls %v", n, att.sizeCalls())
+	}
+}
+
+// A geometry the runtime refused is not the geometry the PTY has, so a
+// follower must not be told to draw at it - and must be told when the same
+// size is applied for real later.
+func TestFollowerHearsOnlyGeometryTheRuntimeAccepted(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-refused")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	kr, kw := io.Pipe()
+	t.Cleanup(func() { _ = kw.Close() })
+	conn := &followConn{testConn: testConn{r: kr, w: &sink{}}}
+	done := make(chan error, 1)
+	go func() {
+		done <- h.Attach(context.Background(), RunSession(run), AttachClient{
+			Member: "phone", Cols: 40, Rows: 20, Follow: true,
+		}, conn, nil)
+	}()
+	waitAttached(t, h, run, 1)
+	// The session's own size, which the ack reports; no resize was needed
+	// for it, so it is told whatever the runtime does later.
+	waitFor(t, "the follower learns the session geometry", func() bool {
+		return len(conn.told()) == 1 && conn.told()[0] == [2]uint{120, 30}
+	})
+
+	att.refuseResizes(errors.New("docker: resize refused"))
+	desktop := startAttach(t, h, run, "desktop", 132, 43, false)
+	waitFor(t, "the refused resize was attempted", func() bool {
+		return len(att.sizeCalls()) == 3
+	})
+	// Nothing to draw at: the terminal is still whatever it was.
+	time.Sleep(50 * time.Millisecond)
+	if told := conn.told(); len(told) != 1 {
+		t.Fatalf("follower was told %v, want only the geometry the runtime accepted", told)
+	}
+
+	att.refuseResizes(nil)
+	desktop.resize <- [2]uint{100, 30}
+	waitFor(t, "the follower hears the geometry that took", func() bool {
+		told := conn.told()
+		return len(told) == 2 && told[1] == [2]uint{100, 30}
+	})
+
+	_ = kw.Close()
+	if err := <-done; err != nil {
+		t.Fatalf("follower attach: %v", err)
 	}
 }
