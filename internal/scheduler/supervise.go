@@ -167,13 +167,16 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		s.mu.Lock()
 		if s.runs[e.runID] == e && !e.paused {
 			waiting := e.agentState == agentstatus.Waiting
+			// A run whose harness reports both ends of a turn and has said
+			// it is waiting is released by the agent's own next report, not
+			// by anything on the terminal.
+			heldForTheMember := waiting && e.reporter == harness.ReporterFull
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold && !waiting:
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
 					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
-			case e.status == domain.RunNeedsAttention && idle <= s.cfg.StallThreshold &&
-				!(waiting && e.reporter == harness.ReporterFull):
+			case e.status == domain.RunNeedsAttention && idle <= s.cfg.StallThreshold && !heldForTheMember:
 				// The run goes back to being judged on silence alone, so
 				// the next quiet threshold parks it as a stall again.
 				e.agentState = ""
