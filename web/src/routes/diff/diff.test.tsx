@@ -63,6 +63,9 @@ function seed(diff?: Partial<RunDiffState>) {
     runs: { [active.id]: toRecord(active), [peerRun.id]: toRecord(peerRun) },
     diffs: diff ? { [active.id]: { ...initialDiff, ...diff } } : {},
     overlaps: {},
+    // A stored view preference, so each test starts with the toggle back on
+    // the pointer default rather than on whatever the last one chose.
+    diffWrap: null,
     route: { name: 'diff', params: { runId: active.id } },
     hydrated: true,
   })
@@ -447,6 +450,23 @@ test('a conflict chip names the file and the member and opens their run', async 
   })
 })
 
+// A tooltip is a hint for a pointer. A finger cannot open one, so the fact it
+// carries - which files two runs are both changing - has to be on the page.
+test('a conflict chip writes its file list out on a coarse pointer', () => {
+  atViewport(390, { pointer: 'coarse' })
+  seed({ status: 'ready', patch })
+  useStore.setState({
+    overlaps: {
+      [active.id]: [{ run_id: peerRun.id, member_id: bob.id, files: ['cmd/main.go', 'go.mod'] }],
+    },
+  })
+  render(<ConflictChips run={useStore.getState().runs[active.id]} />)
+
+  expect(
+    screen.getByText('cmd/main.go go.mod - also being changed by Bob'),
+  ).toBeTruthy()
+})
+
 // The Diff tab hands an unknown run to the shared component rather than
 // rendering a dead end of its own.
 it('sends an unknown run to the shared missing-run view', () => {
@@ -459,9 +479,19 @@ it('sends an unknown run to the shared missing-run view', () => {
 })
 
 // The list starts empty on every page load and fills as the run works, so an
-// empty one is the normal state - and on a stacked layout it would be 208px
-// of nothing between the header and the first line of the patch.
-test('no snapshots means no timeline at all', async () => {
+// empty one is the normal state. Beside the patch it says so, because nothing
+// else explains why there is nothing to pick; above the patch that notice is
+// two lines between the header and the first line of code.
+test('an empty timeline explains itself beside the patch and goes above it', async () => {
+  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
+  const { unmount } = renderDiff()
+
+  expect(await screen.findByText('cmd/main.go')).toBeTruthy()
+  expect(screen.getByText('Change intervals')).toBeTruthy()
+  expect(screen.getByText('Nothing since you opened the dashboard.')).toBeTruthy()
+  unmount()
+
+  atViewport(390, { pointer: 'coarse' })
   seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
   renderDiff()
 
@@ -511,4 +541,21 @@ test('a coarse pointer wraps long lines until the toggle says otherwise', async 
   await waitFor(() => expect(toggle.getAttribute('aria-pressed')).toBe('false'))
   expect(screen.getByText('+new line').className).toContain('whitespace-pre')
   expect(screen.getByText('+new line').className).not.toContain('whitespace-pre-wrap')
+})
+
+// Only one run-detail route is mounted at a time, so a toggle kept in the
+// view's own state would go back to the pointer default every time the member
+// tapped Terminal and came back - several times a minute on a phone.
+test('the wrap choice outlives the tab it was made in', async () => {
+  atViewport(390, { pointer: 'coarse' })
+  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
+  const first = renderDiff()
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Wrap lines' }))
+  await waitFor(() => expect(useStore.getState().diffWrap).toBe(false))
+  first.unmount()
+
+  renderDiff()
+  const toggle = await screen.findByRole('button', { name: 'Wrap lines' })
+  expect(toggle.getAttribute('aria-pressed')).toBe('false')
 })

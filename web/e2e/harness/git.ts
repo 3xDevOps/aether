@@ -9,6 +9,14 @@ import { promisify } from 'node:util'
 const run = promisify(execFile)
 
 /**
+ * A diff line wider than any viewport the suite drives, so the Diff tab's
+ * wrap toggle has something to act on: a patch of short lines looks the same
+ * wrapped and unwrapped. Repeated here rather than in the shell script, so
+ * the agent needs no `seq` in whatever image the run lands on.
+ */
+const wideLine = `wide-line-${'x'.repeat(400)}`
+
+/**
  * The deterministic agent the `fake` harness runs, committed to the seed
  * repository the way the Go integration suite commits it. The leading sleep
  * keeps its first output behind the supervisor's attach point.
@@ -16,6 +24,7 @@ const run = promisify(execFile)
 const agentScript = `sleep 1
 echo agent-ready
 printf 'hello-from-agent\\n' > result.txt
+printf '${wideLine}\\n' >> result.txt
 `
 
 /** git with a fixed identity, so a fresh HOME needs no gitconfig. */

@@ -4,6 +4,8 @@
 // one Actions menu - so a menu that did not open, or opened items too small
 // to hit, would leave a phone with no verbs at all.
 
+import type { Locator } from '@playwright/test'
+
 import { dockerReachable } from './harness/server'
 import { seedWorkspace } from './harness/setup'
 import { expect, test } from './mobile'
@@ -67,13 +69,22 @@ test('a phone steers a run from the Actions menu and reads its diff', async ({
   }).toPass({ timeout: 60 * 1000 })
 
   // Nothing stands between the header and the first line of the patch: with
-  // no snapshots there is no interval list, and on a coarse pointer long
-  // lines wrap rather than scrolling each file section sideways.
+  // no snapshots there is no interval list below `md`.
   await expect(page.getByText('result.txt')).toBeInViewport()
   await expect(page.getByText('+hello-from-agent')).toBeVisible()
-  const overflow = await page.evaluate(
-    () =>
-      document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  )
-  expect(overflow).toBe(0)
+
+  // The page itself can never scroll sideways - the patch column is
+  // `overflow-x-hidden` and each file section clips - so wrapping is only
+  // observable on the scroller inside the file section. The fixture commits
+  // one line far wider than the viewport for this.
+  const scroller = page.locator('section:has-text("result.txt") pre').locator('..')
+  expect(await overflowOf(scroller)).toBe(0)
+
+  await page.getByRole('button', { name: 'Wrap lines' }).tap()
+  await expect.poll(() => overflowOf(scroller)).toBeGreaterThan(0)
 })
+
+/** How much of the element's content its own box cannot show sideways. */
+function overflowOf(scroller: Locator): Promise<number> {
+  return scroller.evaluate((el) => el.scrollWidth - el.clientWidth)
+}

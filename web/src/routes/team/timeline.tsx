@@ -19,17 +19,13 @@ import {
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { eventLabel, type EventType } from '@/lib/events'
-import { useMediaQuery } from '@/lib/hooks'
+import { belowSm, useMediaQuery } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import type { RouteProps } from '@/routes/registry'
 import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
-
-/** Tailwind's `sm`, asked from JavaScript: the width below which the filter
- * bar stops being a row of selects and becomes a disclosure. */
-const belowSm = '(max-width: 639px)'
 
 /** The event types worth offering as a filter; empty means everything. */
 const filterTypes: EventType[] = [
@@ -70,7 +66,7 @@ export function TimelineStatus() {
             }}
             className={cn(
               focusRing,
-              'flex h-[22px] min-h-[22px] shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
+              'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
             )}
           >
             <History className="size-3.5" aria-hidden />
@@ -196,7 +192,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
             <CollapsibleContent className="grid gap-2">{otherFilters}</CollapsibleContent>
           </Collapsible>
         ) : (
-          <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-4">
             {workspaceFilter}
             {otherFilters}
           </div>

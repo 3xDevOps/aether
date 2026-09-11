@@ -11,7 +11,7 @@ import {
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import { api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
-import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { belowMd, coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { Land } from '@/routes/diff/land'
@@ -29,10 +29,6 @@ import {
   type RunDiffState,
 } from '@/store/diff'
 
-/** Tailwind's `md`, asked from JavaScript: the width at which the tab stops
- * putting the timeline beside the patch and starts putting it above. */
-const belowMd = '(max-width: 767px)'
-
 /**
  * The run-detail Diff tab: the run's current diff against its fork point,
  * plus the times its files changed. The server records a git tree per
@@ -48,9 +44,12 @@ function DiffView({ params }: RouteProps) {
   // Keyed on the snapshot's time, not its index: new snapshots are prepended,
   // so an index would silently retarget whenever one arrived.
   const [selected, setSelected] = useState<string | null>(null)
-  // Null until the member says otherwise, so the default follows the pointer
-  // rather than being frozen at whatever it was on the first render.
-  const [wrapping, setWrapping] = useState<boolean | null>(null)
+  // Null until the member says otherwise, so the default follows the pointer;
+  // the choice itself lives on the UI slice, because only one run-detail
+  // route is mounted at a time and component state would forget it on every
+  // trip to the Terminal tab.
+  const wrapping = useStore((s) => s.diffWrap)
+  const setWrapping = useStore((s) => s.setDiffWrap)
   const coarse = useMediaQuery(coarsePointer)
   // The timeline sits above the patch once the grid stacks, so below `md` it
   // is a disclosure rather than 208px of chrome before the first line.
@@ -71,6 +70,11 @@ function DiffView({ params }: RouteProps) {
   const failed = snapshot ? interval?.status === 'error' : state.status === 'error'
   const truncated = snapshot ? (interval?.truncated ?? false) : state.truncated
   const note = emptyNote(snapshot, interval, state)
+  // Beside the patch an empty list is worth its own notice: it is the only
+  // thing that says why there are no intervals. Above the patch that notice
+  // is two lines between the member and the first line of code, so there an
+  // empty list is nothing at all.
+  const hidden = stacked && state.snapshots.length === 0
 
   if (!run) {
     return <MissingRun />
@@ -167,13 +171,10 @@ function DiffView({ params }: RouteProps) {
         <div
           className={cn(
             'grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden',
-            state.snapshots.length > 0 && 'md:grid-cols-[14rem_minmax(0,1fr)]',
+            !hidden && 'md:grid-cols-[14rem_minmax(0,1fr)]',
           )}
         >
-          {/* Nothing to select is nothing to show: the list starts empty on
-              every page load, so an empty one is the normal state and not
-              worth a panel. */}
-          {state.snapshots.length > 0 && (
+          {!hidden && (
             <Timeline
               snapshots={state.snapshots}
               selected={selected}
@@ -317,7 +318,9 @@ function Timeline({
       <div className="sticky top-0 z-10 min-h-[35px] border-b bg-sidebar px-3 py-2">
         <h2 className="text-[12px] font-medium text-foreground">Change intervals</h2>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          Select an interval to review what changed.
+          {snapshots.length === 0
+            ? 'Nothing since you opened the dashboard.'
+            : 'Select an interval to review what changed.'}
         </p>
       </div>
       {rows}

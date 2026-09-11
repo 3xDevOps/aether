@@ -366,10 +366,12 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 A layout that only changes size belongs in CSS. The ones that mount
 different elements for a finger than for a mouse - the run header's menu, the
 diff timeline's disclosure, the activity filter bar - ask `useMediaQuery` in
-`src/lib/hooks.ts` instead, with `coarsePointer` and `phoneScreen` as the two
-named queries. `coarsePointer` is the CSS variant below, asked from
-JavaScript, so the two cannot disagree; `phoneScreen` narrows it to a screen
-640px or smaller.
+`src/lib/hooks.ts` instead. Every edge it asks about is a named constant in
+that file and nowhere else: `coarsePointer` is the CSS variant below asked
+from JavaScript, `belowSm` and `belowMd` are Tailwind's own 640px and 768px
+a pixel short, and `phoneScreen` is a coarse pointer below `sm`. A layout
+that stacks in CSS and a layout that stacks in JavaScript cannot then
+disagree about where.
 
 **Touch density is one variant, defined once.** `src/index.css` declares
 `@custom-variant coarse (@media (pointer: coarse))`, and a control that a
@@ -429,7 +431,7 @@ inside itself. `sm` is a width breakpoint, so a desktop window narrower than
 - **The board's environment dock is not mounted on a phone.** Forwarding a
   port, saving the member environment and resetting it are desktop setup, and
   the expanded dock is a full terminal over the board. The `phoneScreen`
-  query - a coarse pointer on a screen 640px or narrower - is what decides.
+  query - a coarse pointer on a screen narrower than `sm` - is what decides.
 - **The board** uses one column on narrow screens and three columns from the
   `lg`/1024px breakpoint, with compact flat run cards and vertical scrolling on
   small screens. State labels remain visible; empty, loading and error panels
@@ -1242,9 +1244,13 @@ both what it renders and the overlap set the conflict chips read.
   from `md` up it is a list. Below that it sits above the patch, where the
   header, the tabs, Land, the stats row and the local-review block are
   already between the member and the first line of code, so it becomes a
-  disclosure that starts closed. With no snapshots there is no timeline at
-  all and the grid is one column: the list starts empty on every page load
-  and fills as the run works, so empty is the normal state.
+  disclosure that starts closed. With no snapshots the stacked layout drops
+  it entirely and the grid is one column, because two lines saying the list
+  is empty are two lines of the phone's screen; beside the patch it stays,
+  and says "Nothing since you opened the dashboard." - there it is the only
+  thing that explains why there are no intervals to pick. The list starts
+  empty on every page load and fills as the run works, so empty is the
+  normal state either way.
 - **Colour is the whole of the highlighting.** `parse.ts` splits the unified
   diff into files, hunks and line kinds; `patch-view.tsx` paints those kinds.
   The dashboard never edits code, so there is no editor and no language
@@ -1255,9 +1261,11 @@ both what it renders and the overlap set the conflict chips read.
   breaks the column alignment a diff is read by, and side-scrolling means
   panning every file section separately - which a phone cannot do well. So
   **Wrap lines** in the stats row is a toggle, starting on for a coarse
-  pointer and off for a mouse, and the member's choice holds from then on.
-  The Files tab's diff pane has no toolbar to put a toggle in, so there the
-  pointer decides outright.
+  pointer and off for a mouse. The choice itself is a view preference on the
+  UI slice (`diffWrap`), stored like the sidebar width, because only one
+  run-detail route is mounted at a time and component state would forget it
+  on every trip to the Terminal tab. The Files tab's diff pane has no toolbar
+  to put a toggle in, so there the pointer decides outright.
 - **The verbs are not here, the answers are.** The tab keeps what is only
   about reading the diff - the refresh, the snapshot list, the two copyable
   `git` commands that review the run branch in the linked repository, and the
@@ -1269,6 +1277,11 @@ both what it renders and the overlap set the conflict chips read.
   whole block is gated on the `pull` local verb, the same one that fetches
   into the repository it explains: a gateway without it - a phone on the
   server's dashboard - has no repository for those commands to run in.
+- **Conflict chips write their list out for a finger.** The overlapping file
+  names live in the chip's hover tooltip, which a touch screen has no way to
+  open, so on a coarse pointer the same list is rendered as visible text
+  beside the chip. A tooltip is a hint for a pointer, never the only copy of
+  a fact.
 - **Conflict chips are advisory.** `conflict-chips.tsx` registers into
   `card:chips` and the Diff tab renders the same component in its header. It
   reads the overlap set the conflict radar reports (`run.overlaps` at
@@ -1407,9 +1420,10 @@ refusals stay verbatim.
 identity, Workspace, Repository, Agents, First run. It renders only where the
 gateway serves the client-machine verbs (the capability descriptor lists
 `link.status`); a gateway without them gets an explanatory empty state
-instead of a broken wizard, and that copy names the situation a member is
-actually in - looking at Aether from another device - rather than describing
-the gateway to them. Link, Workspace and First run live in `steps.tsx`; Repository
+instead of a broken wizard. That copy names the gateway and what it cannot
+reach - an SSH identity, a repository on the member's own computer - rather
+than guessing at the device in the member's hand, which the app has no way
+to know. Link, Workspace and First run live in `steps.tsx`; Repository
 is `repo-step.tsx`, Git identity is `git-identity-step.tsx`, and Agents is
 `agents-step.tsx` with its GitHub part in `github-connect.tsx` and its
 configuration import in `profile-import.tsx`.
@@ -1975,7 +1989,8 @@ apart sits at the top rather than the middle, and that the launch form keeps
 its footer on screen on a viewport as short as a keyboard leaves, and
 `toast-clearance.mobile` checks that a toast comes to rest above the status
 bar rather than on top of it, and `run-views.mobile` steers a real run from
-the header's Actions menu and then reads its diff. `sidebar-drawer` stays on the desktop project,
+the header's Actions menu and then reads its diff. `sidebar-drawer` stays on
+the desktop project,
 because the keyboard contract it pins - `Mod+B` closing the drawer and the
 palette coming back once it is gone - needs a narrow window with a keyboard
 rather than a phone. `board-card`, `run-switch`, `run-attach-retry`,
