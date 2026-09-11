@@ -68,6 +68,8 @@ type session struct {
 	done            chan struct{}
 	title           titleScanner
 	onTitle         func(string)
+	activity        Activity
+	staleSince      time.Time
 
 	// pendingEcho is the echo the terminal still owes for input the server
 	// wrote to the agent - an injected line, or a member's keystrokes. The
@@ -107,14 +109,41 @@ func (s *session) deliver(p []byte) {
 	// Viewers, the transcript and the title scanner get every byte; only
 	// the liveness clock discounts the terminal's echo of what the server
 	// wrote, and a repaint provoked by our own resize nudge.
-	if s.consumeEcho(p, now) && now.After(s.paintQuietUntil) {
+	agentOutput := s.consumeEcho(p, now) && now.After(s.paintQuietUntil)
+	if agentOutput {
 		s.lastOut = now
 	}
-	s.title.scan(p, s.onTitle)
+	titleObserved := false
+	titleLiveness := now.After(s.paintQuietUntil)
+	s.title.scanWithObserver(p, func(title string) {
+		titleObserved = true
+		s.observeTitle(title, now, titleLiveness)
+	}, s.onTitle)
+	// A stale clear is meaningful only after a working title has been
+	// followed by actual, title-less agent output. Silence alone never arms it.
+	if agentOutput && !titleObserved && s.activity.State == ActivityWorking {
+		s.staleSince = now
+	}
 	s.ring.write(p)
 	s.tr.output(p)
 	for c := range s.clients {
 		c.enqueue(p)
+	}
+}
+
+func (s *session) observeTitle(title string, observedAt time.Time, advanceLiveness bool) {
+	// Every complete title cancels a pending stale clear, including a duplicate
+	// title that the display callback deliberately suppresses.
+	s.staleSince = time.Time{}
+	state, ok := classifyTitle(title)
+	if ok {
+		next := Activity{State: state, ObservedAt: observedAt}
+		// Resize-triggered repaint titles are semantic heartbeats only for
+		// stale-clear cancellation; they must not reset the long stall clock.
+		if state == s.activity.State && !advanceLiveness {
+			next.ObservedAt = s.activity.ObservedAt
+		}
+		s.activity = next
 	}
 }
 
@@ -148,9 +177,10 @@ func (s *session) stop() {
 		c.close(nil)
 	}
 	// The sessions map keeps stopped entries (idempotent StopSession), so
-	// release the replay buffer and client set to bound long-term memory.
+	// release replay and title state to bound long-term memory.
 	s.ring = nil
 	s.clients = nil
+	s.staleSince = time.Time{}
 	if !s.ended {
 		close(s.done)
 	}

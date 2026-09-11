@@ -82,9 +82,13 @@ stdin write succeeds and renders the attribution without terminal control
 bytes.
 
 Only `claude` has a **structured-output adapter** today, so its headless runs
-produce typed tool-call and token events. Everything else degrades to the PTY
-transcript plus the diff timeline, which is always enough. Adding an adapter is
-[adapters.md](adapters.md).
+produce typed tool-call and token events. Other harnesses retain their PTY
+transcript and diff timeline. Native terminal titles also drive live run
+status, including Pi/OMP's working, idle, and input-required markers, without
+an adapter or additional launch flags. See
+[failure-handling.md](failure-handling.md#agent-waiting-for-input) for status
+detection and its silence fallback; see [adapters.md](adapters.md) to add
+structured events.
 
 ## How Aether launches them
 

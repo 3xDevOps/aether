@@ -738,10 +738,12 @@ type fakePTY struct {
 type fakePTYSession struct {
 	att runtime.Attachment
 
-	mu    sync.Mutex
-	out   bytes.Buffer
-	last  time.Time
-	ended bool
+	mu       sync.Mutex
+	out      bytes.Buffer
+	last     time.Time
+	activity ptyhost.Activity
+	ended    bool
+	stopped  bool
 }
 
 type fakeInject struct {
@@ -783,7 +785,6 @@ func (p *fakePTY) StartSession(_ context.Context, key ptyhost.SessionKey, att ru
 	}()
 	return nil
 }
-
 func (p *fakePTY) StopSession(_ context.Context, key ptyhost.SessionKey) error {
 	p.mu.Lock()
 	sess, ok := p.sessions[key]
@@ -791,6 +792,9 @@ func (p *fakePTY) StopSession(_ context.Context, key ptyhost.SessionKey) error {
 	if !ok {
 		return errFakeNoSession
 	}
+	sess.mu.Lock()
+	sess.stopped = true
+	sess.mu.Unlock()
 	return sess.att.Close()
 }
 
@@ -827,6 +831,9 @@ func (p *fakePTY) StopSessionsWithPrefix(_ context.Context, prefix string) {
 	}
 	p.mu.Unlock()
 	for _, sess := range sessions {
+		sess.mu.Lock()
+		sess.stopped = true
+		sess.mu.Unlock()
 		_ = sess.att.Close()
 	}
 }
@@ -845,8 +852,40 @@ func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	sess.mu.Lock()
+
 	defer sess.mu.Unlock()
 	return sess.last, true
+}
+
+func (p *fakePTY) AgentActivity(key ptyhost.SessionKey) (ptyhost.Activity, bool) {
+	p.mu.Lock()
+	sess, ok := p.sessions[key]
+	p.mu.Unlock()
+	if !ok {
+		return ptyhost.Activity{}, false
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if sess.stopped {
+		return ptyhost.Activity{}, false
+	}
+	return sess.activity, true
+}
+
+func (p *fakePTY) setActivity(run domain.RunID, state ptyhost.ActivityState, stale bool) {
+	p.mu.Lock()
+	sess := p.sessions[ptyhost.RunSession(run)]
+	p.mu.Unlock()
+	if sess == nil {
+		return
+	}
+	sess.mu.Lock()
+	sess.activity = ptyhost.Activity{
+		State:      state,
+		ObservedAt: time.Now().UTC(),
+		Stale:      stale,
+	}
+	sess.mu.Unlock()
 }
 
 func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error {

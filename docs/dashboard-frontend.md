@@ -408,8 +408,11 @@ be an invention.
 
 `src/routes/board/` is the default center view: the active workspace's run
 cards in the three buckets the GUI spec copies from Orca. `needs-attention` is
-Needs You for a live stalled run, `queued`/`provisioning`/`running` is Working,
-and `completed` plus the final statuses are Done. An active run whose approval
+Needs You for a live idle, blocked, or stalled run;
+`queued`/`provisioning`/`running` is Working, and `completed` plus the final
+statuses are Done. Native title detection happens on the server, not in the
+browser; see [failure-handling.md](failure-handling.md#agent-waiting-for-input).
+An active run whose approval
 request is still pending also presents as needs-attention on the board and in
 the sidebar - the pause is invisible in the domain status, so `runState` takes
 a pending flag fed from the approval inbox. Cards sort by last state change,
@@ -463,7 +466,7 @@ Two things the buckets do not come from the run status alone:
 **The Needs you reason survives a fetch.** `protocol.Run` carries `reason` -
 the last `run.status` reason, persisted with the run and sanitized
 server-side - so a run that was already in needs-attention when the tab
-loaded shows its live-stall reason. `toRecord` in `src/store/runs.ts` prefers
+loaded shows its waiting, blocked, or stall reason. `toRecord` in `src/store/runs.ts` prefers
 the wire reason and falls back to the previously stored one only when the
 fetch omits it and the status has not changed (a legacy gateway); a live
 `run.status` event still overwrites it with the event payload's reason. An

@@ -14,7 +14,7 @@ means "use the default"; a negative value turns a guard off.
 | Flag | Default | What it controls |
 | --- | --- | --- |
 | `--stall-threshold` | `10m` | How long a run may go with no agent output and no file changes before it parks at needs-attention. |
-| `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
+| `--poll-interval` | `30s` | How often silence stalls and their recovery are checked. Native title activity is checked separately every second. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
 
@@ -24,9 +24,9 @@ scheduler.
 
 ### Picking a stall threshold
 
-The threshold is a bet about the longest legitimate silence. An agent
-thinking, compiling, or waiting on a slow tool call produces no PTY output
-and touches no files, and there is no way to tell that apart from a hang.
+The threshold is a bet about the longest legitimate silence. Without a
+recognized native status title, an agent thinking, compiling, or waiting on
+a slow tool call can look the same as a hang.
 
 - **Too low** and long tool calls park healthy runs, which trains people to
   ignore the badge.
@@ -175,6 +175,27 @@ working, which is what you need to actually clear space.
 
 If the filesystem cannot be read at all, the floor allows the run: the guard
 exists to stop a disk from filling, not to stop the server.
+
+### Agent waiting for input
+
+Aether reads native terminal status titles on the server, using the
+[Orca title detector](https://github.com/stablyai/orca/tree/2ecde717b4561cae1701a27615f704434232399a/src/shared)
+ported into `internal/ptyhost`. It recognizes Pi/OMP's `π :` (working),
+`π >` (idle), and `π !` (input required), along with supported animated and
+named agent titles. No browser attachment or structured-output adapter is
+required.
+
+An idle or blocked title puts the live run in `needs-attention` on the next
+one-second check, with a reason distinguishing waiting for input from being
+blocked. The container stays alive: attach or use `aether inject <run> "..."`.
+A new working title returns it to `running`. Ordinary output, file changes,
+and steering echoes do not clear an explicit waiting state.
+
+Orca's stale-working fallback also applies: after a working title, output
+without another title followed by three quiet seconds parks the run with
+`agent activity stale; no title or output for 3s`. This is uncertain activity,
+not proof that the response finished. Silence alone does not arm this
+three-second fallback; the longer stall guard below still applies.
 
 ### Agent stall or crash
 

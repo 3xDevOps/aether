@@ -39,7 +39,7 @@ type Config struct {
 	DefaultCols   uint      // 120
 	DefaultRows   uint      // 30
 	Gate          WriteGate // nil = allow
-	// OnTitle is declared for the title scanner and never called yet.
+	// OnTitle receives deduplicated display-title observations.
 	OnTitle func(key SessionKey, title string)
 	// OnInput reports that member typed into the session, at most once per
 	// write attach and only after the keystrokes reached the PTY. Bytes a
@@ -246,6 +246,17 @@ func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return s.lastOutput()
+}
+
+// AgentActivity reports the latest recognized semantic title state. A session
+// that has ended remains queryable until StopSession; stopped or missing
+// sessions return false. Fresh sessions report ActivityUnknown.
+func (h *Host) AgentActivity(key SessionKey) (Activity, bool) {
+	s := h.lookup(key)
+	if s == nil {
+		return Activity{}, false
+	}
+	return s.agentActivity(time.Now())
 }
 
 // Replay streams the run's recorded terminal output exactly as the agent

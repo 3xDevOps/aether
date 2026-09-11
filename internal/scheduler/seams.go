@@ -29,5 +29,9 @@ type PTYHost interface {
 	StopSessionsWithPrefix(ctx context.Context, prefix string)
 	ActiveSessions(prefix string) []ptyhost.SessionKey
 	LastOutput(key ptyhost.SessionKey) (time.Time, bool)
+	// AgentActivity returns the latest native title state. A missing or
+	// stopped session is reported with ok=false; a fresh session may return
+	// ActivityUnknown while its first title is still pending.
+	AgentActivity(key ptyhost.SessionKey) (ptyhost.Activity, bool)
 	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error
 }

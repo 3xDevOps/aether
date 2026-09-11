@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -162,6 +163,58 @@ func TestStallAndActivityResume(t *testing.T) {
 		t.Fatalf("resume reason = %q", p.Reason)
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+}
+
+func TestNativeActivityOverridesGenericLiveness(t *testing.T) {
+	e := newTestEnv(t, nil)
+	sub := e.subscribe(t)
+	run, c := e.launchFake(t, "native state")
+
+	e.pty.setActivity(run.ID, ptyhost.ActivityIdle, false)
+	e.sched.checkNativeActivity(t.Context())
+	idle := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	if got := idle.Payload.(events.RunStatusPayload).Reason; got != nativeIdleReason {
+		t.Fatalf("idle reason = %q, want %q", got, nativeIdleReason)
+	}
+
+	// Generic output and file activity cannot clear an explicit native idle.
+	c.output("repaint and answer\r\n")
+	e.git.touch(run.ID)
+	e.sched.checkStalls(t.Context())
+	stored := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if stored.Status != domain.RunNeedsAttention {
+		t.Fatalf("native idle was cleared by generic activity: %s", stored.Status)
+	}
+
+	e.pty.setActivity(run.ID, ptyhost.ActivityBlocked, false)
+	e.sched.checkNativeActivity(t.Context())
+	blocked := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	if got := blocked.Payload.(events.RunStatusPayload).Reason; got != nativeBlockedReason {
+		t.Fatalf("blocked reason = %q, want %q", got, nativeBlockedReason)
+	}
+
+	e.pty.setActivity(run.ID, ptyhost.ActivityWorking, false)
+	e.sched.checkNativeActivity(t.Context())
+	resumed := waitStatusEvent(t, sub, run.ID, domain.RunRunning)
+	if got := resumed.Payload.(events.RunStatusPayload).Reason; got != "activity resumed" {
+		t.Fatalf("working resume reason = %q", got)
+	}
+}
+
+func TestStaleNativeActivityIsUncertain(t *testing.T) {
+	e := newTestEnv(t, nil)
+	sub := e.subscribe(t)
+	run, _ := e.launchFake(t, "stale native state")
+
+	e.pty.setActivity(run.ID, ptyhost.ActivityIdle, true)
+	e.sched.checkNativeActivity(t.Context())
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	if got := ev.Payload.(events.RunStatusPayload).Reason; got != nativeStaleReason {
+		t.Fatalf("stale reason = %q, want %q", got, nativeStaleReason)
+	}
+	if got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention).Status; got != domain.RunNeedsAttention {
+		t.Fatalf("stale activity status = %s, want needs-attention", got)
+	}
 }
 
 func TestFileChangeCountsAsActivity(t *testing.T) {

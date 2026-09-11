@@ -27,6 +27,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -44,6 +45,11 @@ var ErrDiskFull = errors.New("scheduler: not enough free disk space to start a n
 // for the checkout, the container's writes and the event log a new run is
 // about to produce.
 const DefaultMinFreeBytes = 1 << 30
+
+// nativeActivityPollInterval bounds how long a native title state can wait
+// before the scheduler consumes it. It is deliberately independent of the
+// ordinary stall/update cadence.
+const nativeActivityPollInterval = time.Second
 
 // Config wires the scheduler's dependencies and tuning knobs.
 type Config struct {
@@ -192,7 +198,13 @@ type supervised struct {
 	paused        bool
 	killRequested bool
 	killActor     domain.MemberID
-	done          chan struct{}
+	// nativeActivity records the latest semantic title observation consumed
+	// by the scheduler. The timestamp lets a newly observed working title
+	// resume a run without letting an old working title defeat the stall guard.
+	nativeActivity      ptyhost.ActivityState
+	nativeObservedAt    time.Time
+	nativeActivityStale bool
+	done                chan struct{}
 	// runUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root (no ownership pass). Set once
 	// the user is resolved during provisioning, or from the sidecar on
@@ -334,9 +346,9 @@ func New(cfg Config) (*Scheduler, error) {
 	}, nil
 }
 
-// Start performs reboot recovery, then drives the stall-detection and
-// checkout-GC loops until ctx is done or Close is called. Shutting down
-// never stops containers; supervision simply ends.
+// Start performs reboot recovery, then drives native title activity,
+// stall-detection, and checkout-GC loops until ctx is done or Close is
+// called. Shutting down never stops containers; supervision simply ends.
 func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.recoverRuns(ctx); err != nil {
 		return err
@@ -344,6 +356,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.recoverTerminals(ctx); err != nil {
 		return err
 	}
+	activity := time.NewTicker(nativeActivityPollInterval)
+	defer activity.Stop()
 	stall := time.NewTicker(s.cfg.PollInterval)
 	defer stall.Stop()
 	var gcC <-chan time.Time
@@ -360,6 +374,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-s.superCtx.Done():
 			return nil
+		case <-activity.C:
+			s.checkNativeActivity(ctx)
 		case <-stall.C:
 			s.checkStalls(ctx)
 			s.tickUpdates(ctx)

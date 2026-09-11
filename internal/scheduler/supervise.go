@@ -17,6 +17,12 @@ import (
 // runs.
 const finalizeTimeout = time.Minute
 
+const (
+	nativeIdleReason    = "agent waiting for input"
+	nativeBlockedReason = "agent blocked"
+	nativeStaleReason   = "agent activity stale; no title or output for 3s"
+)
+
 // superviseWait blocks on the container's main process and finalizes the
 // run when it exits. Supervision-context cancellation (Close / server
 // shutdown) ends supervision without touching the container or the run.
@@ -122,13 +128,23 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 
 }
 
+// Native activity is sampled more often than the ordinary stall/update poll.
+// The two paths share this reader and transition writer so title states cannot
+// be cleared by raw PTY output, steering echoes, or file changes.
+func (s *Scheduler) checkNativeActivity(ctx context.Context) {
+	s.checkActivity(ctx, false)
+}
+
 // checkStalls implements §6.7: a running, non-paused run with no PTY
 // output and no file changes past StallThreshold parks at needs-attention;
 // a stalled-but-alive run whose activity refreshes returns to running.
-// PTY output is what the agent wrote: a steer's banner, and the terminal's
-// echo of anything written to the agent's input, are the server's, so only
-// the agent's own answer clears a stall.
+// Explicit native idle/blocked states are authoritative and skip this
+// generic liveness path.
 func (s *Scheduler) checkStalls(ctx context.Context) {
+	s.checkActivity(ctx, true)
+}
+
+func (s *Scheduler) checkActivity(ctx context.Context, includeStall bool) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0, len(s.runs))
 	for _, e := range s.runs {
@@ -140,36 +156,132 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 	for _, e := range entries {
 		s.mu.Lock()
 		live := s.runs[e.runID] == e
-		paused, status, started := e.paused, e.status, e.startedAt
+		paused := e.paused
+		exiting := e.exitObserved || e.killRequested
+		status := e.status
+		started := e.startedAt
 		s.mu.Unlock()
-		if !live || paused || (status != domain.RunRunning && status != domain.RunNeedsAttention) {
+		if !live || paused || exiting ||
+			(status != domain.RunRunning && status != domain.RunNeedsAttention) {
 			continue
 		}
-		activity := started
-		if t, ok := s.cfg.PTY.LastOutput(ptyhost.RunSession(e.runID)); ok && t.After(activity) {
-			activity = t
-		}
-		if t, ok := s.cfg.Git.LastFileChange(e.runID); ok && t.After(activity) {
-			activity = t
-		}
-		idle := now.Sub(activity)
 
-		s.mu.Lock()
-		if s.runs[e.runID] == e && !e.paused {
-			var err error
-			switch {
-			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
-				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
-					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
-			case e.status == domain.RunNeedsAttention && idle <= s.cfg.StallThreshold:
-				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunRunning,
-					"activity resumed", "")
-			}
-			if err != nil {
-				slog.Warn("scheduler: stall transition", "run", e.runID, "error", err)
-			}
+		activity, ok := s.cfg.PTY.AgentActivity(ptyhost.RunSession(e.runID))
+		if !ok {
+			// A stopped PTY is already on the exit/finalization path. Never
+			// infer a status transition from its stale output or files.
+			continue
 		}
-		s.mu.Unlock()
+		if activity.State == ptyhost.ActivityWorking && activity.ObservedAt.After(started) {
+			started = activity.ObservedAt
+		}
+		switch activity.State {
+		case ptyhost.ActivityIdle, ptyhost.ActivityBlocked, ptyhost.ActivityWorking:
+			s.applyNativeActivity(ctx, e, activity)
+			if activity.State != ptyhost.ActivityWorking || !includeStall {
+				continue
+			}
+		case ptyhost.ActivityUnknown:
+			if !includeStall {
+				continue
+			}
+		default:
+			continue
+		}
+		s.applyGenericStall(ctx, e, now, started)
+	}
+}
+
+func (s *Scheduler) applyNativeActivity(ctx context.Context, e *supervised, activity ptyhost.Activity) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs[e.runID] != e || e.paused || e.exitObserved || e.killRequested ||
+		(e.status != domain.RunRunning && e.status != domain.RunNeedsAttention) {
+		return
+	}
+	oldState, oldStale, oldObserved := e.nativeActivity, e.nativeActivityStale, e.nativeObservedAt
+	newObservation := oldState != activity.State ||
+		oldStale != activity.Stale ||
+		activity.ObservedAt.After(oldObserved)
+	record := func() {
+		e.nativeActivity = activity.State
+		e.nativeActivityStale = activity.Stale
+		if activity.ObservedAt.After(oldObserved) {
+			e.nativeObservedAt = activity.ObservedAt
+		}
+	}
+	if !newObservation {
+		return
+	}
+
+	var to domain.RunStatus
+	var reason string
+	switch activity.State {
+	case ptyhost.ActivityWorking:
+		if e.status != domain.RunNeedsAttention {
+			record()
+			return
+		}
+		if activity.ObservedAt.IsZero() && !oldObserved.IsZero() {
+			return
+		}
+		to, reason = domain.RunRunning, "activity resumed"
+	case ptyhost.ActivityIdle:
+		if activity.Stale {
+			reason = nativeStaleReason
+		} else {
+			reason = nativeIdleReason
+		}
+		if e.status == domain.RunRunning {
+			to = domain.RunNeedsAttention
+		} else if oldState != ptyhost.ActivityIdle || oldStale != activity.Stale {
+			to = domain.RunNeedsAttention
+		}
+	case ptyhost.ActivityBlocked:
+		reason = nativeBlockedReason
+		if e.status == domain.RunRunning {
+			to = domain.RunNeedsAttention
+		} else if oldState != ptyhost.ActivityBlocked || oldStale != activity.Stale {
+			to = domain.RunNeedsAttention
+		}
+	}
+	if to == "" {
+		record()
+		return
+	}
+	if err := s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, to, reason, ""); err != nil {
+		slog.Warn("scheduler: native activity transition", "run", e.runID, "error", err)
+		return
+	}
+	record()
+}
+
+func (s *Scheduler) applyGenericStall(ctx context.Context, e *supervised, now, started time.Time) {
+	activity := started
+	if t, ok := s.cfg.PTY.LastOutput(ptyhost.RunSession(e.runID)); ok && t.After(activity) {
+		activity = t
+	}
+	if t, ok := s.cfg.Git.LastFileChange(e.runID); ok && t.After(activity) {
+		activity = t
+	}
+	idle := now.Sub(activity)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs[e.runID] != e || e.paused || e.exitObserved || e.killRequested {
+		return
+	}
+	var err error
+	switch {
+	case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
+		err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
+			fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
+	case e.status == domain.RunNeedsAttention && idle <= s.cfg.StallThreshold:
+		err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunRunning,
+			"activity resumed", "")
+	}
+	if err != nil {
+		slog.Warn("scheduler: stall transition", "run", e.runID, "error", err)
 	}
 }
 
