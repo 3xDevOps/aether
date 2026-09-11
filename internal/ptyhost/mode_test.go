@@ -319,3 +319,33 @@ func TestResumeStillFacesTheSteerGate(t *testing.T) {
 		t.Fatalf("resumed write attach got %v, want ErrWriteDenied", err)
 	}
 }
+
+// The ring answers a resume only from a cursor it still holds all of.
+func TestRingSinceEdges(t *testing.T) {
+	r := newRing(8)
+	r.write([]byte("abcd"))
+	if got, ok := r.since(r.written); !ok || len(got) != 0 {
+		t.Fatalf("caught up: %q %v", got, ok)
+	}
+	if got, ok := r.since(0); !ok || string(got) != "abcd" {
+		t.Fatalf("from zero: %q %v", got, ok)
+	}
+	if _, ok := r.since(r.written + 1); ok {
+		t.Fatal("a cursor ahead of the stream must not be served")
+	}
+	r.write([]byte("efghij")) // wraps: retains the last 8 of "abcdefghij"
+	if got, ok := r.since(2); !ok || string(got) != "cdefghij" {
+		t.Fatalf("exactly the retained window: %q %v", got, ok)
+	}
+	if _, ok := r.since(1); ok {
+		t.Fatal("a cursor older than the ring must report false")
+	}
+	big := newRing(4)
+	big.write([]byte("0123456789")) // single write larger than the ring
+	if _, ok := big.since(0); ok {
+		t.Fatal("a write bigger than the ring cannot serve an old cursor")
+	}
+	if got, ok := big.since(big.written); !ok || len(got) != 0 {
+		t.Fatalf("caught up after an oversized write: %q %v", got, ok)
+	}
+}
