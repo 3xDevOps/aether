@@ -463,11 +463,12 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		containerID: runtime.ID(sc.ContainerID),
 		task:        r.Task,
 		memberID:    r.AccountMember(),
-		harness:     r.Harness,
-		// agentState is deliberately not recovered: the container's agent
+		// agentReport is deliberately not recovered: the container's agent
 		// has said nothing to this process yet. The run keeps its stored
-		// status until the next report or the next stall corrects it.
-		reporter:       s.reporterFor(r.Harness),
+		// status until the next report, or until observed activity or a
+		// stall corrects it. The reporter comes off the sidecar because
+		// only the launch knew which profile the container got.
+		reporter:       sc.Reporter,
 		status:         r.Status,
 		startedAt:      started,
 		paused:         sc.Paused,

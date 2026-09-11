@@ -12,6 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 )
 
 // legalTransition encodes the pinned lifecycle table (Wave 1 contract
@@ -163,6 +164,13 @@ type sidecar struct {
 	// server restart.
 	RunUser string `json:"run_user,omitempty"`
 	Home    string `json:"home,omitempty"`
+	// Reporter is how much the harness this run was launched on can say
+	// about its own state. Recorded rather than recomputed on recovery: a
+	// member's own harness definition drops the reporter the same way an
+	// argv override does, and only the launch saw that. Absent in a sidecar
+	// written before runs had reporters, which reads as "none" - the
+	// behaviour that build had.
+	Reporter harness.Reporter `json:"reporter,omitempty"`
 	// ExitObserved is set after Runtime.Wait returns successfully, before
 	// finalize. Recovery uses it to resume exit handling without re-attaching.
 	ExitObserved bool `json:"exit_observed"`
@@ -192,6 +200,7 @@ func (e *supervised) sidecar() sidecar {
 		KillRequested:  e.killRequested,
 		RunUser:        e.runUser,
 		Home:           e.home,
+		Reporter:       e.reporter,
 		ExitObserved:   e.exitObserved,
 		ExitCode:       e.exitCode,
 		BridgeDigest:   e.bridgeDigest,

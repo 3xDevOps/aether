@@ -134,10 +134,13 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 // Silence is now the hang detector and the fallback for harnesses that
 // cannot report (internal/agentstatus): an agent that says it is waiting
 // parks its own run, with a reason that says what for, the moment it stops.
-// Where the harness reports both ends of a turn, activity
+// Two rules follow. Where the harness reports both ends of a turn, activity
 // must not un-park it: a TUI that repaints while the member types is
 // producing output, not work, and only the agent's own "working" means the
-// turn resumed.
+// turn resumed. And un-parking takes activity that was actually observed,
+// not a run that merely started recently - after a restart nothing has been
+// observed yet, and every run parked for its member would otherwise be
+// declared working again on the first poll.
 func (s *Scheduler) checkStalls(ctx context.Context) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0, len(s.runs))
@@ -155,12 +158,12 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		if !live || paused || (status != domain.RunRunning && status != domain.RunNeedsAttention) {
 			continue
 		}
-		activity := started
+		activity, observed := started, false
 		if t, ok := s.cfg.PTY.LastOutput(ptyhost.RunSession(e.runID)); ok && t.After(activity) {
-			activity = t
+			activity, observed = t, true
 		}
 		if t, ok := s.cfg.Git.LastFileChange(e.runID); ok && t.After(activity) {
-			activity = t
+			activity, observed = t, true
 		}
 		idle := now.Sub(activity)
 
@@ -176,7 +179,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
 					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
-			case e.status == domain.RunNeedsAttention && idle <= s.cfg.StallThreshold && !heldForTheMember:
+			case e.status == domain.RunNeedsAttention && observed && idle <= s.cfg.StallThreshold && !heldForTheMember:
 				// The run goes back to being judged on silence alone, so
 				// the next quiet threshold parks it as a stall again.
 				e.agentReport = agentstatus.Report{}

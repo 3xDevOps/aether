@@ -56,6 +56,42 @@ const (
 	ReporterFull
 )
 
+// reporterNames is the text form a Reporter travels in. The server records
+// the reporter a run was launched with so a restart knows it without
+// recomputing it, and a name survives reordering the constants where the
+// iota's number would not.
+var reporterNames = map[Reporter]string{
+	ReporterNone:    "none",
+	ReporterTurnEnd: "turn-end",
+	ReporterFull:    "full",
+}
+
+func (r Reporter) String() string {
+	if name, ok := reporterNames[r]; ok {
+		return name
+	}
+	return "reporter(" + strconv.Itoa(int(r)) + ")"
+}
+
+// MarshalText and UnmarshalText are what put a Reporter in a JSON document.
+func (r Reporter) MarshalText() ([]byte, error) {
+	name, ok := reporterNames[r]
+	if !ok {
+		return nil, fmt.Errorf("harness: %s is not a reporter kind", r)
+	}
+	return []byte(name), nil
+}
+
+func (r *Reporter) UnmarshalText(text []byte) error {
+	for kind, name := range reporterNames {
+		if name == string(text) {
+			*r = kind
+			return nil
+		}
+	}
+	return fmt.Errorf("harness: %q is not a reporter kind", text)
+}
+
 // Definition is an administrator-supplied generic harness launch definition.
 // Paths are absolute container paths so the server never has to infer where
 // credentials live from an executable name.

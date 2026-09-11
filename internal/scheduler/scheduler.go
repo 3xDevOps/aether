@@ -186,10 +186,11 @@ type supervised struct {
 	// memberID identifies the persistent home shared by every live run
 	// belonging to the member.
 	memberID domain.MemberID
-	harness  string
 	// reporter is how much this run's harness can say about its own state
 	// (internal/harness). It is fixed at launch, because the reporter is
-	// wired into the container's launch command.
+	// wired into the container's launch command, and recovered from the
+	// sidecar rather than recomputed: only the launch knew which profile
+	// the container actually got.
 	reporter harness.Reporter
 	// Mutated only under Scheduler.mu.
 	status        domain.RunStatus

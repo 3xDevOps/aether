@@ -6,7 +6,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
 )
 
 // ReportAgentState records what the agent behind a run just said about
@@ -61,19 +60,4 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 	}
 	entry.agentReport = report
 	return nil
-}
-
-// reporterFor is how much the harness a run was launched on can say about
-// its own state. Recovery uses it to rebuild what the launch knew: an argv
-// override drops the reporter exactly as it drops MCP registration, and a
-// harness the registry never shipped has none to begin with.
-func (s *Scheduler) reporterFor(name string) harness.Reporter {
-	if _, overridden := s.harnesses[name]; overridden {
-		return harness.ReporterNone
-	}
-	p, ok := harness.Lookup(name)
-	if !ok {
-		return harness.ReporterNone
-	}
-	return p.Reporter
 }
