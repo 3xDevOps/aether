@@ -1,4 +1,4 @@
-import { Bot, Boxes, Pi, PiSquare, Sparkles, SquareTerminal, Wrench } from 'lucide-react'
+import { Bot, Boxes, Pi, Sparkles, SquarePi, SquareTerminal, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 // Who is running, never merged with the state dot. Names are the harness
@@ -7,7 +7,7 @@ const glyphs: Record<string, LucideIcon> = {
   claude: Sparkles,
   codex: SquareTerminal,
   pi: Pi,
-  omp: PiSquare,
+  omp: SquarePi,
   opencode: Boxes,
   custom: Wrench,
 }
