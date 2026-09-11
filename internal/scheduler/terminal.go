@@ -155,11 +155,12 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	}
 	startedAt := time.Now().UTC()
 	spec := runtime.Spec{
-		Name:        terminalContainerName(member),
-		Image:       plan.Image,
-		Env:         plan.Env,
-		WorkingDir:  plan.Home,
-		Command:     []string{"/bin/bash", "-l"},
+		Name:       terminalContainerName(member),
+		Image:      plan.Image,
+		Env:        plan.Env,
+		WorkingDir: plan.Home,
+		// Init hides child exec failures from Start, so select the shell inside the container.
+		Command:     []string{"/bin/sh", "-c", "if [ -x /bin/bash ]; then exec /bin/bash -l; else exec /bin/sh -l; fi"},
 		TTY:         true,
 		Mounts:      plan.Mounts,
 		User:        plan.User,
@@ -180,10 +181,6 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	return terminal, nil
 }
 
-// createAndStartTerminal creates and starts the terminal container,
-// retrying once with /bin/sh -l when the image has no bash. Docker only
-// reports the missing shell at start (exec stat happens in runc), so the
-// probe is the start error text and the retry needs a fresh container.
 func (s *Scheduler) createAndStartTerminal(ctx context.Context, spec runtime.Spec) (runtime.ID, error) {
 	cid, err := s.cfg.Runtime.Create(ctx, spec)
 	if err != nil {
@@ -194,27 +191,7 @@ func (s *Scheduler) createAndStartTerminal(ctx context.Context, spec runtime.Spe
 		return cid, nil
 	}
 	_ = s.cfg.Runtime.Destroy(context.Background(), cid)
-	if !isMissingShell(startErr, spec.Command[0]) {
-		return "", fmt.Errorf("scheduler: start terminal: %w", startErr)
-	}
-	spec.Command = []string{"/bin/sh", "-l"}
-	cid, err = s.cfg.Runtime.Create(ctx, spec)
-	if err != nil {
-		return "", fmt.Errorf("scheduler: create terminal (sh fallback): %w", err)
-	}
-	if err := s.cfg.Runtime.Start(ctx, cid); err != nil {
-		_ = s.cfg.Runtime.Destroy(context.Background(), cid)
-		return "", fmt.Errorf("scheduler: start terminal (sh fallback): %w", err)
-	}
-	return cid, nil
-}
-
-// isMissingShell recognizes runc's missing-executable start failure for
-// the given shell path.
-func isMissingShell(err error, shell string) bool {
-	msg := err.Error()
-	return strings.Contains(msg, shell) &&
-		(strings.Contains(msg, "no such file or directory") || strings.Contains(msg, "executable file not found"))
+	return "", fmt.Errorf("scheduler: start terminal: %w", startErr)
 }
 
 func (s *Scheduler) lookupTerminal(member domain.MemberID) *terminalSupervision {

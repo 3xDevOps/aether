@@ -81,6 +81,9 @@ runtimes, for example with `sudo apt-get install -y postgresql-client`,
 Homebrew, or a language toolchain. The terminal is a persistent shell with
 the member home mounted at `$HOME`.
 
+Environment images must include `/bin/sh`. The terminal starts `/bin/bash -l`
+when `/bin/bash` is executable; otherwise it starts `/bin/sh -l`.
+
 Until the environment is saved, only the member home is shared with runs. The
 container layer outside `$HOME` belongs to that terminal container and is not
 available to runs or a replacement terminal.

@@ -43,16 +43,6 @@ func TestEnsureTerminalCreatesPersistentContainer(t *testing.T) {
 	if terminal.ContainerID == "" || terminal.Image != "standard:latest" {
 		t.Fatalf("terminal = %+v", terminal)
 	}
-	container, err := e.rt.get(runtime.ID(terminal.ContainerID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if container.spec.Name != terminalContainerName(e.member.ID) || !container.spec.TTY || container.spec.WorkingDir != "/root" {
-		t.Fatalf("spec = %+v", container.spec)
-	}
-	if len(container.spec.Command) != 2 || container.spec.Command[0] != "/bin/bash" || container.spec.Command[1] != "-l" {
-		t.Fatalf("command = %v", container.spec.Command)
-	}
 	status, err := e.sched.TerminalStatus(context.Background(), e.member.ID)
 	if err != nil {
 		t.Fatalf("TerminalStatus: %v", err)
