@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -149,22 +150,29 @@ func TestAgentWaitingReplacesAStallReason(t *testing.T) {
 
 	// This harness has no reporter, so it can never say "working" again:
 	// activity is still what brings it back, exactly as before.
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			case <-time.After(10 * time.Millisecond):
-				c.output("still alive\r\n")
-			}
-		}
-	}()
+	stop := pump(t, c)
+	defer stop()
 	resumed := waitStatusEvent(t, sub, run.ID, domain.RunRunning)
 	if p := resumed.Payload.(events.RunStatusPayload); p.Reason != "activity resumed" {
 		t.Fatalf("resume reason = %q, want \"activity resumed\"", p.Reason)
 	}
+
+	// Un-parking on activity forgets what the agent last said, so the same
+	// wait reported after the next stall is news again. Remembering it
+	// would leave the run reading "stalled:" for a member it is really
+	// waiting on.
+	stop()
+	waitFor(t, "the run to stall a second time", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Status == domain.RunNeedsAttention && strings.HasPrefix(r.Reason, "stalled: ")
+	})
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
+		t.Fatalf("report the same wait after a second stall: %v", err)
+	}
+	waitFor(t, "the second stall reason to be replaced", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Reason == agentstatus.ReasonPermission
+	})
 }
 
 // TestAgentWorkingStillStalls: the threshold is still the hang detector.
@@ -177,7 +185,7 @@ func TestAgentWorkingStillStalls(t *testing.T) {
 	})
 	sub := e.subscribe(t)
 	e.startStalls(t)
-	run, _ := e.launchReporting(t)
+	run, c := e.launchReporting(t)
 
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
 		t.Fatalf("report working: %v", err)
@@ -186,6 +194,37 @@ func TestAgentWorkingStillStalls(t *testing.T) {
 	if p := ev.Payload.(events.RunStatusPayload); !strings.HasPrefix(p.Reason, "stalled: ") {
 		t.Fatalf("reason = %q, want a stall: silence is still the hang detector", p.Reason)
 	}
+
+	// Nothing holds this run for the member - the agent said it was
+	// working, not waiting - so the agent talking again releases it, the
+	// same way it releases a run on a harness that cannot report at all.
+	stop := pump(t, c)
+	defer stop()
+	resumed := waitStatusEvent(t, sub, run.ID, domain.RunRunning)
+	if p := resumed.Payload.(events.RunStatusPayload); p.Reason != "activity resumed" {
+		t.Fatalf("resume reason = %q, want \"activity resumed\"", p.Reason)
+	}
+}
+
+// pump keeps a container's terminal producing agent output until the
+// returned function is called, the way an agent that is talking again does.
+func pump(t *testing.T, c *fakeContainer) func() {
+	t.Helper()
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(10 * time.Millisecond):
+				c.output("still alive\r\n")
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(stop); <-done }) }
 }
 
 // TestReportAgentStateRefusesRunsItDoesNotSupervise: the caller is a hook
