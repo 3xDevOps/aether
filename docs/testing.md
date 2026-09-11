@@ -291,7 +291,7 @@ covered - WebKit is not installed.
 | `onboarding-link.mobile` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach |
 | `status-bar.mobile` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport; on a screen too short for its own readouts it scrolls to them rather than cutting them off, and the theme toggle answers a tap on the bottom edge |
 | `shell-drawer.mobile` | On a phone, the run list as a modal drawer: it opens from the rail, its rows are finger-sized, and tapping a run leaves the drawer closed with that run on screen |
-| `launch-dialog.mobile` | On a phone viewport as short as a soft keyboard leaves, the launch form keeping its Launch button on screen |
+| `dialog-anchor.mobile` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 
 Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
 and a control that answers only a mouse would still pass a click-driven test.

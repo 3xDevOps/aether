@@ -223,9 +223,17 @@ navigation it makes, with focus trapped inside it while it is open. The
 activity rail travels inside the drawer, so a surface is still one tap away
 while the run list is up, and the 48px column the drawer leaves behind keeps
 the center view from reflowing under the scrim. The route itself is what
-closes the drawer, so a run row, a rail link and the palette all take the
-drawer away without knowing it exists. There is no splitter in the drawer:
-the viewport sizes it, capped at the width of the screen less the rail.
+closes the drawer, so a run row and a rail link both take the drawer away
+without either knowing it exists. There is no splitter in the drawer: the
+viewport sizes it, capped at the width of the screen less the rail.
+
+Being a dialog, the drawer also stands the shell's global keys down while it
+is open, the same way every other modal does (see
+[Keyboard and focus](#keyboard-and-focus)) - the palette, `n` and the `g`
+chords are unreachable until it closes. `Mod+B` is the exception: the drawer
+answers that one itself, because it is the key that opened it, and a member
+who opened the drawer from the keyboard must be able to close it the same
+way.
 
 - **The switcher sits above everything it scopes**, and appears only when there
   is a choice: a single workspace renders as a plain label with its base branch
@@ -342,15 +350,28 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 finger has to hit carries its touch size beside its desktop one - for example
 `size-[22px] coarse:size-11`. It answers for the primary pointer, so a touch
 laptop with a trackpad keeps the desktop density. Under it the `Button`
-sizes, `CommandItem`, the dialog close, the palette trigger, the status bar
-and its controls, the sidebar run rows and the sidebar's own buttons grow to
-40-44px. Desktop density is untouched. Use this variant rather than a new
-breakpoint or a per-component pixel value.
+sizes, `CommandItem`, the `Select` trigger and its options, the dialog close,
+the palette trigger and input, the status bar controls, the sidebar run rows
+and the sidebar's own buttons grow to 40-44px. Desktop density is untouched.
+Use this variant rather than a new breakpoint or a per-component pixel value.
 
-Dialogs anchor to the top (`top-4`) below `sm` and centre from `sm` up. A
-centred dialog on a phone puts its footer under the keyboard even after the
-layout viewport shrinks; anchored to the top it shortens from the bottom and
-its own scroll reaches the footer.
+**The two bars are tokens, not repeated numbers.** `--title-bar-height` and
+`--status-bar-height` are declared in `src/index.css` and redeclared once
+under `(pointer: coarse)`, where they become 48px and 44px so a 44px control
+fits inside them. A row that has to line up with a bar reads the token - the
+title bar and the sidebar's workspace switcher, the status bar and every
+control in it, the command palette's drop from under the title bar - and so
+does every offset measured from one: the update banner cap and the toast
+offset. Add a coarse size to a control in a fixed-height row only together
+with the row, or the control grows out of the bar that holds it.
+
+Dialogs anchor to the top (`top-4`) below `sm` and centre from `sm` up. iOS
+Safari ignores `interactive-widget`, so there the layout viewport does not
+shrink and a centred fixed dialog sits behind the keyboard; anchored to the
+top it stays in the visual viewport, and a dialog taller than the screen is
+clamped by `max-h-[calc(100dvh-2rem)]` and scrolls inside itself. `sm` is a
+width breakpoint, so a desktop window narrower than 640px is treated as a
+phone here too.
 
 - **Update notices** keep the message, status icon and action hierarchy visible.
   Their actions become a narrow-screen grid and return to a desktop flex row;
@@ -878,8 +899,10 @@ press, snap to those bounds on Home and End, and collapse the pane on Enter,
 handing focus to the control that restores it. Pointer dragging stays within
 the available space and follows the same bounds. Both handles set
 `touch-action: none`, without which the browser claims a touch drag as a pan
-and cancels the pointer stream the drag listens to, and both grow their hit
-area under `coarse:` without changing what they paint.
+and cancels the pointer stream the drag listens to. Under `coarse:` both grow
+to a 24px hit area centred on the edge they sit at, without changing what they
+paint; the sidebar's carries a `z-index` so the half of it that overhangs the
+pane beside it is not covered by that pane.
 
 ## Terminal view
 
@@ -1873,11 +1896,13 @@ desktop dimensions.
 The touch shell is driven by the `mobile` project, which
 [testing.md](testing.md) describes: `shell-drawer.mobile` opens the phone
 drawer, taps a run and finds the drawer gone with the run on screen, and
-`launch-dialog.mobile` checks that a form keeps its footer on screen on a
-viewport as short as a keyboard leaves. `sidebar-drawer` stays on the desktop
-project, because the keyboard contract it pins - `Mod+B` closing the drawer
-and the palette coming back once it is gone - needs a narrow window with a
-keyboard rather than a phone. `board-card`, `run-switch`, `run-attach-retry`,
+`dialog-anchor.mobile` checks that a dialog short enough to tell the two
+apart sits at the top rather than the middle, and that the launch form keeps
+its footer on screen on a viewport as short as a keyboard leaves.
+`sidebar-drawer` stays on the desktop project, because the keyboard contract
+it pins - `Mod+B` closing the drawer and the palette coming back once it is
+gone - needs a narrow window with a keyboard rather than a phone.
+`board-card`, `run-switch`, `run-attach-retry`,
 `run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
 corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and
