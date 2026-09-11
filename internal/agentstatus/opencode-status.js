@@ -15,6 +15,11 @@ export const AetherStatus = async ({ client }) => {
   // session of its own, and that session going idle is not the run's turn
   // ending, so the reporter speaks for the set rather than for one event.
   const busy = new Set()
+  // The permission and question prompts nobody has answered yet, by the id
+  // opencode gives each one and quotes back as requestID in the answer. A
+  // run can have several open at once - one per session - and the member
+  // is still needed until the last of them is answered.
+  const pending = new Set()
   // One report at a time: two reporter processes racing could reach the
   // server in the opposite order and leave the run card saying the wrong
   // thing. The chain is never awaited by the handler - a report must not
@@ -58,13 +63,17 @@ export const AetherStatus = async ({ client }) => {
 
   return {
     event: async ({ event }) => {
-      const session = event && event.properties ? event.properties.sessionID : undefined
+      const props = (event && event.properties) || {}
+      const session = props.sessionID
       switch (event && event.type) {
         case "session.status": {
-          // The idle half of a turn arrives as session.idle as well, which
-          // is the case below, where the subagent bookkeeping is.
-          const status = event.properties && event.properties.status ? event.properties.status.type : ""
-          if (status === "idle") return
+          // busy is the only status that starts a turn. retry is one
+          // provider call being tried again inside a turn the session
+          // already announced, and a status a newer opencode invents says
+          // nothing this knows how to read; either one in the set would be
+          // an entry no idle ever removes, and the run would never park.
+          const status = props.status ? props.status.type : ""
+          if (status !== "busy") return
           // opencode publishes busy several times in one turn - once when
           // the prompt arrives, once when the runner starts, once per step
           // - and a session already running is not news. Neither is a
@@ -72,19 +81,29 @@ export const AetherStatus = async ({ client }) => {
           // running: the run is working either way.
           const started = session ? !busy.has(session) : true
           if (session) busy.add(session)
-          if (status === "busy" && started && busy.size <= 1) post("--event", "session.status", "--status", status)
+          if (started && busy.size <= 1) post("--event", "session.status", "--status", status)
           return
         }
         case "session.idle":
           if (session) busy.delete(session)
-          if (busy.size > 0) return
+          // A prompt nobody has answered outlives the turn that asked it,
+          // and it is the more precise reason the member is needed, so the
+          // run stays parked on that rather than on this.
+          if (busy.size > 0 || pending.size > 0) return
           post("--event", "session.idle")
           return
         case "permission.asked":
-        case "permission.replied":
         case "question.asked":
+          pending.add(props.id || session)
+          post("--event", event.type)
+          return
+        case "permission.replied":
         case "question.replied":
         case "question.rejected":
+          pending.delete(props.requestID || session)
+          // Answering one prompt while another is still open does not give
+          // the run back to the agent.
+          if (pending.size > 0) return
           post("--event", event.type)
           return
       }

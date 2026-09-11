@@ -173,7 +173,6 @@ func TestFromOpenCodeEvent(t *testing.T) {
 // run container's real path is pinned where the scheduler mounts it
 // (internal/scheduler registration tests).
 func TestOpenCodePluginReportsTheRunsOwnTurn(t *testing.T) {
-	node := requireNode(t)
 	dir := t.TempDir()
 	reports := filepath.Join(dir, "reports.log")
 	stub := filepath.Join(dir, "reporter")
@@ -186,12 +185,8 @@ func TestOpenCodePluginReportsTheRunsOwnTurn(t *testing.T) {
 		"*permission.replied*) sleep 0.2 ;;\n"+
 		"esac\necho \"$@\" >> "+reports+"\n", 0o755)
 	stageOpenCodePlugin(t, dir, stub)
-	writePluginFile(t, filepath.Join(dir, "drive.mjs"), openCodeDriver, 0o644)
 
-	out, err := exec.Command(node, filepath.Join(dir, "drive.mjs"), reports).CombinedOutput()
-	if err != nil {
-		t.Fatalf("drive the plugin: %v (%s)", err, out)
-	}
+	out := driveOpenCodePlugin(t, dir, openCodeDriver, reports, 4)
 	got, err := os.ReadFile(reports)
 	if err != nil {
 		t.Fatalf("read the reports the plugin posted: %v", err)
@@ -206,7 +201,7 @@ func TestOpenCodePluginReportsTheRunsOwnTurn(t *testing.T) {
 	if string(got) != want {
 		t.Errorf("the plugin posted\n%s\nwant\n%s", got, want)
 	}
-	if len(bytes.TrimSpace(out)) != 0 {
+	if len(strings.TrimSpace(out)) != 0 {
 		t.Errorf("the plugin said %s, want nothing: every report reached the server", out)
 	}
 }
@@ -238,18 +233,60 @@ const events = [
   { type: "session.idle", properties: { sessionID: "root" } },
 ]
 for (const event of events) await hooks.event({ event })
+`
 
-// The handler never waits for its own report, so wait for the posts here.
-const { readFileSync } = await import("node:fs")
-const deadline = Date.now() + 10000
-while (Date.now() < deadline) {
-  let lines = ""
-  try {
-    lines = readFileSync(process.argv[2], "utf8")
-  } catch {}
-  if (lines.split("\n").length > 4) break
-  await new Promise((r) => setTimeout(r, 50))
+// TestOpenCodePluginKeepsTheRunParkedUntilTheLastPromptIsAnswered is the
+// other half of the set the plugin speaks for: a run can have a permission
+// and a question open at once, and the first answer is not the member
+// handing the run back. The retry in the middle is the second rule - a
+// status that is not busy is not a session to wait for - and a session the
+// plugin never saw start would otherwise sit in the busy set forever and
+// swallow the run's own idle.
+func TestOpenCodePluginKeepsTheRunParkedUntilTheLastPromptIsAnswered(t *testing.T) {
+	dir := t.TempDir()
+	reports := filepath.Join(dir, "reports.log")
+	stub := filepath.Join(dir, "reporter")
+	writePluginFile(t, stub, "#!/bin/sh\necho \"$@\" >> "+reports+"\n", 0o755)
+	stageOpenCodePlugin(t, dir, stub)
+
+	driveOpenCodePlugin(t, dir, openCodePromptDriver, reports, 5)
+	got, err := os.ReadFile(reports)
+	if err != nil {
+		t.Fatalf("read the reports the plugin posted: %v", err)
+	}
+	want := strings.Join([]string{
+		"report opencode --event session.status --status busy",
+		"report opencode --event permission.asked",
+		"report opencode --event question.asked",
+		"report opencode --event question.replied",
+		"report opencode --event session.idle",
+		"",
+	}, "\n")
+	if string(got) != want {
+		t.Errorf("the plugin posted\n%s\nwant\n%s", got, want)
+	}
 }
+
+// openCodePromptDriver asks two prompts of two sessions and answers them
+// one at a time. opencode names a prompt with id when it asks and quotes it
+// back as requestID in the answer, which is what the plugin pairs them by.
+const openCodePromptDriver = `
+import { AetherStatus } from "./plugin.mjs"
+
+const client = { app: { log: async ({ body }) => console.log(JSON.stringify(body)) } }
+const hooks = await AetherStatus({ client })
+const events = [
+  { type: "session.status", properties: { sessionID: "root", status: { type: "busy" } } },
+  { type: "permission.asked", properties: { sessionID: "root", id: "per_1" } },
+  { type: "question.asked", properties: { sessionID: "sub", id: "que_1" } },
+  // The member answers the permission; the question is still on their screen.
+  { type: "permission.replied", properties: { sessionID: "root", requestID: "per_1" } },
+  // A provider call being retried in a session that never announced a turn.
+  { type: "session.status", properties: { sessionID: "other", status: { type: "retry", attempt: 1 } } },
+  { type: "question.replied", properties: { sessionID: "sub", requestID: "que_1" } },
+  { type: "session.idle", properties: { sessionID: "root" } },
+]
+for (const event of events) await hooks.event({ event })
 `
 
 // TestOpenCodePluginWarnsWhatTheReporterSaid drives the failure path: the
@@ -258,22 +295,17 @@ while (Date.now() < deadline) {
 // reach the server. The plugin has to carry it verbatim into opencode's own
 // log - the TUI owns the terminal - once however many turns fail.
 func TestOpenCodePluginWarnsWhatTheReporterSaid(t *testing.T) {
-	node := requireNode(t)
 	dir := t.TempDir()
 	reports := filepath.Join(dir, "reports.log")
 	stub := filepath.Join(dir, "reporter")
 	writePluginFile(t, stub, "#!/bin/sh\necho \"$@\" >> "+reports+"\n"+
 		"echo 'aether-server report opencode: dial /run/aether/coord.sock: connection refused' >&2\n", 0o755)
 	stageOpenCodePlugin(t, dir, stub)
-	writePluginFile(t, filepath.Join(dir, "drive.mjs"), openCodeFailureDriver, 0o644)
 
-	out, err := exec.Command(node, filepath.Join(dir, "drive.mjs"), reports).CombinedOutput()
-	if err != nil {
-		t.Fatalf("drive the plugin: %v (%s)", err, out)
-	}
+	out := driveOpenCodePlugin(t, dir, openCodeFailureDriver, reports, 2)
 	const want = `{"service":"aether","level":"error","message":"status reporter: ` +
 		`aether-server report opencode: dial /run/aether/coord.sock: connection refused"}`
-	if got := strings.Count(string(out), want); got != 1 {
+	if got := strings.Count(out, want); got != 1 {
 		t.Fatalf("the plugin logged %s, want %s exactly once", out, want)
 	}
 }
@@ -290,7 +322,11 @@ const hooks = await AetherStatus({ client })
 for (const sessionID of ["first", "second"]) {
   await hooks.event({ event: { type: "session.idle", properties: { sessionID } } })
 }
+`
 
+// openCodeDriverWait ends every scenario: the handler never waits for its
+// own report, so the driver waits here for the count the test expects.
+const openCodeDriverWait = `
 const { readFileSync } = await import("node:fs")
 const deadline = Date.now() + 10000
 while (Date.now() < deadline) {
@@ -298,10 +334,22 @@ while (Date.now() < deadline) {
   try {
     lines = readFileSync(process.argv[2], "utf8")
   } catch {}
-  if (lines.split("\n").length > 2) break
+  if (lines.split("\n").length > Number(process.argv[3])) break
   await new Promise((r) => setTimeout(r, 50))
 }
 `
+
+// driveOpenCodePlugin runs one scenario against the plugin staged in dir
+// and returns what it printed, once want reports have reached reports.
+func driveOpenCodePlugin(t *testing.T, dir, driver, reports string, want int) string {
+	t.Helper()
+	writePluginFile(t, filepath.Join(dir, "drive.mjs"), driver+openCodeDriverWait, 0o644)
+	out, err := exec.Command(requireNode(t), filepath.Join(dir, "drive.mjs"), reports, strconv.Itoa(want)).CombinedOutput()
+	if err != nil {
+		t.Fatalf("drive the plugin: %v (%s)", err, out)
+	}
+	return string(out)
+}
 
 // requireNode is the node the plugin scenarios run under. They are the only
 // check that the embedded plugin is valid JavaScript at all, so a machine
