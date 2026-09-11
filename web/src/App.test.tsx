@@ -1,13 +1,14 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import type * as apiModule from '@/lib/api'
 import { App } from '@/App'
 import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
 
-vi.mock('@/lib/api', async () => {
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
   const { fakeApi } = await import('@/test/fixtures')
-  return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
+  return { ...actual, api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
-
 // The shell opens the event stream on mount; keep it off the network.
 beforeAll(() => {
   StubSocket.install()

@@ -17,7 +17,8 @@ import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { openOAuthLink } from '@/lib/oauth-forward'
-import { type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
+import type { ConnectionState } from '@/lib/stream'
+import { type AttachDataKind, type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import {
@@ -87,13 +88,12 @@ export function TerminalDock({
   const controller = useXterm({
     enabled: activeTab !== null && !dock.collapsed,
     onData: (data) => {
-      if (gate.current.muted()) return
-      const tab = activeTabRef.current
-      if (tab) getEnvTerminalSocket(tab)?.send(data)
+      if (!activeTab || activeTabRef.current !== activeTab || gate.current.muted()) return
+      getEnvTerminalSocket(activeTab)?.send(data)
     },
     onResize: (cols, rows) => {
-      const tab = activeTabRef.current
-      if (tab) getEnvTerminalSocket(tab)?.resize(cols, rows)
+      if (!activeTab || activeTabRef.current !== activeTab) return
+      getEnvTerminalSocket(activeTab)?.resize(cols, rows)
     },
     onLink: (uri) => {
       if (!capability.hasLocal('forward.start')) return false
@@ -108,6 +108,14 @@ export function TerminalDock({
   })
   const terminal = controller.terminal
   terminalRef.current = terminal
+  // Keep persistent socket callbacks from reaching a disposed xterm while a
+  // route remount is between hosts.
+  useEffect(() => {
+    terminalRef.current = terminal
+    return () => {
+      if (terminalRef.current === terminal) terminalRef.current = null
+    }
+  }, [terminal])
   const setFindOpen = controller.setFindOpen
   const focusTerminal = controller.focusTerminal
   useEffect(() => {
@@ -176,48 +184,66 @@ export function TerminalDock({
     if (!activeTab || !terminal) return
 
     const socketKey = activeTab
-    const existing = getEnvTerminalSocket(socketKey)
-    let attachment: Attachment
-    if (existing) {
-      attachment = existing
-    } else {
-      attachment = connectAttach(() => rpc.terminalSocket(socketKey), {
-        onData: (chunk, kind) =>
-          emitEnvTerminalSocketData(socketKey, chunk, kind),
-        onAttached: () => {
+    const isCurrent = () => activeTabRef.current === socketKey
+    const handlers = {
+      onData: (chunk: Uint8Array, kind: AttachDataKind) =>
+        emitEnvTerminalSocketData(socketKey, chunk, kind),
+      onAttached: () => {
+        if (isCurrent()) {
           setEnvTerminalSocketReady(socketKey, true)
           setAttachedTab(socketKey)
-          if (activeTabRef.current === socketKey) {
-            gate.current.unmute()
-            terminalRef.current?.reset()
-          }
+          gate.current.unmute()
+          terminalRef.current?.reset()
           const status = useStore.getState().envTerminal.status
           setStatus({ ...(status ?? { running: false, tabs: [] }), running: true }, null)
-        },
-        onState: (connection) => {
-          if (connection === 'offline' && activeTabRef.current === socketKey) {
-            gate.current.unmute()
-          }
-        },
-        onRefused: (detail) => setStatus(useStore.getState().envTerminal.status, detail),
-        onWriteDenied: () =>
-          setStatus(useStore.getState().envTerminal.status, 'Terminal input was denied'),
-        onExit: () => {
+        }
+      },
+      onState: (connection: ConnectionState) => {
+        if (!isCurrent()) return
+        if (connection !== 'live') {
           setEnvTerminalSocketReady(socketKey, false)
+          setAttachedTab(null)
+          if (connection === 'offline') gate.current.unmute()
+        }
+      },
+      onRefused: (detail: string) => {
+        if (!isCurrent()) return
+        setAttachedTab(null)
+        setStatus(useStore.getState().envTerminal.status, detail)
+      },
+      onWriteDenied: () => {
+        if (!isCurrent()) return
+        setAttachedTab(null)
+        setStatus(useStore.getState().envTerminal.status, 'Terminal input was denied')
+      },
+      onExit: () => {
+        if (isCurrent()) {
+          setEnvTerminalSocketReady(socketKey, false)
+          setAttachedTab(null)
           if (socketKey === 'main') {
             const status = useStore.getState().envTerminal.status
             reset()
             setStatus({ ...status, running: false, tabs: [] })
-          } else {
-            closeTab(socketKey)
           }
-        },
-        geometry: () => ({
+        }
+        if (socketKey !== 'main') closeTab(socketKey)
+      },
+      geometry: () => {
+        if (!isCurrent()) return { cols: 80, rows: 24 }
+        return {
           cols: terminalRef.current?.cols ?? 80,
           rows: terminalRef.current?.rows ?? 24,
-        }),
-        wantsWrite: () => true,
-      })
+        }
+      },
+      wantsWrite: () => true,
+    }
+    const existing = getEnvTerminalSocket(socketKey)
+    let attachment: Attachment
+    if (existing) {
+      attachment = existing
+      attachment.rebind(handlers)
+    } else {
+      attachment = connectAttach(() => rpc.terminalSocket(socketKey), handlers)
       registerEnvTerminalSocket(socketKey, attachment)
     }
 
@@ -412,7 +438,11 @@ export function TerminalDock({
                 </Button>
               </div>
             ) : (
-              <TerminalPane controller={controller}>
+              <TerminalPane
+                controller={controller}
+                imageTargetKey={activeTab ?? undefined}
+                imageUploadEnabled={attachedTab === activeTab && activeTab !== null}
+              >
                 {attachedTab !== activeTab && (
                   // Only a terminal the dock has not seen running is starting
                   // a container. A second tab, a tab switch or an expanded

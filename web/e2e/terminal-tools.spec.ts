@@ -34,6 +34,21 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, aethe
 
   const screen = dock.locator('.xterm-screen')
   await screen.click()
+  // Ctrl+Shift+V must stay on xterm's native paste path. This exercises the
+  // Windows-sensitive shortcut without depending on navigator.clipboard.readText
+  // in the renderer; clipboard-read permission is deliberately not granted.
+  await page.context().grantPermissions(['clipboard-write'], {
+    origin: new URL(alice.url).origin,
+  })
+  await page.evaluate(async () => {
+    await navigator.clipboard.writeText('printf "\\141ether-native-paste\\n"\n')
+  })
+  await page.keyboard.press('Control+Shift+V')
+  const nativePasteCount = async () => {
+    const text = (await dock.locator('.xterm-rows').textContent()) ?? ''
+    return text.split('aether-native-paste').length - 1
+  }
+  await expect.poll(nativePasteCount, { timeout: 30_000 }).toBe(1)
   await page.keyboard.type('echo aether-found-me\n')
   await expect(dock.locator('.xterm-rows')).toContainText('aether-found-me', {
     timeout: 30_000,

@@ -11,9 +11,19 @@ import (
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
-// maxRequestBody bounds one API request body, matching the remote
-// dashboard's limit: control calls, not blob pushes.
+// maxRequestBody bounds ordinary API request bodies, matching the remote
+// dashboard's limit. Image uploads get a separate cap below because an
+// 8 MiB decoded payload is about 11.2 MiB in base64 plus JSON framing.
 const maxRequestBody = 1 << 20
+
+const maxTerminalImageRequestBody = 12 << 20
+
+func requestBodyLimit(method string) int64 {
+	if method == protocol.MethodTerminalImage {
+		return maxTerminalImageRequestBody
+	}
+	return maxRequestBody
+}
 
 // handleAPI serves POST /api/v1/{method}: the path segment is the
 // control-channel method name and the body is its params, proxied over
@@ -25,7 +35,7 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 		g.deny(w)
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBody))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, requestBodyLimit(r.PathValue("method"))))
 	if err != nil {
 		webgate.WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeParse, Message: "read body: " + err.Error()})
 		return

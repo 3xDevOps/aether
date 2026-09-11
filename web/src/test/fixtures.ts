@@ -296,6 +296,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
         `ws://localhost/ws/attach/${runID}?shell=${encodeURIComponent(tab)}`,
     ),
     terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
+    uploadTerminalImage: vi.fn(async () => ({ path: '/home/alice/.aether/uploads/image.png' })),
     terminalStop: vi.fn(async () => ({})),
     envSave: vi.fn(async () => ({ image: 'aether/member-1:123' })),
     envReset: vi.fn(async () => ({})),

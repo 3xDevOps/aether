@@ -1,7 +1,8 @@
 // Terminal sockets can be /ws/attach/<run>, /ws/attach/<run>?shell=<tab>, or
-// /ws/terminal?tab=<name>. One attach per mounted terminal, with jittered
-// reconnect and a read-only mirror unless the caller asks to steer. The
-// contract is docs/local-gateway.md - one text header frame, one text ack,
+// /ws/terminal?tab=<name>. One attachment per logical terminal tab, with
+// jittered reconnect and a read-only mirror unless the caller asks to steer.
+// Persistent dock sockets rebind callbacks when a new host adopts them.
+// The contract is docs/local-gateway.md - one text header frame, one text ack,
 // terminal output as binary frames, input and resizes as text control frames.
 
 import { type ConnectionState, backoff } from '@/lib/stream'
@@ -88,6 +89,8 @@ export interface Attachment {
   resize: (cols: number, rows: number) => void
   /** Reattach now, picking up the current write preference. */
   reopen: () => void
+  /** Update callbacks when a persistent socket gets a new terminal host. */
+  rebind: (handlers: AttachHandlers) => void
   close: () => void
 }
 
@@ -131,6 +134,11 @@ export function replayGate(write: (chunk: Uint8Array, done?: () => void) => void
 
 /** Connect to a terminal socket, re-reading its URL before every reconnect. */
 export function connectAttach(socketURL: () => string, h: AttachHandlers): Attachment {
+  // A socket can outlive the component that currently displays it (a dock
+  // collapse or route change keeps the server-side shell alive). Rebinding
+  // keeps callbacks pointed at the current terminal instead of a disposed
+  // component from the first mount.
+  let handlers = h
   let socket: WebSocket | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
@@ -154,7 +162,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     if (disposed) return
     attached = false
     waitingForSession = false
-    h.onState(attempt === 0 ? 'connecting' : 'reconnecting')
+    handlers.onState(attempt === 0 ? 'connecting' : 'reconnecting')
     let ws: WebSocket
     try {
       ws = new WebSocket(socketURL())
@@ -164,13 +172,13 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     }
     ws.binaryType = 'arraybuffer'
     socket = ws
-    const askedWrite = h.wantsWrite() && !writeDenied
+    const askedWrite = handlers.wantsWrite() && !writeDenied
     // The server closes a refused attach with 1008 too, so the close handler
     // needs to know whether this socket already got its answer.
     let answered = false
 
     ws.onopen = () => {
-      const { cols, rows } = h.geometry()
+      const { cols, rows } = handlers.geometry()
       // A mirror sends no "write" key at all - the read-only header is {}
       // plus geometry.
       const header: AttachHeader = { cols, rows }
@@ -181,17 +189,17 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (typeof msg.data !== 'string') {
         const chunk = new Uint8Array(msg.data as ArrayBuffer)
         if (replayRemaining <= 0) {
-          h.onData?.(chunk, 'live')
+          handlers.onData?.(chunk, 'live')
           return
         }
         const replayLength = Math.min(chunk.length, replayRemaining)
         replayRemaining -= replayLength
-        h.onData?.(
+        handlers.onData?.(
           chunk.subarray(0, replayLength),
           replayRemaining === 0 ? 'replay-end' : 'replay',
         )
         if (replayLength < chunk.length) {
-          h.onData?.(chunk.subarray(replayLength), 'live')
+          handlers.onData?.(chunk.subarray(replayLength), 'live')
         }
         return
       }
@@ -207,8 +215,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         attempt = 0
         unavailableTries = 0
         waitingForSession = false
-        h.onState('live')
-        h.onAttached(askedWrite)
+        handlers.onState('live')
+        handlers.onAttached(askedWrite)
         return
       }
       answered = true
@@ -218,7 +226,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // tells the two apart, and the dead token falls through to refusal.
       if (ack.code === codeDenied && askedWrite && ack.error !== deadToken) {
         writeDenied = true
-        h.onWriteDenied()
+        handlers.onWriteDenied()
         attempt = 0
         return
       }
@@ -228,7 +236,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (
         ack.code === codeUnavailable &&
         unavailableTries < unavailableRetries &&
-        h.sessionPending?.()
+        handlers.sessionPending?.()
       ) {
         unavailableTries++
         waitingForSession = true
@@ -236,8 +244,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
       refused = true
       waitingForSession = false
-      h.onRefused(ack.error ?? 'attach refused', ack.code)
-      h.onState('offline')
+      handlers.onRefused(ack.error ?? 'attach refused', ack.code)
+      handlers.onState('offline')
     }
     ws.onclose = (ev) => {
       socket = null
@@ -248,14 +256,14 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // replay of a finished run's transcript drained - stays put, since a
       // reconnect could only replay the same bytes again. Any other close
       // reconnects and gets the server's refusal message, as before.
-      if (ev.code === 1000 && h.onExit) {
+      if (ev.code === 1000 && handlers.onExit) {
         refused = true
-        h.onExit()
-        h.onState('offline')
+        handlers.onExit()
+        handlers.onState('offline')
         return
       }
       if (attached && ev.reason === 'session ended') {
-        h.onState('offline')
+        handlers.onState('offline')
         return
       }
       // 1008 with no refusal frame is the gateway's authorization watch.
@@ -265,14 +273,14 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (ev.code === policyClose && !answered) {
         if (attached && ev.reason === 'steer permission withdrawn') {
           writeDenied = true
-          h.onWriteDenied()
+          handlers.onWriteDenied()
           attempt = 0
           retry()
           return
         }
         refused = true
-        h.onRefused(attached && ev.reason ? ev.reason : deadToken)
-        h.onState('offline')
+        handlers.onRefused(attached && ev.reason ? ev.reason : deadToken)
+        handlers.onState('offline')
         return
       }
       retry()
@@ -281,7 +289,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
 
   const retry = () => {
     if (disposed || refused) return
-    h.onState(!waitingForSession && attempt > 3 ? 'offline' : 'reconnecting')
+    handlers.onState(!waitingForSession && attempt > 3 ? 'offline' : 'reconnecting')
     timer = setTimeout(open, backoff(attempt))
     attempt++
   }
@@ -304,6 +312,9 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   open()
 
   return {
+    rebind: (next) => {
+      if (!disposed) handlers = next
+    },
     // A paste arrives as one string that can dwarf the gateway's 64KB frame
     // limit, so large input goes out as several ordered frames.
     send: (data) => {

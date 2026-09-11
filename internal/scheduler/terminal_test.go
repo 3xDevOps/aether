@@ -3,8 +3,12 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -61,6 +65,191 @@ func TestEnsureTerminalCreatesPersistentContainer(t *testing.T) {
 	}
 	if _, err := e.db.GetTerminal(context.Background(), e.member.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("terminal row after stop: %v", err)
+	}
+}
+
+func TestRecoveredTerminalUsesCapturedUserAndHomeForImages(t *testing.T) {
+	e := newTestEnv(t, nil)
+	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	user := fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid())
+	wantUser := user
+	if os.Geteuid() == 0 {
+		wantUser = ""
+	}
+	container, err := e.rt.get(runtime.ID(first.ContainerID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	container.mu.Lock()
+	container.spec.User = user
+	container.spec.Env["HOME"] = "/home/actual"
+	container.mu.Unlock()
+	if updateErr := e.db.UpdateMemberImage(t.Context(), e.member.ID, "mutable:latest"); updateErr != nil {
+		t.Fatalf("UpdateMemberImage: %v", updateErr)
+	}
+
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close before recovery: %v", closeErr)
+	}
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	startScheduler(t, recovered)
+	waitFor(t, "terminal recovery", func() bool {
+		return recovered.lookupTerminal(e.member.ID) != nil
+	})
+
+	adoptedTerminal, err := recovered.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal adoption: %v", err)
+	}
+	adopted := recovered.lookupTerminal(e.member.ID)
+	if adoptedTerminal.ContainerID != first.ContainerID || adopted == nil || adopted.runUser != wantUser || adopted.home != "/home/actual" {
+		t.Fatalf("adopted terminal = %+v, metadata = %+v, want user %s and HOME /home/actual", adoptedTerminal, adopted, wantUser)
+	}
+	image := []byte("image")
+	path, err := recovered.SaveTerminalImage(t.Context(), e.member.ID, "", ".png", image)
+	if err != nil {
+		t.Fatalf("SaveTerminalImage: %v", err)
+	}
+	if got := readSavedTerminalImage(t, e, e.member.ID, path); string(got) != string(image) {
+		t.Fatalf("saved image = %q, want %q", got, image)
+	}
+	if !strings.HasPrefix(path, "/home/actual/.aether/terminal-images/") {
+		t.Fatalf("image path = %q, want captured terminal HOME", path)
+	}
+}
+
+type failingPutTerminalStore struct {
+	store.Store
+	fail bool
+}
+
+func (s *failingPutTerminalStore) PutTerminal(ctx context.Context, terminal *domain.Terminal) error {
+	if s.fail {
+		return errors.New("test: PutTerminal unavailable")
+	}
+	return s.Store.PutTerminal(ctx, terminal)
+}
+
+func TestRecoveredTerminalAttachFailurePreservesAndRetries(t *testing.T) {
+	e := newTestEnv(t, nil)
+	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	container, err := e.rt.get(runtime.ID(first.ContainerID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	container.mu.Lock()
+	container.spec.User = "1000:1000"
+	container.mu.Unlock()
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	failures := 1
+	attachHook := func(context.Context, runtime.ID) (runtime.Attachment, error) {
+		if failures > 0 {
+			failures--
+			return nil, errors.New("test: attach unavailable")
+		}
+		return nil, errors.New("test: attach hook exhausted")
+	}
+	e.rt.mu.Lock()
+	e.rt.attachHook = attachHook
+	e.rt.mu.Unlock()
+	row, err := e.db.GetTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal: %v", err)
+	}
+	lock := s2.terminalLock(e.member.ID)
+	lock.Lock()
+	recoverErr := s2.recoverTerminalLocked(t.Context(), e.member, row)
+	lock.Unlock()
+	if recoverErr == nil {
+		t.Fatal("recovery unexpectedly succeeded while attach was unavailable")
+	}
+	sup := s2.lookupTerminal(e.member.ID)
+	if sup == nil || sup.containerID != runtime.ID(first.ContainerID) {
+		t.Fatalf("surviving terminal supervision = %+v", sup)
+	}
+	if sup.userReservation == nil || sup.runUser != "1000:1000" {
+		t.Fatalf("surviving terminal reservation = %+v", sup)
+	}
+	if container.currentState() != "running" {
+		t.Fatalf("container state = %q, want running", container.currentState())
+	}
+	e.rt.mu.Lock()
+	e.rt.attachHook = nil
+	e.rt.mu.Unlock()
+	retried, err := s2.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal retry: %v", err)
+	}
+	conflicting := &supervised{runID: "conflicting-run", memberID: e.member.ID}
+	if err := s2.reserveRunUser(conflicting, "2000:2000", true); err == nil {
+		t.Fatal("incompatible run ownership was accepted while survivor remained reserved")
+	}
+	if retried.ContainerID != first.ContainerID {
+		t.Fatalf("retried container = %q, want surviving %q", retried.ContainerID, first.ContainerID)
+	}
+}
+
+func TestRecoveredTerminalPutFailurePreservesAndRetries(t *testing.T) {
+	e := newTestEnv(t, nil)
+	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	container, err := e.rt.get(runtime.ID(first.ContainerID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	container.mu.Lock()
+	container.spec.User = "1000:1000"
+	container.mu.Unlock()
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	failing := &failingPutTerminalStore{Store: e.db, fail: true}
+	s2.cfg.Store = failing
+	row, err := e.db.GetTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal: %v", err)
+	}
+	row.ContainerID = "stale-container"
+	lock := s2.terminalLock(e.member.ID)
+	lock.Lock()
+	recoverErr := s2.recoverTerminalLocked(t.Context(), e.member, row)
+	lock.Unlock()
+	if recoverErr == nil {
+		t.Fatal("recovery unexpectedly succeeded while PutTerminal was unavailable")
+	}
+	sup := s2.lookupTerminal(e.member.ID)
+	if sup == nil || sup.containerID != runtime.ID(first.ContainerID) || sup.userReservation == nil {
+		t.Fatalf("surviving terminal state = %+v", sup)
+	}
+	if !sup.persistPending {
+		t.Fatal("PutTerminal failure did not retain persistence pending state")
+	}
+	failing.fail = false
+	retried, err := s2.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal retry: %v", err)
+	}
+	if retried.ContainerID != first.ContainerID {
+		t.Fatalf("retried container = %q, want surviving %q", retried.ContainerID, first.ContainerID)
+	}
+	stored, err := e.db.GetTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal after retry: %v", err)
+	}
+	if stored.ContainerID != first.ContainerID {
+		t.Fatalf("stored container = %q, want %q", stored.ContainerID, first.ContainerID)
 	}
 }
 

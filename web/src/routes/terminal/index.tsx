@@ -246,7 +246,15 @@ function TerminalView({ params }: RouteProps) {
         </div>
         <div className="relative min-h-0 flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
           <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
-            <TerminalPane key={runID} controller={controller}>
+            <TerminalPane
+              key={runID}
+              controller={controller}
+              imageTarget={runID}
+              imageTargetKey={runID}
+              imageUploadEnabled={
+                !starting && state.connection === 'live' && state.write && !state.steerDenied
+              }
+            >
               {starting && <TerminalSpinner label="Starting the run's container" />}
             </TerminalPane>
           </div>

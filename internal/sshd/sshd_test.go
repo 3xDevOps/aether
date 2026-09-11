@@ -368,6 +368,12 @@ func (f *fakeRuns) SaveEnvironment(_ context.Context, member domain.MemberID) (s
 func (f *fakeRuns) ResetEnvironment(_ context.Context, member domain.MemberID) error {
 	return f.record(fmt.Sprintf("env-reset:%s", member))
 }
+func (f *fakeRuns) SaveTerminalImage(_ context.Context, actor domain.MemberID, run domain.RunID, extension string, data []byte) (string, error) {
+	if err := f.record(fmt.Sprintf("terminal-image:%s:%s:%s:%d", actor, run, extension, len(data))); err != nil {
+		return "", err
+	}
+	return "/root/.aether/terminal-images/image-test" + extension, nil
+}
 
 func (f *fakeRuns) ConnectGitHub(_ context.Context, member domain.MemberID) (domain.GitHubConnection, error) {
 	if err := f.record(fmt.Sprintf("github-connect:%s", member)); err != nil {

@@ -162,6 +162,7 @@ type sidecar struct {
 	// credential-home ownership guard still sees live runs across a
 	// server restart.
 	RunUser string `json:"run_user,omitempty"`
+	Home    string `json:"home,omitempty"`
 	// ExitObserved is set after Runtime.Wait returns successfully, before
 	// finalize. Recovery uses it to resume exit handling without re-attaching.
 	ExitObserved bool `json:"exit_observed"`
@@ -190,6 +191,7 @@ func (e *supervised) sidecar() sidecar {
 		Paused:         e.paused,
 		KillRequested:  e.killRequested,
 		RunUser:        e.runUser,
+		Home:           e.home,
 		ExitObserved:   e.exitObserved,
 		ExitCode:       e.exitCode,
 		BridgeDigest:   e.bridgeDigest,

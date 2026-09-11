@@ -235,7 +235,8 @@ attaches the server's output to the report.
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
 | `run-provisioning` | Opening a run while its container is still being built: the terminal tab waits behind "Starting the run's container" instead of showing the gateway's refusal as a dead terminal, and attaches by itself once the run turns running |
 | `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
-| `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
+| `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, native `Ctrl+Shift+V` paste through the terminal's input path, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
+| `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
 | `status-bar-sizing` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport |
 | `files-browser` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree |
@@ -243,12 +244,18 @@ attaches the server's output to the report.
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,
-`run-provisioning`, `run-switch` and `terminal-tools` need a reachable
-Docker daemon and skip without one, the way the Go suite skips its container
-scenarios. The rest need only git, except `window-sizing`, which needs
-neither: it starts a gateway of its own rather than taking the `aether`
-fixture, because the CLI half of `update.check` is answered on the member's
-own machine and no server is involved.
+`run-provisioning`, `run-switch`, `terminal-images` and `terminal-tools` need a
+reachable Docker daemon and skip without one. That skip is specific to the
+dashboard suite: `make test-integration` requires its real Docker setup and
+fails when Docker is unavailable. The rest need only git, except
+`window-sizing`, which needs neither: it starts a gateway of its own rather
+than taking the `aether` fixture, because the CLI half of `update.check` is
+answered on the member's own machine and no server is involved.
+The terminal image component tests separately pin File type/size validation,
+safe insertion without submission, native image-paste registration cleanup,
+and stale callback rejection after a terminal target remounts. The clipboard
+unit tests pin native `Ctrl+Shift+V` when the async clipboard API is denied;
+these are browser/component regressions, not claims of a local Windows run.
 
 ### Adding a step to the wizard
 

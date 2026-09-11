@@ -2,9 +2,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { vi } from 'vitest'
 import { api } from '@/lib/api'
 import { TerminalDock } from '@/routes/board/terminal-dock'
+import type { AttachHandlers } from '@/routes/terminal/attach'
 import type * as attachModule from '@/routes/terminal/attach'
-import { useStore } from '@/store'
 import { initialEnvTerminal } from '@/store/env-terminal'
+import { useStore } from '@/store'
+import type * as apiModule from '@/lib/api'
 
 const xterm = vi.hoisted(() => ({
   hostRef: () => {},
@@ -17,11 +19,7 @@ const xterm = vi.hoisted(() => ({
 }))
 
 const attach = vi.hoisted(() => ({
-  handlers: null as {
-    onAttached: (write: boolean) => void
-    onRefused: (detail: string) => void
-    onExit: () => void
-  } | null,
+  handlers: null as AttachHandlers | null,
 }))
 
 vi.mock('@/components/xterm-host', () => ({
@@ -34,25 +32,34 @@ vi.mock('@/routes/terminal/attach', async (importOriginal) => ({
   ...(await importOriginal<typeof attachModule>()),
   connectAttach: (
     _socketURL: () => string,
-    handlers: {
-      onAttached: (write: boolean) => void
-      onRefused: (detail: string) => void
-      onExit: () => void
-    },
+    handlers: AttachHandlers,
   ) => {
     attach.handlers = handlers
-    return { send: vi.fn(), resize: vi.fn(), reopen: vi.fn(), close: vi.fn() }
+    return {
+      send: vi.fn(),
+      resize: vi.fn(),
+      reopen: vi.fn(),
+      rebind: (next: AttachHandlers) => {
+        attach.handlers = next
+      },
+      close: vi.fn(),
+    }
   },
 }))
-vi.mock('@/lib/api', () => ({
-  api: {
-    terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
-    terminalStop: vi.fn(async () => ({})),
-    envSave: vi.fn(async () => ({ image: 'aether/member-1:123' })),
-    envReset: vi.fn(async () => ({})),
-    terminalSocket: vi.fn(() => 'ws://localhost/ws/terminal?tab=main'),
-  },
-}))
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
+      terminalStop: vi.fn(async () => ({})),
+      envSave: vi.fn(async () => ({ image: 'aether/member-1:123' })),
+      envReset: vi.fn(async () => ({})),
+      terminalSocket: vi.fn(() => 'ws://localhost/ws/terminal?tab=main'),
+    },
+  }
+})
 
 
 describe('environment terminal dock', () => {
@@ -89,6 +96,49 @@ describe('environment terminal dock', () => {
 
     expect(await screen.findByRole('button', { name: 'Save environment' })).toBeDefined()
     expect(screen.getByText('Installs here reach agents after you save.')).toBeDefined()
+  })
+  it('rebinds a persistent main socket after the dock remounts', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    const first = render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    first.unmount()
+
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    act(() => attach.handlers?.onAttached(true))
+
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  })
+  it('ignores late callbacks from a prior tab after switching terminals', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    const oldHandlers = attach.handlers
+    act(() => oldHandlers?.onAttached(true))
+
+    xterm.terminal.write.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
+    await waitFor(() => {
+      expect(useStore.getState().envTerminal.activeTab).toBe('t2')
+      expect(attach.handlers).not.toBe(oldHandlers)
+    })
+    const currentHandlers = attach.handlers
+    act(() => currentHandlers?.onAttached(true))
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+
+    const currentOutput = new TextEncoder().encode('current output')
+    const oldOutput = new TextEncoder().encode('old output')
+    act(() => {
+      currentHandlers?.onData?.(currentOutput, 'live')
+      oldHandlers?.onData?.(oldOutput, 'live')
+      oldHandlers?.onState('offline')
+      oldHandlers?.onExit?.()
+    })
+
+    expect(useStore.getState().envTerminal.activeTab).toBe('t2')
+    expect(screen.queryByRole('status')).toBeNull()
+    const writes = xterm.terminal.write.mock.calls.map(([chunk]) => chunk)
+    expect(writes).toEqual([currentOutput])
   })
 
   it('opens the environment forward dialog when forwarding is available', async () => {
@@ -240,7 +290,7 @@ describe('environment terminal dock', () => {
     await waitFor(() => expect(attach.handlers).not.toBeNull())
     act(() => attach.handlers?.onAttached(true))
 
-    act(() => attach.handlers?.onExit())
+    act(() => attach.handlers?.onExit?.())
 
     expect(useStore.getState().envTerminal.status).toEqual({
       running: false,

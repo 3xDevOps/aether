@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import type { RunStatus } from '@/lib/types'
+import type * as apiModule from '@/lib/api'
 import { useStore } from '@/store'
 import {
   initialRunShellDock,
@@ -11,36 +12,39 @@ import {
 import { run } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
-vi.mock('@/lib/api', async () => {
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
   const { fakeApi } = await import('@/test/fixtures')
   return {
+    ...actual,
     api: {
       ...fakeApi(),
       attachShellSocket: (runID: string, tab: string) =>
         `ws://localhost/ws/attach/${encodeURIComponent(runID)}?shell=${encodeURIComponent(tab)}`,
     },
-    API_BASE: '/api/v1',
-    ApiError: Error,
   }
 })
 
 function mount({
+  runID = 'run_1',
   dock = {},
   status = 'running',
-}: { dock?: Partial<RunShellDockState>; status?: RunStatus } = {}) {
+}: { runID?: string; dock?: Partial<RunShellDockState>; status?: RunStatus } = {}) {
   const View = lookupRoute('terminal')
   if (!View) throw new Error('terminal route not registered')
-  useStore.getState().upsertRun(run({ status }))
+  useStore.getState().upsertRun(run({ id: runID, status }))
   useStore.setState({
     terminals: {},
-    pausedRuns: { run_1: false },
+    pausedRuns: { [runID]: false },
     // The dock ships collapsed; these cases are about what it shows open.
-    shellDocks: { run_1: { ...initialRunShellDock, collapsed: false, ...dock } },
+    shellDocks: { [runID]: { ...initialRunShellDock, collapsed: false, ...dock } },
   })
-  return render(<View params={{ runId: 'run_1' }} />)
+  return render(<View params={{ runId: runID }} />)
 }
 beforeEach(() => {
-  for (const tab of ['t1', 't2', 't3', 't4']) unregisterShellSocket('run_1', tab)
+  for (const runID of ['run_1', 'run_2']) {
+    for (const tab of ['t1', 't2', 't3', 't4']) unregisterShellSocket(runID, tab)
+  }
   StubSocket.install()
 })
 
@@ -101,6 +105,144 @@ describe('run-shell dock', () => {
     )
     view.unmount()
   }, 20_000)
+  it('rebinds a persistent shell after the terminal route remounts', async () => {
+    const first = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
+    await waitFor(() => expect(StubSocket.last().url).toContain('?shell=t1'))
+    const shell = StubSocket.last()
+    act(() => {
+      shell.onopen?.()
+      shell.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+    })
+    first.unmount()
+
+    const second = mount({
+      dock: { tabs: ['t1'], activeTab: 't1', collapsed: false },
+    })
+    const shellsBeforeReopen = () =>
+      StubSocket.opened.filter((socket) => socket.url.includes('?shell=t1'))
+    await waitFor(() => expect(shellsBeforeReopen()).toHaveLength(2))
+    const reopened = shellsBeforeReopen()[1]
+    act(() => {
+      reopened.onopen?.()
+      reopened.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+      reopened.onmessage?.({ data: new TextEncoder().encode('remounted shell').buffer })
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        [...document.querySelectorAll('.xterm-rows')].some((rows) =>
+          rows.textContent?.includes('remounted shell'),
+        ),
+      ).toBe(true),
+    )
+    second.unmount()
+  })
+  it('ignores late callbacks from a prior run sharing the active shell tab', async () => {
+    const View = lookupRoute('terminal')
+    if (!View) throw new Error('terminal route not registered')
+    const first = mount({
+      runID: 'run_1',
+      dock: { tabs: ['t1'], activeTab: 't1', collapsed: false },
+    })
+    const shellFor = (runID: string) =>
+      StubSocket.opened.find((socket) => socket.url.includes(`/attach/${runID}?shell=t1`))
+    await waitFor(() => expect(shellFor('run_1')).toBeDefined())
+    const oldShell = shellFor('run_1')
+    act(() => {
+      oldShell?.onopen?.()
+      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+    })
+
+    useStore.getState().upsertRun(run({ id: 'run_2' }))
+    useStore.setState({
+      terminals: {},
+      pausedRuns: { run_1: false, run_2: false },
+      shellDocks: {
+        run_1: { ...initialRunShellDock, tabs: ['t1'], activeTab: 't1', collapsed: false },
+        run_2: { ...initialRunShellDock, tabs: ['t1'], activeTab: 't1', collapsed: false },
+      },
+    })
+    first.rerender(<View params={{ runId: 'run_2' }} />)
+
+    await waitFor(() => expect(shellFor('run_2')).toBeDefined())
+    const currentShell = shellFor('run_2')
+    act(() => {
+      currentShell?.onopen?.()
+      currentShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+      currentShell?.onmessage?.({ data: new TextEncoder().encode('B output').buffer })
+      // These events belong to run_1, but arrive after run_2 accepted t1.
+      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+      oldShell?.onmessage?.({ data: new TextEncoder().encode('A output').buffer })
+      oldShell?.onclose?.({ code: 1000 })
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        [...document.querySelectorAll('.xterm-rows')].some((rows) =>
+          rows.textContent?.includes('B output'),
+        ),
+      ).toBe(true),
+    )
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(useStore.getState().shellDocks.run_2.tabs).toEqual(['t1'])
+    expect(currentShell?.closed).toBe(false)
+    first.unmount()
+  })
+
+  it('keeps late background callbacks away from the active shell and refusal', async () => {
+    const view = mount({
+      dock: { tabs: ['t1', 't2'], activeTab: 't1', collapsed: false },
+    })
+    const terminalDock = within(screen.getByRole('region', { name: 'Terminal dock' }))
+    const shellsFor = (tab: string) =>
+      StubSocket.opened.filter((socket) => socket.url.includes(`?shell=${tab}`))
+    const accepted = JSON.stringify({ ok: true, replay: 0 })
+    const denied = JSON.stringify({ ok: false, code: -32001, error: 'write denied' })
+
+    await waitFor(() => expect(shellsFor('t1')).toHaveLength(1))
+    const firstActive = shellsFor('t1')[0]
+    act(() => {
+      firstActive?.onopen?.()
+      firstActive?.onmessage?.({ data: accepted })
+    })
+
+    fireEvent.click(screen.getByRole('tab', { name: 't2' }))
+    await waitFor(() => expect(shellsFor('t2')).toHaveLength(1))
+    const background = shellsFor('t2')[0]
+    act(() => {
+      background?.onopen?.()
+      background?.onmessage?.({ data: accepted })
+    })
+
+    fireEvent.click(screen.getByRole('tab', { name: 't1' }))
+    await waitFor(() => expect(shellsFor('t1')).toHaveLength(2))
+    const active = shellsFor('t1')[1]
+    act(() => {
+      active?.onopen?.()
+      active?.onmessage?.({ data: accepted })
+    })
+    expect(terminalDock.getByRole('toolbar', { name: 'Terminal controls' })).toBeDefined()
+
+    const lateBackgroundMessage = background?.onmessage
+    act(() => lateBackgroundMessage?.({ data: denied }))
+    expect(background?.closed).toBe(true)
+    act(() => lateBackgroundMessage?.({ data: accepted }))
+    expect(terminalDock.getByRole('toolbar', { name: 'Terminal controls' })).toBeDefined()
+
+    const activeMessage = active?.onmessage
+    act(() =>
+      activeMessage?.({
+        data: JSON.stringify({ ok: false, code: -32002, error: 'active backend refusal' }),
+      }),
+    )
+    expect(terminalDock.getByText('active backend refusal')).toBeDefined()
+    expect(active?.closed).toBe(true)
+    act(() => lateBackgroundMessage?.({ data: accepted }))
+    expect(terminalDock.getByText('active backend refusal')).toBeDefined()
+    expect(terminalDock.queryByRole('toolbar', { name: 'Terminal controls' })).toBeNull()
+    view.unmount()
+  })
 
   it('waits for pause state instead of offering a rejected shell', () => {
     const view = mount({ status: 'needs-attention' })

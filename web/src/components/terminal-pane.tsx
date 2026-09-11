@@ -22,7 +22,12 @@ import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/heroui'
 import { Input } from '@/components/ui/input'
-import { copySelection, pasteClipboard } from '@/lib/term-clipboard'
+import {
+  TerminalImageAction,
+  type TerminalImageController,
+  useTerminalImage,
+} from '@/components/terminal-image'
+import { copySelection } from '@/lib/term-clipboard'
 import {
   defaultTerminalFontSize,
   maxTerminalFontSize,
@@ -58,7 +63,13 @@ function ToolButton({
   )
 }
 
-function TerminalTools({ controller }: { controller: XtermController }) {
+function TerminalTools({
+  controller,
+  image,
+}: {
+  controller: XtermController
+  image: TerminalImageController
+}) {
   const terminal = controller.terminal
   const fontSize = useStore((state) => state.terminalFontSize)
   const setFontSize = useStore((state) => state.setTerminalFontSize)
@@ -141,11 +152,12 @@ function TerminalTools({ controller }: { controller: XtermController }) {
         hint="Paste into terminal (Ctrl+Shift+V)"
         disabled={!terminal}
         onClick={() => {
-          if (terminal) void pasteClipboard(terminal)
+          if (terminal) void image.pasteClipboard()
         }}
       >
         <ClipboardPaste />
       </ToolButton>
+      <TerminalImageAction controller={image} />
     </div>
   )
 }
@@ -239,18 +251,34 @@ export function TerminalPane({
   controller,
   className,
   children,
+  imageTarget,
+  imageTargetKey,
+  imageUploadEnabled,
 }: {
   controller: XtermController
   /** Extra classes for the terminal element itself. */
   className?: string
   /** Additional content drawn over the terminal, such as `TerminalSpinner`. */
   children?: React.ReactNode
+  /** Run ID for a run terminal or shell; omit for the member environment. */
+  imageTarget?: string
+  /** Active terminal identity, used to reject late uploads after tab changes. */
+  imageTargetKey?: string
+  /** Whether this attached terminal may accept an uploaded path. */
+  imageUploadEnabled?: boolean
 }) {
+  const image = useTerminalImage({
+    terminal: controller.terminal,
+    imageTarget,
+    imageTargetKey,
+    imageUploadEnabled,
+    focusTerminal: controller.focusTerminal,
+  })
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex h-9 min-h-9 shrink-0 items-center border-b border-border bg-sidebar px-2">
         {!controller.findOpen ? (
-          <TerminalTools controller={controller} />
+          <TerminalTools controller={controller} image={image} />
         ) : (
           <FindBar
             search={controller.search}
@@ -266,6 +294,7 @@ export function TerminalPane({
         className={cn('min-h-0 flex-1 overflow-hidden bg-background p-2 text-foreground', className)}
       />
       {children}
+      {image.dialog}
     </div>
   )
 }

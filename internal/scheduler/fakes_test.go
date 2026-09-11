@@ -39,6 +39,9 @@ type fakeRuntime struct {
 	// heldImages are tags the fake daemon refuses to remove, as Docker does
 	// while a container still uses them.
 	heldImages map[string]bool
+	// attachHook can inject one-shot adoption failures without changing the
+	// fake container's liveness.
+	attachHook func(context.Context, runtime.ID) (runtime.Attachment, error)
 	// execTTYHook overrides ExecTTY for tests that need to model an
 	// immediate shell-executable failure.
 	execTTYHook func(context.Context, runtime.ID, []string, string, uint, uint) (runtime.Attachment, error)
@@ -249,10 +252,14 @@ func (r *fakeRuntime) Destroy(_ context.Context, id runtime.ID) error {
 	return nil
 }
 
-func (r *fakeRuntime) Attach(_ context.Context, id runtime.ID) (runtime.Attachment, error) {
+func (r *fakeRuntime) Attach(ctx context.Context, id runtime.ID) (runtime.Attachment, error) {
 	r.mu.Lock()
 	r.attaches++
+	hook := r.attachHook
 	r.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, id)
+	}
 	c, err := r.get(id)
 	if err != nil {
 		return nil, err
@@ -364,6 +371,22 @@ func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStat
 		defer c.mu.Unlock()
 		return *c.exit, nil
 	}
+}
+
+func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.ContainerInfo, error) {
+	c, err := r.get(id)
+	if err != nil {
+		return runtime.ContainerInfo{}, err
+	}
+	env := make([]string, 0, len(c.spec.Env))
+	for key, value := range c.spec.Env {
+		env = append(env, key+"="+value)
+	}
+	return runtime.ContainerInfo{
+		Image: c.spec.Image,
+		User:  c.spec.User,
+		Env:   env,
+	}, nil
 }
 
 func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.ID, error) {

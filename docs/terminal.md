@@ -91,22 +91,78 @@ the terminal itself claims them before the shell sees them.
 | Key | What it does |
 | --- | --- |
 | `Ctrl+Shift+C` | Copy the selection. A plain `Ctrl+C` copies too when text is selected, and interrupts when none is. |
-| `Ctrl+Shift+V` | Paste. Plain `Ctrl+V` works as well. |
+| `Ctrl+Shift+V` | Native paste on Windows and Linux. Plain `Ctrl+V` is native too; on macOS use native `Cmd+V`. |
 | `Ctrl+Shift+F` | Open the find bar. `Enter` goes to the next match, `Shift+Enter` back, `Esc` closes it. |
 | `Ctrl+=` / `Ctrl+-` | Grow or shrink the terminal font, 8px to 32px. `Ctrl+Shift+=` grows too, since that is how a keyboard without a numpad types `Ctrl++`. |
 | `Ctrl+0` | Back to the default 12px. |
 
-`Cmd`, or the `Super`/`Windows` key, works as well as `Ctrl` for the zoom keys.
-The font size is one preference across every terminal and survives a reload;
-find searches the scrollback of the terminal it was opened in.
+`Cmd`, or the `Super`/`Windows` key, works as well as `Ctrl` for the zoom
+keys. The font size is one preference across every terminal and survives a
+reload; find searches the scrollback of the terminal it was opened in.
+`Ctrl+Shift+=` is accepted for zoom, but `Ctrl+Shift+-` remains the shell's
+`Ctrl+_` (readline undo or a vim keymap switch), as does a shifted `Ctrl+0`.
+The zoom shortcuts normally cancel the browser's own page zoom; if a browser
+keeps its accelerator, the page may zoom too.
 
-Both shifted forms are left to the shell; `Ctrl+Shift+-` is `Ctrl+_`,
-readline's undo and vim's keymap switch.
+Native paste is deliberately left to xterm and the browser for those keyboard
+shortcuts; it does not depend on the asynchronous `navigator.clipboard` API.
+That matters on Windows when clipboard-read permission is denied. When image
+upload is enabled, a native paste containing actual image file data is handled
+by the terminal's image paste listener; ordinary text remains native terminal
+input. On macOS, `Cmd+V` is the native paste shortcut.
 
-The zoom keys are also a browser's own page-zoom accelerators. The terminal
-cancels the key, and the desktop app binds no competing zoom. Where a browser
-keeps the accelerator for itself, the page zooms as well; use the desktop app
-if that gets in the way.
+The terminal toolbar has named **Copy terminal selection**, **Paste into
+terminal**, and **Upload image to terminal** controls. The toolbar's Paste
+control first uses the browser clipboard API to look for an image and then
+falls back to text. If no usable clipboard read API remains, or its reads are
+denied, it shows a visible **Paste unavailable** error telling you to use the
+native paste shortcut or allow clipboard access. Copy uses the same API with a
+selection fallback; if both routes fail it shows **Copy unavailable** rather
+than silently dropping the copy.
+
+### Paste or upload an image
+
+An image paste must contain the actual file bytes. If the clipboard provides a
+PNG, JPEG, GIF, or WebP file (including a disk-backed clipboard image), native
+paste or the toolbar's **Paste into terminal** opens **Upload image to
+terminal** with a preview. Select **Upload and insert** to send it. In a
+browser or desktop app on Windows, macOS, or Linux, the **Upload image to
+terminal** toolbar control opens the platform's file chooser directly; use
+**Choose another image** in the dialog to replace a selection. The chooser is
+the fallback when the clipboard exposes no image bytes.
+
+The client accepts PNG, JPEG, GIF, and WebP files up to 8 MiB. The server
+validates the decoded bytes and format again, so a misleading filename or MIME
+type is not enough. A rejected selection stays in the dialog with the actual
+validation error; server or connection failures appear as **Upload failed:**
+with the server's detail. A native image-paste failure is shown as **Pasting
+image failed:** with its detail.
+
+Some clipboard managers expose only a path such as
+`C:\Screenshots\shot.png` or `/home/me/shot.png`. That is text, not an image
+file: a remote container cannot read a path on your local OS, and a browser
+cannot auto-read arbitrary local paths. Choose the actual file in the chooser
+instead. The server stores the selected bytes and returns a remote absolute
+path; Aether inserts that path with shell quoting and does **not** press
+Enter. Review or edit it, then press Enter yourself when it is ready.
+
+### Control availability
+
+**Upload image to terminal** is disabled until the selected terminal has a
+live attach and write permission. In a run's agent terminal, a read-only
+mirror, a `Connecting`, `Reconnecting`, or `Offline` state, a starting run,
+or a server-denied **Take control** state leaves image upload disabled. Take
+control first when the run is steerable. A run that is finished or otherwise
+not running says **This run is not running** beside its disabled control.
+The run shell can open only for a `running` or `needs-attention` run whose
+pause state is known and unpaused; otherwise its unavailable panel says
+**Run shell unavailable: this run has no live container. The Terminal tab
+replays its recorded output.** A shell that is refused says **You can view this
+run but not open a shell in it**.
+The environment dock shows **Starting your environment container** for its
+first open and **Connecting to your environment** for a later attach; a
+startup or attach failure displays the gateway's own error. These states do
+not turn a read-only transcript into a writable terminal.
 
 ## Tabs and lifecycle
 
@@ -118,3 +174,21 @@ the environment again recreates the container if it stopped.
 Stopping the environment stops its container and all tab processes. The member
 home is not deleted. The next CLI or dashboard open starts a new container with
 the same home.
+
+Uploaded images are kept in the target account's persistent member home under
+`$HOME/.aether/terminal-images/`. The server generates a name such as
+`image-<random>.png`, writes the original bytes with private permissions, and
+returns the absolute path visible inside that target container. The path is
+not a local OS path, a workspace checkout path, or part of the Docker saved
+environment image. Stopping the environment, recreating its container, or
+running `aether env reset` leaves the member home (and these images) intact;
+there is no automatic image cleanup.
+
+To remove one known image from a terminal, substitute the exact generated
+filename and run:
+
+```sh
+rm -- "$HOME/.aether/terminal-images/image-<random>.<ext>"
+```
+
+Do not replace the filename with a wildcard.
