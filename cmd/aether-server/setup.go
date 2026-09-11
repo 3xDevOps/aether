@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -15,6 +17,27 @@ import (
 )
 
 func setup(args []string) error {
+	// Notify overrides inherited ignored signals while a prompt is blocked.
+	signals := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		defer close(done)
+		if sig, ok := <-signals; ok {
+			switch sig {
+			case os.Interrupt:
+				os.Exit(130)
+			case syscall.SIGTERM:
+				os.Exit(143)
+			}
+		}
+	}()
+	defer func() {
+		signal.Stop(signals)
+		close(signals)
+		<-done
+	}()
+
 	fs := flag.NewFlagSet("setup", flag.ExitOnError)
 	configPath := fs.String("config", serversetup.DefaultConfigPath, "options file to write")
 	unitPath := fs.String("unit", serversetup.UnitPath, "systemd unit file to write")

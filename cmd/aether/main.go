@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,8 +18,26 @@ import (
 func main() {
 	if err := dispatch(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "aether:", err)
-		os.Exit(1)
+		code := 1
+		var status *exitStatusError
+		if errors.As(err, &status) {
+			code = status.code
+		}
+		os.Exit(code)
 	}
+}
+
+type exitStatusError struct {
+	code int
+	err  error
+}
+
+func (e *exitStatusError) Error() string {
+	return e.err.Error()
+}
+
+func (e *exitStatusError) Unwrap() error {
+	return e.err
 }
 
 func dispatch(args []string) error {
