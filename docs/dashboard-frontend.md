@@ -83,6 +83,15 @@ cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
 # on the phone: http://<lan-ip>:3000/?token=<token-from-aether-gui>
 ```
 
+- **Binding the LAN address gives up the loopback boundary for as long as
+  the dev server runs.** Every device on that network can reach a proxy in
+  front of a gateway that holds the member's full authority on the linked
+  server, and the bearer token is the whole authentication: it travels in
+  clear over HTTP, sits in the URL and stays in the phone's history. Use a
+  network you trust, and stop the dev server when the session ends. The
+  shipped boundary is the loopback rule in
+  [security.md](security.md#the-dashboard-gateway); this is a
+  development-time exception a contributor opts into by hand.
 - `--hostname` has to be the address typed on the phone. Next's development
   server permits only localhost and the hostname it was started on; any other
   origin needs `allowedDevOrigins` in `web/next.config.ts`.

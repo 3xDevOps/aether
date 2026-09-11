@@ -164,7 +164,10 @@ the server exposes, and the browser surface inherits its boundary.
 
 - **It binds 127.0.0.1 and nothing else.** There is no exposure flag; the
   listener is loopback or it does not exist. Nothing about the dashboard
-  widens what the server listens on.
+  widens what the server listens on. A contributor testing on a phone can
+  put the development proxy in front of it on a LAN address, which gives up
+  this boundary for as long as that proxy runs; what that costs is spelled
+  out in [dashboard-frontend.md](dashboard-frontend.md#testing-on-a-phone).
 - **Every request needs a token, loopback included.** HTTP cannot identify
   a member on its own and any local process can reach a loopback port, so
   the gateway mints a bearer token per process (32 random bytes) that every

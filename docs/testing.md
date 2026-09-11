@@ -15,6 +15,17 @@ Layers, per the design spec's testing strategy:
   `make test-integration` (real Docker, real git). CI runs them on every PR in
   the `integration` job of `.github/workflows/ci.yml`; that job is the merge
   gate the E2E suite owns.
+- **Dashboard component tests** live beside their components in `web/src/`
+  and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
+  the `dashboard` job. They own rendered roles, labels, state transitions,
+  navigation and real gateway error text. jsdom has no layout, so
+  `web/src/test/setup.ts` answers every media query with `false` and a
+  component renders its widest branch; `atViewport`
+  (`web/src/test/viewport.ts`) puts one test on one screen instead - width
+  and pointer queries answer for it, `window.innerWidth`/`innerHeight`
+  report it, and the returned resize fires `change` where an answer moved
+  and `resize` on the window. It decides which branch renders and nothing
+  more: real layout belongs to the browser suite below.
 - **Dashboard end-to-end tests** live in `web/e2e/` and run with
   `make test-e2e`: a real browser driving the static Next export embedded by
   the shipped binary, through a real `aether gui` gateway and a real
@@ -189,13 +200,6 @@ across document listeners. Component tests remain responsible for rendered
 roles, labels, state transitions, navigation and real gateway error text; a
 CSS class or source-pattern assertion is not a substitute for either layer.
 
-A component test picks its screen with `atViewport` (`web/src/test/viewport.ts`).
-jsdom has no layout, so `web/src/test/setup.ts` answers every media query with
-`false` and components render their widest branch. `atViewport(390, 'coarse')`
-answers width and pointer queries for one screen instead, and returns a resize
-that fires `change` on the queries whose answer moved; the sidebar and
-status-bar tests use it. It decides which branch renders and nothing more -
-real layout stays the browser suite's.
 The `aether` fixture (`web/e2e/fixtures.ts`) builds one stack per test and
 tears it down with everything it created:
 
@@ -276,7 +280,7 @@ covered - WebKit is not installed.
 | Spec | Scenario |
 | --- | --- |
 | `files-browser.mobile` | On a phone, opening a real repository file from the sidebar rail, returning with Browse, and opening another file without losing the tree - every control tapped |
-| `onboarding-link.mobile` | The Link step with the soft keyboard up: the focused field stays on screen, typing lands, and the submit can still be scrolled into reach |
+| `onboarding-link.mobile` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach |
 | `status-bar.mobile` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport, with the theme toggle answering a tap on the bottom edge |
 
 Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
@@ -286,12 +290,17 @@ screenshot to every mobile test, passing or failing: a phone layout can be
 wrong while every DOM assertion holds, and a green run otherwise leaves
 nothing to look at.
 
-`raiseSoftKeyboard(page)` in the same file simulates the on-screen keyboard
-by shrinking the layout viewport by 320px - what a keyboard leaves of a
-portrait phone, and the shape it takes on a page that asks for
-`interactive-widget=resizes-content`. It returns the call that lowers it
-again. Playwright cannot raise the platform keyboard, so the real thing stays
-a manual check: `docs/dashboard-frontend.md` has the phone path.
+`raiseSoftKeyboard(page)` in the same file shrinks the layout viewport by
+320px, what a keyboard leaves of a portrait phone, and returns the call that
+restores it. Read it as a short-viewport proxy rather than a keyboard test:
+Playwright cannot raise the platform keyboard, and the dashboard ships Next's
+default viewport meta, so a real phone keyboard leaves the layout at its full
+height and shrinks only the visual viewport. What the helper proves is that
+the shell survives a short screen; content stranded behind a real keyboard
+stays a manual check on a phone (`docs/dashboard-frontend.md` has that path).
+When the shell asks for `interactive-widget=resizes-content`, the simulation
+becomes the shape that ships, and this paragraph and the comment on
+`raiseSoftKeyboard` should say so.
 
 The phone specs need git and no Docker. Run them alone against the binaries
 `make build` produced:
