@@ -26,60 +26,78 @@ const reportBudget = 4 * time.Second
 // agent's own turn boundary, and is far above any real tool call.
 const maxHookPayload = 8 << 20
 
+// reportUsage is what every wrong invocation prints. Each harness hands
+// its callback a different shape, so each has its own form.
+const reportUsage = `report: usage: aether-server report claude   (hook JSON on stdin)
+                     aether-server report codex <notify JSON>
+                     aether-server report pi --event <name> [--tool <name>]
+                     aether-server report opencode --event <name> [--status <type>]`
+
 // report tells the server what the agent is doing. Like mcp it is absent
 // from the usage text: no operator runs it. The server stages this binary
-// into a run container and the harness's own status hooks call it there,
-// against the coordination socket mounted beside it. How the event
+// into a run container and the harness's own status callback calls it
+// there, against the coordination socket mounted beside it. How the event
 // arrives is the harness's choice: Claude Code writes its hook payload on
-// stdin, opencode's plugin names the event on the command line.
+// stdin, Codex hands its notify program the payload as the one argument,
+// and pi's, omp's and opencode's extensions name the event on the command
+// line.
 //
 //	aether-server report claude
+//	aether-server report codex '{"type":"agent-turn-complete"}'
+//	aether-server report pi --event agent_end
 //	aether-server report opencode --event session.idle
 //
-// It never fails and never prints to stdout: a hook that breaks or slows
-// the agent is worse than a run card that is briefly wrong, so every
-// problem is one line on stderr - which the harness shows only when the
-// hook exits non-zero, so in normal use it is invisible and greppable in
-// the transcript.
+// It never fails and never prints to stdout: a callback that breaks or
+// slows the agent is worse than a run card that is briefly wrong, so every
+// problem is one line on stderr - which a harness shows only when the
+// callback exits non-zero, so in normal use it is invisible and greppable
+// in the transcript.
 //
 // Adding a harness is one case below plus one mapping function in
 // internal/agentstatus.
 func report(args []string) {
 	if len(args) == 0 {
-		warn("report: usage: aether-server report <harness> [flags]")
+		warn(reportUsage)
 		return
 	}
 	harness, args := args[0], args[1:]
 	fs := flag.NewFlagSet("report "+harness, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	socket := fs.String("socket", mcpbridge.SocketPath, "coordination socket to report on")
-	event := fs.String("event", "", "the event being reported (opencode)")
+	event := fs.String("event", "", "the event being reported (opencode, pi, omp)")
 	status := fs.String("status", "", "the session status type the event carries (opencode session.status)")
+	tool := fs.String("tool", "", "the tool the event names, where it names one (pi, omp)")
 	if err := fs.Parse(args); err != nil {
 		return
 	}
-	if fs.NArg() != 0 {
-		warn("report %s: unexpected argument %q", harness, fs.Arg(0))
-		return
-	}
+	// Whatever the harness put behind its flags. Only Codex has one: its
+	// notify payload. Every other shape is named below with none, so a
+	// stray argument is a malformed invocation rather than a silent report.
+	payload := fs.Args()
 	ctx, cancel := context.WithTimeout(context.Background(), reportBudget)
 	defer cancel()
 	var (
 		rep    agentstatus.Report
 		mapped bool
 	)
-	switch harness {
-	case "claude":
-		payload, err := readHookPayload(ctx, os.Stdin)
+	switch {
+	case harness == "claude" && len(payload) == 0:
+		hook, err := readHookPayload(ctx, os.Stdin)
 		if err != nil {
 			warn("report %s: read the hook payload: %v", harness, err)
 			return
 		}
-		rep, mapped = agentstatus.FromClaudeHook(payload)
-	case "opencode":
+		rep, mapped = agentstatus.FromClaudeHook(hook)
+	case harness == "codex" && len(payload) == 1:
+		rep, mapped = agentstatus.FromCodexNotify(payload[0])
+	// One reporter name for both CLIs: they load the same extension, which
+	// names itself pi whichever of the two is running it.
+	case harness == "pi" && len(payload) == 0 && *event != "":
+		rep, mapped = agentstatus.FromPiEvent(*event, *tool)
+	case harness == "opencode" && len(payload) == 0 && *event != "":
 		rep, mapped = agentstatus.FromOpenCodeEvent(*event, *status)
 	default:
-		warn("report: unknown harness %q", harness)
+		warn(reportUsage)
 		return
 	}
 	// An event that says nothing about whether the agent is working or

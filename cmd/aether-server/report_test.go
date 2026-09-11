@@ -123,21 +123,9 @@ func TestReportClaudeCallsRunReport(t *testing.T) {
 		t.Fatalf("the reporter wrote %q to stdout, want nothing", out)
 	}
 
-	req, ok := sock.next(t)
-	if !ok {
-		t.Fatal("the reporter never dialled the coordination socket")
-	}
-	if req.Method != protocol.MethodRunReport {
-		t.Fatalf("method = %q, want %q", req.Method, protocol.MethodRunReport)
-	}
-	var params protocol.RunReportParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		t.Fatalf("decode params: %v", err)
-	}
-	want := protocol.RunReportParams{State: string(agentstatus.Waiting), Reason: agentstatus.ReasonInput}
-	if params != want {
-		t.Fatalf("params = %+v, want %+v", params, want)
-	}
+	wantReport(t, sock, protocol.RunReportParams{
+		State: string(agentstatus.Waiting), Reason: agentstatus.ReasonInput,
+	})
 }
 
 // TestReportClaudeIgnoresUnmappedEvents: an event that says nothing about
@@ -183,12 +171,7 @@ func TestReportGivesUpOnAnUnclosedStdin(t *testing.T) {
 	case <-time.After(reportBudget + 2*time.Second):
 		t.Fatal("the reporter hung on a stdin the harness never closed")
 	}
-	// report has already returned, so a dial would already be here.
-	select {
-	case req := <-sock.requests:
-		t.Fatalf("the reporter dialled without a payload it could read: %+v", req)
-	case <-time.After(100 * time.Millisecond):
-	}
+	wantNoReport(t, sock)
 }
 
 // TestReportRefusesAnOversizedPayload: a hook payload carries the tool's
@@ -211,17 +194,10 @@ func TestReportRefusesAnOversizedPayload(t *testing.T) {
 	}
 }
 
-// TestReportOpenCodeCallsRunReport: opencode's plugin names the event on
-// the command line rather than on stdin, and the turn ending becomes the
-// same run.report a Claude Stop hook produces.
-func TestReportOpenCodeCallsRunReport(t *testing.T) {
-	sock := newFakeCoordSocket(t)
-	stdout := capture(t, &os.Stdout)
-	report([]string{"opencode", "--socket", sock.path, "--event", "session.idle"})
-	if out := stdout(); out != "" {
-		t.Fatalf("the reporter wrote %q to stdout, want nothing", out)
-	}
-
+// wantReport reads the one request the reporter made and checks what it
+// said about the agent.
+func wantReport(t *testing.T, sock *fakeCoordSocket, want protocol.RunReportParams) {
+	t.Helper()
 	req, ok := sock.next(t)
 	if !ok {
 		t.Fatal("the reporter never dialled the coordination socket")
@@ -233,10 +209,35 @@ func TestReportOpenCodeCallsRunReport(t *testing.T) {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		t.Fatalf("decode params: %v", err)
 	}
-	want := protocol.RunReportParams{State: string(agentstatus.Waiting), Reason: agentstatus.ReasonInput}
 	if params != want {
 		t.Fatalf("params = %+v, want %+v", params, want)
 	}
+}
+
+// wantNoReport: report has already returned, so a dial it should not have
+// made would already be here.
+func wantNoReport(t *testing.T, sock *fakeCoordSocket) {
+	t.Helper()
+	select {
+	case req := <-sock.requests:
+		t.Fatalf("the reporter dialled when it should not have: %+v", req)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestReportOpenCodeCallsRunReport: opencode's plugin names the event on
+// the command line rather than on stdin, and the turn ending becomes the
+// same run.report a Claude Stop hook produces.
+func TestReportOpenCodeCallsRunReport(t *testing.T) {
+	sock := newFakeCoordSocket(t)
+	stdout := capture(t, &os.Stdout)
+	report([]string{"opencode", "--socket", sock.path, "--event", "session.idle"})
+	if out := stdout(); out != "" {
+		t.Fatalf("the reporter wrote %q to stdout, want nothing", out)
+	}
+	wantReport(t, sock, protocol.RunReportParams{
+		State: string(agentstatus.Waiting), Reason: agentstatus.ReasonInput,
+	})
 }
 
 // TestReportOpenCodeIgnoresUnmappedEvents: opencode hands its plugin every
@@ -264,9 +265,7 @@ func TestReportOpenCodeIgnoresUnmappedEvents(t *testing.T) {
 	if msg := stderr(); msg != "" {
 		t.Fatalf("stderr = %q, want the reporter silent about an event it ignores", msg)
 	}
-	if req, ok := sock.next(t); ok {
-		t.Fatalf("the reporter dialled for an unmapped event: %+v", req)
-	}
+	wantNoReport(t, sock)
 }
 
 // TestReportOpenCodeReportsATurnStarting: the event alone does not say
@@ -276,16 +275,92 @@ func TestReportOpenCodeIgnoresUnmappedEvents(t *testing.T) {
 func TestReportOpenCodeReportsATurnStarting(t *testing.T) {
 	sock := newFakeCoordSocket(t)
 	report([]string{"opencode", "--socket", sock.path, "--event", "session.status", "--status", "busy"})
+	wantReport(t, sock, protocol.RunReportParams{State: string(agentstatus.Working)})
+}
 
-	req, ok := sock.next(t)
-	if !ok {
-		t.Fatal("the reporter never dialled the coordination socket")
+// TestReportCodexCallsRunReport: Codex hands its notify program the payload
+// as the one argument, never on stdin.
+func TestReportCodexCallsRunReport(t *testing.T) {
+	sock := newFakeCoordSocket(t)
+	stdout := capture(t, &os.Stdout)
+	report([]string{"codex", "--socket", sock.path,
+		`{"type":"agent-turn-complete","turn-id":"t1","last-assistant-message":"done"}`})
+	if out := stdout(); out != "" {
+		t.Fatalf("the reporter wrote %q to stdout, want nothing", out)
 	}
-	var params protocol.RunReportParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		t.Fatalf("decode params: %v", err)
+	wantReport(t, sock, protocol.RunReportParams{
+		State: string(agentstatus.Waiting), Reason: agentstatus.ReasonInput,
+	})
+}
+
+// TestReportPiCallsRunReport: pi and omp name the event on the command
+// line, and an ask tool is the agent handing the turn back mid-turn.
+func TestReportPiCallsRunReport(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want protocol.RunReportParams
+	}{
+		{"turn ended", []string{"--event", "agent_end"},
+			protocol.RunReportParams{State: string(agentstatus.Waiting), Reason: agentstatus.ReasonInput}},
+		{"turn started", []string{"--event", "agent_start"},
+			protocol.RunReportParams{State: string(agentstatus.Working)}},
+		{"tool running", []string{"--event", "tool_call", "--tool", "bash"},
+			protocol.RunReportParams{State: string(agentstatus.Working)}},
+		{"question asked", []string{"--event", "tool_call", "--tool", "ask"},
+			protocol.RunReportParams{State: string(agentstatus.Waiting), Reason: agentstatus.ReasonAnswer}},
+		{"permission asked", []string{"--event", "tool_approval_requested", "--tool", "bash"},
+			protocol.RunReportParams{State: string(agentstatus.Waiting), Reason: agentstatus.ReasonPermission}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sock := newFakeCoordSocket(t)
+			report(append([]string{"pi", "--socket", sock.path}, tc.args...))
+			wantReport(t, sock, tc.want)
+		})
 	}
-	if want := (protocol.RunReportParams{State: string(agentstatus.Working)}); params != want {
-		t.Fatalf("params = %+v, want %+v", params, want)
+}
+
+// TestReportIgnoresUnmappedHarnessEvents: an event that says nothing about
+// the agent's state costs no round trip, whichever harness sent it.
+func TestReportIgnoresUnmappedHarnessEvents(t *testing.T) {
+	for _, args := range [][]string{
+		{"codex", `{"type":"agent-turn-started"}`},
+		{"pi", "--event", "session_start"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			sock := newFakeCoordSocket(t)
+			report(append([]string{args[0], "--socket", sock.path}, args[1:]...))
+			wantNoReport(t, sock)
+		})
+	}
+}
+
+// TestReportRefusesAMalformedInvocation: the callback shapes are not
+// interchangeable, and a harness that got one wrong is told so rather than
+// reporting something nobody meant.
+func TestReportRefusesAMalformedInvocation(t *testing.T) {
+	for _, args := range [][]string{
+		{},
+		{"codex"},
+		{"codex", `{"type":"agent-turn-complete"}`, "extra"},
+		{"pi"},
+		{"pi", "agent_end"},
+		{"opencode"},
+		{"claude", "extra"},
+		{"cursor", "--event", "idle"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			sock := newFakeCoordSocket(t)
+			stderr := capture(t, &os.Stderr)
+			if len(args) == 0 {
+				report(nil)
+			} else {
+				report(append([]string{args[0], "--socket", sock.path}, args[1:]...))
+			}
+			if msg := stderr(); msg == "" {
+				t.Error("the reporter said nothing about an invocation it could not use")
+			}
+			wantNoReport(t, sock)
+		})
 	}
 }
