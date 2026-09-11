@@ -691,6 +691,23 @@ func TestPiExtensionRuntime(t *testing.T) {
 		assertReports(t, got, []string{"report pi --event agent_settled"})
 	})
 
+	t.Run("an agent that goes idle after agent_end still ends its turn", func(t *testing.T) {
+		// A pi that is still working at agent_end and never fires
+		// agent_settled has nothing else to say. Stop re-checking and the
+		// turn is never reported as over: the run reads Working until the
+		// stall threshold parks it with the wrong reason.
+		got := runExtension(t, "idle-later")
+		assertReports(t, got, []string{"report pi --event agent_end"})
+	})
+
+	t.Run("a child agent does not report on its parent's run", func(t *testing.T) {
+		// The agent's own environment reaches everything it spawns, this
+		// extension included. Only the process that claimed the marker
+		// reports.
+		got := runExtension(t, "foreign-owner")
+		assertReports(t, got, nil)
+	})
+
 	t.Run("willContinue is not the end of the turn", func(t *testing.T) {
 		got := runExtension(t, "will-continue")
 		assertReports(t, got, nil)

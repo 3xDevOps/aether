@@ -10,6 +10,11 @@ const pi = {
   },
 }
 
+// A child agent spawned by the run's agent inherits the run's environment,
+// including the marker naming the process that reports. Set it to someone
+// else and the extension must register nothing at all.
+if (scenario === 'foreign-owner') process.env.AETHER_STATUS_OWNER = '1'
+
 const copies = scenario === 'double' ? ['./status.ts', './status-copy.ts'] : ['./status.ts']
 for (const copy of copies) {
   const load = await import(copy)
@@ -22,6 +27,10 @@ function fire(event: string, payload?: any, ctx?: any): void {
 
 const idle = { isIdle: () => true }
 const busy = { isIdle: () => false }
+// Busy on the first two checks, idle on the third: the agent kept working
+// past agent_end and then went quiet, with no agent_settled to say so.
+let checks = 0
+const busyThenIdle = { isIdle: () => ++checks > 2 }
 
 switch (scenario) {
   case 'turn':
@@ -44,6 +53,17 @@ switch (scenario) {
     fire('agent_end', {}, busy)
     await new Promise((done) => setTimeout(done, 100))
     fire('agent_settled')
+    break
+  case 'idle-later':
+    // Legacy pi and omp are idle by the time agent_end fires; a modern pi
+    // can still be retrying or compacting. The extension has to keep
+    // asking until the answer changes, and report the end exactly once.
+    fire('agent_end', {}, busyThenIdle)
+    break
+  case 'foreign-owner':
+    fire('agent_start')
+    fire('message_end')
+    fire('agent_end', {}, idle)
     break
   case 'will-continue':
     // omp is already idle when it says more work follows, so nothing but
