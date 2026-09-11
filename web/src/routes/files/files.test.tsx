@@ -17,7 +17,13 @@ describe('Files cache request boundaries', () => {
   it('does not strand a pending config tree when another run invalidates', async () => {
     const tree = Promise.withResolvers<{ entries: Array<{ name: string; kind: 'file' | 'dir'; size: number }> }>()
     const client = fakeApi({
-      configRoots: vi.fn(async () => ({ roots: [{ harness: 'claude', path: '~/.claude' }] })),
+      configRoots: vi.fn(async () => ({
+        roots: [{
+          harness: 'claude',
+          path: '~/.claude',
+          runtime_ignores: ['projects/'],
+        }],
+      })),
       configTree: vi.fn(() => tree.promise),
     })
     render(<FilesRoute params={{}} client={client} />)

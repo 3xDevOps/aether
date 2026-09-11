@@ -262,7 +262,7 @@ Both transports therefore expose the same API shape and authorization checks.
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
 | `files.diff` | `{"run_id":"...","path":"README.md"}` | `{"patch":"...","truncated":false}` |
-| `config.roots` | `{}` | `{"roots":[{"harness":"claude","path":"~/.claude"}]}` |
+| `config.roots` | `{}` | `{"roots":[{"harness":"claude","path":"~/.claude","runtime_ignores":["projects/","shell-snapshots/","statsig/","todos/","file-history/","history.jsonl","daemon/"]}]}` |
 | `config.tree` | `{"harness":"claude","path":"."}` (`path` may be omitted, empty, or `"."` for the root) | `{"entries":[{"name":"settings.json","kind":"file","size":1234},...]}` |
 | `config.read` | `{"harness":"claude","path":"settings.json"}` | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `config.write` | `{"harness":"claude","path":"settings.json","content":"...","revision":"<sha256>"}` (`revision` is empty only for a new file) | the same `FileRead` shape as `config.read`, for the saved bytes |
@@ -304,13 +304,22 @@ read-write persistent HOME. A file edit, configuration import, or manual CLI
 profile operation is therefore visible to already-running processes
 immediately, although a tool may need to reload its configuration.
 
-The browser filters known credential names (wherever they occur in a path)
-and runtime/history defaults before upload, but all remaining bytes are
-uploaded and server-scanned. Imports allow at most 2,000 files, 1 MiB per
-file, and 20 MiB decoded in aggregate. Empty and binary regular files are
-preserved; a browser import sends mode `0644` and cannot preserve executable
-mode or symlinks. Existing remote modes are preserved. The server rejects
-unsafe paths, symlink components, hardlinks, and non-regular destinations.
+The browser uses the selected root's `runtime_ignores` metadata before
+reading or uploading any bytes. `runtime_ignores` contains exact,
+case-sensitive root-relative paths and component prefixes; trailing slashes
+are ignored for matching. These lists are per harness, so a runtime file
+ignored for Claude is not implicitly ignored for OMP or a member-defined
+custom harness. Known credential names wherever they occur in a path, and
+every basename ending in `.pem`, remain filtered by the existing
+destination-independent credential policy. The browser keeps raw local file
+handles so it can recompute an import when the destination changes, and
+cannot change destinations during import or after a result exists.
+All remaining bytes are uploaded and server-scanned. Imports allow at most
+2,000 files, 1 MiB per file, and 20 MiB decoded in aggregate. Empty and binary
+regular files are preserved; a browser import sends mode `0644` and cannot
+preserve executable mode or symlinks. Existing remote modes are preserved.
+The server rejects unsafe paths, symlink components, hardlinks, and
+non-regular destinations.
 
 The result's `files` and `bytes` count
 accepted files only; `excluded` reports server-side credential, ignore,

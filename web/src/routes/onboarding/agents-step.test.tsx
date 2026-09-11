@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import type { Api } from '@/lib/api'
-import type { ConfigImportResult, GatewayCapabilities } from '@/lib/types'
+import type { ConfigImportResult, ConfigRoot, GatewayCapabilities } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { AgentsStep } from '@/routes/onboarding/agents-step'
 import { FirstRunStep } from '@/routes/onboarding/steps'
@@ -79,11 +79,25 @@ function directoryFile(
   })
   return file
 }
+function policyRoot(overrides: Partial<ConfigRoot> = {}): ConfigRoot {
+  return {
+    harness: 'claude',
+    path: '~/.claude',
+    runtime_ignores: [],
+    ...overrides,
+  }
+}
+
 
 async function choose(files: File[]) {
   const input = screen.getByLabelText('Choose configuration directory')
   fireEvent.change(input, { target: { files } })
-  await waitFor(() => expect(screen.getByText('Preview')).toBeDefined())
+  await waitFor(() => {
+    expect(
+      screen.queryByText('Preview') ||
+        screen.queryByLabelText('Configuration destination'),
+    ).toBeTruthy()
+  })
 }
 
 async function confirmImport() {
@@ -116,35 +130,35 @@ describe('agents step', () => {
     const client = fakeApi()
     renderStep(client)
     const pending = Promise.withResolvers<ArrayBuffer>()
+    const readOld = vi.fn(() => pending.promise)
     const oldFile = directoryFile('old.md', 'old')
     Object.defineProperty(oldFile, 'arrayBuffer', {
       configurable: true,
-      value: () => pending.promise,
+      value: readOld,
     })
     const input = screen.getByLabelText('Choose configuration directory')
     fireEvent.change(input, { target: { files: [oldFile] } })
-    await screen.findByRole('status')
+    await waitFor(() => expect(readOld).toHaveBeenCalledOnce())
 
     fireEvent.change(input, {
       target: { files: [directoryFile('new.md', 'new')] },
     })
     await waitFor(() => expect(screen.getByText('Preview')).toBeDefined())
-    expect(screen.queryByText(/old.md/)).toBeNull()
+    await act(async () => pending.resolve(new TextEncoder().encode('old').buffer))
     await confirmImport()
     await waitFor(() => expect(client.configImport).toHaveBeenCalledTimes(1))
     expect(client.configImport).toHaveBeenCalledWith({
       harness: 'claude',
       files: [{ path: 'new.md', content_base64: 'bmV3', mode: 0o644 }],
     })
-    pending.resolve(new TextEncoder().encode('old').buffer)
   })
 
   it('requires a destination when the selected basename is ambiguous', async () => {
     const client = fakeApi({
       configRoots: vi.fn(async () => ({
         roots: [
-          { harness: 'claude', path: '~/.shared' },
-          { harness: 'codex', path: '~/.shared' },
+          policyRoot({ harness: 'claude', path: '~/.shared' }),
+          policyRoot({ harness: 'codex', path: '~/.shared' }),
         ],
       })),
     })
@@ -154,11 +168,19 @@ describe('agents step', () => {
       configurable: true,
       value: 'shared/settings.json',
     })
+    const read = vi.fn(async () => new TextEncoder().encode('{}').buffer)
+    Object.defineProperty(file, 'arrayBuffer', {
+      configurable: true,
+      value: read,
+    })
     await choose([file])
+    expect(read).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Import configuration' })).toBeNull()
 
     const destination = screen.getByLabelText('Configuration destination')
-    expect((screen.getByRole('button', { name: 'Import configuration' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(destination, { target: { value: 'codex' } })
+    await screen.findByText('Preview')
+    expect(read).toHaveBeenCalledTimes(1)
     expect((screen.getByRole('button', { name: 'Import configuration' }) as HTMLButtonElement).disabled).toBe(false)
     await confirmImport()
     await waitFor(() => expect(client.configImport).toHaveBeenCalledTimes(1))
@@ -267,6 +289,11 @@ describe('agents step', () => {
 describe('directory import bounds', () => {
   it('filters credentials, runtime history and oversized files before reading', async () => {
     const root = 'renamed-agent-home'
+    const policy = policyRoot({
+      harness: 'omp',
+      path: `~/${root}`,
+      runtime_ignores: ['agent/cache/', 'logs/', 'run/'],
+    })
     const read = vi.fn(async () => new ArrayBuffer(0))
     const unreadable = (path: string, content: string | Uint8Array) => {
       const file = directoryFile(path, content, root)
@@ -277,39 +304,31 @@ describe('directory import bounds', () => {
       return file
     }
     const runtime = [
-      'history.jsonl',
-      'agent/sessions/transcript.jsonl',
-      'agent/tmp/download.tgz',
-      'agent/terminal-sessions/terminal.json',
       'agent/cache/state.json',
-      'agent/history.db',
-      'agent/history.db-shm',
-      'agent/history.db-wal',
-      'agent/models.db',
-      'natives/18.1.4/node',
-      'cache/runtime.json',
       'logs/omp.log',
       'run/state.json',
-      'collab/transcript.jsonl',
     ]
     const oversized = unreadable(
       'big.bin',
       new Uint8Array(MAX_IMPORT_FILE_BYTES + 1),
     )
-    const prepared = await prepareDirectoryImport([
-      unreadable('.credentials.json', 'secret'),
-      unreadable('agent/agent.db', 'secret'),
-      unreadable('agent/agent.db-wal', 'secret'),
-      unreadable('agent/agent.db-shm', 'secret'),
-      ...runtime.map((path) => unreadable(path, 'runtime')),
-      oversized,
-      directoryFile('agent/skills/work.md', 'skill', root),
-      directoryFile('agent/extensions/work.ts', 'extension', root),
-      directoryFile('agent/npm/package/index.js', 'npm', root),
-      directoryFile('agent/sessions-note.md', 'kept', root),
-      directoryFile('cacheable.json', 'kept', root),
-      directoryFile('empty.txt', '', root),
-    ])
+    const prepared = await prepareDirectoryImport(
+      [
+        unreadable('.credentials.json', 'secret'),
+        unreadable('agent/agent.db', 'secret'),
+        unreadable('agent/agent.db-wal', 'secret'),
+        unreadable('agent/agent.db-shm', 'secret'),
+        ...runtime.map((path) => unreadable(path, 'runtime')),
+        oversized,
+        directoryFile('agent/skills/work.md', 'skill', root),
+        directoryFile('agent/extensions/work.ts', 'extension', root),
+        directoryFile('agent/npm/package/index.js', 'npm', root),
+        directoryFile('agent/sessions-note.md', 'kept', root),
+        directoryFile('cacheable.json', 'kept', root),
+        directoryFile('empty.txt', '', root),
+      ],
+      policy,
+    )
 
     expect(read).not.toHaveBeenCalled()
     expect(prepared?.files.map(({ path }) => path)).toEqual([
@@ -329,6 +348,24 @@ describe('directory import bounds', () => {
       { path: 'agent/agent.db-shm', reason: 'credential' },
       ...runtime.map((path) => ({ path, reason: 'runtime' })),
       { path: 'big.bin', reason: 'too-large' },
+    ])
+    const destinationSensitive = [
+      unreadable('cache/state.json', 'cache'),
+      unreadable('logs/omp.log', 'logs'),
+      unreadable('run/state.json', 'run'),
+    ]
+    const claude = await prepareDirectoryImport(
+      destinationSensitive,
+      policyRoot({
+        harness: 'claude',
+        path: `~/${root}`,
+        runtime_ignores: ['agent/sessions/'],
+      }),
+    )
+    expect(claude?.files.map(({ path }) => path)).toEqual([
+      'cache/state.json',
+      'logs/omp.log',
+      'run/state.json',
     ])
   })
 })

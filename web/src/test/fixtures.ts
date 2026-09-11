@@ -301,9 +301,21 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     scheduleDelete: vi.fn(async () => ({})),
     configRoots: vi.fn(async () => ({
       roots: [
-        { harness: 'claude', path: '~/.claude' },
-        { harness: 'codex', path: '~/.codex' },
-        { harness: 'pi', path: '~/.pi' },
+        {
+          harness: 'claude',
+          path: '~/.claude',
+          runtime_ignores: ['projects/'],
+        },
+        {
+          harness: 'codex',
+          path: '~/.codex',
+          runtime_ignores: ['tmp/'],
+        },
+        {
+          harness: 'pi',
+          path: '~/.pi',
+          runtime_ignores: ['agent/sessions/'],
+        },
       ],
     })),
     configTree: vi.fn(async () => ({ entries: [] })),

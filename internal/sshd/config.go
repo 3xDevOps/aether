@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/permissions"
+	profilesvc "github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -83,6 +84,14 @@ func displayRoot(localRoot string) string {
 	return "~/" + strings.TrimPrefix(harness.HomeRelative(localRoot), "./")
 }
 
+func configRuntimeIgnores(name string) []string {
+	runtimeIgnores := profilesvc.DefaultIgnores(name)
+	if runtimeIgnores == nil {
+		runtimeIgnores = []string{}
+	}
+	return runtimeIgnores
+}
+
 func (b *HomeConfigBackend) Roots(ctx context.Context, member domain.MemberID) ([]protocol.ConfigRoot, error) {
 	seen := make(map[string]struct{})
 	out := make([]protocol.ConfigRoot, 0)
@@ -91,7 +100,10 @@ func (b *HomeConfigBackend) Roots(ctx context.Context, member domain.MemberID) (
 			continue
 		}
 		seen[p.Name] = struct{}{}
-		out = append(out, protocol.ConfigRoot{Harness: p.Name, Path: displayRoot(p.LocalRoot)})
+		out = append(out, protocol.ConfigRoot{
+			Harness: p.Name, Path: displayRoot(p.LocalRoot),
+			RuntimeIgnores: configRuntimeIgnores(p.Name),
+		})
 	}
 	if b.store != nil {
 		defs, err := b.store.ListHarnessDefinitions(ctx, member)
@@ -111,7 +123,10 @@ func (b *HomeConfigBackend) Roots(ctx context.Context, member domain.MemberID) (
 				continue
 			}
 			seen[row.Name] = struct{}{}
-			out = append(out, protocol.ConfigRoot{Harness: row.Name, Path: displayRoot(p.LocalRoot)})
+			out = append(out, protocol.ConfigRoot{
+				Harness: row.Name, Path: displayRoot(p.LocalRoot),
+				RuntimeIgnores: configRuntimeIgnores(row.Name),
+			})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Harness < out[j].Harness })

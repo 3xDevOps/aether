@@ -12,8 +12,10 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func TestConfigRPCAuthorizationAndOwnLifecycle(t *testing.T) {
@@ -171,4 +173,136 @@ func (c *cancelWhenFileAppears) Err() error {
 		return context.Canceled
 	}
 	return c.Context.Err()
+}
+
+func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
+	ctx := context.Background()
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEnv(t, func(c *Config) {
+		c.Homes = homes
+		c.Config = NewConfigBackend(homes, c.Store)
+	})
+
+	custom := harness.Definition{
+		Name:         "mybot",
+		TUIArgs:      []string{"mybot", harness.TaskPlaceholder},
+		HeadlessArgs: []string{"mybot", "-p", harness.TaskPlaceholder},
+		Executable:   "mybot",
+		ProfileRoot:  "/root/.mybot",
+	}
+	definition, err := json.Marshal(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.store.UpsertHarnessDefinition(ctx, &store.HarnessDefinition{
+		MemberID: e.member.ID, Name: custom.Name, Definition: definition,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	backend := NewConfigBackend(homes, e.store)
+	raw, perr := e.srv.Local(e.member.ID).Call(ctx, protocol.MethodConfigRoots, json.RawMessage("{}"))
+	if perr != nil {
+		t.Fatalf("config.roots: %v", perr)
+	}
+	var rootsResult protocol.ConfigRootsResult
+	if err = json.Unmarshal(raw, &rootsResult); err != nil {
+		t.Fatal(err)
+	}
+	roots := rootsResult.Roots
+	byHarness := make(map[string]protocol.ConfigRoot, len(roots))
+	for _, root := range roots {
+		if root.RuntimeIgnores == nil {
+			t.Fatalf("%s runtime_ignores must be an array: %+v", root.Harness, root)
+		}
+		byHarness[root.Harness] = root
+	}
+	for _, name := range []string{"claude", "omp", "mybot"} {
+		if _, ok := byHarness[name]; !ok {
+			t.Fatalf("config.roots omitted %q: %+v", name, roots)
+		}
+	}
+	if !containsString(byHarness["claude"].RuntimeIgnores, "projects/") ||
+		containsString(byHarness["omp"].RuntimeIgnores, "projects/") ||
+		len(byHarness["mybot"].RuntimeIgnores) != 0 {
+		t.Fatalf("runtime policies are not harness-specific: claude=%v omp=%v mybot=%v",
+			byHarness["claude"].RuntimeIgnores, byHarness["omp"].RuntimeIgnores,
+			byHarness["mybot"].RuntimeIgnores)
+	}
+
+	cases := []struct {
+		name     string
+		files    []memberhome.ConfigFile
+		accepted []string
+		excluded map[string]string
+	}{
+		{
+			name: "claude",
+			files: []memberhome.ConfigFile{
+				{Path: "projects/transcript.json", Content: []byte{}},
+				{Path: "agent/sessions/session.json", Content: []byte{}},
+			},
+			accepted: []string{"agent/sessions/session.json"},
+			excluded: map[string]string{"projects/transcript.json": "ignored"},
+		},
+		{
+			name: "omp",
+			files: []memberhome.ConfigFile{
+				{Path: "projects/transcript.json", Content: []byte{}},
+				{Path: "agent/sessions/session.json", Content: []byte{}},
+			},
+			accepted: []string{"projects/transcript.json"},
+			excluded: map[string]string{"agent/sessions/session.json": "ignored"},
+		},
+		{
+			name: "mybot",
+			files: []memberhome.ConfigFile{
+				{Path: "projects/transcript.json", Content: []byte{}},
+			},
+			accepted: []string{"projects/transcript.json"},
+			excluded: map[string]string{},
+		},
+	}
+	home, err := homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := backend.Import(ctx, e.member.ID, tc.name, tc.files)
+			if err != nil {
+				t.Fatalf("config import: %v", err)
+			}
+			if result.Files != len(tc.accepted) {
+				t.Fatalf("accepted files = %d, want %d (%+v)", result.Files, len(tc.accepted), result)
+			}
+			if len(result.Excluded) != len(tc.excluded) {
+				t.Fatalf("excluded files = %+v, want %+v", result.Excluded, tc.excluded)
+			}
+			for _, excluded := range result.Excluded {
+				if want, ok := tc.excluded[excluded.Path]; !ok || excluded.Reason != want {
+					t.Errorf("excluded %q reason = %q, want %q", excluded.Path, excluded.Reason, want)
+				}
+			}
+			rootPath := filepath.FromSlash(strings.TrimPrefix(byHarness[tc.name].Path, "~/"))
+			for _, accepted := range tc.accepted {
+				target := filepath.Join(home, rootPath, filepath.FromSlash(accepted))
+				if _, err := os.Stat(target); err != nil {
+					t.Errorf("accepted file %q not installed at %s: %v", accepted, target, err)
+				}
+			}
+		})
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

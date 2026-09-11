@@ -241,22 +241,28 @@ rm ~/.local/bin/gh
 ## Importing and editing configuration
 
 In the local dashboard (`aether gui`), choose one local directory with the
-browser's directory picker, preview it, and explicitly import it once. The
-server-hosted dashboard cannot read a directory on your laptop; use `aether
-gui` for this step. The picker recognizes known basenames such as `~/.claude`,
-`~/.codex`, and `~/.pi`; an unknown or ambiguous basename needs an explicit
-destination. There is no directory watcher and no AI-generated inventory.
+browser's directory picker and explicitly import it once. The server-hosted
+dashboard cannot read a directory on your laptop; use `aether gui` for this
+step. The picker compares the selected directory basename with the roots in
+`config.roots`: a known unique basename is selected automatically, while an
+unknown or ambiguous basename requires an explicit destination. The browser
+waits for that metadata and destination before previewing or reading bytes.
+Changing the destination clears the old preview and re-reads the retained
+local file handles with that destination's policy; stale reads are discarded.
+There is no directory watcher and no AI-generated inventory.
 
-Known credential names in any path component and runtime/history defaults are
-skipped locally. Remaining bytes are uploaded and scanned by the server, so
-secret content is not guaranteed to stay on the browser machine. Empty files
-and arbitrary binary assets are preserved. The limits are **1 MiB per file**,
-**20 MiB decoded total**, and **2,000 files**. New browser-imported files use
-mode `0644`; existing files retain their current modes, including restrictive
-server-side umask modes. Executable mode and symlinks cannot be represented by
-the browser. Server-side validation rejects unsafe paths, symlink components,
-hardlinks, and nonregular files, while preserving directory and staged-file
-ownership.
+Known credential names in any path component and `*.pem` files are always
+skipped locally. Runtime/history paths come from the selected root's
+`runtime_ignores` metadata and are skipped with exact, case-sensitive
+root-relative component-prefix matching. Remaining bytes are uploaded and
+scanned by the server, so secret content is not guaranteed to stay on the
+browser machine. Empty files and arbitrary binary assets are preserved. The
+limits are **1 MiB per file**, **20 MiB decoded total**, and **2,000 files**.
+New browser-imported files use mode `0644`; existing files retain their current
+modes, including restrictive server-side umask modes. Executable mode and
+symlinks cannot be represented by the browser. Server-side validation rejects
+unsafe paths, symlink components, hardlinks, and nonregular files, while
+preserving directory and staged-file ownership.
 
 The import writes the authenticated member's own persistent home. Because that
 home is mounted read-write in the environment terminal and in every run using

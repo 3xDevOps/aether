@@ -31,6 +31,15 @@ Two rules shape everything below:
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user).
 
+The `config.roots` response used by the dashboard carries a
+`runtime_ignores` list for each configuration root. These are root-relative
+paths, and the browser applies them before reading selected file bytes with
+case-sensitive exact or component-prefix matching; trailing slashes are
+presentation-only. This policy is destination-specific: a directory whose
+basename is renamed or ambiguous must be assigned to a destination before
+the import preview can be read. Credential names remain globally excluded,
+independent of this runtime list.
+
 The **Env setup** column marks harnesses that can participate in agent setup:
 the dashboard can open the member's environment terminal for installation and
 login. Exactly `claude`, `codex`, and `pi` qualify; everything else stays
@@ -460,28 +469,24 @@ transport for installation and login.
 The local dashboard (`aether gui`) does not watch a laptop directory or run an
 AI inventory. During the Agents step, choose one directory such as
 `~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp` with the browser directory picker.
-A preview shows the files that will be sent and the paths left out before
-upload. Import is explicit and one-time: after it succeeds, the import control
-is gone. The server-hosted dashboard has no onboarding picker; use local
-`aether gui` for this step.
+The browser waits for `config.roots` and a known destination before it reads
+any file bytes. A unique basename selects its destination automatically; an
+unknown or ambiguous basename must be assigned explicitly. The preview then
+shows the files that will be sent and the paths left out before upload. Import
+is explicit and one-time: after it succeeds, the import control is gone. The
+server-hosted dashboard has no onboarding picker; use local `aether gui` for
+this step.
 
-The picker normally matches the selected directory basename to a known harness.
-If the basename is unknown or matches more than one destination, choose the
-destination explicitly. The browser skips known credential names (including
-credential names in nested paths) and runtime/history defaults before upload.
-The runtime defaults for pi and omp are:
-
-| Harness | Runtime/history paths left out before upload |
-| --- | --- |
-| `pi` | `agent/sessions/`, `agent/tmp/` |
-| `omp` | `agent/sessions/`, `agent/terminal-sessions/`, `agent/cache/`, `agent/history.db`, `agent/history.db-shm`, `agent/history.db-wal`, `agent/models.db`, `natives/`, `cache/`, `logs/`, `run/`, `collab/` |
-
-The `omp` provider database (`agent/agent.db` and its `-wal`/`-shm`
-companions) is credential material and is also excluded before upload.
-
-These exclusions apply to renamed directories too and are not overridden by
-`.aether-profile-ignore` in browser import. `agent/skills/`, `agent/extensions/`,
-and `agent/npm/` remain configuration and are imported.
+Credential names in any path component and `*.pem` files are always skipped
+before upload. Runtime/history exclusions come from the selected root's
+`runtime_ignores` metadata, which matches exact root-relative paths or
+component prefixes case-sensitively after trailing slashes are trimmed. This
+policy applies to renamed directories too. Changing an ambiguous destination
+clears the prior preview and re-reads the local file handles with the newly
+selected policy; a stale read cannot replace the current preview. These local
+exclusions are not overridden by `.aether-profile-ignore` in browser import.
+`agent/skills/`, `agent/extensions/`, and `agent/npm/` remain configuration and
+are imported.
 Remaining bytes are uploaded and scanned by the server; do not assume all
 secret-looking content stays on the laptop. A complete response reports
 accepted counts and server exclusions. If the server stops after writing files,

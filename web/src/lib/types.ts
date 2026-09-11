@@ -370,6 +370,7 @@ export interface AgentDefinition {
 export interface ConfigRoot {
   harness: string
   path: string
+  runtime_ignores: string[]
 }
 
 export interface ConfigFile {

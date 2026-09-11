@@ -12,8 +12,9 @@ const (
 // member's persistent home. Path is a display/container path such as
 // ~/.claude; requests use paths relative to that root.
 type ConfigRoot struct {
-	Harness string `json:"harness"`
-	Path    string `json:"path"`
+	Harness        string   `json:"harness"`
+	Path           string   `json:"path"`
+	RuntimeIgnores []string `json:"runtime_ignores"`
 }
 
 type ConfigRootsResult struct {

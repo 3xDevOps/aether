@@ -34,35 +34,6 @@ const credentialNames: Record<string, true> = {
   'agent.db-shm': true,
 }
 
-// Keep this list aligned with internal/profile.DefaultIgnores.
-// Directory import has no destination yet (and roots may be renamed), so it
-// uses the union while retaining path-component boundaries below.
-const runtimePaths = [
-  'projects',
-  'shell-snapshots',
-  'statsig',
-  'todos',
-  'file-history',
-  'history.jsonl',
-  'daemon',
-  'tmp',
-  '.tmp',
-  'sessions',
-  'agent/sessions',
-  'agent/tmp',
-  'agent/terminal-sessions',
-  'agent/cache',
-  'agent/history.db',
-  'agent/history.db-shm',
-  'agent/history.db-wal',
-  'agent/models.db',
-  'natives',
-  'cache',
-  'logs',
-  'run',
-  'collab',
-]
-
 interface PathParts {
   root: string
   path: string
@@ -108,11 +79,11 @@ function isCredential(path: string): boolean {
   return parts.some((part) => credentialNames[part] === true || part.endsWith('.pem'))
 }
 
-function isRuntime(path: string): boolean {
-  const normalized = path.toLowerCase()
-  return runtimePaths.some(
-    (entry) => normalized === entry || normalized.startsWith(`${entry}/`),
-  )
+function isRuntime(path: string, runtimeIgnores: string[]): boolean {
+  return runtimeIgnores.some((entry) => {
+    const ignored = entry.replace(/\/+$/, '')
+    return ignored !== '' && (path === ignored || path.startsWith(`${ignored}/`))
+  })
 }
 
 function readBytes(file: File): Promise<ArrayBuffer> {
@@ -150,6 +121,7 @@ function exclusion(path: string, reason: string, detail: string): LocalExclusion
  */
 export async function prepareDirectoryImport(
   selected: File[] | FileList,
+  root: ConfigRoot,
   generationIsCurrent: () => boolean = () => true,
 ): Promise<Selection | null> {
   const files = Array.from(selected)
@@ -187,7 +159,7 @@ export async function prepareDirectoryImport(
       )
       continue
     }
-    if (isRuntime(parts.path)) {
+    if (isRuntime(parts.path, root.runtime_ignores)) {
       excluded.push(
         exclusion(parts.path, 'runtime', 'runtime history excluded before upload'),
       )
@@ -284,6 +256,7 @@ export function ProfileImport({ client }: { client: Api }) {
   const navigate = useStore((state) => state.navigate)
   const [roots, setRoots] = useState<ConfigRoot[] | null>(null)
   const [rootsError, setRootsError] = useState<string | null>(null)
+  const [rawFiles, setRawFiles] = useState<File[] | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [selectedHarness, setSelectedHarness] = useState('')
   const [reading, setReading] = useState(false)
@@ -294,8 +267,10 @@ export function ProfileImport({ client }: { client: Api }) {
   const picker = useRef<HTMLInputElement | null>(null)
   const generation = useRef(0)
 
+  const importStarted = useRef(false)
   useEffect(() => {
     let active = true
+    setRoots(null)
     setRootsError(null)
     client
       .configRoots()
@@ -311,17 +286,10 @@ export function ProfileImport({ client }: { client: Api }) {
     }
   }, [client])
 
-  useEffect(() => {
-    if (!selection || roots === null) return
-    const matching = roots.filter((root) => rootName(root.path) === selection.basename)
-    setSelectedHarness((current) => {
-      if (current && roots.some((root) => root.harness === current)) return current
-      return matching.length === 1 ? matching[0].harness : ''
-    })
-  }, [roots, selection])
-
-  const matchingRoots = selection
-    ? (roots ?? []).filter((root) => rootName(root.path) === selection.basename)
+  const firstPath = rawFiles ? relativePath(rawFiles[0]) : null
+  const basename = firstPath?.valid ? firstPath.root : ''
+  const matchingRoots = basename && roots
+    ? roots.filter((root) => rootName(root.path) === basename)
     : []
   const destinationRoots =
     matchingRoots.length > 0 ? matchingRoots : (roots ?? [])
@@ -331,12 +299,63 @@ export function ProfileImport({ client }: { client: Api }) {
   const friendlyDestination = destination
     ? friendly[destination.harness] ?? destination.harness
     : ''
-  async function choose(event: ChangeEvent<HTMLInputElement>) {
+
+  // A directory can be selected while roots are loading. Pick the destination
+  // from metadata once it arrives, but do not read bytes until that happens.
+  useEffect(() => {
+    if (!rawFiles || roots === null || !basename) return
+    setSelectedHarness((current) => {
+      if (current && roots.some((root) => root.harness === current)) return current
+      const matching = roots.filter((root) => rootName(root.path) === basename)
+      return matching.length === 1 ? matching[0].harness : ''
+    })
+  }, [basename, rawFiles, roots])
+
+  // Both initial auto-selection and an explicit destination change reach this
+  // effect. The generation guard prevents an old File read from replacing the
+  // current destination's preview.
+  useEffect(() => {
+    if (!rawFiles || roots === null || !destination || importing || result || importError || importStarted.current) return
+    const version = generation.current
+    setReading(true)
+    void prepareDirectoryImport(
+      rawFiles,
+      destination,
+      () => generation.current === version,
+    )
+      .then((prepared) => {
+        if (generation.current !== version) return
+        setSelection(prepared)
+        if (!prepared) setSelectionError('The selected directory could not be read.')
+      })
+      .catch((err) => {
+        if (generation.current === version) setSelectionError(message(err))
+      })
+      .finally(() => {
+        if (generation.current === version) setReading(false)
+      })
+  }, [destination, importError, importing, rawFiles, result, roots])
+
+  function chooseDestination(harness: string) {
+    if (importing || result) return
+    importStarted.current = false
+    generation.current += 1
+    setSelectedHarness(harness)
+    setSelection(null)
+    setReading(false)
+    setSelectionError(null)
+    setImportError(null)
+  }
+
+  function choose(event: ChangeEvent<HTMLInputElement>) {
     if (useStore.getState().onboardingImportPending) return
+    importStarted.current = false
     const selected = Array.from(event.currentTarget.files ?? [])
-    const version = ++generation.current
+    generation.current += 1
+    setRawFiles(null)
     setSelection(null)
     setSelectedHarness('')
+    setReading(false)
     setSelectionError(null)
     setImportError(null)
     setResult(null)
@@ -347,25 +366,24 @@ export function ProfileImport({ client }: { client: Api }) {
       setSelectionError('Choose a directory, not an individual file.')
       return
     }
-    setReading(true)
-    try {
-      const prepared = await prepareDirectoryImport(
-        selected,
-        () => generation.current === version,
-      )
-      if (generation.current !== version) return
-      if (prepared) setSelection(prepared)
-    } catch (err) {
-      if (generation.current === version) setSelectionError(message(err))
-    } finally {
-      if (generation.current === version) setReading(false)
+    setRawFiles(selected)
+    if (roots !== null) {
+      const matching = roots.filter((root) => rootName(root.path) === first.root)
+      if (matching.length === 1) setSelectedHarness(matching[0].harness)
     }
   }
 
   async function importConfiguration() {
-    if (!selection || !destination || result || useStore.getState().onboardingImportPending) return
+    if (
+      !selection ||
+      !destination ||
+      reading ||
+      result ||
+      useStore.getState().onboardingImportPending
+    ) return
     const version = generation.current
     const harness = destination.harness
+    importStarted.current = true
     const files = selection.files
     useStore.setState({ onboardingImportPending: true })
     setImportError(null)
@@ -383,7 +401,7 @@ export function ProfileImport({ client }: { client: Api }) {
       useStore.setState({ onboardingImportPending: false })
     }
   }
-  const rootLabel = selection?.basename || 'your agent configuration directory'
+  const rootLabel = basename || 'your agent configuration directory'
 
   return (
     <section
@@ -404,6 +422,11 @@ export function ProfileImport({ client }: { client: Api }) {
         <p role="status" className="text-sm text-muted-foreground">Importing configuration…</p>
       )}
 
+      {roots === null && !rootsError && !importing && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Loading configuration destinations…
+        </p>
+      )}
       {rootsError && (
         <div className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
           <p className="text-sm text-state-failed">Loading configuration destinations failed: {rootsError}</p>
@@ -427,7 +450,7 @@ export function ProfileImport({ client }: { client: Api }) {
             disabled={importing}
             aria-label="Choose configuration directory"
             className="sr-only"
-            onChange={(event) => void choose(event)}
+            onChange={choose}
           />
           <Button
             type="button"
@@ -439,17 +462,50 @@ export function ProfileImport({ client }: { client: Api }) {
             Choose directory
           </Button>
         </div>
+        {basename && (
+          <p className="mt-2 text-sm">
+            Selected directory: <span className="break-all font-mono">{basename}</span>
+          </p>
+        )}
         <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
-          Desktop browsers provide the directory contents directly. Known
-          credential files and runtime history are omitted locally; remaining
-          files are sent to the server and checked before writing. Files are
-          limited to 1 MiB each, 20 MiB total, and {MAX_IMPORT_FILES} files.
+          Known credential files and the selected agent's runtime files are
+          left out before reading. Other files are sent to the server for
+          checking when you confirm. Limits: 1 MiB each, 20 MiB total, and{' '}
+          {MAX_IMPORT_FILES} files.
         </p>
       </div>
 
+      {rawFiles && roots !== null && roots.length > 0 && (
+        <label className="flex min-w-0 flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium">
+            {matchingRoots.length === 1 ? 'Destination' : 'Choose destination'}
+          </span>
+          {matchingRoots.length === 1 ? (
+            <span className="font-mono text-xs text-muted-foreground">
+              {friendlyDestination || matchingRoots[0].harness} ({matchingRoots[0].path})
+            </span>
+          ) : (
+            <select
+              aria-label="Configuration destination"
+              className="h-7 min-w-44 rounded-sm border border-input bg-background px-2 text-sm"
+              value={selectedHarness}
+              disabled={importing || Boolean(result)}
+              onChange={(event) => chooseDestination(event.target.value)}
+            >
+              <option value="">Select an agent</option>
+              {destinationRoots.map((root) => (
+                <option key={root.harness} value={root.harness}>
+                  {friendly[root.harness] ?? root.harness} ({root.path})
+                </option>
+              ))}
+            </select>
+          )}
+        </label>
+      )}
+
       {reading && (
         <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-sm" role="status">
-          Reading {rootLabel}; files over the limits and known runtime files are left out...
+          Reading {rootLabel}; files over the limits and this destination's runtime files are left out...
         </p>
       )}
       {selectionError && (
@@ -473,42 +529,10 @@ export function ProfileImport({ client }: { client: Api }) {
 
           <ExclusionList entries={selection.excluded} label="Left out before upload" />
 
-          {roots !== null && roots.length > 0 && (
-            <label className="flex min-w-0 flex-wrap items-center gap-3 text-sm">
-              <span className="font-medium">
-                {matchingRoots.length > 1 || matchingRoots.length === 0
-                  ? 'Choose destination'
-                  : 'Destination'}
-              </span>
-              {matchingRoots.length === 1 ? (
-                <span className="font-mono text-xs text-muted-foreground">
-                  {friendlyDestination || matchingRoots[0].harness} ({matchingRoots[0].path})
-                </span>
-              ) : (
-                <select
-                  aria-label="Configuration destination"
-                  className="h-7 min-w-44 rounded-sm border border-input bg-background px-2 text-sm"
-                  value={selectedHarness}
-                  onChange={(event) => {
-                    setSelectedHarness(event.target.value)
-                    setImportError(null)
-                  }}
-                >
-                  <option value="">Select an agent</option>
-                  {destinationRoots.map((root) => (
-                    <option key={root.harness} value={root.harness}>
-                      {friendly[root.harness] ?? root.harness} ({root.path})
-                    </option>
-                  ))}
-                </select>
-              )}
-            </label>
-          )}
           <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-[13px] leading-5">
-            Before you confirm: known credential files and runtime history are
-            excluded, matching remote configuration files will be overwritten,
-            accepted files change your persistent remote home immediately, and
-            this local directory will not be watched.
+            Before you confirm: matching remote configuration files will be
+            overwritten, accepted files change your persistent remote home
+            immediately, and this local directory will not be watched.
           </p>
           {importError && (
             <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">

@@ -1740,28 +1740,35 @@ assert one string.
 
 **Configuration import** is an explicit, one-time directory import in the
 local onboarding flow. `config.roots` supplies destinations such as
-`~/.claude`, and the user presses **Choose directory**, selects a destination
-when the basename is unknown or matches multiple roots, then presses
-**Import configuration**. This action is not available from the
-server-hosted dashboard, because that browser cannot read a machine-local
-directory; the server dashboard still exposes Files and configuration editing
-through `config.tree`, `config.read` and `config.write`.
+`~/.claude`, together with the destination-specific runtime paths that can be
+left out locally. The browser waits for that response: a known unique basename
+selects its destination automatically, while an unknown or ambiguous basename
+requires a destination choice before previewing or reading any file bytes.
+The raw browser `File` handles stay local so changing the destination clears
+the old preview and re-reads with the new policy; a generation guard prevents
+a slower old read from replacing the current preview. This action is not
+available from the server-hosted dashboard, because that browser cannot read a
+machine-local directory; the server dashboard still exposes Files and
+configuration editing through `config.tree`, `config.read` and `config.write`.
 There is no local discovery scan or directory watcher; the picker is the only
 onboarding import action.
 
-Credential names found in any path component and runtime/history defaults are
-left out in the browser. Every other selected byte is uploaded and
-server-scanned; the result reports accepted file/byte counts and server
-exclusions. A response with `error` is an incomplete import: the UI reports
-the committed counts, exact canonical `imported_paths`, and the real error
-instead of showing success, and warns that copied files remain. If the RPC
-fails without a response, the outcome is unknown (some files may have been
+Credential names found in any path component and `*.pem` files are always
+left out in the browser. Runtime/history paths come from the selected
+destination's `runtime_ignores` metadata and use exact, root-relative
+case-sensitive component-prefix matching. Every other selected byte is
+uploaded and server-scanned; the result reports accepted file/byte counts and
+server exclusions. A response with `error` is an incomplete import: the UI
+reports the committed counts, exact canonical `imported_paths`, and the real
+error instead of showing success, and warns that copied files remain. If the
+RPC fails without a response, the outcome is unknown (some files may have been
 copied); inspect **Files** before retrying. There is no watcher or automatic
 retry - choosing a directory and importing again is always explicit. The
 import limits are 2,000 files, 1 MiB per file and 20 MiB decoded in aggregate,
 with a 30 MiB HTTP request cap. Empty and binary regular files are preserved,
 but browser imports send mode `0644` and cannot preserve executable mode or
 symlinks.
+
 Accepted files change the calling member's persistent home immediately,
 including for already-running agents that share that home; an agent may need
 to reload. Auth/vendor login is separate.

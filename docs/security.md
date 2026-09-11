@@ -257,6 +257,19 @@ identify its callers.
   ping it would keep holding a PTY client whose geometry clamps every other
   viewer.
 
+### Browser configuration imports
+
+The local onboarding importer reads a directory only after `config.roots`
+returns and a destination is known. Credential names and `*.pem` files are
+filtered before any browser read, while runtime/history paths use the selected
+root's `runtime_ignores`; the server remains authoritative and scans all bytes
+that survive those local exclusions. Unknown or ambiguous directory basenames
+must be assigned explicitly, and changing the destination re-reads the retained
+browser `File` handles. Generation guards discard stale reads and prevent a
+preview prepared for one destination from being submitted to another. The
+server-hosted dashboard cannot read a directory on the user's machine, so this
+surface exists only in `aether gui`.
+
 ### Terminal image uploads
 
 `terminal.image` accepts image bytes, not a client path. The dashboard sends
@@ -290,15 +303,22 @@ shared account's home.
 
 The local dashboard's onboarding directory picker is an explicit, one-time
 browser import. A server-hosted dashboard has no laptop directory picker; use
-`aether gui` for this step. The browser skips known credential names in any
-path component and runtime/history defaults before upload. It reads remaining
+`aether gui` for this step. The browser waits for `config.roots` and a known
+destination before previewing or reading bytes. A known unique basename selects
+its destination automatically; an unknown or ambiguous basename requires an
+explicit choice. Credential names in any path component and `*.pem` files are
+always skipped before upload. Runtime/history paths come from the selected
+root's `runtime_ignores` metadata and match exact, root-relative paths or
+component prefixes case-sensitively after trailing slashes are trimmed.
+Changing the destination clears the old preview and re-reads retained browser
+`File` handles; generation guards discard stale reads. It reads remaining
 selected regular-file bytes and sends them to the server, where they are
-scanned before writing; a secret finding is therefore not proof that the content
-stayed local. Empty files and arbitrary binary regular bytes are preserved under
-the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file limits.
-The shared HTTP gateway permits a 30 MiB request for `config.import`, 4 MiB
-for `config.write` and `files.write`, and 1 MiB for ordinary methods; these
-are framing limits, not larger decoded configuration allowances.
+scanned before writing; a secret finding is therefore not proof that the
+content stayed local. Empty files and arbitrary binary regular bytes are
+preserved under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
+limits. The shared HTTP gateway permits a 30 MiB request for `config.import`,
+4 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods;
+these are framing limits, not larger decoded configuration allowances.
 
 Browser metadata is intentionally limited. New imported files are `0644`;
 existing modes are preserved even when the server uses a restrictive umask.
