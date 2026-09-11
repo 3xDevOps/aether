@@ -27,7 +27,7 @@ scheduler.
 The threshold is the **hang detector**, and the fallback for harnesses that
 cannot report their own state.
 
-Where the agent reports (`claude` today - see
+Where the agent reports (`claude` and `opencode` today - see
 [harnesses.md](harnesses.md)), a turn that ends parks the run immediately
 with a reason that says what it is waiting for, and the threshold is left
 to catch the case the agent cannot report: one that hangs mid-turn, which
