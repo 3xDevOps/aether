@@ -962,9 +962,15 @@ needs.
    ```
 
    Control frames from a read-only attach are ignored. Only write-capable
-   attaches affect the shared terminal geometry. Client frames are capped at
-   64 KiB; the SPA splits larger input (a paste) across several ordered
-   `input` frames.
+   attaches affect the shared terminal geometry, which is the per-dimension
+   minimum over them, so a narrow writer reflows the agent's screen for
+   everyone. A client too narrow to be one of them should send `{"cols":80,
+   "rows":24}` in the header, render at the `cols` and `rows` the ack
+   reports, and send no `resize` at all; it then shows the session the way
+   its writers see it and changes nothing for them. That is what the
+   dashboard does on a phone, mirroring and steering alike. Client frames
+   are capped at 64 KiB; the SPA splits larger input (a paste) across
+   several ordered `input` frames.
 5. The server re-checks the attach's authorization every few seconds. A
    write attach whose member loses **steer** (role change, handoff, run
    protection, workspace policy) closes with **1008**, reason

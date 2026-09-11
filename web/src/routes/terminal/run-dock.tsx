@@ -6,7 +6,13 @@ import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { cn, focusRing } from '@/lib/utils'
 import { type ConnectionState } from '@/lib/stream'
-import { type AttachDataKind, type Attachment, connectAttach, replayGate } from '@/routes/terminal/attach'
+import {
+  type AttachDataKind,
+  type Attachment,
+  connectAttach,
+  replayGate,
+  standardGeometry,
+} from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import {
   emitShellSocketData,
@@ -160,10 +166,10 @@ export function RunDock({ runID }: { runID: string }) {
         removeShellTab(runID, socketKey)
       },
       geometry: () => {
-        if (!isCurrent()) return { cols: 80, rows: 24 }
+        if (!isCurrent()) return standardGeometry
         return {
-          cols: terminalRef.current?.cols ?? 80,
-          rows: terminalRef.current?.rows ?? 24,
+          cols: terminalRef.current?.cols ?? standardGeometry.cols,
+          rows: terminalRef.current?.rows ?? standardGeometry.rows,
         }
       },
       wantsWrite: () => true,

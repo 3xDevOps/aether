@@ -31,6 +31,15 @@ const policyClose = 1008
  */
 const inputChunk = 8 * 1024
 
+/**
+ * The header geometry of a client that means to adopt the server's answer
+ * rather than impose its own: a phone, and any caller with no terminal to
+ * measure yet. The gateway echoes the live session's size instead, and only
+ * falls back to this when there is none - a finished run's replay, where 80
+ * columns reads the recorded transcript far better than a phone's width.
+ */
+export const standardGeometry = { cols: 80, rows: 24 }
+
 interface AttachHeader {
   write?: boolean
   cols: number
@@ -54,9 +63,11 @@ export interface AttachHandlers {
   /**
    * A fresh attach was accepted. The server replays the recent transcript
    * straight after, so the caller clears what it has rather than appending a
-   * second copy of the scrollback.
+   * second copy of the scrollback. `size` is the geometry the ack reports -
+   * the live session's, not what the header asked for - which is what a
+   * client that renders the session at its own size adopts.
    */
-  onAttached: (write: boolean) => void
+  onAttached: (write: boolean, size: { cols: number; rows: number }) => void
   onState: (state: ConnectionState) => void
   /**
    * The attach was refused for good; no further reconnect is attempted. The
@@ -218,7 +229,10 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         unavailableTries = 0
         waitingForSession = false
         handlers.onState('live')
-        handlers.onAttached(askedWrite)
+        handlers.onAttached(askedWrite, {
+          cols: ack.cols ?? standardGeometry.cols,
+          rows: ack.rows ?? standardGeometry.rows,
+        })
         return
       }
       answered = true

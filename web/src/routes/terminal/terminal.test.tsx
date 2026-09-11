@@ -8,6 +8,7 @@ import { codeDenied } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { initialTerminal, type TerminalState } from '@/store/terminal'
 import { bob, run, serverInfo } from '@/test/fixtures'
+import { atViewport } from '@/test/viewport'
 import { StubSocket } from '@/test/stub-socket'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -33,11 +34,11 @@ function mount(seed: Partial<TerminalState> = {}, over: Partial<Run> = {}) {
   return render(<View params={{ runId: 'run_1' }} />)
 }
 
-function attached() {
+function attached(size = { cols: 80, rows: 24 }) {
   act(() => {
     StubSocket.last().onopen?.()
     StubSocket.last().onmessage?.({
-      data: JSON.stringify({ ok: true, cols: 80, rows: 24 }),
+      data: JSON.stringify({ ok: true, ...size }),
     })
   })
 }
@@ -427,6 +428,52 @@ describe('terminal view', () => {
     ).toBeNull()
     fireEvent.click(screen.getByText('Retry'))
     expect(StubSocket.opened).toHaveLength(2)
+    view.unmount()
+  })
+})
+
+// A phone renders the session the way the writers see it and keeps its own
+// width to itself. See the terminal section of docs/dashboard-frontend.md.
+describe('the terminal on a phone', () => {
+  const phone = () => atViewport(390, { height: 844, pointer: 'coarse' })
+
+  it('adopts the server geometry and sends no size of its own', async () => {
+    phone()
+    const resize = vi.spyOn(Terminal.prototype, 'resize')
+    const view = mount()
+    attached({ cols: 132, rows: 43 })
+
+    // The header asks for a standard terminal rather than for the phone's
+    // own width, which is what a finished run's replay is laid out for.
+    expect(StubSocket.last().frames()[0]).toEqual({ cols: 80, rows: 24 })
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledWith(132, 43))
+    expect(StubSocket.last().frames().some((frame) => 'type' in (frame as object))).toBe(
+      false,
+    )
+    resize.mockRestore()
+    view.unmount()
+  })
+
+  it('opens the member own run as a mirror that cannot be typed into', async () => {
+    phone()
+    const view = mount()
+    attached()
+
+    // On a desktop this run auto-steers; here taking control is a decision.
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    expect(screen.getByText('Take control')).toBeDefined()
+    // A read-only textarea is what keeps a tap from raising the keyboard.
+    const input = () =>
+      document.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null
+    await vi.waitFor(() => expect(input()?.readOnly).toBe(true))
+    expect(screen.queryByRole('toolbar', { name: 'Terminal keys' })).toBeNull()
+
+    fireEvent.click(screen.getByText('Take control'))
+    attached()
+
+    await vi.waitFor(() => expect(input()?.readOnly).toBe(false))
+    // The keys a soft keyboard has not got arrive with the ability to type.
+    expect(screen.getByRole('toolbar', { name: 'Terminal keys' })).toBeDefined()
     view.unmount()
   })
 })
