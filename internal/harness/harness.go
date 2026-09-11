@@ -493,11 +493,11 @@ func (p Profile) MCPArgs(configPath string) []string {
 	return []string{p.MCPConfigFlag, configPath}
 }
 
-// StatusArgs are the arguments appended to an interactive run's launch
-// command so the harness reports its own state, with CoordPlaceholder
-// replaced by dir, the container path of the coordination directory. Nil
-// for a harness with no reporter: it is launched exactly as before and the
-// stall threshold is all the server has.
+// StatusLaunchArgs renders StatusArgs, the arguments appended to an
+// interactive run's launch command so the harness reports its own state,
+// with CoordPlaceholder replaced by dir, the container path of the
+// coordination directory. Nil for a harness with no reporter: it is
+// launched exactly as before and the stall threshold is all the server has.
 func (p Profile) StatusLaunchArgs(dir string) []string {
 	if len(p.StatusArgs) == 0 || dir == "" {
 		return nil

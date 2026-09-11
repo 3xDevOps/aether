@@ -169,7 +169,7 @@ type sidecar struct {
 	// member's own harness definition drops the reporter the same way an
 	// argv override does, and only the launch saw that. Absent in a sidecar
 	// written before runs had reporters, which reads as "none" - the
-	// behaviour that build had.
+	// behavior that build had.
 	Reporter harness.Reporter `json:"reporter,omitempty"`
 	// ExitObserved is set after Runtime.Wait returns successfully, before
 	// finalize. Recovery uses it to resume exit handling without re-attaching.

@@ -465,12 +465,13 @@ Two things the buckets do not come from the run status alone:
 the last `run.status` reason, persisted with the run and sanitized
 server-side - so a run that was already in needs-attention when the tab
 loaded still says why: `waiting for your input` and its siblings when the
-agent reported it, `stalled: ...` when the silence heuristic parked it. `toRecord` in `src/store/runs.ts` prefers
-the wire reason and falls back to the previously stored one only when the
-fetch omits it and the status has not changed (a legacy gateway); a live
-`run.status` event still overwrites it with the event payload's reason. An
-approval pause keeps its fallback: a card with an empty reason uses its
-oldest pending request's action as the summary.
+agent reported it, `stalled: ...` when the silence heuristic parked it.
+`toRecord` in `src/store/runs.ts` prefers the wire reason and falls back to
+the previously stored one only when the fetch omits it and the status has
+not changed (a legacy gateway); a live `run.status` event still overwrites
+it with the event payload's reason. An approval pause keeps its fallback: a
+card with an empty reason uses its oldest pending request's action as the
+summary.
 
 **The paused badge hydrates from the same snapshot.** With `paused` on the
 wire (above), a reload shows the badge for a run paused earlier, and the

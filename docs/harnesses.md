@@ -81,10 +81,13 @@ first half comes from the agent itself.
 A harness with a **Status** entry can run a command on its own lifecycle
 events. Aether gives it one: a small settings document written into the
 run's coordination directory beside the MCP config, registering a hook that
-calls the staged server binary inside the container.
+calls the staged server binary inside the container. The interactive launch
+in full, with the session pin and the MCP registration it already carried:
 
 ```
-claude --dangerously-skip-permissions "<task>" --settings /run/aether/claude-settings.json
+claude --session-id <uuid> --dangerously-skip-permissions "<task>" \
+  --mcp-config /run/aether/mcp.json \
+  --settings /run/aether/claude-settings.json
 ```
 
 ```

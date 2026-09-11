@@ -15,12 +15,12 @@ all: the agent's own status reports (`aether-server report`, below).
 ## What the container gets
 
 ```
-/opt/aether/aether-server       read-only  the staged bridge binary
-/run/aether/                    read-only  the run's coordination directory
-/run/aether/mcp.json            read-only  the MCP server config, for a registered harness
-/run/aether/claude-settings.json read-only the status-reporter hooks, for an interactive claude run
-/run/aether/co-authors          read-only  the trailers to end commits with
-/run/aether/coord2.sock                    the socket the bridge dials (wire v2)
+/opt/aether/aether-server         read-only  the staged bridge binary
+/run/aether/                      read-only  the run's coordination directory
+/run/aether/mcp.json              read-only  the MCP server config, for a registered harness
+/run/aether/claude-settings.json  read-only  the status-reporter hooks, for an interactive claude run
+/run/aether/co-authors            read-only  the trailers to end commits with
+/run/aether/coord2.sock                      the socket the bridge dials (wire v2)
 ```
 
 The binary and the directory are the two mounts, and both are Aether-owned
