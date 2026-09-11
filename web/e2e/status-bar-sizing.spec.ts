@@ -11,8 +11,8 @@
 // Keep the compact disclosure keyboard reachable: a mouse-only check would
 // miss the disclosure behavior that makes the offline notice available.
 //
-// The mobile case also keeps the status-slot actions inside the bounded popup,
-// where they may wrap without widening the page.
+// The same bar on a phone, tapped rather than clicked, is
+// `status-bar.mobile.spec.ts`.
 
 import { expect, test } from './fixtures'
 import { OnboardingWizard } from './pages/wizard'
@@ -27,7 +27,6 @@ const sizes = [
   { width: 800, height: 480 },
 ]
 const wideSize = { width: 1280, height: 600 }
-const mobileSize = { width: 390, height: 480 }
 const unreachableNotice =
   'server unreachable over SSH - check the server and network; retrying'
 
@@ -156,61 +155,4 @@ test('the status bar keeps its controls on screen with every readout up', async 
   expect(wideMemberMetrics.height).toBe(22)
   expect(wideMemberMetrics.scrollWidth).toBeGreaterThan(wideMemberMetrics.clientWidth)
   await expect(wideDisk).toHaveCSS('height', '22px')
-
-  await page.setViewportSize(mobileSize)
-  const mobileTrigger = footer.getByRole('button', { name: 'Show status details' })
-  const mobileNotice = footer.getByRole('status', { name: unreachableNotice })
-  await expect(mobileTrigger).toBeVisible()
-  if ((await mobileTrigger.getAttribute('aria-expanded')) === 'true') {
-    await mobileTrigger.focus()
-    await mobileTrigger.press('Enter')
-    await expect(mobileNotice).toBeHidden()
-  }
-  await mobileTrigger.focus()
-  await mobileTrigger.press('Enter')
-  await expect(mobileNotice).toBeVisible()
-  await expect(mobileNotice).toHaveText(unreachableNotice)
-  for (const name of controls) {
-    await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 })
-  }
-  const mobileOverflow = await page.evaluate(() =>
-    Math.max(
-      document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      document.body.scrollWidth - document.body.clientWidth,
-    ),
-  )
-  expect(mobileOverflow).toBe(0)
-
-  const mobileVerticalOverflow = await page.evaluate(() =>
-    Math.max(
-      document.documentElement.scrollHeight - document.documentElement.clientHeight,
-      document.body.scrollHeight - document.body.clientHeight,
-    ),
-  )
-  expect(mobileVerticalOverflow).toBe(0)
-
-  // Exercise the bottom-edge control with the same pointer sequence that can
-  // lose the target when an active style grows the document.
-  await page.setViewportSize({ width: 390, height: 844 })
-  const theme = page.getByRole('button', { name: 'Theme: system' })
-  await expect(theme).toBeVisible()
-  const themeBox = await theme.boundingBox()
-  if (!themeBox) throw new Error('theme toggle did not render')
-  const pointer = {
-    x: themeBox.x + themeBox.width / 2,
-    y: themeBox.y + themeBox.height / 2,
-  }
-  await page.mouse.move(pointer.x, pointer.y)
-  await page.mouse.down()
-  await page.mouse.up()
-  await expect(
-    page.getByRole('button', { name: 'Theme: light' }),
-  ).toBeVisible()
-  const compactOverflow = await page.evaluate(() =>
-    Math.max(
-      document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      document.body.scrollWidth - document.body.clientWidth,
-    ),
-  )
-  expect(compactOverflow).toBe(0)
 })

@@ -7,6 +7,10 @@ import { defineConfig, devices } from '@playwright/test'
 //
 // One worker. The suite runs real containers against one Docker daemon, and
 // a serial run is what makes a CI failure reproducible locally.
+
+/** The specs the mobile project owns, and the desktop project skips. */
+const mobileSpecs = '**/*.mobile.spec.ts'
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -28,5 +32,20 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+      testIgnore: mobileSpecs,
+    },
+    // A phone, on the same Chromium the desktop project uses: CI installs no
+    // other engine, and Pixel 7 is the descriptor that carries isMobile,
+    // hasTouch, a 412px viewport, a 2.625 device scale and a mobile user
+    // agent. Only the mobile specs run here, so nothing is tested twice.
+    {
+      name: 'mobile',
+      use: { ...devices['Pixel 7'] },
+      testMatch: mobileSpecs,
+    },
+  ],
 })
