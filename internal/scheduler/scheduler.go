@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -186,13 +187,22 @@ type supervised struct {
 	// belonging to the member.
 	memberID domain.MemberID
 	harness  string
+	// reporter is how much this run's harness can say about its own state
+	// (internal/harness). It is fixed at launch, because the reporter is
+	// wired into the container's launch command.
+	reporter harness.Reporter
 	// Mutated only under Scheduler.mu.
 	status        domain.RunStatus
 	startedAt     time.Time
 	paused        bool
 	killRequested bool
 	killActor     domain.MemberID
-	done          chan struct{}
+	// agentState is the last thing the agent said about itself, zero until
+	// it says anything. It is in-memory only: after a server restart the
+	// run keeps its stored status and the next report - or the next stall -
+	// corrects it.
+	agentState agentstatus.State
+	done       chan struct{}
 	// runUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root (no ownership pass). Set once
 	// the user is resolved during provisioning, or from the sidecar on
@@ -456,13 +466,16 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 			}).Profile()
 		}
 		// An explicit argv override is respected verbatim. Registry MCP,
-		// session, resume, and semantic-control flags belong to the shipped
-		// CLI, not an override: nothing checks the override is still that
-		// CLI.
+		// session, resume, status-reporter and semantic-control flags
+		// belong to the shipped CLI, not an override: nothing checks the
+		// override is still that CLI.
 		profile.MCPConfigFlag = ""
 		profile.SessionFlag = ""
 		profile.SessionResumeFlag = ""
 		profile.ResumeFlag = ""
+		profile.Reporter = harness.ReporterNone
+		profile.StatusArgs = nil
+		profile.StatusFiles = nil
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:

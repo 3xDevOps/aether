@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -96,12 +97,14 @@ const (
 	idleTimeout    = 5 * time.Minute
 )
 
-// Provision creates the run's coordination directory, writes the optional
-// harness config into it, and binds its socket. It returns the host
-// directory to bind-mount into the container; the mount itself belongs to
-// the harness registry. Calling it again for the same run rebinds the
-// socket, which is what a restarted sidecar needs.
-func (s *Service) Provision(ctx context.Context, run domain.RunID, config []byte) (string, error) {
+// Provision creates the run's coordination directory, writes the harness
+// assets into it, and binds its socket. It returns the host directory to
+// bind-mount into the container; the mount itself belongs to the harness
+// registry, and so does what the files are - this package owns only where
+// they live and that they are read-only to the container. Calling it again
+// for the same run rebinds the socket, which is what a restarted sidecar
+// needs.
+func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[string][]byte) (string, error) {
 	_ = ctx
 	if s.cfg.Disabled {
 		return "", ErrDisabled
@@ -124,12 +127,19 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, config []byte
 	if err := os.Chmod(dir, runDirMode); err != nil {
 		return "", fmt.Errorf("coord: set mode on %s: %w", dir, err)
 	}
-	if config != nil {
-		path := filepath.Join(dir, ConfigName)
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		// The names come from the harness registry, never from a client or
+		// an agent, but this path is handed to a container runtime: a name
+		// that is not a plain file in this directory is refused rather than
+		// written somewhere else.
+		if name == "" || filepath.Base(name) != name || name == "." || name == ".." {
+			return "", fmt.Errorf("coord: %q is not a usable asset name", name)
+		}
+		path := filepath.Join(dir, name)
 		if err := removeFile(path); err != nil {
 			return "", fmt.Errorf("coord: replace %s: %w", path, err)
 		}
-		if err := os.WriteFile(path, config, configMode); err != nil {
+		if err := os.WriteFile(path, files[name], configMode); err != nil {
 			return "", fmt.Errorf("coord: write %s: %w", path, err)
 		}
 		if err := os.Chmod(path, configMode); err != nil {
@@ -446,8 +456,9 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 }
 
 // handle decodes one request and dispatches it. The method set is closed:
-// anything outside the three coordination methods is method-not-found, so
-// no control verb is reachable from inside a container.
+// anything outside the three mailbox methods and run.report is
+// method-not-found, so no control verb is reachable from inside a
+// container.
 func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) protocol.Response {
 	req, resp, valid := protocol.ParseRequest(line)
 	if !valid {
@@ -475,6 +486,13 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 			return resp
 		}
 		result, rpcErr = s.Inbox(ctx, run, p)
+	case protocol.MethodRunReport:
+		p, perr := decodeParams[protocol.RunReportParams](req.Method, req.Params)
+		if perr != nil {
+			resp.Error = perr
+			return resp
+		}
+		result, rpcErr = s.Report(ctx, run, p)
 	default:
 		resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
 		return resp

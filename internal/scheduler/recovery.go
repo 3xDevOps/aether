@@ -459,10 +459,15 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		// The workspace comes off the run row, not the sidecar: a sidecar
 		// written by an older build has no workspace scope at all, and the
 		// row is the source of truth either way.
-		workspaceID:    r.WorkspaceID,
-		containerID:    runtime.ID(sc.ContainerID),
-		task:           r.Task,
-		memberID:       r.AccountMember(),
+		workspaceID: r.WorkspaceID,
+		containerID: runtime.ID(sc.ContainerID),
+		task:        r.Task,
+		memberID:    r.AccountMember(),
+		harness:     r.Harness,
+		// agentState is deliberately not recovered: the container's agent
+		// has said nothing to this process yet. The run keeps its stored
+		// status until the next report or the next stall corrects it.
+		reporter:       s.reporterFor(r.Harness),
 		status:         r.Status,
 		startedAt:      started,
 		paused:         sc.Paused,

@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -71,7 +72,7 @@ var mcpConfigPath = path.Join(mcpbridge.MountDir, coord.ConfigName)
 // scheduler bind-mounts into the container and releases once the container
 // is gone.
 type Coordinator interface {
-	Provision(ctx context.Context, run domain.RunID, config []byte) (string, error)
+	Provision(ctx context.Context, run domain.RunID, files map[string][]byte) (string, error)
 	WriteCoAuthors(run domain.RunID, trailers []string) error
 	Release(run domain.RunID) error
 }
@@ -134,17 +135,17 @@ func (s *Scheduler) coordinationSeam() *coordination {
 // coordinationMounts stages the bridge, provisions the run's coordination
 // directory, records both in the run's sidecar - all before the container
 // exists - and returns the two read-only mounts plus the launch arguments
-// registering the bridge with the harness. A failure anywhere leaves the
-// run with no coordination and says so on its timeline; it never returns a
-// mount it could not verify.
+// registering the bridge and the status reporter with the harness. A
+// failure anywhere leaves the run with no coordination and says so on its
+// timeline; it never returns a mount it could not verify.
 func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, run *domain.Run, profile harness.Profile) ([]runtime.Mount, []string) {
 	c := s.coordinationSeam()
 	if c == nil {
 		return nil, nil
 	}
-	mounts, mcpArgs, err := s.provisionCoordination(ctx, c, entry, run, profile)
+	mounts, launchArgs, err := s.provisionCoordination(ctx, c, entry, run, profile)
 	if err == nil {
-		return mounts, mcpArgs
+		return mounts, launchArgs
 	}
 	slog.Warn("scheduler: coordination assets unavailable", "run", run.ID, "error", err)
 	s.publishTimeline(ctx, run.WorkspaceID, run.ID, run.MemberID, events.TimelineNote,
@@ -152,7 +153,7 @@ func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, r
 	return nil, nil
 }
 
-func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile) (mounts []runtime.Mount, mcpArgs []string, err error) {
+func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile) (mounts []runtime.Mount, launchArgs []string, err error) {
 	digest, bin, err := c.stage()
 	if err != nil {
 		return nil, nil, err
@@ -163,14 +164,26 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	// without registration is provisioned all the same and degrades to the
 	// overlap notice, which is the information a human at that terminal
 	// would want anyway.
-	var config []byte
-	if mcpArgs = profile.MCPArgs(mcpConfigPath); len(mcpArgs) > 0 {
+	files := make(map[string][]byte)
+	if mcpArgs := profile.MCPArgs(mcpConfigPath); len(mcpArgs) > 0 {
+		var config []byte
 		if config, err = harness.MCPConfig(mcpbridge.ServerName, mcpbridge.BinaryPath, bridgeSubcommand); err != nil {
 			return nil, nil, err
 		}
+		files[coord.ConfigName] = config
+		launchArgs = append(launchArgs, mcpArgs...)
+	}
+	// The status reporter goes into the same directory the same way, but
+	// only for an interactive run: a headless agent exits when it is done
+	// and never waits for anyone to answer it.
+	if run.Mode == domain.LaunchTUI {
+		if statusArgs := profile.StatusLaunchArgs(mcpbridge.MountDir); len(statusArgs) > 0 {
+			maps.Copy(files, profile.StatusFiles)
+			launchArgs = append(launchArgs, statusArgs...)
+		}
 	}
 	var dir string
-	dir, err = c.svc.Provision(ctx, run.ID, config)
+	dir, err = c.svc.Provision(ctx, run.ID, files)
 	if err != nil {
 		return nil, nil, fmt.Errorf("provision coordination directory: %w", err)
 	}
@@ -226,7 +239,7 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	if err = fsyncDir(s.cfg.StateDir); err != nil {
 		return nil, nil, err
 	}
-	return mounts, mcpArgs, nil
+	return mounts, launchArgs, nil
 }
 
 // checkCoordinationMounts is the source-side half of mount validation for

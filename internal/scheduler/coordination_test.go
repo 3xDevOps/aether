@@ -33,7 +33,7 @@ type fakeCoordinator struct {
 	coAuthorWrites map[domain.RunID]int
 }
 
-func (f *fakeCoordinator) Provision(_ context.Context, run domain.RunID, _ []byte) (string, error) {
+func (f *fakeCoordinator) Provision(_ context.Context, run domain.RunID, _ map[string][]byte) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}

@@ -55,7 +55,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	}
 	defer timeline.Close() //nolint:errcheck // test cleanup
 
-	dirA, err := h.svc.Provision(ctx, a, []byte(`{"mcpServers":{}}`))
+	dirA, err := h.svc.Provision(ctx, a, map[string][]byte{ConfigName: []byte(`{"mcpServers":{}}`)})
 	if err != nil {
 		t.Fatalf("Provision(a): %v", err)
 	}
@@ -226,7 +226,7 @@ func TestRestartRecovery(t *testing.T) {
 		h := newHarness(t, 1)
 		h.start()
 		run := h.run(0)
-		if _, err := h.svc.Provision(ctx, run, []byte(`{}`)); err != nil {
+		if _, err := h.svc.Provision(ctx, run, map[string][]byte{ConfigName: []byte(`{}`)}); err != nil {
 			t.Fatalf("Provision: %v", err)
 		}
 		if err := h.svc.Close(); err != nil {

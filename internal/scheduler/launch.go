@@ -249,6 +249,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		task:        run.Task,
 		memberID:    run.AccountMember(),
 		harness:     run.Harness,
+		reporter:    profile.Reporter,
 		status:      domain.RunProvisioning,
 		startedAt:   time.Now().UTC(),
 		done:        make(chan struct{}),
@@ -310,9 +311,9 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	s.mu.Unlock()
 	// Coordination assets are Aether-owned container surfaces and are appended
 	// after the environment plan's validated workspace mounts.
-	coordMounts, mcpArgs := s.coordinationMounts(ctx, entry, run, profile)
+	coordMounts, coordArgs := s.coordinationMounts(ctx, entry, run, profile)
 	plan.Mounts = append(plan.Mounts, coordMounts...)
-	argv = append(argv, mcpArgs...)
+	argv = append(argv, coordArgs...)
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan))
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)

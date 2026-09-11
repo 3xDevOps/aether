@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -128,6 +130,14 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 // PTY output is what the agent wrote: a steer's banner, and the terminal's
 // echo of anything written to the agent's input, are the server's, so only
 // the agent's own answer clears a stall.
+//
+// Silence is now the hang detector and the fallback for harnesses that
+// cannot report (internal/agentstatus). Two rules follow from that. A run
+// whose agent has said it is waiting is already parked with a reason that
+// says what for, so silence must not park it again as a stall. And where
+// the harness reports both ends of a turn, activity must not un-park it
+// either: a TUI that repaints while the member types is producing output,
+// not work, and only the agent's own "working" means the turn resumed.
 func (s *Scheduler) checkStalls(ctx context.Context) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0, len(s.runs))
@@ -156,12 +166,17 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 
 		s.mu.Lock()
 		if s.runs[e.runID] == e && !e.paused {
+			waiting := e.agentState == agentstatus.Waiting
 			var err error
 			switch {
-			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
+			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold && !waiting:
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
 					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
-			case e.status == domain.RunNeedsAttention && idle <= s.cfg.StallThreshold:
+			case e.status == domain.RunNeedsAttention && idle <= s.cfg.StallThreshold &&
+				!(waiting && e.reporter == harness.ReporterFull):
+				// The run goes back to being judged on silence alone, so
+				// the next quiet threshold parks it as a stall again.
+				e.agentState = ""
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunRunning,
 					"activity resumed", "")
 			}
