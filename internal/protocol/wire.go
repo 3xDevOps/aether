@@ -381,7 +381,8 @@ type SubscribeResponse struct {
 }
 
 // AttachRequest is the single header line a client sends after opening the
-// attach subsystem. Geometry precedence is pty-req > header > 80x24.
+// attach subsystem. Geometry precedence is pty-req > header > 80x24, and a
+// Follow client's geometry is not part of the session's at all.
 type AttachRequest struct {
 	RunID    string `json:"run_id"`
 	ReadOnly bool   `json:"read_only,omitempty"`
@@ -389,10 +390,19 @@ type AttachRequest struct {
 	Rows     uint   `json:"rows,omitempty"`
 	// Shell names a shell tab inside the run container; write is required.
 	Shell string `json:"shell,omitempty"`
+	// Follow renders the session at the size it already is and imposes
+	// none of its own: the PTY is the minimum over the clients that do
+	// impose one, and a follower is left out of it whether or not it can
+	// write. The ack reports the size to draw at and a window-change
+	// request reports every later change. A screen too narrow to hold the
+	// agent's terminal steers it this way without reflowing it for anyone
+	// else.
+	Follow bool `json:"follow,omitempty"`
 }
 
-// AttachResponse acknowledges an AttachRequest with the effective
-// geometry; on failure the server sends OK false with a code and closes.
+// AttachResponse acknowledges an AttachRequest with the session's live
+// geometry, or with the requested one when no session exists yet to have
+// its own; on failure the server sends OK false with a code and closes.
 type AttachResponse struct {
 	OK   bool `json:"ok"`
 	Cols uint `json:"cols,omitempty"`

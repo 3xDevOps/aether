@@ -120,7 +120,7 @@ func FuzzAttachDropMidInput(f *testing.F) {
 		}
 
 		conn := &dropConn{pending: delivered}
-		err := h.Attach(context.Background(), RunSession(run), "m1", 80, 24, false, conn, nil)
+		err := h.Attach(context.Background(), RunSession(run), AttachClient{Member: "m1", Cols: 80, Rows: 24}, conn, nil)
 		if err != nil && !errors.Is(err, errDropped) {
 			t.Fatalf("Attach after a dropped connection: %v", err)
 		}
@@ -154,7 +154,7 @@ func TestAttachDropDoesNotLeakIntoReattach(t *testing.T) {
 	}
 
 	dead := &dropConn{pending: []byte("half-ty")}
-	if err := h.Attach(context.Background(), RunSession(run), "m1", 80, 24, false, dead, nil); err != nil &&
+	if err := h.Attach(context.Background(), RunSession(run), AttachClient{Member: "m1", Cols: 80, Rows: 24}, dead, nil); err != nil &&
 		!errors.Is(err, errDropped) {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestAttachDropDoesNotLeakIntoReattach(t *testing.T) {
 	})
 
 	fresh := &dropConn{pending: []byte("\x03reset\r")}
-	if err := h.Attach(context.Background(), RunSession(run), "m1", 80, 24, false, fresh, nil); err != nil &&
+	if err := h.Attach(context.Background(), RunSession(run), AttachClient{Member: "m1", Cols: 80, Rows: 24}, fresh, nil); err != nil &&
 		!errors.Is(err, errDropped) {
 		t.Fatalf("reattach: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestAttachIgnoresBytesThatArriveAfterItUnwinds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- h.Attach(ctx, RunSession(run), "m1", 80, 24, false, conn, nil)
+		done <- h.Attach(ctx, RunSession(run), AttachClient{Member: "m1", Cols: 80, Rows: 24}, conn, nil)
 	}()
 	waitFor(t, "the keystrokes the transport did deliver", func() bool {
 		return bytes.Equal(agent.Bytes(), []byte("typed"))

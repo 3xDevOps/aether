@@ -43,6 +43,7 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		Cols:     cols,
 		Rows:     rows,
 		Shell:    shell,
+		Follow:   req.Follow,
 	})
 	if err != nil {
 		if !ack.OK && ack.Code == 0 {
@@ -94,6 +95,9 @@ func attachEndClose(err error) (websocket.StatusCode, string) {
 // error, nil on clean EOF. The peer closing the socket closes the
 // terminal, which in turn ends the output loop.
 func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error {
+	if source, ok := term.(GeometrySource); ok {
+		go s.pumpGeometry(source)
+	}
 	go func() {
 		defer s.cancel()
 		defer func() { _ = term.Close() }()
@@ -139,6 +143,31 @@ func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error
 				return nil
 			}
 			return err
+		}
+	}
+}
+
+// pumpGeometry relays the session's own resizes to the client as geometry
+// frames. Only a client that follows the session acts on them; the frame
+// is sent either way, because the socket does not decide who is following
+// and a client that imposed its size already knows what it is.
+func (s *Socket) pumpGeometry(source GeometrySource) {
+	sizes := source.Geometry()
+	for {
+		select {
+		case <-s.Ctx.Done():
+			return
+		case size, ok := <-sizes:
+			if !ok {
+				return
+			}
+			if s.WriteJSON(protocol.DashAttachControl{
+				Type: protocol.DashAttachGeometry,
+				Cols: size[0],
+				Rows: size[1],
+			}) != nil {
+				return
+			}
 		}
 	}
 }

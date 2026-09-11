@@ -27,7 +27,7 @@ type (
 		Inject(ctx context.Context, key SessionKey, actorName, actorColor, message, submit string) error
 	}
 	sshdPTYAttacher interface {
-		Attach(ctx context.Context, key SessionKey, member domain.MemberID, cols, rows uint, readOnly bool, conn io.ReadWriter, resize <-chan [2]uint) error
+		Attach(ctx context.Context, key SessionKey, client AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error
 		Replay(run domain.RunID) (io.ReadCloser, error)
 	}
 )
@@ -221,7 +221,7 @@ func startAttach(t *testing.T, h *Host, run domain.RunID, member domain.MemberID
 		errCh:  make(chan error, 1),
 	}
 	go func() {
-		hnd.errCh <- h.Attach(context.Background(), RunSession(run), member, cols, rows, readOnly, &testConn{r: kr, w: hnd.out}, hnd.resize)
+		hnd.errCh <- h.Attach(context.Background(), RunSession(run), AttachClient{Member: member, Cols: cols, Rows: rows, ReadOnly: readOnly}, &testConn{r: kr, w: hnd.out}, hnd.resize)
 	}()
 	t.Cleanup(func() {
 		_ = kw.Close()
@@ -328,7 +328,7 @@ func TestAttachReplayWriterReceivesTailBeforeLiveOutput(t *testing.T) {
 	resize := make(chan [2]uint)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- h.Attach(context.Background(), RunSession(run), "member", 80, 24, true, conn, resize)
+		errCh <- h.Attach(context.Background(), RunSession(run), AttachClient{Member: "member", Cols: 80, Rows: 24, ReadOnly: true}, conn, resize)
 	}()
 	t.Cleanup(func() {
 		_ = kw.Close()
@@ -455,7 +455,7 @@ func TestSlowClientDoesNotBlockAgent(t *testing.T) {
 	t.Cleanup(func() { _ = kw.Close(); _ = kr.Close() })
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- h.Attach(context.Background(), RunSession(run), "m1", 120, 30, false, &testConn{r: kr, w: bw}, nil)
+		errCh <- h.Attach(context.Background(), RunSession(run), AttachClient{Member: "m1", Cols: 120, Rows: 30}, &testConn{r: kr, w: bw}, nil)
 	}()
 	waitAttached(t, h, run, 1)
 
@@ -846,7 +846,7 @@ func TestWriteGate(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 
-	err := h.Attach(context.Background(), RunSession(run), "bad", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil)
+	err := h.Attach(context.Background(), RunSession(run), AttachClient{Member: "bad", Cols: 80, Rows: 24}, &testConn{r: strings.NewReader(""), w: &sink{}}, nil)
 	if !errors.Is(err, ErrWriteDenied) {
 		t.Fatalf("write attach = %v, want ErrWriteDenied", err)
 	}
@@ -869,7 +869,7 @@ func TestWriteGate(t *testing.T) {
 func TestLifecycleErrorsAndLastOutput(t *testing.T) {
 	h, _ := newTestHost(t)
 	ctx := context.Background()
-	if err := h.Attach(ctx, SessionKey("nope"), "m", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrNoSession) {
+	if err := h.Attach(ctx, SessionKey("nope"), AttachClient{Member: "m", Cols: 80, Rows: 24}, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("Attach unknown run = %v", err)
 	}
 	if err := h.Inject(ctx, SessionKey("nope"), "a", "", "hi", "\r"); !errors.Is(err, ErrNoSession) {
@@ -916,7 +916,7 @@ func TestLifecycleErrorsAndLastOutput(t *testing.T) {
 		err := h.Inject(ctx, RunSession(run), "a", "", "x", "\r")
 		return errors.Is(err, ErrSessionEnded)
 	})
-	if err := h.Attach(ctx, RunSession(run), "m2", 80, 24, false, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrSessionEnded) {
+	if err := h.Attach(ctx, RunSession(run), AttachClient{Member: "m2", Cols: 80, Rows: 24}, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrSessionEnded) {
 		t.Fatalf("Attach after end = %v, want ErrSessionEnded", err)
 	}
 	if _, ok := h.LastOutput(RunSession(run)); !ok {
@@ -949,7 +949,7 @@ func TestAttachContextCancel(t *testing.T) {
 	t.Cleanup(func() { _ = kw.Close(); _ = kr.Close() })
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- h.Attach(ctx, RunSession(run), "m1", 80, 24, false, &testConn{r: kr, w: &sink{}}, nil)
+		errCh <- h.Attach(ctx, RunSession(run), AttachClient{Member: "m1", Cols: 80, Rows: 24}, &testConn{r: kr, w: &sink{}}, nil)
 	}()
 	waitAttached(t, h, run, 1)
 	cancel()
@@ -1004,8 +1004,7 @@ func TestBlockingResizeDoesNotStallSession(t *testing.T) {
 	// A write-attach reconciles geometry; the resize application hangs in
 	// the runtime, and must not stall anything else.
 	go func() {
-		_ = h.Attach(context.Background(), RunSession(run), "mw", 100, 40, false,
-			&testConn{r: strings.NewReader(""), w: &sink{}}, nil)
+		_ = h.Attach(context.Background(), RunSession(run), AttachClient{Member: "mw", Cols: 100, Rows: 40}, &testConn{r: strings.NewReader(""), w: &sink{}}, nil)
 	}()
 	<-att.entered // resize applier is now wedged inside att.Resize
 
@@ -1066,7 +1065,7 @@ func TestAttachDrainHonorsContext(t *testing.T) {
 	t.Cleanup(func() { close(sw.freed) })
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- h.Attach(ctx, RunSession(run), "m1", 80, 24, false, &testConn{r: kr, w: sw}, nil)
+		errCh <- h.Attach(ctx, RunSession(run), AttachClient{Member: "m1", Cols: 80, Rows: 24}, &testConn{r: kr, w: sw}, nil)
 	}()
 	waitAttached(t, h, run, 1)
 	att.writeOutput(t, "wedge")
@@ -1336,7 +1335,7 @@ func TestStartSessionReplacesEndedSession(t *testing.T) {
 	kr, kw := io.Pipe()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- h.Attach(context.Background(), key, "m1", 120, 30, false, &testConn{r: kr, w: out}, nil)
+		errCh <- h.Attach(context.Background(), key, AttachClient{Member: "m1", Cols: 120, Rows: 30}, &testConn{r: kr, w: out}, nil)
 	}()
 	t.Cleanup(func() {
 		_ = kw.Close()
@@ -1430,5 +1429,93 @@ func TestBannerTextEscapesTerminalControls(t *testing.T) {
 	}
 	if strings.ContainsAny(got, "\x1b\a\n\r") {
 		t.Fatalf("bannerText retained terminal control bytes: %q", got)
+	}
+}
+
+// followConn is an attach that records the geometry the host tells it, the
+// way the sshd attach conn puts the first one in its ack and sends the rest
+// as window-change requests.
+type followConn struct {
+	testConn
+	mu    sync.Mutex
+	sizes [][2]uint
+}
+
+func (c *followConn) SetGeometry(cols, rows uint) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sizes = append(c.sizes, [2]uint{cols, rows})
+}
+
+func (c *followConn) told() [][2]uint {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][2]uint(nil), c.sizes...)
+}
+
+// A follower may type into the agent without the agent's screen being
+// resized to fit its own, which is the whole point of the flag: the phone
+// that takes control of a run is smaller than every other viewer.
+func TestFollowClientStealsNoGeometry(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-follow")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	waitSizes := func(n int) {
+		t.Helper()
+		waitFor(t, fmt.Sprintf("%d resize calls", n), func() bool { return len(att.sizeCalls()) == n })
+	}
+	waitSizes(1) // the session's own default
+
+	stdin := att.captureStdin()
+	desktop := startAttach(t, h, run, "desktop", 132, 43, false)
+	waitSizes(3)
+
+	// The phone: writable, 40x20, and following.
+	kr, kw := io.Pipe()
+	t.Cleanup(func() { _ = kw.Close() })
+	conn := &followConn{testConn: testConn{r: kr, w: &sink{}}}
+	phoneErr := make(chan error, 1)
+	go func() {
+		phoneErr <- h.Attach(context.Background(), RunSession(run), AttachClient{
+			Member: "phone", Cols: 40, Rows: 20, Follow: true,
+		}, conn, nil)
+	}()
+	waitAttached(t, h, run, 2)
+
+	// It is told what to draw at before anything else, and the session is
+	// untouched: a minimum over the clients that impose one leaves it out.
+	waitFor(t, "the phone learns the session geometry", func() bool {
+		return len(conn.told()) == 1 && conn.told()[0] == [2]uint{132, 43}
+	})
+	if n := len(att.sizeCalls()); n != 3 {
+		t.Fatalf("a following attach resized the session: %d resize calls %v", n, att.sizeCalls())
+	}
+
+	// Following is not watching: the keystrokes reach the agent.
+	if _, err := kw.Write([]byte("hello")); err != nil {
+		t.Fatalf("type: %v", err)
+	}
+	waitFor(t, "the phone's keystrokes reach the agent", func() bool {
+		return strings.Contains(stdin.String(), "hello")
+	})
+
+	// Someone else resizing the session is how the phone learns to redraw.
+	desktop.resize <- [2]uint{120, 40}
+	waitSizes(5)
+	waitFor(t, "the phone hears the new geometry", func() bool {
+		told := conn.told()
+		return len(told) == 2 && told[1] == [2]uint{120, 40}
+	})
+
+	_ = kw.Close()
+	if err := <-phoneErr; err != nil {
+		t.Fatalf("phone attach: %v", err)
+	}
+	waitAttached(t, h, run, 1)
+	if n := len(att.sizeCalls()); n != 5 {
+		t.Fatalf("a following detach resized the session: %d resize calls %v", n, att.sizeCalls())
 	}
 }

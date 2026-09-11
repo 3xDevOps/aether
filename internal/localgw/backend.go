@@ -248,6 +248,9 @@ func (b *sshBackend) Events(_ context.Context, req protocol.SubscribeRequest) (i
 	return stream(b, func(c *cli.Conn) (io.ReadCloser, error) { return c.EventsStream(req) })
 }
 
+// An attach carries the session's own resizes to a client following it.
+var _ webgate.GeometrySource = (*cli.TerminalStream)(nil)
+
 func (b *sshBackend) Attach(_ context.Context, req protocol.AttachRequest) (webgate.Terminal, protocol.AttachResponse, error) {
 	type attachResult struct {
 		term webgate.Terminal

@@ -34,6 +34,14 @@ type Terminal interface {
 	Resize(cols, rows uint) error
 }
 
+// GeometrySource is a terminal that reports the size its session takes,
+// which is what a client following the session has to draw at. Both
+// backends implement it; a terminal that does not simply never moves a
+// follower off the size its ack gave.
+type GeometrySource interface {
+	Geometry() <-chan [2]uint
+}
+
 // Authorizer identifies the caller of r and returns the backend acting as
 // them, or the refusal to answer with. handshake marks a WebSocket
 // upgrade, which cannot carry headers, so a credential may also ride the

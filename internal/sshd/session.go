@@ -198,6 +198,17 @@ func sendExitStatus(ch ssh.Channel, code int) {
 	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{uint32(code)}))
 }
 
+// sendWindowChange reports the session's new PTY size to the client in the
+// RFC 4254 window-change payload, which is the same shape the client sends
+// to ask for one. Never expects a reply: a client with no use for it drops
+// the request.
+func sendWindowChange(ch ssh.Channel, cols, rows uint) {
+	_, _ = ch.SendRequest(protocol.WindowChangeRequest, false, ssh.Marshal(struct {
+		Cols, Rows    uint32
+		Width, Height uint32
+	}{Cols: uint32(cols), Rows: uint32(rows)}))
+}
+
 // subsystemConn is the stream the events, attach and terminal handlers
 // serve: the session channel under SSH, an in-memory pipe for the
 // in-process client (Local). The wire contract - header line in, ack line
@@ -207,8 +218,16 @@ type subsystemConn interface {
 	// exit reports the handler's exit status the way an SSH channel's
 	// exit-status request does.
 	exit(status int)
+	// geometry tells the client the session's PTY size changed under it,
+	// out of band from the bytes the same stream carries: the RFC 4254
+	// window-change request, sent the other way round. A client that
+	// imposed the size already knows; one that follows the session needs
+	// telling, and one that cares about neither ignores the request.
+	geometry(cols, rows uint)
 }
 
 type sshConn struct{ ssh.Channel }
 
 func (c sshConn) exit(status int) { sendExitStatus(c.Channel, status) }
+
+func (c sshConn) geometry(cols, rows uint) { sendWindowChange(c.Channel, cols, rows) }
